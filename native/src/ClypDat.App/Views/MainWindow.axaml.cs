@@ -121,6 +121,15 @@ public sealed partial class MainWindow : Window
     private AppUpdateInfo? _availableUpdate;
     private readonly DispatcherTimer _updateCheckTimer;
     private readonly ClipHoverPreviewController _clipHoverPreview = new();
+    // The card preview is an FFmpeg stream and cannot transfer its decoder to
+    // LibVLC. This owns the one real editor player warmed by a hovered card;
+    // the click path claims it instead of constructing/loading it again.
+    private EditorHoverWarmup? _editorHoverWarmup;
+    private EditorHoverWarmup? _claimedEditorHoverWarmup;
+    private EditorHoverWarmup? _adoptingEditorHoverWarmup;
+    private Task? _editorHoverStopTask;
+    private static readonly TimeSpan EditorHoverWarmupDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan EditorHoverWarmupMaximumDecode = TimeSpan.FromSeconds(2);
     // Closing the window (the X button) hides to the tray instead of quitting,
     // so the replay buffer/Full Session keeps recording - matches the tray
     // icon's own "Open"/"Quit" menu, which otherwise had no way to actually be
@@ -362,7 +371,11 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.EnableClipHoverPreview) && !ViewModel.EnableClipHoverPreview) _clipHoverPreview.Stop("setting disabled");
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible))
                     {
-                        if (!ViewModel.IsLibraryVisible) _clipHoverPreview.Stop("navigation");
+                        if (!ViewModel.IsLibraryVisible)
+                        {
+                            _clipHoverPreview.Stop("navigation");
+                            CancelEditorHoverWarmup();
+                        }
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayQualityRestartRequired) && ViewModel.ReplayQualityRestartRequired)
                     {
@@ -476,6 +489,9 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) =>
         {
             _clipHoverPreview.Dispose();
+            CancelEditorHoverWarmup();
+            CancelEditorHoverWarmup(_claimedEditorHoverWarmup);
+            CancelEditorHoverWarmup(_adoptingEditorHoverWarmup);
             _libraryResizeAnchorSettleTimer?.Stop();
             _cs2GsiListener?.Dispose();
             _dotaGsiListener?.Dispose();
@@ -4158,6 +4174,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return false;
         _editorOpenClock.Restart();
+        var warmup = ClaimEditorHoverWarmup(clip.Path);
         _clipHoverPreview.Stop("clip opened");
         // Snapshot while Library is still visible/laid out - once
         // OpenClipAsync flips IsEditorVisible, LibraryScrollViewer collapses
@@ -4169,7 +4186,12 @@ public sealed partial class MainWindow : Window
             _libraryReturnAnchorPath = ComputeLibraryAnchorPath();
             _libraryReturnAnchorDirty = false;
         }
-        if (!await ViewModel.OpenClipAsync(clip)) return false;
+        if (!await ViewModel.OpenClipAsync(clip))
+        {
+            CancelEditorHoverWarmup(warmup);
+            return false;
+        }
+        _claimedEditorHoverWarmup = warmup;
         AppLog.Debug($"Editor open trace: editor state ready at {_editorOpenClock.ElapsedMilliseconds}ms (UI thread).");
         QueueEditorPlayback();
         return true;
@@ -4751,6 +4773,7 @@ public sealed partial class MainWindow : Window
             presenter?.Bounds.Size ?? default, RenderScaling);
         _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible,
             presenter, previewSize);
+        StartEditorHoverWarmup(clip);
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
@@ -4758,6 +4781,172 @@ public sealed partial class MainWindow : Window
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = false;
         _clipHoverPreview.PointerLeft(clip);
+        CancelEditorHoverWarmup(clip.Path);
+    }
+
+    private sealed class EditorHoverWarmup
+    {
+        public EditorHoverWarmup(string path, string codec, TimeSpan start, bool replayArmed)
+        {
+            Path = path;
+            Codec = codec;
+            Start = start;
+            ReplayArmed = replayArmed;
+        }
+
+        public string Path { get; }
+        public string Codec { get; }
+        public TimeSpan Start { get; }
+        public bool ReplayArmed { get; }
+        public CancellationTokenSource Cancellation { get; } = new();
+        public TaskCompletionSource<PlaybackSession> SessionReady { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource VideoLoaded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public PlaybackSession? Session { get; set; }
+        public bool Claimed { get; set; }
+        private int _playerAttached;
+        private int _firstFrameReady;
+
+        public bool PlayerAttached => Volatile.Read(ref _playerAttached) != 0;
+        public bool FirstFrameReady => Volatile.Read(ref _firstFrameReady) != 0;
+        public void MarkPlayerAttached() => Volatile.Write(ref _playerAttached, 1);
+        public void MarkFirstFrameReady() => Volatile.Write(ref _firstFrameReady, 1);
+    }
+
+    // One small interface for callers: begin on tile enter, cancel on leave,
+    // claim on click. Everything else (engine/media ownership, native vout,
+    // first-frame pause and late-work cancellation) remains local here.
+    private void StartEditorHoverWarmup(ClipCardViewModel clip)
+    {
+        if (ViewModel?.IsLibraryVisible != true || !clip.IsHydrated || !File.Exists(clip.Path)) return;
+        if (_editorHoverWarmup is { } current && string.Equals(current.Path, clip.Path, StringComparison.OrdinalIgnoreCase)) return;
+
+        CancelEditorHoverWarmup();
+        var range = clip.HoverPreviewRange;
+        var warmup = new EditorHoverWarmup(clip.Path, clip.Media.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec ?? string.Empty,
+            range.Start, ViewModel.IsReplayRecording);
+        _editorHoverWarmup = warmup;
+        // A libvlc Stop may still be unwinding a previous abandoned hover.
+        // Never load a new Media through that same player until its stop has
+        // completed; libvlc otherwise permits the old stop to tear down the
+        // new vout after it has started.
+        var reusableSession = _editorHoverStopTask is { IsCompleted: false } ? null : _playback;
+        _ = PrepareEditorHoverWarmupAsync(warmup, reusableSession);
+    }
+
+    private async Task PrepareEditorHoverWarmupAsync(EditorHoverWarmup warmup, PlaybackSession? reusableSession)
+    {
+        PlaybackSession? session = null;
+        try
+        {
+            await Task.Delay(EditorHoverWarmupDelay, warmup.Cancellation.Token).ConfigureAwait(false);
+            session = reusableSession ?? await Task.Run(PlaybackSession.TakeWarmedOrCreate, warmup.Cancellation.Token).ConfigureAwait(false);
+            warmup.Session = session;
+            warmup.SessionReady.TrySetResult(session);
+            await session.LoadVideoAsync(warmup.Path, warmup.Codec, warmup.ReplayArmed, warmup.Cancellation.Token).ConfigureAwait(false);
+            warmup.VideoLoaded.TrySetResult();
+            await Dispatcher.UIThread.InvokeAsync(() => StartWarmEditorOutput(warmup, session));
+        }
+        catch (OperationCanceledException)
+        {
+            warmup.SessionReady.TrySetCanceled();
+            warmup.VideoLoaded.TrySetCanceled();
+        }
+        catch (Exception error)
+        {
+            warmup.SessionReady.TrySetException(error);
+            warmup.VideoLoaded.TrySetException(error);
+            AppLog.Error($"Editor hover warm-up failed: {Path.GetFileName(warmup.Path)}", error);
+        }
+        finally
+        {
+            if (warmup.Cancellation.IsCancellationRequested && session is not null && !ReferenceEquals(_playback, session))
+            {
+                session.Dispose();
+            }
+        }
+    }
+
+    private void StartWarmEditorOutput(EditorHoverWarmup warmup, PlaybackSession session)
+    {
+        if (warmup.Cancellation.IsCancellationRequested || warmup.Claimed || !ReferenceEquals(_editorHoverWarmup, warmup)) return;
+
+        // This is the exact native EditorVideoView which will remain attached
+        // after the click. LibVLC only promises a stable HWND at play start;
+        // decoding through a dummy vout cannot be transferred later.
+        _playback = session;
+        EditorVideoView.MediaPlayer = session.VideoPlayer;
+        EditorVideoView.WatchMediaPlayer(session.VideoPlayer);
+        warmup.MarkPlayerAttached();
+
+        void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
+        {
+            if (session.VideoPlayer.VoutCount == 0) return;
+            session.VideoPlayer.TimeChanged -= OnTimeChanged;
+            warmup.MarkFirstFrameReady();
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!warmup.Cancellation.IsCancellationRequested && !warmup.Claimed && ReferenceEquals(_editorHoverWarmup, warmup))
+                {
+                    session.Pause();
+                    AppLog.Debug($"Editor hover warm-up frame ready: {Path.GetFileName(warmup.Path)}.");
+                }
+            });
+        }
+
+        session.VideoPlayer.TimeChanged += OnTimeChanged;
+        session.PlayFrom(warmup.Start);
+        _ = PauseWarmEditorOutputAfterAsync(warmup, session);
+    }
+
+    private async Task PauseWarmEditorOutputAfterAsync(EditorHoverWarmup warmup, PlaybackSession session)
+    {
+        try
+        {
+            await Task.Delay(EditorHoverWarmupMaximumDecode, warmup.Cancellation.Token).ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!warmup.Cancellation.IsCancellationRequested && !warmup.Claimed && ReferenceEquals(_editorHoverWarmup, warmup)) session.Pause();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private EditorHoverWarmup? ClaimEditorHoverWarmup(string path)
+    {
+        var warmup = _editorHoverWarmup;
+        if (warmup is null || !string.Equals(warmup.Path, path, StringComparison.OrdinalIgnoreCase)) return null;
+        _editorHoverWarmup = null;
+        warmup.Claimed = true;
+        return warmup;
+    }
+
+    private void CancelEditorHoverWarmup(string? path = null)
+    {
+        var warmup = _editorHoverWarmup;
+        if (warmup is null || (path is not null && !string.Equals(warmup.Path, path, StringComparison.OrdinalIgnoreCase))) return;
+        _editorHoverWarmup = null;
+        CancelEditorHoverWarmup(warmup);
+    }
+
+    private void CancelEditorHoverWarmup(EditorHoverWarmup? warmup)
+    {
+        if (warmup is null) return;
+        warmup.Cancellation.Cancel();
+        if (warmup.Session is not { } session) return;
+        if (ReferenceEquals(EditorVideoView.MediaPlayer, session.VideoPlayer))
+        {
+            EditorVideoView.WatchMediaPlayer(null);
+            EditorVideoView.MediaPlayer = null;
+        }
+        var stop = Task.Run(session.Stop);
+        _editorHoverStopTask = stop;
+        _ = stop.ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(_playback, session)) session.Dispose();
+            if (ReferenceEquals(_editorHoverStopTask, stop)) _editorHoverStopTask = null;
+        }), TaskScheduler.Default);
     }
 
     // Fires as each card's own row scrolls in/out of the library
@@ -7805,6 +7994,14 @@ public sealed partial class MainWindow : Window
         // meant libvlc did not begin opening the file until the editor panel's
         // layout had already been serviced. Now the two overlap.
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        var claimedWarmup = _claimedEditorHoverWarmup;
+        _claimedEditorHoverWarmup = null;
+        if (claimedWarmup is not null)
+        {
+            _adoptingEditorHoverWarmup = claimedWarmup;
+            QueueClaimedEditorHoverWarmup(claimedWarmup, cts);
+            return;
+        }
         StopEditorPlayback(cancelQueuedStart: false, stopMode: PlaybackStopMode.Skip);
 
         // After that stop, not before: it releases any scope a previous open left
@@ -7888,12 +8085,47 @@ public sealed partial class MainWindow : Window
             DispatcherPriority.Default);
     }
 
+    private void QueueClaimedEditorHoverWarmup(EditorHoverWarmup warmup, CancellationTokenSource cts)
+    {
+        if (ViewModel is null) return;
+        _editorForegroundScope?.Dispose();
+        _editorForegroundScope = EditorForegroundWork.Begin();
+        var foregroundScope = _editorForegroundScope;
+        _ = ReleaseEditorForegroundScopeAfterAsync(foregroundScope, TimeSpan.FromSeconds(12));
+
+        Dispatcher.UIThread.Post(
+            async () =>
+            {
+                if (cts.IsCancellationRequested) return;
+                try
+                {
+                    var session = await warmup.SessionReady.Task;
+                    if (cts.IsCancellationRequested) return;
+                    await StartEditorPlaybackAsync(session, warmup.VideoLoaded.Task, warmup.Codec, cts.Token, foregroundScope, warmup);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error("Editor hover warm-up could not be adopted", error);
+                    if (!cts.IsCancellationRequested) await ShowMessageAsync("Playback unavailable", error.Message);
+                }
+                finally
+                {
+                    if (ReferenceEquals(_adoptingEditorHoverWarmup, warmup)) _adoptingEditorHoverWarmup = null;
+                }
+            },
+            DispatcherPriority.Default);
+    }
+
     private async Task StartEditorPlaybackAsync(
         PlaybackSession playback,
         Task videoLoad,
         string videoCodec,
         CancellationToken cancellationToken,
-        IDisposable? foregroundScope = null)
+        IDisposable? foregroundScope = null,
+        EditorHoverWarmup? hoverWarmup = null)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         if (cancellationToken.IsCancellationRequested) return;
@@ -7916,8 +8148,11 @@ public sealed partial class MainWindow : Window
             // which is exactly the "flickers over the library grid" symptom.
             _recordingPausedOverlay?.Hide();
             AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
-            EditorVideoView.MediaPlayer = playback.VideoPlayer;
-            EditorVideoView.WatchMediaPlayer(playback.VideoPlayer);
+            if (hoverWarmup?.PlayerAttached != true)
+            {
+                EditorVideoView.MediaPlayer = playback.VideoPlayer;
+                EditorVideoView.WatchMediaPlayer(playback.VideoPlayer);
+            }
             var audioTracks = ViewModel.TimelineTracks
                 .Where(track => track.IsAudio)
                 .Select(track => new AudioPreviewTrack(track.StreamIndex, track.EffectiveVolumePercent))
@@ -7940,6 +8175,21 @@ public sealed partial class MainWindow : Window
             // flag - the cancellation check below guards that.
             var videoReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var firstFrameClock = System.Diagnostics.Stopwatch.StartNew();
+            void ConfirmVideoReady(string source)
+            {
+                if (!videoReady.TrySetResult()) return;
+                AppLog.Debug($"Editor {source} ready at {_editorOpenClock.ElapsedMilliseconds}ms.");
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested) return;
+                    if (ViewModel is null) return;
+                    ViewModel.IsEditorVideoLoading = false;
+                    StartPlayheadClock(ViewModel.CurrentTime);
+                    _endedAtTrimBoundary = false;
+                    ViewModel.IsPlaying = true;
+                    _playbackTimer.Start();
+                });
+            }
             var cropMaskReapplied = 0;
             void OnVout(object? _, MediaPlayerVoutEventArgs args)
             {
@@ -7964,37 +8214,37 @@ public sealed partial class MainWindow : Window
                 if (playback.VideoPlayer.VoutCount == 0) return;
                 playback.VideoPlayer.TimeChanged -= OnTimeChanged;
                 playback.VideoPlayer.Vout -= OnVout;
-                videoReady.TrySetResult();
                 // Time from play request to first decoded frame - the primary
                 // "how slow is this clip's storage" number for network-drive
                 // diagnosis (pairs with the "Editor video load: network=..."
                 // line logged at LoadVideo).
                 AppLog.Debug($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms (total from click {_editorOpenClock.ElapsedMilliseconds}ms).");
-                Dispatcher.UIThread.Post(() =>
-                {
-                    if (cancellationToken.IsCancellationRequested) return;
-                    if (ViewModel is null) return;
-                    ViewModel.IsEditorVideoLoading = false;
-                    // The playhead/timeline seeker previously started moving
-                    // the instant PlayFrom was called, well before the video
-                    // itself had a real frame to show - the seeker visibly
-                    // crept forward over a still-"Loading" placeholder.
-                    // Starting it here instead, atomically with clearing the
-                    // loading flag, means nothing on the timeline moves
-                    // until there's an actual frame for it to correspond to.
-                    StartPlayheadClock(ViewModel.CurrentTime);
-                    _endedAtTrimBoundary = false;
-                    ViewModel.IsPlaying = true;
-                    _playbackTimer.Start();
-                });
+                ConfirmVideoReady("first frame");
             }
             playback.VideoPlayer.TimeChanged += OnTimeChanged;
             playback.VideoPlayer.Vout += OnVout;
 
-            playback.PlayFrom(ViewModel.CurrentTime);
+            // A claimed hover player already rendered a frame through this
+            // exact HWND, then paused. Reveal it immediately; PlayFrom below
+            // resumes from the same nearby position without a new vout start.
+            var resumeWarmFrame = hoverWarmup?.FirstFrameReady == true && playback.VideoPlayer.VoutCount > 0;
+            if (resumeWarmFrame)
+            {
+                // The paused warm frame can be a few milliseconds beyond the
+                // trim boundary. Resuming there avoids turning the handoff
+                // into a fresh keyframe seek just to rewind that tiny amount.
+                ViewModel.CurrentTime = playback.Position;
+                // Start the saved crop-guide render before dropping the
+                // placeholder. It races first presentation rather than
+                // visibly trailing an otherwise instant warm handoff.
+                ApplyEditorEffectPreview();
+                ConfirmVideoReady("hover frame");
+            }
+            if (resumeWarmFrame) playback.Play();
+            else playback.PlayFrom(ViewModel.CurrentTime);
             // Start generating the restored guide alongside first-frame decode,
             // rather than after the asynchronous audio setup completes.
-            ApplyEditorEffectPreview();
+            if (!resumeWarmFrame) ApplyEditorEffectPreview();
             _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, videoCodec, audioTracks, videoReady.Task, cancellationToken, foregroundScope);
             await Task.Delay(200, cancellationToken);
             if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
@@ -8139,6 +8389,14 @@ public sealed partial class MainWindow : Window
 
     private void StopEditorPlayback(bool cancelQueuedStart = true, PlaybackStopMode stopMode = PlaybackStopMode.Synchronous)
     {
+        if (cancelQueuedStart)
+        {
+            CancelEditorHoverWarmup();
+            CancelEditorHoverWarmup(_claimedEditorHoverWarmup);
+            _claimedEditorHoverWarmup = null;
+            CancelEditorHoverWarmup(_adoptingEditorHoverWarmup);
+            _adoptingEditorHoverWarmup = null;
+        }
         // Unconditional: every route out of an open - close, navigate, delete, error, or
         // being superseded by another open - comes through here, and none of them should
         // leave background library work parked. QueueEditorPlayback starts a fresh scope
