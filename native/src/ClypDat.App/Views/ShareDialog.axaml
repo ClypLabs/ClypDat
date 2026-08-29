@@ -68,7 +68,7 @@
                  the box frames lives INSIDE it, progress included - the bar's
                  width is set from the box for the same reason. -->
             <Grid x:Name="SharePreviewBox" HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="True">
-              <Rectangle RadiusX="10" RadiusY="10" Stroke="{StaticResource Semantic_4C6FFF}" StrokeThickness="2" StrokeDashArray="6,4" Fill="Transparent" />
+              <Rectangle RadiusX="10" RadiusY="10" Stroke="{StaticResource AccentBrush}" StrokeThickness="2" StrokeDashArray="6,4" Fill="Transparent" />
               <!-- Uniform, not UniformToFill - the box already carries the
                    picture's aspect, so nothing is cropped to fill it. -->
               <Image x:Name="ShareThumbnail" Stretch="Uniform" Margin="3" IsVisible="False" Cursor="Hand"
