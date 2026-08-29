@@ -954,8 +954,6 @@
                     </Border>
                     <Border x:Name="LibraryClipCardSurface"
                             Background="{StaticResource Surface_24303A}"
-                            BorderBrush="{StaticResource Surface_3C4C5A}"
-                            BorderThickness="1"
                             CornerRadius="12"
                             BoxShadow="0 6 18 -6 #66000000"
                             PointerPressed="ClipCard_OnPointerPressed"
