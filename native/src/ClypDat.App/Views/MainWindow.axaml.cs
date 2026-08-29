@@ -114,7 +114,6 @@ public sealed partial class MainWindow : Window
     // target already queued for restart stops identical polls from extending
     // the debounce forever and leaving the UI on "Switching capture...".
     private string _pendingReplayTargetIdentity = string.Empty;
-    private bool _showNewClipsAfterReplayRestart;
     private bool _startNewGameSessionAfterReplayRestart;
     // Capture backends bind to either a monitor or one concrete game window.
     // Keep the target that started the current buffer so detector ticks only
@@ -662,8 +661,15 @@ public sealed partial class MainWindow : Window
         ViewModel.ActiveGame = detection.DisplayName;
         ViewModel.SetGameActiveForTimelineHydration(detection.IsDetected);
 
-        if (previousDetection.IsDetected && !detection.IsDetected && ViewModel.AutomaticallyFocusOnGameExit)
-            (Application.Current as App)?.FocusMainWindow();
+        var gameEnded = previousDetection.IsDetected && !detection.IsDetected;
+        if (gameEnded)
+        {
+            if (ViewModel.AutomaticallyFocusOnGameExit)
+                (Application.Current as App)?.FocusMainWindow();
+            // The session ends here, regardless of whether capture stops or
+            // automatically switches back to Desktop Capture afterwards.
+            ShowNewClipsDialog();
+        }
 
         // Cheap per-window resolution now (see ForegroundGameDetector), but no
         // reason to poll as fast while nothing is running - back off to 3s with
@@ -677,12 +683,10 @@ public sealed partial class MainWindow : Window
         {
             // Explicit Game Capture ends with its game. Desktop Capture stays
             // armed, including when it has just returned from automatic game
-            // capture, so the game-session dialog still appears here only for
-            // the manual game workflow.
+            // capture.
             _ = StopReplayBufferAsync().ContinueWith(
                 _ =>
                 {
-                    ShowNewClipsDialog();
                     Task.Run(() => GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: true));
                 },
                 CancellationToken.None,
@@ -2634,7 +2638,6 @@ public sealed partial class MainWindow : Window
         if (string.Equals(target, _activeReplayTargetIdentity, StringComparison.Ordinal)) return;
         if (string.Equals(target, _pendingReplayTargetIdentity, StringComparison.Ordinal)) return;
         var wasGameCapture = _activeReplayTargetIdentity.StartsWith("Game|", StringComparison.Ordinal);
-        _showNewClipsAfterReplayRestart |= wasGameCapture && ViewModel.IsEffectiveDesktopCapture;
         _startNewGameSessionAfterReplayRestart |= !wasGameCapture && !ViewModel.IsEffectiveDesktopCapture;
         _pendingReplayTargetIdentity = target;
         ViewModel.RecorderStatus = "Switching capture...";
@@ -2669,14 +2672,11 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            var showNewClips = _showNewClipsAfterReplayRestart;
-            _showNewClipsAfterReplayRestart = false;
             var startNewGameSession = _startNewGameSessionAfterReplayRestart;
             _startNewGameSessionAfterReplayRestart = false;
             try
             {
                 if (ViewModel.IsReplayRecording) await StopReplayBufferAsync();
-                if (showNewClips) ShowNewClipsDialog();
                 if (ViewModel is not null) ViewModel.RecorderStatus = "Switching capture...";
                 await StartReplayBufferAsync(showErrors: true, isQualityRestart: !startNewGameSession);
             }
