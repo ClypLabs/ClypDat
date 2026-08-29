@@ -44,6 +44,15 @@
     <Style Selector="Window">
       <Setter Property="FontFamily" Value="{DynamicResource ClypDatFontFamily}" />
     </Style>
+    <Style Selector="PopupRoot, OverlayPopupHost, EmbeddableControlRoot">
+      <Setter Property="FontFamily" Value="{DynamicResource ClypDatFontFamily}" />
+    </Style>
     <StyleInclude Source="avares://ClypDat/Styles/AppStyles.axaml" />
+    <!-- Some display fonts draw italic/extended glyph ink beyond their
+         reported advance width. Reserve a small trailing gutter so parents
+         never clip that overhang off the final character. -->
+    <Style Selector="TextBlock">
+      <Setter Property="Padding" Value="0,0,6,0" />
+    </Style>
   </Application.Styles>
 </Application>
