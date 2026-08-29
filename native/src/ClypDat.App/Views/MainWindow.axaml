@@ -972,7 +972,7 @@
                             <Border Background="{StaticResource Surface_16202A}" Height="{Binding $parent[Window].DataContext.CardImageHeight}">
                               <Grid>
                                 <Image Source="{Binding PreviewImage}" Stretch="{Binding PreviewImageStretch}" />
-                                <controls:ClipPreviewPresenter Classes="clipPreviewOverlay" IsHitTestVisible="False" />
+                                <controls:ClipPreviewPresenter x:Name="ClipPreviewPresenter" Classes="clipPreviewOverlay" IsHitTestVisible="False" />
                                 <Border Background="{StaticResource Surface_661A2040}" IsVisible="{Binding IsSelected}" IsHitTestVisible="False" />
                                 <!-- Queued for, or undergoing, a parameter-set
                                      repair. The thumbnail underneath is the
@@ -1052,6 +1052,21 @@
                                   </Border>
                                 </Grid>
                               </Grid>
+                            </Border>
+                            <!-- Progress sits above the hover ring, so its ends
+                                 reach the tile edge instead of appearing inset
+                                 beneath the ring's two-pixel stroke. -->
+                            <Border Grid.Row="0"
+                                    Height="4"
+                                    Background="{StaticResource AccentBrush}"
+                                    VerticalAlignment="Bottom"
+                                    HorizontalAlignment="Stretch"
+                                    RenderTransformOrigin="0,0.5"
+                                    IsHitTestVisible="False"
+                                    ZIndex="11">
+                              <Border.RenderTransform>
+                                <ScaleTransform ScaleX="{Binding Progress, ElementName=ClipPreviewPresenter}" />
+                              </Border.RenderTransform>
                             </Border>
 
                             <Border Grid.Row="1" Background="{StaticResource Surface_1E2A35}">

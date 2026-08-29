@@ -56,8 +56,16 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
     private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
     private IClipPreviewPresenter? _adapter;
     private bool _requestedAttached;
-    private double _progress;
     private bool _disposed;
+
+    public static readonly StyledProperty<double> ProgressProperty =
+        AvaloniaProperty.Register<ClipPreviewPresenter, double>(nameof(Progress));
+
+    public double Progress
+    {
+        get => GetValue(ProgressProperty);
+        private set => SetValue(ProgressProperty, value);
+    }
 
     public ClipPreviewPresenter()
     {
@@ -84,12 +92,6 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
     {
         if (_requestedAttached && _adapter == _software && _software.Bitmap is { } bitmap)
             context.DrawImage(bitmap, Bounds);
-        if (_requestedAttached && _progress > 0)
-        {
-            var accent = Application.Current?.Resources["AccentBrush"] as IBrush
-                ?? AppThemeService.Brush("AccentBrush", "#5864E8");
-            context.DrawRectangle(accent, null, new Rect(0, Math.Max(0, Bounds.Height - 4), Bounds.Width * _progress, 4));
-        }
     }
 
     async ValueTask IClipPreviewPresenter.ActivateSessionAsync(CancellationToken cancellationToken)
@@ -111,9 +113,12 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
         {
             if (_disposed) return;
             _requestedAttached = attached;
-            if (!attached) _progress = 0;
             if (_adapter is { } adapter) await adapter.SetAttachedAsync(attached).ConfigureAwait(false);
-            await Dispatcher.UIThread.InvokeAsync(InvalidateVisual, DispatcherPriority.Render);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!attached) Progress = 0;
+                InvalidateVisual();
+            }, DispatcherPriority.Render);
         }
         finally { _lifecycleLock.Release(); }
     }
@@ -124,8 +129,8 @@ public sealed class ClipPreviewPresenter : Control, IClipPreviewPresenter
         try
         {
             if (_disposed) return;
-            _progress = Math.Clamp(progress, 0, 1);
-            await Dispatcher.UIThread.InvokeAsync(InvalidateVisual, DispatcherPriority.Render);
+            var boundedProgress = Math.Clamp(progress, 0, 1);
+            await Dispatcher.UIThread.InvokeAsync(() => Progress = boundedProgress, DispatcherPriority.Render);
         }
         finally { _lifecycleLock.Release(); }
     }
