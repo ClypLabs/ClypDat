@@ -6136,14 +6136,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             kind = armed
                 ? $"recording:{ActiveGameDetection.DisplayName}"
                 : $"playing:{ActiveGameDetection.DisplayName}";
-            details = armed
-                ? $"Playing {ActiveGameDetection.DisplayName} and Recording {ActiveGameDetection.DisplayName}"
-                : $"Playing {ActiveGameDetection.DisplayName}";
+            details = $"Playing {ActiveGameDetection.DisplayName}";
             // The library total says nothing about what is happening right
             // now, which is the whole point of the line while a game is up.
             // What the buffer is holding does, and a session tally does once
             // there is one to report.
-            state = RecordingStateLine(armed);
+            state = armed
+                ? $"Recording {ActiveGameDetection.DisplayName}"
+                : RecordingStateLine(false);
         }
         else if (IsGameFilterActive || IsClipTypeFilterActive)
         {
