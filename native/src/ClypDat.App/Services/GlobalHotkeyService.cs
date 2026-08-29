@@ -12,7 +12,8 @@ namespace ClypDat.App.Services;
 // input hook, so it isn't caught by that kind of filtering.
 public sealed class GlobalHotkeyService : IDisposable
 {
-    private const int HotkeyId = 1;
+    private const int FirstHotkeyId = 1;
+    private const int MaxHotkeyRegistrations = 4;
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
@@ -88,7 +89,8 @@ public sealed class GlobalHotkeyService : IDisposable
 
         while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
         {
-            if (msg.Message == WmHotkey && msg.WParam.ToInt32() == HotkeyId)
+            if (msg.Message == WmHotkey
+                && msg.WParam.ToInt32() is >= FirstHotkeyId and < FirstHotkeyId + MaxHotkeyRegistrations)
             {
                 Pressed?.Invoke(this, new ReplayHotkeyPressedEventArgs(MonotonicClock.UtcNow));
             }
@@ -104,19 +106,47 @@ public sealed class GlobalHotkeyService : IDisposable
         // Unregister on the owning thread, immediately before destroying its window.
         if (_hwnd != IntPtr.Zero)
         {
-            UnregisterHotKey(_hwnd, HotkeyId);
+            UnregisterHotkeys();
             DestroyWindow(_hwnd);
         }
     }
 
     private void ApplyRegistration()
     {
-        UnregisterHotKey(_hwnd, HotkeyId);
+        UnregisterHotkeys();
         if (_vk == 0) return;
-        if (!RegisterHotKey(_hwnd, HotkeyId, _modifiers | ModNoRepeat, _vk))
+
+        var modifierVariants = GetModifierVariants(_modifiers);
+        for (var index = 0; index < modifierVariants.Length; index++)
         {
-            AppLog.Error($"Global hotkey registration failed for vk=0x{_vk:X}, modifiers=0x{_modifiers:X}.");
+            var modifiers = modifierVariants[index];
+            if (!RegisterHotKey(_hwnd, FirstHotkeyId + index, modifiers | ModNoRepeat, _vk))
+            {
+                AppLog.Error($"Global hotkey registration failed for vk=0x{_vk:X}, modifiers=0x{modifiers:X}.");
+            }
         }
+    }
+
+    private void UnregisterHotkeys()
+    {
+        for (var index = 0; index < MaxHotkeyRegistrations; index++)
+        {
+            UnregisterHotKey(_hwnd, FirstHotkeyId + index);
+        }
+    }
+
+    internal static uint[] GetModifierVariants(uint modifiers)
+    {
+        // RegisterHotKey matches modifiers exactly. Register the missing Ctrl/Shift
+        // supersets too so gameplay inputs held during the clip key do not block it.
+        var variants = new List<uint> { modifiers };
+        foreach (var optionalModifier in new[] { ModControl, ModShift })
+        {
+            if ((modifiers & optionalModifier) != 0) continue;
+            variants.AddRange(variants.Select(value => value | optionalModifier).ToArray());
+        }
+
+        return variants.ToArray();
     }
 
     private static (uint Modifiers, uint Vk) ToWin32Hotkey(string hotkey)
