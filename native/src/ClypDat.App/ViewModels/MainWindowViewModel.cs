@@ -6126,9 +6126,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             details = recording
                 ? $"Recording {ActiveGameDetection.DisplayName}"
                 : $"Playing {ActiveGameDetection.DisplayName}";
-            state = _discordClipsSaved == 1
-                ? "1 clip saved"
-                : $"{_discordClipsSaved:N0} clips saved";
+            state = _discordClipsSaved switch
+            {
+                0 => "Ready to clip",
+                1 => "1 clip saved",
+                _ => $"{_discordClipsSaved:N0} clips saved"
+            };
         }
         else if (IsSettingsVisible)
         {
