@@ -35,7 +35,7 @@ $manifestDirectory = Join-Path $OutputDirectory "ClypLabs.ClypDat\$version"
 New-Item -ItemType Directory -Force $manifestDirectory | Out-Null
 
 $versionManifest = @"
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
+# yaml-language-server: `$schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
 PackageIdentifier: ClypLabs.ClypDat
 PackageVersion: $version
 DefaultLocale: en-US
@@ -44,7 +44,7 @@ ManifestVersion: 1.10.0
 "@
 
 $installerManifest = @"
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+# yaml-language-server: `$schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
 PackageIdentifier: ClypLabs.ClypDat
 PackageVersion: $version
 InstallerType: nullsoft
@@ -66,7 +66,7 @@ ManifestVersion: 1.10.0
 "@
 
 $defaultLocaleManifest = @"
-# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+# yaml-language-server: `$schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
 PackageIdentifier: ClypLabs.ClypDat
 PackageVersion: $version
 PackageLocale: en-US
