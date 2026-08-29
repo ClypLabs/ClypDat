@@ -49,10 +49,10 @@
     </Style>
     <StyleInclude Source="avares://ClypDat/Styles/AppStyles.axaml" />
     <!-- Some display fonts draw italic/extended glyph ink beyond their
-         reported advance width. Reserve a small trailing gutter so parents
-         never clip that overhang off the final character. -->
+         reported advance width. Allow that ink to overflow without changing
+         text measurement, alignment, or parent control sizes. -->
     <Style Selector="TextBlock">
-      <Setter Property="Padding" Value="0,0,6,0" />
+      <Setter Property="ClipToBounds" Value="False" />
     </Style>
   </Application.Styles>
 </Application>
