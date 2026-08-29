@@ -36,7 +36,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
     internal const int MaximumPreviewWidth = 640;
     private const int MinimumPreviewWidth = 160;
     private const int MinimumPreviewHeight = 90;
-    internal static readonly TimeSpan HoverDelay = TimeSpan.FromMilliseconds(75);
+    internal static readonly TimeSpan HoverDelay = TimeSpan.Zero;
     internal static readonly TimeSpan WarmExitGrace = TimeSpan.FromMilliseconds(150);
 
     private readonly object _stateLock = new();
@@ -261,6 +261,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     attached = _attached;
                 }
                 await presenter.SetAttachedAsync(attached);
+                await presenter.SetProgressAsync(0);
                 runStarted = true;
                 await RunSessionAsync(clip, generation, previewSize, presenter, cancellation.Token, requestTimestamp);
             }
@@ -283,6 +284,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
             if (range.Duration <= TimeSpan.Zero) return;
             var frameRate = MaximumFramesPerSecond;
             var pacer = new HoverPreviewFramePacer(frameRate);
+            var expectedFrameCount = Math.Max(1, (int)Math.Ceiling(range.Duration.TotalSeconds * pacer.CurrentFrameRate));
             var frameBytes = previewSize.Width * previewSize.Height * 4;
             if (!IsCurrent(clip, generation)) return;
             var sourceMbps = clip.Duration > TimeSpan.Zero ? clip.SizeBytes * 8d / clip.Duration.TotalSeconds / 1_000_000d : 0;
@@ -295,7 +297,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 SetProcess(clip, generation, process);
                 var stderr = process.StandardError.ReadToEndAsync();
                 var sourceReadsBefore = GetReadBytes(process);
-                var (decoded, displayed) = await DeliverFramesAsync(process.StandardOutput.BaseStream, slots, clip, generation, presenter, previewSize, pacer, metrics, token);
+                var (decoded, displayed) = await DeliverFramesAsync(process.StandardOutput.BaseStream, slots, clip, generation, presenter, previewSize, pacer, expectedFrameCount, metrics, token);
                 await process.WaitForExitAsync(CancellationToken.None);
                 metrics.AddReadBytes(GetReadBytes(process) - sourceReadsBefore);
                 ClearProcess(process);
@@ -316,7 +318,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         }
     }
 
-    private async Task<(int Decoded, int Displayed)> DeliverFramesAsync(Stream stream, IReadOnlyList<FrameSlot> slots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
+    private async Task<(int Decoded, int Displayed)> DeliverFramesAsync(Stream stream, IReadOnlyList<FrameSlot> slots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, HoverPreviewFramePacer pacer, int expectedFrameCount, PreviewMetrics metrics, CancellationToken token)
     {
         var decodedBefore = metrics.DecodedFrames;
         var displayedBefore = metrics.DisplayedFrames;
@@ -325,7 +327,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         foreach (var slot in slots) await freeSlots.Writer.WriteAsync(slot, token);
 
         var producer = ProduceFramesAsync(stream, freeSlots, frames, clip, generation, pacer, metrics, token);
-        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, presenter, previewSize, metrics, token);
+        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, presenter, previewSize, expectedFrameCount, metrics, token);
         await Task.WhenAll(producer, consumer);
         return (metrics.DecodedFrames - decodedBefore, metrics.DisplayedFrames - displayedBefore);
     }
@@ -349,6 +351,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
                     if (!await ReadFrameAsync(stream, slot.Buffer, token)) return;
                     metrics.MarkDecoded();
+                    slot.Sequence = metrics.DecodedFrames;
                     var dropped = frames.Publish(slot);
                     if (dropped is not null)
                     {
@@ -361,7 +364,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally { frames.Complete(); }
     }
 
-    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, PreviewMetrics metrics, CancellationToken token)
+    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, int expectedFrameCount, PreviewMetrics metrics, CancellationToken token)
     {
         try
         {
@@ -371,6 +374,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 var result = await presenter.PresentAsync(slot.Buffer, previewSize, token);
                 metrics.MarkPresent(result.Path, result.Latency);
                 metrics.MarkDisplayed();
+                await presenter.SetProgressAsync(((slot.Sequence - 1) % expectedFrameCount + 1) / (double)expectedFrameCount);
                 await freeSlots.WriteAsync(slot, token);
             }
         }
@@ -531,7 +535,11 @@ internal sealed class ClipHoverPreviewController : IDisposable
     private static void Kill(Process? process) { try { if (process is { HasExited: false }) process.Kill(true); } catch { } }
     public void Dispose() { if (_disposed) return; _disposed = true; Stop("window closed"); }
 
-    private sealed class FrameSlot(byte[] buffer) { public byte[] Buffer { get; } = buffer; }
+    private sealed class FrameSlot(byte[] buffer)
+    {
+        public byte[] Buffer { get; } = buffer;
+        public int Sequence { get; set; }
+    }
     private readonly record struct SessionState(ClipCardViewModel? Clip, IClipPreviewPresenter? Presenter, Process? Process, CancellationTokenSource? Cancellation, CancellationTokenSource? WarmExitCancellation)
     { public bool IsActive => Clip is not null || Process is not null || Cancellation is not null; }
 
