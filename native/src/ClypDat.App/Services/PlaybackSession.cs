@@ -33,6 +33,7 @@ public sealed class PlaybackSession : IDisposable
     private string? _cropMaskPath;
     private Media? _videoMedia;
     private volatile bool _disposed;
+    private readonly CancellationTokenSource _disposeCts = new();
     // Generous on purpose: a preview decode holding _seekLock is bounded work, and
     // overshooting the wait is far cheaper than the leak the timeout path takes.
     private static readonly TimeSpan PreviewWorkerDrainTimeout = TimeSpan.FromSeconds(5);
@@ -70,10 +71,12 @@ public sealed class PlaybackSession : IDisposable
     private readonly object _transportLock = new();
     private readonly PlaybackLoadGate _loadGate = new();
     private readonly object _previewLock = new();
+    private readonly object _seekTaskLock = new();
     private readonly EditorSeekRequestQueue _previewRequests = new();
     private readonly EditorSeekCoordinator _seekCoordinator;
     private readonly EditorAvClockPolicy _audioClockPolicy = new();
     private Task? _previewWorker;
+    private readonly List<Task> _seekTasks = new();
     private EventHandler<MediaPlayerTimeChangedEventArgs>? _audioDriftHandler;
     private long _audioAnchorDevicePosition;
     private TimeSpan _audioAnchorMediaTime;
@@ -749,8 +752,30 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    public async Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
+    public Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
+        lock (_seekTaskLock)
+        {
+            if (_disposed) return Task.FromCanceled<bool>(_disposeCts.Token);
+
+            var seekTask = SeekCoreAsync(time, resumePlayback, cancellationToken);
+            _seekTasks.Add(seekTask);
+            _ = seekTask.ContinueWith(
+                completed =>
+                {
+                    lock (_seekTaskLock) _seekTasks.Remove(completed);
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            return seekTask;
+        }
+    }
+
+    private async Task<bool> SeekCoreAsync(TimeSpan time, bool resumePlayback, CancellationToken cancellationToken)
+    {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        cancellationToken = linkedCts.Token;
         var finalRequest = _previewRequests.BeginFinalSeek(DateTimeOffset.UtcNow);
         var finalRequestGeneration = finalRequest.Generation;
         var seekVersion = Interlocked.Increment(ref _seekVersion);
@@ -1163,6 +1188,7 @@ public sealed class PlaybackSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _disposeCts.Cancel();
         _previewRequests.BeginFinalSeek();
 
         // The preview worker is a detached Task.Run that calls into libvlc
@@ -1172,18 +1198,22 @@ public sealed class PlaybackSession : IDisposable
         // scrubber is being dragged. Drain it first.
         Task? worker;
         lock (_previewLock) worker = _previewWorker;
+        Task[] seekTasks;
+        lock (_seekTaskLock) seekTasks = _seekTasks.ToArray();
 
         var drained = true;
-        if (worker is not null && !worker.IsCompleted)
+        var activeTasks = seekTasks.Append(worker).Where(task => task is not null && !task.IsCompleted).Cast<Task>().ToArray();
+        if (activeTasks.Length > 0)
         {
             try
             {
-                drained = worker.Wait(PreviewWorkerDrainTimeout);
+                drained = Task.WaitAll(activeTasks, PreviewWorkerDrainTimeout);
             }
             catch (Exception error)
             {
-                // A faulted worker is already finished, which is all this needs.
-                AppLog.Debug($"Editor preview worker ended with an error during dispose: {error.Message}");
+                // Faulted work is already finished, which is all this needs.
+                drained = activeTasks.All(task => task.IsCompleted);
+                AppLog.Debug($"Editor seek work ended with an error during dispose: {error.Message}");
             }
         }
 
@@ -1194,7 +1224,7 @@ public sealed class PlaybackSession : IDisposable
             // Leak rather than free-and-use: the worker is still inside libvlc, so
             // releasing these handles now would corrupt native state. The process is
             // closing this editor, not the app, so this is a bounded, logged leak.
-            AppLog.Error($"Editor preview worker did not stop within {PreviewWorkerDrainTimeout.TotalSeconds:0.#}s; " +
+            AppLog.Error($"Editor seek work did not stop within {PreviewWorkerDrainTimeout.TotalSeconds:0.#}s; " +
                          "leaving the media player and LibVLC instance alive to avoid a use-after-free.");
             DisposeAudio();
             return;
@@ -1205,6 +1235,7 @@ public sealed class PlaybackSession : IDisposable
         DisposeMedia();
         _libVlc.Dispose();
         _seekLock.Dispose();
+        _disposeCts.Dispose();
     }
 
     private void ForceVideoSilent()

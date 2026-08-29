@@ -24,6 +24,7 @@ namespace ClypDat.App.Views;
 
 public sealed partial class MainWindow : Window
 {
+    private static readonly Thickness OffscreenPark = new(-100000, 0, 100000, 0);
     private readonly DispatcherTimer _playbackTimer;
     private readonly DispatcherTimer _gameDetectionTimer;
     private readonly ForegroundGameDetector _gameDetector = new();
@@ -4201,16 +4202,18 @@ public sealed partial class MainWindow : Window
         return true;
     }
 
-    // Opacity keeps the editor subtree measured and its NativeControlHost
-    // created. Native child HWNDs ignore Avalonia opacity, so hide/show that
-    // one surface through Win32 without destroying the HWND LibVLC warmed.
+    // A parked margin keeps the native hosts alive, correctly sized, and out
+    // of the window. IsVisible would hide and shrink the holder to 1x1; opacity
+    // alone would leave the native child painting over Avalonia siblings.
     private void UpdateEditorSurfaceVisibility()
     {
         if (ViewModel is null) return;
         var showEditor = ViewModel.IsEditorVisible;
         EditorPanelRoot.Opacity = showEditor ? 1 : 0;
         EditorPanelRoot.IsHitTestVisible = showEditor;
-        EditorVideoView.SetNativeSurfaceVisible(showEditor && !ViewModel.IsEditorVideoLoading);
+        EditorPanelRoot.IsEnabled = showEditor;
+        EditorPanelRoot.Margin = showEditor ? default : OffscreenPark;
+        EditorVideoView.Margin = ViewModel.IsEditorVideoAreaVisible ? default : OffscreenPark;
     }
 
     private async void ClipContextExport_OnClick(object? sender, RoutedEventArgs e)
@@ -4889,7 +4892,6 @@ public sealed partial class MainWindow : Window
         // This is the exact native EditorVideoView which will remain attached
         // after the click. LibVLC only promises a stable HWND at play start;
         // decoding through a dummy vout cannot be transferred later.
-        EditorVideoView.SetNativeSurfaceVisible(false);
         _playback = session;
         EditorVideoView.MediaPlayer = session.VideoPlayer;
         EditorVideoView.WatchMediaPlayer(session.VideoPlayer);
@@ -8251,6 +8253,7 @@ public sealed partial class MainWindow : Window
                 // trim boundary. Resuming there avoids turning the handoff
                 // into a fresh keyframe seek just to rewind that tiny amount.
                 ViewModel.CurrentTime = playback.Position;
+                ViewModel.IsEditorVideoLoading = false;
                 // Start the saved crop-guide render before dropping the
                 // placeholder. It races first presentation rather than
                 // visibly trailing an otherwise instant warm handoff.
