@@ -7,6 +7,7 @@
         <ResourceInclude Source="avares://ClypDat/Styles/Tokens.axaml" />
         <ResourceInclude Source="avares://ClypDat/Styles/ThemeRamp.axaml" />
       </ResourceDictionary.MergedDictionaries>
+      <FontFamily x:Key="ClypDatFontFamily">fonts:Inter#Inter, $Default</FontFamily>
       <!-- Accent brushes live here rather than in Tokens.axaml only because they
            have no authored "source" value: AppThemeService derives every one of
            them from the live accent (Windows accent, or the preset's own when
@@ -40,6 +41,9 @@
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="FontFamily" Value="{DynamicResource ClypDatFontFamily}" />
+    </Style>
     <StyleInclude Source="avares://ClypDat/Styles/AppStyles.axaml" />
   </Application.Styles>
 </Application>

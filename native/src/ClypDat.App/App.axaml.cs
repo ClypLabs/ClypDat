@@ -249,16 +249,20 @@ public sealed partial class App : Application
         var source = string.Equals(name, "Inter", StringComparison.OrdinalIgnoreCase)
             ? "fonts:Inter#Inter, $Default"
             : $"{name}, $Default";
+        FontFamily fontFamily;
 
         try
         {
-            Resources["ContentControlThemeFontFamily"] = new FontFamily(source);
+            fontFamily = new FontFamily(source);
         }
         catch (Exception error)
         {
             AppLog.Error($"Font family '{name}' could not be applied; using Inter.", error);
-            Resources["ContentControlThemeFontFamily"] = new FontFamily("fonts:Inter#Inter, $Default");
+            fontFamily = new FontFamily("fonts:Inter#Inter, $Default");
         }
+
+        Resources["ClypDatFontFamily"] = fontFamily;
+        if (_mainWindow is not null) _mainWindow.FontFamily = fontFamily;
     }
 
     private void InitializeTrayIcon()
