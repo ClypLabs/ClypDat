@@ -36,7 +36,7 @@ Video playback uses LibVLC. Audio playback uses a separate NAudio/WASAPI pipelin
 
 ## Import existing clips
 
-Import clips from other popular clipping applications through **Settings > Import Clips**. ClypDat reads supported local catalogs, then scans default capture folders when a catalog is missing or unreadable. You can copy or move the clips into the ClypDat library.
+Import clips from other popular clipping applications through **Settings > Import Clips**. ClypDat reads supported local catalogs, then scans default capture folders when a catalog is missing or unreadable. You can choose to either copy or move the clips into the ClypDat library.
 
 ## Requirements
 
