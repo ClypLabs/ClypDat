@@ -110,8 +110,14 @@ Section "ClypDat" SecMain
   nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ClypDatInstallerShutdown.ps1"'
   Pop $0
   ${If} $0 != "0"
+    ; WinGet runs the installer with /S. A MessageBox in that path blocks its
+    ; unattended validation until timeout, so return a failure code instead.
+    IfSilent clypdatShutdownSilentFailure
     MessageBox MB_ICONSTOP "ClypDat is still running and could not be stopped. Close ClypDat, then run this installer again."
     Abort
+clypdatShutdownSilentFailure:
+    SetErrorLevel 1
+    Quit
   ${EndIf}
 
   ; 1.1.0 temporarily installed machine-wide. Its elevated uninstaller is
