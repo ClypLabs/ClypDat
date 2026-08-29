@@ -4844,21 +4844,21 @@ public sealed partial class MainWindow : Window
         var warmup = new EditorHoverWarmup(clip.Path, clip.Media.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec ?? string.Empty,
             range.Start, ViewModel.IsReplayRecording);
         _editorHoverWarmup = warmup;
-        // A libvlc Stop may still be unwinding a previous abandoned hover.
-        // Never load a new Media through that same player until its stop has
-        // completed; libvlc otherwise permits the old stop to tear down the
-        // new vout after it has started.
-        var reusableSession = _editorHoverStopTask is { IsCompleted: false } ? null : _playback;
-        _ = PrepareEditorHoverWarmupAsync(warmup, reusableSession);
+        _ = PrepareEditorHoverWarmupAsync(warmup);
     }
 
-    private async Task PrepareEditorHoverWarmupAsync(EditorHoverWarmup warmup, PlaybackSession? reusableSession)
+    private async Task PrepareEditorHoverWarmupAsync(EditorHoverWarmup warmup)
     {
         PlaybackSession? session = null;
         try
         {
             await Task.Delay(EditorHoverWarmupDelay, warmup.Cancellation.Token).ConfigureAwait(false);
-            session = reusableSession ?? await Task.Run(PlaybackSession.TakeWarmedOrCreate, warmup.Cancellation.Token).ConfigureAwait(false);
+            // Keep the native target attached until Stop has completely unwound.
+            // Reusing or replacing the player earlier lets libvlc set Hwnd to zero
+            // while its old vout is still active, which creates VLC's fallback window.
+            await AwaitEditorHoverStopAsync().ConfigureAwait(false);
+            warmup.Cancellation.Token.ThrowIfCancellationRequested();
+            session = _playback ?? await Task.Run(PlaybackSession.TakeWarmedOrCreate, warmup.Cancellation.Token).ConfigureAwait(false);
             warmup.Session = session;
             warmup.SessionReady.TrySetResult(session);
             await session.LoadVideoAsync(warmup.Path, warmup.Codec, warmup.ReplayArmed, warmup.Cancellation.Token).ConfigureAwait(false);
@@ -4957,15 +4957,8 @@ public sealed partial class MainWindow : Window
         if (ReferenceEquals(EditorVideoView.MediaPlayer, session.VideoPlayer))
         {
             EditorVideoView.WatchMediaPlayer(null);
-            EditorVideoView.MediaPlayer = null;
         }
-        var stop = Task.Run(session.Stop);
-        _editorHoverStopTask = stop;
-        _ = stop.ContinueWith(_ => Dispatcher.UIThread.Post(() =>
-        {
-            if (!ReferenceEquals(_playback, session)) session.Dispose();
-            if (ReferenceEquals(_editorHoverStopTask, stop)) _editorHoverStopTask = null;
-        }), TaskScheduler.Default);
+        QueueEditorBackgroundStop(session);
     }
 
     // Fires as each card's own row scrolls in/out of the library
@@ -8049,23 +8042,8 @@ public sealed partial class MainWindow : Window
         //   "UI thread stalled: no response for 5s" ... "recovered after 10.9s".
         // Off-thread, a cold open still waits on libvlc, but the window keeps
         // painting and the editor shows its loading state instead of hanging.
-        var existingSession = _playback;
         var openClock = _editorOpenClock;
-        var sessionTask = existingSession is not null
-            ? Task.FromResult(existingSession)
-            : Task.Run(() =>
-            {
-                // Logged BEFORE any work, so the number is the thread pool's
-                // pickup delay and nothing else. The app runs capture, encode
-                // and several ffmpeg chunk extractions at once, and the pool
-                // injects new threads roughly one per second when saturated -
-                // if a clip open is sitting seconds behind a busy pool, this
-                // line is where it shows up rather than in the engine cost.
-                AppLog.Debug($"Editor open trace: engine construction picked up at {openClock.ElapsedMilliseconds}ms.");
-                var created = PlaybackSession.TakeWarmedOrCreate();
-                AppLog.Debug($"Editor open trace: engine ready at {openClock.ElapsedMilliseconds}ms.");
-                return created;
-            });
+        var sessionTask = GetEditorPlaybackSessionAfterPendingStopAsync(cts.Token, openClock);
         // Read off the view model here, not inside the continuation - by the
         // time that runs the selection may already have moved on.
         var videoPath = ViewModel.SelectedVideoPath;
@@ -8407,6 +8385,39 @@ public sealed partial class MainWindow : Window
         Skip
     }
 
+    private async Task AwaitEditorHoverStopAsync()
+    {
+        var stop = _editorHoverStopTask;
+        if (stop is not null) await stop.ConfigureAwait(false);
+    }
+
+    private async Task<PlaybackSession> GetEditorPlaybackSessionAfterPendingStopAsync(CancellationToken cancellationToken, Stopwatch openClock)
+    {
+        await AwaitEditorHoverStopAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_playback is not null) return _playback;
+
+        return await Task.Run(() =>
+        {
+            AppLog.Debug($"Editor open trace: engine construction picked up at {openClock.ElapsedMilliseconds}ms.");
+            var created = PlaybackSession.TakeWarmedOrCreate();
+            AppLog.Debug($"Editor open trace: engine ready at {openClock.ElapsedMilliseconds}ms.");
+            return created;
+        }, cancellationToken);
+    }
+
+    private void QueueEditorBackgroundStop(PlaybackSession session)
+    {
+        if (_editorHoverStopTask is { IsCompleted: false }) return;
+
+        var stop = Task.Run(session.Stop);
+        _editorHoverStopTask = stop;
+        _ = stop.ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            if (ReferenceEquals(_editorHoverStopTask, stop)) _editorHoverStopTask = null;
+        }), TaskScheduler.Default);
+    }
+
     private void StopEditorPlayback(bool cancelQueuedStart = true, PlaybackStopMode stopMode = PlaybackStopMode.Synchronous)
     {
         if (cancelQueuedStart)
@@ -8463,14 +8474,18 @@ public sealed partial class MainWindow : Window
         if (stopMode == PlaybackStopMode.Background)
         {
             var playback = _playback;
-            if (playback is not null) _ = Task.Run(() => playback.Stop());
+            if (playback is not null) QueueEditorBackgroundStop(playback);
         }
         else if (stopMode == PlaybackStopMode.Synchronous)
         {
+            _editorHoverStopTask?.GetAwaiter().GetResult();
             _playback?.Stop();
         }
         EditorVideoView.WatchMediaPlayer(null);
-        EditorVideoView.MediaPlayer = null;
+        // An asynchronous stop still owns its vout. Keep the player bound to
+        // this parked view until it finishes so libvlc never falls back to a
+        // parentless Direct3D window. Destructive synchronous paths detach.
+        if (stopMode == PlaybackStopMode.Synchronous) EditorVideoView.MediaPlayer = null;
         _recordingPausedOverlay?.Hide();
         HideEditorHoverControls(immediate: true);
         if (ViewModel is not null)
