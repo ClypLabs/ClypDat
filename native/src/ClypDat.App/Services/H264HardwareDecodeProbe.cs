@@ -18,6 +18,8 @@ internal static class H264HardwareDecodeProbe
     // clear and start again. The probe costs one bounded ffprobe run to repopulate.
     private const int MaximumCacheEntries = 4096;
     private static readonly ConcurrentDictionary<string, bool> Cache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte> PendingQualifications = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly SemaphoreSlim QualificationGate = new(1, 1);
 
     private static void CacheResult(string key, bool value)
     {
@@ -25,21 +27,69 @@ internal static class H264HardwareDecodeProbe
         Cache[key] = value;
     }
 
-    internal static bool HasOnlyIdrRandomAccessPoints(string path)
+    // Never scan the complete packet index while a user waits for a clip to
+    // open. A cache miss deliberately takes the established safe fallback
+    // (software decode); qualification resumes once editor foreground work is
+    // done and enables hardware decode on a later open of that unchanged file.
+    internal static bool TryGetCachedResult(string path, out bool safeForHardwareDecode)
     {
+        safeForHardwareDecode = false;
         try
         {
-            var info = new FileInfo(path);
-            var key = $"{Path.GetFullPath(path)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
-            if (Cache.TryGetValue(key, out var cached)) return cached;
-            var probed = Probe(path);
-            CacheResult(key, probed);
-            return probed;
+            var key = CacheKey(path);
+            return Cache.TryGetValue(key, out safeForHardwareDecode);
         }
         catch
         {
             return false;
         }
+    }
+
+    internal static void QualifyWhenIdle(string path)
+    {
+        string key;
+        try
+        {
+            key = CacheKey(path);
+            if (Cache.ContainsKey(key)) return;
+        }
+        catch
+        {
+            return;
+        }
+
+        if (!PendingQualifications.TryAdd(key, 0)) return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Do not trade an open-delay for playback/capture contention.
+                await EditorForegroundWork.ParkWhileActiveAsync(CancellationToken.None).ConfigureAwait(false);
+                await QualificationGate.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    // A newer open may have started while this request waited
+                    // its turn, so yield once more immediately before ffprobe.
+                    await EditorForegroundWork.ParkWhileActiveAsync(CancellationToken.None).ConfigureAwait(false);
+                    CacheResult(key, Probe(path));
+                }
+                finally
+                {
+                    QualificationGate.Release();
+                }
+            }
+            finally
+            {
+                PendingQualifications.TryRemove(key, out _);
+            }
+        });
+    }
+
+    private static string CacheKey(string path)
+    {
+        var info = new FileInfo(path);
+        return $"{Path.GetFullPath(path)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
     }
 
     private static bool Probe(string path)

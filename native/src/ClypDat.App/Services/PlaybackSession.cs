@@ -316,15 +316,16 @@ public sealed class PlaybackSession : IDisposable
         _videoMedia.AddOption(":no-audio");
         if (IsH264(videoCodec))
         {
-            var safeForHardwareDecode = H264HardwareDecodeProbe.HasOnlyIdrRandomAccessPoints(path);
+            var hardwareDecodeQualified = H264HardwareDecodeProbe.TryGetCachedResult(path, out var safeForHardwareDecode);
             // Hardware H.264 seeking is safe only for clips whose advertised
-            // random-access packets are genuine IDRs. Current replay output
-            // is; legacy clips retain the software fallback.
+            // random-access packets are genuine IDRs. A cache miss must retain
+            // the software fallback rather than block this click on a full
+            // packet scan; qualification runs after editor foreground work.
             _videoMedia.AddOption(safeForHardwareDecode ? ":avcodec-hw=any" : ":avcodec-hw=none");
             _videoMedia.AddOption(":avcodec-skiploopfilter=0");
             _videoMedia.AddOption(":avcodec-skip-frame=0");
             _videoMedia.AddOption(":avcodec-skip-idct=0");
-            AppLog.Info($"Editor H.264 decode: {(safeForHardwareDecode ? "hardware" : "software")} (IDR random-access probe).");
+            AppLog.Info($"Editor H.264 decode: {(safeForHardwareDecode ? "hardware" : "software")} (IDR qualification={(hardwareDecodeQualified ? "cached" : "deferred")}).");
         }
         else
         {
@@ -371,7 +372,7 @@ public sealed class PlaybackSession : IDisposable
         AppLog.Debug($"Editor video load: codec={videoCodec}, network={isNetwork}, fileCachingMs={fileCachingMilliseconds}, sizeMB={sizeMb}, replayArmed={replayArmed}, decodeThreads={decodeThreads}, stopMs={stopMs}, teardownMs={teardownMs}, totalMs={loadClock.ElapsedMilliseconds}, path={path}");
     });
 
-    private static bool IsH264(string? codec) =>
+    internal static bool IsH264(string? codec) =>
         string.Equals(codec, "h264", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(codec, "avc", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(codec, "avc1", StringComparison.OrdinalIgnoreCase);

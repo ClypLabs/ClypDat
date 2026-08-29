@@ -7883,7 +7883,7 @@ public sealed partial class MainWindow : Window
                 }
 
                 if (cts.IsCancellationRequested) return;
-                await StartEditorPlaybackAsync(session, videoLoad, cts.Token, foregroundScope);
+                await StartEditorPlaybackAsync(session, videoLoad, videoCodec, cts.Token, foregroundScope);
             },
             DispatcherPriority.Default);
     }
@@ -7891,6 +7891,7 @@ public sealed partial class MainWindow : Window
     private async Task StartEditorPlaybackAsync(
         PlaybackSession playback,
         Task videoLoad,
+        string videoCodec,
         CancellationToken cancellationToken,
         IDisposable? foregroundScope = null)
     {
@@ -7939,6 +7940,19 @@ public sealed partial class MainWindow : Window
             // flag - the cancellation check below guards that.
             var videoReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var firstFrameClock = System.Diagnostics.Stopwatch.StartNew();
+            var cropMaskReapplied = 0;
+            void OnVout(object? _, MediaPlayerVoutEventArgs args)
+            {
+                if (args.Count == 0 || Interlocked.Exchange(ref cropMaskReapplied, 1) != 0) return;
+                playback.VideoPlayer.Vout -= OnVout;
+                // Vout comes up before the first presentation. Restart the
+                // logo filter in that interval so a saved crop guide belongs
+                // to the first visible frame, not the one after it.
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (!cancellationToken.IsCancellationRequested) playback.ReapplyCropMaskImage();
+                });
+            }
             void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
             {
                 // TimeChanged alone only proves the position advanced, not that
@@ -7949,6 +7963,7 @@ public sealed partial class MainWindow : Window
                 // underneath by the time the placeholder is dropped.
                 if (playback.VideoPlayer.VoutCount == 0) return;
                 playback.VideoPlayer.TimeChanged -= OnTimeChanged;
+                playback.VideoPlayer.Vout -= OnVout;
                 videoReady.TrySetResult();
                 // Time from play request to first decoded frame - the primary
                 // "how slow is this clip's storage" number for network-drive
@@ -7959,10 +7974,6 @@ public sealed partial class MainWindow : Window
                 {
                     if (cancellationToken.IsCancellationRequested) return;
                     if (ViewModel is null) return;
-                    // A restored crop can reach libvlc before its vout exists.
-                    // Restart its logo filter now that first-frame readiness
-                    // confirms a live vout, before revealing the video.
-                    playback.ReapplyCropMaskImage();
                     ViewModel.IsEditorVideoLoading = false;
                     // The playhead/timeline seeker previously started moving
                     // the instant PlayFrom was called, well before the video
@@ -7978,12 +7989,13 @@ public sealed partial class MainWindow : Window
                 });
             }
             playback.VideoPlayer.TimeChanged += OnTimeChanged;
+            playback.VideoPlayer.Vout += OnVout;
 
             playback.PlayFrom(ViewModel.CurrentTime);
             // Start generating the restored guide alongside first-frame decode,
             // rather than after the asynchronous audio setup completes.
             ApplyEditorEffectPreview();
-            _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, audioTracks, videoReady.Task, cancellationToken, foregroundScope);
+            _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, videoCodec, audioTracks, videoReady.Task, cancellationToken, foregroundScope);
             await Task.Delay(200, cancellationToken);
             if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
             {
@@ -8043,6 +8055,7 @@ public sealed partial class MainWindow : Window
     private async Task LoadEditorAudioAsync(
         PlaybackSession playback,
         string videoPath,
+        string videoCodec,
         IReadOnlyList<AudioPreviewTrack> audioTracks,
         Task videoReady,
         CancellationToken cancellationToken,
@@ -8091,6 +8104,7 @@ public sealed partial class MainWindow : Window
             // the picture, and the chunk extractions behind it are exactly the work that
             // was losing the race to library hydration.
             foregroundScope?.Dispose();
+            if (PlaybackSession.IsH264(videoCodec)) H264HardwareDecodeProbe.QualifyWhenIdle(videoPath);
         }
     }
 
