@@ -635,12 +635,6 @@ public sealed class PlaybackSession : IDisposable
         _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
         try
         {
-            lock (_transportLock)
-            {
-                ForceVideoSilent();
-                _audioOutput?.Stop();
-            }
-
             // One worker owns all preview writes. New drag positions replace a
             // pending target; an active GOP decode finishes before final seek
             // can acquire the same lock.
@@ -659,6 +653,7 @@ public sealed class PlaybackSession : IDisposable
 
     private async Task PreviewSeekWorkerAsync()
     {
+        long lastPreviewGeneration = 0;
         try
         {
             while (true)
@@ -685,15 +680,25 @@ public sealed class PlaybackSession : IDisposable
                     // landed frame, then parks video when the mouse stops.
                     if (await WaitForPreviewActivityAsync().ConfigureAwait(false)) continue;
 
-                    lock (_transportLock)
+                    await _seekLock.WaitAsync().ConfigureAwait(false);
+                    try
                     {
-                        if (_disposed)
+                        using var previewLease = _previewRequests.TryAcquirePreviewTransport(lastPreviewGeneration, parking: true);
+                        if (previewLease is null) continue;
+                        lock (_transportLock)
                         {
-                            lock (_previewLock) _previewWorker = null;
-                            return;
-                        }
+                            if (_disposed)
+                            {
+                                lock (_previewLock) _previewWorker = null;
+                                return;
+                            }
 
-                        VideoPlayer.SetPause(true);
+                            VideoPlayer.SetPause(true);
+                        }
+                    }
+                    finally
+                    {
+                        _seekLock.Release();
                     }
 
                     lock (_previewLock)
@@ -711,7 +716,8 @@ public sealed class PlaybackSession : IDisposable
                 await _seekLock.WaitAsync().ConfigureAwait(false);
                 try
                 {
-                    if (!_previewRequests.IsCurrent(generation)) continue;
+                    using var previewLease = _previewRequests.TryAcquirePreviewTransport(generation);
+                    if (previewLease is null) continue;
                     if (_disposed) return;
                     lock (_transportLock)
                     {
@@ -720,6 +726,7 @@ public sealed class PlaybackSession : IDisposable
                         // audio. Video is parked by the idle branch above;
                         // the next final seek owns pause/land/roll.
                         ForceVideoSilent();
+                        _audioOutput?.Stop();
                         if (IsEnded || VideoPlayer.State == VLCState.Stopped)
                         {
                             VideoPlayer.Stop();
@@ -735,7 +742,8 @@ public sealed class PlaybackSession : IDisposable
                             VideoPlayer.SetPause(false);
                         }
                         VideoPlayer.Time = (long)target.TotalMilliseconds;
-                        _previewRequests.MarkPreviewWritten(generation, DateTimeOffset.UtcNow);
+                        previewLease.MarkWritten(DateTimeOffset.UtcNow);
+                        lastPreviewGeneration = generation;
                     }
                 }
                 finally
@@ -811,7 +819,6 @@ public sealed class PlaybackSession : IDisposable
             }
 
             var seekId = $"{GetHashCode():x}:{seekVersion}";
-            AppLog.Debug($"seek={seekId} preview-summary: requests={finalRequest.PreviewRequestCount}, writes={finalRequest.PreviewWriteCount}, coalesced={Math.Max(0, finalRequest.PreviewRequestCount - finalRequest.PreviewWriteCount)}, quietMs={finalRequest.QuietPeriod.TotalMilliseconds:0}.");
             var result = await _seekCoordinator.SeekAsync(
                 new PlaybackSeekTransport(this, seekVersion),
                 requested,
@@ -819,6 +826,9 @@ public sealed class PlaybackSession : IDisposable
                 seekId,
                 () => seekVersion == Interlocked.Read(ref _seekVersion),
                 cancellationToken).ConfigureAwait(false);
+
+            var handoff = _previewRequests.GetHandoffSummary();
+            AppLog.Debug($"seek={seekId} preview-summary: requests={finalRequest.PreviewRequestCount}, writes={finalRequest.PreviewWriteCount}, coalesced={Math.Max(0, finalRequest.PreviewRequestCount - finalRequest.PreviewWriteCount)}, quietMs={finalRequest.QuietPeriod.TotalMilliseconds:0}, handoff={handoff.Outcome}, staleParkSuppressed={handoff.SuppressedStaleParks}.");
 
             if (!result.Succeeded)
             {

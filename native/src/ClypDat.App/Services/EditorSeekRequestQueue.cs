@@ -12,6 +12,7 @@ internal sealed class EditorSeekRequestQueue
     private DateTimeOffset? _lastPreviewWrite;
     private int _previewWritesSinceFinal;
     private int _previewRequestsSinceFinal;
+    private int _suppressedStaleParksSinceFinal;
 
     public long QueuePreview(TimeSpan target)
     {
@@ -31,6 +32,7 @@ internal sealed class EditorSeekRequestQueue
         {
             _preview = null;
             _finalSeekPending = true;
+            _suppressedStaleParksSinceFinal = 0;
             _generation++;
             _finalSeekGeneration = _generation;
             var quietUntil = _lastPreviewWrite is { } lastWrite
@@ -104,6 +106,31 @@ internal sealed class EditorSeekRequestQueue
         }
     }
 
+    // Holds the queue lock through one LibVLC preview mutation. BeginFinalSeek
+    // cannot invalidate a generation between this check and that mutation.
+    public PreviewTransportLease? TryAcquirePreviewTransport(long generation, bool parking = false)
+    {
+        Monitor.Enter(_sync);
+        if (!_finalSeekPending && generation != 0 && generation == _generation)
+        {
+            return new PreviewTransportLease(this);
+        }
+
+        if (parking) _suppressedStaleParksSinceFinal++;
+        Monitor.Exit(_sync);
+        return null;
+    }
+
+    public EditorPreviewHandoffSummary GetHandoffSummary()
+    {
+        lock (_sync)
+        {
+            return new EditorPreviewHandoffSummary(
+                _finalSeekPending ? "final-owner" : "complete",
+                _suppressedStaleParksSinceFinal);
+        }
+    }
+
     public bool IsCurrent(long generation)
     {
         lock (_sync) return !_finalSeekPending && generation == _generation;
@@ -114,6 +141,26 @@ internal sealed class EditorSeekRequestQueue
 
     internal static bool ShouldResume(bool previousPlaying, bool seekSucceeded) =>
         previousPlaying && seekSucceeded;
+
+    internal sealed class PreviewTransportLease : IDisposable
+    {
+        private EditorSeekRequestQueue? _owner;
+
+        internal PreviewTransportLease(EditorSeekRequestQueue owner) => _owner = owner;
+
+        public void MarkWritten(DateTimeOffset now)
+        {
+            var owner = _owner ?? throw new ObjectDisposedException(nameof(PreviewTransportLease));
+            owner._lastPreviewWrite = now;
+            owner._previewWritesSinceFinal++;
+        }
+
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            if (owner is not null) Monitor.Exit(owner._sync);
+        }
+    }
 }
 
 internal readonly record struct EditorFinalSeekRequest(
@@ -121,3 +168,7 @@ internal readonly record struct EditorFinalSeekRequest(
     int PreviewRequestCount,
     int PreviewWriteCount,
     TimeSpan QuietPeriod);
+
+internal readonly record struct EditorPreviewHandoffSummary(
+    string Outcome,
+    int SuppressedStaleParks);
