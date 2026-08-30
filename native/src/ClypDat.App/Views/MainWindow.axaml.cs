@@ -3119,10 +3119,11 @@ public sealed partial class MainWindow : Window
         }
 
         var single = entries.Count == 1;
-        var cardWidth = single ? 440 : 200;
+        var cardWidth = single ? 440 : 215;
         const int cardSpacing = 14;
         var editorDialog = presentation == NewClipsPresentation.EditorWindow;
         var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
+        cardsPanel.Margin = single ? new Thickness(28, 20, 28, 8) : new Thickness(8, 20, 8, 8);
         // The editor presentation is created lazily.  Sync only after it
         // exists so its Delete button cannot be born with empty content.
         SyncNewClipsDeleteButton();
@@ -3151,9 +3152,7 @@ public sealed partial class MainWindow : Window
         // A one-clip save becomes a deliberate preview instead of a mostly
         // blank modal; multi-card saves still grow to their actual columns.
         var columns = single ? 1 : Math.Min(NewClipsCardLayoutPolicy.CardsPerRow, entries.Count);
-        var dialogWidth = single
-            ? 496d
-            : 56d + columns * cardWidth + (columns - 1) * cardSpacing;
+        var dialogWidth = cardsPanel.Margin.Left + columns * cardWidth + (columns - 1) * cardSpacing + cardsPanel.Margin.Right;
         dialogWidth = Math.Min(dialogWidth, Math.Max(320d, Bounds.Width - 32));
         NewClipsDialogCard.Width = dialogWidth;
 
@@ -3323,12 +3322,11 @@ public sealed partial class MainWindow : Window
         {
             Source = entry.Clip.PreviewImage,
             Stretch = entry.Clip.PreviewImageStretch,
-            Height = largePreview ? 248 : 113
+            Height = largePreview ? 248 : 121
         };
         var preview = new ClipPreviewPresenter
         {
-            IsHitTestVisible = false,
-            ZIndex = 1
+            IsHitTestVisible = false
         };
         var progressTransform = new ScaleTransform();
         progressTransform.Bind(ScaleTransform.ScaleXProperty, new Binding(nameof(ClipPreviewPresenter.Progress)) { Source = preview });
