@@ -3103,11 +3103,8 @@ public sealed partial class MainWindow : Window
         NewClipsTitleText.Text = summaryTitle;
         NewClipsSubtitleText.Text = summarySubtitle;
 
-        // Checkboxes only earn their place when there is a choice to make.
-        var multiple = entries.Count > 1;
         foreach (var entry in entries)
         {
-            entry.ShowCheckBox = multiple;
             entry.SelectionChanged += (_, _) => SyncNewClipsDeleteButton();
         }
         foreach (var entry in entries)

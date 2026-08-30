@@ -13,7 +13,7 @@ public sealed class NewClipEntryViewModel(ClipCardViewModel clip) : ViewModelBas
 {
     private bool _isSelected;
     private bool _isHovered;
-    private bool _showCheckBox;
+    private bool _showCheckBox = true;
 
     public ClipCardViewModel Clip { get; } = clip;
     public string Path => Clip.Path;
@@ -40,8 +40,6 @@ public sealed class NewClipEntryViewModel(ClipCardViewModel clip) : ViewModelBas
         }
     }
 
-    // False for a lone clip: with nothing to choose between, a checkbox is a
-    // control that can only ever be turned on and off to no effect.
     public bool ShowCheckBox
     {
         get => _showCheckBox;
