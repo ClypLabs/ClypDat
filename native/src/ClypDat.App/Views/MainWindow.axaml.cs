@@ -3119,7 +3119,7 @@ public sealed partial class MainWindow : Window
         }
 
         var single = entries.Count == 1;
-        var cardWidth = single ? 440 : 180;
+        var cardWidth = single ? 440 : 200;
         const int cardSpacing = 14;
         var editorDialog = presentation == NewClipsPresentation.EditorWindow;
         var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
@@ -3323,7 +3323,7 @@ public sealed partial class MainWindow : Window
         {
             Source = entry.Clip.PreviewImage,
             Stretch = entry.Clip.PreviewImageStretch,
-            Height = largePreview ? 248 : 101
+            Height = largePreview ? 248 : 113
         };
         var preview = new ClipPreviewPresenter
         {
