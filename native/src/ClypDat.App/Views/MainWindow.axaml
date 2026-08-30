@@ -2044,31 +2044,35 @@
          code-behind too (into NewClipsTitleText/NewClipsCardsPanel below),
          same as before, just targeting this embedded tree instead of a
          Window's own body. -->
-    <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#DD000000" IsVisible="False"
+    <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#C7000000" IsVisible="False"
             PointerPressed="NewClipsOverlay_OnPointerPressed">
-      <Border x:Name="NewClipsDialogCard" MaxHeight="860" CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1"
-              ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border x:Name="NewClipsDialogCard" MaxHeight="780" CornerRadius="20" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_3A4856}" BorderThickness="1"
+              BoxShadow="0 18 48 -12 #B0000000" ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel LastChildFill="True">
-          <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="56" Background="{StaticResource Surface_0C1319}">
-            <TextBlock x:Name="NewClipsTitleText" Grid.Column="1" Foreground="{StaticResource Text_D8E4F2}" FontSize="17" FontWeight="Bold"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-            <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                    Width="52" Height="56" Click="NewClipsCloseButton_OnClick">
-              <TextBlock Text="✕" Margin="0,-3,0,0" />
-            </Button>
-          </Grid>
+          <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}">
+            <Grid ColumnDefinitions="*,Auto" MinHeight="44" Margin="28,17,18,15">
+              <StackPanel VerticalAlignment="Center" Spacing="3">
+                <TextBlock x:Name="NewClipsTitleText" Foreground="{StaticResource Text_D8E4F2}" FontSize="19" FontWeight="Bold" />
+                <TextBlock x:Name="NewClipsSubtitleText" Foreground="{StaticResource Text_8C98A7}" FontSize="12" />
+              </StackPanel>
+              <Button Grid.Column="1" Classes="dialogClose" FontSize="13" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                      Width="36" Height="36" CornerRadius="18" Click="NewClipsCloseButton_OnClick">
+                <TextBlock Text="✕" Margin="0,-2,0,0" />
+              </Button>
+            </Grid>
+          </Border>
 
           <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface_141B23}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="Auto,*,Auto" Margin="24,16,24,16">
-              <Button x:Name="NewClipsDeleteButton" Classes="deleteButton" MinWidth="150" Height="40"
+            <Grid ColumnDefinitions="*,Auto,12,Auto" Margin="28,14,28,14">
+              <Button x:Name="NewClipsDeleteButton" Grid.Column="1" Classes="subtleDangerButton" MinWidth="140" Height="42"
                       HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsDeleteButton_OnClick" />
-              <Button x:Name="NewClipsViewAllButton" Grid.Column="2" Classes="primaryButton" Content="View All Clips" MinWidth="180" Height="40"
+              <Button x:Name="NewClipsViewAllButton" Grid.Column="3" Classes="primaryButton" Content="View All Clips" MinWidth="170" Height="42"
                       HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsViewAllButton_OnClick" />
             </Grid>
           </Border>
 
-          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="620">
-            <StackPanel x:Name="NewClipsCardsPanel" Margin="24,20,24,4" />
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="560">
+            <StackPanel x:Name="NewClipsCardsPanel" Margin="28,20,28,8" />
           </ScrollViewer>
         </DockPanel>
       </Border>

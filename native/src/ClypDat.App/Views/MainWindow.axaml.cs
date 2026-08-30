@@ -3085,17 +3085,20 @@ public sealed partial class MainWindow : Window
 
         var clipCount = entries.Count(entry => !entry.IsVod);
         var vodCount = entries.Count - clipCount;
-        var title = (clipCount, vodCount) switch
+        var summaryTitle = (clipCount, vodCount) switch
         {
-            (0, 1) => "NEW VOD",
-            (0, _) => $"{vodCount} NEW VODS",
-            (1, 0) => "NEW CLIP",
-            (_, 0) => $"{clipCount} NEW CLIPS",
-            (1, _) => "NEW CLIP AND VOD",
-            _ => $"{entries.Count} NEW CLIPS AND VODS"
+            (0, 1) => "VOD saved",
+            (0, _) => $"{vodCount} VODs saved",
+            (1, 0) => "Clip saved",
+            (_, 0) => $"{clipCount} clips saved",
+            (1, 1) => "Clip and VOD saved",
+            (1, _) => $"Clip and {vodCount} VODs saved",
+            (_, 1) => $"{clipCount} clips and VOD saved",
+            _ => $"{clipCount} clips and {vodCount} VODs saved"
         };
-        var dialogTitle = $"{title} ({FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))})";
-        NewClipsTitleText.Text = dialogTitle;
+        var summarySubtitle = $"{FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))} • Ready in your library";
+        NewClipsTitleText.Text = summaryTitle;
+        NewClipsSubtitleText.Text = summarySubtitle;
 
         // Checkboxes only earn their place when there is a choice to make.
         var multiple = entries.Count > 1;
@@ -3113,8 +3116,8 @@ public sealed partial class MainWindow : Window
         }
 
         var single = entries.Count == 1;
-        var cardWidth = single ? 472 : 300;
-        const int cardSpacing = 16;
+        var cardWidth = single ? 440 : 280;
+        const int cardSpacing = 14;
         var editorDialog = presentation == NewClipsPresentation.EditorWindow;
         var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
         // The editor presentation is created lazily.  Sync only after it
@@ -3144,17 +3147,17 @@ public sealed partial class MainWindow : Window
         // Size to what is visible, not to a permanently-empty three-card row.
         // A one-clip save becomes a deliberate preview instead of a mostly
         // blank modal; multi-card saves still grow to their actual columns.
-        var columns = single ? 1 : Math.Min(3, entries.Count);
+        var columns = single ? 1 : Math.Min(NewClipsCardLayoutPolicy.CardsPerRow, entries.Count);
         var dialogWidth = single
-            ? 520d
-            : 48d + columns * cardWidth + (columns - 1) * cardSpacing;
+            ? 496d
+            : 56d + columns * cardWidth + (columns - 1) * cardSpacing;
         dialogWidth = Math.Min(dialogWidth, Math.Max(320d, Bounds.Width - 32));
         NewClipsDialogCard.Width = dialogWidth;
 
         if (editorDialog)
         {
             NewClipsOverlay.IsVisible = false;
-            _editorNewClipsDialog!.SetTitle(dialogTitle);
+            _editorNewClipsDialog!.SetSummary(summaryTitle, summarySubtitle);
             _editorNewClipsDialog.SetCardWidth(dialogWidth);
             _editorNewClipsDialog.RefreshOwnerBounds();
             CoverEditorSurfaceForNewClips();
@@ -3317,7 +3320,7 @@ public sealed partial class MainWindow : Window
         {
             Source = entry.Clip.PreviewImage,
             Stretch = Avalonia.Media.Stretch.UniformToFill,
-            Height = largePreview ? 266 : 169
+            Height = largePreview ? 248 : 158
         };
         var preview = new ClipPreviewPresenter
         {
@@ -3334,16 +3337,16 @@ public sealed partial class MainWindow : Window
         var duration = new Border
         {
             Background = AppThemeService.Brush("Surface_CC0B1116", "#CC0B1116"),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(10, 6),
-            Margin = new Thickness(12),
+            CornerRadius = new CornerRadius(16),
+            Padding = new Thickness(10, 5),
+            Margin = new Thickness(10),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
             Child = new TextBlock
             {
                 Text = entry.Clip.DurationLabel,
                 Foreground = AppThemeService.Brush("Text_D8E2EE", "#D8E2EE"),
-                FontSize = 12,
+                FontSize = 13,
                 FontWeight = Avalonia.Media.FontWeight.Bold
             }
         };
@@ -3393,15 +3396,15 @@ public sealed partial class MainWindow : Window
 
         var info = new StackPanel
         {
-            Spacing = 5,
-            Margin = new Thickness(14, 11, 14, 13),
+            Spacing = 4,
+            Margin = new Thickness(14, 12, 14, 14),
             Children =
             {
                 new TextBlock
                 {
                     Text = entry.Clip.TileTopLabel.ToUpperInvariant(),
                     Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
-                    FontSize = 12,
+                    FontSize = 11,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
                 },
@@ -3409,7 +3412,7 @@ public sealed partial class MainWindow : Window
                 {
                     Text = entry.Clip.TileMainLabel,
                     Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"),
-                    FontSize = 14,
+                    FontSize = 15,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
                 },
@@ -3425,14 +3428,15 @@ public sealed partial class MainWindow : Window
 
         var card = new Border
         {
-            Background = AppThemeService.Brush("Surface_161D25", "#161D25"),
-            CornerRadius = new CornerRadius(12),
+            Background = AppThemeService.Brush("Surface_1E2A35", "#1E2A35"),
+            CornerRadius = new CornerRadius(14),
             ClipToBounds = true,
             BorderThickness = new Thickness(1),
             BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
+            BoxShadow = Avalonia.Media.BoxShadows.Parse("0 8 20 -8 #8A000000"),
             Child = new Border
             {
-                CornerRadius = new CornerRadius(12),
+                CornerRadius = new CornerRadius(13),
                 ClipToBounds = true,
                 Child = layout
             }
@@ -9960,19 +9964,16 @@ public sealed partial class MainWindow : Window
         // start rail sat entirely to the LEFT of where the shading actually
         // ends, and the end rail entirely to the right: each read as sitting
         // beside its own boundary rather than on it, by its full width.
-        // Clamp the BOUNDARY, then centre the pill on it. Clamping the pill's
-        // own left edge into [0, width - barWidth] instead is what pushed it
-        // half a width inward at either extreme: a clip trimmed to its very
-        // end drew the pill beside the end rather than on it, and the two
-        // stopped agreeing with the shading exactly where it is most obvious.
-        // Half the pill hanging past the edge is correct - it is centred on a
-        // boundary that is itself at the edge - and nothing here clips it.
-        var startLeft = Math.Clamp(start, 0, width) - barWidth / 2;
+        // The zoom ScrollViewer clips anything outside the timeline content.
+        // Keep the visible pill inside at the two extreme boundaries; all
+        // interior positions remain centred exactly on their trim time.
+        var maxBarLeft = Math.Max(0, width - barWidth);
+        var startLeft = Math.Clamp(start - barWidth / 2, 0, maxBarLeft);
         Canvas.SetLeft(TrimStartHandle, startLeft - hitPadding);
         Canvas.SetTop(TrimStartHandle, 0);
         TrimStartHandle.Height = videoLaneHeight;
 
-        var endLeft = Math.Clamp(end, 0, width) - barWidth / 2;
+        var endLeft = Math.Clamp(end - barWidth / 2, 0, maxBarLeft);
         Canvas.SetLeft(TrimEndHandle, endLeft - hitPadding);
         Canvas.SetTop(TrimEndHandle, 0);
         TrimEndHandle.Height = videoLaneHeight;

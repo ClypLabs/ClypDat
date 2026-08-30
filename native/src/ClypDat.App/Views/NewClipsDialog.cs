@@ -14,10 +14,11 @@ internal sealed class NewClipsDialog : Window
 {
     private readonly Window _owner;
     private readonly TextBlock _title;
+    private readonly TextBlock _subtitle;
     private readonly Border _card;
     private readonly Button _primaryButton;
-    public StackPanel Cards { get; } = new() { Margin = new Thickness(24, 20, 24, 4) };
-    public Button DeleteButton { get; } = new() { MinWidth = 150, Height = 40 };
+    public StackPanel Cards { get; } = new() { Margin = new Thickness(28, 20, 28, 8) };
+    public Button DeleteButton { get; } = new() { MinWidth = 140, Height = 42 };
 
     public NewClipsDialog(Window owner, EventHandler<RoutedEventArgs> close, EventHandler<RoutedEventArgs> delete, EventHandler<RoutedEventArgs> viewAll)
     {
@@ -37,33 +38,43 @@ internal sealed class NewClipsDialog : Window
             owner.SizeChanged -= Owner_OnSizeChanged;
         };
 
-        _title = new TextBlock { Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"), FontSize = 17, FontWeight = FontWeight.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var closeButton = new Button { Content = "✕", Width = 52, Height = 56 };
+        _title = new TextBlock { Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"), FontSize = 19, FontWeight = FontWeight.Bold };
+        _subtitle = new TextBlock { Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"), FontSize = 12 };
+        var summary = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center, Children = { _title, _subtitle } };
+        var closeButton = new Button { Content = "✕", Width = 36, Height = 36, CornerRadius = new CornerRadius(18), FontSize = 13 };
         closeButton.Classes.Add("dialogClose");
         closeButton.Click += close;
-        DeleteButton.Classes.Add("deleteButton");
+        DeleteButton.Classes.Add("subtleDangerButton");
         DeleteButton.Click += delete;
-        _primaryButton = new Button { Content = "View All Clips", MinWidth = 180, Height = 40 };
+        _primaryButton = new Button { Content = "View All Clips", MinWidth = 170, Height = 42 };
         _primaryButton.Classes.Add("primaryButton");
         _primaryButton.Click += viewAll;
 
-        var header = new Grid { Height = 56, Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-        header.Children.Add(_title);
-        Grid.SetColumn(_title, 1);
-        header.Children.Add(closeButton);
-        Grid.SetColumn(closeButton, 2);
-        var footer = new Grid { Margin = new Thickness(24, 16), ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-        footer.Children.Add(DeleteButton);
-        footer.Children.Add(_primaryButton);
-        Grid.SetColumn(_primaryButton, 2);
+        var headerGrid = new Grid { MinHeight = 44, Margin = new Thickness(28, 17, 18, 15), ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        headerGrid.Children.Add(summary);
+        headerGrid.Children.Add(closeButton);
+        Grid.SetColumn(closeButton, 1);
+        var header = new Border { Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"), Child = headerGrid };
+        var footerGrid = new Grid { Margin = new Thickness(28, 14), ColumnDefinitions = new ColumnDefinitions("*,Auto,12,Auto") };
+        footerGrid.Children.Add(DeleteButton);
+        Grid.SetColumn(DeleteButton, 1);
+        footerGrid.Children.Add(_primaryButton);
+        Grid.SetColumn(_primaryButton, 3);
+        var footer = new Border
+        {
+            Background = AppThemeService.Brush("Surface_141B23", "#141B23"),
+            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            Child = footerGrid
+        };
         var dock = new DockPanel();
         dock.Children.Add(header);
         DockPanel.SetDock(header, Dock.Top);
         dock.Children.Add(footer);
         DockPanel.SetDock(footer, Dock.Bottom);
-        dock.Children.Add(new ScrollViewer { Content = Cards, MaxHeight = 620 });
-        _card = new Border { Width = 520, MaxHeight = 860, CornerRadius = new CornerRadius(12), Background = AppThemeService.Brush("Surface_111920", "#111920"), BorderBrush = AppThemeService.Brush("EdgeBrush", "#232F3A"), BorderThickness = new Thickness(1), ClipToBounds = true, Child = dock, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var scrim = new Border { Background = Brush.Parse("#DD000000"), Child = _card };
+        dock.Children.Add(new ScrollViewer { Content = Cards, MaxHeight = 560 });
+        _card = new Border { Width = 496, MaxHeight = 780, CornerRadius = new CornerRadius(20), Background = AppThemeService.Brush("Surface_111920", "#111920"), BorderBrush = AppThemeService.Brush("Surface_3A4856", "#3A4856"), BorderThickness = new Thickness(1), BoxShadow = BoxShadows.Parse("0 18 48 -12 #B0000000"), ClipToBounds = true, Child = dock, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        var scrim = new Border { Background = Brush.Parse("#C7000000"), Child = _card };
         Content = scrim;
         Opened += (_, _) =>
         {
@@ -73,7 +84,11 @@ internal sealed class NewClipsDialog : Window
         KeyDown += (_, e) => { if (e.Key == Key.Escape) close(this, new RoutedEventArgs()); };
     }
 
-    public void SetTitle(string title) => _title.Text = title;
+    public void SetSummary(string title, string subtitle)
+    {
+        _title.Text = title;
+        _subtitle.Text = subtitle;
+    }
     public void SetCardWidth(double width) => _card.Width = Math.Clamp(width, 320, Math.Max(320, _owner.Bounds.Width - 32));
     public void SetPrimaryAction(string label) => _primaryButton.Content = label;
 
