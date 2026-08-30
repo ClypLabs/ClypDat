@@ -6473,12 +6473,6 @@ public sealed partial class MainWindow : Window
         _timelineScrubThrottle.Restart();
         _endedAtTrimBoundary = false;
         _playback?.PrefetchAudioAt(ViewModel.CurrentTime);
-        // A playing drag first pauses the transport, then the old live-preview
-        // path repeatedly did Play/Time/Pause on LibVLC. That decoder churn is
-        // the only path unique to the reported black flash; a click uses one
-        // final seek and stays clean. Keep the last decoded frame during this
-        // gesture and let the one release seek land it cleanly.
-        if (_timelineWasPlayingBeforeDrag) return;
         // Keep the audio chunk for wherever this is heading extracting while the
         // drag is still going, so the resume on release has real samples to play
         // instead of the silence ChunkedAudioReader emits for a cold chunk.

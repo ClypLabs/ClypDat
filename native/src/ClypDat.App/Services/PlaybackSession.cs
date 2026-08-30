@@ -728,12 +728,11 @@ public sealed class PlaybackSession : IDisposable
                         }
                         else if (!VideoPlayer.IsPlaying)
                         {
-                            // Timeline drags keep transport paused. Start the
-                            // pipeline only long enough for LibVLC to accept
-                            // the preview seek; pause immediately after the
-                            // write so the clip cannot run while the pointer
-                            // is stationary.
-                            VideoPlayer.Play();
+                            // Resume the already-initialized paused decoder.
+                            // Play() here can rebuild its output path between
+                            // drag preview writes, producing the black flash
+                            // that a single click seek never has.
+                            VideoPlayer.SetPause(false);
                         }
                         VideoPlayer.Time = (long)target.TotalMilliseconds;
                         _previewRequests.MarkPreviewWritten(generation, DateTimeOffset.UtcNow);
@@ -1255,7 +1254,13 @@ public sealed class PlaybackSession : IDisposable
     private async Task<bool> WaitForPreviewActivityAsync()
     {
         var clock = Stopwatch.StartNew();
-        while (clock.Elapsed < TimeSpan.FromMilliseconds(50))
+        // Pointer events are not clockwork: a drag can have a 50ms+ gap while
+        // still held (GC, compositor, crossing another control). Waiting only
+        // 50ms parked LibVLC mid-gesture, then next preview had to wake it.
+        // Cover one 100ms preview cadence plus margin; final seek owns its
+        // own 100ms quiet period and will still settle the decoder promptly.
+        var grace = EditorSeekRequestQueue.PreviewInterval + TimeSpan.FromMilliseconds(50);
+        while (clock.Elapsed < grace)
         {
             if (_previewRequests.HasPendingPreview()) return true;
             await Task.Delay(TimeSpan.FromMilliseconds(10)).ConfigureAwait(false);
