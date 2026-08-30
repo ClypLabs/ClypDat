@@ -285,7 +285,6 @@ internal sealed class SoftwareClipPreviewAdapter(ClipPreviewPresenter owner) : I
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_attached) return;
             if (_bitmap is null || _bitmap.PixelSize != size)
             {
                 var old = _bitmap;
@@ -412,7 +411,6 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
         // compositor will never read. Fail here so the caller drops to the
         // software path once, instead of feeding frames into nothing.
         if (Volatile.Read(ref _importFailed) != 0) throw new InvalidOperationException("Preview texture import failed.");
-        if (!_attached) return new PreviewPresentResult(Path, TimeSpan.Zero);
         var started = Stopwatch.GetTimestamp();
         var slot = await AcquireSlotAsync(size, cancellationToken).ConfigureAwait(false);
         if (slot.Imported.IsLost) throw new InvalidOperationException("Preview texture was lost.");

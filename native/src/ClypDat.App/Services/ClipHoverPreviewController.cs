@@ -82,8 +82,8 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 _warmExitCancellation = null;
                 if (warmExitCancellation is not null)
                 {
-                    // Keep the surface attached: its last frame stays visible
-                    // until the restarted decoder supplies a replacement.
+                    // The surface stays allocated during grace, but remains
+                    // hidden until the replacement decoder stages frame one.
                     previousCancellation = _cancellation;
                     previousProcess = _process;
                     _cancellation = new CancellationTokenSource();
@@ -91,6 +91,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     restartPresenter = _presenter;
                     token = _cancellation.Token;
                     pendingGeneration = ++_generation;
+                    _attached = false;
                     requestTimestamp = Stopwatch.GetTimestamp();
                     restart = true;
                 }
@@ -153,6 +154,9 @@ internal sealed class ClipHoverPreviewController : IDisposable
     {
         CancellationTokenSource? pendingCancellation = null;
         CancellationTokenSource? previousWarmExit = null;
+        CancellationTokenSource? decoderCancellation = null;
+        Process? decoderProcess = null;
+        IClipPreviewPresenter? presenter = null;
         CancellationToken warmToken = CancellationToken.None;
         int generation = 0;
         var active = false;
@@ -172,7 +176,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 previousWarmExit = _warmExitCancellation;
                 _warmExitCancellation = new CancellationTokenSource();
                 warmToken = _warmExitCancellation.Token;
-                generation = _generation;
+                decoderCancellation = _cancellation;
+                decoderProcess = _process;
+                _process = null;
+                presenter = _presenter;
+                _attached = false;
+                _attachmentVersion++;
+                _attachSignal?.TrySetResult();
+                generation = ++_generation;
                 active = true;
             }
         }
@@ -184,6 +195,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
         previousWarmExit?.Cancel();
         previousWarmExit?.Dispose();
+        if (presenter is not null) _ = DetachAndStopDecoderAsync(presenter, decoderCancellation, decoderProcess);
         _ = ExpireWarmSessionAsync(clip, generation, warmToken);
     }
 
@@ -361,19 +373,12 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
     private async Task ProduceFramesAsync(Stream stream, Channel<FrameSlot> freeSlots, LatestFrameMailbox<FrameSlot> frames, ClipCardViewModel clip, int generation, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
     {
-        var attachmentVersion = -1;
         try
         {
             while (await freeSlots.Reader.WaitToReadAsync(token))
             {
                 while (freeSlots.Reader.TryRead(out var slot))
                 {
-                    var version = await WaitUntilAttachedAsync(clip, generation, token);
-                    if (version != attachmentVersion)
-                    {
-                        attachmentVersion = version;
-                        pacer.Reset();
-                    }
                     var delay = pacer.NextDelay(metrics.Elapsed);
                     if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
                     if (!await ReadFrameAsync(stream, slot.Buffer, token)) return;
@@ -399,6 +404,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
             {
                 if (!IsCurrent(clip, generation)) return;
                 var result = await presenter.PresentAsync(slot.Buffer, previewSize, token);
+                if (AttachAfterStaging(clip, generation)) await presenter.SetAttachedAsync(true);
                 metrics.MarkPresent(result.Path, result.Latency);
                 metrics.MarkDisplayed();
                 await presenter.SetProgressAsync(((slot.Sequence - 1) % expectedFrameCount + 1) / (double)expectedFrameCount);
@@ -408,19 +414,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally { freeSlots.TryComplete(); }
     }
 
-    private async Task<int> WaitUntilAttachedAsync(ClipCardViewModel clip, int generation, CancellationToken token)
+    private bool AttachAfterStaging(ClipCardViewModel clip, int generation)
     {
-        while (true)
+        lock (_stateLock)
         {
-            Task signal;
-            lock (_stateLock)
-            {
-                if (!IsCurrentLocked(clip, generation)) throw new OperationCanceledException(token);
-                if (_attached) return _attachmentVersion;
-                _attachSignal ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                signal = _attachSignal.Task;
-            }
-            await signal.WaitAsync(token);
+            if (!IsCurrentLocked(clip, generation) || _attached) return false;
+            _attached = true;
+            _attachmentVersion++;
+            return true;
         }
     }
 
@@ -436,6 +437,14 @@ internal sealed class ClipHoverPreviewController : IDisposable
             state = DetachActiveLocked();
         }
         _ = DisposeDetachedSessionAsync(state, "warm exit expired", state.IsActive);
+    }
+
+    private static async Task DetachAndStopDecoderAsync(IClipPreviewPresenter presenter, CancellationTokenSource? cancellation, Process? process)
+    {
+        var detach = presenter.SetAttachedAsync(false);
+        cancellation?.Cancel();
+        Kill(process);
+        await detach;
     }
 
     private async Task AbandonSessionAsync(ClipCardViewModel clip, int generation)

@@ -65,7 +65,7 @@ public sealed class ClipHoverPreviewControllerTests
     }
 
     [Fact]
-    public async Task RapidReentry_RestartsFromStartWithoutDetachingPresenter()
+    public async Task RapidReentry_HidesImmediatelyThenStagesRestartFrameBeforeAttaching()
     {
         await using var fixture = await PreviewFixture.CreateAsync();
         using var controller = new ClipHoverPreviewController();
@@ -75,16 +75,20 @@ public sealed class ClipHoverPreviewControllerTests
         await WaitUntilAsync(() => presenter.FrameCount >= 8);
 
         controller.PointerLeft(fixture.Clip);
-        var framesAtExit = presenter.FrameCount;
+        await WaitUntilAsync(() => presenter.Attachments.Contains(false));
+        var framesAfterExit = presenter.FrameCount;
         await Task.Delay(75);
-        Assert.True(presenter.FrameCount > framesAtExit);
-        Assert.DoesNotContain(false, presenter.Attachments);
+        Assert.Equal(framesAfterExit, presenter.FrameCount);
+        Assert.Equal(0, presenter.ReleaseCount);
 
         var zeroProgressBeforeRestart = presenter.ZeroProgressCount;
+        var firstFrameBeforeRestart = presenter.FirstFrames.Single();
         controller.Request(fixture.Clip, true, presenter, fixture.Size);
-        await WaitUntilAsync(() => presenter.ZeroProgressCount > zeroProgressBeforeRestart && presenter.FrameCount >= framesAtExit + 8);
+        await WaitUntilAsync(() => presenter.ZeroProgressCount > zeroProgressBeforeRestart && presenter.FirstFrames.Count == 2);
 
-        Assert.DoesNotContain(false, presenter.Attachments);
+        Assert.Equal([true, false, true], presenter.Attachments.Take(3));
+        Assert.True(presenter.FramesPresentedWhileDetached > 0);
+        Assert.Equal(firstFrameBeforeRestart, presenter.FirstFrames[1]);
         Assert.Equal(0, presenter.ReleaseCount);
 
         controller.PointerLeft(fixture.Clip);
@@ -92,7 +96,7 @@ public sealed class ClipHoverPreviewControllerTests
     }
 
     [Fact]
-    public async Task SustainedExit_KeepsPreviewAttachedThroughGraceThenReleasesIt()
+    public async Task SustainedExit_HidesAndStopsFramesBeforeGraceReleasesResources()
     {
         await using var fixture = await PreviewFixture.CreateAsync();
         using var controller = new ClipHoverPreviewController();
@@ -102,11 +106,11 @@ public sealed class ClipHoverPreviewControllerTests
         await WaitUntilAsync(() => presenter.FrameCount >= 6);
 
         controller.PointerLeft(fixture.Clip);
-        var framesAtExit = presenter.FrameCount;
+        await WaitUntilAsync(() => presenter.Attachments.Contains(false));
+        var framesAfterExit = presenter.FrameCount;
         await Task.Delay(75);
 
-        Assert.True(presenter.FrameCount > framesAtExit);
-        Assert.DoesNotContain(false, presenter.Attachments);
+        Assert.Equal(framesAfterExit, presenter.FrameCount);
         Assert.Equal(0, presenter.ReleaseCount);
 
         await WaitUntilAsync(() => presenter.ReleaseCount == 1);
@@ -149,22 +153,36 @@ public sealed class ClipHoverPreviewControllerTests
         private int _frames;
         private int _releases;
         private int _zeroProgress;
+        private bool _attached;
+        private int _framesInSession;
+        private int _framesPresentedWhileDetached;
+        private readonly List<byte[]> _firstFrames = [];
 
         public PreviewPresentationPath Path => PreviewPresentationPath.Software;
         public int FrameCount => Volatile.Read(ref _frames);
         public int ReleaseCount => Volatile.Read(ref _releases);
         public int ZeroProgressCount => Volatile.Read(ref _zeroProgress);
+        public int FramesPresentedWhileDetached => Volatile.Read(ref _framesPresentedWhileDetached);
         public IReadOnlyList<bool> Attachments { get { lock (_gate) return _attachments.ToArray(); } }
+        public IReadOnlyList<byte[]> FirstFrames { get { lock (_gate) return _firstFrames.Select(frame => frame.ToArray()).ToArray(); } }
 
         public ValueTask ActivateSessionAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
         public ValueTask SetAttachedAsync(bool attached)
         {
-            lock (_gate) _attachments.Add(attached);
+            lock (_gate)
+            {
+                _attached = attached;
+                _attachments.Add(attached);
+            }
             return ValueTask.CompletedTask;
         }
         public ValueTask SetProgressAsync(double progress)
         {
-            if (progress == 0) Interlocked.Increment(ref _zeroProgress);
+            if (progress == 0)
+            {
+                lock (_gate) _framesInSession = 0;
+                Interlocked.Increment(ref _zeroProgress);
+            }
             return ValueTask.CompletedTask;
         }
         public ValueTask ReleaseResourcesAsync()
@@ -174,6 +192,11 @@ public sealed class ClipHoverPreviewControllerTests
         }
         public ValueTask<PreviewPresentResult> PresentAsync(ReadOnlyMemory<byte> rgba, PixelSize size, CancellationToken cancellationToken)
         {
+            lock (_gate)
+            {
+                if (!_attached) Interlocked.Increment(ref _framesPresentedWhileDetached);
+                if (_framesInSession++ == 0) _firstFrames.Add(rgba.Span[..32].ToArray());
+            }
             Interlocked.Increment(ref _frames);
             return ValueTask.FromResult(new PreviewPresentResult(PreviewPresentationPath.Software, TimeSpan.Zero));
         }
@@ -210,6 +233,8 @@ public sealed class ClipHoverPreviewControllerTests
             info.ArgumentList.Add("-an");
             info.ArgumentList.Add("-c:v");
             info.ArgumentList.Add("mpeg4");
+            info.ArgumentList.Add("-g");
+            info.ArgumentList.Add("1");
             info.ArgumentList.Add("-y");
             info.ArgumentList.Add(path);
             using var process = Process.Start(info)!;
