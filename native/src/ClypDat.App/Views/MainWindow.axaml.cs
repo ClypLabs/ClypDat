@@ -9879,7 +9879,19 @@ public sealed partial class MainWindow : Window
         // See ApplyTimelineSeekAsync - the drag guard above is already off while
         // the settling seek runs, and the paused branch below would drag the
         // playhead back to the pre-seek position mid-flight.
-        if (_editorSeekInFlight) return;
+        if (_editorSeekInFlight)
+        {
+            // A click seek can wait for LibVLC landing plus cold PCM. Keep
+            // rendering the local playhead clock during that wait: returning
+            // here froze the white seeker until the final commit jumped it.
+            if (ViewModel.IsPlaying)
+            {
+                ViewModel.CurrentTime = SmoothPlaybackPosition();
+                UpdateTimelineChrome();
+                RefreshPausedBadge();
+            }
+            return;
+        }
         if (_playback.Duration > TimeSpan.Zero && IsPlausibleDuration(_playback.Duration, ViewModel.Duration))
         {
             ViewModel.SetDuration(_playback.Duration);
@@ -9978,6 +9990,9 @@ public sealed partial class MainWindow : Window
         _editorSeekCts = seekCts;
         _endedAtTrimBoundary = false;
         ViewModel.CurrentTime = time;
+        // Render from requested position immediately. The coordinator will
+        // rebase this from its confirmed landing once video commits.
+        if (resumePlayback && ViewModel.IsPlaying) StartPlayheadClock(time);
         // Start the chunk for the landing point extracting before the video
         // seek, not after it - a cold chunk reads as silence (see
         // ChunkedAudioReader.Read), which would look exactly like the audio
