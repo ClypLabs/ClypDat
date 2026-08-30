@@ -33,7 +33,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _waveformCts;
     private CancellationTokenSource? _thumbnailRegenCts;
     private CancellationTokenSource? _filmstripCts;
-    private int _requestedFilmstripFrameCount = MediaProbeService.FilmstripFrameCount;
     private int _filmstripRequestVersion;
     private CancellationTokenSource? _backgroundFilmstripCts;
     private CancellationTokenSource? _backgroundWaveformCts;
@@ -8992,7 +8991,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _filmstripCts?.Dispose();
         var cts = new CancellationTokenSource();
         _filmstripCts = cts;
-        _requestedFilmstripFrameCount = MediaProbeService.FilmstripFrameCount;
         var requestVersion = ++_filmstripRequestVersion;
         // Task.Run, not a bare call: this runs from OpenMedia on the UI thread,
         // and everything before EnsureFilmstripAsync's first await - the cache
@@ -9001,33 +8999,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // here, on the dispatcher, while the user is waiting for the editor to
         // appear. The ConfigureAwait(false) chain inside MediaProbeService
         // keeps it off the UI thread from there on.
-        _ = Task.Run(() => LoadFilmstripAsync(media, MediaProbeService.FilmstripFrameCount, requestVersion, cts.Token));
+        _ = Task.Run(() => LoadFilmstripAsync(media, requestVersion, cts.Token));
     }
 
-    public void RequestTimelineFilmstripDensity(double zoom)
-    {
-        // Each Ctrl+wheel zoom level gets a proportional sheet. Going back
-        // down requests that level's sheet again instead of retaining a denser
-        // one from an earlier zoom, so thumbnail spacing always matches scale.
-        var frameCount = Math.Clamp(
-            (int)Math.Ceiling(MediaProbeService.FilmstripFrameCount * zoom),
-            MediaProbeService.FilmstripFrameCount,
-            80);
-        if (frameCount == _requestedFilmstripFrameCount || string.IsNullOrEmpty(SelectedVideoPath) || Duration <= TimeSpan.Zero) return;
-
-        var media = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, SelectedVideoPath, StringComparison.OrdinalIgnoreCase))?.Media;
-        if (media is null) return;
-        _requestedFilmstripFrameCount = frameCount;
-        var requestVersion = ++_filmstripRequestVersion;
-        var cancellationToken = _filmstripCts?.Token ?? CancellationToken.None;
-        _ = Task.Run(() => LoadFilmstripAsync(media, frameCount, requestVersion, cancellationToken));
-    }
-
-    private async Task LoadFilmstripAsync(MediaFileInfo media, int frameCount, int requestVersion, CancellationToken cancellationToken)
+    private async Task LoadFilmstripAsync(MediaFileInfo media, int requestVersion, CancellationToken cancellationToken)
     {
         try
         {
-            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(media.Path, media.Duration, frameCount, cancellationToken).ConfigureAwait(false);
+            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(media.Path, media.Duration, cancellationToken: cancellationToken).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested || string.IsNullOrEmpty(filmstripPath)) return;
 
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -9042,15 +9021,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 foreach (var track in TimelineTracks.Where(track => track.IsVideo))
                 {
                     track.Filmstrip = filmstrip;
-                    track.FilmstripFrameCount = frameCount;
+                    track.FilmstripFrameCount = MediaProbeService.FilmstripFrameCount;
                 }
-                // Library state always points to its standard 10-frame sheet.
-                // Zoom sheets are editor-only cache files, not card assets.
-                if (frameCount == MediaProbeService.FilmstripFrameCount)
-                {
-                    var card = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, media.Path, StringComparison.OrdinalIgnoreCase));
-                    card?.UpdateMedia(card.Media with { FilmstripPath = filmstripPath });
-                }
+                var card = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, media.Path, StringComparison.OrdinalIgnoreCase));
+                card?.UpdateMedia(card.Media with { FilmstripPath = filmstripPath });
             });
         }
         catch (OperationCanceledException)
