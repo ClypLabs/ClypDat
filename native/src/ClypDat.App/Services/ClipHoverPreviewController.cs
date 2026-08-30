@@ -114,10 +114,9 @@ internal sealed class ClipHoverPreviewController : IDisposable
         _ = StartPendingAsync(clip, presenter, previewSize, pendingGeneration, token, requestTimestamp);
     }
 
-    // Pixel size to decode at, from the card's laid-out DIP size and the
-    // window's render scaling. Even dimensions: the decoder's yuv->rgba path
-    // and texture upload both want them, and an odd height silently breaks
-    // some scaler configurations.
+    // Pixel size from card's laid-out DIP width and render scaling. Quantizing
+    // width to 32px gives exact 16:9 with even dimensions: width = 32n,
+    // height = 18n. A fractional DIP height must not change image aspect.
     internal static PixelSize ResolvePreviewSize(Size cardSize, double renderScaling)
     {
         var scale = double.IsFinite(renderScaling) && renderScaling > 0 ? renderScaling : 1.0;
@@ -129,19 +128,16 @@ internal sealed class ClipHoverPreviewController : IDisposable
             height = DefaultPreviewHeight;
         }
 
-        if (width > MaximumPreviewWidth)
-        {
-            height *= MaximumPreviewWidth / width;
-            width = MaximumPreviewWidth;
-        }
-
-        return new PixelSize(RoundUpToEven(width, MinimumPreviewWidth), RoundUpToEven(height, MinimumPreviewHeight));
+        width = Math.Clamp(width, MinimumPreviewWidth, MaximumPreviewWidth);
+        var quantizedWidth = QuantizePreviewWidth(width);
+        return new PixelSize(quantizedWidth, quantizedWidth * 9 / 16);
     }
 
-    private static int RoundUpToEven(double value, int minimum)
+    private static int QuantizePreviewWidth(double width)
     {
-        var rounded = Math.Max(minimum, (int)Math.Round(value));
-        return rounded % 2 == 0 ? rounded : rounded + 1;
+        const int aspectWidthStep = 32;
+        var rounded = (int)Math.Round(width / aspectWidthStep, MidpointRounding.AwayFromZero) * aspectWidthStep;
+        return Math.Clamp(rounded, MinimumPreviewWidth, MaximumPreviewWidth);
     }
 
     public void PointerLeft(ClipCardViewModel clip)
@@ -445,13 +441,15 @@ internal sealed class ClipHoverPreviewController : IDisposable
         var fps = ResolveFrameRate(frameRate).ToString("0.###", CultureInfo.InvariantCulture);
         var width = previewSize.Width;
         var height = previewSize.Height;
-        // bilinear, not lanczos. Lanczos costs several times as much per pixel
-        // and its sharpening is invisible once the output is this small - and
-        // at the old fixed 1920x1080 it was paying that cost for a 1080p source
-        // that wasn't even being resized.
-        var crop = string.IsNullOrWhiteSpace(cropFilter) ? string.Empty : $"{cropFilter},";
+        // Bilinear, not lanczos. Lanczos costs several times as much per pixel
+        // and its sharpening is invisible once output is this small. Static
+        // tiles use UniformToFill for normal footage and Uniform for saved crop
+        // edits, so FFmpeg must compose frames the same way before they paint.
+        var composition = string.IsNullOrWhiteSpace(cropFilter)
+            ? $"scale=w={width}:h={height}:flags=bilinear:force_original_aspect_ratio=increase,crop={width}:{height}:(in_w-out_w)/2:(in_h-out_h)/2"
+            : $"{cropFilter},scale=w={width}:h={height}:flags=bilinear:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2";
         return ["-hide_banner", "-loglevel", "error", "-ss", start, "-i", path, "-t", duration,
-            "-an", "-vf", $"{crop}fps={fps},scale=w={width}:h={height}:flags=bilinear:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+            "-an", "-vf", $"fps={fps},{composition}",
             "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"];
     }
 

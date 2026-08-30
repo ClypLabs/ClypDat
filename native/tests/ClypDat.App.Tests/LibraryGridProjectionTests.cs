@@ -9,6 +9,15 @@ namespace ClypDat.App.Tests;
 public sealed class LibraryGridProjectionTests
 {
     [Fact]
+    public void CalculateLayout_PreservesFractionalSixteenByNineImageHeight()
+    {
+        var layout = LibraryCardLayoutCalculator.Calculate(1000, scaleWithWindow: false);
+
+        Assert.Equal(309, layout.Width);
+        Assert.Equal(309d * 9d / 16d, layout.ImageHeight);
+    }
+
+    [Fact]
     public void ReconcileRows_ThreeToFourColumns_KeepsRowsAndNeverResets()
     {
         var clips = CreateClips(8);

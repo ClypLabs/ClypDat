@@ -3147,7 +3147,7 @@ public sealed partial class MainWindow : Window
             };
             for (var cardIndex = 0; cardIndex < rowLength; cardIndex++)
             {
-                var card = BuildNewClipCard(entries[entryIndex++], single ? 248 : cardWidth * 9d / 16d);
+                var card = BuildNewClipCard(entries[entryIndex++], cardWidth * 9d / 16d);
                 card.Width = cardWidth;
                 card.Margin = new Thickness(0, 0, cardIndex == rowLength - 1 ? 0 : cardSpacing, cardSpacing);
                 row.Children.Add(card);
@@ -3327,7 +3327,9 @@ public sealed partial class MainWindow : Window
         {
             Source = entry.Clip.PreviewImage,
             Stretch = entry.Clip.PreviewImageStretch,
-            Height = previewHeight
+            Height = previewHeight,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
         };
         var preview = new ClipPreviewPresenter
         {
@@ -3352,6 +3354,7 @@ public sealed partial class MainWindow : Window
         entry.Clip.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ClipCardViewModel.PreviewImage)) thumbnail.Source = entry.Clip.PreviewImage;
+            if (args.PropertyName == nameof(ClipCardViewModel.PreviewImageStretch)) thumbnail.Stretch = entry.Clip.PreviewImageStretch;
         };
 
         var duration = new Border
@@ -3393,6 +3396,7 @@ public sealed partial class MainWindow : Window
         var picture = new Panel
         {
             Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
+            Height = previewHeight,
             Children = { thumbnail, preview, pictureChrome }
         };
 

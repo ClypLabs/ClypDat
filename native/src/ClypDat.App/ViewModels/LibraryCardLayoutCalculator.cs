@@ -27,6 +27,8 @@ internal static class LibraryCardLayoutCalculator
         var width = Math.Max(MinimumCardWidth,
             Math.Floor((contentWidth - SafetyReserve) / columns) - HorizontalMargin);
 
-        return new LibraryCardLayout(columns, width, Math.Floor(width * 9 / 16));
+        // Keep surface mathematically 16:9. Flooring made static thumbnail
+        // shorter than hover presenter for most widths at fractional scale.
+        return new LibraryCardLayout(columns, width, width * 9d / 16d);
     }
 }
