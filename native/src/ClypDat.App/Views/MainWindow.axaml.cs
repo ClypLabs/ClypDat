@@ -5165,23 +5165,15 @@ public sealed partial class MainWindow : Window
     }
 
     // Fires as each card's own row scrolls in/out of the library
-    // ScrollViewer's clipped viewport. Keep two nearby rows decoding in the
-    // bounded virtualizer buffer so an entering row already has its thumbnail.
+    // ScrollViewer's clipped viewport (also on initial layout, so anything
+    // below the fold starts out reporting an empty viewport) - lets
+    // ClipCardViewModel decode/dispose its thumbnail Bitmap lazily instead
+    // of every card in the library holding a decoded bitmap at once.
     private void ClipCard_OnEffectiveViewportChanged(object? sender, EffectiveViewportChangedEventArgs e)
     {
-        if (sender is not Control control || control.DataContext is not ClipCardViewModel clip) return;
+        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         var viewport = e.EffectiveViewport;
         var visible = viewport.Width > 0 && viewport.Height > 0;
-
-        var point = control.TranslatePoint(default, LibraryScrollViewer);
-        var rowHeight = Math.Max(control.Bounds.Height, ViewModel?.LibraryLoadingRowPitch ?? 0);
-        var prefetchDistance = rowHeight * 2;
-        var withinPrefetchBuffer = point is { } origin
-            && LibraryScrollViewer.Viewport.Height > 0
-            && origin.Y + control.Bounds.Height >= -prefetchDistance
-            && origin.Y <= LibraryScrollViewer.Viewport.Height + prefetchDistance;
-
-        clip.SetPreviewPrefetched(withinPrefetchBuffer);
         if (!visible) _clipHoverPreview.StopIfActive(clip, "card left viewport");
         clip.SetPreviewVisible(visible);
     }
