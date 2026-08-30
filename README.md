@@ -10,7 +10,7 @@ The codebase is `native/` (C#/.NET 10, Avalonia UI). ClypDat uses a maintained [
 
 Download the current installer or portable build from [GitHub Releases](https://github.com/ClypLabs/ClypDat/releases). ClypDat checks for stable releases at launch and can download the next installer after you accept an update.
 
-Install or update ClypDat from PowerShell with WinGet:
+### Install or update ClypDat from PowerShell with WinGet:
 
 ```powershell
 winget install --id ClypLabs.ClypDat
