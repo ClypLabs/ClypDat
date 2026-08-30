@@ -28,6 +28,14 @@
           <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
         </Grid>
         <Border Classes="settingsDivider" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding DiscordRichPresenceEnabled}">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Only show while playing a game" />
+            <TextBlock Classes="settingsRowDescSm" Text="Hide browsing, editing, and settings activity unless ClypDat detects a game." />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceOnlyWhenGameActive}" OnContent="{x:Null}" OffContent="{x:Null}" />
+        </Grid>
+        <Border Classes="settingsDivider" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
           <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Show “Get ClypDat” Link" />
