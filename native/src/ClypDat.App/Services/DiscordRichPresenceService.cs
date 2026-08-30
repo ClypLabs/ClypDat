@@ -5,7 +5,12 @@ using System.Text.Json;
 namespace ClypDat.App.Services;
 
 /// <summary>What ClypDat is currently doing, as Discord should describe it.</summary>
-internal sealed record DiscordPresence(string Details, string State, DateTime? StartedUtc)
+internal sealed record DiscordPresence(
+    string Details,
+    string State,
+    DateTime? StartedUtc,
+    string? LargeImageUrl = null,
+    string? LargeImageText = null)
 {
     public static readonly DiscordPresence None = new(string.Empty, string.Empty, null);
 
@@ -300,7 +305,7 @@ internal static class DiscordRichPresenceService
                 ["timestamps"] = presence.StartedUtc is { } started
                     ? new { start = new DateTimeOffset(DateTime.SpecifyKind(started, DateTimeKind.Utc)).ToUnixTimeSeconds() }
                     : null,
-                ["assets"] = new { large_image = "clypdat", large_text = "ClypDat" },
+                ["assets"] = CreateAssets(presence),
                 ["buttons"] = showGetClypDatButton
                     ? new[] { new { label = ButtonLabel, url = ButtonUrl } }
                     : null
@@ -313,6 +318,29 @@ internal static class DiscordRichPresenceService
 
         return null;
     }
+
+    private static Dictionary<string, string> CreateAssets(DiscordPresence presence)
+    {
+        if (IsExternalImageUrl(presence.LargeImageUrl))
+        {
+            return new Dictionary<string, string>
+            {
+                ["large_image"] = presence.LargeImageUrl!,
+                ["large_text"] = presence.LargeImageText is { } text ? Trim(text) ?? "Current game" : "Current game",
+                ["small_image"] = "clypdat",
+                ["small_text"] = "Clipping with ClypDat"
+            };
+        }
+
+        return new Dictionary<string, string>
+        {
+            ["large_image"] = "clypdat",
+            ["large_text"] = "ClypDat"
+        };
+    }
+
+    private static bool IsExternalImageUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
 
     // Discord rejects a details or state string longer than 128 bytes, and
     // rejects one shorter than two characters - a one-character game name

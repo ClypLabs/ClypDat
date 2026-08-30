@@ -6087,6 +6087,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _discordActivityKind = string.Empty;
     private DateTime _discordActivityStartedUtc = DateTime.UtcNow;
     private int _discordClipsSaved;
+    private string? _discordGameImageFor;
+    private string? _discordGameImageUrl;
 
     public void ApplyDiscordSettings()
     {
@@ -6127,6 +6129,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // ClypDat page is open. Settings/editor navigation must not replace it.
         if (ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName))
         {
+            ResolveDiscordGameImage(ActiveGameDetection.DisplayName);
             var recording = IsReplayRecording;
             // Game name is part of the kind, so the elapsed timer Discord shows
             // is "how long on THIS game" rather than "how long recording
@@ -6184,7 +6187,37 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _discordActivityStartedUtc = DateTime.UtcNow;
         }
 
-        DiscordRichPresenceService.SetPresence(new DiscordPresence(details, state, _discordActivityStartedUtc));
+        var gameImage = ActiveGameDetection.IsDetected
+                        && string.Equals(_discordGameImageFor, ActiveGameDetection.DisplayName, StringComparison.Ordinal)
+            ? _discordGameImageUrl
+            : null;
+        DiscordRichPresenceService.SetPresence(new DiscordPresence(
+            details,
+            state,
+            _discordActivityStartedUtc,
+            gameImage,
+            gameImage is null ? null : ActiveGameDetection.DisplayName));
+    }
+
+    private void ResolveDiscordGameImage(string displayName)
+    {
+        if (string.Equals(_discordGameImageFor, displayName, StringComparison.Ordinal)) return;
+
+        _discordGameImageFor = displayName;
+        _discordGameImageUrl = null;
+        _ = Task.Run(async () =>
+        {
+            var imageUrl = await GameIconService.ResolveExternalIconUrlAsync(displayName).ConfigureAwait(false);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!string.Equals(_discordGameImageFor, displayName, StringComparison.Ordinal)
+                    || !ActiveGameDetection.IsDetected
+                    || !string.Equals(ActiveGameDetection.DisplayName, displayName, StringComparison.Ordinal)) return;
+
+                _discordGameImageUrl = imageUrl;
+                UpdateDiscordPresence();
+            });
+        });
     }
 
     public void RecordDiscordClipSaved()
