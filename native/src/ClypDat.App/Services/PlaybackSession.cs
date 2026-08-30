@@ -1444,14 +1444,14 @@ public sealed class PlaybackSession : IDisposable
             }
         }
 
-        public void StartAudio(TimeSpan position, string seekId)
+        public void CommitPlaying(TimeSpan position, string seekId)
         {
             lock (session._transportLock)
             {
-                if (generation != Interlocked.Read(ref session._seekVersion) || !session._shouldPlay) return;
                 session.EnsureAudioOutputConnected();
                 session.SeekAudio(position);
                 _audioAnchor = position;
+                session.VideoPlayer.SetPause(false);
                 session.StartAudioAt(_audioAnchor, generation);
             }
         }
@@ -1459,6 +1459,17 @@ public sealed class PlaybackSession : IDisposable
         public void CommitVideoOnly()
         {
             lock (session._transportLock) session.VideoPlayer.SetPause(false);
+        }
+
+        public void StartDeferredAudio(TimeSpan position, string seekId)
+        {
+            lock (session._transportLock)
+            {
+                if (generation != Interlocked.Read(ref session._seekVersion) || !session._shouldPlay) return;
+                session.EnsureAudioOutputConnected();
+                session.SeekAudio(position);
+                session.StartAudioAt(position, generation);
+            }
         }
 
         public void LogDebug(string line) => AppLog.Debug(line);

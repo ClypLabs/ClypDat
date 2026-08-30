@@ -6,12 +6,13 @@ namespace ClypDat.App.Tests;
 public sealed class EditorSeekCoordinatorTests
 {
     [Fact]
-    public async Task Resume_RollRecovery_StartsAudioOnce()
+    public async Task Resume_WhenVideoRolls_StartsAudioImmediately()
     {
         var transport = new RecoveryTransport();
         var coordinator = new EditorSeekCoordinator(
             pollInterval: TimeSpan.FromMilliseconds(1),
-            attemptTimeout: TimeSpan.FromMilliseconds(12));
+            attemptTimeout: TimeSpan.FromMilliseconds(12),
+            rollTimeout: TimeSpan.FromMilliseconds(12));
 
         var result = await coordinator.SeekAsync(
             transport,
@@ -27,12 +28,13 @@ public sealed class EditorSeekCoordinatorTests
     }
 
     [Fact]
-    public async Task Resume_RollTimeout_NeverStartsAudio()
+    public async Task Resume_RollTimeout_DoesNotReplayAudio()
     {
-        var transport = new RecoveryTransport(rollAfterRecovery: false);
+        var transport = new RecoveryTransport(videoRolls: false);
         var coordinator = new EditorSeekCoordinator(
             pollInterval: TimeSpan.FromMilliseconds(1),
-            attemptTimeout: TimeSpan.FromMilliseconds(12));
+            attemptTimeout: TimeSpan.FromMilliseconds(12),
+            rollTimeout: TimeSpan.FromMilliseconds(12));
 
         var result = await coordinator.SeekAsync(
             transport,
@@ -43,17 +45,18 @@ public sealed class EditorSeekCoordinatorTests
             CancellationToken.None);
 
         Assert.False(result.Succeeded);
-        Assert.Equal(0, transport.AudioStarts);
+        Assert.Equal(1, transport.AudioStarts);
     }
 
     [Fact]
-    public async Task Resume_DeferredAudioAfterRecovery_StartsOnce()
+    public async Task Resume_DeferredAudioAfterVideoRoll_StartsOnce()
     {
         var preparation = new TaskCompletionSource<AudioPreparationResult>();
         var transport = new RecoveryTransport(preparation.Task);
         var coordinator = new EditorSeekCoordinator(
             pollInterval: TimeSpan.FromMilliseconds(1),
-            attemptTimeout: TimeSpan.FromMilliseconds(12));
+            attemptTimeout: TimeSpan.FromMilliseconds(12),
+            rollTimeout: TimeSpan.FromMilliseconds(12));
 
         var result = await coordinator.SeekAsync(
             transport,
@@ -71,18 +74,16 @@ public sealed class EditorSeekCoordinatorTests
 
     private sealed class RecoveryTransport : IEditorSeekTransport
     {
-        private readonly bool _rollAfterRecovery;
+        private readonly bool _videoRolls;
         private readonly Task<AudioPreparationResult> _preparation;
         private TimeSpan _position;
-        private int _recoveryCount;
+        public RecoveryTransport(bool videoRolls = true)
+            : this(Task.FromResult(new AudioPreparationResult(1, 0, false)), videoRolls) { }
 
-        public RecoveryTransport(bool rollAfterRecovery = true)
-            : this(Task.FromResult(new AudioPreparationResult(1, 0, false)), rollAfterRecovery) { }
-
-        public RecoveryTransport(Task<AudioPreparationResult> preparation, bool rollAfterRecovery = true)
+        public RecoveryTransport(Task<AudioPreparationResult> preparation, bool videoRolls = true)
         {
             _preparation = preparation;
-            _rollAfterRecovery = rollAfterRecovery;
+            _videoRolls = videoRolls;
         }
 
         public bool IsPaused { get; private set; }
@@ -97,24 +98,24 @@ public sealed class EditorSeekCoordinatorTests
 
         public void StopAudio() { }
         public void PauseVideo() => IsPaused = true;
-        public void ResetVideo()
-        {
-            _recoveryCount++;
-            IsPaused = true;
-        }
+        public void ResetVideo() => IsPaused = true;
 
         public void WritePosition(TimeSpan target) => _position = target;
         public void CommitPaused(TimeSpan position) => IsPaused = true;
-        public void StartAudio(TimeSpan position, string seekId)
+        public void CommitPlaying(TimeSpan position, string seekId)
         {
             AudioStarts++;
+            IsPaused = false;
+            if (_videoRolls) _position += TimeSpan.FromMilliseconds(25);
         }
 
         public void CommitVideoOnly()
         {
             IsPaused = false;
-            if (_rollAfterRecovery && _recoveryCount > 0) _position += TimeSpan.FromMilliseconds(25);
+            if (_videoRolls) _position += TimeSpan.FromMilliseconds(25);
         }
+
+        public void StartDeferredAudio(TimeSpan position, string seekId) => AudioStarts++;
 
         public void LogDebug(string line) { }
         public void LogInfo(string line) { }
