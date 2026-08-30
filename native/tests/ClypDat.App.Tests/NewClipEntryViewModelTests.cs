@@ -29,5 +29,9 @@ public sealed class NewClipEntryViewModelTests
         entry.IsHovered = true;
         entry.IsHovered = false;
         Assert.True(entry.IsCheckVisible);
+
+        Assert.False(entry.HasSelectionOrder);
+        entry.SelectionOrder = 1;
+        Assert.True(entry.HasSelectionOrder);
     }
 }

@@ -14,6 +14,7 @@ public sealed class NewClipEntryViewModel(ClipCardViewModel clip) : ViewModelBas
     private bool _isSelected;
     private bool _isHovered;
     private bool _showCheckBox = true;
+    private int _selectionOrder;
 
     public ClipCardViewModel Clip { get; } = clip;
     public string Path => Clip.Path;
@@ -53,6 +54,18 @@ public sealed class NewClipEntryViewModel(ClipCardViewModel clip) : ViewModelBas
     // Same rule as the library tile's own checkbox: visible while hovered, and
     // stays visible once ticked so a selection is never invisible.
     public bool IsCheckVisible => ShowCheckBox && (IsSelected || IsHovered);
+
+    public int SelectionOrder
+    {
+        get => _selectionOrder;
+        set
+        {
+            if (!SetProperty(ref _selectionOrder, value)) return;
+            OnPropertyChanged(nameof(HasSelectionOrder));
+        }
+    }
+
+    public bool HasSelectionOrder => SelectionOrder > 0;
 
     public event EventHandler? SelectionChanged;
 }

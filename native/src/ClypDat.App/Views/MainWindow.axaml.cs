@@ -3023,6 +3023,7 @@ public sealed partial class MainWindow : Window
     // wired once in XAML and read whatever's current from here instead of each
     // getting a fresh closure-captured delegate stacked on top of the last one.
     private List<NewClipEntryViewModel> _currentNewClipsEntries = new();
+    private readonly List<string> _newClipsSelectionOrder = new();
     private NewClipsDialog? _editorNewClipsDialog;
     private bool _newClipsNotificationPending;
     // Clips the user has already been shown and dismissed (closed the popup, or
@@ -3084,6 +3085,7 @@ public sealed partial class MainWindow : Window
         }
 
         _currentNewClipsEntries = entries;
+        _newClipsSelectionOrder.Clear();
         _newClipsNotificationPending = false;
 
         var clipCount = entries.Count(entry => !entry.IsVod);
@@ -3105,7 +3107,11 @@ public sealed partial class MainWindow : Window
 
         foreach (var entry in entries)
         {
-            entry.SelectionChanged += (_, _) => SyncNewClipsDeleteButton();
+            entry.SelectionChanged += (_, _) =>
+            {
+                UpdateNewClipsSelectionOrder(entry);
+                SyncNewClipsDeleteButton();
+            };
         }
         foreach (var entry in entries)
         {
@@ -3188,6 +3194,22 @@ public sealed partial class MainWindow : Window
     {
         var ticked = _currentNewClipsEntries.Where(entry => entry.IsSelected).ToArray();
         return ticked.Length > 0 ? ticked : _currentNewClipsEntries.ToArray();
+    }
+
+    private void UpdateNewClipsSelectionOrder(NewClipEntryViewModel entry)
+    {
+        if (entry.IsSelected)
+        {
+            if (!_newClipsSelectionOrder.Any(path => string.Equals(path, entry.Path, StringComparison.OrdinalIgnoreCase)))
+                _newClipsSelectionOrder.Add(entry.Path);
+        }
+        else
+        {
+            _newClipsSelectionOrder.RemoveAll(path => string.Equals(path, entry.Path, StringComparison.OrdinalIgnoreCase));
+        }
+
+        foreach (var current in _currentNewClipsEntries)
+            current.SelectionOrder = _newClipsSelectionOrder.FindIndex(path => string.Equals(path, current.Path, StringComparison.OrdinalIgnoreCase)) + 1;
     }
 
     private void SyncNewClipsDeleteButton()
@@ -3396,6 +3418,23 @@ public sealed partial class MainWindow : Window
             Height = previewHeight,
             Children = { thumbnail, preview, pictureChrome }
         };
+        var selectionOrder = new TextBlock
+        {
+            Foreground = Brushes.White,
+            FontSize = 48,
+            FontWeight = Avalonia.Media.FontWeight.Bold,
+            Opacity = 0.9,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Effect = new DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 10,
+                Opacity = 0.6
+            }
+        };
+        picture.Children.Add(selectionOrder);
 
         var timeRow = new StackPanel
         {
@@ -3480,6 +3519,8 @@ public sealed partial class MainWindow : Window
         {
             check.IsChecked = entry.IsSelected;
             check.IsVisible = entry.IsCheckVisible;
+            selectionOrder.Text = entry.SelectionOrder.ToString();
+            selectionOrder.IsVisible = entry.HasSelectionOrder;
             hoverOutline.IsVisible = entry.IsSelected || entry.IsHovered;
             hoverOutline.BorderBrush = entry.IsSelected
                 ? AppThemeService.Brush("AccentBrush", "#5864E8")
