@@ -3330,6 +3330,20 @@ public sealed partial class MainWindow : Window
             IsHitTestVisible = false,
             ZIndex = 1
         };
+        var progressTransform = new ScaleTransform();
+        progressTransform.Bind(ScaleTransform.ScaleXProperty, new Binding(nameof(ClipPreviewPresenter.Progress)) { Source = preview });
+        var progress = new Border
+        {
+            Height = 4,
+            Background = AppThemeService.Brush("AccentBrush", "#5864E8"),
+            VerticalAlignment = VerticalAlignment.Bottom,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            RenderTransformOrigin = new RelativePoint(0, 0.5, RelativeUnit.Relative),
+            RenderTransform = progressTransform,
+            IsHitTestVisible = false,
+            ZIndex = 3
+        };
+        progress.Bind(Visual.IsVisibleProperty, new Binding(nameof(NewClipEntryViewModel.IsHovered)) { Source = entry });
         // The decode is asynchronous, so a card built before it finishes has to
         // pick the bitmap up when it lands.
         entry.Clip.PropertyChanged += (_, args) =>
@@ -3371,7 +3385,7 @@ public sealed partial class MainWindow : Window
         var picture = new Panel
         {
             Background = AppThemeService.Brush("Surface_0B1116", "#0B1116"),
-            Children = { thumbnail, preview, duration, check }
+            Children = { thumbnail, preview, duration, check, progress }
         };
 
         var timeRow = new StackPanel
