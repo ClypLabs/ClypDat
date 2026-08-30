@@ -798,7 +798,7 @@ public sealed class MediaProbeService
         int frameCount = FilmstripFrameCount,
         CancellationToken cancellationToken = default)
     {
-        frameCount = Math.Clamp(frameCount, 1, 60);
+        frameCount = Math.Clamp(frameCount, 1, 80);
         var output = GetFilmstripPath(filePath, frameCount);
         if (File.Exists(output)) return Task.FromResult(output);
         if (duration <= TimeSpan.Zero) return Task.FromResult(string.Empty);
