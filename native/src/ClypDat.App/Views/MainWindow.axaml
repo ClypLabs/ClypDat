@@ -2058,7 +2058,7 @@
               </StackPanel>
               <Button Grid.Column="1" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                       Width="52" VerticalAlignment="Stretch" CornerRadius="0,11,0,0" Click="NewClipsCloseButton_OnClick">
-                <TextBlock Text="✕" Margin="0,-3,0,0" />
+                <TextBlock Text="✕" />
               </Button>
             </Grid>
           </Border>
@@ -2066,9 +2066,9 @@
           <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface_141B23}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="0,1,0,0" CornerRadius="0,0,11,11">
             <Grid ColumnDefinitions="*,12,*" Margin="28,14,28,14">
               <Button x:Name="NewClipsDeleteButton" Grid.Column="0" Classes="subtleDangerButton" MinWidth="140" Height="42"
-                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsDeleteButton_OnClick" />
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsDeleteButton_OnClick" />
               <Button x:Name="NewClipsViewAllButton" Grid.Column="2" Classes="primaryButton" Content="View All Clips" MinWidth="170" Height="42"
-                      HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsViewAllButton_OnClick" />
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsViewAllButton_OnClick" />
             </Grid>
           </Border>
 
