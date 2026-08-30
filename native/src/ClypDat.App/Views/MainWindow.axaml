@@ -2051,14 +2051,14 @@
               BoxShadow="0 18 48 -12 #B0000000" ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
         <DockPanel LastChildFill="True">
           <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}">
-            <Grid ColumnDefinitions="*,Auto" MinHeight="44" Margin="28,17,18,15">
-              <StackPanel VerticalAlignment="Center" Spacing="3">
+            <Grid ColumnDefinitions="*,Auto" MinHeight="56" Margin="28,0,0,0">
+              <StackPanel VerticalAlignment="Center" Spacing="3" Margin="0,17,18,15">
                 <TextBlock x:Name="NewClipsTitleText" Foreground="{StaticResource Text_D8E4F2}" FontSize="19" FontWeight="Bold" />
                 <TextBlock x:Name="NewClipsSubtitleText" Foreground="{StaticResource Text_8C98A7}" FontSize="12" />
               </StackPanel>
-              <Button Grid.Column="1" Classes="dialogClose" FontSize="13" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                      Width="36" Height="36" CornerRadius="18" Click="NewClipsCloseButton_OnClick">
-                <TextBlock Text="✕" Margin="0,-2,0,0" />
+              <Button Grid.Column="1" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                      Width="52" Height="56" CornerRadius="0,19,0,0" Click="NewClipsCloseButton_OnClick">
+                <TextBlock Text="✕" Margin="0,-3,0,0" />
               </Button>
             </Grid>
           </Border>
