@@ -3322,7 +3322,7 @@ public sealed partial class MainWindow : Window
         var thumbnail = new Image
         {
             Source = entry.Clip.PreviewImage,
-            Stretch = Avalonia.Media.Stretch.UniformToFill,
+            Stretch = entry.Clip.PreviewImageStretch,
             Height = largePreview ? 248 : 158
         };
         var preview = new ClipPreviewPresenter
@@ -3353,11 +3353,9 @@ public sealed partial class MainWindow : Window
 
         var duration = new Border
         {
-            Background = AppThemeService.Brush("Surface_CC0B1116", "#CC0B1116"),
-            CornerRadius = new CornerRadius(16),
-            Padding = new Thickness(10, 5),
-            Margin = new Thickness(10),
-            HorizontalAlignment = HorizontalAlignment.Right,
+            Background = AppThemeService.Brush("Surface_1A2530", "#1A2530"),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(10, 6),
             VerticalAlignment = VerticalAlignment.Top,
             Child = new TextBlock
             {
@@ -3370,8 +3368,6 @@ public sealed partial class MainWindow : Window
 
         var check = new CheckBox
         {
-            Margin = new Thickness(10),
-            HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
             IsChecked = entry.IsSelected,
             IsVisible = entry.IsCheckVisible
@@ -3382,53 +3378,62 @@ public sealed partial class MainWindow : Window
         // would also fling the user into the editor.
         check.PointerPressed += (_, args) => args.Handled = true;
 
+        var pictureChrome = new Grid
+        {
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(12),
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Children = { check, duration }
+        };
+        Grid.SetColumn(duration, 2);
+
         var picture = new Panel
         {
-            Background = AppThemeService.Brush("Surface_0B1116", "#0B1116"),
-            Children = { thumbnail, preview, duration, check, progress }
+            Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
+            Children = { thumbnail, preview, pictureChrome }
         };
 
         var timeRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 6,
+            Spacing = 8,
             Children =
             {
                 new PathIcon
                 {
                     Data = Geometry.Parse("M12,20c-4.41,0-8-3.59-8-8s3.59-8,8-8s8,3.59,8,8S16.41,20,12,20z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"),
-                    Foreground = AppThemeService.Brush("Text_6B7C8C", "#6B7C8C"),
+                    Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
                     Width = 12,
                     Height = 12
                 },
                 new TextBlock
                 {
-                    Text = FormatTimeAgo(entry.Clip.CreatedAt),
-                    Foreground = AppThemeService.Brush("Text_6B7C8C", "#6B7C8C"),
-                    FontSize = 11,
-                    FontWeight = Avalonia.Media.FontWeight.Bold
+                    Text = entry.Clip.RelativeDateLabel,
+                    Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
+                    FontSize = 12,
+                    FontWeight = Avalonia.Media.FontWeight.SemiBold
                 }
             }
         };
 
         var info = new StackPanel
         {
-            Spacing = 4,
-            Margin = new Thickness(14, 12, 14, 14),
+            Spacing = 6,
+            Margin = new Thickness(16, 13),
             Children =
             {
                 new TextBlock
                 {
-                    Text = entry.Clip.TileTopLabel.ToUpperInvariant(),
+                    Text = entry.Clip.TileTopLabel,
                     Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
-                    FontSize = 11,
+                    FontSize = 12,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
                 },
                 new TextBlock
                 {
                     Text = entry.Clip.TileMainLabel,
-                    Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"),
+                    Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
                     FontSize = 15,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
@@ -3438,22 +3443,30 @@ public sealed partial class MainWindow : Window
         };
 
         var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto") };
+        var hoverOutline = new Border
+        {
+            CornerRadius = new CornerRadius(12),
+            BorderThickness = new Thickness(2),
+            IsHitTestVisible = false,
+            ZIndex = 10
+        };
         Grid.SetRow(picture, 0);
         Grid.SetRow(info, 1);
+        Grid.SetRow(progress, 0);
+        Grid.SetRowSpan(hoverOutline, 2);
         layout.Children.Add(picture);
         layout.Children.Add(info);
+        layout.Children.Add(hoverOutline);
+        layout.Children.Add(progress);
 
         var card = new Border
         {
-            Background = AppThemeService.Brush("Surface_1E2A35", "#1E2A35"),
-            CornerRadius = new CornerRadius(14),
-            ClipToBounds = true,
-            BorderThickness = new Thickness(1),
-            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
-            BoxShadow = Avalonia.Media.BoxShadows.Parse("0 8 20 -8 #8A000000"),
+            Background = AppThemeService.Brush("Surface_24303A", "#24303A"),
+            CornerRadius = new CornerRadius(12),
+            BoxShadow = Avalonia.Media.BoxShadows.Parse("0 6 18 -6 #66000000"),
             Child = new Border
             {
-                CornerRadius = new CornerRadius(13),
+                CornerRadius = new CornerRadius(12),
                 ClipToBounds = true,
                 Child = layout
             }
@@ -3463,12 +3476,14 @@ public sealed partial class MainWindow : Window
         {
             check.IsChecked = entry.IsSelected;
             check.IsVisible = entry.IsCheckVisible;
-            card.BorderBrush = entry.IsSelected
+            hoverOutline.IsVisible = entry.IsCheckVisible;
+            hoverOutline.BorderBrush = entry.IsSelected
                 ? AppThemeService.Brush("AccentBrush", "#5864E8")
-                : entry.IsHovered ? AppThemeService.Brush("Surface_3A4856", "#3A4856") : AppThemeService.Brush("Surface_232F3A", "#232F3A");
+                : AppThemeService.Brush("AccentBrushHover", "#6D77F0");
         }
 
         entry.PropertyChanged += (_, _) => SyncCardState();
+        SyncCardState();
         card.Cursor = new Cursor(StandardCursorType.Hand);
         card.PointerEntered += (_, _) =>
         {
