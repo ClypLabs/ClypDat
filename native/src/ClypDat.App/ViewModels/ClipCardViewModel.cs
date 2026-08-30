@@ -18,9 +18,12 @@ public sealed class ClipCardViewModel : ViewModelBase
     private ClipEditSettings? _clipEdit;
     private bool _isVod;
     private bool _isPreviewVisible;
+    private bool _isPreviewPrefetched;
     private string _repairOverlayText = string.Empty;
     private CancellationTokenSource? _previewLoadCts;
     private int _previewLoadVersion;
+    private string? _previewLoadPath;
+    private int _previewLoadWidth;
     private static readonly SemaphoreSlim PreviewDecodeSlots = new(2, 2);
 
     public event EventHandler? PersistentStateChanged;
@@ -390,7 +393,7 @@ public sealed class ClipCardViewModel : ViewModelBase
             if (!SetProperty(ref _previewImagePath, value)) return;
             CancelPreviewLoad();
             ClearPreviewImage();
-            if (_isPreviewVisible) SetPreviewImage(value);
+            if (_isPreviewVisible || _isPreviewPrefetched) SetPreviewImage(value);
         }
     }
 
@@ -430,9 +433,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     }
 
     // Called by MainWindow's per-card EffectiveViewportChanged handler as
-    // cards cross the ScrollViewer's viewport - decodes the thumbnail on
-    // entry and disposes/releases it on exit, so a large library never has
-    // more than a screenful of decoded bitmaps live at once.
+    // cards cross the ScrollViewer's viewport. A card keeps its decode alive
+    // while it remains in the nearby virtualized-row buffer, so crossing a
+    // row boundary does not start a cold thumbnail load on that frame.
     public void SetPreviewVisible(bool visible)
     {
         if (_isPreviewVisible == visible) return;
@@ -444,12 +447,30 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
         else
         {
-            CancelPreviewLoad();
+            if (!_isPreviewPrefetched) CancelPreviewLoad();
             // Just an unbind. The bitmap stays alive in CardThumbnailCache so
             // scrolling back finds it decoded, and cache eviction goes through
             // DeferredBitmapDisposal rather than freeing pixels the compositor
             // may still be drawing.
             PreviewImage = null;
+        }
+    }
+
+    // Medal keeps a two-row virtual buffer around its visible Library range.
+    // ClypDat retains the existing Avalonia virtualizer, then starts thumbnail
+    // work for the same bounded buffer. This never binds an offscreen bitmap.
+    public void SetPreviewPrefetched(bool prefetched)
+    {
+        if (_isPreviewPrefetched == prefetched) return;
+        _isPreviewPrefetched = prefetched;
+
+        if (prefetched)
+        {
+            SetPreviewImage(_previewImagePath);
+        }
+        else if (!_isPreviewVisible)
+        {
+            CancelPreviewLoad();
         }
     }
 
@@ -464,7 +485,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         // wrong - without this the card would keep serving the pre-edit image
         // out of CardThumbnailCache forever.
         CardThumbnailCache.Invalidate(_previewImagePath);
-        if (_isPreviewVisible) SetPreviewImage(_previewImagePath);
+        if (_isPreviewVisible || _isPreviewPrefetched) SetPreviewImage(_previewImagePath);
     }
 
     // The editor just wrote this clip's edit sidecar. _clipEdit was otherwise
@@ -654,7 +675,6 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     private void SetPreviewImage(string path)
     {
-        CancelPreviewLoad();
         if (string.IsNullOrWhiteSpace(path)) return;
 
         var width = Volatile.Read(ref _previewDecodeWidth);
@@ -665,12 +685,23 @@ public sealed class ClipCardViewModel : ViewModelBase
         var cached = CardThumbnailCache.Get(path, width);
         if (cached is not null)
         {
-            PreviewImage = cached;
+            if (_isPreviewVisible) PreviewImage = cached;
             return;
         }
 
+        if (_previewLoadCts is not null
+            && _previewLoadWidth == width
+            && string.Equals(_previewLoadPath, path, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        CancelPreviewLoad();
+
         var cancellation = new CancellationTokenSource();
         _previewLoadCts = cancellation;
+        _previewLoadPath = path;
+        _previewLoadWidth = width;
         var version = _previewLoadVersion;
         _ = LoadPreviewImageAsync(path, width, version, cancellation.Token);
     }
@@ -678,6 +709,8 @@ public sealed class ClipCardViewModel : ViewModelBase
     private void CancelPreviewLoad()
     {
         _previewLoadVersion++;
+        _previewLoadPath = null;
+        _previewLoadWidth = 0;
         var previous = Interlocked.Exchange(ref _previewLoadCts, null);
         if (previous is null) return;
         previous.Cancel();
