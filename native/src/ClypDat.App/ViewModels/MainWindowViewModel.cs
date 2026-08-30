@@ -6101,6 +6101,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!Settings.DiscordRichPresenceEnabled)
         {
             DiscordRichPresenceService.SetPresence(DiscordPresence.None);
+            _discordActivityKind = string.Empty;
+            return;
+        }
+
+        // Game-only presence must not reveal library, editor, or settings
+        // activity. Clear the kind too, so the next detected game starts a
+        // fresh Discord elapsed timer.
+        if (Settings.DiscordRichPresenceOnlyWhenGameActive
+            && (!ActiveGameDetection.IsDetected || string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName)))
+        {
+            DiscordRichPresenceService.SetPresence(DiscordPresence.None);
+            _discordActivityKind = string.Empty;
             return;
         }
 
@@ -6191,6 +6203,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged();
             SaveSettings();
             ApplyDiscordSettings();
+        }
+    }
+
+    public bool DiscordRichPresenceOnlyWhenGameActive
+    {
+        get => Settings.DiscordRichPresenceOnlyWhenGameActive;
+        set
+        {
+            if (Settings.DiscordRichPresenceOnlyWhenGameActive == value) return;
+            Settings.DiscordRichPresenceOnlyWhenGameActive = value;
+            OnPropertyChanged();
+            SaveSettings();
+            UpdateDiscordPresence();
         }
     }
 

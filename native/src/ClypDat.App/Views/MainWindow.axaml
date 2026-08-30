@@ -2017,6 +2017,20 @@
                     </StackPanel>
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                   </Grid>
+                  <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding DiscordRichPresenceEnabled}">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Only show while playing a game" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
+                      <TextBlock Text="Hide ClypDat browsing, editing, and settings activity outside detected games." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceOnlyWhenGameActive}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+                  <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding DiscordRichPresenceEnabled}">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Show Get ClypDat link" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
+                      <TextBlock Text="Add a ClypDat profile link to your Discord activity." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceShowGetClypDatButton}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
                 </StackPanel>
                 </Border>
                 <Border Background="{StaticResource Semantic_102723}" BorderBrush="{StaticResource Semantic_285A50}" BorderThickness="1" CornerRadius="9" Padding="15,13">

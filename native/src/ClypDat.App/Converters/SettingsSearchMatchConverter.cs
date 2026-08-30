@@ -93,7 +93,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         },
         ["Discord Rich Presence"] = new[]
         {
-            "Discord", "Rich Presence", "Discord Rich Presence", "Get ClypDat", "Profile link"
+            "Discord", "Rich Presence", "Discord Rich Presence", "Only show while playing a game", "Get ClypDat", "Profile link"
         },
         ["About"] = new[]
         {

@@ -203,6 +203,9 @@ public sealed class AppSettings
     // to anyone who can see your Discord profile, and that is a decision to be
     // asked for rather than assumed.
     public bool DiscordRichPresenceEnabled { get; set; }
+    // Presence is game-scoped by default. Existing settings files omit this
+    // property and therefore inherit true from this initializer.
+    public bool DiscordRichPresenceOnlyWhenGameActive { get; set; } = true;
     // Presence buttons are visible to other people viewing the profile, not
     // the account publishing it. Keep promotion opt-in and separate from
     // Rich Presence itself.

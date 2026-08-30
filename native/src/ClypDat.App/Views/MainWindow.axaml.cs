@@ -92,6 +92,9 @@ public sealed partial class MainWindow : Window
     // True only while a settling (non-preview) seek is awaiting confirmation -
     // see ApplyTimelineSeekAsync and SyncPlaybackPosition.
     private bool _editorSeekInFlight;
+    // Separate visual resume state from ViewModel.IsPlaying. A playing scrub
+    // deliberately sets that property false while the final seek settles.
+    private bool _editorSeekVisualResumePlayback;
     private readonly DispatcherTimer _keyboardSeekSettleTimer;
     private bool _keyboardSeekActive;
     private bool _keyboardSeekWasPlaying;
@@ -9884,7 +9887,7 @@ public sealed partial class MainWindow : Window
             // A click seek can wait for LibVLC landing plus cold PCM. Keep
             // rendering the local playhead clock during that wait: returning
             // here froze the white seeker until the final commit jumped it.
-            if (ViewModel.IsPlaying)
+            if (_editorSeekVisualResumePlayback)
             {
                 ViewModel.CurrentTime = SmoothPlaybackPosition();
                 UpdateTimelineChrome();
@@ -9992,7 +9995,7 @@ public sealed partial class MainWindow : Window
         ViewModel.CurrentTime = time;
         // Render from requested position immediately. The coordinator will
         // rebase this from its confirmed landing once video commits.
-        if (resumePlayback && ViewModel.IsPlaying) StartPlayheadClock(time);
+        if (resumePlayback) StartPlayheadClock(time);
         // Start the chunk for the landing point extracting before the video
         // seek, not after it - a cold chunk reads as silence (see
         // ChunkedAudioReader.Read), which would look exactly like the audio
@@ -10013,6 +10016,8 @@ public sealed partial class MainWindow : Window
                 // timer off the position for the seek's duration without
                 // restoring the drag.
                 _editorSeekInFlight = true;
+                _editorSeekVisualResumePlayback = resumePlayback;
+                if (resumePlayback) _playbackTimer.Start();
                 didResume = await _playback.SeekAsync(time, resumePlayback, seekCts.Token);
             }
             catch (OperationCanceledException)
@@ -10021,7 +10026,11 @@ public sealed partial class MainWindow : Window
             }
             finally
             {
-                if (_editorSeekCts == seekCts) _editorSeekInFlight = false;
+                if (_editorSeekCts == seekCts)
+                {
+                    _editorSeekInFlight = false;
+                    _editorSeekVisualResumePlayback = false;
+                }
             }
         }
         if (_editorSeekCts != seekCts) return;
