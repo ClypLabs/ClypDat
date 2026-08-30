@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using System.Text.Json;
 using System.IO.Pipes;
+using System.Text.Json;
 using Avalonia.Threading;
 using ClypDat.Capture.Abstractions;
 
@@ -8,69 +8,65 @@ namespace ClypDat.App.Services;
 
 internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IReplayCaptureWorkerEvents, IReplayCaptureWorkerControl
 {
+    private static readonly TimeSpan[] RetryDelays = [TimeSpan.Zero, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4)];
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private readonly object _gate = new();
     private readonly Dictionary<Guid, TaskCompletionSource<JsonElement>> _pending = new();
+    private readonly List<DateTime> _failures = new();
     private NamedPipeClientStream? _pipe;
     private Process? _process;
-    private Task? _reader;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Worker");
-    private bool _isRecording;
+    private CancellationTokenSource? _recoveryCancellation;
+    private Task? _recovery;
+    private long _generation;
+    private long _lostGeneration = -1;
+    private double _durationSeconds;
+    private bool _isRecording, _desiredRecording, _paused;
+    private int? _frameRate;
+    private string _hotkey = string.Empty;
     private volatile bool _disposed;
 
     public CaptureWorkerProxy(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
-
     public bool IsRecording => _isRecording;
-    public TimeSpan Duration => TimeSpan.FromSeconds(Math.Max(0, _health.UpdatedUtc == default ? 0 : _durationSeconds));
-    private double _durationSeconds;
+    public TimeSpan Duration => TimeSpan.FromSeconds(Math.Max(0, _durationSeconds));
+    public bool LastSaveVideoWasFrozen => false;
     public event EventHandler? RecordingStopped;
     public event EventHandler? RecordingStateChanged;
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
     public event EventHandler? SaveStarted;
     public event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     public ReplayCaptureHealth GetHealthSnapshot() => _health;
-    public bool LastSaveVideoWasFrozen => false;
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        CancelRecovery(resetFailures: true);
+        _desiredRecording = true;
         await EnsureAttachedAsync(cancellationToken);
-
         var config = _configProvider();
-        var attach = await AttachConfigAsync(config, cancellationToken);
+        var attach = await AttachAsync(config, cancellationToken);
         if (!string.Equals(attach.ConfigIdentity, ReplayBufferConfigIdentity.Serialize(config), StringComparison.Ordinal))
         {
-            if (attach.Recording)
-            {
-                var stop = await SendAsync<CaptureWorkerAck>("stop", new { }, cancellationToken);
-                EnsureAccepted(stop, "stop capture before applying new configuration");
-                _isRecording = false;
-                RecordingStateChanged?.Invoke(this, EventArgs.Empty);
-            }
-
-            attach = await AttachConfigAsync(config, cancellationToken);
-            if (!string.Equals(attach.ConfigIdentity, ReplayBufferConfigIdentity.Serialize(config), StringComparison.Ordinal))
-                throw new InvalidOperationException("Capture worker did not apply requested capture configuration.");
+            if (attach.Recording) Accept(await SendAsync<CaptureWorkerAck>("stop", new { }, cancellationToken), "stop capture before applying new configuration");
+            attach = await AttachAsync(config, cancellationToken);
+            if (!string.Equals(attach.ConfigIdentity, ReplayBufferConfigIdentity.Serialize(config), StringComparison.Ordinal)) throw new InvalidOperationException("Capture worker did not apply requested capture configuration.");
         }
-
-        ApplyAttachState(attach, config);
-        if (_isRecording) return;
-        var start = await SendAsync<CaptureWorkerAck>("start", new { }, cancellationToken);
-        EnsureAccepted(start, "start capture");
-        _isRecording = true;
-        RecordingStateChanged?.Invoke(this, EventArgs.Empty);
+        ApplyAttach(attach, config, false);
+        if (!_isRecording) { Accept(await SendAsync<CaptureWorkerAck>("start", new { }, cancellationToken), "start capture"); SetRecording(true); }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        if (!await TryEnsureAttachedAsync(cancellationToken)) return;
-        await SendAsync<CaptureWorkerAck>("stop", new { }, cancellationToken);
-        _isRecording = false;
-        RecordingStateChanged?.Invoke(this, EventArgs.Empty);
+        _desiredRecording = false;
+        CancelRecovery(false);
+        if (_pipe?.IsConnected == true) try { Accept(await SendAsync<CaptureWorkerAck>("stop", new { }, cancellationToken), "stop capture"); } catch (IOException) { }
+        SetRecording(false);
     }
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
+        if (_recovery is { IsCompleted: false }) throw new InvalidOperationException("Replay is recovering; retry after recording resumes.");
         await EnsureAttachedAsync(cancellationToken);
         var result = await SendAsync<CaptureWorkerSaveResult>("save", new CaptureWorkerSaveRequest(outputFolder, titleOverride, clipWindow), cancellationToken);
         if (!string.IsNullOrWhiteSpace(result.Error)) throw new InvalidOperationException(result.Error);
@@ -78,217 +74,162 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         return result.Path;
     }
 
-    public void SetCapturePaused(bool paused)
-        => _ = SendBestEffortAsync("pause", new { paused });
-
-    public void RequestFrameRate(int frameRate)
-        => _ = SendBestEffortAsync("frame-rate", new { frameRate });
+    public void SetCapturePaused(bool paused) { _paused = paused; _ = SendBestEffortAsync("pause", new { paused }); }
+    public void RequestFrameRate(int frameRate) { _frameRate = frameRate; _ = SendBestEffortAsync("frame-rate", new { frameRate }); }
 
     public async Task ShutdownWorkerAsync(CancellationToken cancellationToken = default)
     {
-        if (!await TryEnsureAttachedAsync(cancellationToken)) return;
-        await SendAsync<CaptureWorkerAck>("shutdown", new { }, cancellationToken);
-        _isRecording = false;
-        Disconnect();
+        _desiredRecording = false; CancelRecovery(false);
+        if (_pipe?.IsConnected == true) try { await SendAsync<CaptureWorkerAck>("shutdown", new { }, cancellationToken); } catch (IOException) { }
+        SetRecording(false); Disconnect();
     }
 
     public async Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default)
-    {
-        await EnsureAttachedAsync(cancellationToken);
-        await SendAsync<CaptureWorkerAck>("hotkey", new { hotkey }, cancellationToken);
-    }
+    { _hotkey = hotkey; await EnsureAttachedAsync(cancellationToken); await SendAsync<CaptureWorkerAck>("hotkey", new { hotkey }, cancellationToken); }
 
-    public void Dispose()
-    {
-        // SendBestEffortAsync is fire-and-forget and may be awaiting either gate right
-        // now; disposing them underneath it throws ObjectDisposedException on a task
-        // nothing observes. _disposed is set first so new work bails out, and the gates
-        // are deliberately NOT disposed - a SemaphoreSlim holds no unmanaged handle
-        // unless its AvailableWaitHandle was touched, which this type never does, so
-        // leaving them to the GC is free and removes the race entirely.
-        _disposed = true;
-        Disconnect();
-    }
+    public void Dispose() { _disposed = true; _desiredRecording = false; CancelRecovery(false); Disconnect(); }
 
-    private async Task EnsureAttachedAsync(CancellationToken cancellationToken)
+    private async Task EnsureAttachedAsync(CancellationToken cancellationToken, bool startProcess = true)
     {
         if (_pipe?.IsConnected == true) return;
         await _connectionGate.WaitAsync(cancellationToken);
         try
         {
             if (_pipe?.IsConnected == true) return;
-            StartWorkerProcessIfNeeded();
-            _pipe = CaptureWorkerPipe.CreateClient();
-            await _pipe.ConnectAsync(5000, cancellationToken);
-            _reader = Task.Run(() => ReadLoopAsync(_pipe));
+            if (startProcess) StartWorker();
+            var pipe = CaptureWorkerPipe.CreateClient();
+            await pipe.ConnectAsync(5000, cancellationToken);
+            _pipe = pipe;
+            var generation = Volatile.Read(ref _generation);
+            _ = Task.Run(() => ReadLoopAsync(pipe, generation));
             await SendAsync<CaptureWorkerHandshake>("handshake", new { ClientId = Environment.ProcessId }, cancellationToken);
-            var config = _configProvider();
-            var attach = await AttachConfigAsync(config, cancellationToken);
-            ApplyAttachState(attach, config);
+            var config = _configProvider(); var attach = await AttachAsync(config, cancellationToken);
+            ApplyAttach(attach, config, _desiredRecording);
             foreach (var save in attach.UnacknowledgedSaves)
-            {
-                SaveCompleted?.Invoke(this, new ReplaySaveCompleted(save.Path, save.Title, save.CompletedUtc, save.Error));
-                await SendAsync<CaptureWorkerAck>("ack-save", new { save.Path }, cancellationToken);
-            }
+            { SaveCompleted?.Invoke(this, new ReplaySaveCompleted(save.Path, save.Title, save.CompletedUtc, save.Error)); await SendAsync<CaptureWorkerAck>("ack-save", new { save.Path }, cancellationToken); }
         }
         finally { _connectionGate.Release(); }
     }
 
-    private async Task<CaptureWorkerAttachResponse> AttachConfigAsync(ReplayBufferConfig config, CancellationToken cancellationToken)
-        => await SendAsync<CaptureWorkerAttachResponse>("attach", config, cancellationToken);
-
-    private void ApplyAttachState(CaptureWorkerAttachResponse attach, ReplayBufferConfig config)
+    private Task<CaptureWorkerAttachResponse> AttachAsync(ReplayBufferConfig config, CancellationToken token) => SendAsync<CaptureWorkerAttachResponse>("attach", config, token);
+    private void ApplyAttach(CaptureWorkerAttachResponse attach, ReplayBufferConfig config, bool preserveRecording)
     {
-        _isRecording = attach.Recording;
         _durationSeconds = config.DurationSeconds;
-        RecordingStateChanged?.Invoke(this, EventArgs.Empty);
-        PublishHealth(attach.Health);
+        if (!preserveRecording) SetRecording(attach.Recording);
+        PublishHealth(attach.Health with { RecoveryAttempt = _health.RecoveryAttempt, RecentWorkerFailureCount = _health.RecentWorkerFailureCount, LastWorkerExitCode = _health.LastWorkerExitCode });
     }
+    private static void Accept(CaptureWorkerAck ack, string operation) { if (!ack.Accepted) throw new InvalidOperationException($"Capture worker failed to {operation}: {ack.Error}"); }
 
-    private static void EnsureAccepted(CaptureWorkerAck ack, string operation)
+    private async Task<T> SendAsync<T>(string type, object payload, CancellationToken token)
     {
-        if (!ack.Accepted) throw new InvalidOperationException($"Capture worker failed to {operation}: {ack.Error}");
-    }
-
-    private async Task<bool> TryEnsureAttachedAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await EnsureAttachedAsync(cancellationToken);
-            return true;
-        }
-        catch (Exception error)
-        {
-            AppLog.Info($"Capture worker unavailable: {error.Message}");
-            Disconnect();
-            return false;
-        }
-    }
-
-    private async Task<T> SendAsync<T>(string type, object payload, CancellationToken cancellationToken)
-    {
-        // Snapshot the pipe: the read loop nulls _pipe on disconnect, and Disconnect can
-        // dispose it while this send is in flight. ObjectDisposedException is surfaced as
-        // IOException so callers see the one failure shape they already handle.
         if (_disposed) throw new IOException("Capture worker proxy is disposed.");
         var pipe = _pipe ?? throw new IOException("Capture worker pipe is not connected.");
-        var requestId = Guid.NewGuid();
-        var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
-        lock (_pending) _pending[requestId] = completion;
+        var id = Guid.NewGuid(); var completion = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_pending) _pending[id] = completion;
         try
         {
-            await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                await CaptureWorkerPipe.WriteAsync(pipe, type, requestId, payload, cancellationToken).ConfigureAwait(false);
-            }
-            catch (ObjectDisposedException error)
-            {
-                throw new IOException("Capture worker pipe was disposed mid-send.", error);
-            }
-            finally
-            {
-                _writeGate.Release();
-            }
-
-            var result = await completion.Task.WaitAsync(cancellationToken);
+            await _writeGate.WaitAsync(token); try { await CaptureWorkerPipe.WriteAsync(pipe, type, id, payload, token); } catch (ObjectDisposedException error) { throw new IOException("Capture worker pipe was disposed mid-send.", error); } finally { _writeGate.Release(); }
+            var result = await completion.Task.WaitAsync(token);
             return result.Deserialize<T>() ?? throw new InvalidDataException($"Capture worker returned invalid {type} response.");
         }
-        finally
-        {
-            lock (_pending) _pending.Remove(requestId);
-        }
+        finally { lock (_pending) _pending.Remove(id); }
     }
 
     private async Task SendBestEffortAsync(string type, object payload)
     {
-        if (_disposed) return;
-        try
-        {
-            if (!await TryEnsureAttachedAsync(CancellationToken.None)) return;
-            await SendAsync<CaptureWorkerAck>(type, payload, CancellationToken.None);
-        }
+        if (_disposed || _recovery is { IsCompleted: false }) return;
+        try { await EnsureAttachedAsync(CancellationToken.None); await SendAsync<CaptureWorkerAck>(type, payload, CancellationToken.None); }
         catch (Exception error) { AppLog.Info($"Capture worker {type} failed: {error.Message}"); }
     }
 
-    private async Task ReadLoopAsync(Stream pipe)
+    private async Task ReadLoopAsync(Stream pipe, long generation)
     {
         try
         {
-            while (pipe is { CanRead: true })
+            while (true)
             {
-                var message = await CaptureWorkerPipe.ReadAsync(pipe, CancellationToken.None);
-                if (message is null) break;
-                if (message.Type == "response")
-                {
-                    TaskCompletionSource<JsonElement>? completion;
-                    lock (_pending) _pending.TryGetValue(message.RequestId, out completion);
-                    completion?.TrySetResult(message.Payload);
-                    continue;
-                }
-
+                var message = await CaptureWorkerPipe.ReadAsync(pipe, CancellationToken.None); if (message is null) break;
+                if (message.Type == "response") { TaskCompletionSource<JsonElement>? completion; lock (_pending) _pending.TryGetValue(message.RequestId, out completion); completion?.TrySetResult(message.Payload); continue; }
                 switch (message.Type)
                 {
-                    case "health":
-                        var health = message.Payload.Deserialize<ReplayCaptureHealth>();
-                        if (health is not null) Dispatcher.UIThread.Post(() => PublishHealth(health));
-                        break;
-                    case "recording-stopped":
-                        Dispatcher.UIThread.Post(() =>
-                        {
-                            _isRecording = false;
-                            RecordingStateChanged?.Invoke(this, EventArgs.Empty);
-                            RecordingStopped?.Invoke(this, EventArgs.Empty);
-                        });
-                        break;
-                    case "save-started":
-                        Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty));
-                        break;
-                    case "save-completed":
-                        var completed = message.Payload.Deserialize<CaptureWorkerSaveResult>();
-                        if (completed is not null)
-                        {
-                            Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(completed.Path, completed.Title, completed.CompletedUtc, completed.Error)));
-                            _ = SendBestEffortAsync("ack-save", new { completed.Path });
-                        }
-                        break;
+                    case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => PublishHealth(health)); break;
+                    case "recording-stopped": Dispatcher.UIThread.Post(() => { if (!_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
+                    case "save-started": Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty)); break;
+                    case "save-completed": var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (complete is not null) { Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(complete.Path, complete.Title, complete.CompletedUtc, complete.Error))); _ = SendBestEffortAsync("ack-save", new { complete.Path }); } break;
                 }
             }
         }
-        catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidDataException)
-        {
-            AppLog.Info($"Capture worker connection lost: {error.Message}");
-        }
-        finally
-        {
-            lock (_pending)
-            {
-                foreach (var pending in _pending.Values) pending.TrySetException(new IOException("Capture worker connection closed."));
-            }
-            if (ReferenceEquals(_pipe, pipe)) _pipe = null;
-        }
+        catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidDataException) { AppLog.Info($"Capture worker connection lost: {error.Message}"); }
+        finally { FailPending(); if (ReferenceEquals(_pipe, pipe)) _pipe = null; BeginRecovery(generation, "pipe closed", ExitCode()); }
     }
 
-    private void PublishHealth(ReplayCaptureHealth? health)
-    {
-        if (health is null) return;
-        _health = health;
-        HealthChanged?.Invoke(this, health);
-    }
-
-    private void StartWorkerProcessIfNeeded()
+    private void StartWorker()
     {
         if (_process is { HasExited: false }) return;
         var path = Environment.ProcessPath ?? throw new InvalidOperationException("ClypDat process path unavailable.");
-        var info = new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true };
-        info.ArgumentList.Add("--capture-worker");
-        _process = Process.Start(info) ?? throw new InvalidOperationException("Capture worker did not start.");
+        var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true, ArgumentList = { "--capture-worker" } }) ?? throw new InvalidOperationException("Capture worker did not start.");
+        var generation = Interlocked.Increment(ref _generation); _lostGeneration = -1; _process = process;
+        process.EnableRaisingEvents = true; process.Exited += (_, _) => BeginRecovery(generation, "process exited", ExitCode(process));
     }
 
-    private void Disconnect()
+    private void BeginRecovery(long generation, string reason, int? exitCode)
     {
-        try { _pipe?.Dispose(); } catch { }
-        _pipe = null;
-        _reader = null;
+        if (_disposed || !_desiredRecording || generation != Volatile.Read(ref _generation)) return;
+        lock (_gate)
+        {
+            if (_lostGeneration == generation || _recovery is { IsCompleted: false }) return;
+            _lostGeneration = generation; _recoveryCancellation?.Cancel(); _recoveryCancellation = new CancellationTokenSource();
+            _recovery = RecoverAsync(generation, reason, exitCode, _recoveryCancellation.Token);
+        }
     }
+
+    private async Task RecoverAsync(long lostGeneration, string reason, int? exitCode, CancellationToken token)
+    {
+        var now = DateTime.UtcNow; int count;
+        lock (_gate) { _failures.RemoveAll(time => now - time > TimeSpan.FromMinutes(2)); _failures.Add(now); count = _failures.Count; }
+        AppLog.Info($"Capture worker lost ({reason}, exit={exitCode?.ToString() ?? "unknown"}), failures={count}.");
+        if (count >= 5) { Breaker(count, exitCode); return; }
+        RecoveryHealth(0, count, exitCode, DateTime.UtcNow, false, $"Capture worker lost: {reason}");
+        try
+        {
+            using var reconnect = CancellationTokenSource.CreateLinkedTokenSource(token); reconnect.CancelAfter(TimeSpan.FromSeconds(2));
+            try { await EnsureAttachedAsync(reconnect.Token, false); await RestoreAsync(token); AppLog.Info("Capture worker IPC reconnect succeeded."); return; }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+            catch (Exception error) { AppLog.Info($"Capture worker IPC reconnect failed: {error.Message}"); }
+            KillWorker();
+            for (var attempt = 0; attempt < RetryDelays.Length; attempt++)
+            {
+                var delay = RetryDelays[attempt]; RecoveryHealth(attempt + 1, count, exitCode, DateTime.UtcNow + delay, false, $"Restarting capture worker in {delay.TotalSeconds:0}s.");
+                if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
+                // This recovery owns replacement generations too. Do not
+                // abandon retry merely because StartWorker advanced generation.
+                if (!_desiredRecording) return;
+                try { StartWorker(); await EnsureAttachedAsync(token); await RestoreAsync(token); AppLog.Info("Capture worker recovery succeeded."); return; }
+                catch (Exception error) { AppLog.Info($"Capture worker restart attempt {attempt + 1} failed: {error.Message}"); KillWorker(); }
+            }
+            Breaker(count, exitCode);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RestoreAsync(CancellationToken token)
+    {
+        var config = _configProvider(); var attach = await AttachAsync(config, token); ApplyAttach(attach, config, true);
+        await SendAsync<CaptureWorkerAck>("hotkey", new { hotkey = string.IsNullOrWhiteSpace(_hotkey) ? config.SaveReplayHotkey : _hotkey }, token);
+        await SendAsync<CaptureWorkerAck>("pause", new { paused = _paused }, token);
+        if (_frameRate is int frameRate) await SendAsync<CaptureWorkerAck>("frame-rate", new { frameRate }, token);
+        if (_desiredRecording && !attach.Recording) Accept(await SendAsync<CaptureWorkerAck>("start", new { }, token), "restart capture");
+        if (_desiredRecording) SetRecording(true);
+    }
+
+    private void Breaker(int count, int? exitCode)
+    { _desiredRecording = false; RecoveryHealth(RetryDelays.Length, count, exitCode, null, true, "Capture worker crashed repeatedly."); Dispatcher.UIThread.Post(() => { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); }); AppLog.Info("Capture worker recovery breaker opened."); }
+    private void RecoveryHealth(int attempt, int count, int? exitCode, DateTime? retry, bool breaker, string failure) => PublishHealth(_health with { State = breaker ? ReplayCaptureState.Failed : ReplayCaptureState.Recovering, RecoveryAttempt = attempt, RecentWorkerFailureCount = count, LastWorkerExitCode = exitCode, NextWorkerRetryUtc = retry, WorkerCrashLoopDetected = breaker, LastFailure = failure, UpdatedUtc = DateTime.UtcNow });
+    private void SetRecording(bool value) { if (_isRecording == value) return; _isRecording = value; RecordingStateChanged?.Invoke(this, EventArgs.Empty); }
+    private void PublishHealth(ReplayCaptureHealth health) { _health = health; HealthChanged?.Invoke(this, health); }
+    private void FailPending() { lock (_pending) foreach (var item in _pending.Values) item.TrySetException(new IOException("Capture worker connection closed.")); }
+    private int? ExitCode(Process? process = null) { try { return (process ?? _process) is { HasExited: true } item ? item.ExitCode : null; } catch { return null; } }
+    private void KillWorker() { var process = _process; if (process is null) return; try { if (!process.HasExited) process.Kill(true); } catch { } try { process.Dispose(); } catch { } if (ReferenceEquals(_process, process)) _process = null; Disconnect(); }
+    private void CancelRecovery(bool resetFailures) { lock (_gate) { _recoveryCancellation?.Cancel(); if (resetFailures) _failures.Clear(); } }
+    private void Disconnect() { try { _pipe?.Dispose(); } catch { } _pipe = null; }
 }

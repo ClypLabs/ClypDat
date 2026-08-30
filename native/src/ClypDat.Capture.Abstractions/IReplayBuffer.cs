@@ -11,7 +11,10 @@ public enum ReplayCaptureState
     Healthy,
     Degraded,
     Failed,
-    Stopped
+    Stopped,
+    // Worker process or its IPC channel vanished. The proxy keeps replay
+    // logically armed while it reconnects or starts a replacement worker.
+    Recovering
 }
 
 public enum ReplayCaptureStartupPhase
@@ -111,6 +114,13 @@ public sealed record ReplayCaptureHealth(
     public int ConfiguredFrameRate { get; init; }
     public string EncoderInputPath { get; init; } = string.Empty;
     public bool FrameRateProtectionActive { get; init; }
+    // Worker supervision fields. Optional init properties keep every local
+    // backend and existing protocol payload source-compatible.
+    public int RecoveryAttempt { get; init; }
+    public int RecentWorkerFailureCount { get; init; }
+    public int? LastWorkerExitCode { get; init; }
+    public DateTime? NextWorkerRetryUtc { get; init; }
+    public bool WorkerCrashLoopDetected { get; init; }
 
     // WGC and hook transport counters remain separate from InputFrameRate so a
     // support bundle can distinguish compositor cadence from a game-present

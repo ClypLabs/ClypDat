@@ -105,6 +105,7 @@ public sealed partial class MainWindow : Window
     // both chosen to sit above a seek cost that no longer exists.
     private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(33);
     private IReplayBuffer? _replayBuffer;
+    private bool _workerCrashMessageShown;
     private ReplayBufferConfig? _replayConfigSnapshot;
     private ReplayBufferConfig? _activeReplayConfigSnapshot;
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
@@ -873,6 +874,27 @@ public sealed partial class MainWindow : Window
         _encoderTuning.OnHealth(health);
         ViewModel?.UpdateReplayStorageHealth(health.Storage);
         ViewModel?.UpdateReplayEncoderHealth(health);
+        if (ViewModel is null) return;
+        if (health.State == ReplayCaptureState.Recovering)
+        {
+            // Proxy keeps IsRecording logically true while worker reconnects.
+            ViewModel.IsReplayRecording = true;
+            ViewModel.RecorderStatus = "Replay Recovering";
+            return;
+        }
+        if (health.WorkerCrashLoopDetected)
+        {
+            CaptureBackgroundWorkGate.EndCapture();
+            ViewModel.IsReplayRecording = false;
+            ViewModel.ReplayBufferEnabled = false;
+            if (!_workerCrashMessageShown)
+            {
+                _workerCrashMessageShown = true;
+                _ = ShowMessageAsync("Replay stopped", "Capture worker crashed repeatedly and automatic recovery was stopped. Turn Replay Buffer off and on to retry.");
+            }
+            return;
+        }
+        _workerCrashMessageShown = false;
         if (ViewModel is not null && ViewModel.IsReplayRecording)
             ViewModel.RecorderStatus = ViewModel.IsReplayArming ? "Replay Arming" : "Replay On";
     }
