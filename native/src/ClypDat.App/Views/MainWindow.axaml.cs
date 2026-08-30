@@ -3416,8 +3416,14 @@ public sealed partial class MainWindow : Window
         {
             Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
             Height = previewHeight,
-            Children = { thumbnail, preview, pictureChrome }
+            Children = { thumbnail, preview }
         };
+        var selectionOverlay = new Border
+        {
+            Background = AppThemeService.Brush("Surface_661A2040", "#661A2040"),
+            IsHitTestVisible = false
+        };
+        picture.Children.Add(selectionOverlay);
         var selectionOrder = new TextBlock
         {
             Foreground = Brushes.White,
@@ -3435,6 +3441,7 @@ public sealed partial class MainWindow : Window
             }
         };
         picture.Children.Add(selectionOrder);
+        picture.Children.Add(pictureChrome);
 
         var timeRow = new StackPanel
         {
@@ -3519,6 +3526,7 @@ public sealed partial class MainWindow : Window
         {
             check.IsChecked = entry.IsSelected;
             check.IsVisible = entry.IsCheckVisible;
+            selectionOverlay.IsVisible = entry.IsSelected;
             selectionOrder.Text = entry.SelectionOrder.ToString();
             selectionOrder.IsVisible = entry.HasSelectionOrder;
             hoverOutline.IsVisible = entry.IsSelected || entry.IsHovered;
