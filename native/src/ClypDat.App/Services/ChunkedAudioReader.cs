@@ -122,6 +122,16 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         ScheduleExtraction(chunkIndex - 1, priority: false);
     }
 
+    // A waiter never owns extraction cancellation: multiple seeks/readers can
+    // share this flight, so cancelling one seek must not starve another.
+    internal async Task<bool> EnsureReadyAsync(TimeSpan time, CancellationToken cancellationToken = default)
+    {
+        var chunkIndex = (int)(Math.Max(0, time.TotalSeconds) / ChunkSeconds);
+        if (AudioChunkCache.Contains(_cacheKey, chunkIndex)) return true;
+        await ScheduleExtraction(chunkIndex, priority: true).WaitAsync(cancellationToken).ConfigureAwait(false);
+        return AudioChunkCache.Contains(_cacheKey, chunkIndex);
+    }
+
     public int Read(float[] buffer, int offset, int count)
     {
         lock (_readerLock)
@@ -267,14 +277,14 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         _openChunkIndex = -1;
     }
 
-    private void ScheduleExtraction(int chunkIndex, bool priority)
+    private Task ScheduleExtraction(int chunkIndex, bool priority)
     {
-        if (chunkIndex < 0 || (long)chunkIndex * ChunkFrames >= _totalFrames) return;
-        if (AudioChunkCache.Contains(_cacheKey, chunkIndex)) return;
+        if (chunkIndex < 0 || (long)chunkIndex * ChunkFrames >= _totalFrames) return Task.CompletedTask;
+        if (AudioChunkCache.Contains(_cacheKey, chunkIndex)) return Task.CompletedTask;
 
         var isNetwork = PlaybackSession.IsNetworkPath(_inputPath);
         var flightKey = $"{_cacheKey}-c{chunkIndex:0000}";
-        InFlightExtractions.GetOrAdd(flightKey, _ =>
+        return InFlightExtractions.GetOrAdd(flightKey, _ =>
         {
             if (priority) Interlocked.Increment(ref _pendingPriority);
             return Task.Run(async () =>
@@ -289,15 +299,21 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
                         await Task.Delay(20).ConfigureAwait(false);
                     }
 
-                    await ExtractionGate.WaitAsync();
-                    if (isNetwork) await NetworkExtractionGate.WaitAsync();
+                    var queueClock = Stopwatch.StartNew();
+                    await ExtractionGate.WaitAsync().ConfigureAwait(false);
+                    var networkEntered = false;
                     try
                     {
+                        if (isNetwork)
+                        {
+                            await NetworkExtractionGate.WaitAsync().ConfigureAwait(false);
+                            networkEntered = true;
+                        }
                         if (!AudioChunkCache.Contains(_cacheKey, chunkIndex)) await ExtractChunkAsync(chunkIndex);
                     }
                     finally
                     {
-                        if (isNetwork) NetworkExtractionGate.Release();
+                        if (networkEntered) NetworkExtractionGate.Release();
                         ExtractionGate.Release();
                     }
                 }
@@ -360,16 +376,26 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             var pcmBuffer = new byte[81920];
             int pcmRead;
             var truncated = false;
-            while ((pcmRead = await process.StandardOutput.BaseStream.ReadAsync(pcmBuffer)) > 0)
+            using var timeoutCts = new CancellationTokenSource(PlaybackSession.IsNetworkPath(_inputPath) ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(10));
+            try
             {
-                if (pcm.Length + pcmRead > MaximumChunkPcmBytes)
+                while ((pcmRead = await process.StandardOutput.BaseStream.ReadAsync(pcmBuffer, timeoutCts.Token)) > 0)
                 {
-                    truncated = true;
-                    try { process.Kill(entireProcessTree: true); } catch { }
-                    break;
-                }
+                    if (pcm.Length + pcmRead > MaximumChunkPcmBytes)
+                    {
+                        truncated = true;
+                        try { process.Kill(entireProcessTree: true); } catch { }
+                        break;
+                    }
 
-                pcm.Write(pcmBuffer, 0, pcmRead);
+                    pcm.Write(pcmBuffer, 0, pcmRead);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                AppLog.Info($"Editor audio chunk extract timeout: stream={_streamIndex}, chunk={chunkIndex}, timeoutMs={(PlaybackSession.IsNetworkPath(_inputPath) ? 30000 : 10000)}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
+                return;
             }
 
             if (truncated)

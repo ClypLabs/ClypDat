@@ -811,15 +811,15 @@ public sealed class PlaybackSession : IDisposable
                 await Task.Delay(finalRequest.QuietPeriod, cancellationToken).ConfigureAwait(false);
             }
 
-            AppLog.Debug($"Editor seek begin: requested={requested.TotalSeconds:0.###}s, vlc={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}, resume={resumePlayback}, previewRequests={finalRequest.PreviewRequestCount}, previewWrites={finalRequest.PreviewWriteCount}, coalesced={Math.Max(0, finalRequest.PreviewRequestCount - finalRequest.PreviewWriteCount)}, proactiveReset={finalRequest.RequiresDecoderReset}, generation={seekVersion}.");
+            var seekId = $"{GetHashCode():x}:{seekVersion}";
+            AppLog.Debug($"seek={seekId} preview-summary: requests={finalRequest.PreviewRequestCount}, writes={finalRequest.PreviewWriteCount}, coalesced={Math.Max(0, finalRequest.PreviewRequestCount - finalRequest.PreviewWriteCount)}, quietMs={finalRequest.QuietPeriod.TotalMilliseconds:0}.");
             var result = await _seekCoordinator.SeekAsync(
                 new PlaybackSeekTransport(this, seekVersion),
                 requested,
                 resumePlayback,
-                seekVersion,
+                seekId,
                 () => seekVersion == Interlocked.Read(ref _seekVersion),
-                cancellationToken,
-                finalRequest.RequiresDecoderReset).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
 
             if (!result.Succeeded)
             {
@@ -829,11 +829,6 @@ public sealed class PlaybackSession : IDisposable
             }
 
             _lastRequestedPosition = result.Landed;
-            if (!resumePlayback)
-            {
-                lock (_transportLock) SeekAudio(result.Landed);
-            }
-
             AppLog.Debug($"Editor seek end: requested={requested.TotalSeconds:0.###}s, landed={result.Landed.TotalSeconds:0.###}s, audioAnchor={result.AudioAnchor.TotalSeconds:0.###}s, rollConfirmed={result.Resumed}, state={VideoPlayer.State}, resume={resumePlayback}, generation={seekVersion}.");
             return !resumePlayback || result.Resumed;
         }
@@ -1354,6 +1349,25 @@ public sealed class PlaybackSession : IDisposable
 
         public bool IsPaused => session.VideoPlayer.State == VLCState.Paused;
         public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, session.VideoPlayer.Time));
+        public int AudioTrackCount => session._audioSources.Count;
+        public double PlaybackRate => session._playbackRate;
+        public string VideoState => session.VideoPlayer.State.ToString();
+        public bool IsNetworkSource => IsNetworkPath(session._audioInputPath);
+
+        public async Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId)
+        {
+            var clock = Stopwatch.StartNew();
+            var readers = session._audioSources.Values.Select(source => source.Reader).ToArray();
+            if (readers.Length == 0) return new AudioPreparationResult(0, 0, false);
+            var results = await Task.WhenAll(readers.Select(async reader =>
+            {
+                try { return await reader.EnsureReadyAsync(target).ConfigureAwait(false); }
+                catch (Exception error) { AppLog.Error($"seek={seekId} audio-prepare track failed: {error.Message}"); return false; }
+            })).ConfigureAwait(false);
+            var ready = results.Count(result => result);
+            AppLog.Debug($"seek={seekId} audio-prepare: scheduled={readers.Length}, ready={ready}, failed={results.Length-ready}, pending=0, ms={clock.ElapsedMilliseconds}.");
+            return new AudioPreparationResult(ready, results.Length - ready, false);
+        }
 
         public void StopAudio()
         {
@@ -1404,25 +1418,48 @@ public sealed class PlaybackSession : IDisposable
             }
         }
 
-        public void ResumeVideo()
+        public void CommitPaused(TimeSpan position)
         {
-            lock (session._transportLock) session.VideoPlayer.SetPause(false);
+            lock (session._transportLock)
+            {
+                session.SeekAudio(position);
+                session.StopAudioClockMonitoring();
+                session._audioOutput?.Stop();
+                session.VideoPlayer.SetPause(true);
+            }
         }
 
-        public void AnchorAudio(TimeSpan position)
+        public void CommitPlaying(TimeSpan position, string seekId)
         {
             lock (session._transportLock)
             {
                 session.EnsureAudioOutputConnected();
                 session.SeekAudio(position);
                 _audioAnchor = position;
+                session.VideoPlayer.SetPause(false);
+                session.StartAudioAt(_audioAnchor, generation);
             }
         }
 
-        public void StartAudio()
+        public void CommitVideoOnly()
         {
-            lock (session._transportLock) session.StartAudioAt(_audioAnchor, generation);
+            lock (session._transportLock) session.VideoPlayer.SetPause(false);
         }
+
+        public void StartDeferredAudio(TimeSpan position, string seekId)
+        {
+            lock (session._transportLock)
+            {
+                if (generation != Interlocked.Read(ref session._seekVersion) || !session._shouldPlay) return;
+                session.EnsureAudioOutputConnected();
+                session.SeekAudio(position);
+                session.StartAudioAt(position, generation);
+            }
+        }
+
+        public void LogDebug(string line) => AppLog.Debug(line);
+        public void LogInfo(string line) => AppLog.Info(line);
+        public void LogError(string line) => AppLog.Error(line);
     }
 
     private void EnsureAudioOutputConnected()

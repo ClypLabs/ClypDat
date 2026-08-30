@@ -64,6 +64,8 @@ public sealed partial class MainWindow : Window
     // after the trim point" lands well clear of this.
     private static readonly TimeSpan TrimBoundaryTolerance = TimeSpan.FromMilliseconds(80);
     private bool _timelineWasPlayingBeforeDrag;
+    private long _timelineGestureGeneration;
+    private TimelineGesture? _timelineGesture;
     private const double TimelineMinimumZoom = 1;
     private const double TimelineMaximumZoom = 8;
     private const double TimelineZoomStep = 1.25;
@@ -6371,6 +6373,7 @@ public sealed partial class MainWindow : Window
         // Scrubbing the surface genuinely does mean "go where I clicked".
         _trimDragGrabOffsetMs = 0;
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
+        _timelineGesture = new TimelineGesture(_timelineDragMode, _timelineWasPlayingBeforeDrag, ++_timelineGestureGeneration);
         _endedAtTrimBoundary = false;
         BeginTimelineGesture(e);
         UpdateTimelineFromPointer(e, TimelineDragMode.Playhead);
@@ -6385,6 +6388,7 @@ public sealed partial class MainWindow : Window
         _timelineDragMode = TimelineDragMode.TrimStart;
         _trimDragGrabOffsetMs = TrimGrabOffsetMs(e, ViewModel.TrimStart);
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
+        _timelineGesture = new TimelineGesture(_timelineDragMode, _timelineWasPlayingBeforeDrag, ++_timelineGestureGeneration);
         _endedAtTrimBoundary = false;
         BeginTimelineGesture(e, pauseNow: true);
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimStart);
@@ -6399,6 +6403,7 @@ public sealed partial class MainWindow : Window
         _timelineDragMode = TimelineDragMode.TrimEnd;
         _trimDragGrabOffsetMs = TrimGrabOffsetMs(e, ViewModel.TrimEnd);
         _timelineWasPlayingBeforeDrag = ViewModel.IsPlaying;
+        _timelineGesture = new TimelineGesture(_timelineDragMode, _timelineWasPlayingBeforeDrag, ++_timelineGestureGeneration);
         _endedAtTrimBoundary = false;
         BeginTimelineGesture(e, pauseNow: true);
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimEnd);
@@ -6483,7 +6488,9 @@ public sealed partial class MainWindow : Window
     private void TimelineSurface_OnPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
         if (_timelineDragMode == TimelineDragMode.None) return;
-        var wasPlaying = _timelineWasPlayingBeforeDrag;
+        var gesture = _timelineGesture;
+        _timelineGesture = null;
+        var wasPlaying = gesture?.WasPlaying ?? _timelineWasPlayingBeforeDrag;
         _timelineDragMode = TimelineDragMode.None;
         _timelineWasPlayingBeforeDrag = false;
         _timelineGesturePaused = false;
@@ -6494,8 +6501,10 @@ public sealed partial class MainWindow : Window
     private async void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (_timelineDragMode == TimelineDragMode.None) return;
-        var mode = _timelineDragMode;
-        var wasPlaying = _timelineWasPlayingBeforeDrag;
+        var gesture = _timelineGesture;
+        _timelineGesture = null;
+        var mode = gesture?.Mode ?? _timelineDragMode;
+        var wasPlaying = gesture?.WasPlaying ?? _timelineWasPlayingBeforeDrag;
         UpdateTimelineFromPointer(e, _timelineDragMode);
 
         // Drag mode/capture must clear BEFORE the seek await below, not after -
@@ -10176,6 +10185,8 @@ public sealed partial class MainWindow : Window
         TrimStart,
         TrimEnd
     }
+
+    private readonly record struct TimelineGesture(TimelineDragMode Mode, bool WasPlaying, long Generation);
 
     private static async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments)
     {

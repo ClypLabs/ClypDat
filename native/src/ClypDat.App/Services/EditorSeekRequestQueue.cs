@@ -4,7 +4,6 @@ internal sealed class EditorSeekRequestQueue
 {
     internal static readonly TimeSpan PreviewInterval = TimeSpan.FromMilliseconds(100);
     internal static readonly TimeSpan FinalQuietPeriod = TimeSpan.FromMilliseconds(100);
-    internal const int StressPreviewWriteCount = 4;
     private readonly object _sync = new();
     private TimeSpan? _preview;
     private bool _finalSeekPending;
@@ -34,15 +33,14 @@ internal sealed class EditorSeekRequestQueue
             _finalSeekPending = true;
             _generation++;
             _finalSeekGeneration = _generation;
-            var quietUntil = _previewWritesSinceFinal < StressPreviewWriteCount && _lastPreviewWrite is { } lastWrite
+            var quietUntil = _lastPreviewWrite is { } lastWrite
                 ? lastWrite + FinalQuietPeriod
                 : now;
             var request = new EditorFinalSeekRequest(
                 _finalSeekGeneration,
                 _previewRequestsSinceFinal,
                 _previewWritesSinceFinal,
-                quietUntil > now ? quietUntil - now : TimeSpan.Zero,
-                _previewWritesSinceFinal >= StressPreviewWriteCount);
+                quietUntil > now ? quietUntil - now : TimeSpan.Zero);
             _previewRequestsSinceFinal = 0;
             _previewWritesSinceFinal = 0;
             _lastPreviewWrite = null;
@@ -122,5 +120,4 @@ internal readonly record struct EditorFinalSeekRequest(
     long Generation,
     int PreviewRequestCount,
     int PreviewWriteCount,
-    TimeSpan QuietPeriod,
-    bool RequiresDecoderReset);
+    TimeSpan QuietPeriod);
