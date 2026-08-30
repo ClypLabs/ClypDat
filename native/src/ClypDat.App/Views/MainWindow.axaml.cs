@@ -232,7 +232,6 @@ public sealed partial class MainWindow : Window
     // with the new width) again.
     private string? _libraryReturnAnchorPath;
     private bool _libraryReturnAnchorDirty;
-    private bool _libraryResizeAnchorRestorePending;
     private string? _libraryReturnAnchorRestorePath;
     private readonly Stopwatch _libraryReturnClock = new();
     private string? _libraryReturnSource;
@@ -1721,7 +1720,6 @@ public sealed partial class MainWindow : Window
         CaptureLibraryResizeAnchor();
         if (ViewModel?.IsLibraryVisible == true && _libraryResizeAnchorPath is not null)
         {
-            QueueLibraryResizeAnchorRestore();
             ResetLibraryResizeAnchorSettleTimer();
         }
         else if (ViewModel?.IsLibraryVisible != true && _libraryReturnAnchorPath is not null)
@@ -1836,9 +1834,6 @@ public sealed partial class MainWindow : Window
             RestoreLibraryResizeAnchor(path);
         }
 
-        if (!_libraryResizeAnchorRestorePending) return;
-        _libraryResizeAnchorRestorePending = false;
-        RestoreLibraryResizeAnchor(_libraryResizeAnchorPath);
     }
 
     private void StartLibraryReturnTiming(string source)
@@ -2008,12 +2003,6 @@ public sealed partial class MainWindow : Window
         }
 
         topLevel.RequestAnimationFrame(Step);
-    }
-
-    private void QueueLibraryResizeAnchorRestore()
-    {
-        if (_libraryResizeAnchorPath is null) return;
-        _libraryResizeAnchorRestorePending = true;
     }
 
     private void ResetLibraryResizeAnchorSettleTimer()
