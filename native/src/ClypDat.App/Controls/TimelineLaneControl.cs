@@ -20,6 +20,9 @@ public sealed class TimelineLaneControl : Control
     public static readonly StyledProperty<Bitmap?> FilmstripProperty =
         AvaloniaProperty.Register<TimelineLaneControl, Bitmap?>(nameof(Filmstrip));
 
+    public static readonly StyledProperty<int> FilmstripFrameCountProperty =
+        AvaloniaProperty.Register<TimelineLaneControl, int>(nameof(FilmstripFrameCount), MediaProbeService.FilmstripFrameCount);
+
     public static readonly StyledProperty<double> TrimStartPercentProperty =
         AvaloniaProperty.Register<TimelineLaneControl, double>(nameof(TrimStartPercent));
 
@@ -50,6 +53,12 @@ public sealed class TimelineLaneControl : Control
         set => SetValue(FilmstripProperty, value);
     }
 
+    public int FilmstripFrameCount
+    {
+        get => GetValue(FilmstripFrameCountProperty);
+        set => SetValue(FilmstripFrameCountProperty, value);
+    }
+
     public double TrimStartPercent
     {
         get => GetValue(TrimStartPercentProperty);
@@ -69,6 +78,7 @@ public sealed class TimelineLaneControl : Control
             IsVideoProperty,
             PeaksProperty,
             FilmstripProperty,
+            FilmstripFrameCountProperty,
             TrimStartPercentProperty,
             TrimEndPercentProperty);
     }
@@ -143,7 +153,7 @@ public sealed class TimelineLaneControl : Control
         var sheet = Filmstrip;
         if (sheet is null) return;
 
-        var frameCount = MediaProbeService.FilmstripFrameCount;
+        var frameCount = Math.Max(1, FilmstripFrameCount);
         var sourceFrameWidth = sheet.Size.Width / frameCount;
 
         using (context.PushClip(rect.Deflate(1)))

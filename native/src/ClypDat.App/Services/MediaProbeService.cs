@@ -792,16 +792,21 @@ public sealed class MediaProbeService
     // pointless JPEG encode/decode round-trips. Both mattered a lot more than
     // expected because this used to run on the UI thread - see the Task.Run in
     // MainWindowViewModel.StartFilmstripLoad.
-    public Task<string> EnsureFilmstripAsync(string filePath, TimeSpan duration, CancellationToken cancellationToken = default)
+    public Task<string> EnsureFilmstripAsync(
+        string filePath,
+        TimeSpan duration,
+        int frameCount = FilmstripFrameCount,
+        CancellationToken cancellationToken = default)
     {
-        var output = GetFilmstripPath(filePath);
+        frameCount = Math.Clamp(frameCount, 1, 60);
+        var output = GetFilmstripPath(filePath, frameCount);
         if (File.Exists(output)) return Task.FromResult(output);
         if (duration <= TimeSpan.Zero) return Task.FromResult(string.Empty);
         if (!HasCachedVideoStream(filePath)) return Task.FromResult(string.Empty);
 
         var job = FilmstripJobs.GetOrAdd(output, key =>
         {
-            var started = GenerateFilmstripAsync(filePath, duration, output);
+            var started = GenerateFilmstripAsync(filePath, duration, frameCount, output);
             // Detach the cleanup from the returned task so a caller cancelling
             // out never leaves a completed job cached as if still in flight.
             _ = started.ContinueWith(
@@ -816,14 +821,14 @@ public sealed class MediaProbeService
         return job.WaitAsync(cancellationToken);
     }
 
-    private static async Task<string> GenerateFilmstripAsync(string filePath, TimeSpan duration, string output)
+    private static async Task<string> GenerateFilmstripAsync(string filePath, TimeSpan duration, int frameCount, string output)
     {
         try
         {
             var arguments = new List<string> { "-y", "-v", "error" };
-            for (var i = 0; i < FilmstripFrameCount; i++)
+            for (var i = 0; i < frameCount; i++)
             {
-                var seek = (i + 0.5) / FilmstripFrameCount * duration.TotalSeconds;
+                var seek = (i + 0.5) / frameCount * duration.TotalSeconds;
                 arguments.Add("-ss");
                 arguments.Add(seek.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
                 arguments.Add("-i");
@@ -834,15 +839,15 @@ public sealed class MediaProbeService
             // width, which the JPEG encoder's 4:2:0 output rejects outright -
             // same trap EnsureThumbnailAsync documents for height.
             var filter = new System.Text.StringBuilder();
-            for (var i = 0; i < FilmstripFrameCount; i++)
+            for (var i = 0; i < frameCount; i++)
             {
                 filter.Append($"[{i}:v]scale=-2:{FilmstripFrameHeight}[f{i}];");
             }
-            for (var i = 0; i < FilmstripFrameCount; i++)
+            for (var i = 0; i < frameCount; i++)
             {
                 filter.Append($"[f{i}]");
             }
-            filter.Append($"hstack=inputs={FilmstripFrameCount}[strip]");
+            filter.Append($"hstack=inputs={frameCount}[strip]");
 
             arguments.AddRange(new[]
             {
@@ -871,14 +876,15 @@ public sealed class MediaProbeService
         }
     }
 
-    private string GetFilmstripPath(string filePath)
+    private string GetFilmstripPath(string filePath, int frameCount = FilmstripFrameCount)
     {
         // -v2: the strip is now built by one hstack pass instead of ten frame
         // grabs plus a tile pass. The old key carried no version at all, and
         // TimelineLaneControl slices the sheet by the CURRENT
         // FilmstripFrameCount - so without a bump, any change to how the sheet
         // is laid out would silently mis-slice every already-cached strip.
-        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip-v2.jpg");
+        var densitySuffix = frameCount == FilmstripFrameCount ? string.Empty : $"-{frameCount}";
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-filmstrip-v2{densitySuffix}.jpg");
     }
 
     private string GetThumbnailPath(string filePath)

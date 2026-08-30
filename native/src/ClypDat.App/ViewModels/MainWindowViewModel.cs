@@ -33,6 +33,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _waveformCts;
     private CancellationTokenSource? _thumbnailRegenCts;
     private CancellationTokenSource? _filmstripCts;
+    private int _displayedFilmstripFrameCount = MediaProbeService.FilmstripFrameCount;
+    private int _requestedFilmstripFrameCount = MediaProbeService.FilmstripFrameCount;
     private CancellationTokenSource? _backgroundFilmstripCts;
     private CancellationTokenSource? _backgroundWaveformCts;
     // Which clip the live _waveformCts belongs to. Without it, the re-entrant
@@ -8740,7 +8742,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             foreach (var clip in clips)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var path = await _mediaProbe.EnsureFilmstripAsync(clip.Path, clip.Duration, cancellationToken).ConfigureAwait(false);
+                var path = await _mediaProbe.EnsureFilmstripAsync(clip.Path, clip.Duration, cancellationToken: cancellationToken).ConfigureAwait(false);
                 if (string.IsNullOrEmpty(path)) continue;
                 await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { FilmstripPath = path }, reloadSidecars: false));
             }
@@ -8990,6 +8992,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _filmstripCts?.Dispose();
         var cts = new CancellationTokenSource();
         _filmstripCts = cts;
+        _displayedFilmstripFrameCount = MediaProbeService.FilmstripFrameCount;
+        _requestedFilmstripFrameCount = MediaProbeService.FilmstripFrameCount;
         // Task.Run, not a bare call: this runs from OpenMedia on the UI thread,
         // and everything before EnsureFilmstripAsync's first await - the cache
         // key's SHA-256, the File.Exists probes, HasCachedVideoStream's
@@ -8997,14 +9001,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // here, on the dispatcher, while the user is waiting for the editor to
         // appear. The ConfigureAwait(false) chain inside MediaProbeService
         // keeps it off the UI thread from there on.
-        _ = Task.Run(() => LoadFilmstripAsync(media, cts.Token));
+        _ = Task.Run(() => LoadFilmstripAsync(media, MediaProbeService.FilmstripFrameCount, cts.Token));
     }
 
-    private async Task LoadFilmstripAsync(MediaFileInfo media, CancellationToken cancellationToken)
+    public void RequestTimelineFilmstripDensity(double zoom)
+    {
+        var frameCount = zoom switch
+        {
+            <= 1 => MediaProbeService.FilmstripFrameCount,
+            < 2 => 20,
+            < 4 => 40,
+            _ => 60
+        };
+        if (frameCount <= _requestedFilmstripFrameCount || string.IsNullOrEmpty(SelectedVideoPath) || Duration <= TimeSpan.Zero) return;
+
+        var media = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, SelectedVideoPath, StringComparison.OrdinalIgnoreCase))?.Media;
+        if (media is null) return;
+        _requestedFilmstripFrameCount = frameCount;
+        var cancellationToken = _filmstripCts?.Token ?? CancellationToken.None;
+        _ = Task.Run(() => LoadFilmstripAsync(media, frameCount, cancellationToken));
+    }
+
+    private async Task LoadFilmstripAsync(MediaFileInfo media, int frameCount, CancellationToken cancellationToken)
     {
         try
         {
-            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(media.Path, media.Duration, cancellationToken).ConfigureAwait(false);
+            var filmstripPath = await _mediaProbe.EnsureFilmstripAsync(media.Path, media.Duration, frameCount, cancellationToken).ConfigureAwait(false);
             if (cancellationToken.IsCancellationRequested || string.IsNullOrEmpty(filmstripPath)) return;
 
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -9013,12 +9035,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 // not paint the previous clip's strip over the current one.
                 if (cancellationToken.IsCancellationRequested) return;
                 if (!string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
+                if (frameCount < _displayedFilmstripFrameCount) return;
 
                 var filmstrip = LoadBitmap(filmstripPath);
                 foreach (var track in TimelineTracks.Where(track => track.IsVideo))
                 {
                     track.Filmstrip = filmstrip;
+                    track.FilmstripFrameCount = frameCount;
                 }
+                _displayedFilmstripFrameCount = frameCount;
 
                 var card = AllClips.FirstOrDefault(clip => string.Equals(clip.Path, media.Path, StringComparison.OrdinalIgnoreCase));
                 card?.UpdateMedia(card.Media with { FilmstripPath = filmstripPath });

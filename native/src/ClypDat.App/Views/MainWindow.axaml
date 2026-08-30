@@ -1556,6 +1556,7 @@
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
                         <controls:TimelineLaneControl Height="{Binding LaneHeight}"
+                                                      FilmstripFrameCount="{Binding FilmstripFrameCount}"
                                                       VerticalAlignment="Top"
                                                       Margin="{Binding LaneMargin}"
                                                       LaneBrush="{Binding Color}"

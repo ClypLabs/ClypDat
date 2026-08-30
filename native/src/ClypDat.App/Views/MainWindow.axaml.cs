@@ -4127,6 +4127,7 @@ public sealed partial class MainWindow : Window
         }
 
         _timelineZoom = zoom;
+        ViewModel?.RequestTimelineFilmstripDensity(zoom);
         var newWidth = UpdateTimelineContentWidth();
         UpdateTimelineChrome();
         var targetOffset = Math.Clamp(contentFraction * newWidth - pointerX, 0, Math.Max(0, newWidth - viewportWidth));

@@ -18,6 +18,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     private bool _isLastAudioTrack;
     private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
     private Bitmap? _filmstrip;
+    private int _filmstripFrameCount = MediaProbeService.FilmstripFrameCount;
     private readonly Color _laneColor;
     private readonly SolidColorBrush _volumeAccentBrush;
 
@@ -175,5 +176,11 @@ public sealed class TrackLaneViewModel : ViewModelBase
     {
         get => _filmstrip;
         set => SetProperty(ref _filmstrip, value);
+    }
+
+    public int FilmstripFrameCount
+    {
+        get => _filmstripFrameCount;
+        set => SetProperty(ref _filmstripFrameCount, Math.Max(1, value));
     }
 }
