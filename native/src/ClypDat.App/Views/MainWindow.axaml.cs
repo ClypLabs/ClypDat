@@ -3119,11 +3119,16 @@ public sealed partial class MainWindow : Window
         }
 
         var single = entries.Count == 1;
-        var cardWidth = single ? 440 : 215;
         const int cardSpacing = 14;
         var editorDialog = presentation == NewClipsPresentation.EditorWindow;
         var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
         cardsPanel.Margin = single ? new Thickness(28, 20, 28, 8) : new Thickness(8, 20, 8, 8);
+        var columns = single ? 1 : Math.Min(NewClipsCardLayoutPolicy.CardsPerRow, entries.Count);
+        var maximumDialogWidth = Math.Max(320d, Bounds.Width - 32);
+        var availableCardWidth = (maximumDialogWidth - cardsPanel.Margin.Left - cardsPanel.Margin.Right - (columns - 1) * cardSpacing) / columns;
+        // Three saved clips use all safe dialog width, capped at the deliberately
+        // larger library-like size. This keeps desktop captures readable.
+        var cardWidth = single ? 440d : Math.Min(235d, Math.Max(215d, availableCardWidth));
         // The editor presentation is created lazily.  Sync only after it
         // exists so its Delete button cannot be born with empty content.
         SyncNewClipsDeleteButton();
@@ -3137,11 +3142,12 @@ public sealed partial class MainWindow : Window
             var row = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
+                Width = rowLength * cardWidth + (rowLength - 1) * cardSpacing,
                 HorizontalAlignment = HorizontalAlignment.Center
             };
             for (var cardIndex = 0; cardIndex < rowLength; cardIndex++)
             {
-                var card = BuildNewClipCard(entries[entryIndex++], single);
+                var card = BuildNewClipCard(entries[entryIndex++], single ? 248 : cardWidth * 9d / 16d);
                 card.Width = cardWidth;
                 card.Margin = new Thickness(0, 0, cardIndex == rowLength - 1 ? 0 : cardSpacing, cardSpacing);
                 row.Children.Add(card);
@@ -3151,7 +3157,6 @@ public sealed partial class MainWindow : Window
         // Size to what is visible, not to a permanently-empty three-card row.
         // A one-clip save becomes a deliberate preview instead of a mostly
         // blank modal; multi-card saves still grow to their actual columns.
-        var columns = single ? 1 : Math.Min(NewClipsCardLayoutPolicy.CardsPerRow, entries.Count);
         var dialogWidth = cardsPanel.Margin.Left + columns * cardWidth + (columns - 1) * cardSpacing + cardsPanel.Margin.Right;
         dialogWidth = Math.Min(dialogWidth, Math.Max(320d, Bounds.Width - 32));
         NewClipsDialogCard.Width = dialogWidth;
@@ -3316,13 +3321,13 @@ public sealed partial class MainWindow : Window
         return $"{(int)elapsed.TotalDays} DAYS AGO";
     }
 
-    private Border BuildNewClipCard(NewClipEntryViewModel entry, bool largePreview)
+    private Border BuildNewClipCard(NewClipEntryViewModel entry, double previewHeight)
     {
         var thumbnail = new Image
         {
             Source = entry.Clip.PreviewImage,
             Stretch = entry.Clip.PreviewImageStretch,
-            Height = largePreview ? 248 : 121
+            Height = previewHeight
         };
         var preview = new ClipPreviewPresenter
         {
