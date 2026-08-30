@@ -1,11 +1,11 @@
 namespace ClypDat.App.Services;
 
-// The popup deliberately has a fixed two-card grid, independent of the
+// The popup deliberately has a fixed three-card grid, independent of the
 // available viewport width. Keeping this policy free of Avalonia makes its
 // centring contract deterministic and easy to verify.
 internal static class NewClipsCardLayoutPolicy
 {
-    public const int CardsPerRow = 2;
+    public const int CardsPerRow = 3;
 
     public static IReadOnlyList<int> CreateRowLengths(int clipCount)
     {

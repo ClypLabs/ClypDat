@@ -3119,7 +3119,7 @@ public sealed partial class MainWindow : Window
         }
 
         var single = entries.Count == 1;
-        var cardWidth = single ? 440 : 280;
+        var cardWidth = single ? 440 : 180;
         const int cardSpacing = 14;
         var editorDialog = presentation == NewClipsPresentation.EditorWindow;
         var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
@@ -3323,7 +3323,7 @@ public sealed partial class MainWindow : Window
         {
             Source = entry.Clip.PreviewImage,
             Stretch = entry.Clip.PreviewImageStretch,
-            Height = largePreview ? 248 : 158
+            Height = largePreview ? 248 : 101
         };
         var preview = new ClipPreviewPresenter
         {
@@ -3476,7 +3476,7 @@ public sealed partial class MainWindow : Window
         {
             check.IsChecked = entry.IsSelected;
             check.IsVisible = entry.IsCheckVisible;
-            hoverOutline.IsVisible = entry.IsCheckVisible;
+            hoverOutline.IsVisible = entry.IsSelected || entry.IsHovered;
             hoverOutline.BorderBrush = entry.IsSelected
                 ? AppThemeService.Brush("AccentBrush", "#5864E8")
                 : AppThemeService.Brush("AccentBrushHover", "#6D77F0");
