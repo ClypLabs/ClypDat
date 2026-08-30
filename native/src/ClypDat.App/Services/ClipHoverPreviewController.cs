@@ -64,29 +64,35 @@ internal sealed class ClipHoverPreviewController : IDisposable
     {
         if (!enabled || presenter is null || !File.Exists(clip.Path)) return;
 
-        IClipPreviewPresenter? warmPresenter = null;
         CancellationTokenSource? warmExitCancellation = null;
         CancellationTokenSource? pendingCancellation = null;
-        TaskCompletionSource? attachSignal = null;
-        var warmReused = false;
-        CancellationToken token;
-        int pendingGeneration;
-        long requestTimestamp;
+        CancellationTokenSource? previousCancellation = null;
+        Process? previousProcess = null;
+        IClipPreviewPresenter? restartPresenter = null;
+        var restart = false;
+        var token = CancellationToken.None;
+        var pendingGeneration = 0;
+        var requestTimestamp = 0L;
         lock (_stateLock)
         {
             if (_disposed) return;
             if (_clip == clip && _previewSize == previewSize)
             {
                 warmExitCancellation = _warmExitCancellation;
-                warmReused = warmExitCancellation is not null;
                 _warmExitCancellation = null;
-                warmPresenter = _presenter;
-                if (!_attached)
+                if (warmExitCancellation is not null)
                 {
-                    _attached = true;
-                    _attachmentVersion++;
-                    attachSignal = _attachSignal;
-                    _attachSignal = null;
+                    // Keep the surface attached: its last frame stays visible
+                    // until the restarted decoder supplies a replacement.
+                    previousCancellation = _cancellation;
+                    previousProcess = _process;
+                    _cancellation = new CancellationTokenSource();
+                    _process = null;
+                    restartPresenter = _presenter;
+                    token = _cancellation.Token;
+                    pendingGeneration = ++_generation;
+                    requestTimestamp = Stopwatch.GetTimestamp();
+                    restart = true;
                 }
             }
             else
@@ -103,9 +109,12 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
         warmExitCancellation?.Cancel();
         warmExitCancellation?.Dispose();
-        if (warmPresenter is not null) _ = warmPresenter.SetAttachedAsync(true).AsTask();
-        attachSignal?.TrySetResult();
-        if (warmReused) AppLog.Debug($"Clip hover preview warm reuse: {Path.GetFileName(clip.Path)}.");
+        if (restart && restartPresenter is not null)
+        {
+            _ = RestartAttachedSessionAsync(clip, pendingGeneration, previewSize, restartPresenter,
+                token, previousCancellation, previousProcess, requestTimestamp);
+            AppLog.Debug($"Clip hover preview warm restart: {Path.GetFileName(clip.Path)}.");
+        }
         return;
 
     StartPending:
@@ -143,7 +152,6 @@ internal sealed class ClipHoverPreviewController : IDisposable
     public void PointerLeft(ClipCardViewModel clip)
     {
         CancellationTokenSource? pendingCancellation = null;
-        IClipPreviewPresenter? presenter = null;
         CancellationTokenSource? previousWarmExit = null;
         CancellationToken warmToken = CancellationToken.None;
         int generation = 0;
@@ -161,13 +169,6 @@ internal sealed class ClipHoverPreviewController : IDisposable
             }
             if (_clip == clip)
             {
-                presenter = _presenter;
-                if (_attached)
-                {
-                    _attached = false;
-                    _attachmentVersion++;
-                    _attachSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                }
                 previousWarmExit = _warmExitCancellation;
                 _warmExitCancellation = new CancellationTokenSource();
                 warmToken = _warmExitCancellation.Token;
@@ -181,7 +182,6 @@ internal sealed class ClipHoverPreviewController : IDisposable
         if (pendingCancelled) AppLog.Debug($"Clip hover preview pending cancelled: {Path.GetFileName(clip.Path)}.");
         if (!active) return;
 
-        if (presenter is not null) _ = presenter.SetAttachedAsync(false).AsTask();
         previousWarmExit?.Cancel();
         previousWarmExit?.Dispose();
         _ = ExpireWarmSessionAsync(clip, generation, warmToken);
@@ -226,7 +226,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 if (!IsPendingLocked(clip, pendingGeneration)) return;
                 previous = DetachActiveLocked();
             }
-            await DisposeSessionAsync(previous, "replaced", previous.IsActive);
+            await DisposeDetachedSessionAsync(previous, "replaced", previous.IsActive);
 
             await _sessionLock.WaitAsync(token);
             var runStarted = false;
@@ -326,6 +326,37 @@ internal sealed class ClipHoverPreviewController : IDisposable
         var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, presenter, previewSize, expectedFrameCount, metrics, token);
         await Task.WhenAll(producer, consumer);
         return (metrics.DecodedFrames - decodedBefore, metrics.DisplayedFrames - displayedBefore);
+    }
+
+    private async Task RestartAttachedSessionAsync(
+        ClipCardViewModel clip,
+        int generation,
+        PixelSize previewSize,
+        IClipPreviewPresenter presenter,
+        CancellationToken token,
+        CancellationTokenSource? previousCancellation,
+        Process? previousProcess,
+        long requestTimestamp)
+    {
+        previousCancellation?.Cancel();
+        Kill(previousProcess);
+
+        // Wait without replacement token. Previous RunSessionAsync can then
+        // finish before its cancellation source is disposed.
+        await _sessionLock.WaitAsync();
+        try
+        {
+            previousCancellation?.Dispose();
+            token.ThrowIfCancellationRequested();
+            if (!IsCurrent(clip, generation)) return;
+
+            await presenter.ActivateSessionAsync(token);
+            await presenter.SetProgressAsync(0);
+            await RunSessionAsync(clip, generation, previewSize, presenter, token, requestTimestamp);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { AppLog.Error("Clip hover preview restart failed", error); }
+        finally { _sessionLock.Release(); }
     }
 
     private async Task ProduceFramesAsync(Stream stream, Channel<FrameSlot> freeSlots, LatestFrameMailbox<FrameSlot> frames, ClipCardViewModel clip, int generation, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
@@ -487,12 +518,12 @@ internal sealed class ClipHoverPreviewController : IDisposable
         _clip = null; _presenter = null; _previewSize = default; _process = null; _cancellation = null; _warmExitCancellation = null; _attachSignal = null; _attached = false;
         return state;
     }
-    private static async Task DisposeSessionAsync(SessionState state, string reason, bool log)
+    private static async Task DisposeSessionAsync(SessionState state, string reason, bool log, bool presenterDetached = false)
     {
         CancelSession(state);
         if (state.Presenter is not null)
         {
-            await state.Presenter.SetAttachedAsync(false);
+            if (!presenterDetached) await state.Presenter.SetAttachedAsync(false);
             await state.Presenter.ReleaseResourcesAsync();
         }
         state.Cancellation?.Dispose();
@@ -502,12 +533,12 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
     private async Task DisposeDetachedSessionAsync(SessionState state, string reason, bool log)
     {
-        // Cancel before waiting. The session lock is held by RunSessionAsync;
-        // waiting first leaves FFmpeg alive with nobody reading its pipe and
-        // can block cleanup for the entire clip duration.
+        // Hide first. Decoder shutdown can wait behind RunSessionAsync without
+        // leaving a stale moving overlay on screen.
+        if (state.Presenter is not null) await state.Presenter.SetAttachedAsync(false);
         CancelSession(state);
         await _sessionLock.WaitAsync();
-        try { await DisposeSessionAsync(state, reason, log); }
+        try { await DisposeSessionAsync(state, reason, log, presenterDetached: state.Presenter is not null); }
         finally { _sessionLock.Release(); }
     }
     private static void CancelSession(SessionState state)
