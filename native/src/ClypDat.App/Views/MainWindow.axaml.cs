@@ -2708,7 +2708,10 @@ public sealed partial class MainWindow : Window
         }
         else
         {
+            var endedDesktopSession = ViewModel.IsEffectiveDesktopCapture
+                                      && _replayBuffer is { IsRecording: true };
             await StopReplayBufferAsync();
+            if (endedDesktopSession) ShowNewClipsDialog();
         }
 
         if (!ViewModel.IsReplayRecording) ViewModel.RecorderStatus = ReplayIdleStatus;
