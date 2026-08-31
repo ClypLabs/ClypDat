@@ -27,6 +27,7 @@ public sealed class OfficialGameArtServiceTests
         var image = await OfficialGameArtService.ResolveAsync("riot-valorant", "VALORANT");
 
         Assert.Equal("https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/official-game-art/valorant-official.png", image);
-        Assert.Null(await OfficialGameArtService.ResolveAsync("steam-553850", "HELLDIVERS™ 2"));
+        Assert.Equal("https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/official-game-art/helldivers-2-discord.png",
+            await OfficialGameArtService.ResolveAsync("steam-553850", "HELLDIVERS™ 2"));
     }
 }

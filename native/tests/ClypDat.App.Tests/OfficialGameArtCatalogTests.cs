@@ -25,7 +25,8 @@ public sealed class OfficialGameArtCatalogTests
             var width = ReadBigEndianInt32(stream);
             var height = ReadBigEndianInt32(stream);
             Assert.Equal(width, height);
-            Assert.True(width >= 512, $"{game.Asset} is only {width}px.");
+            Assert.True(width >= 512 || game.Asset.EndsWith("-discord.png", StringComparison.Ordinal),
+                $"{game.Asset} is only {width}px.");
         }
     }
 

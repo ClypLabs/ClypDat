@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "games": [
     {
+      "asset": "helldivers-2-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1205090671527071784/6d49be66d5f2b88bdfc8cc7095abdbda.png",
+      "detectionKeys": [ "steam-553850" ],
+      "displayNameAliases": [ "HELLDIVERS™ 2", "HELLDIVERS 2" ]
+    },
+    {
       "asset": "valorant-official.png",
       "officialSourceUrl": "https://playvalorant.com/",
       "detectionKeys": [ "riot-valorant" ],
