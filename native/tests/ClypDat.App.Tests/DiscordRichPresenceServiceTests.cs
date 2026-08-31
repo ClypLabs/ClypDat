@@ -41,7 +41,7 @@ public sealed class DiscordRichPresenceServiceTests
         var assets = document.RootElement.GetProperty("assets");
         Assert.Equal(officialImage, assets.GetProperty("large_image").GetString());
         Assert.Equal("VALORANT", assets.GetProperty("large_text").GetString());
-        Assert.Equal("https://www.clypdat.xyz/icon.png", assets.GetProperty("small_image").GetString());
+        Assert.Equal("https://cdn.discordapp.com/app-icons/1542340384418439189/3141eace8a6b8237cdb77920244731f9.png?size=1024", assets.GetProperty("small_image").GetString());
         Assert.Equal("Clipping with ClypDat", assets.GetProperty("small_text").GetString());
     }
 
