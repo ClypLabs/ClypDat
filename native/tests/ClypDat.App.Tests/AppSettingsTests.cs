@@ -53,4 +53,26 @@ public sealed class AppSettingsTests
         Assert.Equal(8, settings.RecentThemeColors.Count);
         Assert.Equal("#000009", settings.RecentThemeColors[0]);
     }
+
+    [Theory]
+    [InlineData("#FF0000")]
+    [InlineData("#12AB7E")]
+    [InlineData("#000000")]
+    [InlineData("#FFFFFF")]
+    public void ThemeColor_HexRgbAndHsv_RoundTrip(string hex)
+    {
+        Assert.True(ThemeColor.TryParseHex(hex, out var color));
+        Assert.Equal(hex, color.Hex);
+        Assert.True(ThemeColor.TryFromRgb(color.Red, color.Green, color.Blue, out var rgb));
+        Assert.Equal(color, rgb);
+        var hsv = color.ToHsv();
+        Assert.Equal(color, ThemeColor.FromHsv(hsv.Hue, hsv.Saturation, hsv.Value));
+    }
+
+    [Theory]
+    [InlineData(-1, 0, 0)]
+    [InlineData(0, 256, 0)]
+    [InlineData(0, 0, 999)]
+    public void ThemeColor_OutOfRangeRgb_IsRejected(int red, int green, int blue) =>
+        Assert.False(ThemeColor.TryFromRgb(red, green, blue, out _));
 }

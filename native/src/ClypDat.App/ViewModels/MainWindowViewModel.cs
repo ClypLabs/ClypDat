@@ -20,6 +20,8 @@ public enum EditorSidebarSection
     Export
 }
 
+public enum ThemeColorEditorTarget { Base, Accent }
+
 internal readonly record struct LibraryStartupDateMarker(string Text, int FirstVisibleIndex, int Count);
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
@@ -422,11 +424,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _themeEditorBaseColor = "#0D1116";
     private string _themeEditorAccentColor = "#5864E8";
     private string _themeEditorError = string.Empty;
+    private ThemeColorEditorTarget _themeColorEditorTarget;
+    private Color _pickerColor = Color.Parse("#0D1116");
+    private string _pickerHexText = "#0D1116";
+    private string _pickerRedText = "13";
+    private string _pickerGreenText = "17";
+    private string _pickerBlueText = "22";
+    private string _pickerColorError = string.Empty;
+    private bool _updatingPicker;
     public bool IsThemeEditorOpen => _editingTheme is not null;
     public string ThemeEditorName { get => _themeEditorName; set => SetProperty(ref _themeEditorName, value); }
-    public string ThemeEditorBaseColor { get => _themeEditorBaseColor; set => SetThemeEditorColor(ref _themeEditorBaseColor, value); }
-    public string ThemeEditorAccentColor { get => _themeEditorAccentColor; set => SetThemeEditorColor(ref _themeEditorAccentColor, value); }
+    public string ThemeEditorBaseColor { get => _themeEditorBaseColor; private set => SetProperty(ref _themeEditorBaseColor, value); }
+    public string ThemeEditorAccentColor { get => _themeEditorAccentColor; private set => SetProperty(ref _themeEditorAccentColor, value); }
     public string ThemeEditorError { get => _themeEditorError; private set => SetProperty(ref _themeEditorError, value); }
+    public ThemeColorEditorTarget ThemeColorEditorTarget { get => _themeColorEditorTarget; private set => SetProperty(ref _themeColorEditorTarget, value); }
+    public bool IsEditingBaseColor => ThemeColorEditorTarget == ThemeColorEditorTarget.Base;
+    public bool IsEditingAccentColor => ThemeColorEditorTarget == ThemeColorEditorTarget.Accent;
+    public Color PickerColor { get => _pickerColor; set { if (_updatingPicker) return; SetPickerColor(new ThemeColor(value.R, value.G, value.B)); } }
+    public string PickerHexText { get => _pickerHexText; set { if (!SetProperty(ref _pickerHexText, value) || _updatingPicker) return; if (!ThemeColor.TryParseHex(value, out var color)) { PickerColorError = "Use #RRGGBB."; return; } SetPickerColor(color); } }
+    public string PickerRedText { get => _pickerRedText; set => SetPickerRgbText(ref _pickerRedText, value); }
+    public string PickerGreenText { get => _pickerGreenText; set => SetPickerRgbText(ref _pickerGreenText, value); }
+    public string PickerBlueText { get => _pickerBlueText; set => SetPickerRgbText(ref _pickerBlueText, value); }
+    public string PickerColorError { get => _pickerColorError; private set => SetProperty(ref _pickerColorError, value); }
 
     public string? SelectedThemePreset
     {
@@ -514,14 +533,79 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorOpen)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
     }
     public void CancelCustomTheme() { _editingTheme = null; ThemeEditorError = string.Empty; ApplyTheme(); OnPropertyChanged(nameof(IsThemeEditorOpen)); }
-    private void LoadThemeEditor(CustomThemeSettings theme) { ThemeEditorName = theme.Name; ThemeEditorBaseColor = theme.BaseColor; ThemeEditorAccentColor = theme.AccentColor; ThemeEditorError = string.Empty; OnPropertyChanged(nameof(IsThemeEditorOpen)); }
-    private void SetThemeEditorColor(ref string field, string value)
+    private void LoadThemeEditor(CustomThemeSettings theme)
     {
-        if (!SetProperty(ref field, value) || !CustomThemeLibrary.IsColor(value)) return;
+        ThemeEditorName = theme.Name;
+        ThemeEditorBaseColor = theme.BaseColor;
+        ThemeEditorAccentColor = theme.AccentColor;
         ThemeEditorError = string.Empty;
-        if (_editingTheme is not null)
-            (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), false,
-                new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = ThemeEditorBaseColor, AccentColor = ThemeEditorAccentColor });
+        ThemeColorEditorTarget = ThemeColorEditorTarget.Base;
+        OnPropertyChanged(nameof(IsEditingBaseColor));
+        OnPropertyChanged(nameof(IsEditingAccentColor));
+        LoadPickerColor(theme.BaseColor);
+        OnPropertyChanged(nameof(IsThemeEditorOpen));
+    }
+
+    public void SelectBaseThemeColor() => SelectThemeColor(ThemeColorEditorTarget.Base);
+    public void SelectAccentThemeColor() => SelectThemeColor(ThemeColorEditorTarget.Accent);
+    private void SelectThemeColor(ThemeColorEditorTarget target)
+    {
+        ThemeColorEditorTarget = target;
+        OnPropertyChanged(nameof(IsEditingBaseColor));
+        OnPropertyChanged(nameof(IsEditingAccentColor));
+        LoadPickerColor(target == ThemeColorEditorTarget.Base ? ThemeEditorBaseColor : ThemeEditorAccentColor);
+    }
+
+    public void UsePickerColor()
+    {
+        var color = new ThemeColor(PickerColor.R, PickerColor.G, PickerColor.B).Hex;
+        if (ThemeColorEditorTarget == ThemeColorEditorTarget.Base) ThemeEditorBaseColor = color;
+        else ThemeEditorAccentColor = color;
+        CustomThemeLibrary.AddRecent(Settings, color);
+        SaveSettings();
+        PickerColorError = string.Empty;
+        OnPropertyChanged(nameof(RecentThemeColors));
+        PreviewThemeEditor();
+    }
+
+    public void UseRecentThemeColor(string color)
+    {
+        if (ThemeColor.TryParseHex(color, out var parsed)) SetPickerColor(parsed);
+    }
+
+    private void SetPickerRgbText(ref string field, string value)
+    {
+        if (!SetProperty(ref field, value) || _updatingPicker) return;
+        if (!int.TryParse(PickerRedText, out var red) || !int.TryParse(PickerGreenText, out var green) || !int.TryParse(PickerBlueText, out var blue) ||
+            !ThemeColor.TryFromRgb(red, green, blue, out var color)) { PickerColorError = "RGB values must be 0–255."; return; }
+        SetPickerColor(color);
+    }
+
+    private void LoadPickerColor(string hex)
+    {
+        if (ThemeColor.TryParseHex(hex, out var color)) SetPickerColor(color, false);
+    }
+
+    private void SetPickerColor(ThemeColor color, bool preview = true)
+    {
+        _updatingPicker = true;
+        SetProperty(ref _pickerColor, Color.FromRgb(color.Red, color.Green, color.Blue), nameof(PickerColor));
+        PickerHexText = color.Hex;
+        PickerRedText = color.Red.ToString();
+        PickerGreenText = color.Green.ToString();
+        PickerBlueText = color.Blue.ToString();
+        _updatingPicker = false;
+        PickerColorError = string.Empty;
+        if (preview) PreviewThemeEditor();
+    }
+
+    private void PreviewThemeEditor()
+    {
+        if (_editingTheme is null) return;
+        var baseColor = ThemeColorEditorTarget == ThemeColorEditorTarget.Base ? PickerHexText : ThemeEditorBaseColor;
+        var accentColor = ThemeColorEditorTarget == ThemeColorEditorTarget.Accent ? PickerHexText : ThemeEditorAccentColor;
+        (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), false,
+            new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = baseColor, AccentColor = accentColor });
     }
 
     public string AppFontFamilyName

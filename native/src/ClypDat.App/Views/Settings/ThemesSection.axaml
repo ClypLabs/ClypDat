@@ -3,8 +3,10 @@
              xmlns:vm="using:ClypDat.App.ViewModels"
              xmlns:conv="using:Avalonia.Data.Converters"
              xmlns:opconv="using:ClypDat.App.Converters"
+             xmlns:cp="clr-namespace:Avalonia.Controls.Primitives;assembly=Avalonia.Controls.ColorPicker"
              x:Class="ClypDat.App.Views.Settings.ThemesSection"
-             x:DataType="vm:MainWindowViewModel">
+             x:DataType="vm:MainWindowViewModel"
+             Focusable="True">
   <UserControl.IsVisible>
     <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Appearance">
       <Binding Path="SettingsSearchText" />
@@ -104,7 +106,39 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" IsVisible="{Binding IsThemeEditorOpen}"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" /><TextBox Classes="settingsInput" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" /><Grid ColumnDefinitions="*,*" ColumnSpacing="10"><TextBox Classes="settingsInput" Text="{Binding ThemeEditorBaseColor, Mode=TwoWay}" PlaceholderText="#RRGGBB" /><TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding ThemeEditorAccentColor, Mode=TwoWay}" PlaceholderText="#RRGGBB" /></Grid><TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding ThemeEditorError}" /><StackPanel Orientation="Horizontal" Spacing="8"><Button Classes="primaryButton" Content="Apply" Click="ApplyCustomThemeButton_OnClick" /><Button Content="Cancel" Click="CancelCustomThemeButton_OnClick" /></StackPanel></StackPanel></Border>
+    <Border Classes="settingsCard" IsVisible="{Binding IsThemeEditorOpen}">
+      <StackPanel HorizontalAlignment="Center" MaxWidth="400" Width="400" Spacing="12">
+        <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" />
+        <TextBox Classes="settingsInput" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+          <Button Grid.Column="0" Content="Base" Click="SelectBaseThemeColorButton_OnClick" Classes.active="{Binding IsEditingBaseColor}" />
+          <Button Grid.Column="1" Content="Accent" Click="SelectAccentThemeColorButton_OnClick" Classes.active="{Binding IsEditingAccentColor}" />
+        </Grid>
+        <Grid ColumnDefinitions="*,28" ColumnSpacing="10">
+          <cp:ColorSpectrum
+                         Color="{Binding PickerColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Height="260" />
+          <cp:ColorSlider Grid.Column="1"
+                       Color="{Binding PickerColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" IsAlphaVisible="False" />
+        </Grid>
+        <Grid ColumnDefinitions="48,*,Auto" ColumnSpacing="8">
+          <Border Width="48" Height="40" CornerRadius="6" Background="{Binding PickerHexText}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" />
+          <TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding PickerHexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
+          <Button Grid.Column="2" Classes="primaryButton" Content="Use colour" Click="UsePickerColorButton_OnClick" />
+        </Grid>
+        <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+          <TextBox Classes="settingsInput" Text="{Binding PickerRedText, Mode=TwoWay}" PlaceholderText="R" />
+          <TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding PickerGreenText, Mode=TwoWay}" PlaceholderText="G" />
+          <TextBox Grid.Column="2" Classes="settingsInput" Text="{Binding PickerBlueText, Mode=TwoWay}" PlaceholderText="B" />
+        </Grid>
+        <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding PickerColorError}" />
+        <ItemsControl ItemsSource="{Binding RecentThemeColors}">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="34" ItemHeight="34" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate><DataTemplate><Button Tag="{Binding}" Width="28" Height="28" Padding="0" Margin="0,0,6,6" Background="{Binding}" Click="RecentThemeColorButton_OnClick" /></DataTemplate></ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding ThemeEditorError}" />
+        <StackPanel Orientation="Horizontal" Spacing="8"><Button Classes="primaryButton" Content="Apply" Click="ApplyCustomThemeButton_OnClick" /><Button Content="Cancel" Click="CancelCustomThemeButton_OnClick" /></StackPanel>
+      </StackPanel>
+    </Border>
 
     <Border Classes="settingsCard"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="TYPOGRAPHY" /><TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Inter restores ClypDat's default." /><TextBox Classes="settingsInput" Text="{Binding AppFontFamilyName, Mode=TwoWay}" PlaceholderText="Inter" /></StackPanel></Border>
   </StackPanel>

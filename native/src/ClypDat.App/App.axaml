@@ -41,6 +41,7 @@
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
     <Style Selector="Window">
       <Setter Property="FontFamily" Value="{DynamicResource ClypDatFontFamily}" />
     </Style>

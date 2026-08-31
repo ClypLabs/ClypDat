@@ -103,6 +103,7 @@
     <PackageReference Include="Avalonia.Desktop" Version="$(ClypDatAvaloniaPackageVersion)" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="$(ClypDatAvaloniaPackageVersion)" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="$(ClypDatAvaloniaPackageVersion)" />
+    <PackageReference Include="Avalonia.Controls.ColorPicker" Version="$(ClypDatAvaloniaPackageVersion)" />
     <PackageReference Include="LibVLCSharp.Avalonia" Version="3.10.0" />
     <PackageReference Include="NAudio" Version="2.2.1" />
     <!-- .Core (not the full Microsoft.Data.Sqlite) so it doesn't drag in
