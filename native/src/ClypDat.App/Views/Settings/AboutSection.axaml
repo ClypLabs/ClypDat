@@ -144,8 +144,8 @@
 
         <Border Classes="settingsDivider" Margin="0,4,0,0" />
         <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="2">
-        <TextBlock Classes="settingsRowTitle" Text="Full License Text" />
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Full License Text" />
             <TextBlock Classes="settingsRowDesc" Text="Complete notices and source links for every bundled component." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           </StackPanel>
           <Button Grid.Column="1" Content="View Licenses" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
