@@ -6,10 +6,6 @@ namespace ClypDat.App.Views.Settings;
 public sealed partial class XboxSection : UserControl
 {
     public XboxSection() => InitializeComponent();
-    private async void LinkButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (DataContext is MainWindowViewModel vm) await vm.LinkXboxAsync();
-    }
     private async void LinkClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm) await vm.LinkClypDatAccountAsync();
@@ -17,10 +13,6 @@ public sealed partial class XboxSection : UserControl
     private void CreateClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm) vm.OpenClypDatAccount();
-    }
-    private void UnlinkButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        if (DataContext is MainWindowViewModel vm) vm.UnlinkXbox();
     }
     private void UnlinkClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
