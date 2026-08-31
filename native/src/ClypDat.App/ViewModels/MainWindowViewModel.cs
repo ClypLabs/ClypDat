@@ -1,6 +1,7 @@
 ﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
 using Avalonia;
@@ -6327,6 +6328,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public void UnlinkClypDatAccount() => _clypDatAccount.Disconnect();
+
+    public void OpenClypDatAccount()
+    {
+        Process.Start(new ProcessStartInfo("https://www.clypdat.xyz/account") { UseShellExecute = true });
+    }
 
     private void XboxActivityChanged(object? sender, XboxActivitySnapshot snapshot)
     {

@@ -11,9 +11,10 @@
       <TextBlock Classes="settingsCardLabel" Text="CLYPDAT ACCOUNT" />
       <TextBlock Classes="settingsRowDescSm" Text="Use your ClypDat account’s linked Xbox activity for clips and Discord. Sign-in opens in your browser." TextWrapping="Wrap" />
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Cloud account" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountStatus}" /></StackPanel>
+        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Create account or sign in" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountStatus}" /></StackPanel>
         <Button Grid.Column="1" Classes="primaryButton" Content="Link ClypDat account" Click="LinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
       </Grid>
+      <Button Content="Create or sign in to ClypDat" Click="CreateClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}">
         <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Xbox account" /><TextBlock Classes="settingsRowDescSm" Text="Linked through ClypDat" /></StackPanel>
         <Button Grid.Column="1" Content="Unlink" Click="UnlinkClypDatButton_OnClick" />
