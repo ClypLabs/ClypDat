@@ -6489,9 +6489,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var profileUrl = await OfficialGameArtService.ResolveGameProfileUrlAsync(detectionKey, displayName).ConfigureAwait(false);
             Dispatcher.UIThread.Post(() =>
             {
+                var pcStillCurrent = ActiveGameDetection.IsDetected
+                    && string.Equals(ActiveGameDetection.DisplayName, displayName, StringComparison.Ordinal);
+                var xboxStillCurrent = !ActiveGameDetection.IsDetected
+                    && string.Equals(EffectiveXboxSnapshot.CurrentTitle, displayName, StringComparison.Ordinal);
                 if (!string.Equals(_discordGameImageFor, displayName, StringComparison.Ordinal)
-                    || !ActiveGameDetection.IsDetected
-                    || !string.Equals(ActiveGameDetection.DisplayName, displayName, StringComparison.Ordinal)) return;
+                    || (!pcStillCurrent && !xboxStillCurrent)) return;
 
                 _discordGameImageUrl = imageUrl;
                 _discordGameProfileUrl = profileUrl;
