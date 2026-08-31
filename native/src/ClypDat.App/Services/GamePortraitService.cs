@@ -51,34 +51,6 @@ public static class GamePortraitService
     }
 
     /// <summary>
-    /// Gets the high-resolution portrait URL without downloading it. Discord
-    /// fetches this itself for Rich Presence, so routing it through this
-    /// resolver avoids sending the small Library icon as game artwork.
-    /// </summary>
-    public static async Task<string?> ResolveExternalPortraitUrlAsync(
-        string detectionKey,
-        string displayName,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(displayName)) return null;
-
-        try
-        {
-            var url = await ResolvePortraitUrlAsync(detectionKey, displayName, cancellationToken).ConfigureAwait(false);
-            return IsExternalImageUrl(url) ? url : null;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Game portrait URL resolution failed for '{displayName}'", error);
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Downloads the portrait if it is not cached yet. Returns true only when
     /// a new file was written, so callers can refresh exactly once instead of
     /// re-reading a bitmap they already have.
@@ -183,9 +155,6 @@ public static class GamePortraitService
     // 404, which the caller treats as a miss.
     private static string SteamPortraitUrl(int appId) =>
         $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/library_600x900.jpg";
-
-    private static bool IsExternalImageUrl(string? value) =>
-        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
 
     // %ProgramData%\Epic\EpicGamesLauncher\Data\Catalog\catcache.bin is
     // base64-encoded JSON: every catalogue entry the launcher knows about, each

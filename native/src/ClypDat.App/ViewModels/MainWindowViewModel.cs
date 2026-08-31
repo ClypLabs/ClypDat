@@ -6129,10 +6129,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // ClypDat page is open. Settings/editor navigation must not replace it.
         if (ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName))
         {
-            var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
-                ? ActiveGameDetection.ExeName
-                : ActiveGameDetection.DetectionKey;
-            ResolveDiscordGameImage(detectionKey, ActiveGameDetection.DisplayName);
+            ResolveDiscordGameImage(ActiveGameDetection.DisplayName);
             var recording = IsReplayRecording;
             // Game name is part of the kind, so the elapsed timer Discord shows
             // is "how long on THIS game" rather than "how long recording
@@ -6202,7 +6199,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             gameImage is null ? null : ActiveGameDetection.DisplayName));
     }
 
-    private void ResolveDiscordGameImage(string detectionKey, string displayName)
+    private void ResolveDiscordGameImage(string displayName)
     {
         if (string.Equals(_discordGameImageFor, displayName, StringComparison.Ordinal)) return;
 
@@ -6210,7 +6207,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _discordGameImageUrl = null;
         _ = Task.Run(async () =>
         {
-            var imageUrl = await GamePortraitService.ResolveExternalPortraitUrlAsync(detectionKey, displayName).ConfigureAwait(false);
+            var imageUrl = await GameIconService.ResolveExternalIconUrlAsync(displayName).ConfigureAwait(false);
             Dispatcher.UIThread.Post(() =>
             {
                 if (!string.Equals(_discordGameImageFor, displayName, StringComparison.Ordinal)
