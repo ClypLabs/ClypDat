@@ -2961,7 +2961,7 @@ public sealed partial class MainWindow : Window
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
                 var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
-                var effectiveGameName = ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName);
+                var effectiveGameName = ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName, replayConfig.CaptureSource);
                 var clipInfo = new ClipInfo(
                     effectiveGameName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],

@@ -6298,9 +6298,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => Settings.XboxActivityEnabled;
         set { if (Settings.XboxActivityEnabled == value) return; Settings.XboxActivityEnabled = value; SaveSettings(); UpdateDiscordPresence(); OnPropertyChanged(); }
     }
-    public string EffectiveClipGameName(string fallback)
+    public string EffectiveClipGameName(string fallback, string? captureSource = null)
     {
-        if (!string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)) return fallback;
+        // Use the capture session's source when available. The live setting can
+        // change while a replay buffer remains armed, which used to make an
+        // Xbox-backed desktop clip fall back to the generic source label.
+        var source = captureSource ?? Settings.ReplayCaptureSource;
+        if (!string.Equals(source, "Desktop", StringComparison.OrdinalIgnoreCase)) return fallback;
         return Settings.XboxActivityEnabled && !string.IsNullOrWhiteSpace(EffectiveXboxSnapshot.CurrentTitle)
             ? EffectiveXboxSnapshot.CurrentTitle!
             : fallback;
