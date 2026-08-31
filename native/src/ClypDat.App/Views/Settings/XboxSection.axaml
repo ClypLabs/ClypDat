@@ -8,11 +8,22 @@
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4"><TextBlock Classes="settingsSectionTitle" Text="Connected Accounts" /><TextBlock Classes="settingsSectionDesc" Text="Link gaming accounts that can provide activity for Desktop Capture clips and Discord Rich Presence." /><Border Classes="settingsDivider" Margin="0,14,0,0" /></StackPanel>
     <Border Classes="settingsCard"><StackPanel Spacing="14">
-      <TextBlock Classes="settingsCardLabel" Text="XBOX ACCOUNT" />
-      <TextBlock Classes="settingsRowDescSm" Text="Sign in through Microsoft’s browser page. ClypDat never receives your password." TextWrapping="Wrap" />
+      <TextBlock Classes="settingsCardLabel" Text="CLYPDAT ACCOUNT" />
+      <TextBlock Classes="settingsRowDescSm" Text="Use your ClypDat account’s linked Xbox activity for clips and Discord. Sign-in opens in your browser." TextWrapping="Wrap" />
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Cloud account" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountStatus}" /></StackPanel>
+        <Button Grid.Column="1" Classes="primaryButton" Content="Link ClypDat account" Click="LinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
+      </Grid>
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}">
+        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Xbox account" /><TextBlock Classes="settingsRowDescSm" Text="Linked through ClypDat" /></StackPanel>
+        <Button Grid.Column="1" Content="Unlink" Click="UnlinkClypDatButton_OnClick" />
+      </Grid>
+      <Border Classes="settingsDivider" />
+      <TextBlock Classes="settingsCardLabel" Text="DIRECT XBOX LINK" />
+      <TextBlock Classes="settingsRowDescSm" Text="Optional local link. Tokens stay encrypted on this Windows user." TextWrapping="Wrap" />
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
         <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Status" /><TextBlock Classes="settingsRowDescSm" Text="{Binding XboxConnectionStatus}" /></StackPanel>
-        <Button Grid.Column="1" Classes="primaryButton" Content="Link Xbox" Click="LinkButton_OnClick" IsVisible="{Binding XboxIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
+        <Button Grid.Column="1" Classes="primaryButton" Content="Link Xbox directly" Click="LinkButton_OnClick" IsVisible="{Binding XboxIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
       </Grid>
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding XboxIsConnected}">
         <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Current title" /><TextBlock Classes="settingsRowDescSm" Text="{Binding XboxCurrentTitle}" /></StackPanel>

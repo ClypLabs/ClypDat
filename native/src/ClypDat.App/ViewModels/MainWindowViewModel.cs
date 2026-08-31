@@ -210,7 +210,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         Settings = AppSettingsStore.Load();
         _xboxActivity.Changed += XboxActivityChanged;
-        if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
+        _clypDatAccount.Changed += ClypDatAccountChanged;
+        if (Settings.XboxActivityEnabled)
+        {
+            _ = _xboxActivity.TryRestoreAsync();
+            _ = _clypDatAccount.TryRestoreAsync();
+        }
         Settings.CustomThemes ??= new();
         Settings.RecentThemeColors ??= new();
         Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
@@ -5419,6 +5424,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _xboxActivity.Changed -= XboxActivityChanged;
         _xboxActivity.Dispose();
+        _clypDatAccount.Changed -= ClypDatAccountChanged;
+        _clypDatAccount.Dispose();
         CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
         _micLevelMonitor.LevelChanged -= MicLevelMonitor_OnLevelChanged;
         _micLevelMonitor.Dispose();
@@ -6266,11 +6273,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string? _discordGameImageUrl;
     private string? _discordGameProfileUrl;
     private readonly XboxActivityService _xboxActivity = new();
+    private readonly ClypDatAccountActivityService _clypDatAccount = new();
     private XboxActivitySnapshot _xboxSnapshot = XboxActivitySnapshot.Disconnected;
+    private XboxActivitySnapshot _clypDatSnapshot = XboxActivitySnapshot.Disconnected;
 
-    public string XboxConnectionStatus => _xboxSnapshot.Error ?? (_xboxSnapshot.IsConnected ? "Connected" : "Not connected");
-    public string XboxCurrentTitle => _xboxSnapshot.CurrentTitle ?? "No active Xbox game";
-    public bool XboxIsConnected => _xboxSnapshot.IsConnected;
+    private XboxActivitySnapshot EffectiveXboxSnapshot => _clypDatSnapshot.IsConnected ? _clypDatSnapshot : _xboxSnapshot;
+
+    public string XboxConnectionStatus => EffectiveXboxSnapshot.Error ?? (EffectiveXboxSnapshot.IsConnected ? "Connected" : "Not connected");
+    public string XboxCurrentTitle => EffectiveXboxSnapshot.CurrentTitle ?? "No active Xbox game";
+    public bool XboxIsConnected => EffectiveXboxSnapshot.IsConnected;
+    public string ClypDatAccountStatus => _clypDatSnapshot.Error ?? (_clypDatSnapshot.IsConnected ? "Connected" : "Not connected");
+    public bool ClypDatAccountIsConnected => _clypDatSnapshot.IsConnected;
     public bool XboxActivityForDesktop
     {
         get => Settings.XboxActivityEnabled;
@@ -6279,8 +6292,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string EffectiveClipGameName(string fallback)
     {
         if (!string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)) return fallback;
-        return Settings.XboxActivityEnabled && !string.IsNullOrWhiteSpace(_xboxSnapshot.CurrentTitle)
-            ? _xboxSnapshot.CurrentTitle!
+        return Settings.XboxActivityEnabled && !string.IsNullOrWhiteSpace(EffectiveXboxSnapshot.CurrentTitle)
+            ? EffectiveXboxSnapshot.CurrentTitle!
             : fallback;
     }
     public async Task LinkXboxAsync()
@@ -6293,11 +6306,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateDiscordPresence();
         }
     }
-    public void UnlinkXbox() => _xboxActivity.Disconnect();
+    public void UnlinkXbox()
+    {
+        _xboxActivity.Disconnect();
+        _clypDatAccount.Disconnect();
+    }
+
+    public async Task LinkClypDatAccountAsync()
+    {
+        if (await _clypDatAccount.ConnectAsync().ConfigureAwait(false))
+        {
+            Settings.XboxActivityEnabled = true;
+            SaveSettings();
+            OnPropertyChanged(nameof(XboxActivityForDesktop));
+            OnPropertyChanged(nameof(XboxConnectionStatus));
+            OnPropertyChanged(nameof(XboxCurrentTitle));
+            OnPropertyChanged(nameof(XboxIsConnected));
+            UpdateDiscordPresence();
+        }
+    }
+
+    public void UnlinkClypDatAccount() => _clypDatAccount.Disconnect();
 
     private void XboxActivityChanged(object? sender, XboxActivitySnapshot snapshot)
     {
         _xboxSnapshot = snapshot;
+        OnPropertyChanged(nameof(XboxConnectionStatus));
+        OnPropertyChanged(nameof(XboxCurrentTitle));
+        OnPropertyChanged(nameof(XboxIsConnected));
+        Dispatcher.UIThread.Post(UpdateDiscordPresence);
+    }
+
+    private void ClypDatAccountChanged(object? sender, XboxActivitySnapshot snapshot)
+    {
+        _clypDatSnapshot = snapshot;
+        OnPropertyChanged(nameof(ClypDatAccountStatus));
+        OnPropertyChanged(nameof(ClypDatAccountIsConnected));
         OnPropertyChanged(nameof(XboxConnectionStatus));
         OnPropertyChanged(nameof(XboxCurrentTitle));
         OnPropertyChanged(nameof(XboxIsConnected));
@@ -6324,7 +6368,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         var pcGameActive = ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName);
         var xboxGame = Settings.XboxActivityEnabled && Settings.ReplayCaptureSource.Equals("Desktop", StringComparison.OrdinalIgnoreCase)
-            ? _xboxSnapshot.CurrentTitle
+            ? EffectiveXboxSnapshot.CurrentTitle
             : null;
         var activityName = pcGameActive ? ActiveGameDetection.DisplayName : xboxGame;
 
@@ -6366,8 +6410,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 : $"playing:{activityName}";
             var onXbox = !pcGameActive;
             details = recording
-                ? onXbox ? $"Recording {activityName} on an Xbox {(_xboxSnapshot.ConsoleName ?? "Xbox")}" : $"Recording {activityName}"
-                : onXbox ? $"Playing {activityName} on an Xbox {(_xboxSnapshot.ConsoleName ?? "Xbox")}" : $"Playing {activityName}";
+                ? onXbox ? $"Recording {activityName} on an Xbox {(EffectiveXboxSnapshot.ConsoleName ?? "Xbox")}" : $"Recording {activityName}"
+                : onXbox ? $"Playing {activityName} on an Xbox {(EffectiveXboxSnapshot.ConsoleName ?? "Xbox")}" : $"Playing {activityName}";
             state = _discordClipsSaved switch
             {
                 0 => "Ready to clip",

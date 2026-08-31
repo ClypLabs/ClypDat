@@ -48,7 +48,7 @@ Import clips from other popular clipping applications through **Settings > Impor
 
 ## Xbox activity
 
-Link an Xbox account from **Settings > Connected Accounts > Link Xbox**. ClypDat uses Microsoft’s browser sign-in and read-only Xbox Live activity to detect the current title and console. When enabled, that activity can label Desktop Capture clips and Discord Rich Presence with the Xbox game. Tokens are stored in an encrypted per-user cache; ClypDat never receives or stores the Microsoft account password.
+Link a ClypDat account from **Settings > Connected Accounts > Link ClypDat account**. The browser handoff reuses the Xbox account linked on clypdat.xyz; the desktop app receives only a signed activity token, stored encrypted with Windows DPAPI. When enabled, read-only Xbox activity labels Desktop Capture clips and Discord Rich Presence. **Link Xbox directly** remains available as a local fallback.
 
 ## Requirements
 
