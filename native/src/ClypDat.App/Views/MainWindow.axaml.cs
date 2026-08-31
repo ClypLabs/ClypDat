@@ -95,6 +95,10 @@ public sealed partial class MainWindow : Window
     // Separate visual resume state from ViewModel.IsPlaying. A playing scrub
     // deliberately sets that property false while the final seek settles.
     private bool _editorSeekVisualResumePlayback;
+    // A replacement seek can arrive after LibVLC has temporarily reported the
+    // previous seek as paused. Keep user playback intent independent from that
+    // transient transport state so quick timeline clicks still resume.
+    private bool _editorSeekResumeIntent;
     private readonly DispatcherTimer _keyboardSeekSettleTimer;
     private bool _keyboardSeekActive;
     private bool _keyboardSeekWasPlaying;
@@ -6345,6 +6349,8 @@ public sealed partial class MainWindow : Window
     private void PauseEditorPlayback()
     {
         if (ViewModel is null || !ViewModel.IsPlaying || _playback is null) return;
+        _editorSeekResumeIntent = false;
+        _editorSeekCts?.Cancel();
         _playback.Pause();
         var pauseTime = _playback.Position;
         ViewModel.CurrentTime = pauseTime;
@@ -10009,6 +10015,8 @@ public sealed partial class MainWindow : Window
     private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback)
     {
         if (ViewModel is null) return;
+        resumePlayback = TimelineSeekResumePolicy.Resolve(resumePlayback, _editorSeekResumeIntent);
+        _editorSeekResumeIntent = resumePlayback;
         _editorSeekCts?.Cancel();
         _editorSeekCts?.Dispose();
         var seekCts = new CancellationTokenSource();
@@ -10058,12 +10066,14 @@ public sealed partial class MainWindow : Window
         if (_editorSeekCts != seekCts) return;
         if (resumePlayback && didResume)
         {
+            _editorSeekResumeIntent = true;
             StartPlayheadClock(_playback?.Position ?? time);
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
         }
         else
         {
+            _editorSeekResumeIntent = false;
             SetPlayheadBase(_playback?.Position ?? time);
             ViewModel.IsPlaying = false;
             _playbackTimer.Stop();
