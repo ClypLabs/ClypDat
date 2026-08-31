@@ -197,11 +197,12 @@ internal sealed class XboxActivityService : IDisposable
         using var form = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["client_id"] = ClientId, ["grant_type"] = "authorization_code", ["code"] = code,
-            ["redirect_uri"] = RedirectUri, ["code_verifier"] = verifier
+            ["redirect_uri"] = RedirectUri, ["code_verifier"] = verifier, ["scope"] = Scope
         });
         using var response = await _http.PostAsync(TokenUri, form, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        var oauth = JsonSerializer.Deserialize<OAuthTokenResponse>(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false))
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"Microsoft token endpoint rejected the sign-in ({(int)response.StatusCode}); {OAuthError(responseBody)}.");
+        var oauth = JsonSerializer.Deserialize<OAuthTokenResponse>(responseBody)
             ?? throw new InvalidOperationException("Microsoft sign-in returned no token.");
         if (string.IsNullOrWhiteSpace(oauth.RefreshToken)) throw new InvalidOperationException("Microsoft sign-in did not return a refresh token.");
         return await ExchangeXboxTokensAsync(oauth.AccessToken, oauth.RefreshToken, oauth.ExpiresIn, cancellationToken).ConfigureAwait(false);
@@ -212,8 +213,9 @@ internal sealed class XboxActivityService : IDisposable
         using var form = new FormUrlEncodedContent(new Dictionary<string, string>
         { ["client_id"] = ClientId, ["grant_type"] = "refresh_token", ["refresh_token"] = old.RefreshToken, ["scope"] = Scope });
         using var response = await _http.PostAsync(TokenUri, form, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        var oauth = JsonSerializer.Deserialize<OAuthTokenResponse>(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false))
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"Microsoft token refresh was rejected ({(int)response.StatusCode}); {OAuthError(responseBody)}.");
+        var oauth = JsonSerializer.Deserialize<OAuthTokenResponse>(responseBody)
             ?? throw new InvalidOperationException("Microsoft refresh returned no token.");
         return await ExchangeXboxTokensAsync(oauth.AccessToken, oauth.RefreshToken ?? old.RefreshToken, oauth.ExpiresIn, cancellationToken).ConfigureAwait(false);
     }
@@ -278,6 +280,16 @@ internal sealed class XboxActivityService : IDisposable
 
     private void TryDeleteCache() { try { if (File.Exists(_cachePath)) File.Delete(_cachePath); } catch { } }
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    private static string OAuthError(string body)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(body);
+            var code = json.RootElement.TryGetProperty("error", out var error) ? error.GetString() : null;
+            return string.IsNullOrWhiteSpace(code) ? "no error detail" : code;
+        }
+        catch (JsonException) { return "no error detail"; }
+    }
     public void Dispose() { _pollCts?.Cancel(); _pollCts?.Dispose(); _http.Dispose(); }
 
     private sealed class OAuthTokenResponse
