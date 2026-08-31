@@ -513,9 +513,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static string CurrentThemeColor(string resourceKey, string fallback)
     {
-        if ((Application.Current?.Resources[resourceKey] as SolidColorBrush)?.Color is { } color)
-            return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
-        return fallback;
+        // Theme tokens live in merged dictionaries. Read through the theme
+        // service so new themes inherit currently rendered colours, not the
+        // source literals from Tokens.axaml.
+        var color = AppThemeService.ThemeColor(resourceKey, fallback);
+        return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
     }
 
     public void EditCustomTheme(CustomThemeSettings theme) { _editingTheme = theme; LoadThemeEditor(theme); }
