@@ -198,7 +198,8 @@ internal sealed class XboxActivityService : IDisposable
         var code = context.Request.QueryString["code"];
         if (!string.Equals(context.Request.QueryString["state"], state, StringComparison.Ordinal) || string.IsNullOrWhiteSpace(code))
             throw new InvalidOperationException("Xbox sign-in returned an invalid response.");
-        var body = Encoding.UTF8.GetBytes("You may close this window and return to ClypDat.");
+        var body = BrowserCallbackPage.Success();
+        context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.ContentLength64 = body.Length;
         await context.Response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
         context.Response.Close();
