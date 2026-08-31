@@ -6335,12 +6335,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public void UnlinkClypDatAccount()
+    public void SignOutClypDatAccount()
     {
         _clypDatAccount.Disconnect();
         _clypDatAccountSetupStarted = false;
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
+        Process.Start(new ProcessStartInfo("https://www.clypdat.xyz/account/signout") { UseShellExecute = true });
     }
 
     public async Task UnlinkClypDatXboxAsync()

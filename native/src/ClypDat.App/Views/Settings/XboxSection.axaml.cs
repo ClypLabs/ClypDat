@@ -16,7 +16,7 @@ public sealed partial class XboxSection : UserControl
     }
     private void UnlinkClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm) vm.UnlinkClypDatAccount();
+        if (DataContext is MainWindowViewModel vm) vm.SignOutClypDatAccount();
     }
     private async void UnlinkClypDatXboxButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
