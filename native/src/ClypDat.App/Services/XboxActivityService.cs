@@ -233,7 +233,13 @@ internal sealed class XboxActivityService : IDisposable
 
     private async Task<JsonDocument> PostXboxAsync(string uri, object payload, CancellationToken cancellationToken)
     {
-        using var response = await _http.PostAsJsonAsync(uri, payload, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+        {
+            Content = JsonContent.Create(payload)
+        };
+        request.Headers.TryAddWithoutValidation("x-xbl-contract-version", "1");
+        request.Headers.TryAddWithoutValidation("Accept", "application/json");
+        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
