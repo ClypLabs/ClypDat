@@ -157,7 +157,9 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
         var result = JsonSerializer.Deserialize<ActivityResponse>(body) ?? throw new InvalidOperationException("ClypDat activity returned no data.");
         var activity = result.Activity;
-        _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null);
+        var providers = result.Providers ?? Array.Empty<string>();
+        _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null,
+            providers.Contains("google", StringComparer.OrdinalIgnoreCase), providers.Contains("discord", StringComparer.OrdinalIgnoreCase));
         Changed?.Invoke(this, _snapshot);
     }
 
@@ -241,6 +243,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     {
         [JsonPropertyName("connected")] public bool Connected { get; set; }
         [JsonPropertyName("activity")] public Activity? Activity { get; set; }
+        [JsonPropertyName("providers")] public string[]? Providers { get; set; }
     }
     private sealed class Activity
     {

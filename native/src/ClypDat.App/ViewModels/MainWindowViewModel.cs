@@ -6292,6 +6292,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string ClypDatXboxStatus => _clypDatSnapshot.IsConnected ? "Linked through ClypDat" : "No Xbox account linked.";
     public bool ClypDatAccountIsConnected => _clypDatAccount.IsAuthenticated;
     public bool ClypDatXboxIsLinked => _clypDatSnapshot.IsConnected;
+    public string GoogleAccountStatus => _clypDatSnapshot.GoogleConnected ? "Connected" : "Not connected";
+    public string DiscordAccountStatus => _clypDatSnapshot.DiscordConnected ? "Connected" : "Not connected";
     public bool ClypDatAccountCanLink => !_clypDatAccount.IsAuthenticated && _clypDatAccountSetupStarted;
     public bool XboxActivityForDesktop
     {
@@ -6383,6 +6385,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClypDatAccountIsConnected));
         OnPropertyChanged(nameof(ClypDatXboxStatus));
         OnPropertyChanged(nameof(ClypDatXboxIsLinked));
+        OnPropertyChanged(nameof(GoogleAccountStatus));
+        OnPropertyChanged(nameof(DiscordAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
         OnPropertyChanged(nameof(XboxConnectionStatus));
         OnPropertyChanged(nameof(XboxCurrentTitle));

@@ -14,7 +14,9 @@ internal sealed record XboxActivitySnapshot(
     string? CurrentTitle,
     string? ConsoleName,
     DateTimeOffset? UpdatedAt,
-    string? Error)
+    string? Error,
+    bool GoogleConnected = false,
+    bool DiscordConnected = false)
 {
     public static XboxActivitySnapshot Disconnected { get; } = new(false, null, null, null, null, null);
 }
