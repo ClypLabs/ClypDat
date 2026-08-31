@@ -71,7 +71,10 @@ internal sealed class XboxActivityService : IDisposable
         catch (Exception error)
         {
             AppLog.Error("Xbox: connection failed.", error);
-            _snapshot = new XboxActivitySnapshot(false, null, null, null, null, "Xbox connection failed. Reconnect and try again.");
+            var message = error is HttpRequestException && !string.IsNullOrWhiteSpace(error.Message)
+                ? error.Message
+                : "Xbox connection failed. Reconnect and try again.";
+            _snapshot = new XboxActivitySnapshot(false, null, null, null, null, message);
             Changed?.Invoke(this, _snapshot);
             return false;
         }
