@@ -1,7 +1,7 @@
 using Avalonia.Controls;
+using Avalonia;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia;
 using Avalonia.VisualTree;
 using ClypDat.App.ViewModels;
 
@@ -31,12 +31,14 @@ public sealed partial class ThemesSection : UserControl
     {
         if (e.Key != Key.Enter || e.Source is not TextBox) return;
         e.Handled = true;
-        Focus();
+        DropFocus();
     }
 
     private void ThemeTextBox_OnAnyPointerPressed(object? sender, PointerEventArgs e)
     {
-        if (e.Source is not Visual source || source.FindAncestorOfType<TextBox>() is not null) return;
-        Focus();
+        if (e.Source is not Visual source || source is TextBox || source.FindAncestorOfType<TextBox>() is not null) return;
+        DropFocus();
     }
+
+    private void DropFocus() => (TopLevel.GetTopLevel(this) as ClypDat.App.Views.MainWindow)?.DropFocus();
 }

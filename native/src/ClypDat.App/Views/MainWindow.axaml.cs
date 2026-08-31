@@ -4929,7 +4929,7 @@ public sealed partial class MainWindow : Window
         DropFocus();
     }
 
-    private void DropFocus() => FocusSink.Focus();
+    internal void DropFocus() => FocusSink.Focus();
 
     // Commits and drops focus when a click lands anywhere outside the details
     // card. Clicks INSIDE it are left alone - moving between Title and
