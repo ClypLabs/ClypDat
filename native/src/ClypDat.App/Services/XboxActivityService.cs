@@ -159,13 +159,21 @@ internal sealed class XboxActivityService : IDisposable
             {
                 if (!title.TryGetProperty("name", out var name) || !title.TryGetProperty("state", out var state) ||
                     !string.Equals(state.GetString(), "active", StringComparison.OrdinalIgnoreCase)) continue;
+                var titleName = name.GetString()?.Trim();
+                if (string.IsNullOrWhiteSpace(titleName) || IsSystemTitle(titleName)) continue;
                 var timestamp = title.TryGetProperty("timestamp", out var stamp) && DateTimeOffset.TryParse(stamp.GetString(), out var parsed)
                     ? parsed : DateTimeOffset.MinValue;
-                if (timestamp >= newest) { newest = timestamp; best = name.GetString(); console = deviceConsole; }
+                if (timestamp >= newest) { newest = timestamp; best = titleName; console = deviceConsole; }
             }
         }
         return (string.IsNullOrWhiteSpace(best) ? null : best.Trim(), console);
     }
+
+    internal static bool IsSystemTitle(string title) => title.Trim() switch
+    {
+        "Home" or "Xbox Home" or "Xbox Dashboard" or "Xbox Guide" => true,
+        _ => false
+    };
 
     private static string? ConsoleLabel(string? deviceType) => deviceType?.ToUpperInvariant() switch
     {
