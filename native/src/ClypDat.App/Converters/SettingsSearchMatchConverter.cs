@@ -91,6 +91,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         {
             "Discord", "Rich Presence", "Discord Rich Presence", "Only show while playing a game", "Get ClypDat", "Profile link"
         },
+        ["Connected Accounts"] = new[] { "Xbox", "Microsoft", "console", "Gamertag", "Xbox activity", "Desktop Capture", "PlayStation", "Nintendo" },
         ["About"] = new[]
         {
             "Updates", "Check for updates", "Source and Licenses", "View on GitHub", "Diagnostics",

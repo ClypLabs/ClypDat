@@ -2961,10 +2961,11 @@ public sealed partial class MainWindow : Window
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
                 var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
+                var effectiveGameName = ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName);
                 var clipInfo = new ClipInfo(
-                    replayConfig.GameDisplayName,
+                    effectiveGameName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
-                    autoClipLabel ?? replayConfig.GameDisplayName,
+                    autoClipLabel ?? effectiveGameName,
                     File.GetCreationTimeUtc(outputPath),
                     CaptureSource: replayConfig.CaptureSource);
                 // Another plain file write with no UI affinity.

@@ -209,6 +209,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        _xboxActivity.Changed += XboxActivityChanged;
+        if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
         Settings.CustomThemes ??= new();
         Settings.RecentThemeColors ??= new();
         Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
@@ -5406,6 +5408,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _xboxActivity.Changed -= XboxActivityChanged;
+        _xboxActivity.Dispose();
         CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
         _micLevelMonitor.LevelChanged -= MicLevelMonitor_OnLevelChanged;
         _micLevelMonitor.Dispose();
@@ -6252,6 +6256,44 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string? _discordGameImageFor;
     private string? _discordGameImageUrl;
     private string? _discordGameProfileUrl;
+    private readonly XboxActivityService _xboxActivity = new();
+    private XboxActivitySnapshot _xboxSnapshot = XboxActivitySnapshot.Disconnected;
+
+    public string XboxConnectionStatus => _xboxSnapshot.Error ?? (_xboxSnapshot.IsConnected ? "Connected" : "Not connected");
+    public string XboxCurrentTitle => _xboxSnapshot.CurrentTitle ?? "No active Xbox game";
+    public bool XboxIsConnected => _xboxSnapshot.IsConnected;
+    public bool XboxActivityForDesktop
+    {
+        get => Settings.XboxActivityEnabled;
+        set { if (Settings.XboxActivityEnabled == value) return; Settings.XboxActivityEnabled = value; SaveSettings(); UpdateDiscordPresence(); OnPropertyChanged(); }
+    }
+    public string EffectiveClipGameName(string fallback)
+    {
+        if (!string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)) return fallback;
+        return Settings.XboxActivityEnabled && !string.IsNullOrWhiteSpace(_xboxSnapshot.CurrentTitle)
+            ? _xboxSnapshot.CurrentTitle!
+            : fallback;
+    }
+    public async Task LinkXboxAsync()
+    {
+        if (await _xboxActivity.ConnectAsync().ConfigureAwait(false))
+        {
+            Settings.XboxActivityEnabled = true;
+            SaveSettings();
+            OnPropertyChanged(nameof(XboxActivityForDesktop));
+            UpdateDiscordPresence();
+        }
+    }
+    public void UnlinkXbox() => _xboxActivity.Disconnect();
+
+    private void XboxActivityChanged(object? sender, XboxActivitySnapshot snapshot)
+    {
+        _xboxSnapshot = snapshot;
+        OnPropertyChanged(nameof(XboxConnectionStatus));
+        OnPropertyChanged(nameof(XboxCurrentTitle));
+        OnPropertyChanged(nameof(XboxIsConnected));
+        Dispatcher.UIThread.Post(UpdateDiscordPresence);
+    }
 
     public void ApplyDiscordSettings()
     {
@@ -6271,11 +6313,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        var pcGameActive = ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName);
+        var xboxGame = Settings.XboxActivityEnabled && Settings.ReplayCaptureSource.Equals("Desktop", StringComparison.OrdinalIgnoreCase)
+            ? _xboxSnapshot.CurrentTitle
+            : null;
+        var activityName = pcGameActive ? ActiveGameDetection.DisplayName : xboxGame;
+
         // Game-only presence must not reveal library, editor, or settings
         // activity. Clear the kind too, so the next detected game starts a
         // fresh Discord elapsed timer.
         if (Settings.DiscordRichPresenceOnlyWhenGameActive
-            && (!ActiveGameDetection.IsDetected || string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName)))
+            && string.IsNullOrWhiteSpace(activityName))
         {
             DiscordRichPresenceService.SetPresence(DiscordPresence.None);
             _discordActivityKind = string.Empty;
@@ -6292,12 +6340,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         // A running game is the user's primary activity regardless of which
         // ClypDat page is open. Settings/editor navigation must not replace it.
-        if (ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName))
+        if (!string.IsNullOrWhiteSpace(activityName))
         {
-            var detectionKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
+            var detectionKey = pcGameActive && string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
                 ? ActiveGameDetection.ExeName
-                : ActiveGameDetection.DetectionKey;
-            ResolveDiscordGameImage(detectionKey, ActiveGameDetection.DisplayName);
+                : pcGameActive ? ActiveGameDetection.DetectionKey : string.Empty;
+            ResolveDiscordGameImage(detectionKey, activityName);
             var recording = IsReplayRecording;
             // Game name is part of the kind, so the elapsed timer Discord shows
             // is "how long on THIS game" rather than "how long recording
@@ -6305,11 +6353,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // another kept the first game's start time and the timer read as a
             // session that never happened.
             kind = recording
-                ? $"recording:{ActiveGameDetection.DisplayName}"
-                : $"playing:{ActiveGameDetection.DisplayName}";
+                ? $"recording:{activityName}"
+                : $"playing:{activityName}";
+            var onXbox = !pcGameActive;
             details = recording
-                ? $"Recording {ActiveGameDetection.DisplayName}"
-                : $"Playing {ActiveGameDetection.DisplayName}";
+                ? onXbox ? $"Recording {activityName} on an Xbox {(_xboxSnapshot.ConsoleName ?? "Xbox")}" : $"Recording {activityName}"
+                : onXbox ? $"Playing {activityName} on an Xbox {(_xboxSnapshot.ConsoleName ?? "Xbox")}" : $"Playing {activityName}";
             state = _discordClipsSaved switch
             {
                 0 => "Ready to clip",
@@ -6355,8 +6404,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _discordActivityStartedUtc = DateTime.UtcNow;
         }
 
-        var gameImage = ActiveGameDetection.IsDetected
-                        && string.Equals(_discordGameImageFor, ActiveGameDetection.DisplayName, StringComparison.Ordinal)
+        var gameImage = !string.IsNullOrWhiteSpace(activityName)
+                        && string.Equals(_discordGameImageFor, activityName, StringComparison.Ordinal)
             ? _discordGameImageUrl
             : null;
         DiscordRichPresenceService.SetPresence(new DiscordPresence(
@@ -6364,7 +6413,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             state,
             _discordActivityStartedUtc,
             gameImage,
-            gameImage is null ? null : ActiveGameDetection.DisplayName,
+            gameImage is null ? null : activityName,
             gameImage is null ? null : _discordGameProfileUrl));
     }
 

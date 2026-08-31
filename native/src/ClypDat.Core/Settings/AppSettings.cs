@@ -214,6 +214,9 @@ public sealed class AppSettings
     // the account publishing it. Keep promotion opt-in and separate from
     // Rich Presence itself.
     public bool DiscordRichPresenceShowGetClypDatButton { get; set; }
+    // Optional Xbox link. Tokens live in a separately encrypted per-user cache;
+    // settings only remember whether the user enabled the activity source.
+    public bool XboxActivityEnabled { get; set; }
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one
