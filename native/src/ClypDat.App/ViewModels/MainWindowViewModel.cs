@@ -6277,14 +6277,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ClypDatAccountActivityService _clypDatAccount = new();
     private XboxActivitySnapshot _xboxSnapshot = XboxActivitySnapshot.Disconnected;
     private XboxActivitySnapshot _clypDatSnapshot = XboxActivitySnapshot.Disconnected;
+    private bool _clypDatAccountSetupStarted;
 
     private XboxActivitySnapshot EffectiveXboxSnapshot => _clypDatSnapshot.IsConnected ? _clypDatSnapshot : _xboxSnapshot;
 
     public string XboxConnectionStatus => EffectiveXboxSnapshot.Error ?? (EffectiveXboxSnapshot.IsConnected ? "Connected" : "Not connected");
     public string XboxCurrentTitle => EffectiveXboxSnapshot.CurrentTitle ?? "No active Xbox game";
     public bool XboxIsConnected => EffectiveXboxSnapshot.IsConnected;
-    public string ClypDatAccountStatus => _clypDatSnapshot.Error ?? (_clypDatSnapshot.IsConnected ? "Connected" : "Not connected");
+    public string ClypDatAccountStatus => _clypDatSnapshot.Error ?? (_clypDatSnapshot.IsConnected
+        ? "Connected"
+        : _clypDatAccountSetupStarted
+            ? "After signing in, click Link account here."
+            : "Create or sign in first, then link your account here.");
     public bool ClypDatAccountIsConnected => _clypDatSnapshot.IsConnected;
+    public bool ClypDatAccountCanLink => !_clypDatSnapshot.IsConnected && _clypDatAccountSetupStarted;
     public bool XboxActivityForDesktop
     {
         get => Settings.XboxActivityEnabled;
@@ -6327,10 +6333,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public void UnlinkClypDatAccount() => _clypDatAccount.Disconnect();
+    public void UnlinkClypDatAccount()
+    {
+        _clypDatAccount.Disconnect();
+        _clypDatAccountSetupStarted = false;
+        OnPropertyChanged(nameof(ClypDatAccountStatus));
+        OnPropertyChanged(nameof(ClypDatAccountCanLink));
+    }
 
     public void OpenClypDatAccount()
     {
+        _clypDatAccountSetupStarted = true;
+        OnPropertyChanged(nameof(ClypDatAccountStatus));
+        OnPropertyChanged(nameof(ClypDatAccountCanLink));
         Process.Start(new ProcessStartInfo("https://www.clypdat.xyz/account") { UseShellExecute = true });
     }
 
@@ -6348,6 +6363,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clypDatSnapshot = snapshot;
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountIsConnected));
+        OnPropertyChanged(nameof(ClypDatAccountCanLink));
         OnPropertyChanged(nameof(XboxConnectionStatus));
         OnPropertyChanged(nameof(XboxCurrentTitle));
         OnPropertyChanged(nameof(XboxIsConnected));
