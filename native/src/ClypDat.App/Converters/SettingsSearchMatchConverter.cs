@@ -79,17 +79,13 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
             "Per-game settings", "Per game", "Custom game", "Game overrides", "Override",
             "Add Game", "Add Setting", "Recording Quality", "Replay Length", "Full Session"
         },
-        ["Themes"] = new[]
+        ["Appearance"] = new[]
         {
             "Theme", "Preset themes", "System", "ClypDat Blue", "Berry", "Violet", "Emerald", "Rose", "Amber",
             "Accent", "Accent colour", "Windows accent", "System accent",
             "Light", "Light mode", "Light themes", "Light Blue", "Light Berry", "Light Violet",
             "Light Emerald", "Light Rose", "Light Amber",
             "Custom themes", "Custom colours"
-        },
-        ["Fonts"] = new[]
-        {
-            "Font", "Font family", "Typeface", "Typography", "Text style", "Default font", "Installed font"
         },
         ["Discord Rich Presence"] = new[]
         {

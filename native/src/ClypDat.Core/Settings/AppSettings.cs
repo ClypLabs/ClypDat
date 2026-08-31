@@ -25,6 +25,10 @@ public sealed class AppSettings
     // consistent with the rest of the desktop. Turned off, each preset uses its
     // own accent instead ("System" falls back to ClypDat's indigo).
     public bool UseSystemAccent { get; set; } = true;
+    // Built-in choices keep their existing names. User themes use a stable
+    // custom:<guid> selection so renaming does not break the active choice.
+    public List<CustomThemeSettings> CustomThemes { get; set; } = new();
+    public List<string> RecentThemeColors { get; set; } = new();
     // Inter is bundled with ClypDat, so the default remains available even
     // when the user has no matching system font installed.
     public string FontFamilyName { get; set; } = "Inter";

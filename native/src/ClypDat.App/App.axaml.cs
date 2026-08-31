@@ -10,6 +10,7 @@ using System.Diagnostics;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
 using ClypDat.App.Views;
+using ClypDat.Core.Settings;
 
 namespace ClypDat.App;
 
@@ -27,6 +28,7 @@ public sealed partial class App : Application
     private Color _systemAccent = Color.FromRgb(0x58, 0x64, 0xE8);
     private string _themePreset = "System";
     private bool _useSystemAccent = true;
+    private CustomThemeSettings? _customTheme;
 
     public override void Initialize()
     {
@@ -80,7 +82,8 @@ public sealed partial class App : Application
             var useSplash = !UiPreviewMode.Enabled;
             InitializeAccentColor();
             var viewModel = new MainWindowViewModel();
-            ApplyTheme(viewModel.Settings.ThemePreset, viewModel.Settings.UseSystemAccent);
+            ApplyTheme(viewModel.Settings.ThemePreset, viewModel.Settings.UseSystemAccent,
+                viewModel.Settings.CustomThemes.FirstOrDefault(theme => string.Equals(CustomThemeLibrary.Selection(theme), viewModel.Settings.ThemePreset, StringComparison.OrdinalIgnoreCase)));
             ApplyFontFamily(viewModel.Settings.FontFamilyName);
             _mainWindow = new MainWindow
             {
@@ -241,11 +244,12 @@ public sealed partial class App : Application
         }
     }
 
-    internal void ApplyTheme(string preset, bool useSystemAccent)
+    internal void ApplyTheme(string preset, bool useSystemAccent, CustomThemeSettings? customTheme = null)
     {
-        _themePreset = AppThemeService.Normalize(preset);
-        _useSystemAccent = useSystemAccent;
-        AppThemeService.Apply(this, _themePreset, _systemAccent, _useSystemAccent);
+        _customTheme = customTheme;
+        _themePreset = customTheme is null ? AppThemeService.Normalize(preset) : preset;
+        _useSystemAccent = customTheme is null && useSystemAccent;
+        AppThemeService.Apply(this, _themePreset, _systemAccent, _useSystemAccent, _customTheme);
     }
 
     internal void ApplyFontFamily(string? fontFamilyName)

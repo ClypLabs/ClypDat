@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     public static bool Apply(AppSettings settings)
     {
@@ -37,6 +37,22 @@ public static class AppSettingsMigrations
             settings.ReplayBackend = "Native";
             foreach (var game in settings.GameCaptureOverrides ?? []) game.CaptureBackend = "Native";
         }
+
+        if (settings.SettingsSchemaVersion < 5)
+        {
+            if (settings.LastSettingsSection is "Themes" or "Fonts") settings.LastSettingsSection = "Appearance";
+            settings.CustomThemes ??= new();
+            settings.RecentThemeColors ??= new();
+        }
+
+        settings.CustomThemes ??= new();
+        settings.RecentThemeColors ??= new();
+        settings.CustomThemes.RemoveAll(theme => string.IsNullOrWhiteSpace(theme.Id) ||
+            !CustomThemeLibrary.IsColor(theme.BaseColor) || !CustomThemeLibrary.IsColor(theme.AccentColor) ||
+            !CustomThemeLibrary.TryNormalizeName(theme.Name, settings.CustomThemes, theme.Id, out _, out _));
+        settings.RecentThemeColors = settings.RecentThemeColors.Where(CustomThemeLibrary.IsColor)
+            .Select(color => color.ToUpperInvariant()).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(CustomThemeLibrary.RecentColorLimit).ToList();
 
         settings.SettingsSchemaVersion = CurrentSchemaVersion;
         return true;

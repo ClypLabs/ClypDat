@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
 
@@ -187,31 +188,35 @@ internal static class AppThemeService
     public static Color PresetAccent(string preset) =>
         PresetAccents.TryGetValue(Normalize(preset), out var accent) ? accent : PresetAccents["System"];
 
-    public static void Apply(Application application, string preset, Color systemAccent, bool useSystemAccent)
+    public static void Apply(Application application, string preset, Color systemAccent, bool useSystemAccent,
+        CustomThemeSettings? customTheme = null)
     {
         preset = Normalize(preset);
         var transform = Transforms.TryGetValue(preset, out var t) ? t : ThemeTransform.Identity;
-        var accent = useSystemAccent ? systemAccent : PresetAccent(preset);
-        var appBackground = Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
+        var customBase = customTheme is not null ? Color.Parse(customTheme.BaseColor) : default;
+        var isCustom = customTheme is not null;
+        var customLight = isCustom && RelativeLuminance(customBase) > 0.179;
+        var accent = isCustom ? AdjustAccent(Color.Parse(customTheme!.AccentColor), customBase) : useSystemAccent ? systemAccent : PresetAccent(preset);
+        var appBackground = isCustom ? customBase : Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
 
         // FluentTheme swaps its whole control-theme resource set on this. Without
         // it every control we have not re-templated - TextBox, ComboBox popups,
         // CheckBox - keeps its dark chrome on a near-white page.
-        application.RequestedThemeVariant = transform.IsLight ? ThemeVariant.Light : ThemeVariant.Dark;
+        application.RequestedThemeVariant = isCustom ? (customLight ? ThemeVariant.Light : ThemeVariant.Dark) : transform.IsLight ? ThemeVariant.Light : ThemeVariant.Dark;
 
         foreach (var (key, source, role) in NamedTokens)
         {
-            SetBrush(application, key, Recolor(source, role, transform));
+            SetBrush(application, key, isCustom ? RecolorCustom(source, role, customBase, customLight) : Recolor(source, role, transform));
         }
-        ApplyRamp(application, transform);
+        ApplyRamp(application, transform, isCustom ? customBase : null, customLight);
 
         SetBrush(application, "AccentBrush", accent);
-        SetBrush(application, "AccentBrushHover", transform.IsLight
+        SetBrush(application, "AccentBrushHover", (isCustom ? customLight : transform.IsLight)
             ? Blend(accent, appBackground, 0.22)
             : BlendWithWhite(accent, 0.18));
         SetBrush(application, "AccentSelectedBrush", Blend(accent, appBackground, 0.78));
         SetBrush(application, "AccentSelectedHoverBrush", Blend(accent, appBackground, 0.84));
-        SetBrush(application, "AccentSelectedIconBrush", transform.IsLight
+        SetBrush(application, "AccentSelectedIconBrush", (isCustom ? customLight : transform.IsLight)
             ? Blend(accent, Colors.Black, 0.25)
             : BlendWithWhite(accent, 0.55));
         SetBrush(application, "AccentGameHoverBrush", Blend(accent, appBackground, 0.84));
@@ -219,7 +224,8 @@ internal static class AppThemeService
         SetBrush(application, "AccentHoverBrush", Blend(accent, appBackground, 0.84));
 
         ApplyFluentAccent(application, accent, appBackground);
-        ApplyLogo(application, transform.IsLight);
+        SetBrush(application, "AccentForegroundBrush", BestForeground(accent));
+        ApplyLogo(application, isCustom ? customLight : transform.IsLight);
     }
 
     // FluentTheme paints ListBoxItem selection, CheckBox ticks and anything else we
@@ -266,7 +272,7 @@ internal static class AppThemeService
         application.Resources["AppLogoLarge"] = Logo(true, isLight);
     }
 
-    private static void ApplyRamp(Application application, ThemeTransform transform)
+    private static void ApplyRamp(Application application, ThemeTransform transform, Color? customBase = null, bool customLight = false)
     {
         // Keys only, then resolve each one back through TryGetResource. A
         // dictionary loaded from XAML can hold its entries as deferred content
@@ -280,7 +286,7 @@ internal static class AppThemeService
         {
             if (!TryMatchRamp(key, out var role, out var isColor, out var source)) continue;
 
-            var themed = Recolor(source, role, transform);
+            var themed = customBase is { } baseColor ? RecolorCustom(source, role, baseColor, customLight) : Recolor(source, role, transform);
             if (isColor)
             {
                 // Color is a struct, so this shadows the ramp entry with a new
@@ -476,6 +482,65 @@ internal static class AppThemeService
         var weight = LightnessWeight(lightness);
         var themedLightness = lightness + (scaled - lightness) * weight;
         return FromHsl(transform.Hue, themedSaturation, themedLightness, source.A);
+    }
+
+    // Custom themes retain ClypDat's authored surface hierarchy. Only its
+    // hue/lightness anchor changes; text is chosen from true contrast rather
+    // than assuming every custom base is dark.
+    private static Color RecolorCustom(Color source, ColorRole role, Color baseColor, bool light)
+    {
+        if (role == ColorRole.Text)
+        {
+            var foreground = light ? Colors.Black : Colors.White;
+            var (_, _, textLightness) = ToHsl(source);
+            var alpha = textLightness < .48 ? .58 : textLightness < .66 ? .74 : 1d;
+            return Blend(baseColor, foreground, alpha);
+        }
+
+        if (role == ColorRole.Semantic)
+            return EnsureContrast(source, baseColor, 3);
+
+        var (hue, saturation, baseLightness) = ToHsl(baseColor);
+        var (_, _, sourceLightness) = ToHsl(source);
+        var (_, _, appLightness) = ToHsl(NamedTokens[0].Source);
+        var delta = sourceLightness - appLightness;
+        var target = Clamp(baseLightness + (light ? -delta : delta));
+        return FromHsl(hue, saturation, target, source.A);
+    }
+
+    private static Color AdjustAccent(Color accent, Color background) => EnsureContrast(accent, background, 3);
+
+    private static Color EnsureContrast(Color color, Color background, double minimum)
+    {
+        if (Contrast(color, background) >= minimum) return color;
+        var (hue, saturation, lightness) = ToHsl(color);
+        var towardsWhite = Contrast(Colors.White, background) >= Contrast(Colors.Black, background);
+        for (var step = 1; step <= 100; step++)
+        {
+            var candidate = FromHsl(hue, saturation, Clamp(lightness + (towardsWhite ? step : -step) / 100d), color.A);
+            if (Contrast(candidate, background) >= minimum) return candidate;
+        }
+        return towardsWhite ? Colors.White : Colors.Black;
+    }
+
+    private static Color BestForeground(Color background) =>
+        Contrast(Colors.Black, background) >= Contrast(Colors.White, background) ? Colors.Black : Colors.White;
+
+    private static double Contrast(Color first, Color second)
+    {
+        var high = Math.Max(RelativeLuminance(first), RelativeLuminance(second));
+        var low = Math.Min(RelativeLuminance(first), RelativeLuminance(second));
+        return (high + .05) / (low + .05);
+    }
+
+    private static double RelativeLuminance(Color color)
+    {
+        static double Linear(byte channel)
+        {
+            var value = channel / 255d;
+            return value <= .04045 ? value / 12.92 : Math.Pow((value + .055) / 1.055, 2.4);
+        }
+        return .2126 * Linear(color.R) + .7152 * Linear(color.G) + .0722 * Linear(color.B);
     }
 
     private static double LightnessWeight(double lightness)

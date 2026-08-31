@@ -6,16 +6,16 @@
              x:Class="ClypDat.App.Views.Settings.ThemesSection"
              x:DataType="vm:MainWindowViewModel">
   <UserControl.IsVisible>
-    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Themes">
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Appearance">
       <Binding Path="SettingsSearchText" />
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Themes">
+  <StackPanel Spacing="18" Tag="Appearance">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
-      <TextBlock Classes="settingsSectionTitle" Text="Themes" />
-      <TextBlock Classes="settingsSectionDesc" Text="Choose ClypDat's colours across the app. Text colours stay unchanged for readability." />
+      <TextBlock Classes="settingsSectionTitle" Text="Appearance" />
+      <TextBlock Classes="settingsSectionDesc" Text="Themes, colours, and typography." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
 
@@ -83,14 +83,18 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" Opacity="0.55" IsHitTestVisible="False" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Custom Themes|Custom colours'}">
+    <Border Classes="settingsCard">
       <StackPanel Spacing="5">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEMES" VerticalAlignment="Center" />
-          <Border Grid.Column="1" Classes="comingSoonTag"><TextBlock Text="SOON" /></Border>
+          <Button Grid.Column="1" Content="New theme" Click="NewCustomThemeButton_OnClick" />
         </Grid>
-        <TextBlock Classes="settingsRowDesc" Text="Choose your own colours for every part of ClypDat." />
+        <ItemsControl ItemsSource="{Binding CustomThemes}"><ItemsControl.ItemTemplate><DataTemplate><Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,6"><Border Width="25" Height="25" CornerRadius="4" Background="{Binding BaseColor}" /><TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" /><Button Grid.Column="2" Tag="{Binding}" Content="Edit" Click="EditCustomThemeButton_OnClick" /><Button Grid.Column="3" Tag="{Binding}" Content="Duplicate" Click="DuplicateCustomThemeButton_OnClick" /><Button Grid.Column="4" Tag="{Binding}" Content="Delete" Click="DeleteCustomThemeButton_OnClick" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
       </StackPanel>
     </Border>
+
+    <Border Classes="settingsCard" IsVisible="{Binding IsThemeEditorOpen}"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" /><TextBox Classes="settingsInput" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" /><Grid ColumnDefinitions="*,*" ColumnSpacing="10"><TextBox Classes="settingsInput" Text="{Binding ThemeEditorBaseColor, Mode=TwoWay}" PlaceholderText="#RRGGBB" /><TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding ThemeEditorAccentColor, Mode=TwoWay}" PlaceholderText="#RRGGBB" /></Grid><TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding ThemeEditorError}" /><StackPanel Orientation="Horizontal" Spacing="8"><Button Classes="primaryButton" Content="Apply" Click="ApplyCustomThemeButton_OnClick" /><Button Content="Cancel" Click="CancelCustomThemeButton_OnClick" /></StackPanel></StackPanel></Border>
+
+    <Border Classes="settingsCard"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="TYPOGRAPHY" /><TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Inter restores ClypDat's default." /><TextBox Classes="settingsInput" Text="{Binding AppFontFamilyName, Mode=TwoWay}" PlaceholderText="Inter" /></StackPanel></Border>
   </StackPanel>
 </UserControl>

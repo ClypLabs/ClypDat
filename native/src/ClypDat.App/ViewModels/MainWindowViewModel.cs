@@ -207,7 +207,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
-        Settings.ThemePreset = AppThemeService.Normalize(Settings.ThemePreset);
+        Settings.CustomThemes ??= new();
+        Settings.RecentThemeColors ??= new();
+        Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
         if (Settings.LastSettingsSection is "Import from Medal" or "Import from SteelSeries")
         {
@@ -412,6 +414,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public AppSettings Settings { get; }
     public IReadOnlyList<ThemeOption> ThemeOptions => AppThemeService.Options;
     public IReadOnlyList<ThemeOption> LightThemeOptions => AppThemeService.LightOptions;
+    public IReadOnlyList<CustomThemeSettings> CustomThemes => Settings.CustomThemes;
+    public IReadOnlyList<string> RecentThemeColors => Settings.RecentThemeColors;
+    private CustomThemeSettings? _editingTheme;
+    private string _themeEditorName = string.Empty;
+    private string _themeEditorBaseColor = "#0D1116";
+    private string _themeEditorAccentColor = "#5864E8";
+    private string _themeEditorError = string.Empty;
+    public bool IsThemeEditorOpen => _editingTheme is not null;
+    public string ThemeEditorName { get => _themeEditorName; set => SetProperty(ref _themeEditorName, value); }
+    public string ThemeEditorBaseColor { get => _themeEditorBaseColor; set => SetThemeEditorColor(ref _themeEditorBaseColor, value); }
+    public string ThemeEditorAccentColor { get => _themeEditorAccentColor; set => SetThemeEditorColor(ref _themeEditorAccentColor, value); }
+    public string ThemeEditorError { get => _themeEditorError; private set => SetProperty(ref _themeEditorError, value); }
 
     public string? SelectedThemePreset
     {
@@ -424,7 +438,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // would silently overwrite the user's choice - and persist it, which
             // is what made themes look like they were not saving across restarts.
             if (string.IsNullOrEmpty(value)) return;
-            var preset = AppThemeService.Normalize(value);
+            var preset = ResolveThemeSelection(value);
             if (string.Equals(Settings.ThemePreset, preset, StringComparison.OrdinalIgnoreCase)) return;
             Settings.ThemePreset = preset;
             // Picking a preset re-answers the accent question with it: System is
@@ -432,7 +446,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // named preset ships an accent of its own that the Windows one would
             // otherwise override. Still a plain setting - the toggle below can be
             // flipped back either way afterwards.
-            Settings.UseSystemAccent = AppThemeService.IsSystem(preset);
+            Settings.UseSystemAccent = !CustomThemeLibrary.IsCustomSelection(preset) && AppThemeService.IsSystem(preset);
             SaveSettings();
             ApplyTheme();
             OnPropertyChanged();
@@ -453,8 +467,61 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private string ResolveThemeSelection(string? selection)
+    {
+        if (CustomThemeLibrary.IsCustomSelection(selection) && Settings.CustomThemes.Any(theme =>
+                string.Equals(CustomThemeLibrary.Selection(theme), selection, StringComparison.OrdinalIgnoreCase))) return selection!;
+        return AppThemeService.Normalize(selection);
+    }
+
     private void ApplyTheme() =>
-        (Application.Current as ClypDat.App.App)?.ApplyTheme(Settings.ThemePreset, Settings.UseSystemAccent);
+        (Application.Current as ClypDat.App.App)?.ApplyTheme(Settings.ThemePreset, Settings.UseSystemAccent,
+            Settings.CustomThemes.FirstOrDefault(theme => string.Equals(CustomThemeLibrary.Selection(theme), Settings.ThemePreset, StringComparison.OrdinalIgnoreCase)));
+
+    public void NewCustomTheme()
+    {
+        var selected = Settings.CustomThemes.FirstOrDefault(theme => string.Equals(CustomThemeLibrary.Selection(theme), Settings.ThemePreset, StringComparison.OrdinalIgnoreCase));
+        var baseColor = selected?.BaseColor ?? "#0D1116";
+        var accent = selected?.AccentColor ?? AppThemeService.PresetAccent(Settings.ThemePreset).ToString();
+        _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName("Custom theme", Settings.CustomThemes), BaseColor = baseColor, AccentColor = accent };
+        LoadThemeEditor(_editingTheme);
+    }
+
+    public void EditCustomTheme(CustomThemeSettings theme) { _editingTheme = theme; LoadThemeEditor(theme); }
+    public void DuplicateCustomTheme(CustomThemeSettings theme)
+    {
+        _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName(theme.Name, Settings.CustomThemes), BaseColor = theme.BaseColor, AccentColor = theme.AccentColor };
+        LoadThemeEditor(_editingTheme);
+    }
+    public bool DeleteCustomTheme(CustomThemeSettings theme)
+    {
+        if (!Settings.CustomThemes.Remove(theme)) return false;
+        if (string.Equals(Settings.ThemePreset, CustomThemeLibrary.Selection(theme), StringComparison.OrdinalIgnoreCase)) Settings.ThemePreset = "System";
+        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); return true;
+    }
+    public bool ApplyCustomTheme()
+    {
+        if (_editingTheme is null) return false;
+        if (!CustomThemeLibrary.TryNormalizeName(ThemeEditorName, Settings.CustomThemes, _editingTheme.Id, out var name, out var error) ||
+            !CustomThemeLibrary.IsColor(ThemeEditorBaseColor) || !CustomThemeLibrary.IsColor(ThemeEditorAccentColor))
+        { ThemeEditorError = error ?? "Colours must use #RRGGBB."; return false; }
+        _editingTheme.Name = name; _editingTheme.BaseColor = ThemeEditorBaseColor.ToUpperInvariant(); _editingTheme.AccentColor = ThemeEditorAccentColor.ToUpperInvariant();
+        if (!Settings.CustomThemes.Contains(_editingTheme)) Settings.CustomThemes.Add(_editingTheme);
+        Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
+        CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
+        _editingTheme = null; ThemeEditorError = string.Empty; SaveSettings(); ApplyTheme();
+        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorOpen)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
+    }
+    public void CancelCustomTheme() { _editingTheme = null; ThemeEditorError = string.Empty; ApplyTheme(); OnPropertyChanged(nameof(IsThemeEditorOpen)); }
+    private void LoadThemeEditor(CustomThemeSettings theme) { ThemeEditorName = theme.Name; ThemeEditorBaseColor = theme.BaseColor; ThemeEditorAccentColor = theme.AccentColor; ThemeEditorError = string.Empty; OnPropertyChanged(nameof(IsThemeEditorOpen)); }
+    private void SetThemeEditorColor(ref string field, string value)
+    {
+        if (!SetProperty(ref field, value) || !CustomThemeLibrary.IsColor(value)) return;
+        ThemeEditorError = string.Empty;
+        if (_editingTheme is not null)
+            (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), false,
+                new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = ThemeEditorBaseColor, AccentColor = ThemeEditorAccentColor });
+    }
 
     public string AppFontFamilyName
     {
@@ -1394,6 +1461,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _selectedSettingsSection, value)) return;
+            if (!string.Equals(value, "Appearance", StringComparison.Ordinal)) CancelCustomTheme();
             OnPropertyChanged(nameof(IsImportSourcePickerVisible));
             OnPropertyChanged(nameof(IsMedalImportPageVisible));
             OnPropertyChanged(nameof(IsSteelSeriesImportPageVisible));
@@ -8532,7 +8600,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         "General", "Game Detection", "Import Clips",
         "Replay Buffer", "Custom Game Settings", "Auto-Clip", "Audio", "Game Audio Exclusions",
-        "Themes", "Fonts", "Overlays and Notifications", "Discord Rich Presence",
+        "Appearance", "Overlays and Notifications", "Discord Rich Presence",
         "About"
     };
 
