@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "games": [
+    {
+      "asset": "valorant-official.png",
+      "officialSourceUrl": "https://playvalorant.com/",
+      "detectionKeys": [ "riot-valorant" ],
+      "displayNameAliases": [ "VALORANT", "Valorant", "VALORANT-Win64-Shipping" ]
+    },
+    {
+      "asset": "roblox-official.png",
+      "officialSourceUrl": "https://www.roblox.com/",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Roblox", "RobloxPlayerBeta", "RobloxPlayerLauncher" ]
+    }
+  ]
+}

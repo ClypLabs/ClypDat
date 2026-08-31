@@ -6210,7 +6210,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _discordGameImageUrl = null;
         _ = Task.Run(async () =>
         {
-            var imageUrl = await GamePortraitService.ResolveExternalSquareArtUrlAsync(detectionKey, displayName).ConfigureAwait(false);
+            var imageUrl = await OfficialGameArtService.ResolveAsync(detectionKey, displayName).ConfigureAwait(false);
             Dispatcher.UIThread.Post(() =>
             {
                 if (!string.Equals(_discordGameImageFor, displayName, StringComparison.Ordinal)
