@@ -22,7 +22,7 @@
     </StackPanel></Border>
     <Border Classes="settingsCard"><StackPanel Spacing="14">
       <TextBlock Classes="settingsCardLabel" Text="XBOX ACCOUNT" />
-      <TextBlock Classes="settingsRowDescSm" Text="Link Xbox to send game activity to Desktop Capture clips and Discord Rich Presence." TextWrapping="Wrap" />
+      <TextBlock Classes="settingsRowDescSm" Text="Link your Xbox account to send game activity to Desktop Capture clips and Discord Rich Presence." TextWrapping="Wrap" />
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}">
         <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Xbox account" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatXboxStatus}" /></StackPanel>
         <Button Grid.Column="1" Classes="primaryButton" Content="Link Xbox" Click="CreateClypDatButton_OnClick" IsVisible="{Binding ClypDatXboxIsLinked, Converter={x:Static conv:BoolConverters.Not}}" />
