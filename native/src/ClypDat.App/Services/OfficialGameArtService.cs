@@ -20,15 +20,31 @@ public sealed class OfficialGameArtService
     public static Task<string?> ResolveAsync(string detectionKey, string displayName) =>
         Task.FromResult(Packaged.Value.Resolve(detectionKey, displayName));
 
+    public static Task<string?> ResolveGameProfileUrlAsync(string detectionKey, string displayName) =>
+        Task.FromResult(Packaged.Value.ResolveGameProfileUrl(detectionKey, displayName));
+
     public string? Resolve(string detectionKey, string displayName)
     {
-        var entry = _entries.FirstOrDefault(candidate =>
-            candidate.DetectionKeys.Any(key => string.Equals(key, detectionKey, StringComparison.OrdinalIgnoreCase)))
-            ?? _entries.FirstOrDefault(candidate =>
-                candidate.DisplayNameAliases.Any(alias => string.Equals(alias, displayName, StringComparison.OrdinalIgnoreCase)));
+        var entry = Find(detectionKey, displayName);
 
         return entry is null ? null : AssetBaseUrl + Uri.EscapeDataString(entry.Asset);
     }
+
+    public string? ResolveGameProfileUrl(string detectionKey, string displayName)
+    {
+        var entry = Find(detectionKey, displayName);
+        if (entry is null || !Uri.TryCreate(entry.OfficialSourceUrl, UriKind.Absolute, out var source)) return null;
+        var parts = source.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return parts is ["app-icons", var gameId, ..] && ulong.TryParse(gameId, out _)
+            ? $"https://discord.com/games/{gameId}"
+            : null;
+    }
+
+    private OfficialGameArtEntry? Find(string detectionKey, string displayName) =>
+        _entries.FirstOrDefault(candidate =>
+            candidate.DetectionKeys.Any(key => string.Equals(key, detectionKey, StringComparison.OrdinalIgnoreCase)))
+        ?? _entries.FirstOrDefault(candidate =>
+            candidate.DisplayNameAliases.Any(alias => string.Equals(alias, displayName, StringComparison.OrdinalIgnoreCase)));
 
     internal IReadOnlyList<OfficialGameArtEntry> Entries => _entries;
 

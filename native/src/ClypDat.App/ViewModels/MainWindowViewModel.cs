@@ -6089,6 +6089,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _discordClipsSaved;
     private string? _discordGameImageFor;
     private string? _discordGameImageUrl;
+    private string? _discordGameProfileUrl;
 
     public void ApplyDiscordSettings()
     {
@@ -6104,6 +6105,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             DiscordRichPresenceService.SetPresence(DiscordPresence.None);
             _discordActivityKind = string.Empty;
+            _discordGameProfileUrl = null;
             return;
         }
 
@@ -6115,6 +6117,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             DiscordRichPresenceService.SetPresence(DiscordPresence.None);
             _discordActivityKind = string.Empty;
+            _discordGameProfileUrl = null;
             return;
         }
 
@@ -6199,7 +6202,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             state,
             _discordActivityStartedUtc,
             gameImage,
-            gameImage is null ? null : ActiveGameDetection.DisplayName));
+            gameImage is null ? null : ActiveGameDetection.DisplayName,
+            gameImage is null ? null : _discordGameProfileUrl));
     }
 
     private void ResolveDiscordGameImage(string detectionKey, string displayName)
@@ -6208,9 +6212,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _discordGameImageFor = displayName;
         _discordGameImageUrl = null;
+        _discordGameProfileUrl = null;
         _ = Task.Run(async () =>
         {
             var imageUrl = await OfficialGameArtService.ResolveAsync(detectionKey, displayName).ConfigureAwait(false);
+            var profileUrl = await OfficialGameArtService.ResolveGameProfileUrlAsync(detectionKey, displayName).ConfigureAwait(false);
             Dispatcher.UIThread.Post(() =>
             {
                 if (!string.Equals(_discordGameImageFor, displayName, StringComparison.Ordinal)
@@ -6218,6 +6224,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     || !string.Equals(ActiveGameDetection.DisplayName, displayName, StringComparison.Ordinal)) return;
 
                 _discordGameImageUrl = imageUrl;
+                _discordGameProfileUrl = profileUrl;
                 UpdateDiscordPresence();
             });
         });

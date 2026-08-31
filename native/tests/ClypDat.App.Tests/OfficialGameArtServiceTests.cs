@@ -22,6 +22,13 @@ public sealed class OfficialGameArtServiceTests
     public void Resolve_Miss_ReturnsNull() => Assert.Null(Service.Resolve("steam-0", "Unknown game"));
 
     [Fact]
+    public void ResolveGameProfileUrl_DetectionKey_ReturnsDiscordGameRoute() =>
+        Assert.Equal("https://discord.com/games/1205090671527071784",
+            new OfficialGameArtService([
+                new("helldivers-2.png", "https://cdn.discordapp.com/app-icons/1205090671527071784/icon.png", ["steam-553850"], [])
+            ]).ResolveGameProfileUrl("steam-553850", "HELLDIVERS™ 2"));
+
+    [Fact]
     public async Task ResolveAsync_PackagedManifest_UsesApprovedAssetOnly()
     {
         var image = await OfficialGameArtService.ResolveAsync("riot-valorant", "VALORANT");

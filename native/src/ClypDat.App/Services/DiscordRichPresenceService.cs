@@ -10,7 +10,8 @@ internal sealed record DiscordPresence(
     string State,
     DateTime? StartedUtc,
     string? LargeImageUrl = null,
-    string? LargeImageText = null)
+    string? LargeImageText = null,
+    string? LargeImageLink = null)
 {
     public static readonly DiscordPresence None = new(string.Empty, string.Empty, null);
 
@@ -327,13 +328,15 @@ internal static class DiscordRichPresenceService
     {
         if (IsExternalImageUrl(presence.LargeImageUrl))
         {
-            return new Dictionary<string, string>
+            var assets = new Dictionary<string, string>
             {
                 ["large_image"] = presence.LargeImageUrl!,
                 ["large_text"] = presence.LargeImageText is { } text ? Trim(text) ?? "Current game" : "Current game",
                 ["small_image"] = ClypDatLogoUrl,
                 ["small_text"] = "Clipping with ClypDat"
             };
+            if (!string.IsNullOrWhiteSpace(presence.LargeImageLink)) assets["large_url"] = presence.LargeImageLink;
+            return assets;
         }
 
         return new Dictionary<string, string>
