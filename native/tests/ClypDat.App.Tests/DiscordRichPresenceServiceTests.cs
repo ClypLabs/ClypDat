@@ -43,4 +43,15 @@ public sealed class DiscordRichPresenceServiceTests
         Assert.Equal("https://www.clypdat.xyz/icon.png", assets.GetProperty("small_image").GetString());
         Assert.Equal("Clipping with ClypDat", assets.GetProperty("small_text").GetString());
     }
+
+    [Fact]
+    public void CreateExternalSquareArtUrl_CropsHighResolutionArtToSquare()
+    {
+        var url = GamePortraitService.CreateExternalSquareArtUrl(
+            "https://cdn.cloudflare.steamstatic.com/steam/apps/553850/library_600x900.jpg");
+
+        Assert.Equal(
+            "https://images.weserv.nl/?url=https%3A%2F%2Fcdn.cloudflare.steamstatic.com%2Fsteam%2Fapps%2F553850%2Flibrary_600x900.jpg&w=512&h=512&fit=cover&output=jpg",
+            url);
+    }
 }

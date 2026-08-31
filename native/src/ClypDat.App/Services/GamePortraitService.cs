@@ -14,6 +14,7 @@ namespace ClypDat.App.Services;
 // the UI shows its icon instead.
 public static class GamePortraitService
 {
+    private const string SquareArtProxyUrl = "https://images.weserv.nl/";
     private static readonly string CacheFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "game-portraits");
 
     // Same reasoning as GameIconService.NegativeCacheRetryAfter: without a
@@ -48,6 +49,43 @@ public static class GamePortraitService
             AppLog.Error($"Game portrait load failed for '{displayName}'", error);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Resolves high-resolution game art as a 512px square for Discord. Steam's
+    /// app icons are often 32px, which Discord enlarges into a blurred badge.
+    /// The image proxy crops the high-resolution source before Discord fetches
+    /// it, so the presence always receives a square image rather than a
+    /// Custom Game Settings portrait.
+    /// </summary>
+    public static async Task<string?> ResolveExternalSquareArtUrlAsync(
+        string detectionKey,
+        string displayName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(displayName)) return null;
+
+        try
+        {
+            return CreateExternalSquareArtUrl(
+                await ResolvePortraitUrlAsync(detectionKey, displayName, cancellationToken).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Discord square game-art lookup failed for '{displayName}'", error);
+            return null;
+        }
+    }
+
+    internal static string? CreateExternalSquareArtUrl(string? sourceUrl)
+    {
+        if (!Uri.TryCreate(sourceUrl, UriKind.Absolute, out var source) || source.Scheme != Uri.UriSchemeHttps) return null;
+
+        return $"{SquareArtProxyUrl}?url={Uri.EscapeDataString(source.AbsoluteUri)}&w=512&h=512&fit=cover&output=jpg";
     }
 
     /// <summary>
