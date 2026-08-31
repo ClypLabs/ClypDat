@@ -2,22 +2,334 @@
   "schemaVersion": 1,
   "games": [
     {
-      "asset": "helldivers-2-discord.png",
-      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1205090671527071784/6d49be66d5f2b88bdfc8cc7095abdbda.png",
-      "detectionKeys": [ "steam-553850" ],
-      "displayNameAliases": [ "HELLDIVERS™ 2", "HELLDIVERS 2" ]
+      "asset": "among-us-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1402418440685486130/e6cf30ebdaf6e657f636f391b29f06f8.png?size=1024",
+      "detectionKeys": [
+        "steam-945360"
+      ],
+      "displayNameAliases": [ "Among Us" ]
     },
     {
-      "asset": "valorant-official.png",
-      "officialSourceUrl": "https://playvalorant.com/",
-      "detectionKeys": [ "riot-valorant" ],
-      "displayNameAliases": [ "VALORANT", "Valorant", "VALORANT-Win64-Shipping" ]
+      "asset": "barotrauma-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1124351709225955388/bf9af0455e67c542f3c3b92986897240.png?size=1024",
+      "detectionKeys": [
+        "steam-602960"
+      ],
+      "displayNameAliases": [ "Barotrauma" ]
     },
     {
-      "asset": "roblox-official.png",
-      "officialSourceUrl": "https://www.roblox.com/",
+      "asset": "battlefield-6-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1425690433018925056/385864ebfdda22c76c0bd944c8722efd.png?size=1024",
       "detectionKeys": [],
-      "displayNameAliases": [ "Roblox", "RobloxPlayerBeta", "RobloxPlayerLauncher" ]
+      "displayNameAliases": [
+        "Battlefield™ 6",
+        "Battlefield 6"
+      ]
+    },
+    {
+      "asset": "call-of-duty-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1539812812854132867/532b24566a2cdde9646052b7e4d43bc0.png?size=1024",
+      "detectionKeys": [
+        "steam-1938090"
+      ],
+      "displayNameAliases": [
+        "Call of Duty®",
+        "Call of Duty: Modern Warfare 4"
+      ]
+    },
+    {
+      "asset": "counter-strike-2-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1158877933042143272/558f5a26ecb3b17c3dea3d15c1df537a.png?size=1024",
+      "detectionKeys": [
+        "steam-730"
+      ],
+      "displayNameAliases": [ "Counter-Strike 2" ]
+    },
+    {
+      "asset": "dead-by-daylight-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/357607133254254632/64e7623c9af49f2e7dc7048df16b1013.png?size=1024",
+      "detectionKeys": [
+        "steam-381210"
+      ],
+      "displayNameAliases": [ "Dead by Daylight" ]
+    },
+    {
+      "asset": "diablo-iv-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1113966530531704943/ced913ddd2b497545cd3e2931b1310ab.png?size=1024",
+      "detectionKeys": [
+        "battlenet-diabloiv"
+      ],
+      "displayNameAliases": [
+        "Diablo® IV",
+        "Diablo IV"
+      ]
+    },
+    {
+      "asset": "dispatch-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1430601682257051760/57867cb58e2fcb4fa38019cd70ec9a09.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Dispatch" ]
+    },
+    {
+      "asset": "dying-light-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/363427839137153024/e9465677c4f03394da82e8107ab73d70.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Dying Light" ]
+    },
+    {
+      "asset": "for-honor-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/425438403819995145/02e63008d18580c53a2882ae38d71609.png?size=1024",
+      "detectionKeys": [
+        "steam-304390"
+      ],
+      "displayNameAliases": [
+        "FOR HONOR",
+        "For Honor",
+        "ForHonor"
+      ]
+    },
+    {
+      "asset": "fortnite-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1402418703554842694/c1864b38910c209afd5bf6423b672022.png?size=1024",
+      "detectionKeys": [
+        "epic-fortnite"
+      ],
+      "displayNameAliases": [
+        "Fortnite",
+        "FortniteClient-Win64-Shipping",
+        "Epic Games Launcher"
+      ]
+    },
+    {
+      "asset": "forza-horizon-6-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1445163122284429375/94754fda8652e558bca981d891fe2185.png?size=1024",
+      "detectionKeys": [
+        "steam-2483190"
+      ],
+      "displayNameAliases": [ "Forza Horizon 6" ]
+    },
+    {
+      "asset": "grand-theft-auto-v-enhanced-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1402418714716143646/b77111108195cd5e4dd2011dd39bf67d.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [
+        "Grand Theft Auto V Enhanced",
+        "Grand Theft Auto V",
+        "Grand Theft Auto V Legacy"
+      ]
+    },
+    {
+      "asset": "haste-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1356885902231863326/ae4be5c9aa5bf0f8e6c7396f052f8ec3.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [
+        "Haste",
+        "HASTE"
+      ]
+    },
+    {
+      "asset": "helldivers-2-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1205090671527071784/6d49be66d5f2b88bdfc8cc7095abdbda.png?size=1024",
+      "detectionKeys": [
+        "steam-553850"
+      ],
+      "displayNameAliases": [
+        "HELLDIVERS™ 2",
+        "HELLDIVERS 2"
+      ]
+    },
+    {
+      "asset": "machine-party-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1534411052014506085/49f7b350bddc40d237fee44fff9734ae.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Machine Party" ]
+    },
+    {
+      "asset": "marvel-rivals-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1314395942253756416/2dd7882b887306ab5afad03452869ad8.png?size=1024",
+      "detectionKeys": [
+        "steam-2767030"
+      ],
+      "displayNameAliases": [
+        "Marvel Rivals",
+        "マーベル・ライバルズ"
+      ]
+    },
+    {
+      "asset": "minecraft-launcher-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1402418491272986635/166fbad351ecdd02d11a3b464748f66b.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [
+        "Minecraft Launcher",
+        "Minecraft",
+        "Minecraft Windows 10 Edition"
+      ]
+    },
+    {
+      "asset": "misery-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1431069770798600353/4b59e1b3baa0d9438d00a686f1434b0f.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "MISERY" ]
+    },
+    {
+      "asset": "overwatch-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/356875221078245376/a60bb76ba4d4acafbd4cb9aad6e61739.png?size=1024",
+      "detectionKeys": [
+        "steam-2357570"
+      ],
+      "displayNameAliases": [
+        "Overwatch®",
+        "Overwatch"
+      ]
+    },
+    {
+      "asset": "peak-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1384276457596911676/37eee4b1978084ab2c9ea0560173c6f6.png?size=1024",
+      "detectionKeys": [
+        "steam-3527290"
+      ],
+      "displayNameAliases": [ "PEAK" ]
+    },
+    {
+      "asset": "phasmophobia-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1402418103702524046/f65b973be17cd0d2413f34a836279fae.png?size=1024",
+      "detectionKeys": [
+        "steam-739630"
+      ],
+      "displayNameAliases": [ "Phasmophobia" ]
+    },
+    {
+      "asset": "project-zomboid-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/426526722322726912/834930e051a22db2e9f565f92cf0ce1f.png?size=1024",
+      "detectionKeys": [
+        "steam-108600"
+      ],
+      "displayNameAliases": [ "Project Zomboid" ]
+    },
+    {
+      "asset": "r-e-p-o-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1344368447928401961/7ca82489f26e61746f10274de3929e47.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [
+        "R.E.P.O",
+        "R.E.P.O."
+      ]
+    },
+    {
+      "asset": "ready-or-not-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1174041358995042375/c23389ea4e5ed305702cbcffc5f12fe2.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Ready or Not" ]
+    },
+    {
+      "asset": "rift-of-the-necrodancer-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1337634070422753391/ddad4188d211977b9a61db1e25f2cbb1.png?size=1024",
+      "detectionKeys": [
+        "steam-2073250"
+      ],
+      "displayNameAliases": [ "Rift of the NecroDancer" ]
+    },
+    {
+      "asset": "roblox-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/363445589247131668/f2b60e350a2097289b3b0b877495e55f.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [
+        "Roblox",
+        "ROBLOX"
+      ]
+    },
+    {
+      "asset": "schedule-i-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1353866015351636098/817171e4b4335b12b8a9da2a290e73fb.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Schedule I" ]
+    },
+    {
+      "asset": "star-wars-battlefront-ii-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/363429717698936852/980bbb4bf6cd9f7d2f087d9bc24a6f7b.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [
+        "STAR WARS™ Battlefront™ II",
+        "Star Wars Battlefront II",
+        "STAR WARS Battlefront II"
+      ]
+    },
+    {
+      "asset": "the-outlast-trials-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1124351960078897173/6f753c592cd15aa9b4408913536f3238.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "The Outlast Trials" ]
+    },
+    {
+      "asset": "tom-clancy-s-rainbow-six-siege-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/356876590342340608/01125e693db476e6f83f7d9769080fd0.png?size=1024",
+      "detectionKeys": [
+        "steam-359550"
+      ],
+      "displayNameAliases": [
+        "Tom Clancy's Rainbow Six Siege",
+        "Rainbow Six Siege",
+        "Tom Clancy's Rainbow Six? Siege"
+      ]
+    },
+    {
+      "asset": "ultimate-chicken-horse-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/363425213905371146/7db6f7d5c3baf9c00fd32c57110c693a.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Ultimate Chicken Horse" ]
+    },
+    {
+      "asset": "unturned-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1402416803866738808/c868fc1f2cb2fcfaa11631db7125e3e7.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Unturned" ]
+    },
+    {
+      "asset": "valheim-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1124358970618953818/93ac3b8489a031b721995a99102c73f1.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Valheim" ]
+    },
+    {
+      "asset": "valorant-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/700136079562375258/11f81959f4fdd76ca6c39c59eac256c1.png?size=1024",
+      "detectionKeys": [
+        "riot-valorant"
+      ],
+      "displayNameAliases": [ "VALORANT" ]
+    },
+    {
+      "asset": "viscera-cleanup-detail-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1440139542584889524/b4348131e924ee69d2872e30c09b58fb.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [ "Viscera Cleanup Detail" ]
+    },
+    {
+      "asset": "warhammer-40-000-space-marine-2-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1281297844858257418/fe0529b03e92be276eba3deeea99fd7f.png?size=1024",
+      "detectionKeys": [],
+      "displayNameAliases": [
+        "Warhammer 40,000; Space Marine 2",
+        "Warhammer 40,000: Space Marine II",
+        "Warhammer 40,000: Space Marine 2"
+      ]
+    },
+    {
+      "asset": "wuthering-waves-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1247227126416146462/1e7d7e9ca69ea0951467994c581f70f5.png?size=1024",
+      "detectionKeys": [
+        "steam-3513350",
+        "epic-wutheringwaves"
+      ],
+      "displayNameAliases": [ "Wuthering Waves" ]
+    },
+    {
+      "asset": "honkai-star-rail-discord.png",
+      "officialSourceUrl": "https://cdn.discordapp.com/app-icons/1121201675240210523/444d067889922e42b0af99b13e5d5c72.png?size=1024",
+      "detectionKeys": [
+        "epic-honkaistarrail"
+      ],
+      "displayNameAliases": [ "Honkai: Star Rail" ]
     }
   ]
 }
