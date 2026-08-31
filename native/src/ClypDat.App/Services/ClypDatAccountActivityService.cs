@@ -55,7 +55,10 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         {
             AppLog.Error("ClypDat account: connection failed.", error);
             _token = null;
-            _snapshot = new XboxActivitySnapshot(false, null, null, null, null, "ClypDat account connection failed. Sign in through the browser and try again.");
+            var message = error is InvalidOperationException invalid && invalid.Message.StartsWith("No Xbox account linked.", StringComparison.Ordinal)
+                ? invalid.Message
+                : "ClypDat account connection failed. Sign in through the browser and try again.";
+            _snapshot = new XboxActivitySnapshot(false, null, null, null, null, message);
             Changed?.Invoke(this, _snapshot);
             return false;
         }
@@ -113,7 +116,11 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             throw new InvalidOperationException("ClypDat account sign-in expired.");
         }
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ClypDat activity endpoint rejected the request ({(int)response.StatusCode}); {body}");
+        if (!response.IsSuccessStatusCode)
+        {
+            var message = TryReadError(body) ?? $"ClypDat activity endpoint rejected the request ({(int)response.StatusCode}).";
+            throw new HttpRequestException(message);
+        }
         var result = JsonSerializer.Deserialize<ActivityResponse>(body) ?? throw new InvalidOperationException("ClypDat activity returned no data.");
         var activity = result.Activity;
         _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null);
@@ -134,6 +141,10 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         try
         {
             if (!string.Equals(context.Request.QueryString["state"], state, StringComparison.Ordinal)) throw new InvalidOperationException("ClypDat sign-in returned an invalid response.");
+            var error = context.Request.QueryString["error"];
+            if (string.Equals(error, "xbox-not-linked", StringComparison.Ordinal))
+                throw new InvalidOperationException("No Xbox account linked. Open clypdat.xyz/account, link Xbox, then retry here.");
+            if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException("ClypDat sign-in was not completed.");
             var accessToken = context.Request.QueryString["token"];
             if (string.IsNullOrWhiteSpace(accessToken)) throw new InvalidOperationException("ClypDat sign-in returned no token.");
             var expiresIn = int.TryParse(context.Request.QueryString["expires_in"], out var seconds) ? seconds : 60 * 60 * 24 * 30;
@@ -176,6 +187,15 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     }
 
     private void TryDeleteCache() { try { if (File.Exists(_cachePath)) File.Delete(_cachePath); } catch { } }
+    private static string? TryReadError(string body)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(body);
+            return json.RootElement.TryGetProperty("error", out var error) ? error.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
     private static DateTimeOffset ParseTimestamp(string? value) => DateTimeOffset.TryParse(value, out var parsed) ? parsed : DateTimeOffset.UtcNow;
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     public void Dispose() { _pollCts?.Cancel(); _pollCts?.Dispose(); _http.Dispose(); }
