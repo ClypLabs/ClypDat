@@ -16,16 +16,21 @@
       </Grid>
       <Button Content="Create or sign in first" Click="CreateClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Xbox account" /><TextBlock Classes="settingsRowDescSm" Text="Linked through ClypDat" /></StackPanel>
-        <Button Grid.Column="1" Content="Unlink" Click="UnlinkClypDatButton_OnClick" />
+        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="ClypDat account" /><TextBlock Classes="settingsRowDescSm" Text="Signed in to ClypDat" /></StackPanel>
+        <Button Grid.Column="1" Content="Sign out" Click="UnlinkClypDatButton_OnClick" />
       </Grid>
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}">
+        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Xbox account" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatXboxStatus}" /></StackPanel>
+        <Button Grid.Column="1" Classes="primaryButton" Content="Link Xbox" Click="CreateClypDatButton_OnClick" IsVisible="{Binding ClypDatXboxIsLinked, Converter={x:Static conv:BoolConverters.Not}}" />
+        <Button Grid.Column="1" Content="Unlink Xbox" Click="UnlinkClypDatXboxButton_OnClick" IsVisible="{Binding ClypDatXboxIsLinked}" />
+      </Grid>
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatXboxIsLinked}">
         <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Status" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountStatus}" /></StackPanel>
       </Grid>
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatXboxIsLinked}">
         <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Current title" /><TextBlock Classes="settingsRowDescSm" Text="{Binding XboxCurrentTitle}" /></StackPanel>
       </Grid>
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}"><StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Use Xbox activity for Desktop Capture" /><TextBlock Classes="settingsRowDescSm" Text="PC Game Capture remains higher priority." /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding XboxActivityForDesktop}" /></Grid>
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatXboxIsLinked}"><StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Use Xbox activity for Desktop Capture" /><TextBlock Classes="settingsRowDescSm" Text="PC Game Capture remains higher priority." /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding XboxActivityForDesktop}" /></Grid>
     </StackPanel></Border>
   </StackPanel>
 </UserControl>

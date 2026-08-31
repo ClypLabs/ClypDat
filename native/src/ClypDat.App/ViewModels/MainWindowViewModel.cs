@@ -6284,13 +6284,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string XboxConnectionStatus => EffectiveXboxSnapshot.Error ?? (EffectiveXboxSnapshot.IsConnected ? "Connected" : "Not connected");
     public string XboxCurrentTitle => EffectiveXboxSnapshot.CurrentTitle ?? "No active Xbox game";
     public bool XboxIsConnected => EffectiveXboxSnapshot.IsConnected;
-    public string ClypDatAccountStatus => _clypDatSnapshot.Error ?? (_clypDatSnapshot.IsConnected
-        ? "Connected"
-        : _clypDatAccountSetupStarted
+    public string ClypDatAccountStatus => _clypDatAccount.IsAuthenticated
+        ? _clypDatSnapshot.IsConnected ? "Connected" : "Connected. No Xbox account linked."
+        : _clypDatSnapshot.Error ?? (_clypDatAccountSetupStarted
             ? "After signing in, click Link account here."
             : "Create or sign in first, then link your account here.");
-    public bool ClypDatAccountIsConnected => _clypDatSnapshot.IsConnected;
-    public bool ClypDatAccountCanLink => !_clypDatSnapshot.IsConnected && _clypDatAccountSetupStarted;
+    public string ClypDatXboxStatus => _clypDatSnapshot.IsConnected ? "Linked through ClypDat" : "No Xbox account linked.";
+    public bool ClypDatAccountIsConnected => _clypDatAccount.IsAuthenticated;
+    public bool ClypDatXboxIsLinked => _clypDatSnapshot.IsConnected;
+    public bool ClypDatAccountCanLink => !_clypDatAccount.IsAuthenticated && _clypDatAccountSetupStarted;
     public bool XboxActivityForDesktop
     {
         get => Settings.XboxActivityEnabled;
@@ -6341,6 +6343,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
     }
 
+    public async Task UnlinkClypDatXboxAsync()
+    {
+        if (await _clypDatAccount.DisconnectXboxAsync().ConfigureAwait(false))
+        {
+            Settings.XboxActivityEnabled = false;
+            SaveSettings();
+            OnPropertyChanged(nameof(XboxActivityForDesktop));
+            UpdateDiscordPresence();
+        }
+    }
+
     public void OpenClypDatAccount()
     {
         _clypDatAccountSetupStarted = true;
@@ -6363,6 +6376,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clypDatSnapshot = snapshot;
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountIsConnected));
+        OnPropertyChanged(nameof(ClypDatXboxStatus));
+        OnPropertyChanged(nameof(ClypDatXboxIsLinked));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
         OnPropertyChanged(nameof(XboxConnectionStatus));
         OnPropertyChanged(nameof(XboxCurrentTitle));

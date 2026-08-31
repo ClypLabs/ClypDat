@@ -21,6 +21,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private XboxActivitySnapshot _snapshot = XboxActivitySnapshot.Disconnected;
 
     public XboxActivitySnapshot Snapshot => _snapshot;
+    public bool IsAuthenticated => _token is { ExpiresAt: var expiresAt } && expiresAt > DateTimeOffset.UtcNow;
     public event EventHandler<XboxActivitySnapshot>? Changed;
 
     public async Task<bool> TryRestoreAsync(CancellationToken cancellationToken = default)
@@ -75,6 +76,33 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         Changed?.Invoke(this, _snapshot);
     }
 
+    public async Task<bool> DisconnectXboxAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsAuthenticated) return false;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Delete, "api/desktop/xbox/activity");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token!.AccessToken);
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                Disconnect();
+                return false;
+            }
+            if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ClypDat Xbox unlink failed ({(int)response.StatusCode}).");
+            _snapshot = XboxActivitySnapshot.Disconnected;
+            Changed?.Invoke(this, _snapshot);
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("ClypDat account: Xbox unlink failed.", error);
+            _snapshot = _snapshot with { Error = "ClypDat Xbox unlink failed. Try again." };
+            Changed?.Invoke(this, _snapshot);
+            return false;
+        }
+    }
+
     private void StartPolling()
     {
         _pollCts?.Cancel();
@@ -116,6 +144,12 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             throw new InvalidOperationException("ClypDat account sign-in expired.");
         }
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            _snapshot = XboxActivitySnapshot.Disconnected;
+            Changed?.Invoke(this, _snapshot);
+            return;
+        }
         if (!response.IsSuccessStatusCode)
         {
             var message = TryReadError(body) ?? $"ClypDat activity endpoint rejected the request ({(int)response.StatusCode}).";
