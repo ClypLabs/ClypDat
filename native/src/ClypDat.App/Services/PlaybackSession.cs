@@ -8,6 +8,20 @@ using System.Text;
 
 namespace ClypDat.App.Services;
 
+public enum PlaybackSeekOutcome
+{
+    Completed,
+    Superseded,
+    Failed
+}
+
+public readonly record struct PlaybackSeekResult(PlaybackSeekOutcome Outcome, bool Resumed)
+{
+    public static PlaybackSeekResult Completed(bool resumed) => new(PlaybackSeekOutcome.Completed, resumed);
+    public static PlaybackSeekResult Superseded => new(PlaybackSeekOutcome.Superseded, false);
+    public static PlaybackSeekResult Failed => new(PlaybackSeekOutcome.Failed, false);
+}
+
 public sealed class PlaybackSession : IDisposable
 {
     private readonly LibVLC _libVlc;
@@ -631,8 +645,12 @@ public sealed class PlaybackSession : IDisposable
     public void SeekPreview(TimeSpan time)
     {
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
+        var target = TimeSpan.FromMilliseconds(milliseconds);
+        // A final seek has already claimed transport. Ignored preview input
+        // must not increment _seekVersion and falsely supersede that final seek.
+        if (!_previewRequests.TryQueuePreview(target)) return;
         Interlocked.Increment(ref _seekVersion);
-        _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
+        _lastRequestedPosition = target;
         try
         {
             // One worker owns all preview writes. New drag positions replace a
@@ -641,7 +659,6 @@ public sealed class PlaybackSession : IDisposable
             lock (_previewLock)
             {
                 if (_disposed) return;
-                _previewRequests.QueuePreview(TimeSpan.FromMilliseconds(milliseconds));
                 if (_previewWorker is null) _previewWorker = Task.Run(PreviewSeekWorkerAsync);
             }
         }
@@ -759,11 +776,11 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    public Task<bool> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
+    public Task<PlaybackSeekResult> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
         lock (_seekTaskLock)
         {
-            if (_disposed) return Task.FromCanceled<bool>(_disposeCts.Token);
+            if (_disposed) return Task.FromCanceled<PlaybackSeekResult>(_disposeCts.Token);
 
             var seekTask = SeekCoreAsync(time, resumePlayback, cancellationToken);
             _seekTasks.Add(seekTask);
@@ -779,7 +796,7 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    private async Task<bool> SeekCoreAsync(TimeSpan time, bool resumePlayback, CancellationToken cancellationToken)
+    private async Task<PlaybackSeekResult> SeekCoreAsync(TimeSpan time, bool resumePlayback, CancellationToken cancellationToken)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
         cancellationToken = linkedCts.Token;
@@ -802,7 +819,7 @@ public sealed class PlaybackSession : IDisposable
             // would just interrupt the newer one's in-flight decode.
             _seekLock.Release();
             _previewRequests.CompleteFinalSeek(finalRequestGeneration);
-            return false;
+            return PlaybackSeekResult.Superseded;
         }
         var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
         var requested = TimeSpan.FromMilliseconds(milliseconds);
@@ -834,12 +851,12 @@ public sealed class PlaybackSession : IDisposable
             {
                 if (seekVersion == Interlocked.Read(ref _seekVersion)) _shouldPlay = false;
                 AppLog.Debug($"Editor seek failed: requested={requested.TotalSeconds:0.###}s, landed={result.Landed.TotalSeconds:0.###}s, resume={resumePlayback}, superseded={result.Superseded}, generation={seekVersion}.");
-                return false;
+                return result.Superseded ? PlaybackSeekResult.Superseded : PlaybackSeekResult.Failed;
             }
 
             _lastRequestedPosition = result.Landed;
             AppLog.Debug($"Editor seek end: requested={requested.TotalSeconds:0.###}s, landed={result.Landed.TotalSeconds:0.###}s, audioAnchor={result.AudioAnchor.TotalSeconds:0.###}s, rollConfirmed={result.Resumed}, state={VideoPlayer.State}, resume={resumePlayback}, generation={seekVersion}.");
-            return !resumePlayback || result.Resumed;
+            return PlaybackSeekResult.Completed(result.Resumed);
         }
         finally
         {

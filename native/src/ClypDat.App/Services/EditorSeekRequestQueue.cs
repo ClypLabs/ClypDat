@@ -26,6 +26,18 @@ internal sealed class EditorSeekRequestQueue
         }
     }
 
+    public bool TryQueuePreview(TimeSpan target)
+    {
+        lock (_sync)
+        {
+            if (_finalSeekPending) return false;
+            _generation++;
+            _preview = Normalize(target);
+            _previewRequestsSinceFinal++;
+            return true;
+        }
+    }
+
     public EditorFinalSeekRequest BeginFinalSeek(DateTimeOffset now)
     {
         lock (_sync)

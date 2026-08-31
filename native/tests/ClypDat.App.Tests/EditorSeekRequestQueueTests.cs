@@ -57,4 +57,13 @@ public sealed class EditorSeekRequestQueueTests
         Assert.Equal(1, handoff.SuppressedStaleParks);
         queue.CompleteFinalSeek(final.Generation);
     }
+
+    [Fact]
+    public void FinalSeek_RejectsPreviewWithoutInvalidatingItsTransport()
+    {
+        var queue = new EditorSeekRequestQueue();
+        queue.BeginFinalSeek(DateTimeOffset.UtcNow);
+
+        Assert.False(queue.TryQueuePreview(TimeSpan.FromSeconds(2)));
+    }
 }

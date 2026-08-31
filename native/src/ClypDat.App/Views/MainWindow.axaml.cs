@@ -10031,7 +10031,7 @@ public sealed partial class MainWindow : Window
         // ChunkedAudioReader.Read), which would look exactly like the audio
         // lagging the picture in even though both were released together.
         _playback?.PrefetchAudioAt(time);
-        var didResume = false;
+        var seekResult = PlaybackSeekResult.Failed;
         if (_playback is not null)
         {
             try
@@ -10048,7 +10048,7 @@ public sealed partial class MainWindow : Window
                 _editorSeekInFlight = true;
                 _editorSeekVisualResumePlayback = resumePlayback;
                 if (resumePlayback) _playbackTimer.Start();
-                didResume = await _playback.SeekAsync(time, resumePlayback, seekCts.Token);
+                seekResult = await _playback.SeekAsync(time, resumePlayback, seekCts.Token);
             }
             catch (OperationCanceledException)
             {
@@ -10064,9 +10064,18 @@ public sealed partial class MainWindow : Window
             }
         }
         if (_editorSeekCts != seekCts) return;
-        if (resumePlayback && didResume)
+        if (resumePlayback && seekResult.Resumed)
         {
             _editorSeekResumeIntent = true;
+            StartPlayheadClock(_playback?.Position ?? time);
+            ViewModel.IsPlaying = true;
+            _playbackTimer.Start();
+        }
+        else if (TimelineSeekResumePolicy.ShouldContinueAfterSeekFailure(resumePlayback)
+                 && seekResult.Outcome != PlaybackSeekOutcome.Completed)
+        {
+            _editorSeekResumeIntent = true;
+            _playback?.EnsurePlayingIfNeeded(true);
             StartPlayheadClock(_playback?.Position ?? time);
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
