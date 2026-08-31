@@ -84,12 +84,23 @@
     </Border>
 
     <Border Classes="settingsCard">
-      <StackPanel Spacing="5">
+      <StackPanel Spacing="16">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEMES" VerticalAlignment="Center" />
-          <Button Grid.Column="1" Content="New theme" Click="NewCustomThemeButton_OnClick" />
+          <StackPanel Spacing="4">
+            <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEMES" />
+            <TextBlock Classes="settingsRowDesc" Text="Save base and accent pairs. They stay local to ClypDat." />
+          </StackPanel>
+          <Button Grid.Column="1" Classes="primaryButton" Padding="16,9" Content="New theme" Click="NewCustomThemeButton_OnClick" VerticalAlignment="Center" />
         </Grid>
-        <ItemsControl ItemsSource="{Binding CustomThemes}"><ItemsControl.ItemTemplate><DataTemplate><Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,6"><Border Width="25" Height="25" CornerRadius="4" Background="{Binding BaseColor}" /><TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" /><Button Grid.Column="2" Tag="{Binding}" Content="Edit" Click="EditCustomThemeButton_OnClick" /><Button Grid.Column="3" Tag="{Binding}" Content="Duplicate" Click="DuplicateCustomThemeButton_OnClick" /><Button Grid.Column="4" Tag="{Binding}" Content="Delete" Click="DeleteCustomThemeButton_OnClick" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+        <Border Height="1" Background="{StaticResource DividerBrush}" />
+        <Border IsVisible="{Binding IsCustomThemesEmpty}" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="8" Padding="16">
+          <Grid ColumnDefinitions="46,*,Auto" ColumnSpacing="13">
+            <Grid Width="46" Height="46"><Border Background="{StaticResource AccentSelectedBrush}" CornerRadius="23" /><Border Width="20" Height="20" CornerRadius="10" Background="{StaticResource AccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Grid>
+            <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center"><TextBlock Classes="settingsRowTitle" Text="No custom themes yet" /><TextBlock Classes="settingsRowDesc" Text="Start with your current colours, then tune them live." /></StackPanel>
+            <TextBlock Grid.Column="2" Text="Base + accent" Foreground="{StaticResource TextMutedBrush}" FontSize="12" VerticalAlignment="Center" />
+          </Grid>
+        </Border>
+        <ItemsControl ItemsSource="{Binding CustomThemes}"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="8" Padding="12"><Grid ColumnDefinitions="48,*,Auto" ColumnSpacing="12"><Grid Width="48" Height="40"><Border Background="{Binding BaseColor}" CornerRadius="6" /><Border Width="17" Height="17" CornerRadius="9" Background="{Binding AccentColor}" BorderBrush="{StaticResource AppBgBrush}" BorderThickness="2" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,4,4" /></Grid><StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" /><TextBlock Text="{Binding BaseColor}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" /></StackPanel><StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Button Tag="{Binding}" Content="Edit" Click="EditCustomThemeButton_OnClick" /><Button Tag="{Binding}" Content="Duplicate" Click="DuplicateCustomThemeButton_OnClick" /><Button Tag="{Binding}" Content="Delete" Click="DeleteCustomThemeButton_OnClick" /></StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
       </StackPanel>
     </Border>
 

@@ -415,6 +415,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public IReadOnlyList<ThemeOption> ThemeOptions => AppThemeService.Options;
     public IReadOnlyList<ThemeOption> LightThemeOptions => AppThemeService.LightOptions;
     public IReadOnlyList<CustomThemeSettings> CustomThemes => Settings.CustomThemes;
+    public bool IsCustomThemesEmpty => Settings.CustomThemes.Count == 0;
     public IReadOnlyList<string> RecentThemeColors => Settings.RecentThemeColors;
     private CustomThemeSettings? _editingTheme;
     private string _themeEditorName = string.Empty;
@@ -497,7 +498,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!Settings.CustomThemes.Remove(theme)) return false;
         if (string.Equals(Settings.ThemePreset, CustomThemeLibrary.Selection(theme), StringComparison.OrdinalIgnoreCase)) Settings.ThemePreset = "System";
-        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); return true;
+        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); return true;
     }
     public bool ApplyCustomTheme()
     {
@@ -510,7 +511,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
         CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
         _editingTheme = null; ThemeEditorError = string.Empty; SaveSettings(); ApplyTheme();
-        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorOpen)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
+        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorOpen)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
     }
     public void CancelCustomTheme() { _editingTheme = null; ThemeEditorError = string.Empty; ApplyTheme(); OnPropertyChanged(nameof(IsThemeEditorOpen)); }
     private void LoadThemeEditor(CustomThemeSettings theme) { ThemeEditorName = theme.Name; ThemeEditorBaseColor = theme.BaseColor; ThemeEditorAccentColor = theme.AccentColor; ThemeEditorError = string.Empty; OnPropertyChanged(nameof(IsThemeEditorOpen)); }
