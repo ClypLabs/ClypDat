@@ -426,6 +426,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _themeEditorError = string.Empty;
     private ThemeColorEditorTarget _themeColorEditorTarget;
     private Color _pickerColor = Color.Parse("#0D1116");
+    private HsvColor _pickerHsvColor = Color.Parse("#0D1116").ToHsv();
     private string _pickerHexText = "#0D1116";
     private string _pickerRedText = "13";
     private string _pickerGreenText = "17";
@@ -441,6 +442,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsEditingBaseColor => ThemeColorEditorTarget == ThemeColorEditorTarget.Base;
     public bool IsEditingAccentColor => ThemeColorEditorTarget == ThemeColorEditorTarget.Accent;
     public Color PickerColor { get => _pickerColor; set { if (_updatingPicker) return; SetPickerColor(new ThemeColor(value.R, value.G, value.B)); } }
+    public HsvColor PickerHsvColor { get => _pickerHsvColor; set { if (_updatingPicker) return; SetPickerHsvColor(value); } }
     public string PickerHexText { get => _pickerHexText; set { if (!SetProperty(ref _pickerHexText, value) || _updatingPicker) return; if (!ThemeColor.TryParseHex(value, out var color)) { PickerColorError = "Use #RRGGBB."; return; } SetPickerColor(color); } }
     public string PickerRedText { get => _pickerRedText; set => SetPickerRgbText(ref _pickerRedText, value); }
     public string PickerGreenText { get => _pickerGreenText; set => SetPickerRgbText(ref _pickerGreenText, value); }
@@ -590,13 +592,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _updatingPicker = true;
         SetProperty(ref _pickerColor, Color.FromRgb(color.Red, color.Green, color.Blue), nameof(PickerColor));
-        PickerHexText = color.Hex;
-        PickerRedText = color.Red.ToString();
-        PickerGreenText = color.Green.ToString();
-        PickerBlueText = color.Blue.ToString();
+        SetProperty(ref _pickerHsvColor, Color.FromRgb(color.Red, color.Green, color.Blue).ToHsv(), nameof(PickerHsvColor));
+        SetProperty(ref _pickerHexText, color.Hex, nameof(PickerHexText));
+        SetProperty(ref _pickerRedText, color.Red.ToString(), nameof(PickerRedText));
+        SetProperty(ref _pickerGreenText, color.Green.ToString(), nameof(PickerGreenText));
+        SetProperty(ref _pickerBlueText, color.Blue.ToString(), nameof(PickerBlueText));
         _updatingPicker = false;
         PickerColorError = string.Empty;
         if (preview) PreviewThemeEditor();
+    }
+
+    private void SetPickerHsvColor(HsvColor hsvColor)
+    {
+        var rgb = hsvColor.ToRgb();
+        SetPickerColor(new ThemeColor(rgb.R, rgb.G, rgb.B));
     }
 
     private void PreviewThemeEditor()
