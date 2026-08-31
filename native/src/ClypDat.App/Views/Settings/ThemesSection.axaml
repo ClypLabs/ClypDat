@@ -107,18 +107,18 @@
     </Border>
 
     <Border Classes="settingsCard" IsVisible="{Binding IsThemeEditorOpen}">
-      <StackPanel HorizontalAlignment="Center" MaxWidth="400" Width="400" Spacing="12">
+      <StackPanel HorizontalAlignment="Center" MaxWidth="400" Width="400" Spacing="10">
         <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" />
         <TextBox Classes="settingsInput" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
-        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-          <Button Grid.Column="0" Content="Base" Click="SelectBaseThemeColorButton_OnClick" Classes.active="{Binding IsEditingBaseColor}" />
-          <Button Grid.Column="1" Content="Accent" Click="SelectAccentThemeColorButton_OnClick" Classes.active="{Binding IsEditingAccentColor}" />
+        <Grid HorizontalAlignment="Center" Width="230" ColumnDefinitions="*,*" ColumnSpacing="2" Background="{StaticResource AppBgBrush}">
+          <Button Grid.Column="0" Content="Base" Click="SelectBaseThemeColorButton_OnClick" Classes.active="{Binding IsEditingBaseColor}" CornerRadius="7,0,0,7" />
+          <Button Grid.Column="1" Content="Accent" Click="SelectAccentThemeColorButton_OnClick" Classes.active="{Binding IsEditingAccentColor}" CornerRadius="0,7,7,0" />
         </Grid>
-        <Grid ColumnDefinitions="*,28" ColumnSpacing="10">
+        <Grid HorizontalAlignment="Center" Width="250" Height="220" ColumnDefinitions="220,20" ColumnSpacing="10">
           <cp:ColorSpectrum
-                         Color="{Binding PickerColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Height="260" />
+                         Color="{Binding PickerColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="220" Height="220" CornerRadius="6" />
           <cp:ColorSlider Grid.Column="1"
-                       Color="{Binding PickerColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" IsAlphaVisible="False" />
+                       Color="{Binding PickerColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="220" IsAlphaVisible="False" />
         </Grid>
         <Grid ColumnDefinitions="48,*,Auto" ColumnSpacing="8">
           <Border Width="48" Height="40" CornerRadius="6" Background="{Binding PickerHexText}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" />
