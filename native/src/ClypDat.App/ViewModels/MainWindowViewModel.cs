@@ -505,10 +505,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void NewCustomTheme()
     {
         var selected = Settings.CustomThemes.FirstOrDefault(theme => string.Equals(CustomThemeLibrary.Selection(theme), Settings.ThemePreset, StringComparison.OrdinalIgnoreCase));
-        var baseColor = selected?.BaseColor ?? "#0D1116";
-        var accent = selected?.AccentColor ?? AppThemeService.PresetAccent(Settings.ThemePreset).ToString();
+        var baseColor = selected?.BaseColor ?? CurrentThemeColor("AppBgBrush", "#0D1116");
+        var accent = selected?.AccentColor ?? CurrentThemeColor("AccentBrush", AppThemeService.PresetAccent(Settings.ThemePreset).ToString());
         _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName("Custom theme", Settings.CustomThemes), BaseColor = baseColor, AccentColor = accent };
         LoadThemeEditor(_editingTheme);
+    }
+
+    private static string CurrentThemeColor(string resourceKey, string fallback)
+    {
+        if ((Application.Current?.Resources[resourceKey] as SolidColorBrush)?.Color is { } color)
+            return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        return fallback;
     }
 
     public void EditCustomTheme(CustomThemeSettings theme) { _editingTheme = theme; LoadThemeEditor(theme); }
