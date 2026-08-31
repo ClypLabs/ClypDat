@@ -41,6 +41,11 @@ internal static class DiscordRichPresenceService
     // than a fault.
     private const string ButtonLabel = "Get ClypDat";
     private const string ButtonUrl = "https://www.clypdat.xyz";
+    // This is deliberately an external URL, not a Discord asset key. The
+    // application icon is not automatically a Rich Presence asset, so a key
+    // such as "clypdat" is silently dropped until separately uploaded in
+    // Discord's developer portal.
+    private const string ClypDatLogoUrl = "https://www.clypdat.xyz/icon.png";
 
     /// <summary>
     /// ClypDat's own Discord application - the identity the status is published
@@ -327,7 +332,7 @@ internal static class DiscordRichPresenceService
             {
                 ["large_image"] = presence.LargeImageUrl!,
                 ["large_text"] = presence.LargeImageText is { } text ? Trim(text) ?? "Current game" : "Current game",
-                ["small_image"] = "clypdat",
+                ["small_image"] = ClypDatLogoUrl,
                 ["small_text"] = "Clipping with ClypDat"
             };
         }

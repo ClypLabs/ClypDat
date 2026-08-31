@@ -40,7 +40,7 @@ public sealed class DiscordRichPresenceServiceTests
         var assets = document.RootElement.GetProperty("assets");
         Assert.Equal("https://cdn.example.test/helldivers-2.png", assets.GetProperty("large_image").GetString());
         Assert.Equal("HELLDIVERS 2", assets.GetProperty("large_text").GetString());
-        Assert.Equal("clypdat", assets.GetProperty("small_image").GetString());
+        Assert.Equal("https://www.clypdat.xyz/icon.png", assets.GetProperty("small_image").GetString());
         Assert.Equal("Clipping with ClypDat", assets.GetProperty("small_text").GetString());
     }
 }
