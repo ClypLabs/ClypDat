@@ -231,8 +231,21 @@ internal sealed class XboxActivityService : IDisposable
     private async Task<JsonDocument> PostXboxAsync(string uri, object payload, CancellationToken cancellationToken)
     {
         using var response = await _http.PostAsJsonAsync(uri, payload, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        return JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            string detail = "no error detail";
+            try
+            {
+                using var error = JsonDocument.Parse(body);
+                if (error.RootElement.TryGetProperty("XErr", out var xerr)) detail = $"XErr={xerr.GetRawText()}";
+                else if (error.RootElement.TryGetProperty("Message", out var message)) detail = message.GetString() ?? detail;
+                else if (error.RootElement.TryGetProperty("error", out var code)) detail = code.GetString() ?? detail;
+            }
+            catch (JsonException) { }
+            throw new HttpRequestException($"Xbox endpoint {new Uri(uri).Host} rejected the request ({(int)response.StatusCode}); {detail}.");
+        }
+        return JsonDocument.Parse(body);
     }
 
     private XboxTokens? LoadTokens()
