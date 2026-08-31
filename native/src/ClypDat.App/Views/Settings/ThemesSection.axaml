@@ -110,8 +110,8 @@
       <Grid ColumnDefinitions="230,260" ColumnSpacing="18" RowDefinitions="Auto,*">
         <TextBlock Grid.ColumnSpan="2" Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" Margin="0,0,0,10" />
         <Grid Grid.Row="1" Width="230" Height="220" ColumnDefinitions="200,20" ColumnSpacing="10" HorizontalAlignment="Center">
-          <cp:ColorSpectrum HsvColor="{Binding PickerHsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="200" Height="200" CornerRadius="6" />
-          <cp:ColorSlider Grid.Column="1" HsvColor="{Binding PickerHsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
+          <cp:ColorSpectrum Color="{Binding PickerColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="200" Height="200" CornerRadius="6" />
+          <cp:ColorSlider Grid.Column="1" Color="{Binding PickerColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
         </Grid>
         <StackPanel Grid.Row="1" Grid.Column="1" Spacing="8">
           <TextBox Classes="settingsInput" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
