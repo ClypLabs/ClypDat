@@ -78,6 +78,7 @@ internal sealed class WgcCadenceFallbackPolicy
 // directly and avoids DWM's desktop-composition cadence.
 internal sealed class DxgiCadenceFallbackPolicy
 {
+    private const double MinimumFreshFrameRateRatio = 0.5;
     private bool _warmupWindowIgnored;
     private int _consecutiveLowWindows;
     private bool _fallbackCommitted;
@@ -104,7 +105,7 @@ internal sealed class DxgiCadenceFallbackPolicy
         }
 
         var target = Math.Clamp(targetFrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
-        if (freshFrameRate >= target * 0.99)
+        if (freshFrameRate >= target * MinimumFreshFrameRateRatio)
         {
             _consecutiveLowWindows = 0;
             return false;

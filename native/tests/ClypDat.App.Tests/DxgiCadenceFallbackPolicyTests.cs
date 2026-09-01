@@ -27,4 +27,13 @@ public sealed class DxgiCadenceFallbackPolicyTests
         for (var sample = 0; sample < 6; sample++)
             Assert.False(policy.ShouldFallback(90, 2.49, foregroundAndVisible: true, encoderPressure: true));
     }
+
+    [Fact]
+    public void ShouldFallback_NearTargetFreshFrameRate_StaysOnDxgi()
+    {
+        var policy = new DxgiCadenceFallbackPolicy();
+
+        for (var sample = 0; sample < 6; sample++)
+            Assert.False(policy.ShouldFallback(90, 86.9, foregroundAndVisible: true, encoderPressure: false));
+    }
 }
