@@ -5836,8 +5836,17 @@ public sealed partial class MainWindow : Window
     private async Task SaveCs2AutoClipAsync(Cs2GsiListener listener, Cs2AutoClipRequest request)
     {
         listener.MarkSaveRequested();
-        var saved = await SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), "Counter-Strike 2", request.EventType);
-        listener.MarkSaveCompleted(saved);
+        try
+        {
+            var saved = await SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), "Counter-Strike 2", request.EventType);
+            listener.MarkSaveCompleted(saved);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("CS2 auto-clip save pipeline failed", error);
+            listener.MarkSaveCompleted(false);
+            ShowAutoClipFailedNotification();
+        }
     }
 
     private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowAutoClipPendingNotification(message));
