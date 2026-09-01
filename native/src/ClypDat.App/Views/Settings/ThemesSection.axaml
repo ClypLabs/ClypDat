@@ -112,13 +112,19 @@
          the spectrum previewed one colour live while Apply saved another. There
          is no shared state left to disagree, and the settings column had the
          width for both all along. -->
-    <Border Classes="settingsCard" IsVisible="{Binding IsThemeEditorOpen}">
+    <!-- Sized to its content rather than to the settings column. The pickers
+         are fixed width - ColorSpectrum is always square, so a starred column
+         only ever padded one out with dead space - and every other card here
+         has content that genuinely fills the width. This one does not, so it
+         stops where its content does instead of trailing several hundred
+         pixels of empty card. -->
+    <Border Classes="settingsCard" HorizontalAlignment="Left" IsVisible="{Binding IsThemeEditorOpen}">
       <StackPanel Spacing="14">
         <StackPanel Orientation="Horizontal" Spacing="16">
           <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" VerticalAlignment="Center" />
           <TextBox Classes="settingsInput" Width="240" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
         </StackPanel>
-        <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="16">
+        <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16">
           <Border Grid.Column="0" Classes="providerSetting" Padding="14">
             <StackPanel Spacing="10">
               <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
