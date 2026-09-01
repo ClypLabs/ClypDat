@@ -65,6 +65,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing) =>
         directBltAvailable && !requiresCopyBeforeProcessing;
 
+    internal static TimeSpan NextDxgiAcquireDeadline(TimeSpan scheduled, TimeSpan completed, int frameRate)
+    {
+        var cadence = Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+        var next = scheduled + TimeSpan.FromSeconds(1.0 / cadence);
+        return next < completed ? completed : next;
+    }
+
     private static readonly int[] ReplayFrameRateLadder = [120, 90, 60, 30];
     // How long teardown waits for the pacing thread before giving up and leaking its
     // native resources instead of freeing them underneath it. Generous because
@@ -747,16 +754,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         //
         // It is avoidable for sources whose texture is already owned by this
         // processing device. The Video Processor can read those directly with
-        // a source rect. It is deliberately not avoidable for DXGI's shared
-        // cross-device surfaces: their release signal must sit immediately
-        // behind this copy, not behind the downstream scale/convert Blt.
+        // a source rect. It is deliberately not avoidable for DXGI's transport
+        // ring: its CPU lease must end immediately behind this copy, before the
+        // downstream scale/convert Blt.
         //
         // Falls back to the copy for the rest of the session if a driver will
         // not hand out an input view for a duplication texture.
         // CLYPDAT_DISABLE_DIRECT_BLT=1 forces the staging-copy path for every
-        // source. DXGI's cross-device leases always take that path regardless:
-        // their producer slots must be released immediately after one bounded
-        // copy, before scale/convert work can queue ahead of the release fence.
+        // source. DXGI transport leases always take that path regardless: their
+        // producer slots must be released immediately after one bounded copy.
         var directBltAvailable = Environment.GetEnvironmentVariable("CLYPDAT_DISABLE_DIRECT_BLT") != "1";
         // Input views are per-texture, and capture sources rotate a small pool
         // of them, so these are cached by native pointer rather than
@@ -850,9 +856,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             Vortice.RawRect desktopBounds;
             try
             {
-                dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
-                activeGameFrameSource = dxgiCapture;
-                AppLog.Info("Native capture: DXGI shared frames use copy-first ownership; transport slots release before scale/convert.");
+                // Keep duplication and video processing on one ordered device.
+                // The acquired surface can feed the Video Processor directly;
+                // ReleaseFrame follows the queued Blt, so there is no full-frame
+                // transport copy and no cross-device release-fence backlog.
+                duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
                 AppLog.Info($"Native capture: using DXGI Desktop Duplication for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
             }
             catch (Exception error) when (!isMonitorMode)
@@ -1017,6 +1025,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var lastEncodedAt = TimeSpan.Zero;
             var activeFrameRate = Volatile.Read(ref _activeFrameRate);
             var targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
+            var nextDxgiAcquireAt = TimeSpan.Zero;
             var variableFrameTiming = ReplayFrameTimingPolicy.IsVariable(config.FrameRateMode);
             // Counts encoded frames (including duplicate/padding ones) so
             // frame->pts can be assigned an IDEAL, constant-rate timestamp
@@ -1089,7 +1098,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // and pacing degrades, the coupling is confirmed and the real fix is
             // to decouple the two rather than to keep this override.
             var acquireTimeoutOverride = Environment.GetEnvironmentVariable("CLYPDAT_ACQUIRE_TIMEOUT_MS");
-            var acquireTimeoutForcedMs = int.TryParse(acquireTimeoutOverride, out var parsedTimeout) && parsedTimeout is > 0 and <= 50
+            var acquireTimeoutForcedMs = int.TryParse(acquireTimeoutOverride, out var parsedTimeout) && parsedTimeout is > 0 and <= 1000
                 ? parsedTimeout
                 : 0;
             // 200ms, and no longer tied to the frame interval at all. The encode
@@ -1101,7 +1110,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Not longer than this: the wait is also how long shutdown can take to
             // notice cancellation, and how long a target-window change or a
             // duplication recreate waits to be picked up.
-            var acquireTimeoutMs = acquireTimeoutForcedMs > 0 ? (uint)acquireTimeoutForcedMs : 50u;
+            var acquireTimeoutMs = acquireTimeoutForcedMs > 0 ? (uint)acquireTimeoutForcedMs : 200u;
             if (acquireTimeoutForcedMs > 0) AppLog.Info($"Native capture: acquire timeout forced to {acquireTimeoutMs}ms.");
             var lastDiagLog = TimeSpan.Zero;
             var dxgiCadenceFallback = new DxgiCadenceFallbackPolicy();
@@ -1190,6 +1199,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // recording behavior above, unaffected.
             var hasCapturedRealFrame = false;
             var startupValidationWindows = 0;
+            var startupValidationPrimed = false;
             var startupValidationComplete = false;
             var consecutiveOverloadWindows = 0;
             var consecutiveTransportShortfallWindows = 0;
@@ -1278,6 +1288,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             targetFrameInterval = TimeSpan.FromSeconds(1.0 / activeFrameRate);
                             idealFrameIntervalMicroseconds = 1_000_000.0 / activeFrameRate;
                             cropSamplingBudget = new PresentSamplingBudget(activeFrameRate);
+                            startupValidationWindows = 0;
+                            startupValidationPrimed = false;
+                            startupValidationComplete = false;
                             Volatile.Write(ref _activeFrameRate, activeFrameRate);
                             if (activeFrameRate >= Volatile.Read(ref _configuredFrameRate))
                                 Interlocked.Exchange(ref _frameRateProtectionActive, 0);
@@ -1477,20 +1490,32 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         framesProcessedSinceLog / diagElapsed, droppedSinceLog, encodeQueue.Count, encodeQueueCapacity);
                     if (!startupValidationComplete && hasCapturedRealFrame && foregroundForDiagnostics && !capturePaused)
                     {
-                        if (validationWindowPasses)
+                        // NVENC may buffer its initial GOP before returning the
+                        // first packet. That warm-up interval is not a zero-FPS
+                        // production window and must not fail validation or
+                        // trigger encoder failover. Prime on first output, then
+                        // grade only complete windows that follow it.
+                        switch (ReplayStartupQualificationPolicy.ClassifyWindow(
+                                    startupValidationPrimed, packetsOutSinceLog, validationWindowPasses))
                         {
-                            startupValidationWindows = Math.Min(
-                                startupValidationWindows + 1,
-                                ReplayEncoderQualificationPolicy.RequiredWindows);
-                            AppLog.Info($"Native replay startup: {encoderName} live output validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} reached {outputFrameRate:0.0}/{activeFrameRate} FPS.");
-                        }
-                        else
-                        {
-                            startupValidationWindows = 0;
-                            AppLog.Info($"Native replay startup: {encoderName} validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} below target (output={outputFrameRate:0.0}/{activeFrameRate} FPS, dropped={droppedSinceLog}, queue={encodeQueue.Count}/{encodeQueueCapacity}).");
+                            case ReplayStartupQualificationPolicy.WindowDisposition.Prime:
+                                startupValidationPrimed = true;
+                                startupValidationWindows = 0;
+                                AppLog.Info($"Native replay startup: {encoderName} emitted its first packet; live validation windows begin now.");
+                                break;
+                            case ReplayStartupQualificationPolicy.WindowDisposition.Pass:
+                                startupValidationWindows = Math.Min(
+                                    startupValidationWindows + 1,
+                                    ReplayEncoderQualificationPolicy.RequiredWindows);
+                                AppLog.Info($"Native replay startup: {encoderName} live output validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} reached {outputFrameRate:0.0}/{activeFrameRate} FPS.");
+                                break;
+                            case ReplayStartupQualificationPolicy.WindowDisposition.Fail:
+                                startupValidationWindows = 0;
+                                AppLog.Info($"Native replay startup: {encoderName} validation window {startupValidationWindows}/{ReplayEncoderQualificationPolicy.RequiredWindows} below target (output={outputFrameRate:0.0}/{activeFrameRate} FPS, dropped={droppedSinceLog}, queue={encodeQueue.Count}/{encodeQueueCapacity}).");
+                                break;
                         }
 
-                        if (startupValidationWindows >= ReplayEncoderQualificationPolicy.RequiredWindows)
+                        if (startupValidationPrimed && startupValidationWindows >= ReplayEncoderQualificationPolicy.RequiredWindows)
                         {
                             startupValidationComplete = true;
                             AppLog.Info($"Native replay startup: {encoderName} one-time live output validation complete.");
@@ -1607,7 +1632,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         }
                     }
                     var overloaded = encoderPressure;
-                    if (hasCapturedRealFrame && !saveInProgress && overloaded)
+                    if (hasCapturedRealFrame && startupValidationPrimed && !saveInProgress && overloaded)
                         consecutiveOverloadWindows++;
                     else if (!overloaded || saveInProgress)
                         consecutiveOverloadWindows = 0;
@@ -1628,6 +1653,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 Interlocked.Exchange(ref _requestedFrameRate, lower);
                                 Interlocked.Exchange(ref _frameRateProtectionActive, 1);
                                 startupValidationWindows = 0;
+                                startupValidationPrimed = false;
                                 startupValidationComplete = false;
                                 AppLog.Info($"Native capture: full-session encoder congestion requested {activeFrameRate}->{lower} FPS; encoder remains fixed to keep the MP4 track valid.");
                             }
@@ -1689,6 +1715,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         }
                                     }
                                     startupValidationWindows = 0;
+                                    startupValidationPrimed = false;
                                     startupValidationComplete = false;
                                     consecutiveOverloadWindows = 0;
                                     switched = true;
@@ -1707,7 +1734,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             if (!switched)
                             {
                                 consecutiveOverloadWindows = 0;
-                                AppLog.Info("Native capture: every remaining encoder candidate was exhausted; keeping current encoder.");
+                                var protectionEnabled = Volatile.Read(ref _frameRateProtectionEnabled) != 0;
+                                var lower = ReplayEncoderFailoverPolicy.ProtectedFrameRateAfterHardwareExhaustion(activeFrameRate, protectionEnabled);
+                                if (lower < activeFrameRate)
+                                {
+                                    Interlocked.Exchange(ref _requestedFrameRate, lower);
+                                    Interlocked.Exchange(ref _frameRateProtectionActive, 1);
+                                    startupValidationWindows = 0;
+                                    startupValidationPrimed = false;
+                                    startupValidationComplete = false;
+                                    AppLog.Info($"Native capture: every remaining hardware encoder candidate was exhausted; retaining {encoderName} and protecting game load at {activeFrameRate}->{lower} FPS.");
+                                }
+                                else
+                                {
+                                    AppLog.Info("Native capture: every remaining hardware encoder candidate was exhausted; keeping current encoder at the minimum protected cadence.");
+                                }
                             }
                         }
                     }
@@ -1839,18 +1880,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         activeGameFrameSource = null;
 
                         var freshMonitor = ResolveTargetMonitor(targetHandle, config);
-                        if (wgcCapture is not null || freshMonitor != targetMonitor || dxgiCapture is null)
+                        if (wgcCapture is not null || freshMonitor != targetMonitor || duplication is null)
                         {
                             targetMonitor = freshMonitor;
                             wgcCapture?.Dispose();
                             wgcCapture = null;
                             dxgiCapture?.Dispose();
                             dxgiCapture = null;
+                            duplication?.Dispose();
                             duplication = null;
                             try
                             {
-                                dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
-                                activeGameFrameSource = dxgiCapture;
+                                duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
                                 AppLog.Info("Native capture: DXGI duplication replaced for the new target.");
                             }
                             catch (Exception error) when (!isMonitorMode)
@@ -1924,13 +1965,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // which previously crashed the whole capture session on any
                 // transient DuplicateOutput failure (e.g. a fullscreen-exclusive
                 // transition briefly denying access).
-                if (wgcCapture is null && dxgiCapture is null)
+                if (wgcCapture is null && dxgiCapture is null && duplication is null)
                 {
                     Thread.Sleep(50);
                     try
                     {
-                        dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
-                        activeGameFrameSource = dxgiCapture;
+                        duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
                         AppLog.Info("Native capture: DXGI duplication recreated after prior failure.");
                     }
                     catch (Exception error)
@@ -1963,13 +2003,68 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 var acquireResultCode = ResultCode.WaitTimeout.Code;
                 var selectedGameFrameSource = activeGameFrameSource ?? (IGameFrameSource?)dxgiCapture;
                 GameFrameLease? frameLease = null;
-                var sourceHasFrame = selectedGameFrameSource is not null && selectedGameFrameSource.WaitAndTakeLatestFrame(
-                    TimeSpan.FromMilliseconds(Math.Max(100d, acquireTimeoutMs * 4d)), token, out frameLease);
-                var hasDesktopContentUpdate = frameLease?.HasDesktopContentUpdate ?? false;
-                var hasPointerUpdate = frameLease?.HasPointerUpdate ?? false;
-                var contentTimestamp = frameLease?.ContentTimestamp ?? 0;
-                if (frameLease is not null) frameInfo = new OutduplFrameInfo { LastPresentTime = frameLease.SourceTimestamp, AccumulatedFrames = (uint)frameLease.AccumulatedPresents };
-                ID3D11Resource? desktopResource = frameLease?.Texture.QueryInterface<ID3D11Resource>();
+                var hasDesktopContentUpdate = false;
+                var hasPointerUpdate = false;
+                var contentTimestamp = 0L;
+                var duplicationFrameAcquired = false;
+                ID3D11Resource? desktopResource = null;
+                if (selectedGameFrameSource is not null)
+                {
+                    selectedGameFrameSource.WaitAndTakeLatestFrame(
+                        TimeSpan.FromMilliseconds(Math.Max(100d, acquireTimeoutMs * 4d)), token, out frameLease);
+                    hasDesktopContentUpdate = frameLease?.HasDesktopContentUpdate ?? false;
+                    hasPointerUpdate = frameLease?.HasPointerUpdate ?? false;
+                    contentTimestamp = frameLease?.ContentTimestamp ?? 0;
+                    if (frameLease is not null)
+                    {
+                        frameInfo = new OutduplFrameInfo
+                        {
+                            LastPresentTime = frameLease.SourceTimestamp,
+                            AccumulatedFrames = (uint)frameLease.AccumulatedPresents
+                        };
+                        desktopResource = frameLease.Texture.QueryInterface<ID3D11Resource>();
+                    }
+                }
+                else if (duplication is not null)
+                {
+                    // A 240 Hz source made this loop call AcquireNextFrame about
+                    // 200 times per second even though only 60 frames could be
+                    // recorded. Windows bills GPU scheduling work per call, so
+                    // those discarded acquisitions directly stole game budget.
+                    // Pace before acquisition and ask DXGI for the newest frame
+                    // at the selected cadence; the encode clock is independent.
+                    if (nextDxgiAcquireAt == TimeSpan.Zero) nextDxgiAcquireAt = stopwatch.Elapsed;
+                    while (nextDxgiAcquireAt > stopwatch.Elapsed)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var remaining = nextDxgiAcquireAt - stopwatch.Elapsed;
+                        if (remaining > TimeSpan.FromMilliseconds(2))
+                            Thread.Sleep(remaining - TimeSpan.FromMilliseconds(1));
+                        else
+                            Thread.Yield();
+                    }
+
+                    var scheduledAcquireAt = nextDxgiAcquireAt;
+                    var acquireResult = duplication.AcquireNextFrame(acquireTimeoutMs, out frameInfo, out var dxgiResource);
+                    nextDxgiAcquireAt = NextDxgiAcquireDeadline(
+                        scheduledAcquireAt,
+                        stopwatch.Elapsed,
+                        Volatile.Read(ref _activeFrameRate));
+                    acquireResultCode = acquireResult.Code;
+                    duplicationFrameAcquired = acquireResult.Success;
+                    hasDesktopContentUpdate = frameInfo.LastPresentTime != 0;
+                    hasPointerUpdate = config.CaptureCursor && frameInfo.LastMouseUpdateTime != 0;
+                    contentTimestamp = frameInfo.LastPresentTime;
+                    if (acquireResult.Success && dxgiResource is not null)
+                    {
+                        try { desktopResource = dxgiResource.QueryInterface<ID3D11Resource>(); }
+                        finally { dxgiResource.Dispose(); }
+                    }
+                    else
+                    {
+                        dxgiResource?.Dispose();
+                    }
+                }
                 if (desktopResource is null && selectedGameFrameSource is not null && !string.IsNullOrWhiteSpace(selectedGameFrameSource.Failure))
                 {
                     if (usingWgc)
@@ -1997,6 +2092,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (!usingWgc && !hasDesktopContentUpdate && !hasPointerUpdate)
                     {
                         zeroPresentSkips++;
+                        if (duplicationFrameAcquired) duplication?.ReleaseFrame();
                         desktopResource.Dispose();
                         frameLease?.Dispose();
                     }
@@ -2268,7 +2364,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     // The !croppedDirty branch is untouched, so the first
                                     // present after every tick is still converted
                                     // immediately and no unique frame is lost.
-                                    if (cropSamplingBudget.TryConsume(stopwatch.Elapsed, croppedDirty))
+                                    if (duplicationFrameAcquired || cropSamplingBudget.TryConsume(stopwatch.Elapsed, croppedDirty))
                                     {
                                         stageStopwatch.Restart();
                                         using (var desktopTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
@@ -2447,6 +2543,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         finally
                         {
                             Monitor.Exit(gpuLock);
+                            if (duplicationFrameAcquired) duplication?.ReleaseFrame();
                             desktopResource?.Dispose();
                             frameLease?.Dispose();
                         }
@@ -2454,6 +2551,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
                 else
                 {
+                    if (duplicationFrameAcquired) duplication?.ReleaseFrame();
                     desktopResource?.Dispose();
                     frameLease?.Dispose();
                     if (!usingWgc && acquireResultCode == ResultCode.AccessLost.Code)
@@ -5652,7 +5750,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             encoderName = candidate.Name;
             usingHardwareFrames = hardware;
-            AppLog.Info($"Native replay startup: selected {encoderName}/{candidate.InputPath}; production packets begin immediately and rolling output validates the selection.");
+            AppLog.Info($"Native replay startup: selected {encoderName}/{candidate.InputPath}; the first returned packet primes rolling production validation.");
             return context;
         }
 

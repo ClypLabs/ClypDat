@@ -14,5 +14,17 @@ public sealed class GameFrameOwnershipTests
         Assert.True(NativeReplayBuffer.CanUseDirectVideoProcessorInput(
             directBltAvailable: true,
             requiresCopyBeforeProcessing: false));
+}
+
+    [Fact]
+    public void DxgiAcquireDeadline_CapsCallsToCaptureCadenceAndSnapsAfterAStall()
+    {
+        var scheduled = TimeSpan.FromSeconds(1);
+        Assert.Equal(
+            TimeSpan.FromSeconds(1) + TimeSpan.FromSeconds(1d / 60),
+            NativeReplayBuffer.NextDxgiAcquireDeadline(scheduled, TimeSpan.FromSeconds(1.004), 60));
+        Assert.Equal(
+            TimeSpan.FromSeconds(1.050),
+            NativeReplayBuffer.NextDxgiAcquireDeadline(scheduled, TimeSpan.FromSeconds(1.050), 60));
     }
 }

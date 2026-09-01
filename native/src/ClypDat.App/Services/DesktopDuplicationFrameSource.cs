@@ -1,36 +1,29 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using Vortice;
-using Vortice.Direct3D;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 
 namespace ClypDat.App.Services;
 
-// Game capture owns a second DXGI device so acquisition cannot be blocked by
-// conversion/encoding. Three shared surfaces cross to the processing device.
-// Shared fences express GPU ownership; CPU code never Flushes or waits.
+// Acquisition runs off-thread but uses the processing D3D11 device. Producer
+// overwrites and consumer reads therefore share one ordered immediate context:
+// once the consumer has queued its copy, the CPU lease can be released without
+// waiting for GPU completion. A later producer overwrite is ordered after that
+// copy by D3D11 itself, so no cross-device release-fence backlog can starve the
+// transport ring under foreground GPU load.
 internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposable
 {
-    // Ring depth is latency tolerance, not throughput: a slot stays
-    // unavailable until the PROCESSING device's release fence clears it, and
-    // that fence sits behind crop, GPU downscale and the encoder readback. With
-    // a game in the foreground that queue runs 100ms+ deep, so three slots left
-    // the producer finding every one busy and throwing the frame away - measured
-    // on a 4K90 recording, 84 of every 129 acquired frames died at this gate,
-    // which is what leaves ~20 real frames a second inside a 90fps file and pads
-    // the rest with duplicates. Each extra slot buys another frame interval
-    // before that happens.
+    // Ring depth tolerates the short CPU interval between publication and the
+    // consumer queuing its processing-owned copy. It is not GPU latency
+    // tolerance; same-context ordering removes GPU completion from ownership.
     private const int MinimumSurfaceCount = 3;
     private const int MaximumSurfaceCount = 8;
     // Sized from the source frame, so a 4K desktop (33MB a surface) gets 5 and a
     // 1080p one gets the full 8 rather than the same VRAM bill at every
     // resolution.
     private const long SurfaceBudgetBytes = 192L * 1024 * 1024;
-    private readonly ID3D11Device _captureDevice, _processingDevice;
-    private readonly ID3D11Device5 _captureDevice5, _processingDevice5;
-    private readonly ID3D11DeviceContext4 _captureContext, _processingContext;
-    private readonly ID3D11Fence _readyFence, _releasedFence, _readyFenceOnProcessing, _releasedFenceOnCapture;
+    private readonly ID3D11Device _device;
+    private readonly ID3D11DeviceContext _context;
     private readonly IDXGIOutputDuplication _duplication;
     private readonly object _stateLock = new();
     private readonly CancellationTokenSource _stopping = new();
@@ -50,36 +43,19 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private readonly Stopwatch _producerClock = Stopwatch.StartNew();
     private int _nextSlot;
     private long _generation, _sequence;
-    private ulong _readyValue, _releasedValue;
     private string? _failure;
     private bool _disposed;
     private long _sourcePresents, _acquiredFrames, _transportedFrames, _busySlotSkips, _producerCopyTicks, _leaseTicks, _leaseCount, _accumulatedPresents, _zeroPresentFrames, _pointerUpdates, _transportedPointerFrames;
     // _busySlotSkips counts slot EXAMINATIONS (up to one per slot per frame), so
-    // it cannot be read as a frame count. _allBusyDrops is the frame that was
-    // actually thrown away, and _releaseLagFrames is how far the processing
-    // device's fence was behind when that happened - a lag larger than the ring
-    // says the queue, not the ring depth, is the remaining wall.
+    // it cannot be read as a frame count. _allBusyDrops is the frame actually
+    // thrown away; _releaseLagFrames is the number of CPU leases outstanding.
     private long _allBusyDrops, _releaseLagFrames, _acquireTicks;
 
-    private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication, int frameRate, bool captureCursor, int? appliedGpuPriority)
+    private DesktopDuplicationFrameSource(ID3D11Device device, IDXGIOutputDuplication duplication, int frameRate, bool captureCursor, int? appliedGpuPriority)
     {
-        _captureDevice = captureDevice; _processingDevice = processingDevice; _duplication = duplication;
+        _device = device; _context = device.ImmediateContext; _duplication = duplication;
         _captureCursor = captureCursor;
         AppliedGpuPriority = appliedGpuPriority;
-        _captureDevice5 = captureDevice.QueryInterface<ID3D11Device5>();
-        _processingDevice5 = processingDevice.QueryInterface<ID3D11Device5>();
-        _captureContext = captureDevice.ImmediateContext.QueryInterface<ID3D11DeviceContext4>();
-        _processingContext = processingDevice.ImmediateContext.QueryInterface<ID3D11DeviceContext4>();
-        _readyFence = _captureDevice5.CreateFence<ID3D11Fence>(0, FenceFlags.Shared);
-        _releasedFence = _processingDevice5.CreateFence<ID3D11Fence>(0, FenceFlags.Shared);
-        var readyHandle = _readyFence.CreateSharedHandle(null, null!);
-        var releasedHandle = _releasedFence.CreateSharedHandle(null, null!);
-        try
-        {
-            _readyFenceOnProcessing = _processingDevice5.OpenSharedFence<ID3D11Fence>(readyHandle);
-            _releasedFenceOnCapture = _captureDevice5.OpenSharedFence<ID3D11Fence>(releasedHandle);
-        }
-        finally { CloseHandle(readyHandle); CloseHandle(releasedHandle); }
         for (var i = 0; i < _slots.Length; i++) _slots[i] = new SurfaceSlot();
         _transportSamplingBudget = new PresentSamplingBudget(frameRate);
         _producer = new Thread(Produce) { IsBackground = true, Priority = ThreadPriority.AboveNormal, Name = "ClypDat-GameCapture-Producer" };
@@ -88,17 +64,16 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
 
     public static DesktopDuplicationFrameSource Create(ID3D11Device processingDevice, nint targetHandle, ReplayBufferConfig config, out RawRect desktopBounds)
     {
-        using var dxgi = processingDevice.QueryInterface<IDXGIDevice>();
-        using var adapter = dxgi.GetParent<IDXGIAdapter>();
-        var levels = new[] { FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1 };
-        D3D11.D3D11CreateDevice(adapter, DriverType.Unknown, DeviceCreationFlags.BgraSupport, levels, out var captureDevice, out _, out ID3D11DeviceContext? context).CheckError();
-        context?.Dispose();
-        var appliedGpuPriority = GpuScheduling.TryRaiseDeviceGpuPriority(captureDevice!.NativePointer, "DXGI acquisition");
-        try { return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds), config.FrameRate, config.CaptureCursor, appliedGpuPriority); }
-        catch { captureDevice?.Dispose(); throw; }
+        // Own an AddRef'd wrapper while sharing the exact native device/context
+        // with processing. CreateD3D11Device enabled ID3D10Multithread protection
+        // before this source starts its producer thread.
+        var device = processingDevice.QueryInterface<ID3D11Device>();
+        var appliedGpuPriority = GpuScheduling.TryRaiseDeviceGpuPriority(device.NativePointer, "DXGI acquisition");
+        try { return new DesktopDuplicationFrameSource(device, NativeReplayBuffer.CreateDuplicationFor(device, targetHandle, config, out desktopBounds), config.FrameRate, config.CaptureCursor, appliedGpuPriority); }
+        catch { device.Dispose(); throw; }
     }
 
-    public string CaptureMode => "Game Capture (DXGI shared fences)";
+    public string CaptureMode => "Game Capture (DXGI ordered device)";
     public string? Failure { get { lock (_stateLock) return _failure; } }
 
     public bool WaitAndTakeLatestFrame(TimeSpan timeout, CancellationToken cancellationToken, out GameFrameLease? frame)
@@ -110,9 +85,6 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
             var slot = _slots.Where(s => s.ProcessingTexture is not null && !s.Leased && s.Sequence != 0).OrderByDescending(s => s.Sequence).FirstOrDefault();
             if (slot is null) return false;
             slot.Leased = true;
-            // Queue the dependency. The consumer CPU can immediately acquire
-            // another frame; its conversion work will wait only on the GPU.
-            _processingContext.Wait(_readyFenceOnProcessing, slot.ReadyValue);
             frame = new Lease(this, slot);
             return true;
         }
@@ -176,7 +148,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                         for (var i = 0; i < _activeSlots; i++)
                         {
                             var candidate = _slots[_nextSlot]; _nextSlot = (_nextSlot + 1) % _activeSlots;
-                            if (candidate.Leased || _releasedFenceOnCapture.CompletedValue < candidate.ReleaseValue) { Interlocked.Increment(ref _busySlotSkips); continue; }
+                            if (candidate.Leased) { Interlocked.Increment(ref _busySlotSkips); continue; }
                             EnsureSurface(candidate, source.Description);
                             slot = candidate;
                             break;
@@ -184,15 +156,13 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                         if (slot is null)
                         {
                             _allBusyDrops++;
-                            _releaseLagFrames = (long)(_releasedValue - _releasedFenceOnCapture.CompletedValue);
+                            _releaseLagFrames = _slots.Take(_activeSlots).LongCount(candidate => candidate.Leased);
                             continue;
                         }
                     }
                     lock (_stateLock) { if (_disposed) return; }
                     var timer = Stopwatch.StartNew();
-                    _captureDevice.ImmediateContext.CopyResource(slot.CaptureTexture!, source);
-                    slot.ReadyValue = unchecked(++_readyValue);
-                    _captureContext.Signal(_readyFence, slot.ReadyValue);
+                    _context.CopyResource(slot.CaptureTexture!, source);
                     timer.Stop(); Interlocked.Add(ref _producerCopyTicks, timer.Elapsed.Ticks);
                     lock (_stateLock)
                     {
@@ -235,7 +205,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         }
         Volatile.Write(ref _activeSlots, resolved);
         if (_nextSlot >= resolved) _nextSlot = 0;
-        AppLog.Info($"Native capture: game capture ring sized to {resolved} shared {description.Width}x{description.Height} surfaces.");
+        AppLog.Info($"Native capture: game capture ring sized to {resolved} ordered {description.Width}x{description.Height} surfaces.");
     }
 
     private static int ResolveSlotCount(Texture2DDescription description)
@@ -258,9 +228,8 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     {
         if (slot.CaptureTexture is not null && slot.CaptureTexture.Description.Width == description.Width && slot.CaptureTexture.Description.Height == description.Height && slot.CaptureTexture.Description.Format == description.Format) return;
         slot.Dispose();
-        slot.CaptureTexture = _captureDevice.CreateTexture2D(new Texture2DDescription { Width = description.Width, Height = description.Height, MipLevels = 1, ArraySize = 1, Format = description.Format, SampleDescription = description.SampleDescription, Usage = ResourceUsage.Default, BindFlags = BindFlags.None, CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.Shared });
-        using var shared = slot.CaptureTexture.QueryInterface<IDXGIResource>();
-        slot.ProcessingTexture = _processingDevice.OpenSharedResource<ID3D11Texture2D>(shared.SharedHandle);
+        slot.CaptureTexture = _device.CreateTexture2D(new Texture2DDescription { Width = description.Width, Height = description.Height, MipLevels = 1, ArraySize = 1, Format = description.Format, SampleDescription = description.SampleDescription, Usage = ResourceUsage.Default, BindFlags = BindFlags.None, CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.None });
+        slot.ProcessingTexture = slot.CaptureTexture.QueryInterface<ID3D11Texture2D>();
         slot.Generation = ++_generation;
     }
 
@@ -269,9 +238,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         lock (_stateLock)
         {
             if (_disposed) return;
-            slot.ReleaseValue = unchecked(++_releasedValue);
             slot.Leased = false;
-            _processingContext.Signal(_releasedFence, slot.ReleaseValue);
         }
     }
 
@@ -302,13 +269,13 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         }
 
         lock (_stateLock) foreach (var slot in _slots) slot.Dispose();
-        _duplication.Dispose(); _readyFenceOnProcessing.Dispose(); _releasedFenceOnCapture.Dispose(); _readyFence.Dispose(); _releasedFence.Dispose(); _processingContext.Dispose(); _captureContext.Dispose(); _processingDevice5.Dispose(); _captureDevice5.Dispose(); _captureDevice.Dispose(); _signal.Dispose(); _stopping.Dispose();
+        _duplication.Dispose(); _context.Dispose(); _device.Dispose(); _signal.Dispose(); _stopping.Dispose();
     }
 
     private sealed class SurfaceSlot : IDisposable
     {
-        public ID3D11Texture2D? CaptureTexture, ProcessingTexture; public long Timestamp, ContentTimestamp, Presents, Sequence, Generation; public ulong ReadyValue, ReleaseValue; public bool Leased, HasDesktopContentUpdate, HasPointerUpdate;
-        public void Dispose() { ProcessingTexture?.Dispose(); CaptureTexture?.Dispose(); ProcessingTexture = null; CaptureTexture = null; Timestamp = ContentTimestamp = Presents = Sequence = 0; ReadyValue = ReleaseValue = 0; Leased = HasDesktopContentUpdate = HasPointerUpdate = false; }
+        public ID3D11Texture2D? CaptureTexture, ProcessingTexture; public long Timestamp, ContentTimestamp, Presents, Sequence, Generation; public bool Leased, HasDesktopContentUpdate, HasPointerUpdate;
+        public void Dispose() { ProcessingTexture?.Dispose(); CaptureTexture?.Dispose(); ProcessingTexture = null; CaptureTexture = null; Timestamp = ContentTimestamp = Presents = Sequence = 0; Leased = HasDesktopContentUpdate = HasPointerUpdate = false; }
     }
     private sealed class Lease(DesktopDuplicationFrameSource owner, SurfaceSlot slot) : GameFrameLease
     {
@@ -316,9 +283,6 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         public override ID3D11Texture2D Texture => slot.ProcessingTexture!; public override bool RequiresCopyBeforeProcessing => true; public override long SourceTimestamp => slot.Timestamp; public override long AccumulatedPresents => slot.Presents; public override int Width => (int)slot.ProcessingTexture!.Description.Width; public override int Height => (int)slot.ProcessingTexture!.Description.Height; public override long Generation => slot.Generation; public override bool HasDesktopContentUpdate => slot.HasDesktopContentUpdate; public override bool HasPointerUpdate => slot.HasPointerUpdate; public override long ContentTimestamp => slot.ContentTimestamp;
         public override void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) != 0) return; owner.Release(slot); Interlocked.Add(ref owner._leaseTicks, Stopwatch.GetElapsedTime(_started).Ticks); Interlocked.Increment(ref owner._leaseCount); }
     }
-
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr handle);
 }
 
 internal readonly record struct DesktopDuplicationTelemetry(long SourceFrames, long AcquiredFrames, long PublishedFrames, long TakenFrames, long OverwrittenFrames, long BusySlotSkips, long AccumulatedPresents, long ZeroPresentFrames, long PointerUpdates, long TransportedPointerFrames, TimeSpan ProducerCopyTotal, TimeSpan AverageLeaseDuration, string? Failure, long AllBusyDrops, long ReleaseLagFrames, int SlotCount, TimeSpan AcquireTotal)

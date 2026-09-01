@@ -59,6 +59,13 @@ internal sealed class CaptureSourceRecoveryPolicy
 
 internal static class ReplayStartupQualificationPolicy
 {
+    internal enum WindowDisposition { WaitingForFirstPacket, Prime, Pass, Fail }
+
+    internal static WindowDisposition ClassifyWindow(bool primed, long packetsOut, bool passes) =>
+        !primed
+            ? packetsOut > 0 ? WindowDisposition.Prime : WindowDisposition.WaitingForFirstPacket
+            : passes ? WindowDisposition.Pass : WindowDisposition.Fail;
+
     internal static bool Passes(bool foreground, bool paused, bool hasRealFrame, int targetFrameRate,
         double outputFrameRate, double freshVisualFrameRate, long droppedFrames, int queueDepth, int queueCapacity)
         => foreground && !paused && hasRealFrame && droppedFrames == 0 && queueCapacity > 0 &&

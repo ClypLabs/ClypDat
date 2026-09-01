@@ -80,6 +80,20 @@ public sealed class CaptureHealthRecoveryPolicyTests
     }
 
     [Fact]
+    public void StartupQualification_FirstNvencPacketPrimesWithoutGradingWarmup()
+    {
+        Assert.Equal(
+            ReplayStartupQualificationPolicy.WindowDisposition.WaitingForFirstPacket,
+            ReplayStartupQualificationPolicy.ClassifyWindow(primed: false, packetsOut: 0, passes: false));
+        Assert.Equal(
+            ReplayStartupQualificationPolicy.WindowDisposition.Prime,
+            ReplayStartupQualificationPolicy.ClassifyWindow(primed: false, packetsOut: 1, passes: false));
+        Assert.Equal(
+            ReplayStartupQualificationPolicy.WindowDisposition.Fail,
+            ReplayStartupQualificationPolicy.ClassifyWindow(primed: true, packetsOut: 1, passes: false));
+    }
+
+    [Fact]
     public void SharedSurfaceExhaustionHiddenByCfr_SwitchesToWgcAfterTwoWindows()
     {
         var policy = new CaptureSourceRecoveryPolicy();

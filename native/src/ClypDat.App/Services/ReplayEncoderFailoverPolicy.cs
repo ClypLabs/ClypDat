@@ -8,6 +8,15 @@ internal static class ReplayEncoderFailoverPolicy
 {
     internal const int RequiredOverloadWindows = 3;
 
+    internal static int ProtectedFrameRateAfterHardwareExhaustion(int current, bool enabled) =>
+        !enabled ? current : current switch
+        {
+            > 90 => 90,
+            > 60 => 60,
+            > 30 => 30,
+            _ => current
+        };
+
     internal static IReadOnlyList<ReplayEncoderCandidate> CandidatesAfter(
         string requestedCodec,
         string encoderMode,
@@ -21,10 +30,11 @@ internal static class ReplayEncoderFailoverPolicy
         return candidates
             .Skip(activeIndex + 1)
             .Where(candidate => candidate.Codec == active.Codec)
-            // Reliability wins after sustained, measured congestion. libx264
-            // remains last in startup order, after every same-codec hardware
-            // adapter, and generation-tagged packets keep a live swap safe for
-            // replay-window remuxing.
+            // Automatic GPU capture must remain on hardware. CPU takeover under
+            // a foreground game made measured throughput worse than the NVENC
+            // startup window it was reacting to. Keep libx264 for an explicitly
+            // selected CPU mode, not live GPU recovery.
+            .Where(candidate => !active.IsHardware || candidate.IsHardware)
             .Where(candidate => !attempted.Contains(candidate))
             .ToArray();
     }
