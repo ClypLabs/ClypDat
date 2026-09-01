@@ -208,7 +208,20 @@ public sealed class AudioCapturePipeline : IDisposable
         // avoidable serialization tax on every clip save (each track spawns
         // several ffmpeg processes of its own, see BuildAlignedTrackAsync).
         await Task.WhenAll(trackJobs.Select(job => job.PathTask));
-        return trackJobs.Select(job => (job.Label, job.PathTask.Result)).ToList();
+        var tracks = trackJobs.Select(job => (job.Label, job.PathTask.Result)).ToList();
+
+        // Spotify often keeps a render session alive while paused, so its
+        // configured route produces a correctly aligned WAV full of generated
+        // silence. Do not mux that empty lane. Other app tracks deliberately
+        // keep their current placeholder behaviour.
+        foreach (var track in tracks.Where(track => AudioProcessIdentity.Equals(track.Label, "Spotify")).ToArray())
+        {
+            if (!IsSilentWaveFile(track.Result)) continue;
+            AppLog.Info($"Spotify track omitted because requested window is silent: path={track.Result}.");
+            tracks.Remove(track);
+        }
+
+        return tracks;
     }
 
     public void Dispose() => Stop();
@@ -1280,6 +1293,33 @@ public sealed class AudioCapturePipeline : IDisposable
     {
         if (kind != AudioCaptureKind.Microphone) return 2;
         return string.Equals(config?.MicrophoneChannelMode, "Stereo", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
+    }
+
+    // -120 dBFS = amplitude 0.000001. The intermediate WAVs are float PCM,
+    // but accept other PCM WAVs too so a future encoder change cannot turn an
+    // unreadable file into a falsely omitted Spotify lane. Fail open on any
+    // read problem: keeping a silent lane is safer than losing real audio.
+    internal static bool IsSilentWaveFile(string path)
+    {
+        const float silentPeak = 0.000001f;
+        try
+        {
+            using var reader = new WaveFileReader(path);
+            var buffer = new byte[64 * 1024];
+            int bytesRead;
+            while ((bytesRead = reader.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                if (!AudioSampleFormat.TryGetPeak(reader.WaveFormat, buffer, bytesRead, out var peak)) return false;
+                if (peak > silentPeak) return false;
+            }
+
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Spotify silence check failed for {path}; keeping track.", error);
+            return false;
+        }
     }
 
     private async Task<string> ApplyGainAsync(string inputPath, int volumePercent, ICollection<string> snapshots, CancellationToken cancellationToken)
