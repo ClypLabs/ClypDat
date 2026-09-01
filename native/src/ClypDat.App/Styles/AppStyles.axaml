@@ -1491,25 +1491,30 @@
   <Style Selector="Button.settingsNavButton.active:pointerover">
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
-  <!-- Base/Accent selector: one joined segmented control. -->
-  <Style Selector="Button.themeColorTab">
-    <Setter Property="HorizontalAlignment" Value="Stretch" />
-    <Setter Property="HorizontalContentAlignment" Value="Center" />
-    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
+  <!-- Recent-colour swatches under each picker in the theme editor. The colour
+       is painted by a Border inside the button rather than by the button, because
+       the generic Button:not(ToggleSwitch):pointerover rule above sets Background
+       and would grey out the one thing a swatch exists to show. The button keeps
+       a transparent ground and hover moves the ring instead. -->
+  <Style Selector="Button.themeSwatch">
+    <Setter Property="Width" Value="24" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0,0,4,4" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.themeSwatch:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.themeSwatch Border">
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="Padding" Value="8,6" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
-  <Style Selector="Button.themeColorTab:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_2A3B49}" />
-    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-  </Style>
-  <Style Selector="Button.themeColorTab.active">
-    <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+  <Style Selector="Button.themeSwatch:pointerover Border">
+    <Setter Property="BorderBrush" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <!-- Library sidebar's persistent icon rail (Sections/Games/bottom
        shortcuts). Hover/active read as a circular backdrop behind the icon

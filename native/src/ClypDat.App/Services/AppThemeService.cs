@@ -76,6 +76,42 @@ internal static class AppThemeService
     private const double LightTextLightnessScale = 0.75;
     private const double LightSemanticLightnessScale = 0.85;
 
+    // A custom theme's base used to be painted as picked. A UI ground is not a
+    // colour you choose off a spectrum, though - ClypDat's own is #0D1116, and
+    // the authored dark family around it sits at S 0.24-0.29 with the page at
+    // L 0.069 (#141D24 0.286/0.110, #22303D 0.284/0.186, #2C3B48 0.241/0.227).
+    // A mid green off the spectrum is S 0.592 at L 0.404: twice the chroma and
+    // six times the lightness of the thing it replaces, painted across every
+    // panel in the app.
+    //
+    // So the pick supplies the hue, and its chroma and lightness are clamped
+    // into the band the shipped palette already occupies. Clamped, not scaled:
+    // a pick already inside the band comes back untouched, which is what keeps
+    // a custom theme built on #0D1116 rendering byte-for-byte as System. The
+    // colour the user chose is still what the swatch and the saved theme show -
+    // this is a render step, not an edit of their choice.
+    private const double CustomSurfaceMaxSaturation = 0.30;
+    private const double CustomDarkMinLightness = 0.05;
+    private const double CustomDarkMaxLightness = 0.13;
+
+    // Light mode is the same band inverted: 1 - 0.069 = 0.931 is where the light
+    // presets' page lands, and RecolorCustom negates its delta there, so the
+    // ramp reproduces stock light from an anchor in this range.
+    private const double CustomLightMinLightness = 0.90;
+    private const double CustomLightMaxLightness = 0.97;
+
+    // Which band a pick lands in. Deliberately NOT the black-vs-white crossover
+    // this used to use: solving Contrast(black, bg) = Contrast(white, bg) gives
+    // relative luminance 0.17913, so the old "> 0.179" test was asking which
+    // text reads on the pick - and BestForeground would ask the identical
+    // question, which is why swapping in that helper alone fixes nothing. Under
+    // it a mid green (#48A42A, luminance 0.281) counted as a light theme, so the
+    // app returned black text and the light logo on what anyone looking at it
+    // would call a dark green. 0.45 draws the line at genuinely pale instead:
+    // pastels and near-whites go light, and every hue at full chroma except the
+    // ones that really are unusable as a dark base - yellow, cyan - goes dark.
+    private const double CustomLightLuminance = 0.45;
+
     private static readonly IReadOnlyDictionary<string, ThemeTransform> Transforms =
         new Dictionary<string, ThemeTransform>(StringComparer.OrdinalIgnoreCase)
         {
@@ -193,9 +229,11 @@ internal static class AppThemeService
     {
         preset = Normalize(preset);
         var transform = Transforms.TryGetValue(preset, out var t) ? t : ThemeTransform.Identity;
-        var customBase = customTheme is not null ? Color.Parse(customTheme.BaseColor) : default;
         var isCustom = customTheme is not null;
-        var customLight = isCustom && RelativeLuminance(customBase) > 0.179;
+        // Everything downstream reads the damped ground, never the raw pick: the
+        // colour the theme is painted in and the colour the accent has to stay
+        // legible against are the same colour, and it is this one.
+        var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor)) : (default, false);
         var accent = isCustom ? AdjustAccent(Color.Parse(customTheme!.AccentColor), customBase) : useSystemAccent ? systemAccent : PresetAccent(preset);
         var appBackground = isCustom ? customBase : Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
 
@@ -487,14 +525,46 @@ internal static class AppThemeService
     // Custom themes retain ClypDat's authored surface hierarchy. Only its
     // hue/lightness anchor changes; text is chosen from true contrast rather
     // than assuming every custom base is dark.
+    /// <summary>
+    /// The ground a custom theme is actually painted in, and whether that ground
+    /// is a light one. The pick contributes its hue; its chroma and lightness are
+    /// clamped into the band ClypDat's own palette occupies, because a colour
+    /// chosen off a spectrum is a colour, not a UI background. Math.Clamp rather
+    /// than the file's own Clamp, which is a 0..1 clamp and would read
+    /// confusingly here.
+    /// </summary>
+    private static (Color Ground, bool Light) SurfaceBase(Color picked)
+    {
+        var light = RelativeLuminance(picked) >= CustomLightLuminance;
+        var (hue, saturation, lightness) = ToHsl(picked);
+        var ground = FromHsl(
+            hue,
+            Math.Min(saturation, CustomSurfaceMaxSaturation),
+            Math.Clamp(lightness,
+                light ? CustomLightMinLightness : CustomDarkMinLightness,
+                light ? CustomLightMaxLightness : CustomDarkMaxLightness),
+            picked.A);
+        return (ground, light);
+    }
+
     private static Color RecolorCustom(Color source, ColorRole role, Color baseColor, bool light)
     {
         if (role == ColorRole.Text)
         {
-            var foreground = light ? Colors.Black : Colors.White;
+            // Which pole to blend toward is a contrast question, so ask the helper
+            // that answers contrast questions rather than reusing the light flag -
+            // the two agree on ordinary grounds and the helper is right on the ones
+            // near the boundary.
+            var foreground = BestForeground(baseColor);
             var (_, _, textLightness) = ToHsl(source);
             var alpha = textLightness < .48 ? .58 : textLightness < .66 ? .74 : 1d;
-            return Blend(baseColor, foreground, alpha);
+            // Body text carries WCAG AA; the muted tiers only have to stay legible,
+            // and holding them to 4.5 as well would flatten the whole ramp into one
+            // shade. This is the check the Semantic role has always had and the
+            // Text role never did, which is how muted labels ended up tinted to
+            // within a shade of the surface they sit on.
+            var minimum = alpha >= 1d ? 4.5 : 3;
+            return EnsureContrast(Blend(baseColor, foreground, alpha), baseColor, minimum);
         }
 
         if (role == ColorRole.Semantic)

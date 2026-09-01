@@ -106,34 +106,95 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" HorizontalAlignment="Center" MaxWidth="560" IsVisible="{Binding IsThemeEditorOpen}">
-      <Grid ColumnDefinitions="230,260" ColumnSpacing="18" RowDefinitions="Auto,*">
-        <TextBlock Grid.ColumnSpan="2" Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" Margin="0,0,0,10" />
-        <Grid Grid.Row="1" Width="230" Height="220" ColumnDefinitions="200,20" ColumnSpacing="10" HorizontalAlignment="Center">
-          <cp:ColorSpectrum Color="{Binding PickerColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="200" Height="200" CornerRadius="6" />
-          <cp:ColorSlider Grid.Column="1" Color="{Binding PickerColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
+    <!-- Two independent pickers rather than one behind a Base/Accent toggle.
+         The toggle meant a single set of picker state stood for whichever colour
+         was selected, and a separate "Use colour" button copied it across - so
+         the spectrum previewed one colour live while Apply saved another. There
+         is no shared state left to disagree, and the settings column had the
+         width for both all along. -->
+    <Border Classes="settingsCard" IsVisible="{Binding IsThemeEditorOpen}">
+      <StackPanel Spacing="14">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+          <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" VerticalAlignment="Center" />
+          <TextBox Grid.Column="1" Classes="settingsInput" Width="240" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
         </Grid>
-        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="8">
-          <TextBox Classes="settingsInput" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
-          <Grid ColumnDefinitions="*,*" ColumnSpacing="0">
-            <Button Grid.Column="0" Classes="themeColorTab" Content="Base" Click="SelectBaseThemeColorButton_OnClick" Classes.active="{Binding IsEditingBaseColor}" CornerRadius="7,0,0,7" />
-            <Button Grid.Column="1" Classes="themeColorTab" Content="Accent" Click="SelectAccentThemeColorButton_OnClick" Classes.active="{Binding IsEditingAccentColor}" CornerRadius="0,7,7,0" />
-          </Grid>
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-            <TextBox Classes="settingsInput" Text="{Binding PickerHexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
-            <Button Grid.Column="1" Classes="primaryButton" Content="Use colour" Click="UsePickerColorButton_OnClick" />
-          </Grid>
-          <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
-            <TextBox Classes="settingsInput" Text="{Binding PickerRedText, Mode=TwoWay}" PlaceholderText="R" />
-            <TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding PickerGreenText, Mode=TwoWay}" PlaceholderText="G" />
-            <TextBox Grid.Column="2" Classes="settingsInput" Text="{Binding PickerBlueText, Mode=TwoWay}" PlaceholderText="B" />
-          </Grid>
-          <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding PickerColorError}" />
-          <ItemsControl ItemsSource="{Binding RecentThemeColors}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="28" ItemHeight="28" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Button Tag="{Binding}" Width="24" Height="24" Padding="0" Margin="0,0,4,4" Background="{Binding}" Click="RecentThemeColorButton_OnClick" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-          <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding ThemeEditorError}" />
-          <StackPanel Orientation="Horizontal" Spacing="8"><Button Classes="primaryButton" Content="Apply" Click="ApplyCustomThemeButton_OnClick" /><Button Content="Cancel" Click="CancelCustomThemeButton_OnClick" /></StackPanel>
-        </StackPanel>
-      </Grid>
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="24">
+          <StackPanel Grid.Column="0" Spacing="8">
+            <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
+            <Grid ColumnDefinitions="200,20" ColumnSpacing="10" HorizontalAlignment="Left">
+              <!-- Bound on HsvColor, not Color. Dragging into pure black or pure
+                   white throws the hue away in RGB, so the hue slider would jump
+                   back to red the moment the spectrum reached an edge. -->
+              <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="200" Height="200" CornerRadius="6" />
+              <cp:ColorSlider Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
+            </Grid>
+            <TextBox Classes="settingsInput" Text="{Binding BasePicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
+              <TextBox Classes="settingsInput" Text="{Binding BasePicker.RedText, Mode=TwoWay}" PlaceholderText="R" />
+              <TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding BasePicker.GreenText, Mode=TwoWay}" PlaceholderText="G" />
+              <TextBox Grid.Column="2" Classes="settingsInput" Text="{Binding BasePicker.BlueText, Mode=TwoWay}" PlaceholderText="B" />
+            </Grid>
+            <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding BasePicker.Error}" IsVisible="{Binding BasePicker.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            <ItemsControl ItemsSource="{Binding RecentThemeColors}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="28" ItemHeight="28" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate><Button Classes="themeSwatch" Tag="{Binding}" ToolTip.Tip="{Binding}" Click="BaseRecentThemeColorButton_OnClick"><Border Background="{Binding}" /></Button></DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+          <StackPanel Grid.Column="2" Spacing="8">
+            <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
+            <Grid ColumnDefinitions="200,20" ColumnSpacing="10" HorizontalAlignment="Left">
+              <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="200" Height="200" CornerRadius="6" />
+              <cp:ColorSlider Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
+            </Grid>
+            <TextBox Classes="settingsInput" Text="{Binding AccentPicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
+              <TextBox Classes="settingsInput" Text="{Binding AccentPicker.RedText, Mode=TwoWay}" PlaceholderText="R" />
+              <TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding AccentPicker.GreenText, Mode=TwoWay}" PlaceholderText="G" />
+              <TextBox Grid.Column="2" Classes="settingsInput" Text="{Binding AccentPicker.BlueText, Mode=TwoWay}" PlaceholderText="B" />
+            </Grid>
+            <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding AccentPicker.Error}" IsVisible="{Binding AccentPicker.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            <ItemsControl ItemsSource="{Binding RecentThemeColors}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="28" ItemHeight="28" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate><Button Classes="themeSwatch" Tag="{Binding}" ToolTip.Tip="{Binding}" Click="AccentRecentThemeColorButton_OnClick"><Border Background="{Binding}" /></Button></DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Grid>
+        <Border Classes="settingsDivider" />
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="20">
+          <!-- Strong colours are damped before they are painted, so the swatch
+               above and the app no longer show the same thing. This is where the
+               user sees what they will actually get; it reads the live theme
+               resources the preview has already applied, so it cannot claim
+               something different from the window around it. -->
+          <StackPanel Spacing="8">
+            <TextBlock Classes="settingsCardLabel" Text="PREVIEW" />
+            <Border Width="220" Height="112" CornerRadius="10" Padding="12" BorderThickness="1"
+                    Background="{Binding ThemePreviewGroundBrush}" BorderBrush="{Binding ThemePreviewSurfaceBrush}">
+              <Grid RowDefinitions="Auto,*,Auto" RowSpacing="8">
+                <TextBlock Text="{Binding ThemeEditorName}" Foreground="{Binding ThemePreviewTextBrush}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                <Border Grid.Row="1" CornerRadius="6" Background="{Binding ThemePreviewSurfaceBrush}" Padding="8">
+                  <TextBlock Text="Muted label" Foreground="{Binding ThemePreviewMutedBrush}" FontSize="11" VerticalAlignment="Center" />
+                </Border>
+                <Border Grid.Row="2" CornerRadius="6" Padding="10,4" HorizontalAlignment="Left" Background="{Binding ThemePreviewAccentBrush}">
+                  <TextBlock Text="Accent" Foreground="{Binding ThemePreviewAccentTextBrush}" FontSize="11" FontWeight="Bold" />
+                </Border>
+              </Grid>
+            </Border>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="10" VerticalAlignment="Bottom">
+            <TextBlock Classes="settingsRowDescSm" Text="Apply saves this theme and selects it, leaving the editor open so you can keep tuning. Close repaints from what is saved, so anything not applied is dropped." />
+            <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding ThemeEditorError}" IsVisible="{Binding ThemeEditorError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Classes="primaryButton" Content="Apply" Click="ApplyCustomThemeButton_OnClick" />
+              <Button Content="Close" Click="CancelCustomThemeButton_OnClick" />
+            </StackPanel>
+          </StackPanel>
+        </Grid>
+      </StackPanel>
     </Border>
 
     <Border Classes="settingsCard"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="TYPOGRAPHY" /><TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Inter restores ClypDat's default." /><TextBox Classes="settingsInput" Text="{Binding AppFontFamilyName, Mode=TwoWay}" PlaceholderText="Inter" /></StackPanel></Border>

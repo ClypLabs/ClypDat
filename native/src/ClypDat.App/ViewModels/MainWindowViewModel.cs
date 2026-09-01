@@ -21,7 +21,6 @@ public enum EditorSidebarSection
     Export
 }
 
-public enum ThemeColorEditorTarget { Base, Accent }
 
 internal readonly record struct LibraryStartupDateMarker(string Text, int FirstVisibleIndex, int Count);
 
@@ -216,6 +215,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _ = _clypDatAccount.TryRestoreAsync();
         Settings.CustomThemes ??= new();
         Settings.RecentThemeColors ??= new();
+        // Each picker owns one of the editor's two colours and writes straight
+        // into it. Nothing sits between the spectrum and the value Apply saves.
+        BasePicker = new ThemeColorPickerViewModel(_themeEditorBaseColor, hex => { ThemeEditorBaseColor = hex; PreviewThemeEditor(); });
+        AccentPicker = new ThemeColorPickerViewModel(_themeEditorAccentColor, hex => { ThemeEditorAccentColor = hex; PreviewThemeEditor(); });
         Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
         if (Settings.LastSettingsSection is "Import from Medal" or "Import from SteelSeries")
@@ -429,30 +432,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _themeEditorBaseColor = "#0D1116";
     private string _themeEditorAccentColor = "#5864E8";
     private string _themeEditorError = string.Empty;
-    private ThemeColorEditorTarget _themeColorEditorTarget;
-    private Color _pickerColor = Color.Parse("#0D1116");
-    private HsvColor _pickerHsvColor = Color.Parse("#0D1116").ToHsv();
-    private string _pickerHexText = "#0D1116";
-    private string _pickerRedText = "13";
-    private string _pickerGreenText = "17";
-    private string _pickerBlueText = "22";
-    private string _pickerColorError = string.Empty;
-    private bool _updatingPicker;
     public bool IsThemeEditorOpen => _editingTheme is not null;
+    // Whether the theme in the editor is the one currently applied, which is
+    // what tells the user Apply did something.
+    public bool IsThemeEditorSaved => _editingTheme is not null && Settings.CustomThemes.Contains(_editingTheme) &&
+        string.Equals(Settings.ThemePreset, CustomThemeLibrary.Selection(_editingTheme), StringComparison.OrdinalIgnoreCase);
     public string ThemeEditorName { get => _themeEditorName; set => SetProperty(ref _themeEditorName, value); }
     public string ThemeEditorBaseColor { get => _themeEditorBaseColor; private set => SetProperty(ref _themeEditorBaseColor, value); }
     public string ThemeEditorAccentColor { get => _themeEditorAccentColor; private set => SetProperty(ref _themeEditorAccentColor, value); }
     public string ThemeEditorError { get => _themeEditorError; private set => SetProperty(ref _themeEditorError, value); }
-    public ThemeColorEditorTarget ThemeColorEditorTarget { get => _themeColorEditorTarget; private set => SetProperty(ref _themeColorEditorTarget, value); }
-    public bool IsEditingBaseColor => ThemeColorEditorTarget == ThemeColorEditorTarget.Base;
-    public bool IsEditingAccentColor => ThemeColorEditorTarget == ThemeColorEditorTarget.Accent;
-    public Color PickerColor { get => _pickerColor; set { if (_updatingPicker) return; SetPickerColor(new ThemeColor(value.R, value.G, value.B)); } }
-    public HsvColor PickerHsvColor { get => _pickerHsvColor; set { if (_updatingPicker) return; SetPickerHsvColor(value); } }
-    public string PickerHexText { get => _pickerHexText; set { if (!SetProperty(ref _pickerHexText, value) || _updatingPicker) return; if (!ThemeColor.TryParseHex(value, out var color)) { PickerColorError = "Use #RRGGBB."; return; } SetPickerColor(color); } }
-    public string PickerRedText { get => _pickerRedText; set => SetPickerRgbText(ref _pickerRedText, value); }
-    public string PickerGreenText { get => _pickerGreenText; set => SetPickerRgbText(ref _pickerGreenText, value); }
-    public string PickerBlueText { get => _pickerBlueText; set => SetPickerRgbText(ref _pickerBlueText, value); }
-    public string PickerColorError { get => _pickerColorError; private set => SetProperty(ref _pickerColorError, value); }
+    // One picker per colour, each writing straight into the theme it is editing.
+    public ThemeColorPickerViewModel BasePicker { get; }
+    public ThemeColorPickerViewModel AccentPicker { get; }
+
 
     public string? SelectedThemePreset
     {
@@ -535,6 +527,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.Equals(Settings.ThemePreset, CustomThemeLibrary.Selection(theme), StringComparison.OrdinalIgnoreCase)) Settings.ThemePreset = "System";
         SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); return true;
     }
+    /// <summary>
+    /// Saves the theme being edited and selects it, leaving the editor open.
+    /// Apply used to close the editor as well, which - with the colour it saved
+    /// being the wrong one - looked like the picker vanishing and taking the
+    /// user's work with it. Saving and closing are separate now: CloseCustomTheme
+    /// keeps what was applied, CancelCustomTheme drops back to the previous theme.
+    /// </summary>
     public bool ApplyCustomTheme()
     {
         if (_editingTheme is null) return false;
@@ -545,91 +544,64 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!Settings.CustomThemes.Contains(_editingTheme)) Settings.CustomThemes.Add(_editingTheme);
         Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
         CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
-        _editingTheme = null; ThemeEditorError = string.Empty; SaveSettings(); ApplyTheme();
-        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorOpen)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
+        ThemeEditorError = string.Empty; SaveSettings(); ApplyTheme();
+        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
     }
-    public void CancelCustomTheme() { _editingTheme = null; ThemeEditorError = string.Empty; ApplyTheme(); OnPropertyChanged(nameof(IsThemeEditorOpen)); }
+
+    /// <summary>
+    /// Leaves the editor and repaints from what is saved. That is the same thing
+    /// whether or not Apply was pressed - applied work is in Settings and
+    /// survives, unapplied work was only ever a live preview and does not - so
+    /// there is one button rather than a Close and a Cancel that would have to
+    /// explain the difference between them.
+    /// </summary>
+    public void CancelCustomTheme() { _editingTheme = null; ThemeEditorError = string.Empty; ApplyTheme(); OnPropertyChanged(nameof(IsThemeEditorOpen)); OnPropertyChanged(nameof(IsThemeEditorSaved)); }
     private void LoadThemeEditor(CustomThemeSettings theme)
     {
         ThemeEditorName = theme.Name;
         ThemeEditorBaseColor = theme.BaseColor;
         ThemeEditorAccentColor = theme.AccentColor;
         ThemeEditorError = string.Empty;
-        ThemeColorEditorTarget = ThemeColorEditorTarget.Base;
-        OnPropertyChanged(nameof(IsEditingBaseColor));
-        OnPropertyChanged(nameof(IsEditingAccentColor));
-        LoadPickerColor(theme.BaseColor);
+        // Load, not Set: seeding the controls with a theme's saved colours is not
+        // the user changing one, and must not repaint the app on the way in.
+        BasePicker.Load(theme.BaseColor);
+        AccentPicker.Load(theme.AccentColor);
         OnPropertyChanged(nameof(IsThemeEditorOpen));
-    }
-
-    public void SelectBaseThemeColor() => SelectThemeColor(ThemeColorEditorTarget.Base);
-    public void SelectAccentThemeColor() => SelectThemeColor(ThemeColorEditorTarget.Accent);
-    private void SelectThemeColor(ThemeColorEditorTarget target)
-    {
-        ThemeColorEditorTarget = target;
-        OnPropertyChanged(nameof(IsEditingBaseColor));
-        OnPropertyChanged(nameof(IsEditingAccentColor));
-        LoadPickerColor(target == ThemeColorEditorTarget.Base ? ThemeEditorBaseColor : ThemeEditorAccentColor);
-    }
-
-    public void UsePickerColor()
-    {
-        var color = new ThemeColor(PickerColor.R, PickerColor.G, PickerColor.B).Hex;
-        if (ThemeColorEditorTarget == ThemeColorEditorTarget.Base) ThemeEditorBaseColor = color;
-        else ThemeEditorAccentColor = color;
-        CustomThemeLibrary.AddRecent(Settings, color);
-        SaveSettings();
-        PickerColorError = string.Empty;
-        OnPropertyChanged(nameof(RecentThemeColors));
+        OnPropertyChanged(nameof(IsThemeEditorSaved));
+        // Opening the editor previews what is in it. Editing a theme that is not
+        // the applied one otherwise shows the app - and the preview card, which
+        // reads the live resources - in some other theme entirely. Close puts
+        // back whatever is saved.
         PreviewThemeEditor();
     }
 
-    public void UseRecentThemeColor(string color)
-    {
-        if (ThemeColor.TryParseHex(color, out var parsed)) SetPickerColor(parsed);
-    }
-
-    private void SetPickerRgbText(ref string field, string value)
-    {
-        if (!SetProperty(ref field, value) || _updatingPicker) return;
-        if (!int.TryParse(PickerRedText, out var red) || !int.TryParse(PickerGreenText, out var green) || !int.TryParse(PickerBlueText, out var blue) ||
-            !ThemeColor.TryFromRgb(red, green, blue, out var color)) { PickerColorError = "RGB values must be 0–255."; return; }
-        SetPickerColor(color);
-    }
-
-    private void LoadPickerColor(string hex)
-    {
-        if (ThemeColor.TryParseHex(hex, out var color)) SetPickerColor(color, false);
-    }
-
-    private void SetPickerColor(ThemeColor color, bool preview = true)
-    {
-        _updatingPicker = true;
-        SetProperty(ref _pickerColor, Color.FromRgb(color.Red, color.Green, color.Blue), nameof(PickerColor));
-        SetProperty(ref _pickerHsvColor, Color.FromRgb(color.Red, color.Green, color.Blue).ToHsv(), nameof(PickerHsvColor));
-        SetProperty(ref _pickerHexText, color.Hex, nameof(PickerHexText));
-        SetProperty(ref _pickerRedText, color.Red.ToString(), nameof(PickerRedText));
-        SetProperty(ref _pickerGreenText, color.Green.ToString(), nameof(PickerGreenText));
-        SetProperty(ref _pickerBlueText, color.Blue.ToString(), nameof(PickerBlueText));
-        _updatingPicker = false;
-        PickerColorError = string.Empty;
-        if (preview) PreviewThemeEditor();
-    }
-
-    private void SetPickerHsvColor(HsvColor hsvColor)
-    {
-        var rgb = hsvColor.ToRgb();
-        SetPickerColor(new ThemeColor(rgb.R, rgb.G, rgb.B));
-    }
+    public void UseRecentBaseColor(string color) { if (ThemeColor.TryParseHex(color, out var parsed)) BasePicker.Set(parsed); }
+    public void UseRecentAccentColor(string color) { if (ThemeColor.TryParseHex(color, out var parsed)) AccentPicker.Set(parsed); }
 
     private void PreviewThemeEditor()
     {
         if (_editingTheme is null) return;
-        var baseColor = ThemeColorEditorTarget == ThemeColorEditorTarget.Base ? PickerHexText : ThemeEditorBaseColor;
-        var accentColor = ThemeColorEditorTarget == ThemeColorEditorTarget.Accent ? PickerHexText : ThemeEditorAccentColor;
         (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), false,
-            new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = baseColor, AccentColor = accentColor });
+            new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = ThemeEditorBaseColor, AccentColor = ThemeEditorAccentColor });
+        OnPropertyChanged(nameof(ThemePreviewGroundBrush));
+        OnPropertyChanged(nameof(ThemePreviewSurfaceBrush));
+        OnPropertyChanged(nameof(ThemePreviewTextBrush));
+        OnPropertyChanged(nameof(ThemePreviewMutedBrush));
+        OnPropertyChanged(nameof(ThemePreviewAccentBrush));
+        OnPropertyChanged(nameof(ThemePreviewAccentTextBrush));
     }
+
+    // The editor's preview card. Strong colours are damped before they are
+    // painted, so the swatch and the app no longer show the same thing; the card
+    // is where the user sees what they will actually get. Read back out of the
+    // live resources rather than recomputed here, so it cannot drift from the
+    // real result - PreviewThemeEditor has already applied them.
+    public IBrush ThemePreviewGroundBrush => AppThemeService.Brush("AppBgBrush", "#0D1116");
+    public IBrush ThemePreviewSurfaceBrush => AppThemeService.Brush("SurfaceRaisedBrush", "#1A242E");
+    public IBrush ThemePreviewTextBrush => AppThemeService.Brush("TextStrongBrush", "#EDF4FB");
+    public IBrush ThemePreviewMutedBrush => AppThemeService.Brush("TextMutedBrush", "#6B7C8C");
+    public IBrush ThemePreviewAccentBrush => AppThemeService.Brush("AccentBrush", "#5864E8");
+    public IBrush ThemePreviewAccentTextBrush => AppThemeService.Brush("AccentForegroundBrush", "#FFFFFF");
 
     public string AppFontFamilyName
     {

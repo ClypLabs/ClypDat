@@ -22,10 +22,12 @@ public sealed partial class ThemesSection : UserControl
     private void DeleteCustomThemeButton_OnClick(object? sender, RoutedEventArgs e) { if ((sender as Control)?.Tag is ClypDat.Core.Settings.CustomThemeSettings theme) ViewModel?.DeleteCustomTheme(theme); }
     private void ApplyCustomThemeButton_OnClick(object? sender, RoutedEventArgs e) => ViewModel?.ApplyCustomTheme();
     private void CancelCustomThemeButton_OnClick(object? sender, RoutedEventArgs e) => ViewModel?.CancelCustomTheme();
-    private void SelectBaseThemeColorButton_OnClick(object? sender, RoutedEventArgs e) => ViewModel?.SelectBaseThemeColor();
-    private void SelectAccentThemeColorButton_OnClick(object? sender, RoutedEventArgs e) => ViewModel?.SelectAccentThemeColor();
-    private void UsePickerColorButton_OnClick(object? sender, RoutedEventArgs e) => ViewModel?.UsePickerColor();
-    private void RecentThemeColorButton_OnClick(object? sender, RoutedEventArgs e) { if ((sender as Control)?.Tag is string color) ViewModel?.UseRecentThemeColor(color); }
+    // A recent swatch's DataContext is the colour string, so which picker it
+    // fills has to come from the handler. Two handlers rather than walking up to
+    // the owning ContentControl - this file is a list of one-line dispatches and
+    // an ancestor walk would be the only thing in it that needs reading twice.
+    private void BaseRecentThemeColorButton_OnClick(object? sender, RoutedEventArgs e) { if ((sender as Control)?.Tag is string color) ViewModel?.UseRecentBaseColor(color); }
+    private void AccentRecentThemeColorButton_OnClick(object? sender, RoutedEventArgs e) { if ((sender as Control)?.Tag is string color) ViewModel?.UseRecentAccentColor(color); }
 
     private void ThemeTextBox_OnKeyDown(object? sender, KeyEventArgs e)
     {
