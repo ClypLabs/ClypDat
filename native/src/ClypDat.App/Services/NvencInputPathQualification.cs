@@ -38,9 +38,8 @@ internal static class NvencInputPathQualification
         if (!d3dAvailable) return systemAvailable ? NvencInputPath.SystemMemory : null;
         if (!systemAvailable) return NvencInputPath.D3D11;
 
-        // An idle benchmark cannot reveal D3D11 queue contention from a
-        // foreground game. Prefer the independent upload path whenever it is
-        // available; D3D11 is strictly an open-time fallback.
-        return NvencInputPath.SystemMemory;
+        // Scaling and NVENC share this D3D11 device. Keeping the frame there
+        // avoids staging readback, CPU plane copies, and NVENC re-upload.
+        return NvencInputPath.D3D11;
     }
 }

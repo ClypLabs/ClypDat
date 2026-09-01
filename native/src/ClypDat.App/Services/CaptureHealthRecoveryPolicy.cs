@@ -12,6 +12,16 @@ internal sealed class CaptureHealthRecoveryPolicy
 
     internal bool Observe(ReplayCaptureHealth health)
     {
+        // A D3D11 encoder rebind failed after device recovery. The worker no
+        // longer owns valid frames for its encoder, so restart before another
+        // capture tick can submit a stale native resource.
+        if (health.PipelineRecoveryAction == ReplayPipelineRecoveryAction.RestartWorker &&
+            health.LastFailure.StartsWith("D3D11 encoder could not rebind", StringComparison.Ordinal))
+        {
+            _consecutiveFatalSamples = RequiredSamples;
+            return true;
+        }
+
         var queueCapacity = health.EncodeQueueCapacity;
         var fatal = !health.SaveInProgress && !health.CapturePaused &&
                     (health.CaptureMode.Contains("WGC", StringComparison.OrdinalIgnoreCase) ||

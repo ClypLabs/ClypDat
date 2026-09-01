@@ -1544,7 +1544,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             AppLog.Info($"Native replay startup: {encoderName} one-time live output validation complete.");
                         }
                     }
-                    AppLog.Debug($"Native capture diag: framesSeen={framesSeen}, pointerFramesSeen={pointerFramesSeenSinceLog}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, avgFrameStalenessMs={frameStalenessMs / frameStalenessDenom:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}{dxgiTelemetryText}.");
+                    AppLog.Debug($"Native capture diag: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, framesSeen={framesSeen}, pointerFramesSeen={pointerFramesSeenSinceLog}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}{dxgiTelemetryText}.");
+                    AppLog.Debug($"Native capture throughput: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, queueDepth={encodeQueue.Count}, queueCapacity={encodeQueueCapacity}, droppedFrames={droppedSinceLog}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. It remains useful telemetry, but a low rate with
                     // an empty queue is a pacing/source shortfall, not encoder
@@ -2775,17 +2776,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 AppLog.Info($"Native capture: GPU downscale unavailable after device rebuild, falling back to CPU scale: {error.Message}");
                                 useGpuScale = false;
                             }
-                            // The zero-copy pool's textures belong to the device
-                            // that was just destroyed, and the running encoder
-                            // is bound to that pool for life - hw_frames_ctx is
-                            // fixed at avcodec_open2. So both are rebuilt on the
-                            // new device and the encoder is swapped for one that
-                            // reads from the new pool, mid-session, without
-                            // touching the ring buffer or the Full Session
-                            // writer. If anything in that chain fails, the swap
-                            // still happens - to a system-memory encoder - so
-                            // capture continues either way.
-                            if (hwFramesRef != 0)
+                            // hw_frames_ctx binds the D3D11 pool for an encoder's
+                            // entire lifetime. Rebind only to the same D3D11 frame
+                            // type; an NV12 fallback here races queued D3D11 frames
+                            // and previously crashed the worker with 0xC0000005.
+                            if (hardwareFramesActive)
                             {
                                 if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
                                 hardwarePoolTextures.Clear();
@@ -2797,9 +2792,38 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     device, outputWidth, outputHeight, ReplayEncoderProfilePolicy.D3D11FixedPoolSize(config.FrameRate, HardwareFramePoolHeadroom));
                                 }
 
-                                var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device, out _, out var rebuiltEncoderName, out var rebuiltHardware);
-                                if (!rebuiltHardware) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
-                                requiresDistinctAmfSoftwareFrame = !rebuiltHardware && rebuiltEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
+                                AVCodecContext* replacement = null;
+                                string rebuiltEncoderName = string.Empty;
+                                var rebuiltHardware = false;
+                                try
+                                {
+                                    if (hwFramesRef != 0)
+                                    {
+                                        replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device,
+                                            out _, out rebuiltEncoderName, out rebuiltHardware,
+                                            candidateOrder: new[] { activeEncoderCandidate });
+                                    }
+                                }
+                                catch (Exception error)
+                                {
+                                    AppLog.Info($"Native capture: D3D11 encoder rebind unavailable ({error.Message}).");
+                                }
+
+                                if (ReplayEncoderFailoverPolicy.RequiresWorkerRestartAfterDeviceRebind(
+                                        activeEncoderCandidate, rebuiltHardware))
+                                {
+                                    if (replacement is not null) ffmpeg.avcodec_free_context(&replacement);
+                                    ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                                    SetHealth(_health with
+                                    {
+                                        State = ReplayCaptureState.Degraded,
+                                        LastFailure = "D3D11 encoder could not rebind after device recovery; restarting capture worker.",
+                                        PipelineRecoveryAction = ReplayPipelineRecoveryAction.RestartWorker,
+                                        UpdatedUtc = DateTime.UtcNow
+                                    });
+                                    AppLog.Info("Native capture: D3D11 encoder rebind failed; requested supervised worker restart.");
+                                    return;
+                                }
 
                                 var swapped = new ManualResetEventSlim(false);
                                 lock (encodeQueueGate)
@@ -2818,6 +2842,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 swapped.Dispose();
                                 retiredCodecContexts.Add((nint)codecContext);
                                 codecContext = replacement;
+                                hardwareFramesActive = true;
+                                requiresDistinctAmfSoftwareFrame = false;
                                 AppLog.Info($"Native capture: encoder rebound after device rebuild ({rebuiltEncoderName}, zeroCopy={rebuiltHardware}).");
                             }
 
@@ -3081,45 +3107,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (croppedDirty)
                 {
                     stageStopwatch.Restart();
-                    // Only the D3D work is serialized against the acquire thread.
-                    // Everything after it (the frame clone, the queue add) touches
-                    // no GPU resource and must not hold the acquire thread up.
-                    AVFrame* pooled;
-                    lock (gpuLock)
-                    {
-                    if (!nv12Ready)
-                    {
-                        bltStreams[0].Enable = true;
-                        bltStreams[0].InputSurface = inputView;
-                        if (gpuCursorAvailable && cursorInputView is not null)
-                        {
-                            var cursorVisible = cursorOutputX > -12 && cursorOutputY > -15 &&
-                                cursorOutputX < outputWidth && cursorOutputY < outputHeight;
-                            if (cursorVisible)
-                            {
-                                UpdateGpuCursorOverlay(device, cursorTexture!);
-                                bltStreams[1].Enable = true;
-                                bltStreams[1].InputSurface = cursorInputView;
-                                videoContext!.VideoProcessorSetStreamSourceRect(videoProcessor, 1, true, new Vortice.RawRect(0, 0, 12, 15));
-                                videoContext.VideoProcessorSetStreamDestRect(videoProcessor, 1, true, new Vortice.RawRect(cursorOutputX, cursorOutputY, cursorOutputX + 12, cursorOutputY + 15));
-                                videoContext.VideoProcessorSetStreamAlpha(videoProcessor, 1, true, 1.0f);
-                            }
-                            else
-                            {
-                                bltStreams[1].Enable = false;
-                            }
-                        }
-                        else
-                        {
-                            bltStreams[1].Enable = false;
-                        }
-                        videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 2, bltStreams);
-                    }
-
-                    nv12Ready = false;
-                    croppedDirty = false;
-
-                    pooled = ffmpeg.av_frame_alloc();
+                    // A pool frame and its Vortice wrapper have no ordering
+                    // requirement with acquisition. Keep their allocation out of
+                    // gpuLock; only D3D11 Video Processor and copy commands need
+                    // serialization with frame acquisition.
+                    AVFrame* pooled = ffmpeg.av_frame_alloc();
+                    AVBufferRef* poolReference = null;
+                    ID3D11Device? frameDevice = null;
                     if (pooled is null)
                     {
                         Interlocked.Increment(ref _encodeDroppedCount);
@@ -3128,35 +3122,80 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         return;
                     }
 
-                    // Pool exhausted means every surface is still held by a
-                    // frame in the queue - the same condition a full queue
-                    // describes, and handled the same way.
-                    if (ffmpeg.av_hwframe_get_buffer((AVBufferRef*)hwFramesRef, pooled, 0) < 0)
+                    try
                     {
-                        ffmpeg.av_frame_free(&pooled);
-                        Interlocked.Increment(ref _encodeDroppedCount);
-                        Interlocked.Increment(ref _totalDroppedFrames);
+                        lock (gpuLock)
+                        {
+                            if (!hardwareFramesActive || hwFramesRef == 0 || device is null) return;
+                            poolReference = ffmpeg.av_buffer_ref((AVBufferRef*)hwFramesRef);
+                            frameDevice = device.QueryInterface<ID3D11Device>();
+                        }
+                        if (poolReference is null || frameDevice is null ||
+                            ffmpeg.av_hwframe_get_buffer(poolReference, pooled, 0) < 0)
+                        {
+                            Interlocked.Increment(ref _encodeDroppedCount);
+                            Interlocked.Increment(ref _totalDroppedFrames);
+                            return;
+                        }
+
+                        // d3d11 frames carry the texture in data[0] and, since
+                        // the pool is one texture ARRAY, the slice index in
+                        // data[1] - which is the destination subresource.
+                        var texturePointer = (nint)pooled->data[0];
+                        var arraySlice = (uint)(nint)pooled->data[1];
+                        if (!hardwarePoolTextures.TryGetValue(texturePointer, out var poolTexture))
+                        {
+                            poolTexture = new ID3D11Texture2D(texturePointer);
+                            hardwarePoolTextures[texturePointer] = poolTexture;
+                        }
+
+                        lock (gpuLock)
+                        {
+                            // Device recovery can begin while the pool frame is
+                            // allocated. Discard it if its device is no longer
+                            // the active processing device.
+                            if (!hardwareFramesActive || device is null ||
+                                frameDevice.NativePointer != device.NativePointer)
+                                return;
+                            if (!nv12Ready)
+                            {
+                                bltStreams[0].Enable = true;
+                                bltStreams[0].InputSurface = inputView;
+                                if (gpuCursorAvailable && cursorInputView is not null)
+                                {
+                                    var cursorVisible = cursorOutputX > -12 && cursorOutputY > -15 &&
+                                        cursorOutputX < outputWidth && cursorOutputY < outputHeight;
+                                    if (cursorVisible)
+                                    {
+                                        UpdateGpuCursorOverlay(frameDevice, cursorTexture!);
+                                        bltStreams[1].Enable = true;
+                                        bltStreams[1].InputSurface = cursorInputView;
+                                        videoContext!.VideoProcessorSetStreamSourceRect(videoProcessor, 1, true, new Vortice.RawRect(0, 0, 12, 15));
+                                        videoContext.VideoProcessorSetStreamDestRect(videoProcessor, 1, true, new Vortice.RawRect(cursorOutputX, cursorOutputY, cursorOutputX + 12, cursorOutputY + 15));
+                                        videoContext.VideoProcessorSetStreamAlpha(videoProcessor, 1, true, 1.0f);
+                                    }
+                                    else bltStreams[1].Enable = false;
+                                }
+                                else bltStreams[1].Enable = false;
+                                videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 2, bltStreams);
+                            }
+
+                            nv12Ready = false;
+                            croppedDirty = false;
+                            frameDevice.ImmediateContext.CopySubresourceRegion(poolTexture, arraySlice, 0, 0, 0, nv12Output!, 0);
+                        }
+
+                        if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
+                        lastHardwareFrame = pooled;
+                        pooled = null;
+                    }
+                    finally
+                    {
+                        if (poolReference is not null) ffmpeg.av_buffer_unref(&poolReference);
+                        frameDevice?.Dispose();
+                        if (pooled is not null) ffmpeg.av_frame_free(&pooled);
                         scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
-                        return;
                     }
-
-                    // d3d11 frames carry the texture in data[0] and, since
-                    // the pool is one texture ARRAY, the slice index in
-                    // data[1] - which is the destination subresource.
-                    var texturePointer = (nint)pooled->data[0];
-                    var arraySlice = (uint)(nint)pooled->data[1];
-                    if (!hardwarePoolTextures.TryGetValue(texturePointer, out var poolTexture))
-                    {
-                        poolTexture = new ID3D11Texture2D(texturePointer);
-                        hardwarePoolTextures[texturePointer] = poolTexture;
-                    }
-
-                    device.ImmediateContext.CopySubresourceRegion(poolTexture, arraySlice, 0, 0, 0, nv12Output!, 0);
-                    }
-
-                    if (lastHardwareFrame is not null) { var staleHardwareFrame = lastHardwareFrame; ffmpeg.av_frame_free(&staleHardwareFrame); lastHardwareFrame = null; }
-                    lastHardwareFrame = pooled;
-                    scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
                 }
 
                 // Nothing captured yet at all - no texture to send, and the
@@ -5419,23 +5458,38 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(
         ID3D11Device device, int width, int height, int poolSize)
     {
-        // RTX 4070 Ti drivers reject ffmpeg's fixed NV12 texture array. Dynamic
-        // single-texture allocation is accepted and remains bounded by queue
-        // capacity, so retry it after fixed-pool attempts.
-        foreach (var size in new[] { poolSize, 0 })
+        // RTX 4070 Ti accepts FFmpeg's dynamic NV12 allocation. Request it
+        // first; fixed texture arrays remain a startup-only fallback.
+        foreach (var size in new[] { 0, poolSize })
         {
             foreach (var bindFlags in EncodeFramePoolBindFlags)
             {
                 var attempt = TryCreateD3D11EncodeFrames(device, width, height, size, bindFlags);
-                if (attempt.FramesRef != 0)
+                if (attempt.FramesRef != 0 && CanAllocateD3D11EncodeFrame(attempt.FramesRef))
                 {
                     AppLog.Info($"Native capture: D3D11 encode frame pool ready (poolSize={size}, bindFlags=0x{bindFlags:X}).");
                     return attempt;
                 }
+                ReleaseHardwareFrames(ref attempt.DeviceRef, ref attempt.FramesRef);
             }
         }
 
         return (0, 0);
+    }
+
+    private static unsafe bool CanAllocateD3D11EncodeFrame(nint framesRef)
+    {
+        AVFrame* frame = null;
+        try
+        {
+            frame = ffmpeg.av_frame_alloc();
+            return frame is not null &&
+                   ffmpeg.av_hwframe_get_buffer((AVBufferRef*)framesRef, frame, 0) >= 0;
+        }
+        finally
+        {
+            if (frame is not null) ffmpeg.av_frame_free(&frame);
+        }
     }
 
     private static unsafe (nint DeviceRef, nint FramesRef) TryCreateD3D11EncodeFrames(

@@ -30,6 +30,10 @@ internal static class ReplayEncoderFailoverPolicy
         return candidates
             .Skip(activeIndex + 1)
             .Where(candidate => candidate.Codec == active.Codec)
+            // FFmpeg contexts bind AV_PIX_FMT_D3D11 and AV_PIX_FMT_NV12 at
+            // avcodec_open2. Switching between them while pacing and encode
+            // threads own queued frames risks native use-after-free.
+            .Where(candidate => candidate.IsD3D11 == active.IsD3D11)
             // Automatic GPU capture must remain on hardware. CPU takeover under
             // a foreground game made measured throughput worse than the NVENC
             // startup window it was reacting to. Keep libx264 for an explicitly
@@ -38,4 +42,8 @@ internal static class ReplayEncoderFailoverPolicy
             .Where(candidate => !attempted.Contains(candidate))
             .ToArray();
     }
+
+    internal static bool RequiresWorkerRestartAfterDeviceRebind(
+        ReplayEncoderCandidate active, bool rebindSucceeded) =>
+        active.IsD3D11 && !rebindSucceeded;
 }
