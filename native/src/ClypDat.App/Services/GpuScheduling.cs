@@ -20,7 +20,9 @@ namespace ClypDat.App.Services;
 // encoder that was never the bottleneck. Raising priority attacks the actual
 // cause, so those levers stop being pulled for the wrong reason.
 //
-// Two knobs. Only the second is on by default - see each for why:
+// Both knobs are opt-in. A replay recorder must yield GPU time to foreground
+// gameplay when the card is saturated; preserving game frame time matters more
+// than forcing a queued capture frame through.
 //
 //   - Process scheduling priority class (D3DKMTSetProcessSchedulingPriorityClass)
 //     covers EVERY GPU context this process owns. That matters because NVENC's
@@ -79,18 +81,25 @@ internal static class GpuScheduling
     // presents against the compositor's, and a window whose presents never
     // land is exactly a blank one.
     //
-    // The per-device call below is kept on by default and is not implicated:
-    // it targets the capture device explicitly and cannot touch the renderer.
-    // What is given up by disabling this is the lever aimed at NVENC's own
-    // context - which was never isolated as a win either, since the encode
-    // times it was meant to rescue were measured before and after other
-    // changes, never against this one alone.
-    //
-    // Left in place rather than deleted so it can be re-tested deliberately,
-    // on a machine where a blank window would be noticed immediately, instead
-    // of shipping to everyone again on a hypothesis.
+    // The device-level priority used to be unconditional despite the
+    // process-level opt-in comments above. On a saturated GPU that lets capture
+    // preempt game rendering and can collapse game FPS. Keep both mechanisms
+    // behind one explicit diagnostic opt-in until a measured benefit outweighs
+    // that cost.
+    internal static bool IsPriorityElevationEnabled(string? value)
+        => string.Equals(value, "1", StringComparison.Ordinal);
+
+    private static bool IsPriorityElevationEnabled()
+        => IsPriorityElevationEnabled(Environment.GetEnvironmentVariable("CLYPDAT_GPU_CAPTURE_PRIORITY"));
+
     public static void TryRaiseProcessGpuPriority()
     {
+        if (!IsPriorityElevationEnabled())
+        {
+            AppLog.Info("Native capture: GPU priority elevation disabled; foreground game keeps GPU priority.");
+            return;
+        }
+
         if (Interlocked.Exchange(ref _processPriorityRaised, 1) != 0) return;
 
         AppLog.Info("Capture worker: raising process-wide GPU scheduling priority.");
@@ -143,6 +152,8 @@ internal static class GpuScheduling
     // SetGPUThreadPriority=10, GetGPUThreadPriority=11.
     public static void TryRaiseDeviceGpuPriority(nint devicePointer)
     {
+        if (!IsPriorityElevationEnabled()) return;
+
         var dxgiDeviceIid = new Guid("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
         var dxgiDevicePtr = nint.Zero;
         try
