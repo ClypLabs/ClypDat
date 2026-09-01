@@ -18,6 +18,7 @@ using ClypDat.App.Controls;
 using ClypDat.App.Converters;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
+using ClypDat.Core.Settings;
 using LibVLCSharp.Shared;
 
 namespace ClypDat.App.Views;
@@ -31,6 +32,9 @@ public sealed partial class MainWindow : Window
     private Cs2GsiListener? _cs2GsiListener;
     private DotaGsiListener? _dotaGsiListener;
     private LeagueAutoClipListener? _leagueAutoClipListener;
+    // GSI listeners run off the UI thread. Never let their settings callback
+    // reach ViewModel/Avalonia objects; immutable snapshots cross that boundary.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AutoClipGameSettings> _autoClipSettingsSnapshots = new(StringComparer.OrdinalIgnoreCase);
     private PlaybackSession? _playback;
     private CancellationTokenSource? _playbackStartCts;
     // Held from the moment a clip open starts until its picture AND sound are up, so
@@ -436,6 +440,7 @@ public sealed partial class MainWindow : Window
                     {
                         if (e.PropertyName == nameof(AutoClipGameViewModel.IsEnabled)) UpdateAutoClipStates();
                     };
+                    autoClipGame.SettingsChanged += (_, _) => UpdateAutoClipSettingsSnapshot(autoClipGame.Id);
                 }
                 // TryDeploy for CS2/Dota does registry reads, Steam library
                 // enumeration and file IO synchronously - fine on demand, but
@@ -5747,10 +5752,26 @@ public sealed partial class MainWindow : Window
     private void UpdateAutoClipStates()
     {
         if (ViewModel is null) return;
+        foreach (var autoClipGame in ViewModel.AutoClipGames) UpdateAutoClipSettingsSnapshot(autoClipGame.Id);
         UpdateCs2AutoClipState();
         UpdateDotaAutoClipState();
         UpdateLeagueAutoClipState();
     }
+
+    private void UpdateAutoClipSettingsSnapshot(string gameId)
+    {
+        if (ViewModel is null || !ViewModel.Settings.AutoClipping.Games.TryGetValue(gameId, out var source)) return;
+        _autoClipSettingsSnapshots[gameId] = new AutoClipGameSettings
+        {
+            Enabled = source.Enabled,
+            DeathmatchClipping = source.DeathmatchClipping,
+            ListenerPort = source.ListenerPort,
+            Events = new Dictionary<string, bool>(source.Events, StringComparer.OrdinalIgnoreCase)
+        };
+    }
+
+    private AutoClipGameSettings GetAutoClipSettingsSnapshot(string gameId) =>
+        _autoClipSettingsSnapshots.TryGetValue(gameId, out var snapshot) ? snapshot : new AutoClipGameSettings { Enabled = false };
 
     private void UpdateCs2AutoClipState()
     {
@@ -5771,7 +5792,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _cs2GsiListener ??= new Cs2GsiListener(() => ViewModel.Settings.AutoClipping.Games["cs2"]);
+        _cs2GsiListener ??= new Cs2GsiListener(() => GetAutoClipSettingsSnapshot("cs2"));
         if (_cs2GsiListener.IsListening) return;
 
         var port = ViewModel.Settings.AutoClipping.Games["cs2"].ListenerPort;
@@ -5798,7 +5819,7 @@ public sealed partial class MainWindow : Window
             if (_dotaGsiListener is not null) { _dotaGsiListener.AutoClipPending -= AutoClip_OnPending; _dotaGsiListener.AutoClipReady -= AutoClip_OnReady; _dotaGsiListener.Stop(); }
             game.StatusText = "Disabled"; return;
         }
-        _dotaGsiListener ??= new DotaGsiListener(() => ViewModel.Settings.AutoClipping.Games["dota2"]);
+        _dotaGsiListener ??= new DotaGsiListener(() => GetAutoClipSettingsSnapshot("dota2"));
         if (!_dotaGsiListener.IsListening)
         {
             var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
@@ -5816,7 +5837,7 @@ public sealed partial class MainWindow : Window
         {
             _leagueAutoClipListener?.Stop(); game.StatusText = "Disabled"; return;
         }
-        _leagueAutoClipListener ??= new LeagueAutoClipListener(() => ViewModel.Settings.AutoClipping.Games["league"]);
+        _leagueAutoClipListener ??= new LeagueAutoClipListener(() => GetAutoClipSettingsSnapshot("league"));
         _leagueAutoClipListener.AutoClipPending -= AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady -= AutoClip_OnReady;
         _leagueAutoClipListener.AutoClipPending += AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady += AutoClip_OnReady;
         _leagueAutoClipListener.Start(); game.StatusText = "Waiting for a live League match";

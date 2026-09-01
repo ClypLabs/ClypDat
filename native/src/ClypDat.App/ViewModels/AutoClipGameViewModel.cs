@@ -14,6 +14,8 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     private string _searchQuery = string.Empty;
     private string _statusText = "Waiting for game";
 
+    public event EventHandler? SettingsChanged;
+
     public AutoClipGameViewModel(AutoClipGameDefinition definition, AutoClipGameSettings settings, Action save)
     {
         Definition = definition;
@@ -32,8 +34,8 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public ObservableCollection<AutoClipEventViewModel> UngroupedEvents { get; }
     public bool IsSetupRequired => Definition.RequiresSetup;
     public bool IsCs2 => string.Equals(Id, "cs2", StringComparison.OrdinalIgnoreCase);
-    public bool IsEnabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; SaveAndRefresh(); } }
-    public bool DeathmatchClipping { get => _settings.DeathmatchClipping; set { if (_settings.DeathmatchClipping == value) return; _settings.DeathmatchClipping = value; OnPropertyChanged(); _save(); } }
+    public bool IsEnabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; OnPropertyChanged(); SaveAndRefresh(); } }
+    public bool DeathmatchClipping { get => _settings.DeathmatchClipping; set { if (_settings.DeathmatchClipping == value) return; _settings.DeathmatchClipping = value; OnPropertyChanged(); SaveAndRefresh(); } }
     public bool IsSearchMatch { get => _isSearchMatch; set => SetProperty(ref _isSearchMatch, value); }
     // Bound to this row's own Name TextBlock via SettingsHighlight.Query -
     // that attached property needs the query on the SAME DataContext as the
@@ -48,7 +50,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         || Definition.Events.Any(item => item.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
         || (IsCs2 && ("Competitive".Contains(query, StringComparison.OrdinalIgnoreCase) || "Deathmatch Clipping".Contains(query, StringComparison.OrdinalIgnoreCase)));
     public void Refresh() { foreach (var group in Groups) group.Refresh(); }
-    private void SaveAndRefresh() { Refresh(); _save(); }
+    private void SaveAndRefresh() { Refresh(); _save(); SettingsChanged?.Invoke(this, EventArgs.Empty); }
 }
 
 public sealed class AutoClipGroupViewModel : ViewModelBase
