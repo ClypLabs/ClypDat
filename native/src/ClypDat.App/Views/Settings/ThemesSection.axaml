@@ -213,8 +213,13 @@
         </Grid>
         <Border Classes="settingsDivider" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
-          <StackPanel Spacing="6" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowDescSm" Text="Apply saves this theme and selects it, leaving the editor open so you can keep tuning. Close repaints from what is saved, so anything not applied is dropped." />
+          <!-- MaxWidth so the sentence wraps instead of setting the card's width.
+               TextWrapping only takes effect once something constrains the line;
+               left unconstrained a TextBlock asks for its full unwrapped length
+               at measure time, and this one was long enough to stretch the card
+               back across the settings column no matter what the pickers wanted. -->
+          <StackPanel Spacing="6" MaxWidth="380" HorizontalAlignment="Left" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowDescSm" Text="Apply saves and selects this theme. Close drops anything you have not applied." />
             <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding ThemeEditorError}" IsVisible="{Binding ThemeEditorError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
