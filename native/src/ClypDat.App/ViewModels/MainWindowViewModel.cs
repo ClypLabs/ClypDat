@@ -569,11 +569,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AccentPicker.Load(theme.AccentColor);
         OnPropertyChanged(nameof(IsThemeEditorOpen));
         OnPropertyChanged(nameof(IsThemeEditorSaved));
-        // Opening the editor previews what is in it. Editing a theme that is not
-        // the applied one otherwise shows the app - and the preview card, which
-        // reads the live resources - in some other theme entirely. Close puts
-        // back whatever is saved.
-        PreviewThemeEditor();
+        // Deliberately no preview here. Opening the editor is not a change to
+        // the theme, and repainting on open made "New theme" look like it had
+        // already done something. The picker callbacks are what preview.
     }
 
     public void UseRecentBaseColor(string color) { if (ThemeColor.TryParseHex(color, out var parsed)) BasePicker.Set(parsed); }

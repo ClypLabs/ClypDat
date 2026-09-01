@@ -558,26 +558,32 @@ internal static class AppThemeService
 
     private static Color RecolorCustom(Color source, ColorRole role, Color baseColor, bool light)
     {
-        if (role == ColorRole.Text)
+        // Text and semantic colours follow the same rule the presets do:
+        // untouched on a dark ground, inverted on a light one. Deriving them
+        // from the base instead is what made "New theme" repaint the whole
+        // window before the user had touched anything - roughly a hundred keys
+        // that Recolor returns byte-for-byte were being rewritten.
+        //
+        // Two ways it went wrong, both from asking a question about text of
+        // things that are not text. Every Text token above lightness .66 blended
+        // all the way to pure white, throwing the authored colour away. And
+        // EnsureContrast - "can this be read against the page" - was applied to
+        // coloured *fills*: the recording button's #3A1E24 background is meant
+        // to sit close to the page, so forcing it to 3:1 against the page raised
+        // its luminance fourfold and turned it pink.
+        //
+        // No contrast floor replaces the one this drops. SurfaceBase clamps a
+        // custom ground to lightness <= 0.13 or >= 0.90 and the authored text
+        // sits between 0.69 and 0.93, so the authored colours clear AA on any
+        // ground the damping can produce. That clamp did not exist when the
+        // floor was written.
+        if (role != ColorRole.Surface)
         {
-            // Which pole to blend toward is a contrast question, so ask the helper
-            // that answers contrast questions rather than reusing the light flag -
-            // the two agree on ordinary grounds and the helper is right on the ones
-            // near the boundary.
-            var foreground = BestForeground(baseColor);
-            var (_, _, textLightness) = ToHsl(source);
-            var alpha = textLightness < .48 ? .58 : textLightness < .66 ? .74 : 1d;
-            // Body text carries WCAG AA; the muted tiers only have to stay legible,
-            // and holding them to 4.5 as well would flatten the whole ramp into one
-            // shade. This is the check the Semantic role has always had and the
-            // Text role never did, which is how muted labels ended up tinted to
-            // within a shade of the surface they sit on.
-            var minimum = alpha >= 1d ? 4.5 : 3;
-            return EnsureContrast(Blend(baseColor, foreground, alpha), baseColor, minimum);
+            if (!light) return source;
+            var (textHue, textSaturation, textLightness) = ToHsl(source);
+            var scale = role == ColorRole.Text ? LightTextLightnessScale : LightSemanticLightnessScale;
+            return FromHsl(textHue, textSaturation, (1 - textLightness) * scale, source.A);
         }
-
-        if (role == ColorRole.Semantic)
-            return EnsureContrast(source, baseColor, 3);
 
         var (hue, saturation, baseLightness) = ToHsl(baseColor);
         var (_, _, sourceLightness) = ToHsl(source);
