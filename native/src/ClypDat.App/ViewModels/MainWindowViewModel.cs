@@ -6392,8 +6392,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _clypDatAccountSetupStarted = true;
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
+        _clypDatAccount.ExpectLinkChange();
         Process.Start(new ProcessStartInfo("https://www.clypdat.xyz/account") { UseShellExecute = true });
     }
+
+    /// <summary>
+    /// The window has come back to the foreground. If the user was off linking
+    /// a provider in the browser, this is the moment they expect the page to
+    /// already say so.
+    /// </summary>
+    public void OnWindowActivated() => _clypDatAccount.RefreshSoon();
 
     public async Task RefreshClypDatAccountAsync()
     {
@@ -6406,6 +6414,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var connected = provider.Equals("google", StringComparison.OrdinalIgnoreCase) ? _clypDatSnapshot.GoogleConnected : _clypDatSnapshot.DiscordConnected;
         var suffix = connected ? string.Empty : $"?link_provider={Uri.EscapeDataString(provider)}";
+        _clypDatAccount.ExpectLinkChange();
         Process.Start(new ProcessStartInfo($"https://www.clypdat.xyz/account{suffix}") { UseShellExecute = true });
     }
 

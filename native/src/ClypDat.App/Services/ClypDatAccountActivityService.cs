@@ -16,11 +16,26 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private const string BaseUrl = "https://www.clypdat.xyz/";
     private readonly HttpClient _http = new() { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(20) };
     private readonly string _cachePath = Path.Combine(AppDataPaths.Root, "clypdat-account.bin");
+    // The watch is front-loaded: linking finishes seconds after the browser
+    // opens, and every refresh while an Xbox account is linked costs the server
+    // a Microsoft token refresh and a presence call. Two seconds for the first
+    // half minute, then a slow tail for the user who takes their time.
+    private static readonly TimeSpan LinkWatchWindow = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan LinkWatchEager = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan LinkWatchEagerInterval = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan LinkWatchTailInterval = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan RefreshDebounce = TimeSpan.FromSeconds(5);
     private CancellationTokenSource? _pollCts;
+    private readonly SemaphoreSlim _pollWake = new(0, 1);
+    private DateTimeOffset _linkWatchUntil = DateTimeOffset.MinValue;
+    private DateTimeOffset _linkWatchStarted = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastRefresh = DateTimeOffset.MinValue;
+    private (bool Xbox, bool Google, bool Discord) _linkWatchSignature;
     private DesktopToken? _token;
     private XboxActivitySnapshot _snapshot = XboxActivitySnapshot.Disconnected;
 
     public XboxActivitySnapshot Snapshot => _snapshot;
+    private (bool Xbox, bool Google, bool Discord) LinkSignature => (_snapshot.IsConnected, _snapshot.GoogleConnected, _snapshot.DiscordConnected);
     public bool IsAuthenticated => _token is { ExpiresAt: var expiresAt } && expiresAt > DateTimeOffset.UtcNow;
     public event EventHandler<XboxActivitySnapshot>? Changed;
 
@@ -139,6 +154,53 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Called when a provider is about to change outside the app - the user has
+    /// just been sent to clypdat.xyz to link something, or has come back to the
+    /// window afterwards. Linking finishes in the browser, so nothing tells the
+    /// app it happened; on the idle cadence "Connected" could be a minute late.
+    /// This refreshes now and then watches at <see cref="LinkWatchInterval"/>
+    /// until the set of linked providers actually changes, or the window closes.
+    /// </summary>
+    public void ExpectLinkChange()
+    {
+        if (!IsAuthenticated) return;
+        _linkWatchSignature = LinkSignature;
+        _linkWatchStarted = DateTimeOffset.UtcNow;
+        _linkWatchUntil = _linkWatchStarted.Add(LinkWatchWindow);
+        WakePoll();
+    }
+
+    /// <summary>
+    /// Refreshes at the next opportunity without opening a watch window. This is
+    /// what returning to the window asks for: someone who alt-tabs often would
+    /// otherwise keep a fast poll running indefinitely.
+    /// </summary>
+    public void RefreshSoon()
+    {
+        if (!IsAuthenticated) return;
+        if (DateTimeOffset.UtcNow - _lastRefresh < RefreshDebounce) return;
+        WakePoll();
+    }
+
+    private void WakePoll()
+    {
+        // The loop parks on this semaphore instead of a bare delay, so releasing
+        // it cuts whatever wait is in progress short. Capped at one permit: a
+        // second release while a refresh is already queued would only make the
+        // loop go round again for nothing.
+        try { if (_pollWake.CurrentCount == 0) _pollWake.Release(); }
+        catch (SemaphoreFullException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    private TimeSpan NextPollDelay()
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (now >= _linkWatchUntil) return TimeSpan.FromSeconds(_snapshot.CurrentTitle is null ? 60 : 15);
+        return now - _linkWatchStarted < LinkWatchEager ? LinkWatchEagerInterval : LinkWatchTailInterval;
+    }
+
     private void StartPolling()
     {
         _pollCts?.Cancel();
@@ -152,8 +214,10 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(_snapshot.CurrentTitle is null ? 60 : 15), cancellationToken).ConfigureAwait(false);
+                await _pollWake.WaitAsync(NextPollDelay(), cancellationToken).ConfigureAwait(false);
                 await RefreshAsync(cancellationToken).ConfigureAwait(false);
+                // Whatever the user went to the browser to do, they have done it.
+                if (LinkSignature != _linkWatchSignature) _linkWatchUntil = DateTimeOffset.MinValue;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
             catch (Exception error)
@@ -185,6 +249,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             var message = TryReadError(body) ?? $"ClypDat activity endpoint rejected the request ({(int)response.StatusCode}).";
             throw new HttpRequestException(message);
         }
+        _lastRefresh = DateTimeOffset.UtcNow;
         var result = JsonSerializer.Deserialize<ActivityResponse>(body) ?? throw new InvalidOperationException("ClypDat activity returned no data.");
         var activity = result.Activity;
         var providers = result.Providers ?? Array.Empty<string>();
@@ -264,7 +329,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     }
     private static DateTimeOffset ParseTimestamp(string? value) => DateTimeOffset.TryParse(value, out var parsed) ? parsed : DateTimeOffset.UtcNow;
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    public void Dispose() { _pollCts?.Cancel(); _pollCts?.Dispose(); _http.Dispose(); }
+    public void Dispose() { _pollCts?.Cancel(); _pollCts?.Dispose(); _pollWake.Dispose(); _http.Dispose(); }
 
     private sealed record DesktopToken(string AccessToken, DateTimeOffset ExpiresAt);
     private sealed class ActivityResponse

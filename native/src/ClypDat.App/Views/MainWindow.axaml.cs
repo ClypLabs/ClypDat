@@ -446,7 +446,11 @@ public sealed partial class MainWindow : Window
                 Dispatcher.UIThread.Post(UpdateAutoClipStates, DispatcherPriority.Background);
             }
         };
-        Activated += (_, _) => ShowPendingNewClipsDialog();
+        Activated += (_, _) =>
+        {
+            ShowPendingNewClipsDialog();
+            ViewModel?.OnWindowActivated();
+        };
         // Tunnel, not bubble - a focused Button (Export, a transport button,
         // anything clicked most recently) otherwise intercepts Space itself
         // before this handler ever sees it (Button's own gesture recognizer
