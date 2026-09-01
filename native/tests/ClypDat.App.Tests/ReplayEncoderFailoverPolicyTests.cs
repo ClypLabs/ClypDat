@@ -6,20 +6,6 @@ namespace ClypDat.App.Tests;
 public sealed class ReplayEncoderFailoverPolicyTests
 {
     [Fact]
-    public void ShouldRetainD3D11FramePool_GpuModeWithReadyPool_KeepsZeroCopyFailoverAvailable()
-    {
-        Assert.True(ReplayEncoderFailoverPolicy.ShouldRetainD3D11FramePool(
-            ReplayVideoCodecPolicy.Gpu, d3d11FramePoolReady: true));
-    }
-
-    [Fact]
-    public void ShouldRetainD3D11FramePool_CpuMode_ReleasesUnusedPool()
-    {
-        Assert.False(ReplayEncoderFailoverPolicy.ShouldRetainD3D11FramePool(
-            ReplayVideoCodecPolicy.Cpu, d3d11FramePoolReady: true));
-    }
-
-    [Fact]
     public void CandidatesAfter_HardwareEncoder_DoesNotFallBackToLibx264()
     {
         var active = new ReplayEncoderCandidate(

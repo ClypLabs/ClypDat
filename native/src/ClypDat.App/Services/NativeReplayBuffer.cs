@@ -924,8 +924,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device, out codecTimeBase, out encoderName, out hardwareFramesActive);
             _timeBase = codecTimeBase;
             _videoCodecId = codecContext->codec_id;
-            if (!hardwareFramesActive && !ReplayEncoderFailoverPolicy.ShouldRetainD3D11FramePool(config.EncoderMode, hwFramesRef != 0))
-                ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+            if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
             requiresDistinctAmfSoftwareFrame = !hardwareFramesActive && encoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
 
             swsContext = CreateScaler(captureWidth, captureHeight, outputWidth, outputHeight);
@@ -2529,8 +2528,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 }
 
                                 var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device, out _, out var rebuiltEncoderName, out var rebuiltHardware);
-                                if (!rebuiltHardware && !ReplayEncoderFailoverPolicy.ShouldRetainD3D11FramePool(config.EncoderMode, hwFramesRef != 0))
-                                    ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                                if (!rebuiltHardware) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
                                 requiresDistinctAmfSoftwareFrame = !rebuiltHardware && rebuiltEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
 
                                 var swapped = new ManualResetEventSlim(false);
@@ -2682,8 +2680,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     activeEncoderCandidate = ResolveEncoderCandidate(config, encoderName, qualifiedHardwareFrames);
                     attemptedEncoderCandidates.Add(activeEncoderCandidate);
                     requiresDistinctAmfSoftwareFrame = !qualifiedHardwareFrames && qualifiedEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
-                    if (!qualifiedHardwareFrames && !ReplayEncoderFailoverPolicy.ShouldRetainD3D11FramePool(config.EncoderMode, hwFramesRef != 0))
-                        ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                    if (!qualifiedHardwareFrames) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
                     if (codecContext is not null && InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
                     {
                         fullSessionStartUtc = MonotonicClock.UtcNow;
@@ -2937,7 +2934,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             unsafe void EncodeScheduledFrame()
             {
-                if (hardwareFramesActive && hwFramesRef != 0)
+                if (hwFramesRef != 0)
                 {
                     EncodeScheduledFrameHardware();
                     return;
