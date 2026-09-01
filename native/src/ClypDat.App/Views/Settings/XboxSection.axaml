@@ -185,43 +185,46 @@
                 </StackPanel>
               </Grid>
             </Border>
+            <!-- The one setting Xbox brings with it lives inside the Xbox row.
+                 It used to sit under the whole card, where it read as a card-wide
+                 option and left the card ending on a rule below an unrelated
+                 provider. Inside the row it inherits the row's visibility too, so
+                 it is present exactly when there is an Xbox account to apply it to. -->
             <Border Classes="providerRow" IsVisible="{Binding ClypDatXboxIsLinked}">
-              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <Border Classes="providerBadge" Background="{StaticResource XboxBadgeBrush}">
-                  <PathIcon Data="{StaticResource XboxMark}" Foreground="{StaticResource XboxBrandBrush}" />
-                </Border>
-                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
-                  <TextBlock Classes="settingsRowTitle" Text="Xbox" />
-                  <Border Classes="statusPill ok">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <Ellipse />
-                      <TextBlock Text="Linked" />
-                    </StackPanel>
+              <StackPanel Spacing="12">
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                  <Border Classes="providerBadge" Background="{StaticResource XboxBadgeBrush}">
+                    <PathIcon Data="{StaticResource XboxMark}" Foreground="{StaticResource XboxBrandBrush}" />
                   </Border>
-                </StackPanel>
-                <Button Grid.Column="2" VerticalAlignment="Center" Click="UnlinkClypDatXboxButton_OnClick" IsEnabled="{Binding !XboxUnlinkBusy}">
-                  <Grid>
-                    <TextBlock Text="Unlink" IsVisible="{Binding !XboxUnlinkBusy}" VerticalAlignment="Center" />
-                    <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding XboxUnlinkBusy}">
-                      <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                      <TextBlock Text="Unlinking…" VerticalAlignment="Center" />
-                    </StackPanel>
-                  </Grid>
-                </Button>
-              </Grid>
-            </Border>
-          </StackPanel>
-          <!-- Divider and toggle share the Xbox row's visibility, so an account
-               with only Google linked does not end on a hairline under nothing. -->
-          <StackPanel Spacing="14" IsVisible="{Binding ClypDatXboxIsLinked}">
-            <Border Classes="settingsDivider" />
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-              <StackPanel Spacing="2" VerticalAlignment="Center">
-                <TextBlock Classes="settingsRowTitle" Text="Use Xbox activity for Desktop Capture" />
-                <TextBlock Classes="settingsRowDescSm" Text="PC Game Capture remains higher priority." />
+                  <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
+                    <TextBlock Classes="settingsRowTitle" Text="Xbox" />
+                    <Border Classes="statusPill ok">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse />
+                        <TextBlock Text="Linked" />
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                  <Button Grid.Column="2" VerticalAlignment="Center" Click="UnlinkClypDatXboxButton_OnClick" IsEnabled="{Binding !XboxUnlinkBusy}">
+                    <Grid>
+                      <TextBlock Text="Unlink" IsVisible="{Binding !XboxUnlinkBusy}" VerticalAlignment="Center" />
+                      <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding XboxUnlinkBusy}">
+                        <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="Unlinking…" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Grid>
+                  </Button>
+                </Grid>
+                <Border Classes="settingsDivider" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                  <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Classes="settingsRowTitleSm" Text="Use Xbox activity for Desktop Capture" />
+                    <TextBlock Classes="settingsRowDescSm" Text="PC Game Capture remains higher priority." />
+                  </StackPanel>
+                  <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding XboxActivityForDesktop}" OnContent="{x:Null}" OffContent="{x:Null}" />
+                </Grid>
               </StackPanel>
-              <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding XboxActivityForDesktop}" OnContent="{x:Null}" OffContent="{x:Null}" />
-            </Grid>
+            </Border>
           </StackPanel>
         </StackPanel>
       </Border>
