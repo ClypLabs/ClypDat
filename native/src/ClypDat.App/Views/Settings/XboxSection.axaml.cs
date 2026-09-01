@@ -1,5 +1,4 @@
 using Avalonia.Controls;
-using System.Diagnostics;
 using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Views.Settings;
@@ -24,9 +23,13 @@ public sealed partial class XboxSection : UserControl
         if (DataContext is MainWindowViewModel vm) await vm.UnlinkClypDatXboxAsync();
     }
 
+    private async void RefreshClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) await vm.RefreshClypDatAccountAsync();
+    }
+
     private void OpenSocialAccountButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string provider }) return;
-        Process.Start(new ProcessStartInfo($"https://www.clypdat.xyz/account?link_provider={Uri.EscapeDataString(provider)}") { UseShellExecute = true });
+        if (sender is Button { Tag: string provider } && DataContext is MainWindowViewModel vm) vm.OpenSocialAccount(provider);
     }
 }

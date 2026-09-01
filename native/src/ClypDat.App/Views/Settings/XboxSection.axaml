@@ -1,52 +1,11 @@
 <UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:vm="using:ClypDat.App.ViewModels" xmlns:opconv="using:ClypDat.App.Converters" xmlns:conv="using:Avalonia.Data.Converters" x:Class="ClypDat.App.Views.Settings.XboxSection" x:DataType="vm:MainWindowViewModel">
-  <UserControl.IsVisible>
-    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Connected Accounts">
-      <Binding Path="SettingsSearchText" /><Binding Path="SelectedSettingsSection" />
-    </MultiBinding>
-  </UserControl.IsVisible>
+  <UserControl.IsVisible><MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Connected Accounts"><Binding Path="SettingsSearchText" /><Binding Path="SelectedSettingsSection" /></MultiBinding></UserControl.IsVisible>
   <StackPanel Spacing="18" Tag="Connected Accounts">
-    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-    <StackPanel Spacing="4"><TextBlock Classes="settingsSectionTitle" Text="Connected Accounts" /><TextBlock Classes="settingsSectionDesc" Text="Link gaming accounts that can provide activity for Desktop Capture clips and Discord Rich Presence." /><Border Classes="settingsDivider" Margin="0,14,0,0" /></StackPanel>
-    <Border Classes="settingsCard"><StackPanel Spacing="14">
-      <TextBlock Classes="settingsCardLabel" Text="CLYPDAT ACCOUNT" />
-      <TextBlock Classes="settingsRowDescSm" Text="Sign in to your ClypDat account to connect it to this app." TextWrapping="Wrap" />
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Link ClypDat account" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountStatus}" TextWrapping="Wrap" /></StackPanel>
-        <Button Grid.Column="1" Classes="primaryButton" Content="Link account" Click="LinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" IsEnabled="{Binding ClypDatAccountCanLink}" />
-      </Grid>
-      <Button Content="Create or sign in first" Click="CreateClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="ClypDat account" /><TextBlock Classes="settingsRowDescSm" Text="Signed in to ClypDat" /></StackPanel>
-        <Button Grid.Column="1" Content="Sign out" Click="UnlinkClypDatButton_OnClick" />
-      </Grid>
-    </StackPanel></Border>
-    <Border Classes="settingsCard"><StackPanel Spacing="14">
-      <TextBlock Classes="settingsCardLabel" Text="SOCIAL ACCOUNTS" />
-      <TextBlock Classes="settingsRowDescSm" Text="Use your linked social accounts to sign in to ClypDat." TextWrapping="Wrap" />
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Google" /><TextBlock Classes="settingsRowDescSm" Text="{Binding GoogleAccountStatus}" /></StackPanel>
-        <Button Grid.Column="1" Content="Manage" Tag="google" Click="OpenSocialAccountButton_OnClick" />
-      </Grid>
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Discord" /><TextBlock Classes="settingsRowDescSm" Text="{Binding DiscordAccountStatus}" /></StackPanel>
-        <Button Grid.Column="1" Content="Manage" Tag="discord" Click="OpenSocialAccountButton_OnClick" />
-      </Grid>
-    </StackPanel></Border>
-    <Border Classes="settingsCard"><StackPanel Spacing="14">
-      <TextBlock Classes="settingsCardLabel" Text="XBOX ACCOUNT" />
-      <TextBlock Classes="settingsRowDescSm" Text="Xbox game activity appears on Desktop Capture clips and in Discord Rich Presence." TextWrapping="Wrap" />
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatAccountIsConnected}">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Xbox account" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatXboxStatus}" /></StackPanel>
-        <Button Grid.Column="1" Classes="primaryButton" Content="Link Xbox" Click="CreateClypDatButton_OnClick" IsVisible="{Binding ClypDatXboxIsLinked, Converter={x:Static conv:BoolConverters.Not}}" />
-        <Button Grid.Column="1" Content="Unlink Xbox" Click="UnlinkClypDatXboxButton_OnClick" IsVisible="{Binding ClypDatXboxIsLinked}" />
-      </Grid>
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatXboxIsLinked}">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Status" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountStatus}" /></StackPanel>
-      </Grid>
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatXboxIsLinked}">
-        <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Current title" /><TextBlock Classes="settingsRowDescSm" Text="{Binding XboxCurrentTitle}" /></StackPanel>
-      </Grid>
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatXboxIsLinked}"><StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Use Xbox activity for Desktop Capture" /><TextBlock Classes="settingsRowDescSm" Text="PC Game Capture remains higher priority." /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding XboxActivityForDesktop}" /></Grid>
-    </StackPanel></Border>
+    <StackPanel Spacing="4"><TextBlock Classes="settingsSectionTitle" Text="Connected Accounts" /><TextBlock Classes="settingsSectionDesc" Text="Manage ClypDat sign-in, optional social accounts, and Xbox activity." /><Border Classes="settingsDivider" Margin="0,14,0,0" /></StackPanel>
+    <Border Classes="settingsCard"><StackPanel Spacing="14"><TextBlock Classes="settingsCardLabel" Text="CLYPDAT ACCOUNT" /><Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14"><Border Width="36" Height="36" CornerRadius="18" Background="#1BC47D"><TextBlock Text="C" FontWeight="Bold" Foreground="#071B12" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border><StackPanel Grid.Column="1"><TextBlock Classes="settingsRowTitle" Text="ClypDat" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountStatus}" TextWrapping="Wrap" /></StackPanel><StackPanel Grid.Column="2" Spacing="6"><Button Classes="primaryButton" Content="Link account" Click="LinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" IsEnabled="{Binding ClypDatAccountCanLink}" /><Button Content="Refresh" Click="RefreshClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" /><Button Content="Sign out" Click="UnlinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" /></StackPanel></Grid><Button Content="Create or sign in first" Click="CreateClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" HorizontalAlignment="Left" /></StackPanel></Border>
+    <StackPanel Spacing="18" IsVisible="{Binding ClypDatAccountIsConnected}">
+      <Border Classes="settingsCard"><StackPanel Spacing="14"><TextBlock Classes="settingsCardLabel" Text="ADD AN ACCOUNT" /><TextBlock Classes="settingsRowDescSm" Text="Add another sign-in method or optional Xbox activity." /><WrapPanel ItemWidth="250" ItemHeight="80"><Border Classes="settingsCard" Padding="12" Margin="0,0,12,12" IsVisible="{Binding GoogleAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}"><Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10"><TextBlock Text="G" FontSize="20" FontWeight="Bold" Foreground="#4285F4" /><StackPanel Grid.Column="1"><TextBlock Classes="settingsRowTitle" Text="Google" /><TextBlock Classes="settingsRowDescSm" Text="Add sign-in" /></StackPanel><Button Grid.Column="2" Tag="google" Content="Connect" Click="OpenSocialAccountButton_OnClick" /></Grid></Border><Border Classes="settingsCard" Padding="12" Margin="0,0,12,12" IsVisible="{Binding DiscordAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}"><Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10"><TextBlock Text="D" FontSize="20" FontWeight="Bold" Foreground="#5865F2" /><StackPanel Grid.Column="1"><TextBlock Classes="settingsRowTitle" Text="Discord" /><TextBlock Classes="settingsRowDescSm" Text="Add sign-in" /></StackPanel><Button Grid.Column="2" Tag="discord" Content="Connect" Click="OpenSocialAccountButton_OnClick" /></Grid></Border><Border Classes="settingsCard" Padding="12" Margin="0,0,12,12" IsVisible="{Binding ClypDatXboxIsLinked, Converter={x:Static conv:BoolConverters.Not}}"><Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10"><TextBlock Text="X" FontSize="20" FontWeight="Bold" Foreground="#107C10" /><StackPanel Grid.Column="1"><TextBlock Classes="settingsRowTitle" Text="Xbox" /><TextBlock Classes="settingsRowDescSm" Text="Optional activity" /></StackPanel><Button Grid.Column="2" Content="Connect" Click="CreateClypDatButton_OnClick" /></Grid></Border></WrapPanel></StackPanel></Border>
+      <Border Classes="settingsCard"><StackPanel Spacing="14"><TextBlock Classes="settingsCardLabel" Text="CONNECTED ACCOUNTS" /><TextBlock Classes="settingsRowDescSm" Text="Manage linked providers in browser. Refresh after browser changes." /><WrapPanel ItemWidth="250" ItemHeight="98"><Border Classes="settingsCard" Padding="12" Margin="0,0,12,12" IsVisible="{Binding GoogleAccountIsConnected}"><Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10"><TextBlock Text="G" FontSize="20" FontWeight="Bold" Foreground="#4285F4" /><StackPanel Grid.Column="1"><TextBlock Classes="settingsRowTitle" Text="Google" /><TextBlock Classes="settingsRowDescSm" Text="Connected" Foreground="#5FE3A1" /></StackPanel><Button Grid.Column="2" Tag="google" Content="Manage" Click="OpenSocialAccountButton_OnClick" /></Grid></Border><Border Classes="settingsCard" Padding="12" Margin="0,0,12,12" IsVisible="{Binding DiscordAccountIsConnected}"><Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10"><TextBlock Text="D" FontSize="20" FontWeight="Bold" Foreground="#5865F2" /><StackPanel Grid.Column="1"><TextBlock Classes="settingsRowTitle" Text="Discord" /><TextBlock Classes="settingsRowDescSm" Text="Connected" Foreground="#5FE3A1" /></StackPanel><Button Grid.Column="2" Tag="discord" Content="Manage" Click="OpenSocialAccountButton_OnClick" /></Grid></Border><Border Classes="settingsCard" Padding="12" Margin="0,0,12,12" IsVisible="{Binding ClypDatXboxIsLinked}"><Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10"><TextBlock Text="X" FontSize="20" FontWeight="Bold" Foreground="#107C10" /><StackPanel Grid.Column="1"><TextBlock Classes="settingsRowTitle" Text="Xbox" /><TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatXboxStatus}" /></StackPanel><Button Grid.Column="2" Content="Unlink" Click="UnlinkClypDatXboxButton_OnClick" /></Grid></Border></WrapPanel><Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding ClypDatXboxIsLinked}"><StackPanel><TextBlock Classes="settingsRowTitle" Text="Use Xbox activity for Desktop Capture" /><TextBlock Classes="settingsRowDescSm" Text="PC Game Capture remains higher priority." /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding XboxActivityForDesktop}" /></Grid></StackPanel></Border>
+    </StackPanel>
   </StackPanel>
 </UserControl>

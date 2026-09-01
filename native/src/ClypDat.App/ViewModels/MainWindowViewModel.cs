@@ -212,11 +212,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings = AppSettingsStore.Load();
         _xboxActivity.Changed += XboxActivityChanged;
         _clypDatAccount.Changed += ClypDatAccountChanged;
-        if (Settings.XboxActivityEnabled)
-        {
-            _ = _xboxActivity.TryRestoreAsync();
-            _ = _clypDatAccount.TryRestoreAsync();
-        }
+        if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
+        _ = _clypDatAccount.TryRestoreAsync();
         Settings.CustomThemes ??= new();
         Settings.RecentThemeColors ??= new();
         Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
@@ -6294,6 +6291,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ClypDatXboxIsLinked => _clypDatSnapshot.IsConnected;
     public string GoogleAccountStatus => _clypDatSnapshot.GoogleConnected ? "Connected" : "Not connected";
     public string DiscordAccountStatus => _clypDatSnapshot.DiscordConnected ? "Connected" : "Not connected";
+    public bool GoogleAccountIsConnected => _clypDatSnapshot.GoogleConnected;
+    public bool DiscordAccountIsConnected => _clypDatSnapshot.DiscordConnected;
     public bool ClypDatAccountCanLink => !_clypDatAccount.IsAuthenticated && _clypDatAccountSetupStarted;
     public bool XboxActivityForDesktop
     {
@@ -6331,9 +6330,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (await _clypDatAccount.ConnectAsync().ConfigureAwait(false))
         {
-            Settings.XboxActivityEnabled = true;
-            SaveSettings();
-            OnPropertyChanged(nameof(XboxActivityForDesktop));
             OnPropertyChanged(nameof(XboxConnectionStatus));
             OnPropertyChanged(nameof(XboxCurrentTitle));
             OnPropertyChanged(nameof(XboxIsConnected));
@@ -6369,6 +6365,20 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Process.Start(new ProcessStartInfo("https://www.clypdat.xyz/account") { UseShellExecute = true });
     }
 
+    public async Task RefreshClypDatAccountAsync()
+    {
+        if (!_clypDatAccount.IsAuthenticated) return;
+        try { await _clypDatAccount.RefreshAsync().ConfigureAwait(false); }
+        catch (Exception error) { AppLog.Error("ClypDat account: manual refresh failed.", error); }
+    }
+
+    public void OpenSocialAccount(string provider)
+    {
+        var connected = provider.Equals("google", StringComparison.OrdinalIgnoreCase) ? _clypDatSnapshot.GoogleConnected : _clypDatSnapshot.DiscordConnected;
+        var suffix = connected ? string.Empty : $"?link_provider={Uri.EscapeDataString(provider)}";
+        Process.Start(new ProcessStartInfo($"https://www.clypdat.xyz/account{suffix}") { UseShellExecute = true });
+    }
+
     private void XboxActivityChanged(object? sender, XboxActivitySnapshot snapshot)
     {
         _xboxSnapshot = snapshot;
@@ -6387,6 +6397,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClypDatXboxIsLinked));
         OnPropertyChanged(nameof(GoogleAccountStatus));
         OnPropertyChanged(nameof(DiscordAccountStatus));
+        OnPropertyChanged(nameof(GoogleAccountIsConnected));
+        OnPropertyChanged(nameof(DiscordAccountIsConnected));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
         OnPropertyChanged(nameof(XboxConnectionStatus));
         OnPropertyChanged(nameof(XboxCurrentTitle));

@@ -56,7 +56,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         {
             AppLog.Error("ClypDat account: connection failed.", error);
             _token = null;
-            var message = error is InvalidOperationException invalid && (invalid.Message.StartsWith("No Xbox account linked.", StringComparison.Ordinal) || invalid.Message.StartsWith("ClypDat sign-in required.", StringComparison.Ordinal))
+            var message = error is InvalidOperationException invalid && invalid.Message.StartsWith("ClypDat sign-in required.", StringComparison.Ordinal)
                 ? invalid.Message
                 : "ClypDat account connection failed. Sign in through the browser and try again.";
             _snapshot = new XboxActivitySnapshot(false, null, null, null, null, message);
@@ -90,8 +90,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
                 return false;
             }
             if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ClypDat Xbox unlink failed ({(int)response.StatusCode}).");
-            _snapshot = XboxActivitySnapshot.Disconnected;
-            Changed?.Invoke(this, _snapshot);
+            await RefreshAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (Exception error)
@@ -131,7 +130,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
     }
 
-    private async Task RefreshAsync(CancellationToken cancellationToken)
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         if (_token is null) throw new InvalidOperationException("ClypDat account is not authenticated.");
         using var request = new HttpRequestMessage(HttpMethod.Get, "api/desktop/xbox/activity");
@@ -144,12 +143,6 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             throw new InvalidOperationException("ClypDat account sign-in expired.");
         }
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode == HttpStatusCode.Conflict)
-        {
-            _snapshot = XboxActivitySnapshot.Disconnected;
-            Changed?.Invoke(this, _snapshot);
-            return;
-        }
         if (!response.IsSuccessStatusCode)
         {
             var message = TryReadError(body) ?? $"ClypDat activity endpoint rejected the request ({(int)response.StatusCode}).";
@@ -180,8 +173,6 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             var error = context.Request.QueryString["error"];
             if (string.Equals(error, "login-required", StringComparison.Ordinal))
                 throw new InvalidOperationException("ClypDat sign-in required. Open clypdat.xyz/account, sign in, then retry here.");
-            if (string.Equals(error, "xbox-not-linked", StringComparison.Ordinal))
-                throw new InvalidOperationException("No Xbox account linked. Open clypdat.xyz/account, link Xbox, then retry here.");
             if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException("ClypDat sign-in was not completed.");
             var accessToken = context.Request.QueryString["token"];
             if (string.IsNullOrWhiteSpace(accessToken)) throw new InvalidOperationException("ClypDat sign-in returned no token.");
