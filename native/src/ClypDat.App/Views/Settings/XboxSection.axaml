@@ -145,7 +145,15 @@
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <Button Tag="google" Content="Manage" Click="OpenSocialAccountButton_OnClick" ToolTip.Tip="Open this provider on clypdat.xyz." />
-                  <Button Tag="google" Content="Unlink" Click="UnlinkSocialAccountButton_OnClick" />
+                  <Button Tag="google" Click="UnlinkSocialAccountButton_OnClick" IsEnabled="{Binding !GoogleUnlinkBusy}">
+                    <Grid>
+                      <TextBlock Text="Unlink" IsVisible="{Binding !GoogleUnlinkBusy}" VerticalAlignment="Center" />
+                      <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding GoogleUnlinkBusy}">
+                        <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="Unlinking…" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Grid>
+                  </Button>
                 </StackPanel>
               </Grid>
             </Border>
@@ -165,7 +173,15 @@
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <Button Tag="discord" Content="Manage" Click="OpenSocialAccountButton_OnClick" ToolTip.Tip="Open this provider on clypdat.xyz." />
-                  <Button Tag="discord" Content="Unlink" Click="UnlinkSocialAccountButton_OnClick" />
+                  <Button Tag="discord" Click="UnlinkSocialAccountButton_OnClick" IsEnabled="{Binding !DiscordUnlinkBusy}">
+                    <Grid>
+                      <TextBlock Text="Unlink" IsVisible="{Binding !DiscordUnlinkBusy}" VerticalAlignment="Center" />
+                      <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding DiscordUnlinkBusy}">
+                        <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                        <TextBlock Text="Unlinking…" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Grid>
+                  </Button>
                 </StackPanel>
               </Grid>
             </Border>
@@ -183,7 +199,15 @@
                     </StackPanel>
                   </Border>
                 </StackPanel>
-                <Button Grid.Column="2" VerticalAlignment="Center" Content="Unlink" Click="UnlinkClypDatXboxButton_OnClick" />
+                <Button Grid.Column="2" VerticalAlignment="Center" Click="UnlinkClypDatXboxButton_OnClick" IsEnabled="{Binding !XboxUnlinkBusy}">
+                  <Grid>
+                    <TextBlock Text="Unlink" IsVisible="{Binding !XboxUnlinkBusy}" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding XboxUnlinkBusy}">
+                      <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                      <TextBlock Text="Unlinking…" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
               </Grid>
             </Border>
           </StackPanel>

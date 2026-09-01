@@ -6303,6 +6303,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // sign-in method is refused there, not here - so the message it returns
     // needs somewhere on the page to appear.
     public string ClypDatAccountError => _clypDatSnapshot.Error ?? string.Empty;
+    // Unlinking is a round trip to clypdat.xyz and back, so the button that
+    // started it says so. Per provider rather than one shared flag: the rows sit
+    // next to each other, and a single flag would spin all of them.
+    private bool _googleUnlinkBusy;
+    private bool _discordUnlinkBusy;
+    private bool _xboxUnlinkBusy;
+    public bool GoogleUnlinkBusy { get => _googleUnlinkBusy; private set { if (_googleUnlinkBusy == value) return; _googleUnlinkBusy = value; OnPropertyChanged(); } }
+    public bool DiscordUnlinkBusy { get => _discordUnlinkBusy; private set { if (_discordUnlinkBusy == value) return; _discordUnlinkBusy = value; OnPropertyChanged(); } }
+    public bool XboxUnlinkBusy { get => _xboxUnlinkBusy; private set { if (_xboxUnlinkBusy == value) return; _xboxUnlinkBusy = value; OnPropertyChanged(); } }
     public bool ClypDatAccountHasError => ClypDatAccountIsConnected && !string.IsNullOrWhiteSpace(_clypDatSnapshot.Error);
     public bool XboxActivityForDesktop
     {
@@ -6358,18 +6367,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task UnlinkSocialAccountAsync(string provider)
     {
-        await _clypDatAccount.UnlinkSocialAsync(provider).ConfigureAwait(false);
+        var isGoogle = provider.Equals("google", StringComparison.OrdinalIgnoreCase);
+        if (isGoogle) GoogleUnlinkBusy = true; else DiscordUnlinkBusy = true;
+        try { await _clypDatAccount.UnlinkSocialAsync(provider); }
+        finally { if (isGoogle) GoogleUnlinkBusy = false; else DiscordUnlinkBusy = false; }
     }
 
     public async Task UnlinkClypDatXboxAsync()
     {
-        if (await _clypDatAccount.DisconnectXboxAsync().ConfigureAwait(false))
+        XboxUnlinkBusy = true;
+        try
         {
+            if (!await _clypDatAccount.DisconnectXboxAsync()) return;
             Settings.XboxActivityEnabled = false;
             SaveSettings();
             OnPropertyChanged(nameof(XboxActivityForDesktop));
             UpdateDiscordPresence();
         }
+        finally { XboxUnlinkBusy = false; }
     }
 
     public void OpenClypDatAccount()
