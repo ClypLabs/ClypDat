@@ -70,3 +70,55 @@ internal sealed class WgcCadenceFallbackPolicy
         _fallbackCommitted = false;
     }
 }
+
+// DXGI Desktop Duplication can keep reporting a healthy acquisition rate while
+// its cropped output stops advancing for an uncapped game. Once the encoder is
+// healthy and the target is foreground, repeated low fresh-frame windows prove
+// this is a source failure, not an encode failure. WGC captures the window
+// directly and avoids DWM's desktop-composition cadence.
+internal sealed class DxgiCadenceFallbackPolicy
+{
+    private bool _warmupWindowIgnored;
+    private int _consecutiveLowWindows;
+    private bool _fallbackCommitted;
+
+    public bool ShouldFallback(
+        int targetFrameRate,
+        double freshFrameRate,
+        bool foregroundAndVisible,
+        bool encoderPressure,
+        bool saveInProgress = false)
+    {
+        if (_fallbackCommitted) return false;
+
+        if (!foregroundAndVisible || encoderPressure || saveInProgress)
+        {
+            Reset();
+            return false;
+        }
+
+        if (!_warmupWindowIgnored)
+        {
+            _warmupWindowIgnored = true;
+            return false;
+        }
+
+        var target = Math.Clamp(targetFrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+        if (freshFrameRate >= target * 0.99)
+        {
+            _consecutiveLowWindows = 0;
+            return false;
+        }
+
+        return ++_consecutiveLowWindows >= 3;
+    }
+
+    public void MarkFallbackCommitted() => _fallbackCommitted = true;
+
+    private void Reset()
+    {
+        _warmupWindowIgnored = false;
+        _consecutiveLowWindows = 0;
+        _fallbackCommitted = false;
+    }
+}

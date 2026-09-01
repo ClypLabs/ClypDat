@@ -33,8 +33,9 @@ namespace ClypDat.App.Services;
 //
 // DXGI Desktop Duplication is the primary source for game and desktop capture.
 // It hands this loop an ID3D11Texture2D which remains on the capture device for
-// crop/scale/encode.  Windows.Graphics.Capture remains available only as the
-// bounded recovery source when Desktop Duplication cannot be recreated.
+// crop/scale/encode. Windows.Graphics.Capture takes over only if DXGI fails to
+// initialize, cannot recover, or repeatedly delivers stale game frames while
+// the encoder is healthy.
 //
 // The tradeoff: Desktop Duplication captures the composited desktop, not a
 // specific window's content directly, so it can't stay "attached" to a window
@@ -48,15 +49,10 @@ namespace ClypDat.App.Services;
 // as a wall-clock event so SaveReplayAsync can tell the editor which parts of a
 // saved clip were frozen, via a "Recording Paused" sidecar.
 //
-// Same DWM dependency also explains low/laggy capture when the GAME has
-// vsync off: AcquireNextFrame only gets a new frame on DWM's own present/
-// composition cadence, and an uncapped/tearing game presents outside that
-// cadence, so DWM skips composing most of its frames and duplication starves
-// - confirmed via avgPresentGapMs in the diag log spiking to hundreds of ms
-// (vs. ~13ms at a clean 60fps) during exactly this symptom. Turning the
-// game's vsync on locks its presents to refresh, so DWM composes every one
-// and duplication gets them reliably again. Nothing to fix here - not
-// something Desktop Duplication can be worked around from application code.
+// An uncapped/tearing game can present outside DWM's desktop-composition
+// cadence. DXGI may then acquire frequently but produce stale cropped content.
+// The live cadence policy detects that mismatch and switches game windows to
+// WGC, which captures their content directly.
 //
 // Falls back to capturing the primary monitor (no crop, no occlusion pausing)
 // when no game window is detected. NVENC only for now (no software fallback -
@@ -806,10 +802,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         try
         {
             var config = _configProvider();
-            // DXGI is the sole capture backend. A failure remains visible and
-            // retries DXGI recovery; it never swaps to a different API with
-            // different cadence and composition semantics.
-            const bool forceDxgi = true;
             // Before any D3D work: a game that owns the GPU otherwise outranks
             // this process's own submissions, which is what turns an 8ms encode
             // into a 50ms one under load. Device priority is applied by worker.
@@ -827,7 +819,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 activeGameFrameSource = dxgiCapture;
                 AppLog.Info($"Native capture: using DXGI Desktop Duplication for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
             }
-            catch (Exception error) when (!isMonitorMode && !forceDxgi)
+            catch (Exception error) when (!isMonitorMode)
             {
                 AppLog.Error("Native capture: DXGI initialization failed; using bounded WGC recovery source.", error);
                 wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, config.FrameRate);
@@ -1074,6 +1066,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var acquireTimeoutMs = acquireTimeoutForcedMs > 0 ? (uint)acquireTimeoutForcedMs : 200u;
             if (acquireTimeoutForcedMs > 0) AppLog.Info($"Native capture: acquire timeout forced to {acquireTimeoutMs}ms.");
             var lastDiagLog = TimeSpan.Zero;
+            var dxgiCadenceFallback = new DxgiCadenceFallbackPolicy();
             var lastRingTrim = TimeSpan.Zero;
             var previousWgcTelemetry = default(WindowGraphicsCaptureTelemetry);
             var previousDxgiTelemetry = default(DesktopDuplicationTelemetry);
@@ -1499,6 +1492,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     else
                         consecutiveTransportShortfallWindows = 0;
                     var transportDegraded = consecutiveTransportShortfallWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows;
+                    if (!isMonitorMode && wgcCapture is null && dxgiCapture is not null &&
+                        dxgiCadenceFallback.ShouldFallback(activeFrameRate, freshTransportRate,
+                            IsWindowForegroundAndVisible(targetHandle), encoderPressure, saveInProgress))
+                    {
+                        try
+                        {
+                            var fallback = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate);
+                            dxgiCapture.Dispose();
+                            dxgiCapture = null;
+                            wgcCapture = fallback;
+                            activeGameFrameSource = fallback;
+                            dxgiCadenceFallback.MarkFallbackCommitted();
+                            var size = fallback.ContentSize;
+                            desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                            AppLog.Info($"Native capture: DXGI fresh frames remained below target; switched to WGC ({freshTransportRate:0.0}/{activeFrameRate} FPS).");
+                        }
+                        catch (Exception error)
+                        {
+                            AppLog.Error("Native capture: DXGI cadence fallback could not start WGC; keeping DXGI.", error);
+                        }
+                    }
                     var overloaded = encoderPressure;
                     if (hasCapturedRealFrame && !saveInProgress && overloaded)
                         consecutiveOverloadWindows++;
@@ -1720,7 +1734,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 activeGameFrameSource = dxgiCapture;
                                 AppLog.Info("Native capture: DXGI duplication replaced for the new target.");
                             }
-                            catch (Exception error) when (!isMonitorMode && !forceDxgi)
+                            catch (Exception error) when (!isMonitorMode)
                             {
                                 AppLog.Error("Native capture: DXGI target replacement failed; using bounded WGC recovery source.", error);
                                 wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate);
@@ -1803,7 +1817,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     catch (Exception error)
                     {
                         AppLog.Error("Native capture: duplication recreate retry failed.", error);
-                        if (!isMonitorMode && !forceDxgi)
+                        if (!isMonitorMode)
                         {
                             try
                             {
@@ -2566,7 +2580,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // refused repeatedly. WGC is intentionally a one-way
                         // recovery source for this target session; a target change
                         // or capture restart is the only route back to DXGI.
-                        if (!forceDxgi && !isMonitorMode && wgcCapture is null && recoveryAttempts >= recoveryAttemptsBeforeDeviceRebuild)
+                        if (!isMonitorMode && wgcCapture is null && recoveryAttempts >= recoveryAttemptsBeforeDeviceRebuild)
                         {
                             try
                             {
