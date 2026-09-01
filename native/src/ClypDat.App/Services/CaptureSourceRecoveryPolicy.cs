@@ -2,37 +2,41 @@ using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
 
-internal enum CaptureSourceRecoveryAction { None, RecreateDxgi, SwitchToWgc }
+internal enum CaptureSourceRecoveryAction { None, RecreateDxgi, SwitchToWgc, RestartWorker }
 
-// Source starvation is distinct from an overloaded encoder: CFR can keep
-// outputting duplicates while no fresh pixels cross DXGI. Keep this pure so
-// captured failure traces remain deterministic tests.
+// One pipeline policy: a full encoder queue can suppress DXGI just as surely
+// as a quiet source. Do not infer cause from a vendor encoder name.
 internal sealed class CaptureSourceRecoveryPolicy
 {
     private const int RequiredWindows = 2;
     private static readonly TimeSpan RepeatWindow = TimeSpan.FromSeconds(30);
-    private int _consecutiveStarvation;
+    private int _consecutiveUnhealthy;
     private DateTime? _lastDxgiRecreateUtc;
 
     internal CaptureSourceRecoveryAction Observe(ReplayCaptureHealth health, bool foreground, DateTime nowUtc)
     {
         if (!foreground || health.CapturePaused || health.SaveInProgress)
         {
-            _consecutiveStarvation = 0;
+            _consecutiveUnhealthy = 0;
             return CaptureSourceRecoveryAction.None;
         }
 
-        var starving = health.InputFrameRate <= 0 && health.UniqueFrameRate <= 0 &&
-                       health.OutputFrameRate < 1 && health.EncodeQueueCapacity > 0 &&
-                       health.QueueDepth * 4 >= health.EncodeQueueCapacity * 3;
-        if (!starving)
+        var pressured = health.EncodeQueueCapacity > 0 && health.QueueDepth * 4 >= health.EncodeQueueCapacity * 3;
+        var congestion = health.OutputFrameRate < health.TargetFrameRate * 0.5 && pressured &&
+                         (health.DroppedFrames > 0 || health.EncoderSubmissionStalled);
+        var sourceStarvation = health.InputFrameRate <= 0 && health.UniqueFrameRate <= 0 &&
+                               health.OutputFrameRate < 1 && !pressured;
+        if (!congestion && !sourceStarvation)
         {
-            _consecutiveStarvation = 0;
+            _consecutiveUnhealthy = 0;
             return CaptureSourceRecoveryAction.None;
         }
 
-        if (++_consecutiveStarvation < RequiredWindows) return CaptureSourceRecoveryAction.None;
-        _consecutiveStarvation = 0;
+        if (++_consecutiveUnhealthy < RequiredWindows) return CaptureSourceRecoveryAction.None;
+        _consecutiveUnhealthy = 0;
+        // Queue-backed DXGI collapse has already proved acquisition shares the
+        // blocked pipeline: recreate cannot drain it, WGC can.
+        if (congestion) return CaptureSourceRecoveryAction.SwitchToWgc;
         if (_lastDxgiRecreateUtc is { } previous && nowUtc - previous <= RepeatWindow)
             return CaptureSourceRecoveryAction.SwitchToWgc;
         _lastDxgiRecreateUtc = nowUtc;

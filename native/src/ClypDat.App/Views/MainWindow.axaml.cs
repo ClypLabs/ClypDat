@@ -921,7 +921,10 @@ public sealed partial class MainWindow : Window
         }
         _workerCrashMessageShown = false;
         if (ViewModel is not null && ViewModel.IsReplayRecording)
-            ViewModel.RecorderStatus = ViewModel.IsReplayArming ? "Replay Arming" : "Replay On";
+            ViewModel.RecorderStatus = ViewModel.IsReplayArming ? "Replay Arming" :
+                health.CapturePaused ? "Replay Paused" :
+                health.CaptureMode.Contains("Graphics Capture", StringComparison.OrdinalIgnoreCase) ? "Replay WGC Recovery" :
+                "Replay On";
     }
 
     private void EncoderTuning_OnFrameRateChangeRequested(object? sender, EncoderFrameRateChange change)

@@ -100,6 +100,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // Recording-paused transitions (see class summary) - trimmed alongside
     // _packets so this never grows unbounded across a long session.
     private readonly List<PauseEvent> _pauseEvents = new();
+    private readonly List<(DateTime StartUtc, DateTime? EndUtc)> _recoveryOutages = new();
+    private DateTime? _recoveryCleanSinceUtc;
+    private int _recoveryHealthyWindows;
 
     private CancellationTokenSource? _captureCts;
     private Task? _captureTask;
@@ -224,6 +227,32 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (observed == current) return;
             current = observed;
         }
+    }
+
+    private void UpdateRecoveryTimeline(bool unhealthy, bool paused, DateTime nowUtc)
+    {
+        lock (_bufferLock)
+        {
+            if (paused) { _recoveryHealthyWindows = 0; return; }
+            if (unhealthy)
+            {
+                _recoveryHealthyWindows = 0;
+                _recoveryCleanSinceUtc = null;
+                if (_recoveryOutages.Count == 0 || _recoveryOutages[^1].EndUtc is not null)
+                    _recoveryOutages.Add((nowUtc, null));
+                return;
+            }
+            if (_recoveryOutages.Count == 0 || _recoveryOutages[^1].EndUtc is not null) return;
+            if (++_recoveryHealthyWindows < 2) return;
+            _recoveryOutages[^1] = (_recoveryOutages[^1].StartUtc, nowUtc);
+            _recoveryCleanSinceUtc = nowUtc;
+        }
+    }
+
+    private bool OverlapsRecovery(DateTime startUtc, DateTime endUtc)
+    {
+        lock (_bufferLock)
+            return _recoveryOutages.Any(outage => outage.StartUtc < endUtc && (outage.EndUtc ?? DateTime.MaxValue) > startUtc);
     }
 
     private static int ClampReplayFrameRate(int requested, int configured)
@@ -363,6 +392,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             _ringBufferBytes = 0;
             _ringBufferCapacityBytes = 0;
             _pauseEvents.Clear();
+            _recoveryOutages.Clear();
+            _recoveryCleanSinceUtc = null;
+            _recoveryHealthyWindows = 0;
         }
         _packetPayloads.Deactivate();
     }
@@ -382,6 +414,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         {
             throw new InvalidOperationException("The requested replay window is empty.");
         }
+        if (OverlapsRecovery(requestedStartUtc, requestedEndUtc))
+            throw new InvalidOperationException("Replay capture was recovering during the requested window; no clip was saved.");
 
         // Selected under the lock, payloads borrowed rather than copied - see
         // BorrowWindowUnderLock. Released in the finally at the end of this
@@ -1049,7 +1083,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // and pacing degrades, the coupling is confirmed and the real fix is
             // to decouple the two rather than to keep this override.
             var acquireTimeoutOverride = Environment.GetEnvironmentVariable("CLYPDAT_ACQUIRE_TIMEOUT_MS");
-            var acquireTimeoutForcedMs = int.TryParse(acquireTimeoutOverride, out var parsedTimeout) && parsedTimeout is > 0 and <= 1000
+            var acquireTimeoutForcedMs = int.TryParse(acquireTimeoutOverride, out var parsedTimeout) && parsedTimeout is > 0 and <= 50
                 ? parsedTimeout
                 : 0;
             // 200ms, and no longer tied to the frame interval at all. The encode
@@ -1061,7 +1095,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Not longer than this: the wait is also how long shutdown can take to
             // notice cancellation, and how long a target-window change or a
             // duplication recreate waits to be picked up.
-            var acquireTimeoutMs = acquireTimeoutForcedMs > 0 ? (uint)acquireTimeoutForcedMs : 200u;
+            var acquireTimeoutMs = acquireTimeoutForcedMs > 0 ? (uint)acquireTimeoutForcedMs : 50u;
             if (acquireTimeoutForcedMs > 0) AppLog.Info($"Native capture: acquire timeout forced to {acquireTimeoutMs}ms.");
             var lastDiagLog = TimeSpan.Zero;
             var dxgiCadenceFallback = new DxgiCadenceFallbackPolicy();
@@ -1153,6 +1187,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var startupValidationComplete = false;
             var consecutiveOverloadWindows = 0;
             var consecutiveTransportShortfallWindows = 0;
+            var consecutiveWgcCongestionWindows = 0;
             var activeEncoderCandidate = default(ReplayEncoderCandidate);
             // See the content-write sites above and the pacing gate below -
             // measures how stale frame->data's content actually is at the
@@ -1465,13 +1500,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var saveInProgress = Volatile.Read(ref _savesInFlight) > 0;
                     var sourceFrameRate = inputFrameCount / diagElapsed;
                     var freshTransportRate = framesProcessedSinceLog / diagElapsed;
+                    var encoderSubmissionStalled = encoderPressure && outputFrameRate < activeFrameRate * 0.5;
                     var sourceRecoverySample = new ReplayCaptureHealth("Native", "DXGI", ReplayCaptureState.Degraded,
                         activeFrameRate, inputFrameCount / diagElapsed, freshTransportRate, outputFrameRate, 0, droppedSinceLog,
                         encodeQueue.Count, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
                     {
                         EncodeQueueCapacity = encodeQueueCapacity,
                         CapturePaused = capturePaused,
-                        SaveInProgress = saveInProgress
+                        SaveInProgress = saveInProgress,
+                        EncoderSubmissionStalled = encoderSubmissionStalled
                     };
                     var sourceRecoveryAction = wgcCapture is null && dxgiCapture is not null
                         ? sourceRecovery.Observe(sourceRecoverySample, foregroundForDiagnostics, DateTime.UtcNow)
@@ -1510,6 +1547,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             AppLog.Error("Native capture: WGC fallback after DXGI source starvation failed.", error);
                         }
                     }
+                    var wgcCongested = wgcCapture is not null && !capturePaused && !saveInProgress &&
+                        outputFrameRate < activeFrameRate * 0.5 && encoderPressure;
+                    consecutiveWgcCongestionWindows = wgcCongested ? consecutiveWgcCongestionWindows + 1 : 0;
+                    var pipelineAction = sourceRecoveryAction switch
+                    {
+                        CaptureSourceRecoveryAction.RecreateDxgi => ReplayPipelineRecoveryAction.RecreateDxgi,
+                        CaptureSourceRecoveryAction.SwitchToWgc => ReplayPipelineRecoveryAction.SwitchToWgc,
+                        _ when consecutiveWgcCongestionWindows >= 3 => ReplayPipelineRecoveryAction.RestartWorker,
+                        _ => ReplayPipelineRecoveryAction.None
+                    };
                     var freshTransportTarget = Math.Min(activeFrameRate, sourceFrameRate);
                     var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
                     var transportShortfall = hasCapturedRealFrame && freshTransportTarget > 0 &&
@@ -1519,6 +1566,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     else
                         consecutiveTransportShortfallWindows = 0;
                     var transportDegraded = consecutiveTransportShortfallWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows;
+                    var pipelineUnhealthy = !capturePaused && ((encoderPressure && outputFrameRate < activeFrameRate * 0.5) ||
+                        sourceRecoveryAction != CaptureSourceRecoveryAction.None || isStalled || transportDegraded);
+                    UpdateRecoveryTimeline(pipelineUnhealthy, capturePaused, DateTime.UtcNow);
                     if (!isMonitorMode && wgcCapture is null && dxgiCapture is not null &&
                         dxgiCadenceFallback.ShouldFallback(activeFrameRate, freshTransportRate,
                             IsWindowForegroundAndVisible(targetHandle), encoderPressure, saveInProgress))
@@ -1578,6 +1628,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
                     var activeCaptureMode = wgcCapture is null ? dxgiCapture?.CaptureMode ?? "Game Capture" : "Windows Graphics Capture (recovery)";
                     SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
+                        pipelineAction == ReplayPipelineRecoveryAction.SwitchToWgc ? ReplayCaptureState.Recovering :
                         overloaded || isStalled || transportDegraded || sourceStarved ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
                         activeFrameRate, inputFrameCount / diagElapsed, framesProcessedSinceLog / diagElapsed,
                         outputFrameRate, Math.Max(0, packetsOutSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
@@ -1630,6 +1681,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         StartupValidationWindow = startupValidationWindows,
                         StartupValidationWindowCount = ReplayEncoderQualificationPolicy.RequiredWindows,
                         CapturePaused = capturePaused,
+                        RecoveryCleanSinceUtc = _recoveryCleanSinceUtc,
+                        PipelineRecoveryAction = pipelineAction,
+                        EncoderSubmissionStalled = encoderSubmissionStalled,
                         ProcessingGpuPriority = processingGpuPriority,
                         AcquisitionGpuPriority = dxgiCapture?.AppliedGpuPriority
                     });

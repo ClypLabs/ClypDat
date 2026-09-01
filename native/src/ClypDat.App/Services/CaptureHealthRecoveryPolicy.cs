@@ -13,12 +13,14 @@ internal sealed class CaptureHealthRecoveryPolicy
     internal bool Observe(ReplayCaptureHealth health)
     {
         var queueCapacity = health.EncodeQueueCapacity;
-        var fatal = !health.SaveInProgress &&
-                    health.State == ReplayCaptureState.Degraded &&
-                    health.DegradeReason == ReplayDegradeReason.EncoderOverload &&
-                    health.OutputFrameRate < 1 &&
+        var fatal = !health.SaveInProgress && !health.CapturePaused &&
+                    (health.CaptureMode.Contains("WGC", StringComparison.OrdinalIgnoreCase) ||
+                     health.CaptureMode.Contains("Graphics Capture", StringComparison.OrdinalIgnoreCase)) &&
+                    health.OutputFrameRate < health.TargetFrameRate * 0.5 &&
                     queueCapacity > 0 &&
-                    health.QueueDepth * 4 >= queueCapacity * 3;
+                    health.QueueDepth * 4 >= queueCapacity * 3 &&
+                    (health.DroppedFrames > 0 || health.EncoderSubmissionStalled ||
+                     health.PipelineRecoveryAction == ReplayPipelineRecoveryAction.RestartWorker);
         _consecutiveFatalSamples = fatal ? _consecutiveFatalSamples + 1 : 0;
         return _consecutiveFatalSamples >= RequiredSamples;
     }

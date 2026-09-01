@@ -69,6 +69,14 @@ public enum ReplayRecoveryStopReason
     CapturePipelineStall
 }
 
+public enum ReplayPipelineRecoveryAction
+{
+    None,
+    RecreateDxgi,
+    SwitchToWgc,
+    RestartWorker
+}
+
 // Keep capture health separate from IReplayBuffer. Old/third-party backends can
 // remain valid while callers opt into richer diagnostics where available.
 public sealed record ReplayCaptureHealth(
@@ -132,6 +140,12 @@ public sealed record ReplayCaptureHealth(
     public ReplayRecoveryStopReason RecoveryStopReason { get; init; }
     public int? ProcessingGpuPriority { get; init; }
     public int? AcquisitionGpuPriority { get; init; }
+    // Recovery fields are optional so old worker JSON payloads remain valid.
+    // CleanSince is set only after two clean diagnostic windows.
+    public DateTime? RecoveryCleanSinceUtc { get; init; }
+    public ReplayPipelineRecoveryAction PipelineRecoveryAction { get; init; }
+    // Vendor-neutral: submission latency/queue behaviour, never encoder name.
+    public bool EncoderSubmissionStalled { get; init; }
 
     // Native engine diagnostics. These are optional for managed/legacy
     // backends, but make worker health actionable without parsing logs.
