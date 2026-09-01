@@ -122,6 +122,18 @@ public sealed record ReplayCaptureHealth(
     public DateTime? NextWorkerRetryUtc { get; init; }
     public bool WorkerCrashLoopDetected { get; init; }
 
+    // Native engine diagnostics. These are optional for managed/legacy
+    // backends, but make worker health actionable without parsing logs.
+    public uint NativeEngineVersion { get; init; }
+    public uint NativeBuildVersion { get; init; }
+    public TimeSpan EncodeQueueAge { get; init; }
+    public double EncoderSlotWaitP95Ms { get; init; }
+    public double SubmissionP95Ms { get; init; }
+    public int SurfacesInUse { get; init; }
+    public int SurfaceCapacity { get; init; }
+    public string AdapterLuid { get; init; } = string.Empty;
+    public string FatalCategory { get; init; } = string.Empty;
+
     // WGC and hook transport counters remain separate from InputFrameRate so a
     // support bundle can distinguish compositor cadence from a game-present
     // transport issue without parsing the debug log.

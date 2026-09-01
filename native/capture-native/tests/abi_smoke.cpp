@@ -13,6 +13,7 @@ int main() {
     config.header.struct_size = sizeof(config);
     config.header.abi_version = CD_ABI_VERSION;
     config.selected_fps = 90;
+    config.bitrate_mbps = 20;
     config.width = 1920;
     config.height = 1080;
     config.history_seconds = 60;
@@ -27,6 +28,7 @@ int main() {
     health.header.abi_version = CD_ABI_VERSION;
     assert(cd_engine_get_health(engine, &health) == CD_OK);
     assert(health.engine_version == CD_ENGINE_VERSION);
+    assert(health.build_version == CD_ENGINE_VERSION);
     assert(health.selected_fps == 90);
     assert(health.active_fps == 60);
     assert(health.state == CD_ENGINE_PAUSED);

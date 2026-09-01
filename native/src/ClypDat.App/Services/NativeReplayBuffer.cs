@@ -1154,9 +1154,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var startupValidationComplete = false;
             var consecutiveOverloadWindows = 0;
             var consecutiveTransportShortfallWindows = 0;
-            DateTime? cleanRecoverySinceUtc = null;
             var activeEncoderCandidate = default(ReplayEncoderCandidate);
-            var attemptedEncoderCandidates = new HashSet<ReplayEncoderCandidate>();
             // See the content-write sites above and the pacing gate below -
             // measures how stale frame->data's content actually is at the
             // moment each output frame gets encoded, to find out whether a
@@ -1217,23 +1215,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // ProcessLoopbackWaveIn's capture thread). Its lateness is directly
             // visible in the output - as padsSkipped, and as a clip that reads
             // under its configured frame rate - so it also runs AboveNormal.
-            void RequestAutomaticLowerFrameRate(string reason)
-            {
-                var active = Volatile.Read(ref _activeFrameRate);
-                var lower = NextLowerReplayFrameRate(active);
-                if (lower >= active) return;
-
-                while (true)
-                {
-                    var requested = Volatile.Read(ref _requestedFrameRate);
-                    if (lower >= requested) return;
-                    if (Interlocked.CompareExchange(ref _requestedFrameRate, lower, requested) != requested) continue;
-                    Interlocked.Exchange(ref _frameRateProtectionActive, 1);
-                    AppLog.Info($"Native capture: frame-rate protection {active}->{lower} FPS ({reason}).");
-                    return;
-                }
-            }
-
             pacingThread = new Thread(() =>
             {
                 var nextTickAt = stopwatch.Elapsed;
@@ -1519,93 +1500,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     else if (!overloaded || saveInProgress)
                         consecutiveOverloadWindows = 0;
 
-                    var cleanForRecovery = hasCapturedRealFrame && !saveInProgress && !isStalled && !transportDegraded &&
-                        !overloaded && outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold &&
-                        encodeQueue.Count * 4 < encodeQueueCapacity;
-                    if (Volatile.Read(ref _frameRateProtectionEnabled) != 0 &&
-                        Volatile.Read(ref _frameRateProtectionActive) != 0 && cleanForRecovery)
-                    {
-                        cleanRecoverySinceUtc ??= DateTime.UtcNow;
-                        if (DateTime.UtcNow - cleanRecoverySinceUtc >= TimeSpan.FromMinutes(10))
-                        {
-                            var higher = NextHigherReplayFrameRate(activeFrameRate, Volatile.Read(ref _configuredFrameRate));
-                            if (higher > activeFrameRate)
-                            {
-                                Interlocked.Exchange(ref _requestedFrameRate, higher);
-                                cleanRecoverySinceUtc = null;
-                                AppLog.Info($"Native capture: frame-rate protection restoring {activeFrameRate}->{higher} FPS after ten clean minutes.");
-                            }
-                        }
-                    }
-                    else if (!cleanForRecovery)
-                    {
-                        cleanRecoverySinceUtc = null;
-                    }
-
                     if (hasCapturedRealFrame && consecutiveOverloadWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows &&
                         !string.IsNullOrEmpty(activeEncoderCandidate.Name))
                     {
-                        // A stable lower cadence is preferable to exchanging a
-                        // working encoder mid-ring.  Only investigate another
-                        // input path after the current path also fails at the
-                        // safer rate.
-                        if (Volatile.Read(ref _frameRateProtectionEnabled) != 0 &&
-                            NextLowerReplayFrameRate(activeFrameRate) < activeFrameRate)
-                        {
-                            RequestAutomaticLowerFrameRate($"{consecutiveOverloadWindows} overloaded diagnostic windows");
-                            consecutiveOverloadWindows = 0;
-                            startupValidationWindows = 0;
-                            startupValidationComplete = false;
-                        }
-                        else
-                        {
-                            var switched = false;
-                            foreach (var candidate in ReplayEncoderFailoverPolicy.CandidatesAfter(
-                                         config.VideoCodec, config.EncoderMode, activeEncoderCandidate, attemptedEncoderCandidates))
-                            {
-                                attemptedEncoderCandidates.Add(candidate);
-                                try
-                                {
-                                    var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device,
-                                        out var replacementTimeBase, out var replacementName, out var replacementHardware,
-                                        candidateOrder: new[] { candidate });
-                                    var swapped = new ManualResetEventSlim(false);
-                                    lock (encodeQueueGate)
-                                        encodeQueue!.Add(new EncodeJob(0, DateTime.UtcNow, (nint)replacement, swapped));
-                                    if (!swapped.Wait(TimeSpan.FromSeconds(5)))
-                                    {
-                                        swapped.Dispose();
-                                        // The encode thread may still consume the control
-                                        // job after this timeout. Keep the new context alive
-                                        // until it has joined rather than racing a late swap.
-                                        retiredCodecContexts.Add((nint)replacement);
-                                        AppLog.Info($"Native capture: encoder failover to {candidate.Name}/{candidate.InputPath} timed out.");
-                                        break;
-                                    }
-                                    swapped.Dispose();
-                                    retiredCodecContexts.Add((nint)codecContext);
-                                    codecContext = replacement;
-                                    _timeBase = replacementTimeBase;
-                                    encoderName = replacementName;
-                                    hardwareFramesActive = replacementHardware;
-                                    requiresDistinctAmfSoftwareFrame = !replacementHardware && replacementName.Contains("amf", StringComparison.OrdinalIgnoreCase);
-                                    activeEncoderCandidate = ResolveEncoderCandidate(config, replacementName, replacementHardware);
-                                    consecutiveOverloadWindows = 0;
-                                    switched = true;
-                                    AppLog.Info($"Native capture: sustained encoder overload switched to {replacementName}/{activeEncoderCandidate.InputPath}; replay history remains buffered.");
-                                    break;
-                                }
-                                catch (Exception error)
-                                {
-                                    AppLog.Info($"Native capture: encoder failover candidate {candidate.Name}/{candidate.InputPath} unavailable ({error.Message}).");
-                                }
-                            }
-                            if (!switched)
-                            {
-                                consecutiveOverloadWindows = 0;
-                                AppLog.Info("Native capture: every remaining encoder candidate was exhausted; keeping the best available encoder.");
-                            }
-                        }
+                        // Codec contexts and their packet metadata are immutable
+                        // for one recording session.  Replacing one here used to
+                        // splice incompatible packets into a live replay ring.
+                        // EncoderTuningService observes this health sample and
+                        // can request one cadence rung after sustained overload.
+                        consecutiveOverloadWindows = 0;
+                        AppLog.Info("Native capture: sustained encoder overload; retaining session encoder until worker restart.");
                     }
                     // A stall is worse than an overload and reads nothing like one:
                     // no frames arrive at all, so nothing gets dropped and the queue
@@ -2678,7 +2582,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     hardwareFramesActive = qualifiedHardwareFrames;
                     encoderName = qualifiedEncoderName;
                     activeEncoderCandidate = ResolveEncoderCandidate(config, encoderName, qualifiedHardwareFrames);
-                    attemptedEncoderCandidates.Add(activeEncoderCandidate);
                     requiresDistinctAmfSoftwareFrame = !qualifiedHardwareFrames && qualifiedEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
                     if (!qualifiedHardwareFrames) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
                     if (codecContext is not null && InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
@@ -3157,16 +3060,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // FillFrameBlack placeholder into the ring buffer/full
             void RunPacingTick()
             {
-                // Act before the bounded queue starts evicting video work.  The
-                // queue is deliberately small to keep latency bounded, so at
-                // 90 FPS a full queue is already too late to wait for the next
-                // one-second diagnostic window.
-                if (Volatile.Read(ref _frameRateProtectionEnabled) != 0 && hasCapturedRealFrame && !isPaused && !isStalled &&
-                    encodeQueue!.Count * 4 >= encodeQueueCapacity * 3)
-                {
-                    RequestAutomaticLowerFrameRate($"encode queue {encodeQueue.Count}/{encodeQueueCapacity}");
-                }
-
                 if (hasCapturedRealFrame && variableFrameTiming)
                 {
                     var now = stopwatch.Elapsed;

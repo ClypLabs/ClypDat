@@ -15,6 +15,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private readonly object _gate = new();
     private readonly Dictionary<Guid, TaskCompletionSource<JsonElement>> _pending = new();
     private readonly List<DateTime> _failures = new();
+    private readonly CaptureHealthRecoveryPolicy _fatalHealthPolicy = new();
     private NamedPipeClientStream? _pipe;
     private Process? _process;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Worker");
@@ -25,6 +26,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private double _durationSeconds;
     private bool _isRecording, _desiredRecording, _paused;
     private int? _frameRate;
+    private int _fatalHealthRecoveryUsed;
     private string _hotkey = string.Empty;
     private volatile bool _disposed;
 
@@ -42,6 +44,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         CancelRecovery(resetFailures: true);
+        _fatalHealthPolicy.Reset();
+        Interlocked.Exchange(ref _fatalHealthRecoveryUsed, 0);
         _desiredRecording = true;
         await EnsureAttachedAsync(cancellationToken);
         var config = _configProvider();
@@ -66,7 +70,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
     {
-        if (_recovery is { IsCompleted: false }) throw new InvalidOperationException("Replay is recovering; retry after recording resumes.");
+        if (_recovery is { IsCompleted: false } || _health.State == ReplayCaptureState.Recovering) throw new InvalidOperationException("Replay is recovering; retry after recording resumes.");
+        if (!_desiredRecording || _health.State == ReplayCaptureState.Failed) throw new InvalidOperationException("Replay is not recording; no video can be saved.");
         await EnsureAttachedAsync(cancellationToken);
         var result = await SendAsync<CaptureWorkerSaveResult>("save", new CaptureWorkerSaveRequest(outputFolder, titleOverride, clipWindow), cancellationToken);
         if (!string.IsNullOrWhiteSpace(result.Error)) throw new InvalidOperationException(result.Error);
@@ -152,7 +157,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                 if (message.Type == "response") { TaskCompletionSource<JsonElement>? completion; lock (_pending) _pending.TryGetValue(message.RequestId, out completion); completion?.TrySetResult(message.Payload); continue; }
                 switch (message.Type)
                 {
-                    case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => PublishHealth(health)); break;
+                    case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => HandleWorkerHealth(health)); break;
                     case "recording-stopped": Dispatcher.UIThread.Post(() => { if (!_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
                     case "save-started": Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty)); break;
                     case "save-completed": var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (complete is not null) { Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(complete.Path, complete.Title, complete.CompletedUtc, complete.Error))); _ = SendBestEffortAsync("ack-save", new { complete.Path }); } break;
@@ -181,6 +186,26 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             _lostGeneration = generation; _recoveryCancellation?.Cancel(); _recoveryCancellation = new CancellationTokenSource();
             _recovery = RecoverAsync(generation, reason, exitCode, _recoveryCancellation.Token);
         }
+    }
+
+    private void HandleWorkerHealth(ReplayCaptureHealth health)
+    {
+        PublishHealth(health);
+        if (!_fatalHealthPolicy.Observe(health)) return;
+
+        if (Interlocked.CompareExchange(ref _fatalHealthRecoveryUsed, 1, 0) == 0)
+        {
+            AppLog.Info("Capture worker health fatal for three windows; restarting worker once.");
+            KillWorker();
+            BeginRecovery(Volatile.Read(ref _generation), "fatal encoder health", ExitCode());
+            return;
+        }
+
+        _desiredRecording = false;
+        RecoveryHealth(1, _health.RecentWorkerFailureCount, _health.LastWorkerExitCode, null, true,
+            "Capture output remained below 1 FPS with a full encoder queue; recording stopped.");
+        SetRecording(false);
+        RecordingStopped?.Invoke(this, EventArgs.Empty);
     }
 
     private async Task RecoverAsync(long lostGeneration, string reason, int? exitCode, CancellationToken token)

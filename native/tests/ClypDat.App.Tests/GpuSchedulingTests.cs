@@ -15,4 +15,12 @@ public sealed class GpuSchedulingTests
     {
         Assert.Equal(expected, GpuScheduling.IsPriorityElevationEnabled(value));
     }
+
+    [Fact]
+    public void CaptureDevicePriority_UsesMaximumDxgiPriority()
+    {
+        // Device priority is intentionally default-on; only process-wide
+        // scheduling needs the explicit environment opt-in above.
+        Assert.Equal(7, GpuScheduling.CaptureDevicePriority);
+    }
 }

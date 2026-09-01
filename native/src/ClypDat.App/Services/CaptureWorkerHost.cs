@@ -269,7 +269,6 @@ internal static class CaptureWorkerHost
         try
         {
             if (_config is not null) ProcessPriorityService.Apply(_config.ProcessPriority);
-            GpuScheduling.TryRaiseProcessGpuPriority();
         }
         catch (Exception error) { CaptureWorkerLog.Error("Worker priority setup failed.", error); }
     }

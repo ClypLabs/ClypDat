@@ -8,8 +8,8 @@ namespace ClypDat.App.Services;
 // SafeHandle; every native frame and packet stays inside the native engine.
 internal static class NativeReplayEngineAbi
 {
-    internal const uint Version = 1;
-    internal const uint EngineVersion = 1;
+    internal const uint Version = 2;
+    internal const uint EngineVersion = 2;
     internal const string LibraryName = "ClypDat.Capture.Native";
 
     internal enum Result : int
@@ -45,6 +45,8 @@ internal static class NativeReplayEngineAbi
     {
         internal Header Header;
         internal ulong TargetWindow;
+        internal ulong TargetMonitor;
+        internal uint BitrateMbps;
         internal uint SelectedFps;
         internal uint Width;
         internal uint Height;
@@ -57,6 +59,8 @@ internal static class NativeReplayEngineAbi
         {
             Header = NativeReplayEngineAbi.Header.Create<EngineConfig>(),
             TargetWindow = unchecked((ulong)config.GameWindowHandle),
+            TargetMonitor = 0,
+            BitrateMbps = checked((uint)Math.Clamp(config.BitrateMbps, 1, 200)),
             SelectedFps = checked((uint)Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate)),
             Width = checked((uint)MakeEven(config.CaptureWidth > 0 ? config.CaptureWidth : Math.Max(2, config.MaxHeight * 16 / 9))),
             Height = checked((uint)MakeEven(config.CaptureHeight > 0 ? config.CaptureHeight : Math.Max(2, config.MaxHeight))),
@@ -74,6 +78,7 @@ internal static class NativeReplayEngineAbi
     {
         internal Header Header;
         internal uint EngineVersion;
+        internal uint BuildVersion;
         internal EngineState State;
         internal uint SelectedFps;
         internal uint ActiveFps;
@@ -193,7 +198,16 @@ internal sealed class NativeReplayEngine : IDisposable
             EncodeQueueCapacity = checked((int)native.QueueCapacity),
             AdapterDescription = $"LUID {native.AdapterLuidHigh:X8}:{native.AdapterLuidLow:X8}",
             FrameRateMode = "CFR",
-            DegradeReason = native.FatalError == NativeReplayEngineAbi.FatalError.Encoder ? ReplayDegradeReason.EncoderOverload : ReplayDegradeReason.None
+            DegradeReason = native.FatalError == NativeReplayEngineAbi.FatalError.Encoder ? ReplayDegradeReason.EncoderOverload : ReplayDegradeReason.None,
+            NativeEngineVersion = native.EngineVersion,
+            NativeBuildVersion = native.BuildVersion,
+            EncodeQueueAge = TimeSpan.FromMilliseconds(native.QueueAgeMs),
+            EncoderSlotWaitP95Ms = native.EncoderSlotWaitP95Ms,
+            SubmissionP95Ms = native.SubmissionP95Ms,
+            SurfacesInUse = checked((int)native.SurfacesInUse),
+            SurfaceCapacity = checked((int)native.SurfaceCapacity),
+            AdapterLuid = $"{native.AdapterLuidHigh:X8}:{native.AdapterLuidLow:X8}",
+            FatalCategory = native.FatalError.ToString()
         };
     }
 

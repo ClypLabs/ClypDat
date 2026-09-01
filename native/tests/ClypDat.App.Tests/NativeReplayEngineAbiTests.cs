@@ -10,8 +10,8 @@ public sealed class NativeReplayEngineAbiTests
     public void Structures_HaveStableVersionedX64Layout()
     {
         Assert.Equal(8, Marshal.SizeOf<NativeReplayEngineAbi.Header>());
-        Assert.Equal(48, Marshal.SizeOf<NativeReplayEngineAbi.EngineConfig>());
-        Assert.Equal(104, Marshal.SizeOf<NativeReplayEngineAbi.EngineHealth>());
+        Assert.Equal(56, Marshal.SizeOf<NativeReplayEngineAbi.EngineConfig>());
+        Assert.Equal(112, Marshal.SizeOf<NativeReplayEngineAbi.EngineHealth>());
         Assert.Equal(NativeReplayEngineAbi.Version, NativeReplayEngineAbi.Header.Create<NativeReplayEngineAbi.EngineHealth>().AbiVersion);
     }
 

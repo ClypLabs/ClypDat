@@ -11,7 +11,7 @@ public sealed class EncoderTuningService
 
     private static readonly TimeSpan Warmup = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan RestoreAfterClean = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan RestoreAfterClean = TimeSpan.FromMinutes(2);
     private const int WindowSize = 15;
     private const int DemoteThreshold = 8;
     // A 60 fps capture producing 44 fps with a backed-up queue is already
@@ -132,6 +132,21 @@ public sealed class EncoderTuningService
             RecordSustainedOverload(health, now, severeCount);
             return;
         }
+
+        if (_activeFrameRate < _configuredFrameRate && clean && _cleanSinceUtc is { } cleanSince && now - cleanSince >= RestoreAfterClean)
+        {
+            var next = NextHigherFrameRate(_activeFrameRate, _configuredFrameRate);
+            if (next > _activeFrameRate)
+            {
+                var previous = _activeFrameRate;
+                _activeFrameRate = next;
+                _lastDecisionUtc = now;
+                _cleanSinceUtc = null;
+                _peakQueueSinceClean = 0;
+                FrameRateChangeRequested?.Invoke(this, new EncoderFrameRateChange(previous, next));
+                AppLog.Info($"Encoder tuning: restored {previous}->{next} fps after two clean minutes.");
+            }
+        }
     }
 
     private void RecordSustainedOverload(ReplayCaptureHealth health, DateTime now, int severeCount)
@@ -158,6 +173,14 @@ public sealed class EncoderTuningService
         _cleanSinceUtc = null;
         _peakQueueSinceClean = 0;
     }
+
+    private static int NextHigherFrameRate(int current, int configured) => current switch
+    {
+        < 30 => Math.Min(30, configured),
+        < 60 => Math.Min(60, configured),
+        < 90 => Math.Min(90, configured),
+        _ => configured
+    };
 }
 
 public sealed record EncoderFrameRateChange(int PreviousFrameRate, int FrameRate);

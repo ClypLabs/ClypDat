@@ -14,8 +14,8 @@
 // cross this boundary. Every input and output begins with this header so a newer
 // managed host can be rejected safely by an older engine.
 enum : uint32_t {
-    CD_ABI_VERSION = 1,
-    CD_ENGINE_VERSION = 1,
+    CD_ABI_VERSION = 2,
+    CD_ENGINE_VERSION = 2,
 };
 
 enum cd_result : int32_t {
@@ -58,6 +58,8 @@ struct cd_struct_header {
 struct cd_engine_config {
     cd_struct_header header;
     uint64_t target_window;
+    uint64_t target_monitor;
+    uint32_t bitrate_mbps;
     uint32_t selected_fps;
     uint32_t width;
     uint32_t height;
@@ -70,6 +72,7 @@ struct cd_engine_config {
 struct cd_engine_health {
     cd_struct_header header;
     uint32_t engine_version;
+    uint32_t build_version;
     uint32_t state;
     uint32_t selected_fps;
     uint32_t active_fps;
@@ -89,10 +92,22 @@ struct cd_engine_health {
     double fresh_fps;
 };
 
-struct cd_save_window {
+struct cd_save_request {
     cd_struct_header header;
-    int64_t start_unix_milliseconds;
-    int64_t end_unix_milliseconds;
+    int64_t start_qpc;
+    int64_t end_qpc;
+};
+
+// temporary_video_path is a caller-owned writable buffer. No native object or
+// allocation crosses the ABI boundary.
+struct cd_save_result {
+    cd_struct_header header;
+    int64_t actual_start_qpc;
+    int64_t actual_end_qpc;
+    int64_t duration_qpc;
+    uint64_t packet_count;
+    wchar_t* temporary_video_path;
+    uint32_t temporary_video_path_capacity;
 };
 
 struct cd_engine;
@@ -104,4 +119,4 @@ CD_API void CD_CALL cd_engine_destroy(cd_engine* engine);
 CD_API int32_t CD_CALL cd_engine_set_paused(cd_engine* engine, uint32_t paused);
 CD_API int32_t CD_CALL cd_engine_set_active_fps(cd_engine* engine, uint32_t active_fps);
 CD_API int32_t CD_CALL cd_engine_get_health(const cd_engine* engine, cd_engine_health* health);
-CD_API int32_t CD_CALL cd_engine_save_window(cd_engine* engine, const cd_save_window* window, wchar_t* output_path, uint32_t output_path_capacity);
+CD_API int32_t CD_CALL cd_engine_save_window(cd_engine* engine, const cd_save_request* request, cd_save_result* result);

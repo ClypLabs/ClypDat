@@ -13,9 +13,9 @@ constexpr uint32_t kEncodeQueueCapacity = 8;
 constexpr uint32_t kSurfacePoolCapacity = 12;
 
 static_assert(sizeof(cd_struct_header) == 8);
-static_assert(sizeof(cd_engine_config) == 48);
-static_assert(sizeof(cd_engine_health) == 104);
-static_assert(sizeof(cd_save_window) == 24);
+static_assert(sizeof(cd_engine_config) == 56);
+static_assert(sizeof(cd_engine_health) == 112);
+static_assert(sizeof(cd_save_request) == 24);
 
 bool valid_header(const cd_struct_header* header, uint32_t required_size) {
     return header != nullptr && header->abi_version == CD_ABI_VERSION && header->struct_size >= required_size;
@@ -78,6 +78,13 @@ int32_t CD_CALL cd_engine_start(cd_engine* engine) {
     if (adapter != nullptr) adapter->Release();
     if (dxgi_device != nullptr) dxgi_device->Release();
     engine->route = CD_CAPTURE_ROUTE_DXGI;
+    // This is capture engine's own device only. Do not change process-wide
+    // scheduling; that would also reprioritize Avalonia and DWM-facing work.
+    if (IDXGIDevice* priority_device = nullptr; SUCCEEDED(engine->device->QueryInterface(IID_PPV_ARGS(&priority_device)))) {
+        const auto priority_hr = priority_device->SetGPUThreadPriority(7);
+        priority_device->Release();
+        (void)priority_hr; // Driver refusal is non-fatal.
+    }
     engine->state = CD_ENGINE_RUNNING;
     return CD_OK;
 }
@@ -116,6 +123,7 @@ int32_t CD_CALL cd_engine_get_health(const cd_engine* engine, cd_engine_health* 
     auto* mutable_engine = const_cast<cd_engine*>(engine);
     std::scoped_lock lock(mutable_engine->mutex);
     health->engine_version = CD_ENGINE_VERSION;
+    health->build_version = CD_ENGINE_VERSION;
     health->state = mutable_engine->state;
     health->selected_fps = mutable_engine->config.selected_fps;
     health->active_fps = mutable_engine->active_fps;
@@ -136,10 +144,15 @@ int32_t CD_CALL cd_engine_get_health(const cd_engine* engine, cd_engine_health* 
     return CD_OK;
 }
 
-int32_t CD_CALL cd_engine_save_window(cd_engine* engine, const cd_save_window* window, wchar_t* output_path, uint32_t output_path_capacity) {
-    if (engine == nullptr || !valid_header(window == nullptr ? nullptr : &window->header, sizeof(cd_save_window))) return CD_E_INVALID_ARGUMENT;
-    if (window->end_unix_milliseconds <= window->start_unix_milliseconds) return CD_E_INVALID_ARGUMENT;
-    if (output_path == nullptr || output_path_capacity == 0) return CD_E_BUFFER_TOO_SMALL;
-    output_path[0] = L'\0';
+int32_t CD_CALL cd_engine_save_window(cd_engine* engine, const cd_save_request* request, cd_save_result* result) {
+    if (engine == nullptr || !valid_header(request == nullptr ? nullptr : &request->header, sizeof(cd_save_request)) ||
+        !valid_header(result == nullptr ? nullptr : &result->header, sizeof(cd_save_result))) return CD_E_INVALID_ARGUMENT;
+    if (request->end_qpc <= request->start_qpc) return CD_E_INVALID_ARGUMENT;
+    if (result->temporary_video_path == nullptr || result->temporary_video_path_capacity == 0) return CD_E_BUFFER_TOO_SMALL;
+    result->temporary_video_path[0] = L'\0';
+    result->actual_start_qpc = request->start_qpc;
+    result->actual_end_qpc = request->end_qpc;
+    result->duration_qpc = request->end_qpc - request->start_qpc;
+    result->packet_count = 0;
     return CD_E_UNAVAILABLE;
 }

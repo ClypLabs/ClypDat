@@ -52,6 +52,7 @@ internal static class GpuScheduling
     // capture app wants: the work is small, bounded, and latency-critical
     // relative to the game's, so it should cut ahead rather than queue.
     private const int MaxGpuThreadPriority = 7;
+    internal const int CaptureDevicePriority = MaxGpuThreadPriority;
 
     private static int _processPriorityRaised;
 
@@ -86,15 +87,22 @@ internal static class GpuScheduling
     // preempt game rendering and can collapse game FPS. Keep both mechanisms
     // behind one explicit diagnostic opt-in until a measured benefit outweighs
     // that cost.
-    internal static bool IsPriorityElevationEnabled(string? value)
+    // Process priority is deliberately a separate opt-in from the capture
+    // device priority.  The latter only affects this D3D11 device and is the
+    // safe default; the former also changes Avalonia's render device.
+    internal static bool IsProcessPriorityElevationEnabled(string? value)
         => string.Equals(value, "1", StringComparison.Ordinal);
 
-    private static bool IsPriorityElevationEnabled()
-        => IsPriorityElevationEnabled(Environment.GetEnvironmentVariable("CLYPDAT_GPU_CAPTURE_PRIORITY"));
+    // Kept for existing callers/tests that were named before the two knobs
+    // were separated.
+    internal static bool IsPriorityElevationEnabled(string? value) => IsProcessPriorityElevationEnabled(value);
+
+    private static bool IsProcessPriorityElevationEnabled()
+        => IsProcessPriorityElevationEnabled(Environment.GetEnvironmentVariable("CLYPDAT_GPU_PROCESS_PRIORITY"));
 
     public static void TryRaiseProcessGpuPriority()
     {
-        if (!IsPriorityElevationEnabled())
+        if (!IsProcessPriorityElevationEnabled())
         {
             AppLog.Info("Native capture: GPU priority elevation disabled; foreground game keeps GPU priority.");
             return;
@@ -152,8 +160,6 @@ internal static class GpuScheduling
     // SetGPUThreadPriority=10, GetGPUThreadPriority=11.
     public static void TryRaiseDeviceGpuPriority(nint devicePointer)
     {
-        if (!IsPriorityElevationEnabled()) return;
-
         var dxgiDeviceIid = new Guid("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
         var dxgiDevicePtr = nint.Zero;
         try
