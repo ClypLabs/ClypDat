@@ -322,7 +322,7 @@
             </StackPanel>
 
             <Grid Grid.Row="1">
-              <ScrollViewer VerticalScrollBarVisibility="Hidden">
+              <ScrollViewer x:Name="GameRailScrollViewer" VerticalScrollBarVisibility="Hidden">
                 <StackPanel Margin="0,0,0,16" Spacing="2">
 
               <!-- With Combine off, a game and a section can never both be
@@ -578,8 +578,13 @@
                 </StackPanel>
               </ScrollViewer>
 
-              <!-- Soft edge shows game rail continues beneath fixed filters. -->
-              <Border Height="14" VerticalAlignment="Top" IsHitTestVisible="False" ZIndex="1">
+              <!-- Soft edge shows game rail continues beneath fixed filters.
+                   Tied to the rail's own scroll offset: at rest there is nothing
+                   above the first game to imply, and painting the gradient anyway
+                   just dimmed the top of that first icon. Fades in over the same
+                   14px it is tall, so the ramp tracks the content sliding under it. -->
+              <Border Height="14" VerticalAlignment="Top" IsHitTestVisible="False" ZIndex="1"
+                      Opacity="{Binding #GameRailScrollViewer.Offset.Y, Converter={x:Static opconv:ScrollFadeOpacityConverter.Instance}, ConverterParameter=14}">
                 <Border.Background>
                   <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
                     <GradientStop Color="{DynamicResource SurfaceColor_0D1116}" Offset="0" />

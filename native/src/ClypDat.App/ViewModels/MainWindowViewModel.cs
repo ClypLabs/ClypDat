@@ -6294,6 +6294,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool GoogleAccountIsConnected => _clypDatSnapshot.GoogleConnected;
     public bool DiscordAccountIsConnected => _clypDatSnapshot.DiscordConnected;
     public bool ClypDatAccountCanLink => !_clypDatAccount.IsAuthenticated && _clypDatAccountSetupStarted;
+    // The "add an account" and "linked accounts" cards each render an empty
+    // titled box once every provider has moved to the other one, so both ask
+    // whether they still have a row to show before drawing themselves.
+    public bool HasAccountsToAdd => !_clypDatSnapshot.GoogleConnected || !_clypDatSnapshot.DiscordConnected || !_clypDatSnapshot.IsConnected;
+    public bool HasLinkedAccounts => _clypDatSnapshot.GoogleConnected || _clypDatSnapshot.DiscordConnected || _clypDatSnapshot.IsConnected;
     public bool XboxActivityForDesktop
     {
         get => Settings.XboxActivityEnabled;
@@ -6400,6 +6405,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(GoogleAccountIsConnected));
         OnPropertyChanged(nameof(DiscordAccountIsConnected));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
+        OnPropertyChanged(nameof(HasAccountsToAdd));
+        OnPropertyChanged(nameof(HasLinkedAccounts));
         OnPropertyChanged(nameof(XboxConnectionStatus));
         OnPropertyChanged(nameof(XboxCurrentTitle));
         OnPropertyChanged(nameof(XboxIsConnected));

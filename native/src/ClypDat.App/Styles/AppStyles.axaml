@@ -2148,6 +2148,83 @@
     <Setter Property="Background" Value="{StaticResource DividerBrush}" />
   </Style>
 
+  <!-- Connected Accounts: one provider per row, each row its own bordered
+       tile. The section used to lay providers out in a WrapPanel with a fixed
+       ItemWidth/ItemHeight, so a status line that wrapped to two lines - "Linked
+       through ClypDat" - was clipped by the cell rather than growing it. A
+       stacked row also keeps its own visibility: a hidden provider takes no
+       space and leaves no divider behind it. Raised a step above the card it
+       sits in, since a settingsCard nested in a settingsCard is the same fill
+       twice and reads as one flat box. -->
+  <Style Selector="Border.providerRow">
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="14,12" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.providerRow:pointerover">
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
+  </Style>
+
+  <!-- The tile behind a provider's mark. Each row sets its own Background to a
+       low-alpha wash of that brand's colour, which is why no fill is set here:
+       brand colours are the one thing on this page the theme must not re-hue. -->
+  <Style Selector="Border.providerBadge">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.providerBadge PathIcon">
+    <Setter Property="Width" Value="18" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- Connection state as a dot-and-label pill rather than a line of coloured
+       body text. At 11px a green sentence sitting where a description belongs
+       reads as a description that happens to be green; a pill reads as state. -->
+  <Style Selector="Border.statusPill">
+    <Setter Property="Background" Value="{StaticResource Surface_1D2B38}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="Padding" Value="8,2" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.statusPill TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.statusPill Ellipse">
+    <Setter Property="Width" Value="6" />
+    <Setter Property="Height" Value="6" />
+    <Setter Property="Fill" Value="{StaticResource TextMutedBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.statusPill.ok">
+    <Setter Property="Background" Value="{StaticResource Semantic_1B2E24}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Semantic_2F5B45}" />
+  </Style>
+  <Style Selector="Border.statusPill.ok TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource Semantic_38D996}" />
+  </Style>
+  <Style Selector="Border.statusPill.ok Ellipse">
+    <Setter Property="Fill" Value="{StaticResource Semantic_38D996}" />
+  </Style>
+
   <!-- ToggleSwitch. Until now the app had no style for one at all, so all
        ~60 of them rendered in bare Fluent colours against a hand-painted dark
        UI. Colour comes from the theme keys; the geometry is bumped from
