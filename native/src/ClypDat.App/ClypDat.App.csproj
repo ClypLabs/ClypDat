@@ -199,6 +199,26 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <!-- Native replay owns D3D11/FFmpeg state once cut over. Build it through
+       MSVC with its static CRT, then keep DLL beside both developer and
+       published app output. The bridge is presently probe-only, so an absent
+       DLL cannot affect capture startup before the native media path is live. -->
+  <Target Name="BuildNativeCaptureEngine" BeforeTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\capture-native\build.ps1&quot; -Configuration $(Configuration)" />
+  </Target>
+
+  <Target Name="CopyNativeCaptureEngineToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyNativeCaptureEngineToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <!-- The RNNoise model the microphone noise suppression filter loads. It is
        a data file, not code: arnndn has no built-in model and refuses to
        create the filter without a path to one, so a build missing this folder

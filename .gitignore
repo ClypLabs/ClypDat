@@ -7,6 +7,7 @@ bin/
 obj/
 publish/
 TestResults/
+native/capture-native/build/
 *.user
 *.suo
 native/vendor/*
