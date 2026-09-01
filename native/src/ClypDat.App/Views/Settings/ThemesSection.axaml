@@ -116,9 +116,9 @@
          are fixed width - ColorSpectrum is always square, so a starred column
          only ever padded one out with dead space - and every other card here
          has content that genuinely fills the width. This one does not, so it
-         stops where its content does instead of trailing several hundred
-         pixels of empty card. -->
-    <Border Classes="settingsCard" HorizontalAlignment="Left" IsVisible="{Binding IsThemeEditorOpen}">
+         stops where its content does and centres in the column, rather than
+         trailing several hundred pixels of empty card off one side. -->
+    <Border Classes="settingsCard" HorizontalAlignment="Center" IsVisible="{Binding IsThemeEditorOpen}">
       <StackPanel Spacing="14">
         <StackPanel Orientation="Horizontal" Spacing="16">
           <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" VerticalAlignment="Center" />
