@@ -6299,6 +6299,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // whether they still have a row to show before drawing themselves.
     public bool HasAccountsToAdd => !_clypDatSnapshot.GoogleConnected || !_clypDatSnapshot.DiscordConnected || !_clypDatSnapshot.IsConnected;
     public bool HasLinkedAccounts => _clypDatSnapshot.GoogleConnected || _clypDatSnapshot.DiscordConnected || _clypDatSnapshot.IsConnected;
+    // Unlinking can fail for a reason only the site knows - removing the last
+    // sign-in method is refused there, not here - so the message it returns
+    // needs somewhere on the page to appear.
+    public string ClypDatAccountError => _clypDatSnapshot.Error ?? string.Empty;
+    public bool ClypDatAccountHasError => ClypDatAccountIsConnected && !string.IsNullOrWhiteSpace(_clypDatSnapshot.Error);
     public bool XboxActivityForDesktop
     {
         get => Settings.XboxActivityEnabled;
@@ -6349,6 +6354,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
         Process.Start(new ProcessStartInfo("https://www.clypdat.xyz/account/signout") { UseShellExecute = true });
+    }
+
+    public async Task UnlinkSocialAccountAsync(string provider)
+    {
+        await _clypDatAccount.UnlinkSocialAsync(provider).ConfigureAwait(false);
     }
 
     public async Task UnlinkClypDatXboxAsync()
@@ -6407,6 +6417,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
         OnPropertyChanged(nameof(HasAccountsToAdd));
         OnPropertyChanged(nameof(HasLinkedAccounts));
+        OnPropertyChanged(nameof(ClypDatAccountError));
+        OnPropertyChanged(nameof(ClypDatAccountHasError));
         OnPropertyChanged(nameof(XboxConnectionStatus));
         OnPropertyChanged(nameof(XboxCurrentTitle));
         OnPropertyChanged(nameof(XboxIsConnected));

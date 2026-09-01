@@ -102,6 +102,43 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Removes a linked social provider through the ClypDat account. The site
+    /// refuses to remove an account's only remaining sign-in method and says so
+    /// in the response body, so that message is surfaced rather than replaced
+    /// with a generic failure - it is the one the user can act on.
+    /// </summary>
+    public async Task<bool> UnlinkSocialAsync(string provider, CancellationToken cancellationToken = default)
+    {
+        if (!IsAuthenticated) return false;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Delete, $"api/desktop/social?provider={Uri.EscapeDataString(provider)}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token!.AccessToken);
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                Disconnect();
+                return false;
+            }
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(TryReadError(body) ?? $"ClypDat unlink failed ({(int)response.StatusCode}).");
+            }
+            await RefreshAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"ClypDat account: {provider} unlink failed.", error);
+            var message = error is HttpRequestException ? error.Message : $"{provider} could not be disconnected. Try again.";
+            _snapshot = _snapshot with { Error = message };
+            Changed?.Invoke(this, _snapshot);
+            return false;
+        }
+    }
+
     private void StartPolling()
     {
         _pollCts?.Cancel();

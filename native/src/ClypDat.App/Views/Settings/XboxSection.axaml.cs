@@ -28,6 +28,11 @@ public sealed partial class XboxSection : UserControl
         if (DataContext is MainWindowViewModel vm) await vm.RefreshClypDatAccountAsync();
     }
 
+    private async void UnlinkSocialAccountButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string provider } && DataContext is MainWindowViewModel vm) await vm.UnlinkSocialAccountAsync(provider);
+    }
+
     private void OpenSocialAccountButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is Button { Tag: string provider } && DataContext is MainWindowViewModel vm) vm.OpenSocialAccount(provider);
