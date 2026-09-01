@@ -1491,6 +1491,15 @@
   <Style Selector="Button.settingsNavButton.active:pointerover">
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
+  <!-- Caption over a field inside the theme editor's pickers. A step below
+       settingsCardLabel: those name a whole card, these name one box. -->
+  <Style Selector="TextBlock.settingsPickerLabel">
+    <Setter Property="Foreground" Value="{StaticResource LabelBrush}" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="0.6" />
+  </Style>
+
   <!-- Recent-colour swatches under each picker in the theme editor. The colour
        is painted by a Border inside the button rather than by the button, because
        the generic Button:not(ToggleSwitch):pointerover rule above sets Background

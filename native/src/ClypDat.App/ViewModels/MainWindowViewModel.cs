@@ -427,6 +427,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public IReadOnlyList<CustomThemeSettings> CustomThemes => Settings.CustomThemes;
     public bool IsCustomThemesEmpty => Settings.CustomThemes.Count == 0;
     public IReadOnlyList<string> RecentThemeColors => Settings.RecentThemeColors;
+    public bool HasRecentThemeColors => Settings.RecentThemeColors.Count > 0;
     private CustomThemeSettings? _editingTheme;
     private string _themeEditorName = string.Empty;
     private string _themeEditorBaseColor = "#0D1116";
@@ -545,7 +546,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
         CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
         ThemeEditorError = string.Empty; SaveSettings(); ApplyTheme();
-        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
+        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(HasRecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
     }
 
     /// <summary>
@@ -5751,7 +5752,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // both RenameClipAsync (auto-clips/Medal imports, edits FileTitle) and
     // RenameClipTitleAsync (manual clips, edits CustomTitle), so naming a
     // clip in the Library keeps File Explorer's filename in sync either way.
-    private async Task<string> RenameClipFileAsync(ClipCardViewModel clip, string sanitizedTitle)
+    private async Task<string> RenameClipFileAsync(ClipCardViewModel clip, string sanitizedTitle, string? replacementFileName = null)
     {
         var oldPath = clip.Path;
         var oldStem = Path.GetFileNameWithoutExtension(oldPath);
@@ -5762,7 +5763,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // "LPT1" or to a 400-character title produced a name File.Move would choke on.
         var newStem = ClipFileNaming.SanitizeStem(sanitizedTitle + suffix);
         var directory = Path.GetDirectoryName(oldPath) ?? Settings.LibraryFolder;
-        var newPath = ClipFileNaming.BuildUniquePath(directory, newStem + Path.GetExtension(oldPath));
+        var requestedFileName = replacementFileName ?? newStem + Path.GetExtension(oldPath);
+        var requestedPath = Path.Combine(directory, requestedFileName);
+        if (string.Equals(oldPath, requestedPath, StringComparison.OrdinalIgnoreCase)) return oldPath;
+
+        var newPath = ClipFileNaming.BuildUniquePath(directory, requestedFileName);
 
         await FileRetry.RunAsync(() => File.Move(oldPath, newPath), $"Rename clip {oldPath} -> {newPath}");
         MoveClipSidecars(oldPath, newPath);
@@ -5839,6 +5844,35 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var oldPath = clip.Path;
         ClipInfoSidecar.Save(Settings.LibraryFolder, oldPath, updatedInfo);
         var newPath = await RenameClipFileAsync(clip, sanitizedForFile);
+        SyncOpenEditorPathIfNeeded(oldPath, newPath);
+        await RefreshClipInPlaceAsync(clip, newPath);
+    }
+
+    // Batch naming differs from a normal rename: every selected clip gets a
+    // filename made with its own capture timestamp and the active naming
+    // scheme, and the card title mirrors the resulting filename stem. This
+    // keeps a dozen clips named together distinguishable in both Explorer and
+    // the library, including a collision-resolved "(2)" suffix.
+    public async Task RenameClipForBatchAsync(ClipCardViewModel clip, string newTitle)
+    {
+        var title = newTitle.Trim();
+        var sanitizedTitle = SanitizeFileTitle(title);
+        if (string.IsNullOrWhiteSpace(sanitizedTitle)) return;
+
+        var oldPath = clip.Path;
+        var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, oldPath);
+        var game = existingInfo?.GameDisplayName ?? clip.GameFilterKey;
+        var timestamp = existingInfo?.CapturedAt?.LocalDateTime ?? clip.CreatedAt.LocalDateTime;
+        var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(oldPath), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, game);
+        var newPath = await RenameClipFileAsync(clip, sanitizedTitle, fileName);
+        var displayTitle = Path.GetFileNameWithoutExtension(newPath);
+        var movedInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, newPath) ?? existingInfo ?? new ClipInfo(game, null);
+        var useFileTitle = clip.IsAutoClip || clip.IsMedalImport;
+        var updatedInfo = useFileTitle
+            ? movedInfo with { FileTitle = displayTitle }
+            : movedInfo with { CustomTitle = displayTitle };
+        ClipInfoSidecar.Save(Settings.LibraryFolder, newPath, updatedInfo);
+
         SyncOpenEditorPathIfNeeded(oldPath, newPath);
         await RefreshClipInPlaceAsync(clip, newPath);
     }

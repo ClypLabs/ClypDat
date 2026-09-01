@@ -2866,7 +2866,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null)
+    private async Task<bool> SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null)
     {
         var isAutoClip = autoClipLabel is not null;
         // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
@@ -2882,12 +2882,12 @@ public sealed partial class MainWindow : Window
         }
         else if (!await _clipSaveLock.WaitAsync(0))
         {
-            return;
+            return false;
         }
 
         try
         {
-            if (ViewModel is null) return;
+            if (ViewModel is null) return false;
             ViewModel.IsSavingReplayClip = true;
             InitializeReplayServices();
             if (_replayBuffer is null || !_replayBuffer.IsRecording)
@@ -2895,12 +2895,12 @@ public sealed partial class MainWindow : Window
                 // A background auto-clip trigger firing before the buffer is actually
                 // recording (e.g. CS2 launched but ClypDat hasn't caught up yet) isn't
                 // worth interrupting the user over - just drop it.
-                if (isAutoClip) return;
+                if (isAutoClip) return false;
                 if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
                 await ShowMessageAsync("Clip failed", ViewModel.Settings.ReplayBufferEnabled
                     ? "Replay is armed, but no game is being captured yet."
                     : "The replay buffer is turned off, so there's nothing to clip. Turn it back on from the Replay Buffer menu.");
-                return;
+                return false;
             }
 
             var outputFolder = ViewModel.Settings.LibraryFolder;
@@ -2981,12 +2981,14 @@ public sealed partial class MainWindow : Window
                 // trimmer itself decides how hard it can collect; mid-game it
                 // stays out of the way.
                 MemoryTrimmer.RequestTrim("clip saved");
+                return true;
             }
             catch (Exception error)
             {
                 AppLog.Error("Replay clip save failed", error);
                 if (isAutoClip) ShowAutoClipFailedNotification();
                 if (!isAutoClip) await ShowMessageAsync("Clip Failed", error.Message);
+                return false;
             }
         }
         finally
@@ -4690,12 +4692,19 @@ public sealed partial class MainWindow : Window
         var trimmed = newTitle.Trim();
         if (string.IsNullOrWhiteSpace(trimmed)) return;
 
-        // Every clip gets the same title; the filename builder appends each
-        // clip's own timestamp (and de-duplicates beyond that), so they don't
-        // collide on disk.
+        // Batch naming gives every selected clip a filename from its own
+        // timestamp and makes the visible title match that resolved filename
+        // stem, so a run of clips named together remains distinguishable.
         foreach (var clip in clips)
         {
-            await ApplyClipTitleRenameAsync(clip, trimmed);
+            try
+            {
+                await ViewModel.RenameClipForBatchAsync(clip, trimmed);
+            }
+            catch (Exception error)
+            {
+                await ShowMessageAsync("Rename failed", error.Message);
+            }
         }
     }
 
@@ -5642,7 +5651,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var path = CaptureDiagnosticBundle.Create(_replayBuffer);
+            var path = CaptureDiagnosticBundle.Create(_replayBuffer, _cs2GsiListener);
             ExplorerService.Open(path, selectFile: true);
         }
         catch (Exception error)
@@ -5775,7 +5784,8 @@ public sealed partial class MainWindow : Window
 
         _cs2GsiListener.AutoClipPending += Cs2GsiListener_OnAutoClipPending;
         _cs2GsiListener.AutoClipReady += Cs2GsiListener_OnAutoClipReady;
-        Cs2GsiDeployer.TryDeploy(port, cs2Token, out var statusMessage);
+        var deployed = Cs2GsiDeployer.TryDeploy(port, cs2Token, out var statusMessage);
+        _cs2GsiListener.SetConfigurationDeploymentResult(deployed);
         game.StatusText = statusMessage;
     }
 
@@ -5819,7 +5829,15 @@ public sealed partial class MainWindow : Window
 
     private void Cs2GsiListener_OnAutoClipReady(object? sender, Cs2AutoClipRequest request)
     {
-        AutoClip_OnReady(sender, new AutoClipRequest("cs2", "Counter-Strike 2", request.EventId, request.EventType, request.Title, request.StartUtc, request.EndUtc));
+        if (sender is not Cs2GsiListener listener) return;
+        Dispatcher.UIThread.Post(() => _ = SaveCs2AutoClipAsync(listener, request));
+    }
+
+    private async Task SaveCs2AutoClipAsync(Cs2GsiListener listener, Cs2AutoClipRequest request)
+    {
+        listener.MarkSaveRequested();
+        var saved = await SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), "Counter-Strike 2", request.EventType);
+        listener.MarkSaveCompleted(saved);
     }
 
     private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowAutoClipPendingNotification(message));

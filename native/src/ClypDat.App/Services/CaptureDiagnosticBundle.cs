@@ -7,7 +7,7 @@ namespace ClypDat.App.Services;
 
 public static class CaptureDiagnosticBundle
 {
-    public static string Create(IReplayBuffer? replayBuffer)
+    public static string Create(IReplayBuffer? replayBuffer, Cs2GsiListener? cs2GsiListener = null)
     {
         Directory.CreateDirectory(AppLog.LogFolder);
         var path = Path.Combine(AppLog.LogFolder, $"clypdat-capture-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
@@ -17,6 +17,7 @@ public static class CaptureDiagnosticBundle
             ? diagnostics.GetHealthSnapshot()
             : ReplayCaptureHealth.Unknown();
         WriteJson(archive, "capture-health.json", health);
+        if (cs2GsiListener is not null) WriteJson(archive, "auto-clip-health.json", cs2GsiListener.GetHealthSnapshot());
         WriteJson(archive, "environment.json", new
         {
             os = RuntimeInformation.OSDescription,

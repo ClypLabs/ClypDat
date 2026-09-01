@@ -6,6 +6,34 @@ namespace ClypDat.App.Services;
 
 public sealed record Cs2AutoClipRequest(string EventId, string EventType, string Title, DateTime StartUtc, DateTime EndUtc);
 
+// Safe to put in a support bundle: this deliberately records stages and counts,
+// never a payload, token, Steam ID, player name, map name, or filesystem path.
+public sealed record Cs2AutoClipHealthSnapshot(
+    bool IsListening,
+    int? Port,
+    DateTime? StartedUtc,
+    DateTime UpdatedUtc,
+    bool? ConfigurationDeployed,
+    long RequestsReceived,
+    long RequestShapeRejected,
+    long OversizedRequests,
+    long TimedOutRequests,
+    long ParseFailures,
+    long UnauthorizedPayloads,
+    long MissingPlayerPayloads,
+    long SteamIdMismatches,
+    long AcceptedPayloads,
+    long DisabledBySettings,
+    long BlockedByMode,
+    long PendingEvents,
+    long FinalizedEvents,
+    long SaveRequests,
+    long SavedClips,
+    long SaveFailures,
+    string LastStage,
+    string? LastGate,
+    DateTime? LastStageUtc);
+
 // CS2 GSI supplies snapshots rather than discrete events. Keep the round's
 // timeline so a 3K can become a 4K/Ace before one precise clip is exported.
 public sealed class Cs2GsiListener : IDisposable
@@ -29,13 +57,77 @@ public sealed class Cs2GsiListener : IDisposable
     private readonly List<DateTime> _roundKillTimes = new();
     private string? _pendingLabel;
     private readonly List<AutoClipEvent> _roundEvents = new();
+    private int? _healthPort;
+    private DateTime? _healthStartedUtc;
+    private DateTime _healthUpdatedUtc = DateTime.UtcNow;
+    private DateTime _healthLastPersistedUtc = DateTime.MinValue;
+    private bool? _healthConfigurationDeployed;
+    private long _healthRequestsReceived;
+    private long _healthRequestShapeRejected;
+    private long _healthOversizedRequests;
+    private long _healthTimedOutRequests;
+    private long _healthParseFailures;
+    private long _healthUnauthorizedPayloads;
+    private long _healthMissingPlayerPayloads;
+    private long _healthSteamIdMismatches;
+    private long _healthAcceptedPayloads;
+    private long _healthDisabledBySettings;
+    private long _healthBlockedByMode;
+    private long _healthPendingEvents;
+    private long _healthFinalizedEvents;
+    private long _healthSaveRequests;
+    private long _healthSavedClips;
+    private long _healthSaveFailures;
+    private string _healthLastStage = "Not started";
+    private string? _healthLastGate;
+    private DateTime? _healthLastStageUtc;
 
     public event EventHandler<string>? AutoClipPending;
     public event EventHandler<Cs2AutoClipRequest>? AutoClipReady;
 
     public bool IsListening => _listener?.IsListening == true;
 
-    public Cs2GsiListener(Func<AutoClipGameSettings> settingsProvider) => _settingsProvider = settingsProvider;
+    public Cs2GsiListener(Func<AutoClipGameSettings> settingsProvider, string? authToken = null)
+    {
+        _settingsProvider = settingsProvider;
+        _authToken = authToken ?? string.Empty;
+    }
+
+    public Cs2AutoClipHealthSnapshot GetHealthSnapshot()
+    {
+        lock (_stateLock) return BuildHealthSnapshotLocked();
+    }
+
+    public void SetConfigurationDeploymentResult(bool deployed)
+    {
+        lock (_stateLock)
+        {
+            _healthConfigurationDeployed = deployed;
+            SetHealthStageLocked(deployed ? "Configuration deployed" : "Configuration deployment failed");
+        }
+        PersistHealthSnapshot(force: true);
+    }
+
+    public void MarkSaveRequested()
+    {
+        lock (_stateLock)
+        {
+            _healthSaveRequests++;
+            SetHealthStageLocked("Save requested");
+        }
+        PersistHealthSnapshot(force: true);
+    }
+
+    public void MarkSaveCompleted(bool succeeded)
+    {
+        lock (_stateLock)
+        {
+            if (succeeded) _healthSavedClips++;
+            else _healthSaveFailures++;
+            SetHealthStageLocked(succeeded ? "Saved" : "Save failed");
+        }
+        PersistHealthSnapshot(force: true);
+    }
 
     public bool Start(int port, string authToken)
     {
@@ -49,12 +141,20 @@ public sealed class Cs2GsiListener : IDisposable
         }
         catch (Exception error)
         {
+            lock (_stateLock) SetHealthStageLocked("Listener start failed");
+            PersistHealthSnapshot(force: true);
             AppLog.Error($"CS2 GSI listener failed to start on port {port}", error);
             return false;
         }
 
         _listener = listener;
         _cts = new CancellationTokenSource();
+        lock (_stateLock)
+        {
+            ResetHealthLocked(port);
+            SetHealthStageLocked("Listening");
+        }
+        PersistHealthSnapshot(force: true);
         _ = ListenLoopAsync(listener, _cts.Token);
         AppLog.Info($"CS2 GSI listener started on port {port}.");
         return true;
@@ -75,7 +175,9 @@ public sealed class Cs2GsiListener : IDisposable
             _lastMapName = string.Empty;
             _lastMapMode = string.Empty;
             ClearRoundLocked();
+            SetHealthStageLocked("Stopped");
         }
+        PersistHealthSnapshot(force: true);
     }
 
     private async Task ListenLoopAsync(HttpListener listener, CancellationToken token)
@@ -93,8 +195,19 @@ public sealed class Cs2GsiListener : IDisposable
             {
                 try
                 {
+                    lock (_stateLock)
+                    {
+                        _healthRequestsReceived++;
+                        SetHealthStageLocked("Request received");
+                    }
                     if (!GsiAuth.IsRequestShapeValid(context.Request))
                     {
+                        lock (_stateLock)
+                        {
+                            _healthRequestShapeRejected++;
+                            SetHealthStageLocked("Request rejected", "Invalid request shape");
+                        }
+                        PersistHealthSnapshot(force: true);
                         context.Response.StatusCode = 403;
                         context.Response.Close();
                         return;
@@ -106,6 +219,12 @@ public sealed class Cs2GsiListener : IDisposable
                     var body = await GsiAuth.ReadBoundedBodyAsync(context.Request, requestTimeout.Token);
                     if (body is null)
                     {
+                        lock (_stateLock)
+                        {
+                            _healthOversizedRequests++;
+                            SetHealthStageLocked("Request rejected", "Payload too large");
+                        }
+                        PersistHealthSnapshot(force: true);
                         context.Response.StatusCode = 413;
                         context.Response.Close();
                         return;
@@ -114,13 +233,33 @@ public sealed class Cs2GsiListener : IDisposable
                     context.Response.StatusCode = 200;
                     context.Response.Close();
                     ProcessPayload(body);
+                    PersistHealthSnapshot();
                 }
                 catch (OperationCanceledException)
                 {
+                    lock (_stateLock)
+                    {
+                        _healthTimedOutRequests++;
+                        SetHealthStageLocked("Request timed out");
+                    }
+                    PersistHealthSnapshot(force: true);
                     try { context.Response.Abort(); } catch { }
                 }
                 catch (Exception error)
                 {
+                    if (error is JsonException)
+                    {
+                        lock (_stateLock)
+                        {
+                            _healthParseFailures++;
+                            SetHealthStageLocked("Payload parse failed");
+                        }
+                    }
+                    else
+                    {
+                        lock (_stateLock) SetHealthStageLocked("Payload processing failed");
+                    }
+                    PersistHealthSnapshot(force: true);
                     AppLog.Error("CS2 GSI payload processing failed", error);
                     try { context.Response.StatusCode = 500; context.Response.Close(); } catch { }
                 }
@@ -136,9 +275,25 @@ public sealed class Cs2GsiListener : IDisposable
         // Before anything else. The old provider/steamid comparison below was the only
         // sender check and was skipped entirely when the payload omitted "provider",
         // so it authenticated nothing.
-        if (!GsiAuth.IsPayloadAuthorized(root, _authToken)) return;
+        if (!GsiAuth.IsPayloadAuthorized(root, _authToken))
+        {
+            lock (_stateLock)
+            {
+                _healthUnauthorizedPayloads++;
+                SetHealthStageLocked("Payload rejected", "Unauthorized");
+            }
+            return;
+        }
 
-        if (!root.TryGetProperty("player", out var player)) return;
+        if (!root.TryGetProperty("player", out var player))
+        {
+            lock (_stateLock)
+            {
+                _healthMissingPlayerPayloads++;
+                SetHealthStageLocked("Payload rejected", "Missing player");
+            }
+            return;
+        }
 
         if (root.TryGetProperty("provider", out var provider) &&
             provider.TryGetProperty("steamid", out var providerSteamIdElement) &&
@@ -147,6 +302,11 @@ public sealed class Cs2GsiListener : IDisposable
             playerSteamIdElement.GetString() is { Length: > 0 } playerSteamId &&
             !string.Equals(providerSteamId, playerSteamId, StringComparison.Ordinal))
         {
+            lock (_stateLock)
+            {
+                _healthSteamIdMismatches++;
+                SetHealthStageLocked("Payload rejected", "Player mismatch");
+            }
             return;
         }
 
@@ -172,6 +332,8 @@ public sealed class Cs2GsiListener : IDisposable
 
         lock (_stateLock)
         {
+            _healthAcceptedPayloads++;
+            SetHealthStageLocked("Payload accepted");
             var settings = _settingsProvider();
             var clippingBlocked = !IsCompetitive(mapMode) && !(IsDeathmatch(mapMode) && settings.DeathmatchClipping);
             var mapChanged = !string.IsNullOrWhiteSpace(mapName) && !string.Equals(mapName, _lastMapName, StringComparison.OrdinalIgnoreCase);
@@ -198,6 +360,7 @@ public sealed class Cs2GsiListener : IDisposable
                 _lastMatchDeaths = deaths ?? 0;
                 _lastMatchAssists = assists ?? 0;
                 _lastRoundNumber = roundNumber ?? _lastRoundNumber;
+                SetHealthStageLocked("State seeded");
                 return;
             }
 
@@ -214,12 +377,16 @@ public sealed class Cs2GsiListener : IDisposable
 
             if (!settings.Enabled)
             {
+                _healthDisabledBySettings++;
+                SetHealthStageLocked("Processing gated", "Game disabled");
                 SyncCounters(roundKills, roundKillHs, deaths, assists);
                 return;
             }
 
             if (clippingBlocked)
             {
+                _healthBlockedByMode++;
+                SetHealthStageLocked("Processing gated", "Unsupported mode");
                 ClearRoundLocked();
                 SyncCounters(roundKills, roundKillHs, deaths, assists);
                 return;
@@ -238,6 +405,8 @@ public sealed class Cs2GsiListener : IDisposable
                         _roundEvents.Add(new AutoClipEvent(EventIdForLabel(label), label, now, KillPriority(label)));
                         if (changed)
                         {
+                            _healthPendingEvents++;
+                            SetHealthStageLocked("Event pending");
                             AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, waiting for the round result.");
                         }
                     }
@@ -297,6 +466,8 @@ public sealed class Cs2GsiListener : IDisposable
         var startUtc = _roundKillTimes[0] - EventPadding;
         var eventId = EventIdForLabel(_pendingLabel);
         var title = BuildTitle(_roundEvents.Count == 0 ? new[] { new AutoClipEvent(eventId, _pendingLabel, startUtc, KillPriority(_pendingLabel)) } : _roundEvents);
+        _healthFinalizedEvents++;
+        SetHealthStageLocked("Event finalized");
         AppLog.Info($"CS2 auto-clip finalized: {title}, window={startUtc:O}..{endUtc:O}.");
         AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(eventId, _pendingLabel, title, startUtc, endUtc));
         ClearRoundLocked();
@@ -304,6 +475,9 @@ public sealed class Cs2GsiListener : IDisposable
 
     private void FireStandaloneLocked(string label, DateTime timestampUtc)
     {
+        _healthPendingEvents++;
+        _healthFinalizedEvents++;
+        SetHealthStageLocked("Event finalized");
         AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, finishing the clip.");
         var eventId = EventIdForLabel(label);
         AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(eventId, label, BuildTitle(new[] { new AutoClipEvent(eventId, label, timestampUtc, KillPriority(label)) }), timestampUtc - EventPadding, timestampUtc + EventPadding));
@@ -359,6 +533,77 @@ public sealed class Cs2GsiListener : IDisposable
             if (cleaned.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { cleaned = cleaned[prefix.Length..]; break; }
         }
         return cleaned.Length == 0 ? string.Empty : char.ToUpperInvariant(cleaned[0]) + cleaned[1..];
+    }
+
+    private void ResetHealthLocked(int port)
+    {
+        _healthPort = port;
+        _healthStartedUtc = DateTime.UtcNow;
+        _healthConfigurationDeployed = null;
+        _healthRequestsReceived = _healthRequestShapeRejected = _healthOversizedRequests = _healthTimedOutRequests = 0;
+        _healthParseFailures = _healthUnauthorizedPayloads = _healthMissingPlayerPayloads = _healthSteamIdMismatches = 0;
+        _healthAcceptedPayloads = _healthDisabledBySettings = _healthBlockedByMode = _healthPendingEvents = _healthFinalizedEvents = 0;
+        _healthSaveRequests = _healthSavedClips = _healthSaveFailures = 0;
+        _healthLastGate = null;
+    }
+
+    private void SetHealthStageLocked(string stage, string? gate = null)
+    {
+        _healthLastStage = stage;
+        _healthLastGate = gate;
+        _healthLastStageUtc = DateTime.UtcNow;
+        _healthUpdatedUtc = _healthLastStageUtc.Value;
+    }
+
+    private Cs2AutoClipHealthSnapshot BuildHealthSnapshotLocked() => new(
+        IsListening,
+        _healthPort,
+        _healthStartedUtc,
+        _healthUpdatedUtc,
+        _healthConfigurationDeployed,
+        _healthRequestsReceived,
+        _healthRequestShapeRejected,
+        _healthOversizedRequests,
+        _healthTimedOutRequests,
+        _healthParseFailures,
+        _healthUnauthorizedPayloads,
+        _healthMissingPlayerPayloads,
+        _healthSteamIdMismatches,
+        _healthAcceptedPayloads,
+        _healthDisabledBySettings,
+        _healthBlockedByMode,
+        _healthPendingEvents,
+        _healthFinalizedEvents,
+        _healthSaveRequests,
+        _healthSavedClips,
+        _healthSaveFailures,
+        _healthLastStage,
+        _healthLastGate,
+        _healthLastStageUtc);
+
+    private void PersistHealthSnapshot(bool force = false)
+    {
+        Cs2AutoClipHealthSnapshot snapshot;
+        lock (_stateLock)
+        {
+            var now = DateTime.UtcNow;
+            if (!force && now - _healthLastPersistedUtc < TimeSpan.FromSeconds(5)) return;
+            _healthLastPersistedUtc = now;
+            snapshot = BuildHealthSnapshotLocked();
+        }
+
+        try
+        {
+            Directory.CreateDirectory(AppLog.LogFolder);
+            var path = Path.Combine(AppLog.LogFolder, "cs2-auto-clip-health.json");
+            var temporaryPath = path + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("CS2 auto-clip health snapshot write failed", error);
+        }
     }
 
     public void Dispose() => Stop();

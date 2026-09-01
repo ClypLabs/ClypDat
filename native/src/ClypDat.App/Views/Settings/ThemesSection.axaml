@@ -118,50 +118,92 @@
           <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" VerticalAlignment="Center" />
           <TextBox Classes="settingsInput" Width="240" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
         </StackPanel>
-        <Grid ColumnDefinitions="*,*" ColumnSpacing="28">
-          <StackPanel Grid.Column="0" Spacing="8">
-            <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
-            <Grid ColumnDefinitions="*,20" ColumnSpacing="10">
-              <!-- Bound on HsvColor, not Color. Dragging into pure black or pure
-                   white throws the hue away in RGB, so the hue slider would jump
-                   back to red the moment the spectrum reached an edge. -->
-              <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" MinWidth="200" Height="200" CornerRadius="6" />
-              <cp:ColorSlider Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
-            </Grid>
-            <TextBox Classes="settingsInput" Text="{Binding BasePicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
-            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
-              <TextBox Classes="settingsInput" Text="{Binding BasePicker.RedText, Mode=TwoWay}" PlaceholderText="R" />
-              <TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding BasePicker.GreenText, Mode=TwoWay}" PlaceholderText="G" />
-              <TextBox Grid.Column="2" Classes="settingsInput" Text="{Binding BasePicker.BlueText, Mode=TwoWay}" PlaceholderText="B" />
-            </Grid>
-            <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding BasePicker.Error}" IsVisible="{Binding BasePicker.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-            <ItemsControl ItemsSource="{Binding RecentThemeColors}">
-              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="28" ItemHeight="28" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate><Button Classes="themeSwatch" Tag="{Binding}" ToolTip.Tip="{Binding}" Click="BaseRecentThemeColorButton_OnClick"><Border Background="{Binding}" /></Button></DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
-          <StackPanel Grid.Column="1" Spacing="8">
-            <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
-            <Grid ColumnDefinitions="*,20" ColumnSpacing="10">
-              <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" MinWidth="200" Height="200" CornerRadius="6" />
-              <cp:ColorSlider Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
-            </Grid>
-            <TextBox Classes="settingsInput" Text="{Binding AccentPicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
-            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
-              <TextBox Classes="settingsInput" Text="{Binding AccentPicker.RedText, Mode=TwoWay}" PlaceholderText="R" />
-              <TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding AccentPicker.GreenText, Mode=TwoWay}" PlaceholderText="G" />
-              <TextBox Grid.Column="2" Classes="settingsInput" Text="{Binding AccentPicker.BlueText, Mode=TwoWay}" PlaceholderText="B" />
-            </Grid>
-            <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding AccentPicker.Error}" IsVisible="{Binding AccentPicker.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-            <ItemsControl ItemsSource="{Binding RecentThemeColors}">
-              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="28" ItemHeight="28" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate><Button Classes="themeSwatch" Tag="{Binding}" ToolTip.Tip="{Binding}" Click="AccentRecentThemeColorButton_OnClick"><Border Background="{Binding}" /></Button></DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
+        <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="16">
+          <Border Grid.Column="0" Classes="providerSetting" Padding="14">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
+              <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
+                <!-- Bound on HsvColor, not Color. Dragging into pure black or
+                     pure white throws the hue away in RGB, so the hue slider
+                     would jump back to red the moment the spectrum hit an edge. -->
+                <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8" />
+                <cp:ColorSlider Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
+              </Grid>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="settingsPickerLabel" Text="HEX" />
+                <TextBox Classes="settingsInput" Text="{Binding BasePicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
+              </StackPanel>
+              <!-- Labelled, because a placeholder disappears the moment the box
+                   has a value in it and three bare numbers say nothing about
+                   which channel is which. -->
+              <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="settingsPickerLabel" Text="R" />
+                  <TextBox Classes="settingsInput" Text="{Binding BasePicker.RedText, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                  <TextBlock Classes="settingsPickerLabel" Text="G" />
+                  <TextBox Classes="settingsInput" Text="{Binding BasePicker.GreenText, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="4">
+                  <TextBlock Classes="settingsPickerLabel" Text="B" />
+                  <TextBox Classes="settingsInput" Text="{Binding BasePicker.BlueText, Mode=TwoWay}" />
+                </StackPanel>
+              </Grid>
+              <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding BasePicker.Error}" TextWrapping="Wrap"
+                         IsVisible="{Binding BasePicker.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              <StackPanel Spacing="6" IsVisible="{Binding HasRecentThemeColors}">
+                <TextBlock Classes="settingsPickerLabel" Text="RECENT" />
+                <ItemsControl ItemsSource="{Binding RecentThemeColors}">
+                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="30" ItemHeight="30" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate><Button Classes="themeSwatch" Tag="{Binding}" ToolTip.Tip="{Binding}" Click="BaseRecentThemeColorButton_OnClick"><Border Background="{Binding}" /></Button></DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <Border Grid.Column="1" Classes="providerSetting" Padding="14">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
+              <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
+                <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8" />
+                <cp:ColorSlider Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
+              </Grid>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="settingsPickerLabel" Text="HEX" />
+                <TextBox Classes="settingsInput" Text="{Binding AccentPicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
+              </StackPanel>
+              <!-- Labelled, because a placeholder disappears the moment the box
+                   has a value in it and three bare numbers say nothing about
+                   which channel is which. -->
+              <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="settingsPickerLabel" Text="R" />
+                  <TextBox Classes="settingsInput" Text="{Binding AccentPicker.RedText, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                  <TextBlock Classes="settingsPickerLabel" Text="G" />
+                  <TextBox Classes="settingsInput" Text="{Binding AccentPicker.GreenText, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="4">
+                  <TextBlock Classes="settingsPickerLabel" Text="B" />
+                  <TextBox Classes="settingsInput" Text="{Binding AccentPicker.BlueText, Mode=TwoWay}" />
+                </StackPanel>
+              </Grid>
+              <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding AccentPicker.Error}" TextWrapping="Wrap"
+                         IsVisible="{Binding AccentPicker.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              <StackPanel Spacing="6" IsVisible="{Binding HasRecentThemeColors}">
+                <TextBlock Classes="settingsPickerLabel" Text="RECENT" />
+                <ItemsControl ItemsSource="{Binding RecentThemeColors}">
+                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel ItemWidth="30" ItemHeight="30" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate><Button Classes="themeSwatch" Tag="{Binding}" ToolTip.Tip="{Binding}" Click="AccentRecentThemeColorButton_OnClick"><Border Background="{Binding}" /></Button></DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </StackPanel>
+          </Border>
         </Grid>
         <Border Classes="settingsDivider" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
