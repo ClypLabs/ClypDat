@@ -4,8 +4,9 @@ namespace ClypDat.App.Services;
 
 internal enum CaptureSourceRecoveryAction { None, RecreateDxgi, SwitchToWgc, RestartWorker }
 
-// One pipeline policy: a full encoder queue can suppress DXGI just as surely
-// as a quiet source. Do not infer cause from a vendor encoder name.
+// Distinguishes acquisition failure from encoder congestion using ownership
+// telemetry, never an encoder vendor name. CFR output can remain exactly at
+// target while it pads a starved source, so output rate is not source health.
 internal sealed class CaptureSourceRecoveryPolicy
 {
     private const int RequiredWindows = 2;
@@ -21,12 +22,23 @@ internal sealed class CaptureSourceRecoveryPolicy
             return CaptureSourceRecoveryAction.None;
         }
 
-        var pressured = health.EncodeQueueCapacity > 0 && health.QueueDepth * 4 >= health.EncodeQueueCapacity * 3;
-        var congestion = health.OutputFrameRate < health.TargetFrameRate * 0.5 && pressured &&
-                         (health.DroppedFrames > 0 || health.EncoderSubmissionStalled);
-        var sourceStarvation = health.InputFrameRate <= 0 && health.UniqueFrameRate <= 0 &&
-                               health.OutputFrameRate < 1 && !pressured;
-        if (!congestion && !sourceStarvation)
+        var pressured = health.EncodeQueueCapacity > 0 &&
+                        health.QueueDepth * 4 >= health.EncodeQueueCapacity * 3;
+        var encoderCongestion = health.EncoderSubmissionStalled ||
+                                (pressured && health.DroppedFrames > 0);
+        if (encoderCongestion)
+        {
+            _consecutiveUnhealthy = 0;
+            return CaptureSourceRecoveryAction.None;
+        }
+
+        var sharedSurfacesExhausted = health.SurfaceCapacity > 0 &&
+                                      health.SurfacesInUse >= health.SurfaceCapacity &&
+                                      health.TransportAllBusyDrops > 0 &&
+                                      health.TransportReleaseLagFrames >= health.SurfaceCapacity;
+        var sourceSilent = health.InputFrameRate <= 0 && health.UniqueFrameRate <= 0 &&
+                           (health.OutputFrameRate < 1 || health.DegradeReason == ReplayDegradeReason.CaptureStall);
+        if (!sharedSurfacesExhausted && !sourceSilent)
         {
             _consecutiveUnhealthy = 0;
             return CaptureSourceRecoveryAction.None;
@@ -34,9 +46,10 @@ internal sealed class CaptureSourceRecoveryPolicy
 
         if (++_consecutiveUnhealthy < RequiredWindows) return CaptureSourceRecoveryAction.None;
         _consecutiveUnhealthy = 0;
-        // Queue-backed DXGI collapse has already proved acquisition shares the
-        // blocked pipeline: recreate cannot drain it, WGC can.
-        if (congestion) return CaptureSourceRecoveryAction.SwitchToWgc;
+        // Every shared slot waiting on a release fence proves recreating the
+        // same transport cannot remove its ownership cycle. WGC owns callback
+        // textures independently, so switch directly.
+        if (sharedSurfacesExhausted) return CaptureSourceRecoveryAction.SwitchToWgc;
         if (_lastDxgiRecreateUtc is { } previous && nowUtc - previous <= RepeatWindow)
             return CaptureSourceRecoveryAction.SwitchToWgc;
         _lastDxgiRecreateUtc = nowUtc;

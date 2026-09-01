@@ -55,13 +55,16 @@ namespace ClypDat.App.Services;
 // WGC, which captures their content directly.
 //
 // Falls back to capturing the primary monitor (no crop, no occlusion pausing)
-// when no game window is detected. NVENC only for now (no software fallback -
-// machines without NVENC should stay on Legacy). Audio reuses
+// when no game window is detected. Hardware encoding is preferred; libx264 is
+// the last-resort live fallback after sustained hardware congestion. Audio reuses
 // AudioCapturePipeline - the same Game/Chat/Microphone routing, WASAPI capture, and mux
 // logic WindowsReplayBuffer uses, via its own independent instance.
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate
 {
+    internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing) =>
+        directBltAvailable && !requiresCopyBeforeProcessing;
+
     private static readonly int[] ReplayFrameRateLadder = [120, 90, 60, 30];
     // How long teardown waits for the pacing thread before giving up and leaking its
     // native resources instead of freeing them underneath it. Generous because
@@ -730,7 +733,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // duplicate. See the encode-time conversion in EncodeScheduledFrame.
         var croppedDirty = false;
         // Set when the scale/convert Blt already ran at present time straight
-        // off the duplication texture, so the encode tick only has to read
+        // off an owned source texture, so the encode tick only has to read
         // nv12Output back rather than produce it. See directBltAvailable.
         var nv12Ready = false;
         // The crop copy above exists purely to outlive the duplication frame.
@@ -742,20 +745,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // and nothing else in the pipeline (the Blt and the readback are both
         // pinned to the encode rate).
         //
-        // It is avoidable. The Video Processor can read the duplication texture
-        // directly with a source rect, so the crop happens as part of the scale
-        // it was feeding instead of as a separate pass beforehand. That means
-        // doing the Blt while the frame is still acquired rather than deferring
-        // it, which costs nothing: the gate below already limits this block to
-        // roughly the encode rate, which is the rate the deferred Blt ran at.
+        // It is avoidable for sources whose texture is already owned by this
+        // processing device. The Video Processor can read those directly with
+        // a source rect. It is deliberately not avoidable for DXGI's shared
+        // cross-device surfaces: their release signal must sit immediately
+        // behind this copy, not behind the downstream scale/convert Blt.
         //
         // Falls back to the copy for the rest of the session if a driver will
         // not hand out an input view for a duplication texture.
-        // CLYPDAT_DISABLE_DIRECT_BLT=1 forces the old staging-copy path, so the
-        // two can be measured against each other on one build.
+        // CLYPDAT_DISABLE_DIRECT_BLT=1 forces the staging-copy path for every
+        // source. DXGI's cross-device leases always take that path regardless:
+        // their producer slots must be released immediately after one bounded
+        // copy, before scale/convert work can queue ahead of the release fence.
         var directBltAvailable = Environment.GetEnvironmentVariable("CLYPDAT_DISABLE_DIRECT_BLT") != "1";
-        // Input views are per-texture, and Desktop Duplication rotates a small
-        // pool of them, so these are cached by native pointer rather than
+        // Input views are per-texture, and capture sources rotate a small pool
+        // of them, so these are cached by native pointer rather than
         // rebuilt per frame. Disposed with the rest of the D3D state.
         var desktopInputViews = new Dictionary<nint, ID3D11VideoProcessorInputView>();
         // Cursor position for the GPU path, already converted into OUTPUT-resolution
@@ -805,6 +809,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // Encoders retired by a mid-session swap (see EncodeJob). Freed only
         // after the encode thread has joined - it may still be inside one.
         var retiredCodecContexts = new List<nint>();
+        var swapCompletionEvents = new List<ManualResetEventSlim>();
         var fullSessionTempVideoPath = string.Empty;
         var fullSessionFinalOutputPath = string.Empty;
         var fullSessionStartUtc = MonotonicClock.UtcNow;
@@ -847,6 +852,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
                 activeGameFrameSource = dxgiCapture;
+                AppLog.Info("Native capture: DXGI shared frames use copy-first ownership; transport slots release before scale/convert.");
                 AppLog.Info($"Native capture: using DXGI Desktop Duplication for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
             }
             catch (Exception error) when (!isMonitorMode)
@@ -1189,6 +1195,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var consecutiveTransportShortfallWindows = 0;
             var consecutiveWgcCongestionWindows = 0;
             var activeEncoderCandidate = default(ReplayEncoderCandidate);
+            var attemptedEncoderCandidates = new HashSet<ReplayEncoderCandidate>();
             // See the content-write sites above and the pacing gate below -
             // measures how stale frame->data's content actually is at the
             // moment each output frame gets encoded, to find out whether a
@@ -1508,7 +1515,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         EncodeQueueCapacity = encodeQueueCapacity,
                         CapturePaused = capturePaused,
                         SaveInProgress = saveInProgress,
-                        EncoderSubmissionStalled = encoderSubmissionStalled
+                        EncoderSubmissionStalled = encoderSubmissionStalled,
+                        DegradeReason = isStalled ? ReplayDegradeReason.CaptureStall : ReplayDegradeReason.None,
+                        TransportFrameRate = dxgiTransportedCount / diagElapsed,
+                        TransportBusySlotSkips = dxgiBusySlotSkips,
+                        TransportAllBusyDrops = dxgiAllBusyDrops,
+                        TransportReleaseLagFrames = dxgiTelemetry?.ReleaseLagFrames ?? 0,
+                        SurfacesInUse = dxgiTelemetry is null
+                            ? 0
+                            : (int)Math.Min(dxgiTelemetry.Value.SlotCount, Math.Max(0, dxgiTelemetry.Value.ReleaseLagFrames)),
+                        SurfaceCapacity = dxgiTelemetry?.SlotCount ?? 0
                     };
                     var sourceRecoveryAction = wgcCapture is null && dxgiCapture is not null
                         ? sourceRecovery.Observe(sourceRecoverySample, foregroundForDiagnostics, DateTime.UtcNow)
@@ -1599,13 +1615,101 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (hasCapturedRealFrame && consecutiveOverloadWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows &&
                         !string.IsNullOrEmpty(activeEncoderCandidate.Name))
                     {
-                        // Codec contexts and their packet metadata are immutable
-                        // for one recording session.  Replacing one here used to
-                        // splice incompatible packets into a live replay ring.
-                        // EncoderTuningService observes this health sample and
-                        // can request one cadence rung after sustained overload.
-                        consecutiveOverloadWindows = 0;
-                        AppLog.Info("Native capture: sustained encoder overload; retaining session encoder until worker restart.");
+                        if (fullSessionFormatContext is not null)
+                        {
+                            // One continuously-written MP4 cannot change codec
+                            // parameter sets mid-track. Protect full-session
+                            // integrity by reducing cadence; replay-window mode
+                            // can swap safely because packets and extradata are
+                            // tagged per encoder generation.
+                            var lower = NextLowerReplayFrameRate(activeFrameRate);
+                            if (Volatile.Read(ref _frameRateProtectionEnabled) != 0 && lower < activeFrameRate)
+                            {
+                                Interlocked.Exchange(ref _requestedFrameRate, lower);
+                                Interlocked.Exchange(ref _frameRateProtectionActive, 1);
+                                startupValidationWindows = 0;
+                                startupValidationComplete = false;
+                                AppLog.Info($"Native capture: full-session encoder congestion requested {activeFrameRate}->{lower} FPS; encoder remains fixed to keep the MP4 track valid.");
+                            }
+                            else
+                            {
+                                AppLog.Info("Native capture: full-session encoder congestion persists at minimum protected cadence; preserving current MP4 encoder.");
+                            }
+                            consecutiveOverloadWindows = 0;
+                        }
+                        else
+                        {
+                            var switched = false;
+                            foreach (var candidate in ReplayEncoderFailoverPolicy.CandidatesAfter(
+                                         config.VideoCodec, config.EncoderMode, activeEncoderCandidate, attemptedEncoderCandidates))
+                            {
+                                attemptedEncoderCandidates.Add(candidate);
+                                try
+                                {
+                                    var replacement = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device,
+                                        out var replacementTimeBase, out var replacementName, out var replacementHardware,
+                                        candidateOrder: new[] { candidate });
+                                    var swapped = new ManualResetEventSlim(false);
+                                    swapCompletionEvents.Add(swapped);
+                                    lock (gpuLock)
+                                    {
+                                        // Stop pacing while the control job crosses
+                                        // the queue. Every job before it uses the old
+                                        // frame type; every job after it sees the new
+                                        // hardwareFramesActive value.
+                                        lock (encodeQueueGate)
+                                            encodeQueue!.Add(new EncodeJob(0, DateTime.UtcNow, (nint)replacement, swapped));
+                                        if (!swapped.Wait(TimeSpan.FromSeconds(5)))
+                                        {
+                                            // Event and context stay alive until the
+                                            // encode thread joins. Ending this capture
+                                            // is safer than racing a late control job.
+                                            retiredCodecContexts.Add((nint)replacement);
+                                            throw new TimeoutException($"Encoder failover to {candidate.Name}/{candidate.InputPath} did not complete within 5 seconds.");
+                                        }
+
+                                        retiredCodecContexts.Add((nint)codecContext);
+                                        codecContext = replacement;
+                                        _timeBase = replacementTimeBase;
+                                        _videoCodecId = replacement->codec_id;
+                                        encoderName = replacementName;
+                                        hardwareFramesActive = replacementHardware;
+                                        requiresDistinctAmfSoftwareFrame = !replacementHardware && replacementName.Contains("amf", StringComparison.OrdinalIgnoreCase);
+                                        activeEncoderCandidate = ResolveEncoderCandidate(config, replacementName, replacementHardware);
+                                        if (!replacementHardware && hwFramesRef != 0)
+                                        {
+                                            if (lastHardwareFrame is not null)
+                                            {
+                                                var staleHardwareFrame = lastHardwareFrame;
+                                                ffmpeg.av_frame_free(&staleHardwareFrame);
+                                                lastHardwareFrame = null;
+                                            }
+                                            hardwarePoolTextures.Clear();
+                                            ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
+                                        }
+                                    }
+                                    startupValidationWindows = 0;
+                                    startupValidationComplete = false;
+                                    consecutiveOverloadWindows = 0;
+                                    switched = true;
+                                    AppLog.Info($"Native capture: sustained encoder congestion switched to {replacementName}/{activeEncoderCandidate.InputPath}; replay retained by encoder generation.");
+                                    break;
+                                }
+                                catch (TimeoutException)
+                                {
+                                    throw;
+                                }
+                                catch (Exception error)
+                                {
+                                    AppLog.Info($"Native capture: encoder failover candidate {candidate.Name}/{candidate.InputPath} unavailable ({error.Message}).");
+                                }
+                            }
+                            if (!switched)
+                            {
+                                consecutiveOverloadWindows = 0;
+                                AppLog.Info("Native capture: every remaining encoder candidate was exhausted; keeping current encoder.");
+                            }
+                        }
                     }
                     // A stall is worse than an overload and reads nothing like one:
                     // no frames arrive at all, so nothing gets dropped and the queue
@@ -1672,6 +1776,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         TransportFrameRate = dxgiTransportedCount / diagElapsed,
                         TransportSlotOverwrites = dxgiSlotOverwrites,
                         TransportBusySlotSkips = dxgiBusySlotSkips,
+                        TransportAllBusyDrops = dxgiAllBusyDrops,
+                        TransportReleaseLagFrames = dxgiTelemetry?.ReleaseLagFrames ?? 0,
+                        SurfacesInUse = dxgiTelemetry is null
+                            ? 0
+                            : (int)Math.Min(dxgiTelemetry.Value.SlotCount, Math.Max(0, dxgiTelemetry.Value.ReleaseLagFrames)),
+                        SurfaceCapacity = dxgiTelemetry?.SlotCount ?? 0,
                         ProducerGpuDuration = dxgiProducerDuration,
                         AverageTransportLeaseDuration = dxgiLeaseDuration,
                         PointerUpdateFrameRate = dxgiPointerTransportedCount / diagElapsed,
@@ -2174,7 +2284,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                             // description is only a hint about - a driver may reject
                                             // the view, the rect, or the Blt itself, and any of
                                             // those throwing here would kill the capture thread.
-                                            if (directBltAvailable)
+                                            if (CanUseDirectVideoProcessorInput(
+                                                    directBltAvailable,
+                                                    frameLease?.RequiresCopyBeforeProcessing == true))
                                             {
                                                 try
                                                 {
@@ -2216,6 +2328,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                                 device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
                                             }
                                         }
+                                        if (frameLease?.RequiresCopyBeforeProcessing == true)
+                                        {
+                                            // Signal transport release directly behind the
+                                            // copy. Cursor work, scaling, readback and encode
+                                            // now use processing-owned resources only.
+                                            frameLease.Dispose();
+                                            frameLease = null;
+                                            desktopResource.Dispose();
+                                            desktopResource = null;
+                                        }
                                         copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
                                         // Same screen->crop conversion the CPU path does, then scaled
@@ -2251,6 +2373,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     {
                                         var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
                                         device.ImmediateContext.CopySubresourceRegion(staging, 0, 0, 0, 0, desktopTexture, 0, box);
+                                    }
+                                    if (frameLease?.RequiresCopyBeforeProcessing == true)
+                                    {
+                                        frameLease.Dispose();
+                                        frameLease = null;
+                                        desktopResource.Dispose();
+                                        desktopResource = null;
                                     }
 
                                     var mapped = device.ImmediateContext.Map(staging, 0, MapMode.Read, MapFlags.None);
@@ -2318,7 +2447,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         finally
                         {
                             Monitor.Exit(gpuLock);
-                            desktopResource.Dispose();
+                            desktopResource?.Dispose();
                             frameLease?.Dispose();
                         }
                     }
@@ -2687,6 +2816,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     hardwareFramesActive = qualifiedHardwareFrames;
                     encoderName = qualifiedEncoderName;
                     activeEncoderCandidate = ResolveEncoderCandidate(config, encoderName, qualifiedHardwareFrames);
+                    attemptedEncoderCandidates.Add(activeEncoderCandidate);
                     requiresDistinctAmfSoftwareFrame = !qualifiedHardwareFrames && qualifiedEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
                     if (!qualifiedHardwareFrames) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
                     if (codecContext is not null && InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
@@ -2942,7 +3072,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             unsafe void EncodeScheduledFrame()
             {
-                if (hwFramesRef != 0)
+                bool encodeHardwareFrame;
+                lock (gpuLock)
+                    encodeHardwareFrame = hardwareFramesActive && hwFramesRef != 0;
+                if (encodeHardwareFrame)
                 {
                     EncodeScheduledFrameHardware();
                     return;
@@ -3351,6 +3484,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 AppLog.Error("Native capture: encode thread shutdown failed.", error);
             }
+            foreach (var completion in swapCompletionEvents) completion.Dispose();
+            swapCompletionEvents.Clear();
             encodeQueue?.Dispose();
 
             // Authoritative join. The one after the capture loop covers only the normal

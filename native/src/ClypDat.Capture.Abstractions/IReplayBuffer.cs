@@ -177,6 +177,8 @@ public sealed record ReplayCaptureHealth(
     public double TransportFrameRate { get; init; }
     public long TransportSlotOverwrites { get; init; }
     public long TransportBusySlotSkips { get; init; }
+    public long TransportAllBusyDrops { get; init; }
+    public long TransportReleaseLagFrames { get; init; }
     public TimeSpan ProducerGpuDuration { get; init; }
     public TimeSpan AverageTransportLeaseDuration { get; init; }
     // Cursor movement is a visual update even while desktop pixels stay still.

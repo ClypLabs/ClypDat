@@ -11,11 +11,16 @@ internal interface IGameFrameSource
     bool WaitAndTakeLatestFrame(TimeSpan timeout, CancellationToken cancellationToken, out GameFrameLease? frame);
 }
 
-// Source owns transport synchronization. Lease survives crop/scale, preventing
-// producer overwrite while consumer reads pixels.
+// Source owns transport synchronization. Shared leases declare copy-first
+// ownership; owned textures may remain leased through crop/scale.
 internal abstract class GameFrameLease : IDisposable
 {
     public abstract ID3D11Texture2D Texture { get; }
+    // Shared cross-device transport textures must be copied into a processing-
+    // owned texture before downstream GPU work begins. Holding such a lease
+    // through scale/convert keeps its release fence behind that work and can
+    // exhaust every producer slot while the encoder itself remains idle.
+    public virtual bool RequiresCopyBeforeProcessing => false;
     public abstract long SourceTimestamp { get; }
     public abstract long AccumulatedPresents { get; }
     public abstract int Width { get; }

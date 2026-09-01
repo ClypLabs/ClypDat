@@ -80,16 +80,45 @@ public sealed class CaptureHealthRecoveryPolicyTests
     }
 
     [Fact]
-    public void DxgiCongestion_SwitchesToWgcAfterTwoWindows_RegardlessOfEncoder()
+    public void SharedSurfaceExhaustionHiddenByCfr_SwitchesToWgcAfterTwoWindows()
     {
         var policy = new CaptureSourceRecoveryPolicy();
         var sample = ReplayCaptureHealth.Unknown("Native") with
         {
-            TargetFrameRate = 90, OutputFrameRate = 8, QueueDepth = 12, EncodeQueueCapacity = 12,
-            DroppedFrames = 1, Encoder = "AMF"
+            TargetFrameRate = 60,
+            InputFrameRate = 25.28,
+            UniqueFrameRate = 25.28,
+            OutputFrameRate = 60,
+            QueueDepth = 0,
+            EncodeQueueCapacity = 8,
+            SurfacesInUse = 6,
+            SurfaceCapacity = 6,
+            TransportBusySlotSkips = 330,
+            TransportAllBusyDrops = 55,
+            TransportReleaseLagFrames = 6
         };
         var now = DateTime.UtcNow;
         Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(sample, true, now));
         Assert.Equal(CaptureSourceRecoveryAction.SwitchToWgc, policy.Observe(sample, true, now));
+    }
+
+    [Fact]
+    public void EncoderCongestion_IsNotMisclassifiedAsSourceFailure()
+    {
+        var policy = new CaptureSourceRecoveryPolicy();
+        var sample = ReplayCaptureHealth.Unknown("Native") with
+        {
+            TargetFrameRate = 60,
+            InputFrameRate = 60,
+            UniqueFrameRate = 60,
+            OutputFrameRate = 20,
+            QueueDepth = 8,
+            EncodeQueueCapacity = 8,
+            DroppedFrames = 40,
+            EncoderSubmissionStalled = true
+        };
+
+        Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(sample, true, DateTime.UtcNow));
+        Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(sample, true, DateTime.UtcNow));
     }
 }

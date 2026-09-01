@@ -21,12 +21,10 @@ internal static class ReplayEncoderFailoverPolicy
         return candidates
             .Skip(activeIndex + 1)
             .Where(candidate => candidate.Codec == active.Codec)
-            // GPU mode must remain on GPU. A CPU encoder can make capture look
-            // alive while its upload/encode work destroys fresh-frame cadence.
-            // Keep current hardware context if every hardware replacement
-            // fails; its live health remains actionable and no libx264 takeover
-            // can turn a GPU overload into a worse CPU bottleneck.
-            .Where(candidate => !active.IsHardware || candidate.IsHardware)
+            // Reliability wins after sustained, measured congestion. libx264
+            // remains last in startup order, after every same-codec hardware
+            // adapter, and generation-tagged packets keep a live swap safe for
+            // replay-window remuxing.
             .Where(candidate => !attempted.Contains(candidate))
             .ToArray();
     }
