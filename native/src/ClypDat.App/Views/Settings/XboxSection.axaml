@@ -198,12 +198,20 @@
                   </Border>
                   <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
                     <TextBlock Classes="settingsRowTitle" Text="Xbox" />
-                    <Border Classes="statusPill ok">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Ellipse />
-                        <TextBlock Text="Linked" />
-                      </StackPanel>
-                    </Border>
+                    <!-- The pill is the link state; what you are playing sits
+                         beside it. XboxCurrentTitle is what the activity poll
+                         actually fetches, and the toggle below names clips after
+                         it, so the row that owns that setting is where you check
+                         whether it is reading anything. -->
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                      <Border Classes="statusPill ok">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Ellipse />
+                          <TextBlock Text="Linked" />
+                        </StackPanel>
+                      </Border>
+                      <TextBlock Classes="settingsRowDescSm" Text="{Binding XboxCurrentTitle}" VerticalAlignment="Center" />
+                    </StackPanel>
                   </StackPanel>
                   <Button Grid.Column="2" VerticalAlignment="Center" Click="UnlinkClypDatXboxButton_OnClick" IsEnabled="{Binding !XboxUnlinkBusy}">
                     <Grid>
