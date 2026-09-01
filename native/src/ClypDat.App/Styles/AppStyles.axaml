@@ -2174,6 +2174,21 @@
     <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
 
+  <!-- A setting a provider brings with it, drawn inside that provider's row.
+       Recessed rather than divided: a settingsDivider hairline is DividerBrush,
+       which is darker than the raised row it would be drawn on and so all but
+       disappeared there, leaving the setting looking bolted onto the bottom of
+       the card. Dropping back to the card's own fill reads as inset at any
+       theme, and the row's pointerover lightens around it rather than with it,
+       which is what keeps the depth. -->
+  <Style Selector="Border.providerSetting">
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="12,10" />
+  </Style>
+
   <!-- The tile behind a provider's mark. Each row sets its own Background to a
        low-alpha wash of that brand's colour, which is why no fill is set here:
        brand colours are the one thing on this page the theme must not re-hue. -->

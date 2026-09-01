@@ -215,14 +215,15 @@
                     </Grid>
                   </Button>
                 </Grid>
-                <Border Classes="settingsDivider" />
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                  <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Classes="settingsRowTitleSm" Text="Use Xbox activity for Desktop Capture" />
-                    <TextBlock Classes="settingsRowDescSm" Text="PC Game Capture remains higher priority." />
-                  </StackPanel>
-                  <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding XboxActivityForDesktop}" OnContent="{x:Null}" OffContent="{x:Null}" />
-                </Grid>
+                <Border Classes="providerSetting">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Classes="settingsRowTitleSm" Text="Use Xbox activity for Desktop Capture" />
+                      <TextBlock Classes="settingsRowDescSm" Text="Names Desktop Capture clips after the game you are playing on Xbox. PC Game Capture stays higher priority." />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding XboxActivityForDesktop}" OnContent="{x:Null}" OffContent="{x:Null}" />
+                  </Grid>
+                </Border>
               </StackPanel>
             </Border>
           </StackPanel>
