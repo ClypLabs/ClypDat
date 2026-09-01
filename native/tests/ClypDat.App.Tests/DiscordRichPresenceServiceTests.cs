@@ -25,7 +25,7 @@ public sealed class DiscordRichPresenceServiceTests
     }
 
     [Fact]
-    public async Task CreateActivity_OfficialGameImage_UsesClypDatOverlay()
+    public async Task CreateActivity_OfficialGameImage_UsesGameArtWithoutOverlay()
     {
         var officialImage = await OfficialGameArtService.ResolveAsync("riot-valorant", "VALORANT");
         var activity = DiscordRichPresenceService.CreateActivity(
@@ -43,8 +43,8 @@ public sealed class DiscordRichPresenceServiceTests
         Assert.Equal(officialImage, assets.GetProperty("large_image").GetString());
         Assert.Equal("VALORANT", assets.GetProperty("large_text").GetString());
         Assert.Equal("https://discord.com/games/700136079562375258", assets.GetProperty("large_url").GetString());
-        Assert.Equal("https://cdn.discordapp.com/app-icons/1542340384418439189/3141eace8a6b8237cdb77920244731f9.png?size=1024", assets.GetProperty("small_image").GetString());
-        Assert.Equal("Clipping with ClypDat", assets.GetProperty("small_text").GetString());
+        Assert.False(assets.TryGetProperty("small_image", out _));
+        Assert.False(assets.TryGetProperty("small_text", out _));
     }
 
 }
