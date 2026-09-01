@@ -149,6 +149,30 @@
         </StackPanel>
       </Border>
 
+      <Border Classes="settingsCard" IsVisible="{Binding HasCaptureMethod}">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="settingsRowTitle" Text="Capture Method" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="CaptureMethod" Click="RemoveCustomGameGroupButton_OnClick" />
+          </Grid>
+          <RadioButton GroupName="CustomGameCaptureMethod" IsChecked="{Binding IsDisplayCapture}">
+            <StackPanel Spacing="2" Margin="4,0,0,0">
+              <TextBlock Text="Display Capture (Default)" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+              <TextBlock Classes="settingsRowDescSm" Text="Captures the game through the normal display route." />
+            </StackPanel>
+          </RadioButton>
+          <RadioButton GroupName="CustomGameCaptureMethod" IsChecked="{Binding IsGraphicsHookCapture}">
+            <StackPanel Spacing="2" Margin="4,0,0,0">
+              <TextBlock Text="Graphics Hook (Experimental)" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" />
+              <TextBlock Classes="settingsRowDescSm" Text="Captures a supported D3D11 backbuffer before desktop composition." />
+            </StackPanel>
+          </RadioButton>
+          <Border Classes="settingsNotice" IsVisible="{Binding IsGraphicsHookCapture}">
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="ClypDat injects a D3D11 hook into this game. Anti-cheat, elevated, or protected games can reject it. ClypDat does not bypass those protections and will fall back to display capture. Restart the game to fully unload the hook after turning this off." />
+          </Border>
+        </StackPanel>
+      </Border>
+
       <!-- Same preset cards and dropdowns as the global Recording
            Quality card, deliberately: a per-game override that looked
            nothing like the setting it overrides is harder to read,
@@ -353,6 +377,7 @@
             <MenuItem Header="Recording Quality" Tag="Quality" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasQuality}" />
             <MenuItem Header="Replay Length and Hotkey" Tag="Replay" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasReplay}" />
             <MenuItem Header="Audio" Tag="Audio" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasAudio}" />
+            <MenuItem Header="Capture Method" Tag="CaptureMethod" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasCaptureMethod}" />
           </MenuFlyout>
         </Button.Flyout>
       </Button>

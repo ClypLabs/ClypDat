@@ -13,15 +13,17 @@ public sealed class CustomGameTabViewModel : ViewModelBase
 {
     private readonly AppSettings _settings;
     private readonly Action _save;
+    private readonly Action? _captureMethodChanged;
     private bool _isSelected;
     private bool _qualityWarningAcknowledged;
 
-    public CustomGameTabViewModel(string detectionKey, CustomGameProfile profile, AppSettings settings, Action save)
+    public CustomGameTabViewModel(string detectionKey, CustomGameProfile profile, AppSettings settings, Action save, Action? captureMethodChanged = null)
     {
         DetectionKey = detectionKey;
         Profile = profile;
         _settings = settings;
         _save = save;
+        _captureMethodChanged = captureMethodChanged;
         Icon = GameIconService.TryLoad(profile.DisplayName);
         // Nothing about the portrait touches the UI thread. This constructor
         // runs once per tab while the settings page is being built, and a
@@ -113,6 +115,12 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         set => SetGroup(CustomGameSettingsResolver.AudioGroup, value);
     }
 
+    public bool HasCaptureMethod
+    {
+        get => Has(CustomGameSettingsResolver.CaptureMethodGroup);
+        set => SetGroup(CustomGameSettingsResolver.CaptureMethodGroup, value);
+    }
+
     public bool HasAnyGroup => Profile.Groups.Count > 0;
 
     /// <summary>
@@ -141,6 +149,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasQuality));
         OnPropertyChanged(nameof(HasReplay));
         OnPropertyChanged(nameof(HasAudio));
+        OnPropertyChanged(nameof(HasCaptureMethod));
         OnPropertyChanged(nameof(HasAnyGroup));
         OnPropertyChanged(nameof(CanAddGroup));
         NotifyQualityWarning();
@@ -181,6 +190,8 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsManualCapture));
         OnPropertyChanged(nameof(IsFullSessionCapture));
         OnPropertyChanged(nameof(IsRecordingOff));
+        OnPropertyChanged(nameof(IsDisplayCapture));
+        OnPropertyChanged(nameof(IsGraphicsHookCapture));
         _save();
     }
 
@@ -288,6 +299,31 @@ public sealed class CustomGameTabViewModel : ViewModelBase
             if (Profile.ReplayBitrateMbps > 20) exceeded.Add($"{Profile.ReplayBitrateMbps} Mbps");
             return $"{DisplayName} exceeds ClypDat's recommended maximums: {string.Join(", ", exceeded)}.";
         }
+    }
+
+    // Two radio buttons over one persisted wire value. Invalid stored values
+    // read as Display and become normalized on the next selection/save.
+    public bool IsDisplayCapture
+    {
+        get => string.Equals(CustomGameSettingsResolver.NormalizeGameCaptureMethod(Profile.GameCaptureMethod), "Display", StringComparison.Ordinal);
+        set { if (value) SetCaptureMethod("Display"); }
+    }
+
+    public bool IsGraphicsHookCapture
+    {
+        get => string.Equals(CustomGameSettingsResolver.NormalizeGameCaptureMethod(Profile.GameCaptureMethod), "Hook", StringComparison.Ordinal);
+        set { if (value) SetCaptureMethod("Hook"); }
+    }
+
+    private void SetCaptureMethod(string method)
+    {
+        method = CustomGameSettingsResolver.NormalizeGameCaptureMethod(method);
+        if (string.Equals(Profile.GameCaptureMethod, method, StringComparison.Ordinal)) return;
+        Profile.GameCaptureMethod = method;
+        OnPropertyChanged(nameof(IsDisplayCapture));
+        OnPropertyChanged(nameof(IsGraphicsHookCapture));
+        _save();
+        _captureMethodChanged?.Invoke();
     }
 
     public void FixQualityWarning()

@@ -386,6 +386,7 @@ public sealed partial class MainWindow : Window
                         or nameof(MainWindowViewModel.SelectedDesktopMonitor)
                         or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
                         or nameof(MainWindowViewModel.ReplayAutoSwitchToGameCapture)
+                        or nameof(MainWindowViewModel.ActiveGameCaptureMethodChanged)
                         ) ScheduleReplayRestart();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
@@ -2684,7 +2685,8 @@ public sealed partial class MainWindow : Window
         config.CaptureMonitorDeviceName,
         config.GameExecutableName,
         config.GameWindowHandle,
-        config.Backend);
+        config.Backend,
+        config.GameCaptureMethod);
 
     private void ReconcileReplayTarget()
     {
@@ -6163,6 +6165,7 @@ public sealed partial class MainWindow : Window
             case "Quality": tab.HasQuality = enabled; break;
             case "Replay": tab.HasReplay = enabled; break;
             case "Audio": tab.HasAudio = enabled; break;
+            case "CaptureMethod": tab.HasCaptureMethod = enabled; break;
         }
     }
 

@@ -95,6 +95,12 @@ bindings use FFmpeg.AutoGen, licensed under the **MIT License**. This
 covers only the C# binding code itself; the underlying ffmpeg binaries it
 calls into are covered under "ffmpeg / ffprobe (GPL)" above.
 
+## MinHook (BSD-2-Clause)
+
+The experimental D3D11 graphics hook uses MinHook v1.3.4, bundled from
+https://github.com/TsudaKageyu/minhook/releases/tag/v1.3.4. Its unmodified
+source and BSD-2-Clause license are under `native/capture-native/vendor/minhook`.
+
 - Project: https://github.com/Ruslan-B/FFmpeg.AutoGen
 
 ---

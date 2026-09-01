@@ -703,6 +703,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         IDXGIOutputDuplication? duplication = null;
         DesktopDuplicationFrameSource? dxgiCapture = null;
         WindowGraphicsCaptureSource? wgcCapture = null;
+        GraphicsHookFrameSource? hookCapture = null;
         IGameFrameSource? activeGameFrameSource = null;
         // GPU-side downscale path (see TrySetupGpuScale) - only actually used
         // when useGpuScale ends up true; `staging`/swsContext above always
@@ -854,25 +855,46 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
             Vortice.RawRect desktopBounds;
-            try
+            var hookFallbackReason = string.Empty;
+            var hookRequested = !isMonitorMode && string.Equals(config.GameCaptureMethod, "Hook", StringComparison.OrdinalIgnoreCase);
+            var hookFailure = string.Empty;
+            if (hookRequested &&
+                GraphicsHookFrameSource.TryCreate(device, gpuLock, config, out hookCapture, out hookFailure))
             {
+                activeGameFrameSource = hookCapture;
+                var size = hookCapture!.ContentSize;
+                desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                AppLog.Info($"Native capture: Graphics Hook ready for game window 0x{targetHandle:X}.");
+            }
+            else
+            {
+                if (hookRequested)
+                {
+                    hookFallbackReason = hookFailure;
+                    AppLog.Info($"Native capture: Graphics Hook unavailable ({hookFallbackReason}); using DXGI.");
+                }
+                try
+                {
                 // Keep duplication and video processing on one ordered device.
                 // The acquired surface can feed the Video Processor directly;
                 // ReleaseFrame follows the queued Blt, so there is no full-frame
                 // transport copy and no cross-device release-fence backlog.
                 duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds);
                 AppLog.Info($"Native capture: using DXGI Desktop Duplication for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
-            }
-            catch (Exception error) when (!isMonitorMode)
-            {
+                }
+                catch (Exception error) when (!isMonitorMode)
+                {
                 AppLog.Error("Native capture: DXGI initialization failed; using bounded WGC recovery source.", error);
                 wgcCapture = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, config.FrameRate);
                 activeGameFrameSource = wgcCapture;
                 var size = wgcCapture.ContentSize;
                 desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                }
             }
 
-            var (captureWidth, captureHeight) = wgcCapture is not null
+            var (captureWidth, captureHeight) = hookCapture is not null
+                ? hookCapture.ContentSize
+                : wgcCapture is not null
                 ? wgcCapture.ContentSize
                 : isMonitorMode
                 ? (desktopBounds.Right - desktopBounds.Left, desktopBounds.Bottom - desktopBounds.Top)
@@ -1292,6 +1314,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             startupValidationPrimed = false;
                             startupValidationComplete = false;
                             Volatile.Write(ref _activeFrameRate, activeFrameRate);
+                            hookCapture?.SetTargetFrameRate(activeFrameRate);
                             if (activeFrameRate >= Volatile.Read(ref _configuredFrameRate))
                                 Interlocked.Exchange(ref _frameRateProtectionActive, 0);
                             AppLog.Info($"Native capture: active cadence is now {activeFrameRate} FPS (selected {config.FrameRate} FPS).");
@@ -1771,7 +1794,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         const string recoveryGuidance = "Automatic hardware profile is already active; reduce capture resolution or frame rate.";
                         AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgInputMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.0}, avgOutputMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
                     }
-                    var activeCaptureMode = wgcCapture is null ? dxgiCapture?.CaptureMode ?? "Game Capture" : "Windows Graphics Capture (recovery)";
+                    var activeCaptureMode = hookCapture?.CaptureMode ?? (wgcCapture is null ? dxgiCapture?.CaptureMode ?? "Game Capture" : "Windows Graphics Capture (recovery)");
                     SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
                         pipelineAction == ReplayPipelineRecoveryAction.SwitchToWgc ? ReplayCaptureState.Recovering :
                         overloaded || isStalled || transportDegraded || sourceStarved ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
@@ -1809,10 +1832,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         SaveInProgress = Volatile.Read(ref _savesInFlight) > 0,
                         WgcRequestedUpdateInterval = wgcTelemetry?.MinimumUpdateInterval.Requested,
                         WgcAppliedUpdateInterval = wgcTelemetry?.MinimumUpdateInterval.Applied,
-                        HookPresents = 0,
-                        HookTransportedFrames = 0,
-                        HookTransportDrops = 0,
-                        HookFallbackReason = string.Empty,
+                        HookPresents = hookCapture?.Telemetry.Presents ?? 0,
+                        HookTransportedFrames = hookCapture?.Telemetry.TransportedFrames ?? 0,
+                        HookTransportDrops = hookCapture?.Telemetry.TransportDrops ?? 0,
+                        HookFallbackReason = hookFallbackReason,
                         AcquiredFrameRate = dxgiAcquiredCount / diagElapsed,
                         TransportFrameRate = dxgiTransportedCount / diagElapsed,
                         TransportSlotOverwrites = dxgiSlotOverwrites,
@@ -1995,7 +2018,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     continue;
                 }
 
-                var usingWgc = wgcCapture is not null;
+                var usingWgc = wgcCapture is not null || hookCapture is not null;
                 // Both sources now publish application-owned textures. DXGI's
                 // producer has already copied and released its acquired frame
                 // before this consumer begins crop/scale work.
@@ -2067,7 +2090,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
                 if (desktopResource is null && selectedGameFrameSource is not null && !string.IsNullOrWhiteSpace(selectedGameFrameSource.Failure))
                 {
-                    if (usingWgc)
+                    if (hookCapture is not null)
+                    {
+                        var sourceFailure = selectedGameFrameSource.Failure ?? "Graphics hook transport stopped.";
+                        hookFallbackReason = sourceFailure;
+                        AppLog.Info($"Native capture: {sourceFailure} Switching Graphics Hook to DXGI.");
+                        hookCapture.Dispose();
+                        hookCapture = null;
+                        activeGameFrameSource = null;
+                        try { duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds); }
+                        catch (Exception error) { throw new InvalidOperationException("DXGI fallback after graphics hook failure could not start.", error); }
+                    }
+                    else if (usingWgc)
                     {
                         AppLog.Info($"Native capture: WGC source closed ({selectedGameFrameSource.Failure}); restarting WGC.");
                         wgcCapture!.Dispose();
@@ -3696,6 +3730,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 hardwarePoolTextures.Clear();
                 ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
                 wgcCapture?.Dispose();
+                hookCapture?.Dispose();
                 dxgiCapture?.Dispose();
                 duplication?.Dispose();
                 staging?.Dispose();

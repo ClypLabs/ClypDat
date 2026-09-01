@@ -75,3 +75,9 @@ The output is `native\publish\win-x64-folder`. It contains `ClypDat.exe`, depend
 ## License
 
 ClypDat is licensed under GPLv3. See [LICENSE](LICENSE). Distributed builds bundle LibVLC under LGPL-2.1-or-later and FFmpeg under GPL; [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) lists each bundled component and its source location.
+
+Game Capture normally uses display capture. Per-game Custom Game Settings can
+opt into the experimental D3D11 Graphics Hook, which injects only into the
+selected x64 game to copy its supported backbuffer before desktop composition.
+Anti-cheat, elevated, protected, unsupported-renderer, HDR, and cross-adapter
+targets remain on the normal display route; ClypDat does not bypass protections.

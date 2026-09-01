@@ -332,6 +332,10 @@ public sealed class CustomGameProfile
     public string DisplayName { get; set; } = string.Empty;
     public List<string> Groups { get; set; } = new();
 
+    // "Display" preserves the established capture route. "Hook" opts this
+    // game into the D3D11 graphics hook when Capture Method is enabled.
+    public string GameCaptureMethod { get; set; } = "Display";
+
     // "Manual" (replay buffer, saved by hotkey), "FullSession" (record the
     // whole session from launch) or "Off" (do not record this game at all).
     public string RecordingMode { get; set; } = "Manual";

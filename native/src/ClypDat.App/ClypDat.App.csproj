@@ -143,6 +143,7 @@
 
   <ItemGroup>
     <Content Include="..\..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\capture-native\vendor\minhook\LICENSE.txt" Link="licenses\MinHook-BSD-2-Clause.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\game-catalog.json" Link="game-catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\game-icons.json" Link="game-icons.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\official-game-art.json" Link="official-game-art.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -213,8 +214,20 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <Target Name="CopyGraphicsHookPayloadsToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.GraphicsHook.dll') And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Hook.Injector.exe')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.GraphicsHook.dll;$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Hook.Injector.exe"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <Target Name="CopyNativeCaptureEngineToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll')">
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyGraphicsHookPayloadsToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.GraphicsHook.dll') And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Hook.Injector.exe')">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.GraphicsHook.dll;$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Hook.Injector.exe"
           DestinationFolder="$(PublishDir)"
           SkipUnchangedFiles="true" />
   </Target>
