@@ -93,6 +93,16 @@ public sealed class CaptureHealthRecoveryPolicyTests
             ReplayStartupQualificationPolicy.ClassifyWindow(primed: true, packetsOut: 1, passes: false));
     }
 
+    [Theory]
+    [InlineData(3, 3, true)]
+    [InlineData(0, 7, false)]
+    [InlineData(0, 8, true)]
+    public void StartupQualification_CompletesAfterSuccessOrBoundedSamples(
+        int passedWindows, int sampledWindows, bool expected)
+    {
+        Assert.Equal(expected, ReplayStartupQualificationPolicy.HasCompleted(passedWindows, sampledWindows));
+    }
+
     [Fact]
     public void SharedSurfaceExhaustionHiddenByCfr_SwitchesToWgcAfterTwoWindows()
     {
