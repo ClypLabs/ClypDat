@@ -583,32 +583,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (_editingTheme is null) return;
         (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), false,
             new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = ThemeEditorBaseColor, AccentColor = ThemeEditorAccentColor });
-        foreach (var brush in ThemePreviewBrushes) OnPropertyChanged(brush);
     }
 
-    private static readonly string[] ThemePreviewBrushes =
-    {
-        nameof(ThemePreviewGroundBrush), nameof(ThemePreviewPanelBrush), nameof(ThemePreviewSurfaceBrush),
-        nameof(ThemePreviewRaisedBrush), nameof(ThemePreviewEdgeBrush), nameof(ThemePreviewTextBrush),
-        nameof(ThemePreviewSubtleBrush), nameof(ThemePreviewMutedBrush), nameof(ThemePreviewAccentBrush),
-        nameof(ThemePreviewAccentTextBrush)
-    };
-
-    // The editor's preview card. Strong colours are damped before they are
-    // painted, so the swatch and the app no longer show the same thing; the card
-    // is where the user sees what they will actually get. Read back out of the
-    // live resources rather than recomputed here, so it cannot drift from the
-    // real result - PreviewThemeEditor has already applied them.
-    public IBrush ThemePreviewGroundBrush => AppThemeService.Brush("AppBgBrush", "#0D1116");
-    public IBrush ThemePreviewPanelBrush => AppThemeService.Brush("PanelBgBrush", "#101820");
-    public IBrush ThemePreviewSurfaceBrush => AppThemeService.Brush("SurfaceBrush", "#141D24");
-    public IBrush ThemePreviewRaisedBrush => AppThemeService.Brush("SurfaceRaisedBrush", "#1A242E");
-    public IBrush ThemePreviewEdgeBrush => AppThemeService.Brush("EdgeBrush", "#232F3A");
-    public IBrush ThemePreviewTextBrush => AppThemeService.Brush("TextStrongBrush", "#EDF4FB");
-    public IBrush ThemePreviewSubtleBrush => AppThemeService.Brush("TextSubtleBrush", "#9FB2C6");
-    public IBrush ThemePreviewMutedBrush => AppThemeService.Brush("TextMutedBrush", "#6B7C8C");
-    public IBrush ThemePreviewAccentBrush => AppThemeService.Brush("AccentBrush", "#5864E8");
-    public IBrush ThemePreviewAccentTextBrush => AppThemeService.Brush("AccentForegroundBrush", "#FFFFFF");
 
     public string AppFontFamilyName
     {

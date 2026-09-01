@@ -118,14 +118,14 @@
           <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" VerticalAlignment="Center" />
           <TextBox Classes="settingsInput" Width="240" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
         </StackPanel>
-        <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="28">
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="28">
           <StackPanel Grid.Column="0" Spacing="8">
             <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
-            <Grid ColumnDefinitions="200,20" ColumnSpacing="10" HorizontalAlignment="Left">
+            <Grid ColumnDefinitions="*,20" ColumnSpacing="10">
               <!-- Bound on HsvColor, not Color. Dragging into pure black or pure
                    white throws the hue away in RGB, so the hue slider would jump
                    back to red the moment the spectrum reached an edge. -->
-              <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="200" Height="200" CornerRadius="6" />
+              <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" MinWidth="200" Height="200" CornerRadius="6" />
               <cp:ColorSlider Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
             </Grid>
             <TextBox Classes="settingsInput" Text="{Binding BasePicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
@@ -144,8 +144,8 @@
           </StackPanel>
           <StackPanel Grid.Column="1" Spacing="8">
             <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
-            <Grid ColumnDefinitions="200,20" ColumnSpacing="10" HorizontalAlignment="Left">
-              <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="200" Height="200" CornerRadius="6" />
+            <Grid ColumnDefinitions="*,20" ColumnSpacing="10">
+              <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" MinWidth="200" Height="200" CornerRadius="6" />
               <cp:ColorSlider Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="200" IsAlphaVisible="False" />
             </Grid>
             <TextBox Classes="settingsInput" Text="{Binding AccentPicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
@@ -161,59 +161,6 @@
                 <DataTemplate><Button Classes="themeSwatch" Tag="{Binding}" ToolTip.Tip="{Binding}" Click="AccentRecentThemeColorButton_OnClick"><Border Background="{Binding}" /></Button></DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-          </StackPanel>
-          <StackPanel Grid.Column="2" Spacing="8">
-            <!-- Strong colours are damped before they are painted, so the pickers
-                 to the left and the app no longer show the same thing. This is
-                 where the user sees what they will actually get.
-
-                 It is a miniature of the app rather than a single swatch because
-                 a theme is a family, not a colour: the rail against the page, a
-                 card against both, and the three text tiers on top of that are
-                 what tells you whether a base works, and one flat rectangle
-                 cannot show any of it. Every brush is read back out of the live
-                 resources the preview has already applied, so the mock cannot
-                 claim something different from the window around it. -->
-            <TextBlock Classes="settingsCardLabel" Text="PREVIEW" />
-            <Border Height="200" CornerRadius="10" BorderThickness="1" ClipToBounds="True"
-                    Background="{Binding ThemePreviewGroundBrush}" BorderBrush="{Binding ThemePreviewEdgeBrush}">
-              <Grid ColumnDefinitions="44,*">
-                <!-- Rail -->
-                <Border Background="{Binding ThemePreviewPanelBrush}" BorderThickness="0,0,1,0" BorderBrush="{Binding ThemePreviewEdgeBrush}">
-                  <StackPanel Spacing="8" Margin="0,14" HorizontalAlignment="Center">
-                    <Border Width="24" Height="24" CornerRadius="7" Background="{Binding ThemePreviewAccentBrush}" />
-                    <Border Width="24" Height="24" CornerRadius="7" Background="{Binding ThemePreviewRaisedBrush}" />
-                    <Border Width="24" Height="24" CornerRadius="7" Background="{Binding ThemePreviewRaisedBrush}" />
-                  </StackPanel>
-                </Border>
-                <Grid Grid.Column="1" RowDefinitions="Auto,*" Margin="14,12">
-                  <StackPanel Spacing="2">
-                    <TextBlock Text="{Binding ThemeEditorName}" Foreground="{Binding ThemePreviewTextBrush}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="Every surface, both text tiers and the accent" Foreground="{Binding ThemePreviewSubtleBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                  </StackPanel>
-                  <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="10" Margin="0,12,0,0">
-                    <Border CornerRadius="8" Padding="12" BorderThickness="1"
-                            Background="{Binding ThemePreviewSurfaceBrush}" BorderBrush="{Binding ThemePreviewEdgeBrush}">
-                      <StackPanel Spacing="8">
-                        <TextBlock Text="Card" Foreground="{Binding ThemePreviewTextBrush}" FontWeight="SemiBold" FontSize="12" />
-                        <TextBlock Text="Muted label" Foreground="{Binding ThemePreviewMutedBrush}" FontSize="11" />
-                        <Border CornerRadius="6" Padding="10,4" HorizontalAlignment="Left" Background="{Binding ThemePreviewAccentBrush}">
-                          <TextBlock Text="Accent" Foreground="{Binding ThemePreviewAccentTextBrush}" FontSize="11" FontWeight="Bold" />
-                        </Border>
-                      </StackPanel>
-                    </Border>
-                    <Border Grid.Column="1" CornerRadius="8" Padding="12" BorderThickness="1"
-                            Background="{Binding ThemePreviewRaisedBrush}" BorderBrush="{Binding ThemePreviewEdgeBrush}">
-                      <StackPanel Spacing="8">
-                        <TextBlock Text="Raised" Foreground="{Binding ThemePreviewTextBrush}" FontWeight="SemiBold" FontSize="12" />
-                        <TextBlock Text="Subtle body copy" Foreground="{Binding ThemePreviewSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-                        <Border Height="6" CornerRadius="3" Background="{Binding ThemePreviewEdgeBrush}" />
-                      </StackPanel>
-                    </Border>
-                  </Grid>
-                </Grid>
-              </Grid>
-            </Border>
           </StackPanel>
         </Grid>
         <Border Classes="settingsDivider" />
