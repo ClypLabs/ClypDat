@@ -285,7 +285,7 @@ public sealed class Cs2GsiListener : IDisposable
             return;
         }
 
-        if (!root.TryGetProperty("player", out var player))
+        if (!TryGetObjectProperty(root, "player", out var player))
         {
             lock (_stateLock)
             {
@@ -295,9 +295,9 @@ public sealed class Cs2GsiListener : IDisposable
             return;
         }
 
-        if (root.TryGetProperty("provider", out var provider) &&
-            provider.TryGetProperty("steamid", out var providerSteamIdElement) &&
-            player.TryGetProperty("steamid", out var playerSteamIdElement) &&
+        if (TryGetObjectProperty(root, "provider", out var provider) &&
+            TryGetProperty(provider, "steamid", out var providerSteamIdElement) &&
+            TryGetProperty(player, "steamid", out var playerSteamIdElement) &&
             providerSteamIdElement.GetString() is { Length: > 0 } providerSteamId &&
             playerSteamIdElement.GetString() is { Length: > 0 } playerSteamId &&
             !string.Equals(providerSteamId, playerSteamId, StringComparison.Ordinal))
@@ -310,18 +310,18 @@ public sealed class Cs2GsiListener : IDisposable
             return;
         }
 
-        var state = player.TryGetProperty("state", out var stateElement) ? stateElement : default;
-        var matchStats = player.TryGetProperty("match_stats", out var statsElement) ? statsElement : default;
-        var mapName = root.TryGetProperty("map", out var mapElement) && mapElement.TryGetProperty("name", out var mapNameElement)
+        var state = TryGetObjectProperty(player, "state", out var stateElement) ? stateElement : default;
+        var matchStats = TryGetObjectProperty(player, "match_stats", out var statsElement) ? statsElement : default;
+        var mapName = TryGetObjectProperty(root, "map", out var mapElement) && TryGetProperty(mapElement, "name", out var mapNameElement)
             ? mapNameElement.GetString() ?? string.Empty
             : string.Empty;
-        var mapMode = root.TryGetProperty("map", out mapElement) && mapElement.TryGetProperty("mode", out var mapModeElement)
+        var mapMode = TryGetObjectProperty(root, "map", out mapElement) && TryGetProperty(mapElement, "mode", out var mapModeElement)
             ? mapModeElement.GetString() ?? string.Empty
             : string.Empty;
-        var roundNumber = root.TryGetProperty("map", out var map) && map.TryGetProperty("round", out var roundElement) && roundElement.TryGetInt32(out var parsedRound)
+        var roundNumber = TryGetObjectProperty(root, "map", out var map) && TryGetProperty(map, "round", out var roundElement) && roundElement.TryGetInt32(out var parsedRound)
             ? parsedRound
             : (int?)null;
-        var roundOver = root.TryGetProperty("round", out var round) && round.TryGetProperty("phase", out var phase) &&
+        var roundOver = TryGetObjectProperty(root, "round", out var round) && TryGetProperty(round, "phase", out var phase) &&
                         string.Equals(phase.GetString(), "over", StringComparison.OrdinalIgnoreCase);
 
         var roundKills = GetInt(state, "round_kills");
@@ -514,7 +514,17 @@ public sealed class Cs2GsiListener : IDisposable
     }
 
     private static int? GetInt(JsonElement parent, string name) =>
-        parent.ValueKind == JsonValueKind.Object && parent.TryGetProperty(name, out var element) && element.TryGetInt32(out var value) ? value : null;
+        TryGetProperty(parent, name, out var element) && element.TryGetInt32(out var value) ? value : null;
+
+    private static bool TryGetProperty(JsonElement parent, string name, out JsonElement value)
+    {
+        if (parent.ValueKind == JsonValueKind.Object) return parent.TryGetProperty(name, out value);
+        value = default;
+        return false;
+    }
+
+    private static bool TryGetObjectProperty(JsonElement parent, string name, out JsonElement value) =>
+        TryGetProperty(parent, name, out value) && value.ValueKind == JsonValueKind.Object;
 
     private static readonly Dictionary<string, string> KnownMapNames = new(StringComparer.OrdinalIgnoreCase)
     {

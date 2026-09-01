@@ -45,6 +45,7 @@ public static class GsiAuth
     public static bool IsPayloadAuthorized(JsonElement root, string expectedToken)
     {
         if (string.IsNullOrEmpty(expectedToken)) return false;
+        if (root.ValueKind != JsonValueKind.Object) return false;
         if (!root.TryGetProperty("auth", out var auth) || auth.ValueKind != JsonValueKind.Object) return false;
         if (!auth.TryGetProperty(TokenKey, out var tokenElement) || tokenElement.ValueKind != JsonValueKind.String) return false;
 
