@@ -114,11 +114,11 @@
          width for both all along. -->
     <Border Classes="settingsCard" IsVisible="{Binding IsThemeEditorOpen}">
       <StackPanel Spacing="14">
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+        <StackPanel Orientation="Horizontal" Spacing="16">
           <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" VerticalAlignment="Center" />
-          <TextBox Grid.Column="1" Classes="settingsInput" Width="240" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
-        </Grid>
-        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="24">
+          <TextBox Classes="settingsInput" Width="240" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
+        </StackPanel>
+        <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="28">
           <StackPanel Grid.Column="0" Spacing="8">
             <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
             <Grid ColumnDefinitions="200,20" ColumnSpacing="10" HorizontalAlignment="Left">
@@ -142,7 +142,7 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </StackPanel>
-          <StackPanel Grid.Column="2" Spacing="8">
+          <StackPanel Grid.Column="1" Spacing="8">
             <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
             <Grid ColumnDefinitions="200,20" ColumnSpacing="10" HorizontalAlignment="Left">
               <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="200" Height="200" CornerRadius="6" />
@@ -162,21 +162,18 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </StackPanel>
-        </Grid>
-        <Border Classes="settingsDivider" />
-        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="20">
-          <!-- Strong colours are damped before they are painted, so the swatch
-               above and the app no longer show the same thing. This is where the
-               user sees what they will actually get; it reads the live theme
-               resources the preview has already applied, so it cannot claim
-               something different from the window around it. -->
-          <StackPanel Spacing="8">
+          <StackPanel Grid.Column="2" Spacing="8">
+            <!-- Strong colours are damped before they are painted, so the pickers
+                 above and the app no longer show the same thing. This is where the
+                 user sees what they will actually get; it reads the live theme
+                 resources the preview has already applied, so it cannot claim
+                 something different from the window around it. -->
             <TextBlock Classes="settingsCardLabel" Text="PREVIEW" />
-            <Border Width="220" Height="112" CornerRadius="10" Padding="12" BorderThickness="1"
+            <Border Height="200" MaxWidth="300" CornerRadius="10" Padding="14" BorderThickness="1" HorizontalAlignment="Left" MinWidth="200"
                     Background="{Binding ThemePreviewGroundBrush}" BorderBrush="{Binding ThemePreviewSurfaceBrush}">
-              <Grid RowDefinitions="Auto,*,Auto" RowSpacing="8">
+              <Grid RowDefinitions="Auto,*,Auto" RowSpacing="10">
                 <TextBlock Text="{Binding ThemeEditorName}" Foreground="{Binding ThemePreviewTextBrush}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
-                <Border Grid.Row="1" CornerRadius="6" Background="{Binding ThemePreviewSurfaceBrush}" Padding="8">
+                <Border Grid.Row="1" CornerRadius="6" Background="{Binding ThemePreviewSurfaceBrush}" Padding="10">
                   <TextBlock Text="Muted label" Foreground="{Binding ThemePreviewMutedBrush}" FontSize="11" VerticalAlignment="Center" />
                 </Border>
                 <Border Grid.Row="2" CornerRadius="6" Padding="10,4" HorizontalAlignment="Left" Background="{Binding ThemePreviewAccentBrush}">
@@ -185,13 +182,16 @@
               </Grid>
             </Border>
           </StackPanel>
-          <StackPanel Grid.Column="1" Spacing="10" VerticalAlignment="Bottom">
+        </Grid>
+        <Border Classes="settingsDivider" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
+          <StackPanel Spacing="6" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowDescSm" Text="Apply saves this theme and selects it, leaving the editor open so you can keep tuning. Close repaints from what is saved, so anything not applied is dropped." />
             <TextBlock Foreground="{StaticResource DangerBrush}" Text="{Binding ThemeEditorError}" IsVisible="{Binding ThemeEditorError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
-            <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button Classes="primaryButton" Content="Apply" Click="ApplyCustomThemeButton_OnClick" />
-              <Button Content="Close" Click="CancelCustomThemeButton_OnClick" />
-            </StackPanel>
+          </StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Button Classes="primaryButton" Content="Apply" Click="ApplyCustomThemeButton_OnClick" />
+            <Button Content="Close" Click="CancelCustomThemeButton_OnClick" />
           </StackPanel>
         </Grid>
       </StackPanel>
