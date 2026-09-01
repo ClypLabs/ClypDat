@@ -907,6 +907,18 @@ public sealed partial class MainWindow : Window
             }
             return;
         }
+        if (health.RecoveryStopReason == ReplayRecoveryStopReason.CapturePipelineStall)
+        {
+            CaptureBackgroundWorkGate.EndCapture();
+            ViewModel.IsReplayRecording = false;
+            ViewModel.ReplayBufferEnabled = false;
+            if (!_workerCrashMessageShown)
+            {
+                _workerCrashMessageShown = true;
+                _ = ShowMessageAsync("Replay stopped", "Capture pipeline stalled after recovery. Turn Replay Buffer off and on to retry.");
+            }
+            return;
+        }
         _workerCrashMessageShown = false;
         if (ViewModel is not null && ViewModel.IsReplayRecording)
             ViewModel.RecorderStatus = ViewModel.IsReplayArming ? "Replay Arming" : "Replay On";

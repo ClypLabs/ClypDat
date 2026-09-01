@@ -46,6 +46,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     // it was too old for the selected output cadence.
     private readonly PresentSamplingBudget _transportSamplingBudget;
     private readonly bool _captureCursor;
+    public int? AppliedGpuPriority { get; }
     private readonly Stopwatch _producerClock = Stopwatch.StartNew();
     private int _nextSlot;
     private long _generation, _sequence;
@@ -60,10 +61,11 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     // says the queue, not the ring depth, is the remaining wall.
     private long _allBusyDrops, _releaseLagFrames, _acquireTicks;
 
-    private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication, int frameRate, bool captureCursor)
+    private DesktopDuplicationFrameSource(ID3D11Device captureDevice, ID3D11Device processingDevice, IDXGIOutputDuplication duplication, int frameRate, bool captureCursor, int? appliedGpuPriority)
     {
         _captureDevice = captureDevice; _processingDevice = processingDevice; _duplication = duplication;
         _captureCursor = captureCursor;
+        AppliedGpuPriority = appliedGpuPriority;
         _captureDevice5 = captureDevice.QueryInterface<ID3D11Device5>();
         _processingDevice5 = processingDevice.QueryInterface<ID3D11Device5>();
         _captureContext = captureDevice.ImmediateContext.QueryInterface<ID3D11DeviceContext4>();
@@ -91,7 +93,8 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         var levels = new[] { FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1 };
         D3D11.D3D11CreateDevice(adapter, DriverType.Unknown, DeviceCreationFlags.BgraSupport, levels, out var captureDevice, out _, out ID3D11DeviceContext? context).CheckError();
         context?.Dispose();
-        try { return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds), config.FrameRate, config.CaptureCursor); }
+        var appliedGpuPriority = GpuScheduling.TryRaiseDeviceGpuPriority(captureDevice!.NativePointer, "DXGI acquisition");
+        try { return new DesktopDuplicationFrameSource(captureDevice!, processingDevice, NativeReplayBuffer.CreateDuplicationFor(captureDevice!, targetHandle, config, out desktopBounds), config.FrameRate, config.CaptureCursor, appliedGpuPriority); }
         catch { captureDevice?.Dispose(); throw; }
     }
 

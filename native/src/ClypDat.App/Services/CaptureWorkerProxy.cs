@@ -202,7 +202,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         }
 
         _desiredRecording = false;
-        RecoveryHealth(1, _health.RecentWorkerFailureCount, _health.LastWorkerExitCode, null, true,
+        RecoveryHealth(1, _health.RecentWorkerFailureCount, _health.LastWorkerExitCode, null, true, ReplayRecoveryStopReason.CapturePipelineStall,
             "Capture output remained below 1 FPS with a full encoder queue; recording stopped.");
         SetRecording(false);
         RecordingStopped?.Invoke(this, EventArgs.Empty);
@@ -214,7 +214,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         lock (_gate) { _failures.RemoveAll(time => now - time > TimeSpan.FromMinutes(2)); _failures.Add(now); count = _failures.Count; }
         AppLog.Info($"Capture worker lost ({reason}, exit={exitCode?.ToString() ?? "unknown"}), failures={count}.");
         if (count >= 5) { Breaker(count, exitCode); return; }
-        RecoveryHealth(0, count, exitCode, DateTime.UtcNow, false, $"Capture worker lost: {reason}");
+        RecoveryHealth(0, count, exitCode, DateTime.UtcNow, false, ReplayRecoveryStopReason.None, $"Capture worker lost: {reason}");
         try
         {
             using var reconnect = CancellationTokenSource.CreateLinkedTokenSource(token); reconnect.CancelAfter(TimeSpan.FromSeconds(2));
@@ -224,7 +224,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             KillWorker();
             for (var attempt = 0; attempt < RetryDelays.Length; attempt++)
             {
-                var delay = RetryDelays[attempt]; RecoveryHealth(attempt + 1, count, exitCode, DateTime.UtcNow + delay, false, $"Restarting capture worker in {delay.TotalSeconds:0}s.");
+                var delay = RetryDelays[attempt]; RecoveryHealth(attempt + 1, count, exitCode, DateTime.UtcNow + delay, false, ReplayRecoveryStopReason.None, $"Restarting capture worker in {delay.TotalSeconds:0}s.");
                 if (delay > TimeSpan.Zero) await Task.Delay(delay, token);
                 // This recovery owns replacement generations too. Do not
                 // abandon retry merely because StartWorker advanced generation.
@@ -248,8 +248,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     }
 
     private void Breaker(int count, int? exitCode)
-    { _desiredRecording = false; RecoveryHealth(RetryDelays.Length, count, exitCode, null, true, "Capture worker crashed repeatedly."); Dispatcher.UIThread.Post(() => { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); }); AppLog.Info("Capture worker recovery breaker opened."); }
-    private void RecoveryHealth(int attempt, int count, int? exitCode, DateTime? retry, bool breaker, string failure) => PublishHealth(_health with { State = breaker ? ReplayCaptureState.Failed : ReplayCaptureState.Recovering, RecoveryAttempt = attempt, RecentWorkerFailureCount = count, LastWorkerExitCode = exitCode, NextWorkerRetryUtc = retry, WorkerCrashLoopDetected = breaker, LastFailure = failure, UpdatedUtc = DateTime.UtcNow });
+    { _desiredRecording = false; RecoveryHealth(RetryDelays.Length, count, exitCode, null, true, ReplayRecoveryStopReason.WorkerCrashLoop, "Capture worker crashed repeatedly."); Dispatcher.UIThread.Post(() => { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); }); AppLog.Info("Capture worker recovery breaker opened."); }
+    private void RecoveryHealth(int attempt, int count, int? exitCode, DateTime? retry, bool breaker, ReplayRecoveryStopReason stopReason, string failure) => PublishHealth(_health with { State = breaker ? ReplayCaptureState.Failed : ReplayCaptureState.Recovering, RecoveryAttempt = attempt, RecentWorkerFailureCount = count, LastWorkerExitCode = exitCode, NextWorkerRetryUtc = retry, WorkerCrashLoopDetected = stopReason == ReplayRecoveryStopReason.WorkerCrashLoop, RecoveryStopReason = stopReason, LastFailure = failure, UpdatedUtc = DateTime.UtcNow });
     private void SetRecording(bool value) { if (_isRecording == value) return; _isRecording = value; RecordingStateChanged?.Invoke(this, EventArgs.Empty); }
     private void PublishHealth(ReplayCaptureHealth health) { _health = health; HealthChanged?.Invoke(this, health); }
     private void FailPending() { lock (_pending) foreach (var item in _pending.Values) item.TrySetException(new IOException("Capture worker connection closed.")); }

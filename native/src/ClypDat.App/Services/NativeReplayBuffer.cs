@@ -620,12 +620,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    public void SetCapturePaused(bool paused)
-    {
-        // No-op for now: the capture loop always runs while a session is active.
-        // A pause would need to stop encoding without tearing down the ring buffer,
-        // not currently needed since nothing calls this on the Windows Capture path.
-    }
+    private int _capturePaused;
+    public void SetCapturePaused(bool paused) => Volatile.Write(ref _capturePaused, paused ? 1 : 0);
 
     public void Dispose()
     {
@@ -805,7 +801,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Before any D3D work: a game that owns the GPU otherwise outranks
             // this process's own submissions, which is what turns an 8ms encode
             // into a 50ms one under load. Device priority is applied by worker.
-            device = CreateD3D11Device();
+            device = CreateD3D11Device(out var processingGpuPriority);
             var targetHandle = ResolveTargetWindow(config);
             var isMonitorMode = targetHandle == 0;
             // Which output the duplication below is actually bound to - see the
@@ -967,7 +963,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 ConfiguredFrameRate = config.FrameRate,
                 EncoderInputPath = hardwareFramesActive ? "D3D11 zero-copy" : "System memory",
                 FrameRateProtectionActive = false,
-                StartupPhase = ReplayCaptureStartupPhase.WaitingForForeground
+                StartupPhase = ReplayCaptureStartupPhase.WaitingForForeground,
+                ProcessingGpuPriority = processingGpuPriority,
+                AcquisitionGpuPriority = dxgiCapture?.AppliedGpuPriority
             });
             ready.TrySetResult();
 
@@ -1067,6 +1065,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (acquireTimeoutForcedMs > 0) AppLog.Info($"Native capture: acquire timeout forced to {acquireTimeoutMs}ms.");
             var lastDiagLog = TimeSpan.Zero;
             var dxgiCadenceFallback = new DxgiCadenceFallbackPolicy();
+            var sourceRecovery = new CaptureSourceRecoveryPolicy();
             var lastRingTrim = TimeSpan.Zero;
             var previousWgcTelemetry = default(WindowGraphicsCaptureTelemetry);
             var previousDxgiTelemetry = default(DesktopDuplicationTelemetry);
@@ -1429,10 +1428,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // produce target-rate packets while submissions already
                     // back up behind a foreground game, which is exactly the
                     // failure mode qualification is intended to catch.
-                    var validationWindowPasses = hasCapturedRealFrame && droppedSinceLog == 0 &&
-                        encodeQueue.Count * 4 < encodeQueueCapacity * 3 &&
-                        outputFrameRate >= activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
-                    if (!startupValidationComplete && hasCapturedRealFrame)
+                    var foregroundForDiagnostics = isMonitorMode || IsWindowForegroundAndVisible(targetHandle);
+                    var capturePaused = Volatile.Read(ref _capturePaused) != 0 || (!isMonitorMode && !foregroundForDiagnostics);
+                    var validationWindowPasses = ReplayStartupQualificationPolicy.Passes(
+                        foregroundForDiagnostics, capturePaused, hasCapturedRealFrame, activeFrameRate, outputFrameRate,
+                        framesProcessedSinceLog / diagElapsed, droppedSinceLog, encodeQueue.Count, encodeQueueCapacity);
+                    if (!startupValidationComplete && hasCapturedRealFrame && foregroundForDiagnostics && !capturePaused)
                     {
                         if (validationWindowPasses)
                         {
@@ -1464,6 +1465,51 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var saveInProgress = Volatile.Read(ref _savesInFlight) > 0;
                     var sourceFrameRate = inputFrameCount / diagElapsed;
                     var freshTransportRate = framesProcessedSinceLog / diagElapsed;
+                    var sourceRecoverySample = new ReplayCaptureHealth("Native", "DXGI", ReplayCaptureState.Degraded,
+                        activeFrameRate, inputFrameCount / diagElapsed, freshTransportRate, outputFrameRate, 0, droppedSinceLog,
+                        encodeQueue.Count, encoderName, "Default adapter", string.Empty, DateTime.UtcNow)
+                    {
+                        EncodeQueueCapacity = encodeQueueCapacity,
+                        CapturePaused = capturePaused,
+                        SaveInProgress = saveInProgress
+                    };
+                    var sourceRecoveryAction = wgcCapture is null && dxgiCapture is not null
+                        ? sourceRecovery.Observe(sourceRecoverySample, foregroundForDiagnostics, DateTime.UtcNow)
+                        : CaptureSourceRecoveryAction.None;
+                    if (sourceRecoveryAction == CaptureSourceRecoveryAction.RecreateDxgi)
+                    {
+                        try
+                        {
+                            dxgiCapture!.Dispose();
+                            dxgiCapture = DesktopDuplicationFrameSource.Create(device, targetHandle, config, out desktopBounds);
+                            activeGameFrameSource = dxgiCapture;
+                            previousDxgiTelemetry = default;
+                            AppLog.Info("Native capture: DXGI source starvation persisted for two windows; recreated acquisition source.");
+                        }
+                        catch (Exception error)
+                        {
+                            AppLog.Error("Native capture: DXGI source recreation failed.", error);
+                            dxgiCapture = null;
+                        }
+                    }
+                    else if (sourceRecoveryAction == CaptureSourceRecoveryAction.SwitchToWgc && !isMonitorMode)
+                    {
+                        try
+                        {
+                            var fallback = WindowGraphicsCaptureSource.Create(device, gpuLock, targetHandle, config.CaptureCursor, activeFrameRate);
+                            dxgiCapture!.Dispose();
+                            dxgiCapture = null;
+                            wgcCapture = fallback;
+                            activeGameFrameSource = fallback;
+                            var size = fallback.ContentSize;
+                            desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
+                            AppLog.Info("Native capture: DXGI source starvation repeated within 30s; switched to bounded WGC.");
+                        }
+                        catch (Exception error)
+                        {
+                            AppLog.Error("Native capture: WGC fallback after DXGI source starvation failed.", error);
+                        }
+                    }
                     var freshTransportTarget = Math.Min(activeFrameRate, sourceFrameRate);
                     var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
                     var transportShortfall = hasCapturedRealFrame && freshTransportTarget > 0 &&
@@ -1517,7 +1563,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // up until the clip comes out frozen. Report it while it is
                     // happening instead, so the UI can say so live rather than the
                     // save-time warning being the first anyone hears of it.
-                    if (isStalled || transportDegraded) _lastDegradedUtc = DateTime.UtcNow;
+                    var sourceStarved = sourceRecoveryAction != CaptureSourceRecoveryAction.None;
+                    if (isStalled || transportDegraded || sourceStarved) _lastDegradedUtc = DateTime.UtcNow;
                     if (overloaded)
                     {
                         _lastDegradedUtc = DateTime.UtcNow;
@@ -1531,10 +1578,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
                     var activeCaptureMode = wgcCapture is null ? dxgiCapture?.CaptureMode ?? "Game Capture" : "Windows Graphics Capture (recovery)";
                     SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
-                        overloaded || isStalled || transportDegraded ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
+                        overloaded || isStalled || transportDegraded || sourceStarved ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
                         activeFrameRate, inputFrameCount / diagElapsed, framesProcessedSinceLog / diagElapsed,
                         outputFrameRate, Math.Max(0, packetsOutSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
+                        sourceStarved ? "Capture source starved; recovering DXGI acquisition." :
                         isStalled ? "Capture stalled - no new frames from the display. Recovering." :
                         overloaded ? "Capture overload. Output may fall below target FPS." :
                         transportDegraded ? "Game Capture transport is below 99% of source/selected cadence." :
@@ -1547,7 +1595,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // Stall wins when both are true: no frames are arriving,
                         // so whatever the encoder looks like is a consequence of
                         // that rather than the encode settings being too costly.
-                        DegradeReason = isStalled ? ReplayDegradeReason.CaptureStall
+                        DegradeReason = sourceStarved || isStalled ? ReplayDegradeReason.CaptureStall
                             : overloaded ? ReplayDegradeReason.EncoderOverload
                             : transportDegraded ? ReplayDegradeReason.CaptureTransport
                             : ReplayDegradeReason.None,
@@ -1580,7 +1628,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             ? ReplayCaptureStartupPhase.Ready
                             : ReplayCaptureStartupPhase.Validating,
                         StartupValidationWindow = startupValidationWindows,
-                        StartupValidationWindowCount = ReplayEncoderQualificationPolicy.RequiredWindows
+                        StartupValidationWindowCount = ReplayEncoderQualificationPolicy.RequiredWindows,
+                        CapturePaused = capturePaused,
+                        ProcessingGpuPriority = processingGpuPriority,
+                        AcquisitionGpuPriority = dxgiCapture?.AppliedGpuPriority
                     });
                     copyMapMs = 0;
                     scaleMs = 0;
@@ -2328,7 +2379,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             duplication?.Dispose();
                             duplication = null;
 
-                            var newDevice = CreateD3D11Device();
+                            var newDevice = CreateD3D11Device(out processingGpuPriority);
                             IDXGIOutputDuplication? newDuplication = null;
                             ID3D11Texture2D? newStaging = null;
                             try
@@ -3200,6 +3251,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // duplicate drain.
             encodeQueue.CompleteAdding();
             encodeThread?.Join();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Stop/restart cancellation is normal lifecycle, not a capture failure.
+            ready.TrySetCanceled(token);
         }
         catch (Exception error)
         {
@@ -5439,7 +5495,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         return value % 2 == 0 ? value : value + 1;
     }
 
-    private static ID3D11Device CreateD3D11Device()
+    private static ID3D11Device CreateD3D11Device(out int? appliedGpuPriority)
     {
         var levels = new[]
         {
@@ -5481,7 +5537,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // one place that work begins; it self-guards against the repeat calls
         // that a buffer restart causes.
         GpuScheduling.TryRaiseProcessGpuPriority();
-        GpuScheduling.TryRaiseDeviceGpuPriority(device!.NativePointer);
+        appliedGpuPriority = GpuScheduling.TryRaiseDeviceGpuPriority(device!.NativePointer, "processing");
         return device!;
     }
 

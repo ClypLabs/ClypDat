@@ -62,6 +62,13 @@ public enum ReplayDegradeReason
     CaptureTransport
 }
 
+public enum ReplayRecoveryStopReason
+{
+    None,
+    WorkerCrashLoop,
+    CapturePipelineStall
+}
+
 // Keep capture health separate from IReplayBuffer. Old/third-party backends can
 // remain valid while callers opt into richer diagnostics where available.
 public sealed record ReplayCaptureHealth(
@@ -121,6 +128,10 @@ public sealed record ReplayCaptureHealth(
     public int? LastWorkerExitCode { get; init; }
     public DateTime? NextWorkerRetryUtc { get; init; }
     public bool WorkerCrashLoopDetected { get; init; }
+    public bool CapturePaused { get; init; }
+    public ReplayRecoveryStopReason RecoveryStopReason { get; init; }
+    public int? ProcessingGpuPriority { get; init; }
+    public int? AcquisitionGpuPriority { get; init; }
 
     // Native engine diagnostics. These are optional for managed/legacy
     // backends, but make worker health actionable without parsing logs.

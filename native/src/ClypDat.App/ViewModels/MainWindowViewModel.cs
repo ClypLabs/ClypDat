@@ -137,6 +137,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private double _activeReplayOutputFrameRate;
     private double _activeReplayUniqueGameFrameRate;
     private ReplayCaptureStartupPhase _activeReplayStartupPhase;
+    private bool _activeReplayCapturePaused;
     private int _activeReplayStartupWindow;
     private int _activeReplayStartupWindowCount;
     private readonly ReplayFrameRateDisplaySmoother _replayFrameRateDisplaySmoother = new();
@@ -1950,6 +1951,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string ReplayFrameTimingMetrics => _activeReplayTargetFrameRate <= 0
         ? string.Empty
+        : _activeReplayCapturePaused
+        ? "Replay paused while game is backgrounded. Fresh FPS is not a capture-health sample."
         : _activeReplayStartupPhase == ReplayCaptureStartupPhase.WaitingForForeground
         ? "Waiting for game foreground before replay frames begin."
         : _activeReplayStartupPhase == ReplayCaptureStartupPhase.Validating
@@ -2155,6 +2158,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayTargetFrameRate = health.TargetFrameRate;
         _activeReplaySourceFrameRate = health.InputFrameRate;
         _activeReplayStartupPhase = health.StartupPhase;
+        _activeReplayCapturePaused = health.CapturePaused;
         _activeReplayStartupWindow = health.StartupValidationWindow;
         _activeReplayStartupWindowCount = health.StartupValidationWindowCount;
         var displayedRates = _replayFrameRateDisplaySmoother.Update(health);
@@ -2172,6 +2176,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayEncoder = string.Empty;
         _activeReplayAdapter = string.Empty;
         _activeReplayTargetFrameRate = 0;
+        _activeReplayCapturePaused = false;
         _activeReplaySourceFrameRate = 0;
         _activeReplayOutputFrameRate = 0;
         _activeReplayUniqueGameFrameRate = 0;

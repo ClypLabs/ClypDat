@@ -65,6 +65,9 @@ internal static class GpuScheduling
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int SetGpuThreadPriorityDelegate(nint self, int priority);
 
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetGpuThreadPriorityDelegate(nint self, out int priority);
+
     // DISABLED - opt-in only, via CLYPDAT_GPU_PROCESS_PRIORITY=1.
     //
     // This was on by default for one build, and that build is the one an AMD
@@ -158,7 +161,7 @@ internal static class GpuScheduling
     // and IDXGIObject (SetPrivateData/SetPrivateDataInterface/GetPrivateData/
     // GetParent = 3-6): GetAdapter=7, CreateSurface=8, QueryResourceResidency=9,
     // SetGPUThreadPriority=10, GetGPUThreadPriority=11.
-    public static void TryRaiseDeviceGpuPriority(nint devicePointer)
+    public static int? TryRaiseDeviceGpuPriority(nint devicePointer, string role)
     {
         var dxgiDeviceIid = new Guid("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
         var dxgiDevicePtr = nint.Zero;
@@ -167,8 +170,8 @@ internal static class GpuScheduling
             var hr = Marshal.QueryInterface(devicePointer, in dxgiDeviceIid, out dxgiDevicePtr);
             if (hr != 0 || dxgiDevicePtr == nint.Zero)
             {
-                AppLog.Info($"Native capture: device does not expose IDXGIDevice (hr=0x{hr:X8}), leaving GPU thread priority at default.");
-                return;
+                AppLog.Info($"Native capture: {role} D3D11 device does not expose IDXGIDevice (hr=0x{hr:X8}); GPU thread priority remains default.");
+                return null;
             }
 
             var vtable = Marshal.ReadIntPtr(dxgiDevicePtr, 0);
@@ -177,16 +180,27 @@ internal static class GpuScheduling
             var result = setPriority(dxgiDevicePtr, MaxGpuThreadPriority);
             if (result == 0)
             {
-                AppLog.Info($"Native capture: D3D11 device GPU thread priority set to {MaxGpuThreadPriority}.");
+                var getPriorityPtr = Marshal.ReadIntPtr(vtable, 11 * nint.Size);
+                var getPriority = Marshal.GetDelegateForFunctionPointer<GetGpuThreadPriorityDelegate>(getPriorityPtr);
+                var readBackResult = getPriority(dxgiDevicePtr, out var applied);
+                if (readBackResult == 0)
+                {
+                    AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority requested={MaxGpuThreadPriority}, applied={applied}.");
+                    return applied;
+                }
+                AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority set to {MaxGpuThreadPriority}; read-back refused (hr=0x{readBackResult:X8}).");
+                return MaxGpuThreadPriority;
             }
             else
             {
-                AppLog.Info($"Native capture: D3D11 device GPU thread priority refused (hr=0x{result:X8}), continuing at default.");
+                AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority refused (hr=0x{result:X8}); continuing at default.");
+                return null;
             }
         }
         catch (Exception error)
         {
-            AppLog.Info($"Native capture: could not set D3D11 device GPU thread priority (non-fatal): {error.Message}");
+            AppLog.Info($"Native capture: could not set {role} D3D11 device GPU thread priority (non-fatal): {error.Message}");
+            return null;
         }
         finally
         {
