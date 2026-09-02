@@ -863,10 +863,16 @@ public sealed partial class MainWindow : Window
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
     {
-        if (string.IsNullOrWhiteSpace(completed.Path) || !string.IsNullOrWhiteSpace(completed.Error)) return;
         Dispatcher.UIThread.Post(async () =>
         {
             if (ViewModel?.IsSavingReplayClip == true) return;
+            if (!string.IsNullOrWhiteSpace(completed.Error))
+            {
+                ShowClipNotification("Clip Failed", playSound: false);
+                await ShowMessageAsync("Clip Failed", completed.Error);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(completed.Path)) return;
             RememberSessionClip(completed.Path);
             ShowClipSavedNotification();
             if (ViewModel is not null)

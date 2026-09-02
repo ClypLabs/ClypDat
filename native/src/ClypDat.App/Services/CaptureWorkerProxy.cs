@@ -161,6 +161,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                     case "recording-stopped": Dispatcher.UIThread.Post(() => { if (!_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
                     case "save-started": Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty)); break;
                     case "save-completed": var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (complete is not null) { Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(complete.Path, complete.Title, complete.CompletedUtc, complete.Error))); _ = SendBestEffortAsync("ack-save", new { complete.Path }); } break;
+                    case "save-failed": var failed = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (failed is not null) Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(failed.Path, failed.Title, failed.CompletedUtc, failed.Error))); break;
                 }
             }
         }

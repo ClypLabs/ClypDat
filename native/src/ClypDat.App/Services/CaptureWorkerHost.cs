@@ -203,6 +203,7 @@ internal static class CaptureWorkerHost
         }
         catch (Exception error)
         {
+            CaptureWorkerLog.Error("Replay clip save failed.", error);
             var result = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, error.Message);
             await SendEventAsync("save-failed", result);
             return result;

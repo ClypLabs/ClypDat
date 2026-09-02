@@ -259,10 +259,31 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private bool OverlapsRecovery(DateTime startUtc, DateTime endUtc)
+    private bool TryGetSafeSaveStart(DateTime requestedStartUtc, DateTime requestedEndUtc, out DateTime saveStartUtc)
     {
         lock (_bufferLock)
-            return _recoveryOutages.Any(outage => outage.StartUtc < endUtc && (outage.EndUtc ?? DateTime.MaxValue) > startUtc);
+            return TryGetSaveStartAfterRecovery(_recoveryOutages, requestedStartUtc, requestedEndUtc, out saveStartUtc);
+    }
+
+    // A short, completed recovery should shorten a clip, not discard every
+    // otherwise-good second in its requested window. An ongoing recovery has
+    // no trustworthy tail yet, so it remains a failed save.
+    internal static bool TryGetSaveStartAfterRecovery(
+        IReadOnlyList<(DateTime StartUtc, DateTime? EndUtc)> recoveryOutages,
+        DateTime requestedStartUtc,
+        DateTime requestedEndUtc,
+        out DateTime saveStartUtc)
+    {
+        saveStartUtc = requestedStartUtc;
+        foreach (var outage in recoveryOutages)
+        {
+            var outageEndUtc = outage.EndUtc;
+            if (outage.StartUtc >= requestedEndUtc || outageEndUtc is { } ended && ended <= requestedStartUtc) continue;
+            if (outageEndUtc is null || outageEndUtc >= requestedEndUtc) return false;
+            if (outageEndUtc > saveStartUtc) saveStartUtc = outageEndUtc.Value;
+        }
+
+        return saveStartUtc < requestedEndUtc;
     }
 
     private static int ClampReplayFrameRate(int requested, int configured)
@@ -424,13 +445,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         {
             throw new InvalidOperationException("The requested replay window is empty.");
         }
-        if (OverlapsRecovery(requestedStartUtc, requestedEndUtc))
-            throw new InvalidOperationException("Replay capture was recovering during the requested window; no clip was saved.");
+        if (!TryGetSafeSaveStart(requestedStartUtc, requestedEndUtc, out var safeSaveStartUtc))
+            throw new InvalidOperationException("Replay capture is still recovering. Try again after recording resumes.");
+        var recoveryTrimmed = safeSaveStartUtc > requestedStartUtc;
+        if (recoveryTrimmed)
+        {
+            AppLog.Info($"Native replay save: recovery overlapped requested window; trimming {(safeSaveStartUtc - requestedStartUtc).TotalSeconds:0.0}s of unstable history.");
+            requestedStartUtc = safeSaveStartUtc;
+        }
 
         // Selected under the lock, payloads borrowed rather than copied - see
         // BorrowWindowUnderLock. Released in the finally at the end of this
         // method, which is what lets the ring recycle again.
-        var window = BorrowWindowUnderLock(requestedStartUtc, requestedEndUtc);
+        var window = BorrowWindowUnderLock(requestedStartUtc, requestedEndUtc, startAtOrAfterRequestedUtc: recoveryTrimmed);
         var saveGateHeld = false;
         // Hoisted so the finally can hand the borrowed-window release to it. The remux
         // reads the borrowed payload arrays directly, and the release returns them to
@@ -5003,7 +5030,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     //
     // Every caller MUST pair this with ReleaseBorrowedWindow in a finally, or
     // the pool stops recycling for the rest of the session.
-    private RingPacket[] BorrowWindowUnderLock(DateTime requestedStartUtc, DateTime requestedEndUtc)
+    private RingPacket[] BorrowWindowUnderLock(DateTime requestedStartUtc, DateTime requestedEndUtc, bool startAtOrAfterRequestedUtc = false)
     //
     // The copy is what lets the ring pool its payloads at all. TrimRingBuffer
     // keeps running once a second for the entire multi-second life of a save,
@@ -5025,11 +5052,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Saving from a keyframe immediately before the requested event
             // keeps the remux playable while still producing an event-sized clip.
             var startIndex = -1;
-            for (var i = _packets.Count - 1; i >= 0; i--)
+            if (startAtOrAfterRequestedUtc)
             {
-                if (_packets[i].WallClockUtc <= requestedStartUtc && _packets[i].IsKeyframe) { startIndex = i; break; }
+                for (var i = 0; i < _packets.Count; i++)
+                {
+                    if (_packets[i].WallClockUtc >= requestedStartUtc && _packets[i].IsKeyframe) { startIndex = i; break; }
+                }
             }
-            if (startIndex < 0) startIndex = _packets.FindIndex(packet => packet.IsKeyframe);
+            else
+            {
+                for (var i = _packets.Count - 1; i >= 0; i--)
+                {
+                    if (_packets[i].WallClockUtc <= requestedStartUtc && _packets[i].IsKeyframe) { startIndex = i; break; }
+                }
+                if (startIndex < 0) startIndex = _packets.FindIndex(packet => packet.IsKeyframe);
+            }
             if (startIndex < 0) throw new InvalidOperationException("Replay just started. Try again in a second.");
 
             var endIndex = -1;
