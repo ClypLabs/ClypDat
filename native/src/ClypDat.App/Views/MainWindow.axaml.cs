@@ -6924,6 +6924,7 @@ public sealed partial class MainWindow : Window
 
     private async void SaveTrimButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        PauseEditorPlayback();
         await SaveTrimToOriginalAsync();
     }
 

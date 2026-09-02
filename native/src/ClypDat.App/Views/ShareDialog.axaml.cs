@@ -16,6 +16,9 @@ public partial class ShareDialog : Window
     private Window? _coveredWindow;
     private MainWindowViewModel _viewModel = null!;
     private CancellationTokenSource? _shareCts;
+    // Drag target may be user source or our encoded temp output. Only temp is
+    // owned by this dialog and safe to delete.
+    private string? _sharePath;
     private string? _shareTempPath;
     private Point? _dragPressPoint;
     private PointerPressedEventArgs? _dragPressEvent;
@@ -193,6 +196,7 @@ public partial class ShareDialog : Window
         // than blocking the close.
         if (_shareTempPath is { } path) _ = DeleteWithRetryAsync(path);
         _shareTempPath = null;
+        _sharePath = null;
     }
 
     private static async Task DeleteWithRetryAsync(string path)
@@ -253,6 +257,13 @@ public partial class ShareDialog : Window
         if (radio.Tag is string tagText && double.TryParse(tagText, out var mb))
         {
             _lastTargetBytes = MegabytesToTargetBytes(mb);
+            if (_lastTargetBytes == 0)
+            {
+                // Set target first, so AV1 change cannot restart encoding.
+                ShareAv1Toggle.IsChecked = false;
+                PrepareOriginalShare();
+                return;
+            }
             _ = StartShareEncodeAsync(_lastTargetBytes);
         }
     }
@@ -275,6 +286,52 @@ public partial class ShareDialog : Window
 
     private long _lastTargetBytes;
 
+    private void PrepareOriginalShare()
+    {
+        var sourcePath = _viewModel.SelectedVideoPath;
+        _shareCts?.Cancel();
+        _shareCts = null;
+        if (_shareTempPath is { } previous) _ = DeleteWithRetryAsync(previous);
+        _shareTempPath = null;
+        _sharePath = null;
+
+        if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
+        {
+            ShareStatusText.Text = "Original clip is unavailable.";
+            ShareShowInFolderButton.IsEnabled = false;
+            return;
+        }
+
+        _sharePath = sourcePath;
+
+        try
+        {
+            var sourceBytes = new FileInfo(sourcePath).Length;
+            var quality = _viewModel.SelectedSourceHeight > 0
+                ? $"{_viewModel.SelectedSourceHeight}p{_viewModel.SelectedSourceFps:0}"
+                : "Original";
+
+            ShareProgressPanel.IsVisible = false;
+            ShareStatusText.Text = "Drag original clip into any chat to upload it";
+            ShareResultSizeText.Text = $"{sourceBytes / 1_000_000.0:0.#} MB · {quality}";
+            ShareShowInFolderButton.Content = "Show in folder";
+            ShareShowInFolderButton.IsEnabled = true;
+            // Original sends source bytes. Do not show pending crop/trim edits.
+            ShareThumbnail.Source = _viewModel.SelectedThumbnail;
+            ShareThumbnail.IsVisible = ShareThumbnail.Source is not null;
+            SizeSharePreviewBox(useSourceDimensions: true);
+            ShareDurationText.Text = FormatShareDuration(_viewModel.Duration);
+            ShareDurationBadge.IsVisible = true;
+        }
+        catch (Exception error)
+        {
+            _sharePath = null;
+            ShareShowInFolderButton.IsEnabled = false;
+            ShareStatusText.Text = "Original clip is unavailable.";
+            AppLog.Error("Share: could not prepare original clip", error);
+        }
+    }
+
     private void Av1Toggle_OnChanged(object? sender, RoutedEventArgs e)
     {
         // Codec change invalidates whatever is already encoded, so redo it at
@@ -294,6 +351,7 @@ public partial class ShareDialog : Window
         _shareCts?.Cancel();
         // Superseded by a different size - the old encode's file goes with it.
         if (_shareTempPath is { } previous) _ = DeleteWithRetryAsync(previous);
+        _sharePath = null;
 
         var cts = new CancellationTokenSource();
         _shareCts = cts;
@@ -458,6 +516,9 @@ public partial class ShareDialog : Window
                 ShareStatusText.Text = statusText;
             }
 
+            // A newer preset or Original selection now owns dialog state.
+            if (cts.IsCancellationRequested || !ReferenceEquals(_shareCts, cts)) return;
+
             if (result.ExitCode != 0)
             {
                 _ = DeleteWithRetryAsync(tempPath);
@@ -485,6 +546,7 @@ public partial class ShareDialog : Window
             var quality = $"{spec.Height}p{spec.Fps:0}{(useAv1 ? " · AV1" : string.Empty)}";
             ShareResultSizeText.Text = $"{actualMb:0.#} MB · {quality}";
             if (ReferenceEquals(_shareCts, cts)) _shareCts = null;
+            _sharePath = tempPath;
             ShareShowInFolderButton.Content = "Show in folder";
             ShareShowInFolderButton.IsEnabled = true;
 
@@ -533,12 +595,12 @@ public partial class ShareDialog : Window
     // Fits the preview's own aspect inside the fixed 424x238 slot (dialog is 480
     // wide with 28px margins either side). Vertical crops get narrower, never
     // taller, so picking an aspect never resizes the dialog under the cursor.
-    private void SizeSharePreviewBox()
+    private void SizeSharePreviewBox(bool useSourceDimensions = false)
     {
         const double MaximumWidth = 424;
         const double MaximumHeight = 238;
 
-        var crop = _viewModel.ActiveCropRect;
+        var crop = useSourceDimensions ? null : _viewModel.ActiveCropRect;
         var width = crop?.Width ?? _viewModel.SelectedSourceWidth;
         var height = crop?.Height ?? _viewModel.SelectedSourceHeight;
         var aspect = width > 0 && height > 0 ? (double)width / height : 16.0 / 9.0;
@@ -570,8 +632,10 @@ public partial class ShareDialog : Window
         if (_shareCts is { IsCancellationRequested: false })
         {
             _shareCts.Cancel();
+            _shareCts = null;
             if (_shareTempPath is { } tempPath) _ = DeleteWithRetryAsync(tempPath);
             _shareTempPath = null;
+            _sharePath = null;
             ShareProgressPanel.IsVisible = false;
             ShareShowInFolderButton.Content = "Show in folder";
             ShareShowInFolderButton.IsEnabled = false;
@@ -579,7 +643,7 @@ public partial class ShareDialog : Window
             return;
         }
 
-        if (_shareTempPath is { } path) ExplorerService.Open(path, selectFile: true);
+        if (_sharePath is { } path) ExplorerService.Open(path, selectFile: true);
     }
 
     private void Thumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e)
@@ -591,7 +655,7 @@ public partial class ShareDialog : Window
     private async void Thumbnail_OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (_dragPressPoint is not { } start || _dragPressEvent is not { } dragStart || e.GetCurrentPoint(ShareThumbnail).Properties.IsLeftButtonPressed != true) return;
-        if (_shareTempPath is not { } tempPath) return;
+        if (_sharePath is not { } sharePath) return;
         var current = e.GetPosition(ShareThumbnail);
         if (Math.Abs(current.X - start.X) < 4 && Math.Abs(current.Y - start.Y) < 4) return;
         _dragPressPoint = null;
@@ -605,12 +669,12 @@ public partial class ShareDialog : Window
             // way dragging out of Explorer does. It blocks for the whole
             // gesture, same as Avalonia's version, so the bracketing below
             // still lines up.
-            if (ShellFileDrag.TryDragFile(tempPath)) return;
+            if (ShellFileDrag.TryDragFile(sharePath)) return;
 
-            var file = await StorageProvider.TryGetFileFromPathAsync(new Uri(Path.GetFullPath(tempPath)));
+            var file = await StorageProvider.TryGetFileFromPathAsync(new Uri(Path.GetFullPath(sharePath)));
             if (file is null)
             {
-                AppLog.Error($"Share: drag-out source disappeared: {tempPath}");
+                AppLog.Error($"Share: drag-out source disappeared: {sharePath}");
                 return;
             }
 
