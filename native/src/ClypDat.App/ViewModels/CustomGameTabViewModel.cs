@@ -14,16 +14,19 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     private readonly AppSettings _settings;
     private readonly Action _save;
     private readonly Action? _captureMethodChanged;
+    private readonly Action<CustomGameSettingChange>? _settingChanged;
     private bool _isSelected;
     private bool _qualityWarningAcknowledged;
 
-    public CustomGameTabViewModel(string detectionKey, CustomGameProfile profile, AppSettings settings, Action save, Action? captureMethodChanged = null)
+    public CustomGameTabViewModel(string detectionKey, CustomGameProfile profile, AppSettings settings, Action save, Action? captureMethodChanged = null,
+        Action<CustomGameSettingChange>? settingChanged = null)
     {
         DetectionKey = detectionKey;
         Profile = profile;
         _settings = settings;
         _save = save;
         _captureMethodChanged = captureMethodChanged;
+        _settingChanged = settingChanged;
         Icon = GameIconService.TryLoad(profile.DisplayName);
         // Nothing about the portrait touches the UI thread. This constructor
         // runs once per tab while the settings page is being built, and a
@@ -155,6 +158,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         NotifyQualityWarning();
         RaiseAllValues();
         _save();
+        _settingChanged?.Invoke(CustomGameSettingChange.Group);
     }
 
     // --- recording mode ---------------------------------------------------
@@ -193,6 +197,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsDisplayCapture));
         OnPropertyChanged(nameof(IsGraphicsHookCapture));
         _save();
+        _settingChanged?.Invoke(CustomGameSettingChange.RecordingMode);
     }
 
     // --- quality ----------------------------------------------------------
@@ -273,6 +278,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
                 OnPropertyChanged(nameof(SelectedBitrateOption));
                 NotifyQualityWarning();
                 _save();
+                _settingChanged?.Invoke(CustomGameSettingChange.Quality);
             }
 
             OnPropertyChanged();
@@ -324,6 +330,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsGraphicsHookCapture));
         _save();
         _captureMethodChanged?.Invoke();
+        _settingChanged?.Invoke(CustomGameSettingChange.CaptureMethod);
     }
 
     public void FixQualityWarning()
@@ -338,8 +345,10 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReplayFrameRate));
         OnPropertyChanged(nameof(ReplayBitrateMbps));
         OnPropertyChanged(nameof(SelectedBitrateOption));
-        RaiseQualityPreset();
-        _save();
+            RaiseQualityPreset();
+            _save();
+            _settingChanged?.Invoke(CustomGameSettingChange.Quality);
+        _settingChanged?.Invoke(CustomGameSettingChange.Quality);
     }
 
     public void AcknowledgeQualityWarning()
@@ -408,7 +417,19 @@ public sealed class CustomGameTabViewModel : ViewModelBase
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayDurationSeconds));
             _save();
+            _settingChanged?.Invoke(CustomGameSettingChange.Replay);
         }
+    }
+
+    public string SaveReplayHotkey => Profile.SaveReplayHotkey;
+
+    public void SetSaveReplayHotkey(string hotkey)
+    {
+        if (string.Equals(Profile.SaveReplayHotkey, hotkey, StringComparison.Ordinal)) return;
+        Profile.SaveReplayHotkey = hotkey;
+        OnPropertyChanged(nameof(SaveReplayHotkey));
+        _save();
+        _settingChanged?.Invoke(CustomGameSettingChange.Hotkey);
     }
 
     // --- audio ------------------------------------------------------------
@@ -440,6 +461,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         if (row.IsEnabled) Profile.AdditionalAudioProcesses[row.Name] = (int)Math.Round(row.VolumePercent);
         else Profile.AdditionalAudioProcesses.Remove(row.Name);
         _save();
+        _settingChanged?.Invoke(CustomGameSettingChange.Audio);
     }
 
 
@@ -484,6 +506,9 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         }
 
         _save();
+        _settingChanged?.Invoke(property is nameof(GameAudioVolumePercent) or nameof(MicrophoneVolumePercent)
+            or nameof(MicrophoneNoiseSuppressionEnabled) or nameof(MicrophoneNoiseGateThresholdDb)
+            ? CustomGameSettingChange.Audio : CustomGameSettingChange.Quality);
     }
 
     private void RaiseAllValues()
@@ -501,6 +526,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsCustomQuality));
         OnPropertyChanged(nameof(ReplayFrameRateMode));
         OnPropertyChanged(nameof(ReplayDurationSeconds));
+        OnPropertyChanged(nameof(SaveReplayHotkey));
         _selectedDurationPreset = null;
         OnPropertyChanged(nameof(SelectedDurationPreset));
         OnPropertyChanged(nameof(GameAudioVolumePercent));
@@ -508,4 +534,15 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(MicrophoneNoiseSuppressionEnabled));
         OnPropertyChanged(nameof(MicrophoneNoiseGateThresholdDb));
     }
+}
+
+public enum CustomGameSettingChange
+{
+    Group,
+    RecordingMode,
+    Quality,
+    Replay,
+    Audio,
+    CaptureMethod,
+    Hotkey
 }

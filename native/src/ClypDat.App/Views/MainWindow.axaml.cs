@@ -118,6 +118,7 @@ public sealed partial class MainWindow : Window
     private ReplayBufferConfig? _activeReplayConfigSnapshot;
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
+    private CustomGameTabViewModel? _hotkeyCaptureCustomGame;
     // Set only while capture was started from a control living in a popup
     // (the Replay Buffer flyout), so its handlers can be detached again.
     private TopLevel? _hotkeyCaptureTopLevel;
@@ -376,6 +377,7 @@ public sealed partial class MainWindow : Window
                     _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
                 };
                 ViewModel.ClipAdded += ViewModel_OnClipAdded;
+                ViewModel.CustomGameSettingChanged += ViewModel_CustomGameSettingChanged;
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
@@ -2767,6 +2769,51 @@ public sealed partial class MainWindow : Window
             ? ViewModel.IsReplayArming ? "Replay Arming" : "Replay On"
             : ReplayIdleStatus;
     }
+
+    private void ViewModel_CustomGameSettingChanged(string detectionKey, CustomGameSettingChange change) =>
+        _ = ApplyCustomGameSettingChangeAsync(detectionKey, change);
+
+    private async Task ApplyCustomGameSettingChangeAsync(string detectionKey, CustomGameSettingChange change)
+    {
+        if (ViewModel is null || ViewModel.IsEffectiveDesktopCapture) return;
+        var activeKey = string.IsNullOrWhiteSpace(ViewModel.ActiveGameDetection.DetectionKey)
+            ? ViewModel.ActiveGameDetection.ExeName : ViewModel.ActiveGameDetection.DetectionKey;
+        if (!ReferenceEquals(CustomGameSettingsResolver.Find(ViewModel.Settings, activeKey),
+                ViewModel.Settings.CustomGameSettings.GetValueOrDefault(detectionKey))) return;
+
+        var desired = ViewModel.CreateReplayConfig();
+        if (_activeReplayConfigSnapshot is { } active && !string.Equals(active.SaveReplayHotkey, desired.SaveReplayHotkey, StringComparison.Ordinal))
+        {
+            if (_replayBuffer is IReplayCaptureWorkerControl worker) await worker.UpdateHotkeyAsync(desired.SaveReplayHotkey);
+            _activeReplayConfigSnapshot = active with { SaveReplayHotkey = desired.SaveReplayHotkey };
+        }
+        if (!ViewModel.IsRecordingEnabledForActiveGame)
+        {
+            _replayRestartDebounceTimer?.Stop();
+            _replayRestartDebounceTimer = null;
+            if (_replayBuffer is { IsRecording: true }) await StopReplayBufferAsync();
+            return;
+        }
+        if (_replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        {
+            await StartReplayBufferAsync(showErrors: false);
+            return;
+        }
+        if (_activeReplayConfigSnapshot is { } snapshot && RuntimeSettingsDiffer(snapshot, desired)) ScheduleReplayRestart();
+    }
+
+    private static bool RuntimeSettingsDiffer(ReplayBufferConfig active, ReplayBufferConfig desired) =>
+        active.DurationSeconds != desired.DurationSeconds || active.MaxHeight != desired.MaxHeight || active.FrameRate != desired.FrameRate ||
+        active.BitrateMbps != desired.BitrateMbps || !string.Equals(active.VideoCodec, desired.VideoCodec, StringComparison.Ordinal) ||
+        !string.Equals(active.EncoderMode, desired.EncoderMode, StringComparison.Ordinal) || !string.Equals(active.FrameRateMode, desired.FrameRateMode, StringComparison.Ordinal) ||
+        active.FullSessionRecordingEnabled != desired.FullSessionRecordingEnabled || !string.Equals(active.GameCaptureMethod, desired.GameCaptureMethod, StringComparison.Ordinal) ||
+        active.GameAudioVolumePercent != desired.GameAudioVolumePercent || active.MicrophoneVolumePercent != desired.MicrophoneVolumePercent ||
+        active.MicrophoneNoiseSuppressionEnabled != desired.MicrophoneNoiseSuppressionEnabled || active.MicrophoneNoiseGateThresholdDb != desired.MicrophoneNoiseGateThresholdDb ||
+        !AudioProcessesEqual(active.AdditionalAudioProcesses, desired.AdditionalAudioProcesses);
+
+    private static bool AudioProcessesEqual(IReadOnlyDictionary<string, int>? left, IReadOnlyDictionary<string, int>? right) =>
+        ReferenceEquals(left, right) || (left?.Count ?? 0) == (right?.Count ?? 0) &&
+        (left ?? new Dictionary<string, int>()).All(pair => right?.TryGetValue(pair.Key, out var value) == true && value == pair.Value);
 
     // Flipping the master switch takes effect now rather than at the next
     // game-detection tick: on arms (and starts capturing straight away if a
@@ -6207,6 +6254,7 @@ public sealed partial class MainWindow : Window
     {
         EndHotkeyCapture();
         if (ViewModel is null) return;
+        _hotkeyCaptureCustomGame = sender is Control { DataContext: CustomGameTabViewModel tab } ? tab : null;
         ViewModel.IsCapturingHotkey = true;
 
         // The key handlers live on this window, but a Flyout hosts its content
@@ -6272,6 +6320,7 @@ public sealed partial class MainWindow : Window
         }
 
         _capturedHotkeyKeys.Clear();
+        _hotkeyCaptureCustomGame = null;
         if (ViewModel is not null) ViewModel.IsCapturingHotkey = false;
     }
 
@@ -6529,9 +6578,14 @@ public sealed partial class MainWindow : Window
             var hotkey = HotkeyCombo.Normalize(_capturedHotkeyKeys);
             if (!string.IsNullOrWhiteSpace(hotkey))
             {
-                ViewModel.SetHotkey(hotkey);
-                if (_replayBuffer is IReplayCaptureWorkerControl worker)
-                    _ = worker.UpdateHotkeyAsync(hotkey);
+                if (_hotkeyCaptureCustomGame is { } customGame)
+                    customGame.SetSaveReplayHotkey(hotkey);
+                else
+                {
+                    ViewModel.SetHotkey(hotkey);
+                    if (_replayBuffer is IReplayCaptureWorkerControl worker)
+                        _ = worker.UpdateHotkeyAsync(ViewModel.EffectiveSaveReplayHotkey);
+                }
                 AppLog.Info($"Save hotkey set to {hotkey}.");
             }
 

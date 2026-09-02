@@ -262,6 +262,10 @@
           <ListBox Classes="pillGroup"
                    ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayDurationPresets}"
                    SelectedItem="{Binding SelectedDurationPreset}" />
+          <StackPanel Spacing="4">
+            <TextBlock Text="Save Hotkey" Foreground="{StaticResource TextBrush}" FontSize="12" />
+            <Button Content="{Binding SaveReplayHotkey}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
+          </StackPanel>
         </StackPanel>
       </Border>
 

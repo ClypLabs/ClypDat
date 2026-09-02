@@ -1000,7 +1000,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string HotkeyDisplay => IsCapturingHotkey ? "Press keys..." : Settings.SaveReplayHotkey;
+    public string HotkeyDisplay => IsCapturingHotkey ? "Press keys..." : EffectiveSaveReplayHotkey;
+
+    public string EffectiveSaveReplayHotkey
+    {
+        get
+        {
+            if (IsEffectiveDesktopCapture) return Settings.SaveReplayHotkey;
+            var key = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
+            return CustomGameSettingsResolver.Resolve(Settings, key).SaveReplayHotkey;
+        }
+    }
 
     public int SelectedCount => _selectedPaths.Count;
     public bool HasSelection => SelectedCount > 0;
@@ -1190,6 +1200,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            OnPropertyChanged(nameof(HotkeyDisplay));
             UpdateDiscordPresence();
         }
     }
@@ -6686,7 +6697,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var entry in Settings.CustomGameSettings.OrderBy(pair => pair.Value.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var tab = new CustomGameTabViewModel(entry.Key, entry.Value, Settings, SaveSettings,
-                () => NotifyCaptureMethodChanged(entry.Key));
+                () => NotifyCaptureMethodChanged(entry.Key), change => NotifyCustomGameSettingChanged(entry.Key, change));
             tab.SyncAudioProcesses(ActiveAudioProcesses);
             CustomGameTabs.Add(tab);
         }
@@ -6704,6 +6715,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : ActiveGameDetection.DetectionKey;
         if (string.Equals(activeKey, detectionKey, StringComparison.OrdinalIgnoreCase))
             OnPropertyChanged(nameof(ActiveGameCaptureMethodChanged));
+    }
+
+    public event Action<string, CustomGameSettingChange>? CustomGameSettingChanged;
+
+    private void NotifyCustomGameSettingChanged(string detectionKey, CustomGameSettingChange change)
+    {
+        var activeKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
+            ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
+        if (ReferenceEquals(CustomGameSettingsResolver.Find(Settings, activeKey),
+                Settings.CustomGameSettings.GetValueOrDefault(detectionKey)))
+            OnPropertyChanged(nameof(HotkeyDisplay));
+        CustomGameSettingChanged?.Invoke(detectionKey, change);
     }
 
     private void RebuildCustomGameCandidates()

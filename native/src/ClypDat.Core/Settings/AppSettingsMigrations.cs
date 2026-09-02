@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     public static bool Apply(AppSettings settings)
     {
@@ -43,6 +43,16 @@ public static class AppSettingsMigrations
             if (settings.LastSettingsSection is "Themes" or "Fonts") settings.LastSettingsSection = "Appearance";
             settings.CustomThemes ??= new();
             settings.RecentThemeColors ??= new();
+        }
+
+        if (settings.SettingsSchemaVersion < 6)
+        {
+            // Profile hotkeys were stored while their UI was absent. Make an
+            // upgrade deterministic: enabling Replay later keeps today's
+            // global key instead of reviving an old invisible override.
+            if (settings.CustomGameSettings is not null)
+                foreach (var profile in settings.CustomGameSettings.Values)
+                    profile.SaveReplayHotkey = settings.SaveReplayHotkey;
         }
 
         settings.CustomThemes ??= new();

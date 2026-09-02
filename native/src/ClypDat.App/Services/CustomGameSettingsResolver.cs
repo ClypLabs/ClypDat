@@ -133,6 +133,7 @@ internal static class CustomGameSettingsResolver
 
             case ReplayGroup:
                 profile.ReplayDurationSeconds = settings.ReplayDurationSeconds;
+                profile.SaveReplayHotkey = settings.SaveReplayHotkey;
                 break;
 
             case AudioGroup:
@@ -177,7 +178,7 @@ internal static class CustomGameSettingsResolver
             ReplayMaxHeight: quality?.ReplayMaxHeight ?? settings.ReplayMaxHeight,
             ReplayFrameRateMode: quality?.ReplayFrameRateMode ?? settings.ReplayFrameRateMode,
             ReplayDurationSeconds: replay?.ReplayDurationSeconds ?? settings.ReplayDurationSeconds,
-            SaveReplayHotkey: settings.SaveReplayHotkey,
+            SaveReplayHotkey: replay?.SaveReplayHotkey ?? settings.SaveReplayHotkey,
             AdditionalAudioProcesses: audio?.AdditionalAudioProcesses ?? settings.AdditionalAudioProcesses,
             GameAudioVolumePercent: audio?.GameAudioVolumePercent ?? settings.GameAudioVolumePercent,
             MicrophoneVolumePercent: audio?.MicrophoneVolumePercent ?? settings.MicrophoneVolumePercent,

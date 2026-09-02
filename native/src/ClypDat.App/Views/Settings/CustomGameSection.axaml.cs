@@ -34,4 +34,7 @@ public sealed partial class CustomGameSection : UserControl
 
     private void DeleteCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.DeleteCustomGameButton_OnClick(sender, e);
+
+    private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.HotkeyCaptureButton_OnClick(sender, e);
 }
