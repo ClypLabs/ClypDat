@@ -17,4 +17,13 @@ internal static class ReplayPacingPolicy
         scheduledAt += TimeSpan.FromTicks(checked(interval.Ticks * intervals));
         return intervals;
     }
+
+    // Housekeeping must run independently of whether a pacing policy emitted a
+    // frame. In particular, latest-frame pacing may intentionally skip a wake.
+    internal static bool IsMaintenanceDue(TimeSpan now, TimeSpan interval, ref TimeSpan lastRunAt)
+    {
+        if (interval <= TimeSpan.Zero || now - lastRunAt < interval) return false;
+        lastRunAt = now;
+        return true;
+    }
 }

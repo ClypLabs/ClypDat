@@ -69,4 +69,17 @@ public sealed class ReplayPipelineHealthClassifierTests
         Assert.Equal(120, encoded);
         Assert.Equal(TimeSpan.FromTicks(interval.Ticks * 120), scheduled);
     }
+
+    [Fact]
+    public void PeriodicMaintenanceStillRunsWhenLatestPacingSkipsAFrame()
+    {
+        var lastMaintenance = TimeSpan.Zero;
+        var interval = TimeSpan.FromSeconds(1);
+
+        Assert.False(ReplayPacingPolicy.IsMaintenanceDue(TimeSpan.FromMilliseconds(999), interval, ref lastMaintenance));
+        Assert.True(ReplayPacingPolicy.IsMaintenanceDue(TimeSpan.FromSeconds(1), interval, ref lastMaintenance));
+        Assert.Equal(TimeSpan.FromSeconds(1), lastMaintenance);
+        Assert.False(ReplayPacingPolicy.IsMaintenanceDue(TimeSpan.FromSeconds(1.5), interval, ref lastMaintenance));
+        Assert.True(ReplayPacingPolicy.IsMaintenanceDue(TimeSpan.FromSeconds(2), interval, ref lastMaintenance));
+    }
 }

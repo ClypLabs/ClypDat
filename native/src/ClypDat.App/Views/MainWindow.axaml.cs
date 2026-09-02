@@ -813,7 +813,11 @@ public sealed partial class MainWindow : Window
             return;
         }
         if (_replayBuffer is not { IsRecording: true }) return;
-        var shouldPause = string.Equals(detection.ExeName, "cs2.exe", StringComparison.OrdinalIgnoreCase) && detection.IsDetected && !detection.IsForeground;
+        // A background game must be treated the same way regardless of its
+        // executable name. This preserves the replay ring while preventing the
+        // capture health watchdog from mistaking an intentional privacy pause
+        // for a failed source.
+        var shouldPause = detection.IsDetected && !detection.IsForeground;
         _replayBuffer.SetCapturePaused(shouldPause);
     }
 
