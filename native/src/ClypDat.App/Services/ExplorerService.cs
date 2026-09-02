@@ -53,12 +53,21 @@ public static class ExplorerService
 
     private static void SelectFile(string path)
     {
-        var parseResult = SHParseDisplayName(path, IntPtr.Zero, out var itemIdList, 0, out _);
-        if (parseResult >= 0)
+        var folder = Path.GetDirectoryName(path);
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            AppLog.Error($"Could not determine the parent folder for '{path}'.");
+            return;
+        }
+
+        var folderParseResult = SHParseDisplayName(folder, IntPtr.Zero, out var folderItemIdList, 0, out _);
+        var itemParseResult = SHParseDisplayName(path, IntPtr.Zero, out var itemIdList, 0, out _);
+        if (folderParseResult >= 0 && itemParseResult >= 0)
         {
             try
             {
-                var selectResult = SHOpenFolderAndSelectItems(itemIdList, 0, IntPtr.Zero, 0);
+                var childItemIdList = ILFindLastID(itemIdList);
+                var selectResult = SHOpenFolderAndSelectItems(folderItemIdList, 1, new[] { childItemIdList }, 0);
                 if (selectResult >= 0) return;
 
                 AppLog.Error($"Failed to select '{path}' in Explorer (HRESULT 0x{selectResult:X8}); opening its folder instead.");
@@ -66,15 +75,14 @@ public static class ExplorerService
             finally
             {
                 Marshal.FreeCoTaskMem(itemIdList);
+                Marshal.FreeCoTaskMem(folderItemIdList);
             }
         }
-        else
-        {
-            AppLog.Error($"Failed to resolve '{path}' for Explorer selection (HRESULT 0x{parseResult:X8}); opening its folder instead.");
-        }
 
-        var folder = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(folder)) OpenFolder(folder);
+        if (itemParseResult >= 0) Marshal.FreeCoTaskMem(itemIdList);
+        if (folderParseResult >= 0) Marshal.FreeCoTaskMem(folderItemIdList);
+        AppLog.Error($"Failed to resolve '{path}' for Explorer selection (folder HRESULT 0x{folderParseResult:X8}, item HRESULT 0x{itemParseResult:X8}); opening its folder instead.");
+        OpenFolder(folder);
     }
 
     private static void OpenFolder(string path)
@@ -104,8 +112,11 @@ public static class ExplorerService
     private static extern int SHOpenFolderAndSelectItems(
         IntPtr folderItemIdList,
         uint childItemCount,
-        IntPtr childItemIdLists,
+        [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] IntPtr[] childItemIdLists,
         uint flags);
+
+    [DllImport("shell32.dll")]
+    private static extern IntPtr ILFindLastID(IntPtr itemIdList);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr ShellExecute(

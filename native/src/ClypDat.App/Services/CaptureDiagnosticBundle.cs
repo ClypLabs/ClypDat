@@ -8,36 +8,89 @@ namespace ClypDat.App.Services;
 public static class CaptureDiagnosticBundle
 {
     public static string Create(IReplayBuffer? replayBuffer, Cs2GsiListener? cs2GsiListener = null)
-    {
-        Directory.CreateDirectory(AppLog.LogFolder);
-        var path = Path.Combine(AppLog.LogFolder, $"clypdat-capture-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
-        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        => Create(replayBuffer, cs2GsiListener, AppLog.LogFolder, DateTime.Now);
 
-        var health = replayBuffer is IReplayCaptureDiagnostics diagnostics
-            ? diagnostics.GetHealthSnapshot()
-            : ReplayCaptureHealth.Unknown();
-        WriteJson(archive, "capture-health.json", health);
-        if (cs2GsiListener is not null) WriteJson(archive, "auto-clip-health.json", cs2GsiListener.GetHealthSnapshot());
-        WriteJson(archive, "environment.json", new
+    internal static string Create(
+        IReplayBuffer? replayBuffer,
+        Cs2GsiListener? cs2GsiListener,
+        string logFolder,
+        DateTime now)
+    {
+        Directory.CreateDirectory(logFolder);
+        var path = Path.Combine(logFolder, $"clypdat-capture-diagnostics-{now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}.zip");
+        var partialPath = $"{path}.partial";
+
+        try
         {
-            os = RuntimeInformation.OSDescription,
-            osVersion = Environment.OSVersion.VersionString,
-            architecture = RuntimeInformation.OSArchitecture.ToString(),
-            processorCount = Environment.ProcessorCount,
-            utc = DateTime.UtcNow
-        });
-        var logs = Directory.EnumerateFiles(AppLog.LogFolder, "clypdat*.log")
-            .Concat(new[] { Path.Combine(AppLog.LogFolder, "capture-worker.log") })
-            .Where(File.Exists);
-        foreach (var log in logs.Distinct(StringComparer.OrdinalIgnoreCase))
+            using (var archive = ZipFile.Open(partialPath, ZipArchiveMode.Create))
+            {
+                var health = replayBuffer is IReplayCaptureDiagnostics diagnostics
+                    ? diagnostics.GetHealthSnapshot()
+                    : ReplayCaptureHealth.Unknown();
+                WriteJson(archive, "capture-health.json", health);
+                if (cs2GsiListener is not null) WriteJson(archive, "auto-clip-health.json", cs2GsiListener.GetHealthSnapshot());
+                WriteJson(archive, "environment.json", new
+                {
+                    os = RuntimeInformation.OSDescription,
+                    osVersion = Environment.OSVersion.VersionString,
+                    architecture = RuntimeInformation.OSArchitecture.ToString(),
+                    processorCount = Environment.ProcessorCount,
+                    utc = DateTime.UtcNow
+                });
+
+                var skippedLogs = new List<string>();
+                var logs = Directory.EnumerateFiles(logFolder, "clypdat*.log")
+                    .Concat(new[] { Path.Combine(logFolder, "capture-worker.log") })
+                    .Where(File.Exists);
+                foreach (var log in logs.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var contents = ReadLog(log);
+                        var entry = archive.CreateEntry($"logs/{Path.GetFileName(log)}", CompressionLevel.Optimal);
+                        using var output = new StreamWriter(entry.Open());
+                        output.Write(Scrub(contents));
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                    {
+                        skippedLogs.Add($"{Path.GetFileName(log)} ({error.GetType().Name})");
+                    }
+                }
+
+                if (skippedLogs.Count > 0)
+                {
+                    var entry = archive.CreateEntry("bundle-warnings.txt", CompressionLevel.Optimal);
+                    using var output = new StreamWriter(entry.Open());
+                    output.WriteLine("The following logs could not be read while this bundle was created:");
+                    foreach (var skippedLog in skippedLogs) output.WriteLine($"- {skippedLog}");
+                }
+            }
+
+            File.Move(partialPath, path);
+        }
+        catch
         {
-            var entry = archive.CreateEntry($"logs/{Path.GetFileName(log)}", CompressionLevel.Optimal);
-            using var output = new StreamWriter(entry.Open());
-            output.Write(Scrub(File.ReadAllText(log)));
+            try
+            {
+                if (File.Exists(partialPath)) File.Delete(partialPath);
+            }
+            catch
+            {
+                // Preserve the original export error if cleanup is blocked by another process.
+            }
+
+            throw;
         }
 
         AppLog.Info($"Capture diagnostic bundle created: {path}.");
         return path;
+    }
+
+    private static string ReadLog(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     private static void WriteJson<T>(ZipArchive archive, string name, T value)

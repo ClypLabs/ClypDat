@@ -5851,16 +5851,19 @@ public sealed partial class MainWindow : Window
         AppLog.OpenFolder();
     }
 
-    internal void ExportCaptureDiagnosticsButton_OnClick(object? sender, RoutedEventArgs e)
+    internal async void ExportCaptureDiagnosticsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         try
         {
-            var path = CaptureDiagnosticBundle.Create(_replayBuffer, _cs2GsiListener);
+            var replayBuffer = _replayBuffer;
+            var cs2GsiListener = _cs2GsiListener;
+            var path = await Task.Run(() => CaptureDiagnosticBundle.Create(replayBuffer, cs2GsiListener));
             ExplorerService.Open(path, selectFile: true);
         }
         catch (Exception error)
         {
             AppLog.Error("Capture diagnostic bundle export failed", error);
+            await ShowMessageAsync("Export Bundle failed", "ClypDat could not create the diagnostic bundle. Please try again after recording resumes.");
         }
     }
 
