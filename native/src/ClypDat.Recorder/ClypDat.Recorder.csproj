@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\..\eng\AvaloniaPin.props" />
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>ClypDatRecorder</AssemblyName>
+    <RootNamespace>ClypDat.Recorder</RootNamespace>
+    <AssemblyTitle>ClypDat Recorder</AssemblyTitle>
+    <Description>ClypDat background capture recorder</Description>
+    <Company>ClypLabs</Company>
+    <!-- Installer shutdown validates this value before touching a process. -->
+    <Product>ClypDat</Product>
+    <ApplicationIcon>..\..\..\assets\clypdat-icon.ico</ApplicationIcon>
+    <ApplicationManifest>..\ClypDat.App\app.manifest</ApplicationManifest>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PlatformTarget>x64</PlatformTarget>
+    <Version Condition="'$(Version)' == ''">1.4.1</Version>
+    <PublishReadyToRun>false</PublishReadyToRun>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(ClypDatChannel)' == 'Dev'">
+    <DefineConstants>$(DefineConstants);CLYPDAT_DEV</DefineConstants>
+    <Version>0.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
+
+  <Target Name="GetCaptureWorkerOutputFiles" DependsOnTargets="Build" Returns="@(CaptureWorkerOutputFiles)">
+    <ItemGroup>
+      <CaptureWorkerOutputFiles Include="$(TargetDir)ClypDatRecorder.exe" />
+      <CaptureWorkerOutputFiles Include="$(TargetDir)ClypDatRecorder.dll" />
+      <CaptureWorkerOutputFiles Include="$(TargetDir)ClypDatRecorder.deps.json" />
+      <CaptureWorkerOutputFiles Include="$(TargetDir)ClypDatRecorder.runtimeconfig.json" />
+    </ItemGroup>
+  </Target>
+</Project>

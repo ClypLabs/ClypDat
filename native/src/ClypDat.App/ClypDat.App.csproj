@@ -126,6 +126,9 @@
   <ItemGroup>
     <ProjectReference Include="..\ClypDat.Core\ClypDat.Core.csproj" />
     <ProjectReference Include="..\ClypDat.Capture.Abstractions\ClypDat.Capture.Abstractions.csproj" />
+    <ProjectReference Include="..\ClypDat.Recorder\ClypDat.Recorder.csproj"
+                      ReferenceOutputAssembly="false"
+                      Condition="'$(ClypDatUiPreview)' != 'true'" />
     <Compile Include="..\ClypDat.DevChannel\DevChannelConstants.cs" Link="Services\DevChannel\DevChannelConstants.cs" />
     <Compile Include="..\ClypDat.DevChannel\DevBuildManifest.cs" Link="Services\DevChannel\DevBuildManifest.cs" />
     <Compile Include="..\ClypDat.DevChannel\DevPackageVerifier.cs" Link="Services\DevChannel\DevPackageVerifier.cs" />
@@ -200,18 +203,32 @@
           SkipUnchangedFiles="true" />
   </Target>
 
-  <!-- Same apphost, distinct image name. Worker mode exits before any
-       Avalonia/UI initialization, while Task Manager now identifies recorder
-       separately from the desktop shell. -->
-  <Target Name="CopyCaptureWorkerAppHostToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(TargetDir)ClypDat.exe')">
-    <Copy SourceFiles="$(TargetDir)ClypDat.exe"
-          DestinationFiles="$(TargetDir)ClypDatRecorder.exe"
+  <!-- A distinct apphost gives Task Manager a truthful process name and file
+       description. Copy only its four launcher files; the worker resolves the
+       already-published App and its dependency graph at runtime. -->
+  <Target Name="BuildCaptureWorkerAppHost"
+          AfterTargets="Build"
+          Condition="'$(ClypDatUiPreview)' != 'true'">
+    <MSBuild Projects="..\ClypDat.Recorder\ClypDat.Recorder.csproj"
+             Targets="GetCaptureWorkerOutputFiles"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);ClypDatChannel=$(ClypDatChannel);Version=$(Version)">
+      <Output TaskParameter="TargetOutputs" ItemName="CaptureWorkerOutputFiles" />
+    </MSBuild>
+    <Copy SourceFiles="@(CaptureWorkerOutputFiles)"
+          DestinationFolder="$(TargetDir)"
           SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="CopyCaptureWorkerAppHostToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(PublishDir)ClypDat.exe')">
-    <Copy SourceFiles="$(PublishDir)ClypDat.exe"
-          DestinationFiles="$(PublishDir)ClypDatRecorder.exe"
+  <Target Name="PublishCaptureWorkerAppHost"
+          AfterTargets="Publish"
+          Condition="'$(ClypDatUiPreview)' != 'true'">
+    <MSBuild Projects="..\ClypDat.Recorder\ClypDat.Recorder.csproj"
+             Targets="GetCaptureWorkerOutputFiles"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);ClypDatChannel=$(ClypDatChannel);Version=$(Version)">
+      <Output TaskParameter="TargetOutputs" ItemName="CaptureWorkerPublishFiles" />
+    </MSBuild>
+    <Copy SourceFiles="@(CaptureWorkerPublishFiles)"
+          DestinationFolder="$(PublishDir)"
           SkipUnchangedFiles="true" />
   </Target>
 

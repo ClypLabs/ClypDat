@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClypDat.Core", "src\ClypDat
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClypDat.Capture.Abstractions", "src\ClypDat.Capture.Abstractions\ClypDat.Capture.Abstractions.csproj", "{417FD5E8-70CD-4C26-AD5D-9C6F05E1D836}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ClypDat.Recorder", "src\ClypDat.Recorder\ClypDat.Recorder.csproj", "{A2D8B426-65E0-4E69-B8C9-37D49C7BD34B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -26,5 +28,9 @@ Global
 		{417FD5E8-70CD-4C26-AD5D-9C6F05E1D836}.Debug|x64.Build.0 = Debug|x64
 		{417FD5E8-70CD-4C26-AD5D-9C6F05E1D836}.Release|x64.ActiveCfg = Release|x64
 		{417FD5E8-70CD-4C26-AD5D-9C6F05E1D836}.Release|x64.Build.0 = Release|x64
+		{A2D8B426-65E0-4E69-B8C9-37D49C7BD34B}.Debug|x64.ActiveCfg = Debug|x64
+		{A2D8B426-65E0-4E69-B8C9-37D49C7BD34B}.Debug|x64.Build.0 = Debug|x64
+		{A2D8B426-65E0-4E69-B8C9-37D49C7BD34B}.Release|x64.ActiveCfg = Release|x64
+		{A2D8B426-65E0-4E69-B8C9-37D49C7BD34B}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 EndGlobal

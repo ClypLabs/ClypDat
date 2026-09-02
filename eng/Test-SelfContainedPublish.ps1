@@ -11,6 +11,9 @@ $requiredFiles = @(
     'ClypDat.exe',
     'ClypDatRecorder.exe',
     'ClypDat.runtimeconfig.json',
+    'ClypDatRecorder.dll',
+    'ClypDatRecorder.deps.json',
+    'ClypDatRecorder.runtimeconfig.json',
     'coreclr.dll',
     'hostfxr.dll',
     'hostpolicy.dll'
@@ -20,6 +23,14 @@ foreach ($file in $requiredFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishDirectory $file))) {
         throw "Self-contained publish is missing $file."
     }
+}
+
+$workerInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $publishDirectory 'ClypDatRecorder.exe'))
+if ($workerInfo.FileDescription -ne 'ClypDat Recorder') {
+    throw "Recorder FileDescription is '$($workerInfo.FileDescription)', expected 'ClypDat Recorder'."
+}
+if ($workerInfo.ProductName -ne 'ClypDat') {
+    throw "Recorder ProductName is '$($workerInfo.ProductName)', expected 'ClypDat'."
 }
 
 $runtimeConfig = Get-Content -Raw (Join-Path $publishDirectory 'ClypDat.runtimeconfig.json') | ConvertFrom-Json
