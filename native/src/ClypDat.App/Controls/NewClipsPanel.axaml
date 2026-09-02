@@ -1,0 +1,52 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ClypDat.App.Controls.NewClipsPanel"
+             x:CompileBindings="False">
+
+  <!-- The "N clips saved" popup frame, shared by both places it is shown from:
+       the in-window overlay on the library (MainWindow.axaml's NewClipsOverlay)
+       and the top-level window used while the editor is open (NewClipsDialog,
+       which needs its own OS window because LibVLC's native child window cannot
+       be covered by a control in MainWindow's tree).
+
+       It lives here because it used to live in BOTH of those, hand-built in C#
+       in one and in XAML in the other. Four rounds of restyling then landed on
+       the XAML copy only, so for weeks the editor popup rendered the older
+       design - a look nobody had chosen since. One tree means a restyle cannot
+       reach one presentation and miss the other.
+
+       The cards inside are still built in code (BuildNewClipCard) and dropped
+       into Cards; only the frame is here. -->
+  <Border x:Name="Card" MaxHeight="780" CornerRadius="12" Background="{StaticResource Surface_111920}"
+          BorderBrush="{StaticResource Surface_3A4856}" BorderThickness="1"
+          BoxShadow="0 18 48 -12 #B0000000" ClipToBounds="True">
+    <DockPanel LastChildFill="True">
+      <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0">
+        <Grid ColumnDefinitions="*,Auto" MinHeight="56" Margin="28,0,0,0">
+          <StackPanel VerticalAlignment="Center" Spacing="3" Margin="0,17,18,15">
+            <TextBlock x:Name="TitleText" Foreground="{StaticResource Text_D8E4F2}" FontSize="19" FontWeight="Bold" />
+            <TextBlock x:Name="SubtitleText" Foreground="{StaticResource Text_8C98A7}" FontSize="12" />
+          </StackPanel>
+          <Button x:Name="CloseButton" Grid.Column="1" Classes="dialogClose" FontSize="14"
+                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                  Width="52" VerticalAlignment="Stretch" CornerRadius="0,11,0,0" Click="CloseButton_OnClick">
+            <TextBlock Text="✕" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface_141B23}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="0,1,0,0" CornerRadius="0,0,11,11">
+        <Grid ColumnDefinitions="*,12,*" Margin="28,14,28,14">
+          <Button x:Name="DeleteButton" Grid.Column="0" Classes="subtleDangerButton" MinWidth="140" Height="42"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="DeleteButton_OnClick" />
+          <Button x:Name="ViewAllButton" Grid.Column="2" Classes="primaryButton" Content="View All Clips" MinWidth="170" Height="42"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="ViewAllButton_OnClick" />
+        </Grid>
+      </Border>
+
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="560">
+        <StackPanel x:Name="CardsPanel" Margin="28,20,28,8" />
+      </ScrollViewer>
+    </DockPanel>
+  </Border>
+</UserControl>

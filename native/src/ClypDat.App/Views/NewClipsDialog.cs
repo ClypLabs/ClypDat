@@ -2,23 +2,30 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.Layout;
 using Avalonia.Media;
+using ClypDat.App.Controls;
 using ClypDat.App.Services;
 
 namespace ClypDat.App.Views;
 
 // Top-level editor variant: native VLC video cannot be covered by a control in
-// MainWindow's visual tree, so this mirrors ShareDialog's transparent airspace.
+// MainWindow's visual tree, so the popup gets its own window while the editor
+// is open.
+//
+// It carries the panel and NOTHING else. It used to paint the dim scrim itself,
+// in this same window - and when the platform declines real transparency (which
+// it does intermittently, most visibly right after a fullscreen game exits)
+// WindowTransparencyFallback answers that by applying the scrim's own alpha to
+// the WHOLE window. That fades the popup along with its backdrop: 78% opacity
+// on the card, the cards, the text and the buttons, with the editor showing
+// through all of it. The dim now comes from a separate ShareBackdropWindow, the
+// same split ShareDialog already uses ("Separate from ShareDialog so its layered
+// alpha never affects the solid card"), so the popup's own background stays
+// opaque and no fallback can make it see-through.
 internal sealed class NewClipsDialog : Window
 {
     private readonly Window _owner;
-    private readonly TextBlock _title;
-    private readonly TextBlock _subtitle;
-    private readonly Border _card;
-    private readonly Button _primaryButton;
-    public StackPanel Cards { get; } = new() { Margin = new Thickness(28, 20, 28, 8) };
-    public Button DeleteButton { get; } = new() { MinWidth = 140, Height = 42 };
+    public NewClipsPanel Panel { get; } = new();
 
     public NewClipsDialog(Window owner, EventHandler<RoutedEventArgs> close, EventHandler<RoutedEventArgs> delete, EventHandler<RoutedEventArgs> viewAll)
     {
@@ -27,9 +34,16 @@ internal sealed class NewClipsDialog : Window
         ShowInTaskbar = false;
         CanResize = false;
         WindowStartupLocation = WindowStartupLocation.Manual;
+        // Width is assigned per show (SetCardWidth); the popup is as tall as its
+        // cards make it, up to the panel's own MaxHeight.
+        SizeToContent = SizeToContent.Height;
         Background = Brushes.Transparent;
         TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent };
-        PositionOverOwner(owner);
+        Panel.CloseRequested += close;
+        Panel.DeleteRequested += delete;
+        Panel.ViewAllRequested += viewAll;
+        Content = Panel;
+
         owner.PositionChanged += Owner_OnPositionChanged;
         owner.SizeChanged += Owner_OnSizeChanged;
         Closed += (_, _) =>
@@ -37,71 +51,51 @@ internal sealed class NewClipsDialog : Window
             owner.PositionChanged -= Owner_OnPositionChanged;
             owner.SizeChanged -= Owner_OnSizeChanged;
         };
-
-        _title = new TextBlock { Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"), FontSize = 19, FontWeight = FontWeight.Bold };
-        _subtitle = new TextBlock { Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"), FontSize = 12 };
-        var summary = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center, Children = { _title, _subtitle } };
-        var closeButton = new Button { Content = "✕", Width = 36, Height = 36, CornerRadius = new CornerRadius(18), FontSize = 13 };
-        closeButton.Classes.Add("dialogClose");
-        closeButton.Click += close;
-        DeleteButton.Classes.Add("subtleDangerButton");
-        DeleteButton.Click += delete;
-        _primaryButton = new Button { Content = "View All Clips", MinWidth = 170, Height = 42 };
-        _primaryButton.Classes.Add("primaryButton");
-        _primaryButton.Click += viewAll;
-
-        var headerGrid = new Grid { MinHeight = 44, Margin = new Thickness(28, 17, 18, 15), ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-        headerGrid.Children.Add(summary);
-        headerGrid.Children.Add(closeButton);
-        Grid.SetColumn(closeButton, 1);
-        var header = new Border { Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"), Child = headerGrid };
-        var footerGrid = new Grid { Margin = new Thickness(28, 14), ColumnDefinitions = new ColumnDefinitions("*,Auto,12,Auto") };
-        footerGrid.Children.Add(DeleteButton);
-        Grid.SetColumn(DeleteButton, 1);
-        footerGrid.Children.Add(_primaryButton);
-        Grid.SetColumn(_primaryButton, 3);
-        var footer = new Border
-        {
-            Background = AppThemeService.Brush("Surface_141B23", "#141B23"),
-            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Child = footerGrid
-        };
-        var dock = new DockPanel();
-        dock.Children.Add(header);
-        DockPanel.SetDock(header, Dock.Top);
-        dock.Children.Add(footer);
-        DockPanel.SetDock(footer, Dock.Bottom);
-        dock.Children.Add(new ScrollViewer { Content = Cards, MaxHeight = 560 });
-        _card = new Border { Width = 496, MaxHeight = 780, CornerRadius = new CornerRadius(20), Background = AppThemeService.Brush("Surface_111920", "#111920"), BorderBrush = AppThemeService.Brush("Surface_3A4856", "#3A4856"), BorderThickness = new Thickness(1), BoxShadow = BoxShadows.Parse("0 18 48 -12 #B0000000"), ClipToBounds = true, Child = dock, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        var scrim = new Border { Background = Brush.Parse("#C7000000"), Child = _card };
-        Content = scrim;
+        // Height only settles after the cards lay out, and the centred position
+        // depends on that height.
+        Resized += (_, _) => CenterOverOwner();
         Opened += (_, _) =>
         {
             OverlayTransparencyDiagnostics.Log(this, "new-clips-dialog");
-            WindowTransparencyFallback.ApplyIfNeeded(this, scrim.Background, b => scrim.Background = b);
+            // Opaque background in, so this resolves to full opacity and leaves
+            // the popup solid. It stays wired because the rounded corners still
+            // want per-pixel alpha where the platform can give it.
+            WindowTransparencyFallback.ApplyIfNeeded(this, Panel.PanelBackground, Panel.SetPanelBackground, "new-clips-dialog");
+            CenterOverOwner();
         };
         KeyDown += (_, e) => { if (e.Key == Key.Escape) close(this, new RoutedEventArgs()); };
     }
 
-    public void SetSummary(string title, string subtitle)
+    public void SetCardWidth(double width)
     {
-        _title.Text = title;
-        _subtitle.Text = subtitle;
-    }
-    public void SetCardWidth(double width) => _card.Width = Math.Clamp(width, 320, Math.Max(320, _owner.Bounds.Width - 32));
-    public void SetPrimaryAction(string label) => _primaryButton.Content = label;
-
-    public void RefreshOwnerBounds() => PositionOverOwner(_owner);
-
-    private void PositionOverOwner(Window owner)
-    {
-        Position = owner.PointToScreen(new Point(0, 0));
-        Width = owner.Bounds.Width;
-        Height = owner.Bounds.Height;
+        Width = Math.Clamp(width, 320, Math.Max(320, _owner.Bounds.Width - 32));
+        CenterOverOwner();
     }
 
-    private void Owner_OnPositionChanged(object? sender, PixelPointEventArgs e) => RefreshOwnerBounds();
+    public void RefreshOwnerBounds() => CenterOverOwner();
 
-    private void Owner_OnSizeChanged(object? sender, SizeChangedEventArgs e) => RefreshOwnerBounds();
+    // Follows the owner rather than being centred once: the popup can be up for
+    // as long as the user leaves it there, and the main window can be dragged
+    // or resized under it in the meantime.
+    private void CenterOverOwner()
+    {
+        if (_owner.Bounds.Width <= 0 || _owner.Bounds.Height <= 0) return;
+
+        var ownerScaling = _owner.RenderScaling > 0 ? _owner.RenderScaling : 1;
+        var scaling = RenderScaling > 0 ? RenderScaling : 1;
+        var ownerTopLeft = _owner.PointToScreen(new Point(0, 0));
+        var ownerWidth = (int)Math.Round(_owner.Bounds.Width * ownerScaling);
+        var ownerHeight = (int)Math.Round(_owner.Bounds.Height * ownerScaling);
+        var size = FrameSize ?? ClientSize;
+        var width = (int)Math.Round(size.Width * scaling);
+        var height = (int)Math.Round(size.Height * scaling);
+
+        Position = new PixelPoint(
+            ownerTopLeft.X + (ownerWidth - width) / 2,
+            ownerTopLeft.Y + (ownerHeight - height) / 2);
+    }
+
+    private void Owner_OnPositionChanged(object? sender, PixelPointEventArgs e) => CenterOverOwner();
+
+    private void Owner_OnSizeChanged(object? sender, SizeChangedEventArgs e) => CenterOverOwner();
 }

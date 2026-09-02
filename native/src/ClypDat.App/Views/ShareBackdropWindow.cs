@@ -15,7 +15,11 @@ internal sealed class ShareBackdropWindow : Window
     private PixelPoint _lockedPosition;
     private bool _restoringPosition;
 
-    public ShareBackdropWindow(Window owner, bool allowOwnerMove = false)
+    // scrimColor is the dim itself, so callers that were designed around a
+    // lighter one keep it. It also decides the layered-alpha level applied when
+    // the platform refuses real transparency - this window carries nothing but
+    // the scrim, so fading the whole window IS the effect, not a side effect.
+    public ShareBackdropWindow(Window owner, bool allowOwnerMove = false, string scrimColor = "#DD000000")
     {
         _owner = owner;
         _allowOwnerMove = allowOwnerMove;
@@ -29,7 +33,7 @@ internal sealed class ShareBackdropWindow : Window
 
         var scrim = new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#DD000000")),
+            Background = new SolidColorBrush(Color.Parse(scrimColor)),
             CornerRadius = new CornerRadius(8),
             ClipToBounds = true
         };
@@ -42,7 +46,7 @@ internal sealed class ShareBackdropWindow : Window
         Closed += OnClosed;
         Opened += (_, _) =>
         {
-            WindowTransparencyFallback.ApplyIfNeeded(this, scrim.Background, b => scrim.Background = b);
+            WindowTransparencyFallback.ApplyIfNeeded(this, scrim.Background, b => scrim.Background = b, "backdrop");
             RestoreLockedPosition();
         };
     }

@@ -2059,43 +2059,17 @@
          this Border it can't be moved at all, and the same #AA000000 scrim the
          onboarding overlay above uses darkens the whole app behind it instead
          of leaving it in full view. IsVisible is toggled directly on the named
-         element from code-behind (ShowNewClipsDialog) rather than bound to a
-         ViewModel property - the title text and card grid are still built in
-         code-behind too (into NewClipsTitleText/NewClipsCardsPanel below),
-         same as before, just targeting this embedded tree instead of a
-         Window's own body. -->
+         element from code-behind (ShowNewClipsDialog).
+
+         The popup's frame is controls:NewClipsPanel, shared with the top-level
+         NewClipsDialog used while the editor is open - the two used to be
+         separate hand-maintained copies and the editor's fell four restyles
+         behind. The card grid is still built in code-behind, into the panel's
+         Cards host. Centre alignment is load-bearing: stretched, the panel
+         would cover the scrim and swallow the click that dismisses it. -->
     <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#C7000000" IsVisible="False"
             PointerPressed="NewClipsOverlay_OnPointerPressed">
-      <Border x:Name="NewClipsDialogCard" MaxHeight="780" CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_3A4856}" BorderThickness="1"
-              BoxShadow="0 18 48 -12 #B0000000" ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <DockPanel LastChildFill="True">
-          <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0">
-            <Grid ColumnDefinitions="*,Auto" MinHeight="56" Margin="28,0,0,0">
-              <StackPanel VerticalAlignment="Center" Spacing="3" Margin="0,17,18,15">
-                <TextBlock x:Name="NewClipsTitleText" Foreground="{StaticResource Text_D8E4F2}" FontSize="19" FontWeight="Bold" />
-                <TextBlock x:Name="NewClipsSubtitleText" Foreground="{StaticResource Text_8C98A7}" FontSize="12" />
-              </StackPanel>
-              <Button Grid.Column="1" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                      Width="52" VerticalAlignment="Stretch" CornerRadius="0,11,0,0" Click="NewClipsCloseButton_OnClick">
-                <TextBlock Text="✕" />
-              </Button>
-            </Grid>
-          </Border>
-
-          <Border DockPanel.Dock="Bottom" Background="{StaticResource Surface_141B23}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="0,1,0,0" CornerRadius="0,0,11,11">
-            <Grid ColumnDefinitions="*,12,*" Margin="28,14,28,14">
-              <Button x:Name="NewClipsDeleteButton" Grid.Column="0" Classes="subtleDangerButton" MinWidth="140" Height="42"
-                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsDeleteButton_OnClick" />
-              <Button x:Name="NewClipsViewAllButton" Grid.Column="2" Classes="primaryButton" Content="View All Clips" MinWidth="170" Height="42"
-                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="NewClipsViewAllButton_OnClick" />
-            </Grid>
-          </Border>
-
-          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="560">
-            <StackPanel x:Name="NewClipsCardsPanel" Margin="28,20,28,8" />
-          </ScrollViewer>
-        </DockPanel>
-      </Border>
+      <controls:NewClipsPanel x:Name="NewClipsPanelHost" HorizontalAlignment="Center" VerticalAlignment="Center" />
     </Border>
 
     <!-- Video-only fullscreen overlay. Grid.RowSpan="2" + last child of the

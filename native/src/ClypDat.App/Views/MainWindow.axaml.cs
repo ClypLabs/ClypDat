@@ -268,6 +268,11 @@ public sealed partial class MainWindow : Window
         _startupWindowCloaked = StartupWindowPresentation.TryCloak(this);
         if (!_startupWindowCloaked) Opacity = 0;
         EditorVideoView.VideoClicked += EditorVideoView_OnVideoClicked;
+        // The popup's buttons live inside NewClipsPanel now, so their handlers
+        // are subscribed here instead of through Click= in this window's XAML.
+        NewClipsPanelHost.CloseRequested += NewClipsCloseButton_OnClick;
+        NewClipsPanelHost.DeleteRequested += NewClipsDeleteButton_OnClick;
+        NewClipsPanelHost.ViewAllRequested += NewClipsViewAllButton_OnClick;
         // ApplySavedWindowBounds can restore straight into Maximized, which
         // won't raise an OffScreenMargin change of its own.
         RootLayout.Margin = OffScreenMargin;
@@ -3088,13 +3093,21 @@ public sealed partial class MainWindow : Window
     // testing the popup's layout never touches _sessionNewClipPaths or
     // interferes with the real end-of-session summary it drives.
     // Backs the fixed Delete/View All Clips buttons (NewClipsDeleteButton_OnClick
-    // /NewClipsViewAllButton_OnClick below) - those are named, persistent XAML
-    // elements now rather than rebuilt per show, so their Click handlers are
-    // wired once in XAML and read whatever's current from here instead of each
+    // /NewClipsViewAllButton_OnClick below) - those live on the shared
+    // NewClipsPanel rather than being rebuilt per show, so their handlers are
+    // wired once per panel and read whatever's current from here instead of each
     // getting a fresh closure-captured delegate stacked on top of the last one.
     private List<NewClipEntryViewModel> _currentNewClipsEntries = new();
     private readonly List<string> _newClipsSelectionOrder = new();
     private NewClipsDialog? _editorNewClipsDialog;
+    private ShareBackdropWindow? _editorNewClipsBackdrop;
+    // Which panel the popup on show is actually using. Held as a field, not
+    // derived from _editorNewClipsDialog: on the library path that dialog is
+    // still non-null while the cards are being built (it isn't closed until the
+    // end of ShowNewClipsDialog), so deriving it would target the wrong panel.
+    // SyncNewClipsDeleteButton is also called from a per-entry SelectionChanged
+    // closure, long after the show call has returned.
+    private NewClipsPanel? _activeNewClipsPanel;
     private bool _newClipsNotificationPending;
     // Clips the user has already been shown and dismissed (closed the popup, or
     // clicked one to open it). Without this the popup came straight back for the
@@ -3172,8 +3185,14 @@ public sealed partial class MainWindow : Window
             _ => $"{clipCount} clips and {vodCount} VODs saved"
         };
         var summarySubtitle = $"{FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))} • Ready in your library";
-        NewClipsTitleText.Text = summaryTitle;
-        NewClipsSubtitleText.Text = summarySubtitle;
+
+        // Both presentations render the same NewClipsPanel; everything below
+        // targets whichever one this show is using. EnsureEditorNewClipsDialog
+        // only constructs the window - it isn't shown until the end.
+        var editorDialog = presentation == NewClipsPresentation.EditorWindow;
+        var panel = editorDialog ? EnsureEditorNewClipsDialog().Panel : NewClipsPanelHost;
+        _activeNewClipsPanel = panel;
+        panel.SetSummary(summaryTitle, summarySubtitle);
 
         foreach (var entry in entries)
         {
@@ -3193,8 +3212,7 @@ public sealed partial class MainWindow : Window
 
         var single = entries.Count == 1;
         const int cardSpacing = 14;
-        var editorDialog = presentation == NewClipsPresentation.EditorWindow;
-        var cardsPanel = editorDialog ? EnsureEditorNewClipsDialog().Cards : NewClipsCardsPanel;
+        var cardsPanel = panel.Cards;
         cardsPanel.Margin = single ? new Thickness(28, 20, 28, 8) : new Thickness(8, 20, 8, 8);
         var columns = single ? 1 : Math.Min(NewClipsCardLayoutPolicy.CardsPerRow, entries.Count);
         var maximumDialogWidth = Math.Max(320d, Bounds.Width - 32);
@@ -3206,8 +3224,7 @@ public sealed partial class MainWindow : Window
         // exists so its Delete button cannot be born with empty content.
         SyncNewClipsDeleteButton();
         var primaryAction = single ? "View Clip" : "View All Clips";
-        NewClipsViewAllButton.Content = primaryAction;
-        _editorNewClipsDialog?.SetPrimaryAction(primaryAction);
+        panel.SetPrimaryAction(primaryAction);
         cardsPanel.Children.Clear();
         var entryIndex = 0;
         foreach (var rowLength in NewClipsCardLayoutPolicy.CreateRowLengths(entries.Count))
@@ -3232,20 +3249,24 @@ public sealed partial class MainWindow : Window
         // blank modal; multi-card saves still grow to their actual columns.
         var dialogWidth = cardsPanel.Margin.Left + columns * cardWidth + (columns - 1) * cardSpacing + cardsPanel.Margin.Right;
         dialogWidth = Math.Min(dialogWidth, Math.Max(320d, Bounds.Width - 32));
-        NewClipsDialogCard.Width = dialogWidth;
 
         if (editorDialog)
         {
             NewClipsOverlay.IsVisible = false;
-            _editorNewClipsDialog!.SetSummary(summaryTitle, summarySubtitle);
-            _editorNewClipsDialog.SetCardWidth(dialogWidth);
-            _editorNewClipsDialog.RefreshOwnerBounds();
             CoverEditorSurfaceForNewClips();
-            _editorNewClipsDialog.Show(this);
+            // Backdrop first, then the popup owned BY it: the dim is its own
+            // window (see NewClipsDialog), and the ownership chain is what keeps
+            // the popup above it without making either one modal. A popup with
+            // no backdrop is still worth showing - undimmed beats absent.
+            _editorNewClipsBackdrop?.Show(this);
+            _editorNewClipsDialog!.SetCardWidth(dialogWidth);
+            _editorNewClipsDialog.Show((Window?)_editorNewClipsBackdrop ?? this);
+            _editorNewClipsDialog.RefreshOwnerBounds();
         }
         else
         {
             CloseEditorNewClipsDialog();
+            panel.SetCardWidth(dialogWidth);
             NewClipsOverlay.IsVisible = true;
         }
         AppLog.Info($"New Clips popup shown: {entries.Count} clip(s).");
@@ -3285,8 +3306,8 @@ public sealed partial class MainWindow : Window
     private void SyncNewClipsDeleteButton()
     {
         var count = ChosenNewClips().Length;
-        NewClipsDeleteButton.Content = count == 1 ? "Delete clip" : $"Delete {count} clips";
-        if (_editorNewClipsDialog is not null) _editorNewClipsDialog.DeleteButton.Content = NewClipsDeleteButton.Content;
+        var label = count == 1 ? "Delete clip" : $"Delete {count} clips";
+        (_activeNewClipsPanel ?? NewClipsPanelHost).SetDeleteLabel(label);
     }
 
     // Hides the popup AND records what was on show, so the same clips can't
@@ -3302,11 +3323,24 @@ public sealed partial class MainWindow : Window
     private NewClipsDialog EnsureEditorNewClipsDialog()
     {
         if (_editorNewClipsDialog is not null) return _editorNewClipsDialog;
+        // The dim is a separate window so no transparency fallback can fade the
+        // popup along with it. Keeping the popup's own #C7000000 rather than the
+        // backdrop's default #DD000000 leaves the editor as visible behind it as
+        // it has always been.
+        var backdrop = new ShareBackdropWindow(this, scrimColor: "#C7000000");
+        // Clicking the dark area outside the popup dismisses it, matching the
+        // library presentation - the editor one never had light dismiss because
+        // its scrim was part of the popup window itself.
+        backdrop.DismissRequested += (_, _) => DismissNewClipsDialog();
+        _editorNewClipsBackdrop = backdrop;
         _editorNewClipsDialog = new NewClipsDialog(this, NewClipsCloseButton_OnClick, NewClipsDeleteButton_OnClick, NewClipsViewAllButton_OnClick);
         _editorNewClipsDialog.Closed += (_, _) =>
         {
             if (_editorNewClipsDialog is not null) DismissNewClipsDialog();
             _editorNewClipsDialog = null;
+            var stranded = _editorNewClipsBackdrop;
+            _editorNewClipsBackdrop = null;
+            stranded?.Close();
         };
         return _editorNewClipsDialog;
     }
@@ -3314,9 +3348,13 @@ public sealed partial class MainWindow : Window
     private void CloseEditorNewClipsDialog()
     {
         var dialog = _editorNewClipsDialog;
+        var backdrop = _editorNewClipsBackdrop;
         _editorNewClipsDialog = null;
+        _editorNewClipsBackdrop = null;
+        if (ReferenceEquals(_activeNewClipsPanel, dialog?.Panel)) _activeNewClipsPanel = null;
         UncoverEditorSurfaceForNewClips();
         dialog?.Close();
+        backdrop?.Close();
     }
 
     private void NewClipsCloseButton_OnClick(object? sender, RoutedEventArgs e) => DismissNewClipsDialog();
@@ -3854,7 +3892,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b);
+                WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b, "clip-toast");
             }
         };
         _activeClipOverlay.Closed += (_, _) =>
@@ -7582,7 +7620,7 @@ public sealed partial class MainWindow : Window
         };
         var layout = new DockPanel { LastChildFill = true };
         card.Child = layout;
-        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, card.Background, brush => card.Background = brush);
+        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, card.Background, brush => card.Background = brush, "audio-only-clips");
         var header = new Grid { Height = 56, ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Background = AppThemeService.Brush("Surface_0C1319", "#0C1319") };
         var title = new TextBlock
         {
@@ -8190,7 +8228,7 @@ public sealed partial class MainWindow : Window
         DockPanel.SetDock(hero, Dock.Top);
         var shell = CreateRoundedDialogShell(content);
         window.Content = shell;
-        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, shell.Background, brush => shell.Background = brush);
+        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, shell.Background, brush => shell.Background = brush, "rounded-dialog");
 
         return window;
     }
@@ -8443,7 +8481,7 @@ public sealed partial class MainWindow : Window
         DockPanel.SetDock(hero, Dock.Top);
         var shell = CreateRoundedDialogShell(content);
         window.Content = shell;
-        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, shell.Background, brush => shell.Background = brush);
+        window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, shell.Background, brush => shell.Background = brush, "rounded-dialog");
 
         return window;
     }
@@ -9111,7 +9149,7 @@ public sealed partial class MainWindow : Window
         overlay.Opened += (_, _) =>
         {
             OverlayTransparencyDiagnostics.Log(overlay, "playback-paused");
-            WindowTransparencyFallback.ApplyIfNeeded(overlay, scrim.Background, b => scrim.Background = b);
+            WindowTransparencyFallback.ApplyIfNeeded(overlay, scrim.Background, b => scrim.Background = b, "playback-paused");
         };
         overlay.AddHandler(PointerPressedEvent, RecordingPausedOverlay_OnPointerPressed, RoutingStrategies.Tunnel);
         _recordingPausedOverlay = overlay;
@@ -10006,7 +10044,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b);
+                WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b, "hover-bar");
             }
         };
         window.Closed += (_, _) =>
