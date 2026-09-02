@@ -4,7 +4,8 @@ param()
 $ErrorActionPreference = 'Stop'
 
 $eventPrefix = 'ClypDat-Recorder-UpdateShutdownRequest-9F3D2A61-'
-$productName = 'ClypDat'
+$appProductName = 'ClypDat'
+$recorderProductName = 'ClypDat Recorder'
 
 function Get-ProcessPath {
     param([System.Diagnostics.Process] $Process)
@@ -17,13 +18,19 @@ function Test-ClypDatExecutable {
     param([string] $Path)
 
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    if ([System.IO.Path]::GetFileName($Path) -notin @('ClypDat.exe', 'ClypDatRecorder.exe')) { return $false }
+    $fileName = [System.IO.Path]::GetFileName($Path)
+    $expectedProductName = switch ($fileName)
+    {
+        'ClypDat.exe' { $appProductName }
+        'ClypDatRecorder.exe' { $recorderProductName }
+        default { return $false }
+    }
 
     try
     {
         return [string]::Equals(
             ([System.Diagnostics.FileVersionInfo]::GetVersionInfo($Path)).ProductName,
-            $productName,
+            $expectedProductName,
             [System.StringComparison]::OrdinalIgnoreCase)
     }
     catch { return $false }

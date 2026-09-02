@@ -29,8 +29,8 @@ $workerInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $p
 if ($workerInfo.FileDescription -ne 'ClypDat Recorder') {
     throw "Recorder FileDescription is '$($workerInfo.FileDescription)', expected 'ClypDat Recorder'."
 }
-if ($workerInfo.ProductName -ne 'ClypDat') {
-    throw "Recorder ProductName is '$($workerInfo.ProductName)', expected 'ClypDat'."
+if ($workerInfo.ProductName -ne 'ClypDat Recorder') {
+    throw "Recorder ProductName is '$($workerInfo.ProductName)', expected 'ClypDat Recorder'."
 }
 
 $runtimeConfig = Get-Content -Raw (Join-Path $publishDirectory 'ClypDat.runtimeconfig.json') | ConvertFrom-Json

@@ -8,8 +8,7 @@
     <AssemblyTitle>ClypDat Recorder</AssemblyTitle>
     <Description>ClypDat background capture recorder</Description>
     <Company>ClypLabs</Company>
-    <!-- Installer shutdown validates this value before touching a process. -->
-    <Product>ClypDat</Product>
+    <Product>ClypDat Recorder</Product>
     <ApplicationIcon>..\..\..\assets\clypdat-icon.ico</ApplicationIcon>
     <ApplicationManifest>..\ClypDat.App\app.manifest</ApplicationManifest>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
