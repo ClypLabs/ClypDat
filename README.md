@@ -48,7 +48,7 @@ Import clips from other popular clipping applications through **Settings > Impor
 
 ## Third-Party Connections (Optional)
 
-Link a ClypDat account from **Settings > Connected Accounts > Link ClypDat account** to receive a signed token, stored encrypted with Windows DPAPI. Xbox integration is optional too; when linked and enabled, read-only activity labels Desktop Capture clips and Discord Rich Presence. **Link Xbox directly** remains available as a local fallback.
+Link a ClypDat account from **Settings > Connected Accounts > Link ClypDat account** to receive a signed token, stored encrypted with Windows DPAPI. Xbox integration is optional too; when linked and enabled, read-only activity labels Desktop Capture clips and Discord Rich Presence.
 
 ## Requirements
 
