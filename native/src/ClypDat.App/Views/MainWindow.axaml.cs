@@ -393,7 +393,6 @@ public sealed partial class MainWindow : Window
                         or nameof(MainWindowViewModel.SelectedDesktopMonitor)
                         or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
                         or nameof(MainWindowViewModel.ReplayAutoSwitchToGameCapture)
-                        or nameof(MainWindowViewModel.ActiveGameCaptureMethodChanged)
                         ) ScheduleReplayRestart();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
@@ -2702,8 +2701,7 @@ public sealed partial class MainWindow : Window
         config.CaptureMonitorDeviceName,
         config.GameExecutableName,
         config.GameWindowHandle,
-        config.Backend,
-        config.GameCaptureMethod);
+        config.Backend);
 
     private void ReconcileReplayTarget()
     {
@@ -2806,7 +2804,7 @@ public sealed partial class MainWindow : Window
         active.DurationSeconds != desired.DurationSeconds || active.MaxHeight != desired.MaxHeight || active.FrameRate != desired.FrameRate ||
         active.BitrateMbps != desired.BitrateMbps || !string.Equals(active.VideoCodec, desired.VideoCodec, StringComparison.Ordinal) ||
         !string.Equals(active.EncoderMode, desired.EncoderMode, StringComparison.Ordinal) || !string.Equals(active.FrameRateMode, desired.FrameRateMode, StringComparison.Ordinal) ||
-        active.FullSessionRecordingEnabled != desired.FullSessionRecordingEnabled || !string.Equals(active.GameCaptureMethod, desired.GameCaptureMethod, StringComparison.Ordinal) ||
+        active.FullSessionRecordingEnabled != desired.FullSessionRecordingEnabled ||
         active.GameAudioVolumePercent != desired.GameAudioVolumePercent || active.MicrophoneVolumePercent != desired.MicrophoneVolumePercent ||
         active.MicrophoneNoiseSuppressionEnabled != desired.MicrophoneNoiseSuppressionEnabled || active.MicrophoneNoiseGateThresholdDb != desired.MicrophoneNoiseGateThresholdDb ||
         !AudioProcessesEqual(active.AdditionalAudioProcesses, desired.AdditionalAudioProcesses);
@@ -6437,7 +6435,6 @@ public sealed partial class MainWindow : Window
             case "Quality": tab.HasQuality = enabled; break;
             case "Replay": tab.HasReplay = enabled; break;
             case "Audio": tab.HasAudio = enabled; break;
-            case "CaptureMethod": tab.HasCaptureMethod = enabled; break;
         }
     }
 

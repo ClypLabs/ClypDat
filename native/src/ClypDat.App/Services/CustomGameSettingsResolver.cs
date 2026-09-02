@@ -24,11 +24,9 @@ internal static class CustomGameSettingsResolver
     public const string QualityGroup = "Quality";
     public const string ReplayGroup = "Replay";
     public const string AudioGroup = "Audio";
-    public const string CaptureMethodGroup = "CaptureMethod";
-
     public static readonly IReadOnlyList<string> AllGroups = new[]
     {
-        RecordingModeGroup, QualityGroup, ReplayGroup, AudioGroup, CaptureMethodGroup
+        RecordingModeGroup, QualityGroup, ReplayGroup, AudioGroup
     };
 
     // The one group a newly added game starts with. Adding a game is almost
@@ -46,7 +44,6 @@ internal static class CustomGameSettingsResolver
         QualityGroup => "Recording Quality",
         ReplayGroup => "Replay Length",
         AudioGroup => "Audio",
-        CaptureMethodGroup => "Capture Method",
         _ => group
     };
 
@@ -56,7 +53,6 @@ internal static class CustomGameSettingsResolver
         QualityGroup => "Codec, encoder, bitrate, frame rate and resolution cap for this game.",
         ReplayGroup => "How much of this game the replay buffer keeps.",
         AudioGroup => "Game and microphone levels, and microphone noise suppression.",
-        CaptureMethodGroup => "Choose display capture or the experimental D3D11 graphics hook.",
         _ => string.Empty
     };
 
@@ -144,9 +140,6 @@ internal static class CustomGameSettingsResolver
                 profile.MicrophoneNoiseGateThresholdDb = settings.MicrophoneNoiseGateThresholdDb;
                 break;
 
-            case CaptureMethodGroup:
-                profile.GameCaptureMethod = "Display";
-                break;
         }
     }
 
@@ -157,7 +150,6 @@ internal static class CustomGameSettingsResolver
         var quality = FindActive(settings, detectionKey, QualityGroup);
         var replay = FindActive(settings, detectionKey, ReplayGroup);
         var audio = FindActive(settings, detectionKey, AudioGroup);
-        var captureMethod = FindActive(settings, detectionKey, CaptureMethodGroup);
 
         // Recording Mode is the sole owner of whether this game records at all
         // and whether it records whole sessions. There was briefly a separate
@@ -194,26 +186,20 @@ internal static class CustomGameSettingsResolver
             FullSessionRecordingEnabled: recordingEnabled && fullSession,
             FullSessionVideoCodec: settings.FullSessionVideoCodec,
             FullSessionQuotaGb: settings.FullSessionQuotaGb,
-            GameCaptureMethod: NormalizeGameCaptureMethod(captureMethod?.GameCaptureMethod),
-            AppliedGroups: DescribeAppliedGroups(mode, quality, replay, audio, captureMethod));
+            AppliedGroups: DescribeAppliedGroups(mode, quality, replay, audio));
     }
-
-    public static string NormalizeGameCaptureMethod(string? value) =>
-        string.Equals(value, "Hook", StringComparison.OrdinalIgnoreCase) ? "Hook" : "Display";
 
     // Purely for the log line at the start of a recording - "which of these
     // settings are not the ones in the settings page?" is otherwise an
     // unanswerable question when a user reports odd output for one game.
     private static string DescribeAppliedGroups(
-        CustomGameProfile? mode, CustomGameProfile? quality, CustomGameProfile? replay, CustomGameProfile? audio,
-        CustomGameProfile? captureMethod)
+        CustomGameProfile? mode, CustomGameProfile? quality, CustomGameProfile? replay, CustomGameProfile? audio)
     {
-        var applied = new List<string>(5);
+        var applied = new List<string>(4);
         if (mode is not null) applied.Add(RecordingModeGroup);
         if (quality is not null) applied.Add(QualityGroup);
         if (replay is not null) applied.Add(ReplayGroup);
         if (audio is not null) applied.Add(AudioGroup);
-        if (captureMethod is not null) applied.Add(CaptureMethodGroup);
         return applied.Count == 0 ? string.Empty : string.Join(",", applied);
     }
 }
@@ -236,5 +222,4 @@ internal sealed record EffectiveRecordingSettings(
     bool FullSessionRecordingEnabled,
     string FullSessionVideoCodec,
     int FullSessionQuotaGb,
-    string GameCaptureMethod,
     string AppliedGroups);

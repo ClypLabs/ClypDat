@@ -104,10 +104,7 @@ public static class AppSettingsStore
             foreach (var profile in settings.CustomGameSettings.Values)
             {
                 if (profile is null) continue;
-                profile.Groups ??= new List<string>();
-                profile.GameCaptureMethod = string.Equals(profile.GameCaptureMethod, "Hook", StringComparison.OrdinalIgnoreCase)
-                    ? "Hook"
-                    : "Display";
+                profile.PruneUnknownGroups();
                 profile.AdditionalAudioProcesses ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 profile.ReplayBitrateMbps = Math.Clamp(profile.ReplayBitrateMbps, 1, 200);
                 profile.ReplayFrameRate = Math.Clamp(profile.ReplayFrameRate, 10, 480);

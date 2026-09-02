@@ -184,15 +184,10 @@ public sealed record ReplayCaptureHealth(
     public string AdapterLuid { get; init; } = string.Empty;
     public string FatalCategory { get; init; } = string.Empty;
 
-    // WGC and hook transport counters remain separate from InputFrameRate so a
-    // support bundle can distinguish compositor cadence from a game-present
-    // transport issue without parsing the debug log.
+    // WGC cadence remains separate from InputFrameRate so support bundles can
+    // distinguish compositor cadence without parsing debug logs.
     public TimeSpan? WgcRequestedUpdateInterval { get; init; }
     public TimeSpan? WgcAppliedUpdateInterval { get; init; }
-    public long HookPresents { get; init; }
-    public long HookTransportedFrames { get; init; }
-    public long HookTransportDrops { get; init; }
-    public string HookFallbackReason { get; init; } = string.Empty;
 
     // Producer-side DXGI measurements.  These deliberately do not reuse
     // UniqueFrameRate: that value describes frames that made it through the

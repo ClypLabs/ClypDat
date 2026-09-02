@@ -35,9 +35,6 @@ internal sealed class WgcCadenceFallbackPolicy
         bool encoderPressure,
         bool saveInProgress = false)
     {
-        // A selected hook is kept for the lifetime of this game process.  It
-        // avoids a source swap every time WGC has one good sample, which would
-        // itself create the cadence oscillation this watchdog is meant to cure.
         if (_fallbackCommitted) return false;
 
         if (!foregroundAndVisible || encoderPressure || saveInProgress)

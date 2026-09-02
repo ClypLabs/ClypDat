@@ -827,8 +827,7 @@ public sealed record ReplayBufferConfig(
     string MicrophoneChannelMode = "Mono",
     bool MicrophoneNoiseSuppressionEnabled = false,
     double MicrophoneNoiseGateThresholdDb = -100,
-    bool AdaptiveFrameRateProtectionEnabled = true,
-    string GameCaptureMethod = "Display");
+    bool AdaptiveFrameRateProtectionEnabled = true);
 
 internal sealed class AudioCaptureSession : IDisposable
 {

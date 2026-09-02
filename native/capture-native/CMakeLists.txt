@@ -2,16 +2,6 @@ cmake_minimum_required(VERSION 3.25)
 
 project(ClypDatCaptureNative LANGUAGES C CXX)
 
-add_library(minhook STATIC
-    vendor/minhook/src/buffer.c
-    vendor/minhook/src/hook.c
-    vendor/minhook/src/trampoline.c
-    vendor/minhook/src/hde/hde64.c)
-target_include_directories(minhook PUBLIC vendor/minhook/include)
-target_include_directories(minhook PRIVATE vendor/minhook/src vendor/minhook/src/hde)
-target_compile_definitions(minhook PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-set_target_properties(minhook PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-
 add_library(ClypDat.Capture.Native SHARED
     src/engine.cpp
     include/clypdat_capture_native.h)
@@ -26,27 +16,6 @@ target_include_directories(ClypDat.Capture.Native PUBLIC include)
 target_compile_definitions(ClypDat.Capture.Native PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(ClypDat.Capture.Native PRIVATE /W4 /permissive- /EHsc)
 target_link_libraries(ClypDat.Capture.Native PRIVATE d3d11 dxgi)
-
-add_library(ClypDat.GraphicsHook SHARED
-    src/graphics_hook.cpp
-    include/clypdat_graphics_hook_protocol.h)
-target_compile_features(ClypDat.GraphicsHook PRIVATE cxx_std_20)
-target_include_directories(ClypDat.GraphicsHook PRIVATE include vendor/minhook/include)
-target_compile_definitions(ClypDat.GraphicsHook PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_compile_options(ClypDat.GraphicsHook PRIVATE /W4 /permissive- /EHsc)
-target_link_libraries(ClypDat.GraphicsHook PRIVATE minhook d3d11 dxgi)
-set_target_properties(ClypDat.GraphicsHook PROPERTIES
-    OUTPUT_NAME "ClypDat.GraphicsHook"
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-
-add_executable(ClypDat.Hook.Injector src/hook_injector.cpp)
-target_compile_features(ClypDat.Hook.Injector PRIVATE cxx_std_20)
-target_compile_definitions(ClypDat.Hook.Injector PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_compile_options(ClypDat.Hook.Injector PRIVATE /W4 /permissive- /EHsc)
-target_link_libraries(ClypDat.Hook.Injector PRIVATE advapi32)
-set_target_properties(ClypDat.Hook.Injector PROPERTIES
-    OUTPUT_NAME "ClypDat.Hook.Injector"
-    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 enable_testing()
 add_executable(ClypDat.Capture.Native.Tests tests/abi_smoke.cpp)

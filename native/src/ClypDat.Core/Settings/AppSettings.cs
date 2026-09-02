@@ -326,15 +326,22 @@ public sealed class ClipEditSettings
 // returns the user to what they had, rather than to the global value again.
 public sealed class CustomGameProfile
 {
+    public static readonly IReadOnlySet<string> SupportedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "RecordingMode", "Quality", "Replay", "Audio"
+    };
+
     // Snapshot of the game's name when the profile was created, so the settings
     // page can still label the row after a game stops being detected (a
     // reinstall, a launcher change) instead of showing a bare "steam-1172470".
     public string DisplayName { get; set; } = string.Empty;
     public List<string> Groups { get; set; } = new();
 
-    // "Display" preserves the established capture route. "Hook" opts this
-    // game into the D3D11 graphics hook when Capture Method is enabled.
-    public string GameCaptureMethod { get; set; } = "Display";
+    public void PruneUnknownGroups()
+    {
+        Groups ??= new List<string>();
+        Groups = Groups.Where(SupportedGroups.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
 
     // "Manual" (replay buffer, saved by hotkey), "FullSession" (record the
     // whole session from launch) or "Off" (do not record this game at all).

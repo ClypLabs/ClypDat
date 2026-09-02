@@ -755,7 +755,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         new("NAudio", "https://github.com/naudio/NAudio", "MIT License", "https://opensource.org/license/mit"),
         new("Vortice.Windows", "https://github.com/amerkoleci/Vortice.Windows", "MIT License", "https://opensource.org/license/mit"),
         new("FFmpeg.AutoGen", "https://github.com/Ruslan-B/FFmpeg.AutoGen", "MIT License", "https://opensource.org/license/mit"),
-        new("MinHook", "https://github.com/TsudaKageyu/minhook", "BSD 2-Clause", "https://opensource.org/license/bsd-2-clause"),
         // Microphone noise suppression. One row, not two: the weights in
         // rnnoise/lq.rnnn come from GregorR/rnnoise-models, which declares no
         // licence at all - no LICENSE file, no licence field, only a README
@@ -6270,9 +6269,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool HasSelectedCustomGame => SelectedCustomGameTab is not null;
-    // Event-shaped property: MainWindow listens for this only when the active
-    // game's route changes, then restarts capture with the new config identity.
-    public bool ActiveGameCaptureMethodChanged => false;
 
     // ---- Discord Rich Presence ------------------------------------------
     // What the status is describing right now. Kept so the elapsed timer only
@@ -6705,7 +6701,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var entry in Settings.CustomGameSettings.OrderBy(pair => pair.Value.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
             var tab = new CustomGameTabViewModel(entry.Key, entry.Value, Settings, SaveSettings,
-                () => NotifyCaptureMethodChanged(entry.Key), change => NotifyCustomGameSettingChanged(entry.Key, change));
+                change => NotifyCustomGameSettingChanged(entry.Key, change));
             tab.SyncAudioProcesses(ActiveAudioProcesses);
             CustomGameTabs.Add(tab);
         }
@@ -6714,15 +6710,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ?? CustomGameTabs.FirstOrDefault();
         OnPropertyChanged(nameof(HasCustomGameTabs));
         RebuildCustomGameCandidates();
-    }
-
-    private void NotifyCaptureMethodChanged(string detectionKey)
-    {
-        var activeKey = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey)
-            ? ActiveGameDetection.ExeName
-            : ActiveGameDetection.DetectionKey;
-        if (string.Equals(activeKey, detectionKey, StringComparison.OrdinalIgnoreCase))
-            OnPropertyChanged(nameof(ActiveGameCaptureMethodChanged));
     }
 
     public event Action<string, CustomGameSettingChange>? CustomGameSettingChanged;
@@ -7052,8 +7039,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneChannelMode: Settings.MicrophoneChannelMode,
             MicrophoneNoiseSuppressionEnabled: effective.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseGateThresholdDb: effective.MicrophoneNoiseGateThresholdDb,
-            AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled,
-            GameCaptureMethod: desktopCapture ? "Display" : effective.GameCaptureMethod);
+            AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled);
     }
 
     public void SetDuration(TimeSpan duration)

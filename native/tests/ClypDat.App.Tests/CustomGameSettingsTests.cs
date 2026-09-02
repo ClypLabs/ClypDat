@@ -4,43 +4,34 @@ using Xunit;
 
 namespace ClypDat.App.Tests;
 
-public sealed class GraphicsHookSettingsTests
+public sealed class CustomGameSettingsTests
 {
-    [Theory]
-    [InlineData(null, "Display")]
-    [InlineData("", "Display")]
-    [InlineData("display", "Display")]
-    [InlineData("Hook", "Hook")]
-    [InlineData("invalid", "Display")]
-    public void CaptureMethod_NormalizesToKnownWireValues(string? value, string expected)
+    [Fact]
+    public void AllGroups_ContainsOnlySupportedGroups()
     {
-        Assert.Equal(expected, CustomGameSettingsResolver.NormalizeGameCaptureMethod(value));
+        Assert.Equal(
+            [
+                CustomGameSettingsResolver.RecordingModeGroup,
+                CustomGameSettingsResolver.QualityGroup,
+                CustomGameSettingsResolver.ReplayGroup,
+                CustomGameSettingsResolver.AudioGroup
+            ],
+            CustomGameSettingsResolver.AllGroups);
     }
 
     [Fact]
-    public void CaptureMethod_OnlyAppliesWhenGroupEnabled()
+    public void PruneUnknownGroups_RemovesRetiredGroupsWithoutChangingValidOverrides()
     {
-        var settings = new AppSettings();
-        settings.CustomGameSettings["game.exe"] = new CustomGameProfile
+        var profile = new CustomGameProfile
         {
-            GameCaptureMethod = "Hook",
-            Groups = new List<string> { CustomGameSettingsResolver.CaptureMethodGroup }
+            RecordingMode = CustomGameSettingsResolver.OffMode,
+            Groups = [CustomGameSettingsResolver.RecordingModeGroup, "CaptureMethod", "Retired", "recordingmode"]
         };
 
-        Assert.Equal("Hook", CustomGameSettingsResolver.Resolve(settings, "game.exe").GameCaptureMethod);
+        profile.PruneUnknownGroups();
 
-        settings.CustomGameSettings["game.exe"].Groups.Clear();
-        Assert.Equal("Display", CustomGameSettingsResolver.Resolve(settings, "game.exe").GameCaptureMethod);
-    }
-
-    [Fact]
-    public void ReplayConfigIdentity_ChangesWithGameCaptureMethod()
-    {
-        var display = new ReplayBufferConfig(60, 1080, 60, 0, 0, 1920, 1080, "", "", [], [], "", [], "Game", "game.exe", "", "",
-            GameCaptureMethod: "Display");
-        var hook = display with { GameCaptureMethod = "Hook" };
-
-        Assert.NotEqual(ReplayBufferConfigIdentity.Serialize(display), ReplayBufferConfigIdentity.Serialize(hook));
+        Assert.Equal([CustomGameSettingsResolver.RecordingModeGroup], profile.Groups);
+        Assert.Equal(CustomGameSettingsResolver.OffMode, profile.RecordingMode);
     }
 
     [Fact]
@@ -50,7 +41,7 @@ public sealed class GraphicsHookSettingsTests
         settings.CustomGameSettings["game.exe"] = new CustomGameProfile
         {
             SaveReplayHotkey = "Alt+F9",
-            Groups = new List<string> { CustomGameSettingsResolver.ReplayGroup }
+            Groups = [CustomGameSettingsResolver.ReplayGroup]
         };
 
         Assert.Equal("Alt+F9", CustomGameSettingsResolver.Resolve(settings, "game.exe").SaveReplayHotkey);
@@ -67,7 +58,7 @@ public sealed class GraphicsHookSettingsTests
         settings.CustomGameSettings["game.exe"] = new CustomGameProfile
         {
             SaveReplayHotkey = "Alt+F9",
-            Groups = new List<string> { CustomGameSettingsResolver.ReplayGroup }
+            Groups = [CustomGameSettingsResolver.ReplayGroup]
         };
 
         Assert.Equal("Alt+F9", CustomGameSettingsResolver.Resolve(settings, "steam-1").SaveReplayHotkey);
