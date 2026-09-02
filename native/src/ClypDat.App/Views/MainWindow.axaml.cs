@@ -3863,6 +3863,27 @@ public sealed partial class MainWindow : Window
             _clipOverlayPerPixelOverlay = null;
         };
 
+        // The overlay is pinned flush to one monitor's edge, and this machine's
+        // monitors do not share a DPI. Two things move it off that edge behind
+        // our back:
+        //
+        //   - the badge is sized in DIPs, which the platform converts against
+        //     whatever monitor the window sat on when the size was applied, not
+        //     the monitor it is being sent to;
+        //   - crossing a DPI boundary makes Windows send WM_DPICHANGED with a
+        //     suggested rect, and Avalonia applies that rect verbatim - a move
+        //     AND a resize we never asked for, landing after the position we
+        //     computed.
+        //
+        // Result was a right-pinned badge either floating a fat gap in from the
+        // edge or hanging off it onto the neighbouring display. So the final
+        // placement is not computed once and trusted: it is re-derived from the
+        // window's real size every time the platform rescales, resizes or moves
+        // it, until the overlay is hidden again.
+        _activeClipOverlay.ScalingChanged += (_, _) => PlaceClipOverlay();
+        _activeClipOverlay.Resized += (_, _) => PlaceClipOverlay();
+        _activeClipOverlay.PositionChanged += (_, _) => PlaceClipOverlay();
+
         // Movement only, deliberately no opacity transition: the badge slides
         // in and out from off screen and never fades. A cross-fade on top of
         // the slide is what made the old 28px nudge read as "appears and
@@ -3902,19 +3923,64 @@ public sealed partial class MainWindow : Window
     // on a second display, and ScreenFromWindow(this) then puts the overlay on a
     // monitor the player isn't looking at - indistinguishable, from the chair,
     // from the overlay never appearing at all.
+    //
+    // Resolved per show, so the notifications of one clip could disagree with
+    // each other: "Clipping started" resolved the game window and landed on the
+    // game's display, then "Clip saved" a few seconds later hit a moment where
+    // the handle wasn't resolvable (alt-tabbed, minimised, a fullscreen mode
+    // switch mid-flight) and fell through to the main window's display instead.
+    // From the chair that reads as one overlay wandering between monitors. The
+    // last monitor an overlay actually used is therefore remembered and re-used
+    // for that gap, and only a genuinely stale one (nothing shown for a while)
+    // falls back to the main window.
+    private PixelPoint? _lastOverlayScreenAnchor;
+    private DateTime _lastOverlayScreenAt = DateTime.MinValue;
+    private static readonly TimeSpan OverlayScreenStickiness = TimeSpan.FromMinutes(5);
+
     private Avalonia.Platform.Screen? ScreenForOverlay()
     {
         var gameHandle = ViewModel?.ActiveGameDetection.WindowHandle ?? IntPtr.Zero;
-        if (gameHandle != IntPtr.Zero && IsWindowVisible(gameHandle) && GetWindowRect(gameHandle, out var gameRect))
+        // IsWindowVisible is still true for a MINIMISED window, and a minimised
+        // window's rect is parked out at (-32000, -32000) - a centre point on no
+        // monitor at all, which used to silently fall through to the main
+        // window's monitor. IsIconic is the part that was missing.
+        if (gameHandle != IntPtr.Zero && IsWindowVisible(gameHandle) && !IsIconic(gameHandle) && GetWindowRect(gameHandle, out var gameRect))
         {
             var centre = new PixelPoint(
                 gameRect.Left + (gameRect.Right - gameRect.Left) / 2,
                 gameRect.Top + (gameRect.Bottom - gameRect.Top) / 2);
-            var gameScreen = Screens.ScreenFromPoint(centre);
-            if (gameScreen is not null) return gameScreen;
+            var gameScreen = Screens.ScreenFromPoint(centre)
+                // A window straddling two displays has a centre that can land in
+                // the dead space between mismatched-height monitors; the screen
+                // holding most of the window is the right answer there.
+                ?? Screens.ScreenFromBounds(new PixelRect(
+                    gameRect.Left,
+                    gameRect.Top,
+                    Math.Max(1, gameRect.Right - gameRect.Left),
+                    Math.Max(1, gameRect.Bottom - gameRect.Top)));
+            if (gameScreen is not null) return RememberOverlayScreen(gameScreen);
         }
 
-        return Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
+        if (_lastOverlayScreenAnchor is { } anchor && DateTime.UtcNow - _lastOverlayScreenAt < OverlayScreenStickiness)
+        {
+            // Re-resolved rather than cached as a Screen instance: the display
+            // set can change (monitor asleep, resolution change) between shows.
+            var sticky = Screens.ScreenFromPoint(anchor);
+            if (sticky is not null) return RememberOverlayScreen(sticky);
+        }
+
+        var fallback = Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
+        return fallback is null ? null : RememberOverlayScreen(fallback);
+    }
+
+    private Avalonia.Platform.Screen RememberOverlayScreen(Avalonia.Platform.Screen screen)
+    {
+        var bounds = screen.Bounds;
+        _lastOverlayScreenAnchor = new PixelPoint(
+            bounds.X + bounds.Width / 2,
+            bounds.Y + bounds.Height / 2);
+        _lastOverlayScreenAt = DateTime.UtcNow;
+        return screen;
     }
 
     // "Ctrl+Shift+F9" -> [Ctrl] + [Shift] + [F9] as keycap chips, followed by
@@ -3994,15 +4060,25 @@ public sealed partial class MainWindow : Window
         _overlayAccent.CornerRadius = new CornerRadius(0);
         DockPanel.SetDock(_overlayAccent, isLeft ? Dock.Left : Dock.Right);
 
-        _overlayBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var desiredWidth = _overlayBadge.DesiredSize.Width;
-
         var screen = ScreenForOverlay();
         var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
-        var scaling = screen?.Scaling ?? 1.0;
-        // Flush to the side it is pinned to - no horizontal gap. Vertically it
-        // still sits down from the top edge so it clears a game's own HUD.
-        const double TopMarginDips = 24;
+
+        _clipOverlayScreenArea = area;
+        _clipOverlayScreenScaling = screen?.Scaling ?? 1.0;
+        _clipOverlayAnchorLeft = isLeft;
+        _clipOverlayPlacementActive = true;
+
+        // Moved onto the target monitor BEFORE it is measured or sized. Width
+        // below is assigned in DIPs, and the platform converts that against
+        // whichever monitor the window is on AT THE MOMENT it is applied - so
+        // sizing first and moving second gave the window a real pixel width
+        // scaled for the monitor it came FROM. Across a 150%/100% pair that is
+        // a badge either half again too wide (hanging off the edge onto the next
+        // display) or a third too narrow (a visible gap at the edge).
+        PlaceClipOverlay(refreshScaling: true);
+
+        _overlayBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var desiredWidth = _overlayBadge.DesiredSize.Width;
 
         // Window is exactly the badge's width and sits against the screen edge,
         // so translating the badge by that full width carries it past the
@@ -4011,11 +4087,6 @@ public sealed partial class MainWindow : Window
         // would leave the very gap this is meant not to have.
         var travel = desiredWidth;
         _activeClipOverlay.Width = travel;
-
-        var travelDevicePixels = (int)Math.Round(travel * scaling);
-        var topMarginDevicePixels = (int)Math.Round(TopMarginDips * scaling);
-        var x = isLeft ? area.X : area.X + area.Width - travelDevicePixels;
-        _activeClipOverlay.Position = new PixelPoint(x, area.Y + topMarginDevicePixels);
 
         _overlayBadge.HorizontalAlignment = HorizontalAlignment.Stretch;
 
@@ -4056,6 +4127,14 @@ public sealed partial class MainWindow : Window
             SetWindowPos(overlayHandle, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
         }
 
+        // Show() is where the DIP width above actually reaches the OS, so this
+        // is the first moment the window's real pixel width is known. Flush it
+        // against the edge with that width, then once more after the layout pass
+        // settles - a DPI change triggered by the move lands its own move and
+        // resize in between, and the last word has to be ours.
+        PlaceClipOverlay();
+        Dispatcher.UIThread.Post(() => PlaceClipOverlay(), DispatcherPriority.Loaded);
+
         if (WindowsPlatformProfile.IsServer())
         {
             _clipOverlayPerPixelOverlay?.ShowAndRefresh();
@@ -4095,7 +4174,7 @@ public sealed partial class MainWindow : Window
                 StartClipOverlayAnimation(exitOffset, () =>
                 {
                     _clipOverlayPerPixelOverlay?.Hide();
-                    _activeClipOverlay?.Hide();
+                    HideClipOverlay();
                 });
                 return;
             }
@@ -4106,13 +4185,106 @@ public sealed partial class MainWindow : Window
             {
                 hideAfterExit.Stop();
                 _overlayHideTimer = null;
-                _activeClipOverlay?.Hide();
+                HideClipOverlay();
             };
             _overlayHideTimer = hideAfterExit;
             hideAfterExit.Start();
         };
         _activeClipOverlayCloseTimer = closeTimer;
         closeTimer.Start();
+    }
+
+    // Target placement, kept as state rather than recomputed, because the
+    // platform can move or resize this window on its own (see the handlers
+    // wired in EnsureClipOverlay) and every one of those has to be answered
+    // with the same answer.
+    private PixelRect _clipOverlayScreenArea;
+    private double _clipOverlayScreenScaling = 1.0;
+    private bool _clipOverlayAnchorLeft;
+    private bool _clipOverlayPlacementActive;
+    private bool _clipOverlayPlacing;
+    // Flush to the side it is pinned to - no horizontal gap. Vertically it
+    // still sits down from the top edge so it clears a game's own HUD.
+    private const double ClipOverlayTopMarginDips = 24;
+
+    // Pins the overlay flush to the anchored edge of the ONE monitor it was
+    // assigned, using the window's real pixel size from the OS rather than the
+    // DIP size we asked for - those two disagree by exactly the ratio between
+    // two monitors' scaling for as long as it takes a cross-monitor move to
+    // settle, and that disagreement is the gap (or the overhang onto the next
+    // display) this exists to close. Clamped to the monitor as well, so a badge
+    // that somehow measures wider than the screen is cut off at the far edge
+    // instead of spilling onto its neighbour.
+    private void PlaceClipOverlay(bool refreshScaling = false)
+    {
+        if (!_clipOverlayPlacementActive || _clipOverlayPlacing) return;
+        if (_activeClipOverlay is null) return;
+
+        var area = _clipOverlayScreenArea;
+        if (area.Width <= 0 || area.Height <= 0) return;
+
+        _clipOverlayPlacing = true;
+        try
+        {
+            var widthDevicePixels = 0;
+            var heightDevicePixels = 0;
+            var handle = NativeHandleOf(_activeClipOverlay);
+            if (handle != IntPtr.Zero && GetWindowRect(handle, out var rect))
+            {
+                widthDevicePixels = rect.Right - rect.Left;
+                heightDevicePixels = rect.Bottom - rect.Top;
+            }
+            else
+            {
+                // No hwnd yet (first show): fall back to what Avalonia thinks,
+                // converted with the target monitor's scaling.
+                var size = _activeClipOverlay.FrameSize ?? _activeClipOverlay.ClientSize;
+                widthDevicePixels = (int)Math.Round(size.Width * _clipOverlayScreenScaling);
+                heightDevicePixels = (int)Math.Round(size.Height * _clipOverlayScreenScaling);
+            }
+
+            var x = _clipOverlayAnchorLeft ? area.X : area.X + area.Width - widthDevicePixels;
+            x = Math.Clamp(x, area.X, Math.Max(area.X, area.X + area.Width - widthDevicePixels));
+            var y = area.Y + (int)Math.Round(ClipOverlayTopMarginDips * _clipOverlayScreenScaling);
+            y = Math.Clamp(y, area.Y, Math.Max(area.Y, area.Y + area.Height - heightDevicePixels));
+
+            if (handle == IntPtr.Zero || refreshScaling)
+            {
+                // The move that hands the window to a new monitor goes through
+                // Window.Position on purpose: that setter re-reads the monitor's
+                // effective DPI afterwards, so the DIP width assigned next is
+                // converted against the monitor the badge is actually on.
+                _activeClipOverlay.Position = new PixelPoint(x, y);
+            }
+            else
+            {
+                // Every later correction is driven through the hwnd, for the
+                // same reason the hover-bar paths are (see the IsWindowVisible
+                // note by the P/Invokes) - Avalonia's own position bookkeeping
+                // reports back what we last assigned, which is exactly the value
+                // that is wrong when the platform has moved the window out from
+                // under it.
+                SetWindowPos(handle, HwndTopmost, x, y, 0, 0, SwpNoSize | SwpNoActivate);
+            }
+
+            // Server SKUs mirror this window into a layered one placed off its
+            // rect - moving the source without redrawing the mirror leaves the
+            // visible copy behind at the old spot.
+            _clipOverlayPerPixelOverlay?.Refresh();
+        }
+        finally
+        {
+            _clipOverlayPlacing = false;
+        }
+    }
+
+    // Placement handlers stop answering once the badge is off screen - a hidden
+    // window still gets moved and rescaled by the platform, and correcting a
+    // window nobody can see just fights whatever the next show wants.
+    private void HideClipOverlay()
+    {
+        _clipOverlayPlacementActive = false;
+        _activeClipOverlay?.Hide();
     }
 
     private void StartClipOverlayAnimation(double targetOffset, Action? completed = null)
@@ -9869,6 +10041,12 @@ public sealed partial class MainWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
+
+    // Minimised counts as visible to IsWindowVisible, and a minimised window's
+    // rect is parked off every monitor - so anything picking a monitor from a
+    // window rect has to ask this too. See ScreenForOverlay.
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
