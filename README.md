@@ -46,9 +46,9 @@ Video playback uses LibVLC. Audio playback uses a separate NAudio/WASAPI pipelin
 
 Import clips from other popular clipping applications through **Settings > Import Clips**. ClypDat reads supported local catalogs, then scans default capture folders when a catalog is missing or unreadable. You can choose to either copy or move the clips into the ClypDat library.
 
-## Xbox activity
+## Third-Party Connections
 
-Link a ClypDat account from **Settings > Connected Accounts > Link ClypDat account**. The desktop app receives a signed token, stored encrypted with Windows DPAPI, even when no Xbox account is linked. Xbox is optional; when linked and enabled, read-only activity labels Desktop Capture clips and Discord Rich Presence. **Link Xbox directly** remains available as a local fallback.
+ClypDat accounts and third-party connections are optional. Link a ClypDat account from **Settings > Connected Accounts > Link ClypDat account** to receive a signed token, stored encrypted with Windows DPAPI. Xbox integration is optional too; when linked and enabled, read-only activity labels Desktop Capture clips and Discord Rich Presence. **Link Xbox directly** remains available as a local fallback.
 
 ## Requirements
 
