@@ -44,6 +44,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // waveform restarted from empty every time hydration caught up with the
     // open clip.
     private string _waveformLoadPath = string.Empty;
+    // Size and mtime of the file the lanes' CURRENT peaks were decoded from.
+    // Save Trim replaces a clip with a shorter one at the same path while the
+    // editor stays open on it, and the rebuild that follows carries the painted
+    // peaks over rather than blanking them (see OpenMedia's carriedPeaks) - so
+    // without this the timeline kept drawing the pre-trim waveform, full length,
+    // against a clip that no longer had that audio in it, for the rest of the
+    // editor session.
+    private (long SizeBytes, long WriteTicks) _timelinePeaksSource;
     // Start paused until first detector result arrives, so startup cannot
     // briefly launch ffmpeg before a foreground game is known.
     private bool _gameIsActive = true;
@@ -7580,6 +7588,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // are already painted - so a waveform that had finished drawing visibly
         // blanked and refilled for no reason the user could see.
         var isSameClipRebuild = string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase);
+        // Same path is not the same FILE. Save Trim (and the corruption repair)
+        // rewrite a clip in place, so a rebuild for the same path can be handed
+        // bytes that have nothing to do with the peaks currently on screen.
+        var mediaFileIdentity = (media.SizeBytes, media.LastWriteTimeUtc.Ticks);
+        var carriedPeaksStillValid = isSameClipRebuild && SamePeakSource(_timelinePeaksSource, mediaFileIdentity);
         SelectedVideoName = media.Name;
         SelectedVideoPath = media.Path;
         _selectedVideoCodec = media.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec ?? string.Empty;
@@ -7625,7 +7638,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         TrimStart = TimeSpan.Zero;
         TrimEnd = media.Duration;
         IsPlaying = false;
-        var carriedPeaks = isSameClipRebuild
+        var carriedPeaks = carriedPeaksStillValid
             ? TimelineTracks
                 .Where(track => track.IsAudio && track.WaveformPeaks.Count > 0)
                 .ToDictionary(track => track.StreamIndex, track => track.WaveformPeaks)
@@ -7733,7 +7746,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // pre-mix skip above means the lane set can be a strict subset of the
         // audio streams, and a track with no lane has nothing to paint.
         var everyAudioLanePainted = TimelineTracks.Where(track => track.IsAudio).All(track => track.WaveformPeaks.Count > 0);
-        StartWaveformLoad(media, everyAudioLanePainted, isSameClipRebuild);
+        // Whatever the lanes are holding now came from this file.
+        _timelinePeaksSource = mediaFileIdentity;
+        // Deliberately the stricter flag: a decode already in flight for this
+        // path was reading the PRE-rewrite bytes, so it must be restarted rather
+        // than left to finish and publish into the new lanes.
+        StartWaveformLoad(media, everyAudioLanePainted, carriedPeaksStillValid);
+    }
+
+    // The lanes may keep their painted peaks only while they still describe the
+    // file being opened. Size alone already moves on any trim; ticks are only
+    // compared when both sides have them, because a MediaFileInfo restored from
+    // an older library-cache row can carry a default LastWriteTimeUtc, and
+    // treating that as a mismatch would blank a perfectly good waveform on an
+    // ordinary same-clip rebuild - the exact flicker carriedPeaks exists to
+    // prevent.
+    private static bool SamePeakSource((long SizeBytes, long WriteTicks) painted, (long SizeBytes, long WriteTicks) media)
+    {
+        if (painted.SizeBytes != media.SizeBytes) return false;
+        return painted.WriteTicks == 0 || media.WriteTicks == 0 || painted.WriteTicks == media.WriteTicks;
     }
 
     private void ApplyClipEditState(string path, bool restoreDescription = true)
@@ -9503,7 +9534,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void StartWaveformLoad(MediaFileInfo media, bool alreadyPainted, bool isSameClipRebuild)
+    // reusePeaksInFlight: this rebuild is the same clip AND the same bytes, so a
+    // decode already running for it is still decoding the right file.
+    private void StartWaveformLoad(MediaFileInfo media, bool alreadyPainted, bool reusePeaksInFlight)
     {
         if (alreadyPainted)
         {
@@ -9517,7 +9550,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (isSameClipRebuild
+        if (reusePeaksInFlight
             && _waveformCts is { IsCancellationRequested: false }
             && string.Equals(_waveformLoadPath, media.Path, StringComparison.OrdinalIgnoreCase))
         {
