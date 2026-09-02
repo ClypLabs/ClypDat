@@ -9,6 +9,7 @@ $publishDirectory = (Resolve-Path -LiteralPath $PublishDirectory).Path
 
 $requiredFiles = @(
     'ClypDat.exe',
+    'ClypDatRecorder.exe',
     'ClypDat.runtimeconfig.json',
     'coreclr.dll',
     'hostfxr.dll',
@@ -50,6 +51,15 @@ try {
         -PassThru
     if ($process.ExitCode -ne 0) {
         throw "Bundled ClypDat runtime check failed with exit code $($process.ExitCode)."
+    }
+    $workerProcess = Start-Process -FilePath (Join-Path $publishDirectory 'ClypDatRecorder.exe') `
+        -ArgumentList '--verify-self-contained' `
+        -WorkingDirectory $publishDirectory `
+        -WindowStyle Hidden `
+        -Wait `
+        -PassThru
+    if ($workerProcess.ExitCode -ne 0) {
+        throw "Bundled recorder runtime check failed with exit code $($workerProcess.ExitCode)."
     }
 }
 finally {

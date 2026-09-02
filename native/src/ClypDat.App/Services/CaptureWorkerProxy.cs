@@ -172,7 +172,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private void StartWorker()
     {
         if (_process is { HasExited: false }) return;
-        var path = Environment.ProcessPath ?? throw new InvalidOperationException("ClypDat process path unavailable.");
+        var appPath = Environment.ProcessPath ?? throw new InvalidOperationException("ClypDat process path unavailable.");
+        var path = CaptureWorkerExecutable.Resolve(appPath);
         var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true, ArgumentList = { "--capture-worker" } }) ?? throw new InvalidOperationException("Capture worker did not start.");
         var generation = Interlocked.Increment(ref _generation); _lostGeneration = -1; _process = process;
         process.EnableRaisingEvents = true; process.Exited += (_, _) => BeginRecovery(generation, "process exited", ExitCode(process));
@@ -258,4 +259,16 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private void KillWorker() { var process = _process; if (process is null) return; try { if (!process.HasExited) process.Kill(true); } catch { } try { process.Dispose(); } catch { } if (ReferenceEquals(_process, process)) _process = null; Disconnect(); }
     private void CancelRecovery(bool resetFailures) { lock (_gate) { _recoveryCancellation?.Cancel(); if (resetFailures) _failures.Clear(); } }
     private void Disconnect() { try { _pipe?.Dispose(); } catch { } _pipe = null; }
+}
+
+internal static class CaptureWorkerExecutable
+{
+    internal const string FileName = "ClypDatRecorder.exe";
+
+    internal static string Resolve(string appPath, Func<string, bool>? fileExists = null)
+    {
+        fileExists ??= File.Exists;
+        var workerPath = Path.Combine(Path.GetDirectoryName(appPath) ?? string.Empty, FileName);
+        return fileExists(workerPath) ? workerPath : appPath;
+    }
 }

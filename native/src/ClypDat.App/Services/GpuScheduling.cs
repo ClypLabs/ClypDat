@@ -20,17 +20,13 @@ namespace ClypDat.App.Services;
 // encoder that was never the bottleneck. Raising priority attacks the actual
 // cause, so those levers stop being pulled for the wrong reason.
 //
-// Both knobs are opt-in. A replay recorder must yield GPU time to foreground
-// gameplay when the card is saturated; preserving game frame time matters more
-// than forcing a queued capture frame through.
-//
 //   - Process scheduling priority class (D3DKMTSetProcessSchedulingPriorityClass)
 //     covers EVERY GPU context this process owns. That matters because NVENC's
 //     context is not ours: ffmpeg's h264_nvenc creates its own CUDA/D3D device
 //     internally, so no per-device call we make can reach it. FFmpeg is linked
 //     in-process here (FFmpeg.AutoGen calls avcodec_send_frame directly), so a
-//     process-wide class does reach it. It also reaches the UI's renderer,
-//     which is why it is now opt-in and off by default.
+//     process-wide class does reach it. The recorder lives in a dedicated
+//     ClypDatRecorder.exe process, so this cannot elevate Avalonia's renderer.
 //
 //   - Per-device GPU thread priority (IDXGIDevice::SetGPUThreadPriority) covers
 //     the capture device specifically - the crop copy and the scale Blt. This
@@ -41,12 +37,13 @@ namespace ClypDat.App.Services;
 // leaves capture running exactly as it did before; nothing here is load-bearing.
 internal static class GpuScheduling
 {
-    // D3DKMT_SCHEDULINGPRIORITYCLASS. REALTIME is deliberately not in this
-    // list and never attempted: it outranks the desktop compositor, and a
-    // background recorder that can starve DWM is a worse bug than a clip that
-    // records at 53fps.
+    // D3DKMT_SCHEDULINGPRIORITYCLASS. The worker's GPU work is bounded by the
+    // selected capture cadence. REALTIME is safe to try here because the UI is
+    // no longer hosted in this process; HIGH and ABOVE_NORMAL remain fallbacks
+    // for drivers or policies that refuse it.
     private const int SchedulingPriorityClassAboveNormal = 3;
     private const int SchedulingPriorityClassHigh = 4;
+    private const int SchedulingPriorityClassRealtime = 5;
 
     // DXGI clamps to [-7, 7] and returns E_INVALIDARG outside it. 7 is what a
     // capture app wants: the work is small, bounded, and latency-critical
@@ -59,6 +56,9 @@ internal static class GpuScheduling
     [DllImport("gdi32.dll")]
     private static extern int D3DKMTSetProcessSchedulingPriorityClass(nint process, int priorityClass);
 
+    [DllImport("gdi32.dll")]
+    private static extern int D3DKMTGetProcessSchedulingPriorityClass(nint process, out int priorityClass);
+
     [DllImport("kernel32.dll")]
     private static extern nint GetCurrentProcess();
 
@@ -68,38 +68,14 @@ internal static class GpuScheduling
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int GetGpuThreadPriorityDelegate(nint self, out int priority);
 
-    // Only CaptureWorkerHost calls this. The UI process keeps normal GPU
-    // scheduling even when it hosts a preview.
-    //
-    // This was on by default for one build, and that build is the one an AMD
-    // Radeon RX 9070 XT on Windows Server 2025 rendered as a solid white
-    // window, with the clip toast a solid black block - a window that creates
-    // and lays out fine and then presents nothing.
-    //
-    // The mechanism is not a guess about the driver, it is what this call
-    // does. D3DKMTSetProcessSchedulingPriorityClass is PROCESS-wide, and that
-    // was the whole reason for choosing it: ffmpeg's h264_nvenc builds its own
-    // CUDA/D3D device internally, so nothing scoped to our capture device can
-    // reach it. But "every GPU context in the process" is not only the encoder
-    // - it is also Avalonia's ANGLE/D3D11 render device, which draws the UI.
-    // Raising the whole process to the HIGH scheduling class reorders the UI's
-    // presents against the compositor's, and a window whose presents never
-    // land is exactly a blank one.
-    //
-    // The device-level priority used to be unconditional despite the
-    // process-level opt-in comments above. On a saturated GPU that lets capture
-    // preempt game rendering and can collapse game FPS. Keep both mechanisms
-    // behind one explicit diagnostic opt-in until a measured benefit outweighs
-    // that cost.
-    // Process priority is deliberately a separate opt-in from the capture
-    // device priority.  The latter only affects this D3D11 device and is the
-    // safe default; the former also changes Avalonia's render device.
+    // Only the capture worker calls this. The UI process stays NORMAL.
     internal static bool IsProcessPriorityElevationEnabled(string? value)
         => ResolveProcessPriority(value) is not null;
 
     internal static string? ResolveProcessPriority(string? value) => value?.Trim().ToLowerInvariant() switch
     {
-        null or "" or "high" or "1" => "HIGH",
+        null or "" or "realtime" => "REALTIME",
+        "high" or "1" => "HIGH",
         "above-normal" => "ABOVE_NORMAL",
         "normal" or "0" => null,
         _ => "HIGH"
@@ -123,11 +99,9 @@ internal static class GpuScheduling
 
         AppLog.Info($"Capture worker: raising process-wide GPU scheduling priority to {requested}.");
 
-        // HIGH first, ABOVE_NORMAL as the fallback. Some drivers/OS
-        // configurations refuse HIGH for an unprivileged process; ABOVE_NORMAL
-        // still puts capture ahead of the game's default NORMAL, which is the
-        // entire point, so a refusal at HIGH is a downgrade and not a failure.
+        if (requested == "REALTIME" && TrySetProcessPriorityClass(SchedulingPriorityClassRealtime, "REALTIME")) return;
         if (requested == "HIGH" && TrySetProcessPriorityClass(SchedulingPriorityClassHigh, "HIGH")) return;
+        if (requested == "REALTIME" && TrySetProcessPriorityClass(SchedulingPriorityClassHigh, "HIGH")) return;
         if (TrySetProcessPriorityClass(SchedulingPriorityClassAboveNormal, "ABOVE_NORMAL")) return;
 
         AppLog.Info("Native capture: GPU process scheduling priority could not be raised - capture will queue behind the foreground game as before.");
@@ -143,7 +117,17 @@ internal static class GpuScheduling
             var status = D3DKMTSetProcessSchedulingPriorityClass(GetCurrentProcess(), priorityClass);
             if (status == 0)
             {
-                AppLog.Info($"Native capture: GPU process scheduling priority raised to {name}.");
+                try
+                {
+                    var readBackStatus = D3DKMTGetProcessSchedulingPriorityClass(GetCurrentProcess(), out var applied);
+                    AppLog.Info(readBackStatus == 0
+                        ? $"Native capture: GPU process scheduling priority requested={name}, applied={ProcessPriorityName(applied)}."
+                        : $"Native capture: GPU process scheduling priority raised to {name}; read-back refused (status=0x{readBackStatus:X8}).");
+                }
+                catch (Exception error)
+                {
+                    AppLog.Info($"Native capture: GPU process scheduling priority raised to {name}; read-back unavailable (non-fatal): {error.Message}");
+                }
                 return true;
             }
 
@@ -158,6 +142,17 @@ internal static class GpuScheduling
             return false;
         }
     }
+
+    internal static string ProcessPriorityName(int value) => value switch
+    {
+        0 => "IDLE",
+        1 => "BELOW_NORMAL",
+        2 => "NORMAL",
+        3 => "ABOVE_NORMAL",
+        4 => "HIGH",
+        5 => "REALTIME",
+        _ => $"UNKNOWN({value})"
+    };
 
     // Same raw-vtable approach as TryMarkDeviceMultithreadProtected in
     // NativeReplayBuffer, and for the same reason: this call has to reach

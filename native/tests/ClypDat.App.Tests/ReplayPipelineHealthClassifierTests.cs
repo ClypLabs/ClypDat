@@ -41,4 +41,32 @@ public sealed class ReplayPipelineHealthClassifierTests
         Assert.Equal(3, ReplayPacingPolicy.TakeLatestIntervals(TimeSpan.FromMilliseconds(40), interval, ref scheduled));
         Assert.Equal(TimeSpan.FromMilliseconds(40), scheduled);
     }
+
+    [Fact]
+    public void LatestPacingAcceptsNormalSubMillisecondEarlyWake()
+    {
+        var scheduled = TimeSpan.Zero;
+        var interval = TimeSpan.FromSeconds(1.0 / 120);
+
+        Assert.Equal(1, ReplayPacingPolicy.TakeLatestIntervals(
+            interval - TimeSpan.FromMilliseconds(.75), interval, ref scheduled));
+        Assert.Equal(interval, scheduled);
+    }
+
+    [Fact]
+    public void EarlyWakeJitterStillProducesEvery120FpsDeadline()
+    {
+        var scheduled = TimeSpan.Zero;
+        var interval = TimeSpan.FromSeconds(1.0 / 120);
+        long encoded = 0;
+
+        for (var tick = 1; tick <= 120; tick++)
+        {
+            var wake = TimeSpan.FromTicks(interval.Ticks * tick) - TimeSpan.FromMilliseconds(.75);
+            if (ReplayPacingPolicy.TakeLatestIntervals(wake, interval, ref scheduled) > 0) encoded++;
+        }
+
+        Assert.Equal(120, encoded);
+        Assert.Equal(TimeSpan.FromTicks(interval.Ticks * 120), scheduled);
+    }
 }

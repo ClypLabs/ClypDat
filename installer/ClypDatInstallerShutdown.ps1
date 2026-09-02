@@ -17,7 +17,7 @@ function Test-ClypDatExecutable {
     param([string] $Path)
 
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    if (-not [string]::Equals([System.IO.Path]::GetFileName($Path), 'ClypDat.exe', [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+    if ([System.IO.Path]::GetFileName($Path) -notin @('ClypDat.exe', 'ClypDatRecorder.exe')) { return $false }
 
     try
     {

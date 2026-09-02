@@ -200,6 +200,21 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <!-- Same apphost, distinct image name. Worker mode exits before any
+       Avalonia/UI initialization, while Task Manager now identifies recorder
+       separately from the desktop shell. -->
+  <Target Name="CopyCaptureWorkerAppHostToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(TargetDir)ClypDat.exe')">
+    <Copy SourceFiles="$(TargetDir)ClypDat.exe"
+          DestinationFiles="$(TargetDir)ClypDatRecorder.exe"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyCaptureWorkerAppHostToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(PublishDir)ClypDat.exe')">
+    <Copy SourceFiles="$(PublishDir)ClypDat.exe"
+          DestinationFiles="$(PublishDir)ClypDatRecorder.exe"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <!-- Native replay owns D3D11/FFmpeg state once cut over. Build it through
        MSVC with its static CRT, then keep DLL beside both developer and
        published app output. The bridge is presently probe-only, so an absent

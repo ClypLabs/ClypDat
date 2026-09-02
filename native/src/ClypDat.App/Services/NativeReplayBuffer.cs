@@ -1334,8 +1334,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // deadline overshoots it; stopping 1ms short and yielding
                     // through the remainder lands close without burning a core.
                     var remaining = nextTickAt - stopwatch.Elapsed;
-                    if (remaining > TimeSpan.FromMilliseconds(2)) Thread.Sleep(remaining - TimeSpan.FromMilliseconds(1));
-                    else if (remaining > TimeSpan.Zero) Thread.Yield();
+                    while (remaining > TimeSpan.Zero)
+                    {
+                        if (remaining > TimeSpan.FromMilliseconds(2))
+                            Thread.Sleep(remaining - TimeSpan.FromMilliseconds(1));
+                        else
+                            Thread.Yield();
+                        remaining = nextTickAt - stopwatch.Elapsed;
+                    }
 
                     try
                     {
@@ -1367,9 +1373,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // the GPU cost this whole change is removing. The lock lives
                         // inside the encode functions instead, around the D3D work
                         // alone.
-                        var pacingTimer = System.Diagnostics.Stopwatch.StartNew();
+                        var lateness = stopwatch.Elapsed - nextTickAt;
+                        pacingLatency.Record(lateness > TimeSpan.Zero ? lateness : TimeSpan.Zero);
                         RunPacingTick();
-                        pacingLatency.Record(pacingTimer.Elapsed);
                     }
                     catch (Exception error)
                     {
@@ -1589,7 +1595,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         }
                     }
                     AppLog.Debug($"Native capture diag: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, framesSeen={framesSeen}, pointerFramesSeen={pointerFramesSeenSinceLog}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}{dxgiTelemetryText}.");
-                    AppLog.Debug($"Native capture throughput: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, queueDepth={encodeQueue.Count}, queueCapacity={encodeQueueCapacity}, droppedFrames={droppedSinceLog}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. It remains useful telemetry, but a low rate with
                     // an empty queue is a pacing/source shortfall, not encoder
@@ -1600,13 +1605,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var saveInProgress = Volatile.Read(ref _savesInFlight) > 0;
                     var sourceFrameRate = inputFrameCount / diagElapsed;
                     var freshTransportRate = framesProcessedSinceLog / diagElapsed;
-                    processingLatency.Record(TimeSpan.FromMilliseconds(scaleMs / n));
                     var (pacingP95Ms, pacingMaxMs) = pacingLatency.SnapshotAndReset();
                     var (processingP95Ms, processingMaxMs) = processingLatency.SnapshotAndReset();
                     var (submissionP95Ms, submissionMaxMs) = submissionLatency.SnapshotAndReset();
                     var (outputLatencyP95Ms, outputLatencyMaxMs) = outputLatency.SnapshotAndReset();
                     var missedPacingSinceLog = Interlocked.Exchange(ref pacingMissedFrames, 0);
                     var queueReplacementsSinceLog = Interlocked.Exchange(ref encodeQueueReplacements, 0);
+                    var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
+                    var bottleneckStage = ReplayPipelineHealthClassifier.Classify(
+                        sourceFrameRate, freshTransportRate, processingP95Ms, 1000.0 / activeFrameRate,
+                        missedPacingSinceLog, encodeQueue.Count, encodeQueueCapacity, submissionP95Ms,
+                        outputLatencyP95Ms, outputShortfall);
+                    AppLog.Debug($"Native capture throughput: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, queueDepth={encodeQueue.Count}, queueCapacity={encodeQueueCapacity}, droppedFrames={droppedSinceLog}, stage={bottleneckStage}, pacingMisses={missedPacingSinceLog}, pacingP95Ms={pacingP95Ms:0.00}, pacingMaxMs={pacingMaxMs:0.00}, queueReplacements={queueReplacementsSinceLog}, processingP95Ms={processingP95Ms:0.00}, processingMaxMs={processingMaxMs:0.00}, submissionP95Ms={submissionP95Ms:0.00}, submissionMaxMs={submissionMaxMs:0.00}, outputLatencyP95Ms={outputLatencyP95Ms:0.00}, outputLatencyMaxMs={outputLatencyMaxMs:0.00}.");
                     var encoderSubmissionStalled = encoderPressure && outputFrameRate < activeFrameRate * 0.5;
                     var sourceRecoverySample = new ReplayCaptureHealth("Native", "DXGI", ReplayCaptureState.Degraded,
                         activeFrameRate, inputFrameCount / diagElapsed, freshTransportRate, outputFrameRate, 0, droppedSinceLog,
@@ -1674,7 +1684,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         _ => ReplayPipelineRecoveryAction.None
                     };
                     var freshTransportTarget = Math.Min(activeFrameRate, sourceFrameRate);
-                    var outputShortfall = hasCapturedRealFrame && outputFrameRate < activeFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
                     var transportShortfall = hasCapturedRealFrame && freshTransportTarget > 0 &&
                         freshTransportRate < freshTransportTarget * ReplayEncoderQualificationPolicy.TargetThreshold;
                     if (transportShortfall && !saveInProgress)
@@ -1682,10 +1691,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     else
                         consecutiveTransportShortfallWindows = 0;
                     var transportDegraded = consecutiveTransportShortfallWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows;
-                    var bottleneckStage = ReplayPipelineHealthClassifier.Classify(
-                        sourceFrameRate, freshTransportRate, processingP95Ms, 1000.0 / activeFrameRate,
-                        missedPacingSinceLog, encodeQueue.Count, encodeQueueCapacity, submissionP95Ms,
-                        outputLatencyP95Ms, outputShortfall);
                     var encoderStage = bottleneckStage is ReplayPipelineStage.EncodeQueue or ReplayPipelineStage.EncoderSubmission or ReplayPipelineStage.EncoderCompletion;
                     var pipelineUnhealthy = !capturePaused && ((encoderPressure && outputFrameRate < activeFrameRate * 0.5) ||
                         sourceRecoveryAction != CaptureSourceRecoveryAction.None || isStalled || transportDegraded);
@@ -2606,6 +2611,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         device.ImmediateContext.Unmap(staging, 0);
                                     }
                                     scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                                    processingLatency.Record(stageStopwatch.Elapsed);
                                     RetainAmfSoftwareFrame();
                                     contentAdvanced = true;
                                 }
@@ -3189,6 +3195,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         Interlocked.Increment(ref _encodeDroppedCount);
                         Interlocked.Increment(ref _totalDroppedFrames);
                         scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                        processingLatency.Record(stageStopwatch.Elapsed);
                         return;
                     }
 
@@ -3265,6 +3272,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         frameDevice?.Dispose();
                         if (pooled is not null) ffmpeg.av_frame_free(&pooled);
                         scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                        processingLatency.Record(stageStopwatch.Elapsed);
                     }
                 }
 
@@ -3412,6 +3420,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         break;
                     }
                     scaleMs += stageStopwatch.Elapsed.TotalMilliseconds;
+                    processingLatency.Record(stageStopwatch.Elapsed);
 
                     nv12StagingIndex = (currentRingIndex + 1) % ringLength;
                     croppedDirty = false;
