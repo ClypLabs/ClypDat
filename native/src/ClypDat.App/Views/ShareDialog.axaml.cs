@@ -313,7 +313,7 @@ public partial class ShareDialog : Window
 
             ShareProgressPanel.IsVisible = false;
             ShareStatusText.Text = "Drag original clip into any chat to upload it";
-            ShareResultSizeText.Text = $"{sourceBytes / 1_000_000.0:0.#} MB · {quality}";
+            ShareResultSizeText.Text = FormatOriginalResultSize(sourceBytes, quality);
             ShareShowInFolderButton.Content = "Show in folder";
             ShareShowInFolderButton.IsEnabled = true;
             // Original sends source bytes. Do not show pending crop/trim edits.
@@ -626,6 +626,9 @@ public partial class ShareDialog : Window
 
     private static string FormatShareDuration(TimeSpan duration) =>
         duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss") : duration.ToString(@"m\:ss");
+
+    internal static string FormatOriginalResultSize(long bytes, string quality) =>
+        $"{MainWindow.FormatFileSize(bytes)} · {quality}";
 
     private void ShowInFolderButton_OnClick(object? sender, RoutedEventArgs e)
     {

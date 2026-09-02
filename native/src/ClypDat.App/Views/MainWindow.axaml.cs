@@ -3391,7 +3391,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
     }
 
-    private static string FormatFileSize(long bytes)
+    internal static string FormatFileSize(long bytes)
     {
         if (bytes >= 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024 * 1024):0.##} GB";
         if (bytes >= 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.##} MB";
