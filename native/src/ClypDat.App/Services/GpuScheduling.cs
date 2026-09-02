@@ -52,7 +52,7 @@ internal static class GpuScheduling
     // capture app wants: the work is small, bounded, and latency-critical
     // relative to the game's, so it should cut ahead rather than queue.
     private const int MaxGpuThreadPriority = 7;
-    internal const int CaptureDevicePriority = MaxGpuThreadPriority;
+    internal const int CaptureDevicePriority = 1;
 
     private static int _processPriorityRaised;
 
@@ -68,7 +68,8 @@ internal static class GpuScheduling
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int GetGpuThreadPriorityDelegate(nint self, out int priority);
 
-    // DISABLED - opt-in only, via CLYPDAT_GPU_PROCESS_PRIORITY=1.
+    // Only CaptureWorkerHost calls this. The UI process keeps normal GPU
+    // scheduling even when it hosts a preview.
     //
     // This was on by default for one build, and that build is the one an AMD
     // Radeon RX 9070 XT on Windows Server 2025 rendered as a solid white
@@ -94,7 +95,18 @@ internal static class GpuScheduling
     // device priority.  The latter only affects this D3D11 device and is the
     // safe default; the former also changes Avalonia's render device.
     internal static bool IsProcessPriorityElevationEnabled(string? value)
-        => string.Equals(value, "1", StringComparison.Ordinal);
+        => ResolveProcessPriority(value) is not null;
+
+    internal static string? ResolveProcessPriority(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "high" or "1" => "HIGH",
+        "above-normal" => "ABOVE_NORMAL",
+        "normal" or "0" => null,
+        _ => "HIGH"
+    };
+
+    internal static int ResolveDevicePriority(string? value) =>
+        int.TryParse(value, out var parsed) && parsed is >= -7 and <= 7 ? parsed : CaptureDevicePriority;
 
     // Kept for existing callers/tests that were named before the two knobs
     // were separated.
@@ -105,21 +117,17 @@ internal static class GpuScheduling
 
     public static void TryRaiseProcessGpuPriority()
     {
-        if (!IsProcessPriorityElevationEnabled())
-        {
-            AppLog.Info("Native capture: GPU priority elevation disabled; foreground game keeps GPU priority.");
-            return;
-        }
-
         if (Interlocked.Exchange(ref _processPriorityRaised, 1) != 0) return;
+        var requested = ResolveProcessPriority(Environment.GetEnvironmentVariable("CLYPDAT_GPU_PROCESS_PRIORITY"));
+        if (requested is null) return;
 
-        AppLog.Info("Capture worker: raising process-wide GPU scheduling priority.");
+        AppLog.Info($"Capture worker: raising process-wide GPU scheduling priority to {requested}.");
 
         // HIGH first, ABOVE_NORMAL as the fallback. Some drivers/OS
         // configurations refuse HIGH for an unprivileged process; ABOVE_NORMAL
         // still puts capture ahead of the game's default NORMAL, which is the
         // entire point, so a refusal at HIGH is a downgrade and not a failure.
-        if (TrySetProcessPriorityClass(SchedulingPriorityClassHigh, "HIGH")) return;
+        if (requested == "HIGH" && TrySetProcessPriorityClass(SchedulingPriorityClassHigh, "HIGH")) return;
         if (TrySetProcessPriorityClass(SchedulingPriorityClassAboveNormal, "ABOVE_NORMAL")) return;
 
         AppLog.Info("Native capture: GPU process scheduling priority could not be raised - capture will queue behind the foreground game as before.");
@@ -177,7 +185,8 @@ internal static class GpuScheduling
             var vtable = Marshal.ReadIntPtr(dxgiDevicePtr, 0);
             var setPriorityPtr = Marshal.ReadIntPtr(vtable, 10 * nint.Size);
             var setPriority = Marshal.GetDelegateForFunctionPointer<SetGpuThreadPriorityDelegate>(setPriorityPtr);
-            var result = setPriority(dxgiDevicePtr, MaxGpuThreadPriority);
+            var requested = ResolveDevicePriority(Environment.GetEnvironmentVariable("CLYPDAT_GPU_DEVICE_PRIORITY"));
+            var result = setPriority(dxgiDevicePtr, requested);
             if (result == 0)
             {
                 var getPriorityPtr = Marshal.ReadIntPtr(vtable, 11 * nint.Size);
@@ -185,11 +194,11 @@ internal static class GpuScheduling
                 var readBackResult = getPriority(dxgiDevicePtr, out var applied);
                 if (readBackResult == 0)
                 {
-                    AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority requested={MaxGpuThreadPriority}, applied={applied}.");
+                    AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority requested={requested}, applied={applied}.");
                     return applied;
                 }
-                AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority set to {MaxGpuThreadPriority}; read-back refused (hr=0x{readBackResult:X8}).");
-                return MaxGpuThreadPriority;
+                AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority set to {requested}; read-back refused (hr=0x{readBackResult:X8}).");
+                return requested;
             }
             else
             {

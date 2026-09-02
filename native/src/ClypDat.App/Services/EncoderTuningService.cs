@@ -87,6 +87,7 @@ public sealed class EncoderTuningService
         if (health.EncodeQueueCapacity <= 0 || string.IsNullOrEmpty(health.EncoderProfile)) return;
         if (health.State is not (ReplayCaptureState.Healthy or ReplayCaptureState.Degraded)) return;
         if (health.DegradeReason is ReplayDegradeReason.CaptureStall or ReplayDegradeReason.CaptureTransport || health.SaveInProgress) return;
+        if (health.BottleneckStage is not (ReplayPipelineStage.None or ReplayPipelineStage.EncodeQueue or ReplayPipelineStage.EncoderSubmission or ReplayPipelineStage.EncoderCompletion)) return;
 
         var now = health.UpdatedUtc;
         if (now - _sessionStartUtc < Warmup) return;

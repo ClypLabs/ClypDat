@@ -989,6 +989,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // wants the newest game frame, not a second of stale work, so bound
             // the queue to roughly 125ms at every supported target rate.
             var encodeQueueCapacity = ReplayEncoderProfilePolicy.ReplayQueueCapacity(config.FrameRate);
+            var pacingLatency = new ReplayLatencyHistogram();
+            var processingLatency = new ReplayLatencyHistogram();
+            var submissionLatency = new ReplayLatencyHistogram();
+            var outputLatency = new ReplayLatencyHistogram();
+            long pacingMissedFrames = 0;
+            long encodeQueueReplacements = 0;
+            var latestPacing = ReplayPacingPolicy.IsLatest(Environment.GetEnvironmentVariable("CLYPDAT_PACING_POLICY"));
 
             if (useGpuScale && config.CaptureCursor)
             {
@@ -1318,6 +1325,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // under its configured frame rate - so it also runs AboveNormal.
             pacingThread = new Thread(() =>
             {
+                using var pacingMmcss = MmcssScope.Capture("native pacing thread");
                 var nextTickAt = stopwatch.Elapsed;
                 while (!token.IsCancellationRequested)
                 {
@@ -1359,7 +1367,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // the GPU cost this whole change is removing. The lock lives
                         // inside the encode functions instead, around the D3D work
                         // alone.
+                        var pacingTimer = System.Diagnostics.Stopwatch.StartNew();
                         RunPacingTick();
+                        pacingLatency.Record(pacingTimer.Elapsed);
                     }
                     catch (Exception error)
                     {
@@ -1590,6 +1600,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var saveInProgress = Volatile.Read(ref _savesInFlight) > 0;
                     var sourceFrameRate = inputFrameCount / diagElapsed;
                     var freshTransportRate = framesProcessedSinceLog / diagElapsed;
+                    processingLatency.Record(TimeSpan.FromMilliseconds(scaleMs / n));
+                    var (pacingP95Ms, pacingMaxMs) = pacingLatency.SnapshotAndReset();
+                    var (processingP95Ms, processingMaxMs) = processingLatency.SnapshotAndReset();
+                    var (submissionP95Ms, submissionMaxMs) = submissionLatency.SnapshotAndReset();
+                    var (outputLatencyP95Ms, outputLatencyMaxMs) = outputLatency.SnapshotAndReset();
+                    var missedPacingSinceLog = Interlocked.Exchange(ref pacingMissedFrames, 0);
+                    var queueReplacementsSinceLog = Interlocked.Exchange(ref encodeQueueReplacements, 0);
                     var encoderSubmissionStalled = encoderPressure && outputFrameRate < activeFrameRate * 0.5;
                     var sourceRecoverySample = new ReplayCaptureHealth("Native", "DXGI", ReplayCaptureState.Degraded,
                         activeFrameRate, inputFrameCount / diagElapsed, freshTransportRate, outputFrameRate, 0, droppedSinceLog,
@@ -1665,6 +1682,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     else
                         consecutiveTransportShortfallWindows = 0;
                     var transportDegraded = consecutiveTransportShortfallWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows;
+                    var bottleneckStage = ReplayPipelineHealthClassifier.Classify(
+                        sourceFrameRate, freshTransportRate, processingP95Ms, 1000.0 / activeFrameRate,
+                        missedPacingSinceLog, encodeQueue.Count, encodeQueueCapacity, submissionP95Ms,
+                        outputLatencyP95Ms, outputShortfall);
+                    var encoderStage = bottleneckStage is ReplayPipelineStage.EncodeQueue or ReplayPipelineStage.EncoderSubmission or ReplayPipelineStage.EncoderCompletion;
                     var pipelineUnhealthy = !capturePaused && ((encoderPressure && outputFrameRate < activeFrameRate * 0.5) ||
                         sourceRecoveryAction != CaptureSourceRecoveryAction.None || isStalled || transportDegraded);
                     UpdateRecoveryTimeline(pipelineUnhealthy, capturePaused, DateTime.UtcNow);
@@ -1689,7 +1711,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             AppLog.Error("Native capture: DXGI cadence fallback could not start WGC; keeping DXGI.", error);
                         }
                     }
-                    var overloaded = encoderPressure;
+                    var overloaded = encoderStage;
                     if (hasCapturedRealFrame && startupValidationPrimed && !saveInProgress && overloaded)
                         consecutiveOverloadWindows++;
                     else if (!overloaded || saveInProgress)
@@ -1853,9 +1875,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // so whatever the encoder looks like is a consequence of
                         // that rather than the encode settings being too costly.
                         DegradeReason = sourceStarved || isStalled ? ReplayDegradeReason.CaptureStall
-                            : overloaded ? ReplayDegradeReason.EncoderOverload
                             : transportDegraded ? ReplayDegradeReason.CaptureTransport
-                            : ReplayDegradeReason.None,
+                            : ReplayPipelineHealthClassifier.ToDegradeReason(bottleneckStage),
+                        BottleneckStage = bottleneckStage,
+                        PacingMissedFrames = missedPacingSinceLog,
+                        PacingLatenessP95Ms = pacingP95Ms,
+                        PacingLatenessMaxMs = pacingMaxMs,
+                        EncodeQueueReplacements = queueReplacementsSinceLog,
+                        ProcessingP95Ms = processingP95Ms,
+                        ProcessingMaxMs = processingMaxMs,
+                        SubmissionP95Ms = submissionP95Ms,
+                        SubmissionMaxMs = submissionMaxMs,
+                        EncoderOutputLatencyP95Ms = outputLatencyP95Ms,
+                        EncoderOutputLatencyMaxMs = outputLatencyMaxMs,
                         AdapterDescription = adapterDescription,
                         EncoderProfile = config.EncoderProfile,
                         EncodeQueueCapacity = encodeQueueCapacity,
@@ -3027,7 +3059,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var encodePacketPtr = (nint)packet;
                     var encodeFullSessionFormatContextPtr = (nint)fullSessionFormatContext;
                     var encodeFullSessionStreamPtr = (nint)fullSessionStream;
-                    encodeThread = new Thread(() => EncodeLoop(encodeQueue!, encodeCodecContextPtr, encodePacketPtr, encodeFullSessionFormatContextPtr, encodeFullSessionStreamPtr))
+                    encodeThread = new Thread(() => EncodeLoop(encodeQueue!, encodeCodecContextPtr, encodePacketPtr, encodeFullSessionFormatContextPtr, encodeFullSessionStreamPtr, submissionLatency, outputLatency))
                     {
                         IsBackground = true,
                         Name = "ClypDat-NativeEncode"
@@ -3120,6 +3152,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             FreeEncodeFrame(stale.FramePtr);
                             Interlocked.Increment(ref _encodeDroppedCount);
                             Interlocked.Increment(ref _totalDroppedFrames);
+                            Interlocked.Increment(ref encodeQueueReplacements);
                             if (queue.TryAdd(job)) return true;
                         }
                     }
@@ -3535,6 +3568,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 }
                 else if (hasCapturedRealFrame)
                 {
+                if (latestPacing)
+                {
+                    var now = stopwatch.Elapsed;
+                    var intervals = ReplayPacingPolicy.TakeLatestIntervals(now, targetFrameInterval, ref lastEncodedAt);
+                    if (intervals > 0)
+                    {
+                        if (intervals > 1) Interlocked.Add(ref pacingMissedFrames, intervals - 1);
+                        frame->pts = (long)Math.Round(nextPtsMicroseconds + idealFrameIntervalMicroseconds * (intervals - 1));
+                        nextPtsMicroseconds += idealFrameIntervalMicroseconds * intervals;
+                        EncodeScheduledFrame();
+                        Volatile.Write(ref freshContentSinceLastEncode, 0);
+                    }
+                    return;
+                }
                 // At most 250 ms of duplicate work after a stall. Longer bursts
                 // refill a saturated queue with stale copies and make recovery
                 // worse than dropping the missed interval.
@@ -4446,7 +4493,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // AcquireNextFrame right along with it, since it was the same thread. This
     // loop owns codecContext/packet/pendingFrameWallClocks exclusively from here
     // on - CaptureLoop never touches them again after starting this thread.
-    private unsafe void EncodeLoop(BlockingCollection<EncodeJob> queue, nint codecContextPtr, nint packetPtr, nint fullSessionFormatContextPtr, nint fullSessionStreamPtr)
+    private unsafe void EncodeLoop(BlockingCollection<EncodeJob> queue, nint codecContextPtr, nint packetPtr, nint fullSessionFormatContextPtr, nint fullSessionStreamPtr, ReplayLatencyHistogram submissionLatency, ReplayLatencyHistogram outputLatency)
     {
         // Same reasoning as the capture loop: this thread owns the encoder, and
         // a stall here backs the queue up until frames start being dropped.
@@ -4524,13 +4571,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
                     Interlocked.Add(ref _encodeInputMicrosAccum, (long)(sendTimer.Elapsed.TotalMilliseconds * 1000));
                     Interlocked.Increment(ref _encodeInputCountAccum);
+                    submissionLatency.Record(sendTimer.Elapsed);
                     if (sendResult == 0)
                     {
                         pendingFrames.Enqueue(job.FramePtr, job.WallClockUtc);
                         accepted = true;
                         Volatile.Write(ref _pendingEncoderFrames, pendingFrames.Count);
                         UpdatePeak(ref _peakPendingEncoderFrames, pendingFrames.PeakCount);
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames);
+                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames, outputLatency);
                     }
                     else
                     {
@@ -4547,7 +4595,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // loop exited) - flush whatever's still buffered inside the encoder
             // itself, same as the original inline flush used to.
             ffmpeg.avcodec_send_frame(codecContext, null);
-            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames);
+            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames, outputLatency);
         }
         catch (Exception error)
         {
@@ -4562,7 +4610,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, EncoderFrameLifetimeQueue pendingFrames)
+    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, EncoderFrameLifetimeQueue pendingFrames, ReplayLatencyHistogram? outputLatency = null)
     {
         while (true)
         {
@@ -4574,6 +4622,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             Interlocked.Increment(ref _encodeOutputCountAccum);
 
             var hasPendingFrame = pendingFrames.TryTake(out var pendingFrame);
+            if (hasPendingFrame) outputLatency?.Record(MonotonicClock.UtcNow - pendingFrame.WallClockUtc);
             try
             {
             var isKeyframe = (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
@@ -5362,6 +5411,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             if (profile is not null) TrySet("profile", profile);
             TrySet("tune", "ll");
             TrySet("surfaces", ReplayEncoderProfilePolicy.NvencSurfaces(config.FrameRate).ToString(CultureInfo.InvariantCulture));
+            var delay = Environment.GetEnvironmentVariable("CLYPDAT_NVENC_DELAY")?.Trim();
+            if (delay is "4" or "8") TrySet("delay", delay);
             // This is a replay buffer, not a live stream. NVENC's zerolatency
             // option forces a packet out for every submitted frame; when the
             // game is contending for the GPU, that turns avcodec_send_frame

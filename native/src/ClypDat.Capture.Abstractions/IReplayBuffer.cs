@@ -62,6 +62,21 @@ public enum ReplayDegradeReason
     CaptureTransport
 }
 
+// The first failing boundary in the recorder.  Keep this separate from the
+// compatibility degrade reason: a slow source must never make the encoder
+// tuner sacrifice quality.
+public enum ReplayPipelineStage
+{
+    None,
+    SourceAcquisition,
+    CaptureTransport,
+    FrameProcessing,
+    Pacing,
+    EncodeQueue,
+    EncoderSubmission,
+    EncoderCompletion
+}
+
 public enum ReplayRecoveryStopReason
 {
     None,
@@ -146,6 +161,13 @@ public sealed record ReplayCaptureHealth(
     public ReplayPipelineRecoveryAction PipelineRecoveryAction { get; init; }
     // Vendor-neutral: submission latency/queue behaviour, never encoder name.
     public bool EncoderSubmissionStalled { get; init; }
+    public ReplayPipelineStage BottleneckStage { get; init; }
+    public long PacingMissedFrames { get; init; }
+    public double PacingLatenessP95Ms { get; init; }
+    public double PacingLatenessMaxMs { get; init; }
+    public long EncodeQueueReplacements { get; init; }
+    public double ProcessingP95Ms { get; init; }
+    public double ProcessingMaxMs { get; init; }
 
     // Native engine diagnostics. These are optional for managed/legacy
     // backends, but make worker health actionable without parsing logs.
@@ -154,6 +176,9 @@ public sealed record ReplayCaptureHealth(
     public TimeSpan EncodeQueueAge { get; init; }
     public double EncoderSlotWaitP95Ms { get; init; }
     public double SubmissionP95Ms { get; init; }
+    public double SubmissionMaxMs { get; init; }
+    public double EncoderOutputLatencyP95Ms { get; init; }
+    public double EncoderOutputLatencyMaxMs { get; init; }
     public int SurfacesInUse { get; init; }
     public int SurfaceCapacity { get; init; }
     public string AdapterLuid { get; init; } = string.Empty;
