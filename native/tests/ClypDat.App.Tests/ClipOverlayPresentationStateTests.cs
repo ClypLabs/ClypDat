@@ -29,70 +29,75 @@ public sealed class ClipOverlayPresentationStateTests
     }
 
     [Fact]
-    public void CompletionBeforeEntry_QueuesSavedUntilSavingEntryFinishes()
+    public void CompletionDuringEntry_CrossesInsteadOfQueuing()
     {
+        // The result of a save used to be held back until the "Clip Saving…"
+        // badge had finished arriving, which is what made it land as a snap.
+        // With two badge layers it can start crossing straight away.
         var state = new ClipOverlayPresentationState();
-        var saving = Request("Clip Saving…");
-        var saved = saving with { Text = "Clip Saved", PlaySound = true };
         var generation = state.Begin();
 
-        Assert.Equal(ClipOverlayUpdateDisposition.Queue, state.Update(generation, saved));
-        Assert.True(state.BeginEntry(generation));
         Assert.Equal(ClipOverlayPresentationPhase.Entering, state.Phase);
+        Assert.True(state.BeginSwap(generation));
+        Assert.Equal(ClipOverlayPresentationPhase.Swapping, state.Phase);
+    }
 
-        Assert.Same(saved, state.CompleteEntry(generation));
+    [Fact]
+    public void CompletionAfterEntry_Crosses()
+    {
+        var state = new ClipOverlayPresentationState();
+        var generation = state.Begin();
+        Assert.True(state.EnterCompleted(generation));
+        Assert.Equal(ClipOverlayPresentationPhase.Dwelling, state.Phase);
+
+        Assert.True(state.BeginSwap(generation));
+        Assert.True(state.SwapCompleted(generation));
         Assert.Equal(ClipOverlayPresentationPhase.Dwelling, state.Phase);
     }
 
     [Fact]
-    public void SupersededFrameCallback_CannotStartNewSessionEntry()
+    public void SupersededGeneration_CannotDriveTheCurrentPresentation()
     {
         var state = new ClipOverlayPresentationState();
         var oldGeneration = state.Begin();
         var newGeneration = state.Begin();
 
-        Assert.False(state.BeginEntry(oldGeneration));
-        Assert.True(state.BeginEntry(newGeneration));
+        Assert.False(state.EnterCompleted(oldGeneration));
+        // The hole this closes: a dwell timer left over from a superseded
+        // presentation must not push the current one into its exit.
+        Assert.False(state.BeginExit(oldGeneration));
+        Assert.False(state.BeginSwap(oldGeneration));
+
+        Assert.True(state.EnterCompleted(newGeneration));
     }
 
     [Fact]
-    public void CompletionAfterEntry_AppliesImmediatelyAndDoesNotQueue()
+    public void SwapIsRejectedOnceExitHasStarted()
     {
         var state = new ClipOverlayPresentationState();
-        var request = Request("Clip Saved");
         var generation = state.Begin();
-        Assert.True(state.BeginEntry(generation));
-        Assert.Null(state.CompleteEntry(generation));
+        Assert.True(state.EnterCompleted(generation));
+        Assert.True(state.BeginExit(generation));
 
-        Assert.Equal(ClipOverlayUpdateDisposition.Apply, state.Update(generation, request));
+        // Nothing crosses over a badge that is already leaving; the next
+        // notification enters fresh once it has parked.
+        Assert.False(state.BeginSwap(generation));
+        Assert.Equal(ClipOverlayPresentationPhase.Exiting, state.Phase);
     }
 
     [Fact]
-    public void CompletionDuringExit_RestartsInsteadOfBeingDropped()
+    public void Park_InvalidatesPendingContinuations()
     {
         var state = new ClipOverlayPresentationState();
         var generation = state.Begin();
-        Assert.True(state.BeginEntry(generation));
-        Assert.Null(state.CompleteEntry(generation));
-        Assert.True(state.BeginExit());
+        state.Idle();
 
-        Assert.Equal(ClipOverlayUpdateDisposition.Restart, state.Update(generation, Request("Clip Saved")));
-    }
-
-    [Fact]
-    public void Hide_InvalidatesPendingFrameCallbacks()
-    {
-        var state = new ClipOverlayPresentationState();
-        var generation = state.Begin();
-        state.Hide();
-
-        Assert.False(state.BeginEntry(generation));
-        Assert.Equal(ClipOverlayPresentationPhase.Hidden, state.Phase);
-    }
-
-    private static ClipOverlayRequest Request(string text)
-    {
-        return new ClipOverlayRequest(new ClipOverlaySession("test", Target()), text, ClipOverlaySide.Right, false, true);
+        // Every await in the window resumes into one of these; after a park
+        // they must all decline rather than animate a parked window.
+        Assert.False(state.EnterCompleted(generation));
+        Assert.False(state.BeginSwap(generation));
+        Assert.False(state.BeginExit(generation));
+        Assert.Equal(ClipOverlayPresentationPhase.Idle, state.Phase);
     }
 
     private static ClipOverlayTarget Target() => new("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040), 1, ClipOverlayTargetReason.Primary);
