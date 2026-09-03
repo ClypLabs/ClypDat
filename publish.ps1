@@ -10,8 +10,8 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
 $nativeRoot = Join-Path $repoRoot 'native'
 $appProject = Join-Path $nativeRoot 'src\ClypDat.App\ClypDat.App.csproj'
-$installDirectory = Join-Path $env:LOCALAPPDATA 'ClypDat.LocalBuild'
-$programInstallDirectory = Join-Path $env:LOCALAPPDATA 'Programs\ClypDat'
+$installDirectory = Join-Path $env:LOCALAPPDATA 'Programs\ClypDat'
+$legacyInstallDirectory = Join-Path $env:LOCALAPPDATA 'ClypDat.LocalBuild'
 $dotnetExecutable = & (Join-Path $repoRoot 'eng\Ensure-DotNet.ps1')
 $selfContainedVerifier = Join-Path $repoRoot 'eng\Test-SelfContainedPublish.ps1'
 $globalJson = Get-Content -LiteralPath (Join-Path $repoRoot 'global.json') -Raw | ConvertFrom-Json
@@ -269,19 +269,25 @@ function Remove-IncompleteAvaloniaPackageCache {
 }
 
 function Stop-InstalledClypDatProcesses {
-    param([Parameter(Mandatory)][string]$InstallDirectory)
+    param([Parameter(Mandatory)][string[]]$InstallDirectories)
 
-    $installPathPrefix = "$([IO.Path]::GetFullPath($InstallDirectory).TrimEnd('\'))\"
+    $installPathPrefixes = @($InstallDirectories | ForEach-Object {
+        "$([IO.Path]::GetFullPath($_).TrimEnd('\'))\"
+    })
     $processIds = [Collections.Generic.HashSet[int]]::new()
 
     # ExecutablePath can be unavailable for a process owned by another session.
-    # Include the application name so an old local build cannot keep its files open.
+    # Include application and recorder names so an old local build cannot keep
+    # its files open.
     foreach ($process in @(Get-CimInstance Win32_Process | Where-Object {
-        $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installPathPrefix, [StringComparison]::OrdinalIgnoreCase)
+        $executablePath = $_.ExecutablePath
+        $executablePath -and @($installPathPrefixes | Where-Object {
+            $executablePath.StartsWith($_, [StringComparison]::OrdinalIgnoreCase)
+        }).Count -gt 0
     })) {
         [void]$processIds.Add([int]$process.ProcessId)
     }
-    foreach ($process in @(Get-Process -Name 'ClypDat' -ErrorAction SilentlyContinue)) {
+    foreach ($process in @(Get-Process -Name 'ClypDat', 'ClypDatRecorder' -ErrorAction SilentlyContinue)) {
         [void]$processIds.Add([int]$process.Id)
     }
 
@@ -349,48 +355,6 @@ function Invoke-AvaloniaBuild {
     }
 
     return $exitCode
-}
-
-function Install-ClypDatDirectory {
-    param(
-        [Parameter(Mandatory)][string]$SourceDirectory,
-        [Parameter(Mandatory)][string]$DestinationDirectory
-    )
-
-    $destinationParent = Split-Path -Parent $DestinationDirectory
-    New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
-    if (-not (Test-DirectoryCreateAccess -Directory $destinationParent)) {
-        throw "Cannot create local publish files under $destinationParent."
-    }
-
-    $stagedDirectory = Join-Path $destinationParent ('.ClypDat.staged-' + [Guid]::NewGuid().ToString('N'))
-    $previousDirectory = $null
-    try {
-        Copy-Item -LiteralPath $SourceDirectory -Destination $stagedDirectory -Recurse -Force
-
-        if (Test-Path -LiteralPath $DestinationDirectory) {
-            $previousDirectory = Join-Path $destinationParent ('.ClypDat.previous-' + [Guid]::NewGuid().ToString('N'))
-            Move-Item -LiteralPath $DestinationDirectory -Destination $previousDirectory
-        }
-
-        try {
-            Move-Item -LiteralPath $stagedDirectory -Destination $DestinationDirectory
-        }
-        catch {
-            if ($previousDirectory -and (Test-Path -LiteralPath $previousDirectory) -and -not (Test-Path -LiteralPath $DestinationDirectory)) {
-                Move-Item -LiteralPath $previousDirectory -Destination $DestinationDirectory
-            }
-            throw
-        }
-    }
-    finally {
-        if (Test-Path -LiteralPath $stagedDirectory) {
-            Remove-Item -LiteralPath $stagedDirectory -Recurse -Force
-        }
-        if ($previousDirectory -and (Test-Path -LiteralPath $previousDirectory)) {
-            Remove-Item -LiteralPath $previousDirectory -Recurse -Force
-        }
-    }
 }
 
 function Test-AvaloniaPackageSet {
@@ -858,7 +822,7 @@ try {
 
     & $selfContainedVerifier -PublishDirectory $publishStagingDirectory
 
-    Stop-InstalledClypDatProcesses -InstallDirectory $installDirectory
+    Stop-InstalledClypDatProcesses -InstallDirectories @($installDirectory, $legacyInstallDirectory)
 
     $previousInstallDirectory = $null
     if (Test-Path -LiteralPath $installDirectory) {
@@ -884,8 +848,15 @@ try {
     $installedExe = Join-Path $installDirectory 'ClypDat.exe'
     Write-Host "Installed local build to: $installedExe"
 
-    Install-ClypDatDirectory -SourceDirectory $installDirectory -DestinationDirectory $programInstallDirectory
-    Write-Host "Copied local build to: $(Join-Path $programInstallDirectory 'ClypDat.exe')"
+    $expectedLegacyInstallDirectory = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'ClypDat.LocalBuild'))
+    $actualLegacyInstallDirectory = [IO.Path]::GetFullPath($legacyInstallDirectory)
+    if (-not $actualLegacyInstallDirectory.Equals($expectedLegacyInstallDirectory, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove unexpected legacy local build path: $actualLegacyInstallDirectory"
+    }
+    if (Test-Path -LiteralPath $legacyInstallDirectory) {
+        Remove-Item -LiteralPath $legacyInstallDirectory -Recurse -Force
+        Write-Host "Removed legacy local build: $legacyInstallDirectory"
+    }
 
     Write-Host 'Starting updated ClypDat.'
     Start-Process -FilePath $installedExe
