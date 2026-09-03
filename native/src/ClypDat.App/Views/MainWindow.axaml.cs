@@ -397,7 +397,7 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName is nameof(MainWindowViewModel.XboxCurrentTitle)
                         or nameof(MainWindowViewModel.XboxActivityForDesktop)
                         or nameof(MainWindowViewModel.SelectedReplayCaptureSource))
-                        _ = UpdateWorkerClipGameNameAsync();
+                        QueueWorkerClipGameNameUpdate();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.SelectedVideoPath)) ResetTimelineZoom();
@@ -3087,12 +3087,25 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void QueueWorkerClipGameNameUpdate()
+    {
+        // Xbox activity polling raises PropertyChanged from a background thread.
+        // This path reads DataContext and creates a replay config, both UI-owned.
+        // Marshal before either operation so a new Xbox title reaches the worker.
+        if (Dispatcher.UIThread.CheckAccess()) _ = UpdateWorkerClipGameNameAsync();
+        else Dispatcher.UIThread.Post(() => _ = UpdateWorkerClipGameNameAsync());
+    }
+
     private async Task UpdateWorkerClipGameNameAsync(ReplayBufferConfig? config = null)
     {
-        if (ViewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
-        config ??= ViewModel.CreateReplayConfig();
-        var gameDisplayName = ViewModel.EffectiveClipGameName(config.GameDisplayName, config.CaptureSource);
-        try { await worker.UpdateClipGameNameAsync(gameDisplayName); }
+        try
+        {
+            var viewModel = ViewModel;
+            if (viewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
+            config ??= viewModel.CreateReplayConfig();
+            var gameDisplayName = viewModel.EffectiveClipGameName(config.GameDisplayName, config.CaptureSource);
+            await worker.UpdateClipGameNameAsync(gameDisplayName);
+        }
         catch (Exception error) { AppLog.Info($"Capture worker clip name update failed: {error.Message}"); }
     }
 
