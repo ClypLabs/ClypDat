@@ -230,6 +230,7 @@ public interface IReplayCaptureWorkerControl
 {
     Task ShutdownWorkerAsync(CancellationToken cancellationToken = default);
     Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default);
+    Task UpdateClipGameNameAsync(string gameDisplayName, CancellationToken cancellationToken = default);
 }
 
 public interface IStoragePressureObserver
@@ -260,7 +261,7 @@ public interface IReplayBuffer : IDisposable
     // titleOverride, when set, replaces the default "{GameName} {timestamp}" clip
     // name entirely (e.g. "4K - Inferno") - used by auto-clip triggers (CS2 GSI
     // kill events) to name the clip after what just happened.
-    Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null);
+    Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null);
     void SetCapturePaused(bool paused) { }
     // Set by the most recent SaveReplayAsync when no genuinely new video frame
     // landed anywhere inside the saved window - i.e. the clip is one frozen

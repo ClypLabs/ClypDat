@@ -430,7 +430,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         _packetPayloads.Deactivate();
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null)
     {
         if (!_sessionActive) throw new InvalidOperationException("Replay buffer is not recording.");
         // Packets emitted before live qualification belong to a provisional
@@ -472,10 +472,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         saveGateHeld = true;
 
         var config = _configProvider();
-        var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config.GameDisplayName : titleOverride;
-        var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config.GameDisplayName));
+        var gameDisplayName = string.IsNullOrWhiteSpace(gameDisplayNameOverride) ? config.GameDisplayName : gameDisplayNameOverride;
+        var clipName = string.IsNullOrWhiteSpace(titleOverride) ? gameDisplayName : titleOverride;
+        var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(gameDisplayName));
         Directory.CreateDirectory(gameFolder);
-        var outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
+        var outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, gameDisplayName));
 
         // A capture source can go silent while every stage after it keeps
         // working: the pacing gate pads the last frame, the ring fills with

@@ -394,6 +394,10 @@ public sealed partial class MainWindow : Window
                         or nameof(MainWindowViewModel.ReplayDesktopCaptureCursor)
                         or nameof(MainWindowViewModel.ReplayAutoSwitchToGameCapture)
                         ) ScheduleReplayRestart();
+                    if (e.PropertyName is nameof(MainWindowViewModel.XboxCurrentTitle)
+                        or nameof(MainWindowViewModel.XboxActivityForDesktop)
+                        or nameof(MainWindowViewModel.SelectedReplayCaptureSource))
+                        _ = UpdateWorkerClipGameNameAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.SelectedVideoPath)) ResetTimelineZoom();
@@ -2899,6 +2903,7 @@ public sealed partial class MainWindow : Window
             await EnsureLibraryFolderAsync();
             ApplyCaptureBounds();
             _replayConfigSnapshot = ViewModel.CreateReplayConfig();
+            await UpdateWorkerClipGameNameAsync(_replayConfigSnapshot);
             CaptureBackgroundWorkGate.BeginCapture();
             await Task.Run(() => _replayBuffer.StartAsync());
             AppLog.Info("Replay started.");
@@ -3028,7 +3033,11 @@ public sealed partial class MainWindow : Window
                     ShowClipNotification("Clip Saving…", playSound: false);
                 }
 
-                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow));
+                var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
+                // Snapshot Xbox activity before encoding starts. Folder, filename,
+                // sidecar, and tile must retain this one capture identity.
+                var effectiveGameName = ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName, replayConfig.CaptureSource);
+                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow, gameDisplayNameOverride: effectiveGameName));
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 RememberSessionClip(outputPath);
                 ViewModel.RecordDiscordClipSaved();
@@ -3046,8 +3055,6 @@ public sealed partial class MainWindow : Window
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
-                var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
-                var effectiveGameName = ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName, replayConfig.CaptureSource);
                 var clipInfo = new ClipInfo(
                     effectiveGameName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
@@ -3078,6 +3085,15 @@ public sealed partial class MainWindow : Window
             if (ViewModel is not null) ViewModel.IsSavingReplayClip = false;
             _clipSaveLock.Release();
         }
+    }
+
+    private async Task UpdateWorkerClipGameNameAsync(ReplayBufferConfig? config = null)
+    {
+        if (ViewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
+        config ??= ViewModel.CreateReplayConfig();
+        var gameDisplayName = ViewModel.EffectiveClipGameName(config.GameDisplayName, config.CaptureSource);
+        try { await worker.UpdateClipGameNameAsync(gameDisplayName); }
+        catch (Exception error) { AppLog.Info($"Capture worker clip name update failed: {error.Message}"); }
     }
 
     // Only one clip-notification overlay at a time - a fast save ("Saving

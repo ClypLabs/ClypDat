@@ -28,6 +28,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private int? _frameRate;
     private int _fatalHealthRecoveryUsed;
     private string _hotkey = string.Empty;
+    private string? _clipGameName;
     private volatile bool _disposed;
 
     public CaptureWorkerProxy(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
@@ -68,12 +69,12 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         SetRecording(false);
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null)
     {
         if (_recovery is { IsCompleted: false } || _health.State == ReplayCaptureState.Recovering) throw new InvalidOperationException("Replay is recovering; retry after recording resumes.");
         if (!_desiredRecording || _health.State == ReplayCaptureState.Failed) throw new InvalidOperationException("Replay is not recording; no video can be saved.");
         await EnsureAttachedAsync(cancellationToken);
-        var result = await SendAsync<CaptureWorkerSaveResult>("save", new CaptureWorkerSaveRequest(outputFolder, titleOverride, clipWindow), cancellationToken);
+        var result = await SendAsync<CaptureWorkerSaveResult>("save", new CaptureWorkerSaveRequest(outputFolder, titleOverride, clipWindow, gameDisplayNameOverride), cancellationToken);
         if (!string.IsNullOrWhiteSpace(result.Error)) throw new InvalidOperationException(result.Error);
         await SendAsync<CaptureWorkerAck>("ack-save", new { result.Path }, cancellationToken);
         return result.Path;
@@ -91,6 +92,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
     public async Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default)
     { _hotkey = hotkey; await EnsureAttachedAsync(cancellationToken); await SendAsync<CaptureWorkerAck>("hotkey", new { hotkey }, cancellationToken); }
+
+    public async Task UpdateClipGameNameAsync(string gameDisplayName, CancellationToken cancellationToken = default)
+    { _clipGameName = gameDisplayName; await EnsureAttachedAsync(cancellationToken); await SendAsync<CaptureWorkerAck>("clip-game-name", new { gameDisplayName }, cancellationToken); }
 
     public void Dispose() { _disposed = true; _desiredRecording = false; CancelRecovery(false); Disconnect(); }
 
@@ -110,6 +114,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             await SendAsync<CaptureWorkerHandshake>("handshake", new { ClientId = Environment.ProcessId }, cancellationToken);
             var config = _configProvider(); var attach = await AttachAsync(config, cancellationToken);
             ApplyAttach(attach, config, _desiredRecording);
+            var gameDisplayName = _clipGameName ?? config.GameDisplayName;
+            await SendAsync<CaptureWorkerAck>("clip-game-name", new { gameDisplayName }, cancellationToken);
             foreach (var save in attach.UnacknowledgedSaves)
             { SaveCompleted?.Invoke(this, new ReplaySaveCompleted(save.Path, save.Title, save.CompletedUtc, save.Error)); await SendAsync<CaptureWorkerAck>("ack-save", new { save.Path }, cancellationToken); }
         }

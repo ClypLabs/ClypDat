@@ -117,7 +117,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null)
     {
         if (!Directory.Exists(outputFolder)) Directory.CreateDirectory(outputFolder);
 
@@ -136,10 +136,11 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         StopAudioCaptures();
         var concatPath = Path.Combine(_bufferFolder, $"concat_{Guid.NewGuid():N}.txt");
         var tempVideoPath = Path.Combine(_bufferFolder, $"replay_video_{Guid.NewGuid():N}.mkv");
-        var clipName = string.IsNullOrWhiteSpace(titleOverride) ? config?.GameDisplayName ?? string.Empty : titleOverride;
-        var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(config?.GameDisplayName ?? string.Empty));
+        var gameDisplayName = string.IsNullOrWhiteSpace(gameDisplayNameOverride) ? config?.GameDisplayName ?? string.Empty : gameDisplayNameOverride;
+        var clipName = string.IsNullOrWhiteSpace(titleOverride) ? gameDisplayName : titleOverride;
+        var gameFolder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(gameDisplayName));
         Directory.CreateDirectory(gameFolder);
-        var outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mkv", config?.ClipFileNameScheme ?? ClipFileNaming.StandardScheme, config?.CustomClipFileNameTemplate ?? string.Empty, config?.GameDisplayName));
+        var outputPath = ClipFileNaming.BuildUniquePath(gameFolder, ClipFileNaming.BuildFileName(clipName, DateTime.Now, "mkv", config?.ClipFileNameScheme ?? ClipFileNaming.StandardScheme, config?.CustomClipFileNameTemplate ?? string.Empty, gameDisplayName));
         await File.WriteAllLinesAsync(
             concatPath,
             files.Select(file => $"file '{EscapeConcatPath(file.FullName)}'"),

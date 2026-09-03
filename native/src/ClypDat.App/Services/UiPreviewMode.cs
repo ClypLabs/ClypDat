@@ -31,7 +31,8 @@ internal sealed class UiPreviewReplayBuffer : IReplayBuffer, IReplayCaptureDiagn
         string outputFolder,
         CancellationToken cancellationToken = default,
         string? titleOverride = null,
-        ReplayClipWindow? clipWindow = null) => Task.FromResult(string.Empty);
+        ReplayClipWindow? clipWindow = null,
+        string? gameDisplayNameOverride = null) => Task.FromResult(string.Empty);
 
     public void Dispose()
     {

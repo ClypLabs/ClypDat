@@ -17,6 +17,7 @@ internal static class CaptureWorkerHost
     private static ReplayBufferConfig? _config;
     private static IReplayBuffer? _buffer;
     private static GlobalHotkeyService? _hotkey;
+    private static string? _clipGameName;
 
     public static int Run()
     {
@@ -99,6 +100,10 @@ internal static class CaptureWorkerHost
                     break;
                 case "hotkey":
                     SetHotkey(message.Payload.GetProperty("hotkey").GetString() ?? string.Empty);
+                    await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
+                    break;
+                case "clip-game-name":
+                    _clipGameName = message.Payload.GetProperty("gameDisplayName").GetString();
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "health":
@@ -184,15 +189,16 @@ internal static class CaptureWorkerHost
                 return new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, storageReason);
             await SendEventAsync("save-started", new { });
             var stopwatch = Stopwatch.StartNew();
-            var path = await _buffer!.SaveReplayAsync(request.OutputFolder, cancellationToken, request.TitleOverride, request.ClipWindow);
+            var gameDisplayName = string.IsNullOrWhiteSpace(request.GameDisplayNameOverride) ? _config?.GameDisplayName : request.GameDisplayNameOverride;
+            var path = await _buffer!.SaveReplayAsync(request.OutputFolder, cancellationToken, request.TitleOverride, request.ClipWindow, gameDisplayName);
             stopwatch.Stop();
             Storage.RecordWrite(path, stopwatch.Elapsed);
             if (_config is not null)
             {
                 ClipInfoSidecar.Save(_config.LibraryFolder, path, new ClipInfo(
-                    _config.GameDisplayName,
+                    gameDisplayName,
                     null,
-                    request.TitleOverride ?? _config.GameDisplayName,
+                    request.TitleOverride ?? gameDisplayName,
                     File.GetCreationTimeUtc(path),
                     CaptureSource: _config.CaptureSource));
             }
@@ -226,7 +232,8 @@ internal static class CaptureWorkerHost
         if (_buffer?.IsRecording != true || _config is null) return;
         var duration = TimeSpan.FromSeconds(Math.Clamp(_config.DurationSeconds, 30, 1200));
         var folder = LibraryLayout.ClipsRoot(_config.LibraryFolder);
-        _ = SaveAsync(new CaptureWorkerSaveRequest(folder, null, new ReplayClipWindow(args.PressedAtUtc - duration, args.PressedAtUtc)), CancellationToken.None);
+        var gameDisplayName = _clipGameName ?? _config.GameDisplayName;
+        _ = SaveAsync(new CaptureWorkerSaveRequest(folder, null, new ReplayClipWindow(args.PressedAtUtc - duration, args.PressedAtUtc), gameDisplayName), CancellationToken.None);
     }
 
     private static ReplayCaptureHealth GetHealth()
@@ -275,7 +282,7 @@ internal static class CaptureWorkerHost
     }
 }
 
-internal sealed record CaptureWorkerSaveRequest(string OutputFolder, string? TitleOverride, ReplayClipWindow? ClipWindow);
+internal sealed record CaptureWorkerSaveRequest(string OutputFolder, string? TitleOverride, ReplayClipWindow? ClipWindow, string? GameDisplayNameOverride = null);
 
 internal static class CaptureWorkerLog
 {
