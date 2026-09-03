@@ -830,6 +830,12 @@ public sealed record ReplayBufferConfig(
     double MicrophoneNoiseGateThresholdDb = -100,
     bool AdaptiveFrameRateProtectionEnabled = true);
 
+internal enum AudioSnapshotPurpose
+{
+    InteractiveReplay,
+    BackgroundArchive
+}
+
 internal sealed class AudioCaptureSession : IDisposable
 {
     private readonly IWaveIn _capture;
@@ -880,6 +886,9 @@ internal sealed class AudioCaptureSession : IDisposable
     public long BytesWritten { get { lock (_lock) return _bytesWritten; } }
 
     public int AverageBytesPerSecond => _capture.WaveFormat.AverageBytesPerSecond;
+
+    internal static bool UsesBackgroundIo(AudioSnapshotPurpose purpose) =>
+        purpose == AudioSnapshotPurpose.BackgroundArchive;
 
     // True for a capture started via StartInMemory - AudioCapturePipeline's
     // roll-check uses this to apply the much smaller "replay window + slack"
@@ -986,25 +995,23 @@ internal sealed class AudioCaptureSession : IDisposable
     // over it. The bytes being copied are already immutable (the writer only
     // ever appends past _bytesWritten) and the source is re-opened on its own
     // read handle, so holding the lock bought nothing.
-    public bool SnapshotTo(string path, DateTime? earliestNeededUtc, out DateTime lastSampleUtc)
+    public bool SnapshotTo(string path, DateTime? earliestNeededUtc, out DateTime lastSampleUtc, AudioSnapshotPurpose purpose = AudioSnapshotPurpose.InteractiveReplay)
     {
+        lastSampleUtc = MonotonicClock.UtcNow;
         string? sourceFileName = null;
         long copyFromOffset = 0;
         long copyBytes = 0;
 
         lock (_lock)
         {
-            lastSampleUtc = MonotonicClock.UtcNow;
             try
             {
-                // Pad any in-progress delivery gap up to "now" first, so the
-                // snapshot's last byte genuinely corresponds to the snapshot
-                // moment - the end-anchored alignment in AudioCapturePipeline
-                // depends on that. MonotonicClock, not DateTime: a system
-                // clock step mid-session made this pad silently stop firing
-                // (the stepped-back "now" implied fewer bytes than written),
-                // desyncing every track by its own flush-phase amount.
-                WriteSilenceForDeliveryGapLocked(lastSampleUtc, minGapMs: 30);
+                // Snapshotting must not change capture timing. A stalled device
+                // stays short until track assembly pads it; padding to wall-clock
+                // here creates false gaps and shifts later microphone packets.
+                lastSampleUtc = FirstSampleUtc is { } first
+                    ? first.AddSeconds(_bytesWritten / (double)Math.Max(1, AverageBytesPerSecond))
+                    : MonotonicClock.UtcNow;
                 _writer.Flush();
 
                 // Keeping the TAIL is what makes this safe for alignment.
@@ -1034,7 +1041,6 @@ internal sealed class AudioCaptureSession : IDisposable
 
                 if (_stream is FileStream fileStream)
                 {
-                    fileStream.Flush(true);
                     // The live file's own RIFF sizes are stale while it is
                     // being written, so the data chunk is located from what
                     // this session knows rather than by parsing the header:
@@ -1082,7 +1088,7 @@ internal sealed class AudioCaptureSession : IDisposable
         {
             using var source = new FileStream(sourceFileName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             source.Seek(copyFromOffset, SeekOrigin.Begin);
-            WriteTailWav(path, source, copyBytes);
+            WriteTailWav(path, source, copyBytes, purpose);
             return true;
         }
         catch
@@ -1100,9 +1106,10 @@ internal sealed class AudioCaptureSession : IDisposable
     // and ThreadPriority govern CPU only, and this is bound by disk. Windows
     // background mode is the one knob that also drops the thread's I/O
     // priority, which is what keeps this off the queue the game is using.
-    private void WriteTailWav(string path, Stream source, long dataBytes)
+    private void WriteTailWav(string path, Stream source, long dataBytes, AudioSnapshotPurpose purpose)
     {
-        var background = SetThreadPriority(GetCurrentThread(), ThreadModeBackgroundBegin);
+        var background = UsesBackgroundIo(purpose) &&
+            SetThreadPriority(GetCurrentThread(), ThreadModeBackgroundBegin);
         try
         {
             using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
@@ -1258,14 +1265,28 @@ internal sealed class AudioCaptureSession : IDisposable
                         AppLog.Info($"Audio capture gap placed from packet timestamps: {Title}, gap={aheadBytes * 1000L / Math.Max(1, format.AverageBytesPerSecond)}ms.");
                     }
                 }
-                else if (aheadBytes < -toleranceBytes && !_loggedOverlap)
+                var bufferOffset = 0;
+                var bytesToWrite = e.BytesRecorded;
+                if (aheadBytes < 0)
                 {
-                    _loggedOverlap = true;
-                    AppLog.Info($"Audio capture packet overlap (timestamp behind written data): {Title}, behindMs={-aheadBytes * 1000L / Math.Max(1, format.AverageBytesPerSecond)}.");
+                    // Skip timestamp-overlapping packet prefix. Writing it would
+                    // duplicate timeline time and delay all later mic audio.
+                    var overlapBytes = Math.Min(e.BytesRecorded, -aheadBytes);
+                    overlapBytes -= overlapBytes % Math.Max(1, format.BlockAlign);
+                    bufferOffset = (int)overlapBytes;
+                    bytesToWrite -= bufferOffset;
+                    if (aheadBytes < -toleranceBytes && !_loggedOverlap)
+                    {
+                        _loggedOverlap = true;
+                        AppLog.Info($"Audio capture packet overlap trimmed: {Title}, behindMs={-aheadBytes * 1000L / Math.Max(1, format.AverageBytesPerSecond)}.");
+                    }
                 }
 
-                _writer.Write(e.Buffer, 0, e.BytesRecorded);
-                _bytesWritten += e.BytesRecorded;
+                if (bytesToWrite > 0)
+                {
+                    _writer.Write(e.Buffer, bufferOffset, bytesToWrite);
+                    _bytesWritten += bytesToWrite;
+                }
                 _writer.Flush();
                 AccumulatePeakLocked(e.Buffer, e.BytesRecorded);
                 LogPlacementDiagnosticLocked(timestamped.PacketStartUtc);

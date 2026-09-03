@@ -4826,7 +4826,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             }
 
             var tracks = _audio
-                .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None, capturesOverride)
+                .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None, capturesOverride, AudioSnapshotPurpose.BackgroundArchive)
                 .GetAwaiter().GetResult();
 
             // Background finalize already moved the video-only file onto the

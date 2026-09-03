@@ -122,12 +122,13 @@ public sealed class AudioCapturePipeline : IDisposable
     // afterward. If nothing is configured for chat/mic, no track is emitted for
     // that kind at all (no silent placeholder) - the output simply has fewer
     // audio streams.
-    public async Task<List<(string Label, string Path)>> BuildAlignedTracksAsync(
+    internal async Task<List<(string Label, string Path)>> BuildAlignedTracksAsync(
         List<(DateTime StartUtc, double DurationSeconds)> segmentWindows,
         ReplayBufferConfig config,
         List<string> snapshots,
         CancellationToken cancellationToken,
-        CaptureSetSnapshot? capturesOverride = null)
+        CaptureSetSnapshot? capturesOverride = null,
+        AudioSnapshotPurpose snapshotPurpose = AudioSnapshotPurpose.InteractiveReplay)
     {
         ReplayAudioCapture[] captures;
         if (capturesOverride is not null)
@@ -159,7 +160,7 @@ public sealed class AudioCapturePipeline : IDisposable
 
         var trackJobs = new List<(string Label, Task<string> PathTask)>
         {
-            ("Game Audio", BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, volumePercent: Math.Clamp(config.GameAudioVolumePercent, 0, 150)))
+            ("Game Audio", BuildAlignedTrackAsync(AudioCaptureKind.Game, captures, null, segmentWindows, allowMix: true, snapshots, sourceSnapshotCache, earliestNeededUtc, snapshotPurpose, cancellationToken, volumePercent: Math.Clamp(config.GameAudioVolumePercent, 0, 150)))
         };
 
         // Derive application lanes from current configuration, not from the
@@ -181,7 +182,7 @@ public sealed class AudioCapturePipeline : IDisposable
             foreach (var appName in names)
             {
                 var gain = AudioProcessIdentity.TryGetValue(additionalApps, appName, out var value) ? Math.Clamp(value, 0, 150) : 100;
-                trackJobs.Add((appName, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, volumePercent: gain)));
+                trackJobs.Add((appName, BuildAlignedTrackAsync(AudioCaptureKind.Chat, captures, appName, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, snapshotPurpose, cancellationToken, volumePercent: gain)));
             }
         }
 
@@ -200,7 +201,7 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             micIndex++;
             var label = micIds.Length > 1 ? $"Microphone {micIndex}" : "Microphone";
-            trackJobs.Add((label, BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, cancellationToken, config, Math.Clamp(config.MicrophoneVolumePercent, 0, 150))));
+            trackJobs.Add((label, BuildAlignedTrackAsync(AudioCaptureKind.Microphone, captures, micId, segmentWindows, allowMix: false, snapshots, sourceSnapshotCache, earliestNeededUtc, snapshotPurpose, cancellationToken, config, Math.Clamp(config.MicrophoneVolumePercent, 0, 150))));
         }
 
         AddApplicationTracks(orderedApps.Where(name => !AudioProcessIdentity.IsSocial(name)));
@@ -489,7 +490,7 @@ public sealed class AudioCapturePipeline : IDisposable
             {
                 // null: this is persisting the capture itself on stop, not
                 // serving one save's window, so it has to keep everything.
-                capture.Session.SnapshotTo(capture.Path, earliestNeededUtc: null, out _);
+                capture.Session.SnapshotTo(capture.Path, earliestNeededUtc: null, out _, AudioSnapshotPurpose.BackgroundArchive);
             }
             catch (Exception error)
             {
@@ -1089,7 +1090,7 @@ public sealed class AudioCapturePipeline : IDisposable
     // even with multiple segments/tracks racing to snapshot the same capture
     // concurrently, the (potentially multi-GB) source copy below only ever
     // runs once per capture per save.
-    private async Task<SourceSnapshot?> CreateSourceSnapshotAsync(ReplayAudioCapture capture, ICollection<string> snapshots, DateTime? earliestNeededUtc)
+    private async Task<SourceSnapshot?> CreateSourceSnapshotAsync(ReplayAudioCapture capture, ICollection<string> snapshots, DateTime? earliestNeededUtc, AudioSnapshotPurpose snapshotPurpose)
     {
         // One snapshot copy at a time across the whole save. These are pure
         // sequential disk reads and writes: running the Game/Chat/Mic copies
@@ -1112,7 +1113,7 @@ public sealed class AudioCapturePipeline : IDisposable
             var lastSampleUtc = capture.EndedAtUtc ?? default;
             var copyTimer = System.Diagnostics.Stopwatch.StartNew();
             var copied = capture.EndedAtUtc is null
-                ? capture.Session.SnapshotTo(sourceSnapshotPath, earliestNeededUtc, out lastSampleUtc)
+                ? capture.Session.SnapshotTo(sourceSnapshotPath, earliestNeededUtc, out lastSampleUtc, snapshotPurpose)
                 : CopyAudioFile(capture.Path, sourceSnapshotPath);
             var copyMs = copyTimer.ElapsedMilliseconds;
             if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
@@ -1147,14 +1148,14 @@ public sealed class AudioCapturePipeline : IDisposable
         }
     }
 
-    private Task<SourceSnapshot?> GetOrCreateSourceSnapshotAsync(ReplayAudioCapture capture, ICollection<string> snapshots, ConcurrentDictionary<ReplayAudioCapture, Lazy<Task<SourceSnapshot?>>> sourceSnapshotCache, DateTime? earliestNeededUtc)
+    private Task<SourceSnapshot?> GetOrCreateSourceSnapshotAsync(ReplayAudioCapture capture, ICollection<string> snapshots, ConcurrentDictionary<ReplayAudioCapture, Lazy<Task<SourceSnapshot?>>> sourceSnapshotCache, DateTime? earliestNeededUtc, AudioSnapshotPurpose snapshotPurpose)
     {
         return sourceSnapshotCache.GetOrAdd(capture, c => new Lazy<Task<SourceSnapshot?>>(
-            () => CreateSourceSnapshotAsync(c, snapshots, earliestNeededUtc),
+            () => CreateSourceSnapshotAsync(c, snapshots, earliestNeededUtc, snapshotPurpose),
             LazyThreadSafetyMode.ExecutionAndPublication)).Value;
     }
 
-    private async Task<string> SnapshotAudioFileAsync(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, ConcurrentDictionary<ReplayAudioCapture, Lazy<Task<SourceSnapshot?>>> sourceSnapshotCache, DateTime? earliestNeededUtc, ReplayBufferConfig? config = null, int channels = 2)
+    private async Task<string> SnapshotAudioFileAsync(ReplayAudioCapture? capture, DateTime windowStartUtc, double durationSeconds, ICollection<string> snapshots, ConcurrentDictionary<ReplayAudioCapture, Lazy<Task<SourceSnapshot?>>> sourceSnapshotCache, DateTime? earliestNeededUtc, AudioSnapshotPurpose snapshotPurpose, ReplayBufferConfig? config = null, int channels = 2)
     {
         // BytesWritten, not IsUsableAudioFile(capture.Path) - a RAM-backed
         // capture (the plain replay-buffer window) never has a real file at
@@ -1165,7 +1166,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
         try
         {
-            var sourceSnapshot = await GetOrCreateSourceSnapshotAsync(capture, snapshots, sourceSnapshotCache, earliestNeededUtc);
+            var sourceSnapshot = await GetOrCreateSourceSnapshotAsync(capture, snapshots, sourceSnapshotCache, earliestNeededUtc, snapshotPurpose);
             if (sourceSnapshot is null) return string.Empty;
             var sourceSnapshotPath = sourceSnapshot.Path;
 
@@ -1238,6 +1239,7 @@ public sealed class AudioCapturePipeline : IDisposable
         List<string> snapshots,
         ConcurrentDictionary<ReplayAudioCapture, Lazy<Task<SourceSnapshot?>>> sourceSnapshotCache,
         DateTime? earliestNeededUtc,
+        AudioSnapshotPurpose snapshotPurpose,
         CancellationToken cancellationToken,
         ReplayBufferConfig? config = null,
         int volumePercent = 100)
@@ -1264,7 +1266,7 @@ public sealed class AudioCapturePipeline : IDisposable
             }
 
             var clipPathResults = await Task.WhenAll(overlapping
-                .Select(capture => SnapshotAudioFileAsync(capture, startUtc, durationSeconds, snapshots, sourceSnapshotCache, earliestNeededUtc, config, channels)));
+                .Select(capture => SnapshotAudioFileAsync(capture, startUtc, durationSeconds, snapshots, sourceSnapshotCache, earliestNeededUtc, snapshotPurpose, config, channels)));
             var clipPaths = clipPathResults
                 .Where(IsUsableAudioFile)
                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)

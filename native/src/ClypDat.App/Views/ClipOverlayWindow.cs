@@ -94,6 +94,8 @@ internal sealed class ClipOverlayWindow : IDisposable
     // mirrored into a native layered window and the offset has to be stepped by
     // hand.
     private int _animationId;
+    private int _entryId;
+    private bool _entryBegan;
     private double _animationStart;
     private double _animationTarget;
     private double _offset;
@@ -165,7 +167,7 @@ internal sealed class ClipOverlayWindow : IDisposable
         {
             ResizeInPlace(target, isLeft);
             AppLog.Info($"Clip overlay text: id={visible.Id}, text='{request.Text}', rect={Describe(_committedRect)} (in place).");
-            StartDwell();
+            if (_entryBegan) StartDwell();
             if (request.PlaySound) _playSound();
             return;
         }
@@ -228,6 +230,7 @@ internal sealed class ClipOverlayWindow : IDisposable
         }
 
         _visibleSession = request.Session;
+        _entryBegan = false;
         _shownAtUtc = DateTime.UtcNow;
         StartTopmostReassert();
 
@@ -237,9 +240,10 @@ internal sealed class ClipOverlayWindow : IDisposable
             $"reason={target.ReasonLabel}, work={Describe(target.WorkArea)}, scaling={target.Scaling:0.00}, " +
             $"requested={Describe(rect)}, actual={Describe(_committedRect)}, foreground={DescribeForeground()}.");
 
+        var entryId = ++_entryId;
         Dispatcher.UIThread.Post(() =>
         {
-            if (_translate is null || _visibleSession is null) return;
+            if (_translate is null || !ReferenceEquals(_visibleSession, request.Session) || entryId != _entryId) return;
             if (WindowsPlatformProfile.IsServer()) StartAnimation(0);
             else
             {
@@ -250,9 +254,10 @@ internal sealed class ClipOverlayWindow : IDisposable
             // Fired here rather than at call time so the chime lines up with
             // the slide starting instead of landing a couple hundred ms early.
             if (request.PlaySound) _playSound();
+            _entryBegan = true;
+            AppLog.Debug($"Clip overlay entry began: id={request.Session.Id}, text='{request.Text}'.");
+            StartDwell();
         }, DispatcherPriority.Loaded);
-
-        StartDwell();
     }
 
     public void HideNow(string reason)
@@ -264,6 +269,8 @@ internal sealed class ClipOverlayWindow : IDisposable
         StopAnimation();
 
         var session = _visibleSession;
+        _entryId++;
+        _entryBegan = false;
         _visibleSession = null;
         _committedTarget = null;
 
