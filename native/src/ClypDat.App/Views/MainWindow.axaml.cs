@@ -384,6 +384,14 @@ public sealed partial class MainWindow : Window
                 };
                 ViewModel.ClipAdded += ViewModel_OnClipAdded;
                 ViewModel.CustomGameSettingChanged += ViewModel_CustomGameSettingChanged;
+                ViewModel.OverlayPreviewRequested += (_, _) =>
+                {
+                    // Always a fresh monitor decision: a preview exists to
+                    // answer "where would it show NOW", so it must never inherit
+                    // the session a save left behind seconds ago.
+                    _clipNotificationSession = null;
+                    ShowClipNotification("preview", "Clip Saved", playSound: true);
+                };
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
@@ -486,6 +494,10 @@ public sealed partial class MainWindow : Window
         AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
         TrackPausedOverlayToWindow();
         SetupEditorHoverControls();
+        // Realise the clip badge now, off-screen, rather than on the first
+        // notification: that first realise is the one show that happens before
+        // WS_EX_NOACTIVATE is on the hwnd, and it used to land mid-game.
+        ClipOverlay.Warm();
         AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
         // Owned windows (the hover bar, the paused badge) can get hidden by
         // Windows itself - owner minimized (alt-tab into an exclusive-
@@ -877,24 +889,37 @@ public sealed partial class MainWindow : Window
         // UI-owned saves already show this immediately before calling the
         // worker. The event is for global-hotkey saves that originate inside
         // the worker, so do not restart the toast for the former.
-        if (ViewModel.IsSavingReplayClip) return;
-        ShowClipNotification("Clip Saving…", playSound: false);
+        if (ViewModel.IsSavingReplayClip)
+        {
+            AppLog.Info("Clip overlay skipped: trigger=save-started, reason=ui-owned-save-in-flight.");
+            return;
+        }
+
+        ShowClipNotification("save-started", "Clip Saving…", playSound: false);
     }
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
     {
         Dispatcher.UIThread.Post(async () =>
         {
-            if (ViewModel?.IsSavingReplayClip == true) return;
+            if (ViewModel?.IsSavingReplayClip == true)
+            {
+                AppLog.Info("Clip overlay skipped: trigger=save-completed, reason=ui-owned-save-in-flight.");
+                return;
+            }
             if (!string.IsNullOrWhiteSpace(completed.Error))
             {
-                ShowClipNotification("Clip Failed", playSound: false);
+                ShowClipNotification("save-failed", "Clip Failed", playSound: false);
                 await ShowMessageAsync("Clip Failed", completed.Error);
                 return;
             }
-            if (string.IsNullOrWhiteSpace(completed.Path)) return;
+            if (string.IsNullOrWhiteSpace(completed.Path))
+            {
+                AppLog.Info("Clip overlay skipped: trigger=save-completed, reason=empty-path.");
+                return;
+            }
             RememberSessionClip(completed.Path);
-            ShowClipSavedNotification();
+            ShowClipSavedNotification("save-completed");
             if (ViewModel is not null)
             {
                 ViewModel.RecordDiscordClipSaved();
@@ -3025,7 +3050,7 @@ public sealed partial class MainWindow : Window
                 {
                     var wait = clipWindow.EndUtc - MonotonicClock.UtcNow;
                     if (wait > TimeSpan.Zero) await Task.Delay(wait);
-                    ShowClipNotification($"Saving {autoClipLabel} Clip…", playSound: false);
+                    ShowClipNotification("ui-save", $"Saving {autoClipLabel} Clip…", playSound: false);
                 }
                 else
                 {
@@ -3036,7 +3061,7 @@ public sealed partial class MainWindow : Window
                     // the whole time it was working. Auto-clips already got this
                     // via the branch above; manual presses just never had the
                     // equivalent.
-                    ShowClipNotification("Clip Saving…", playSound: false);
+                    ShowClipNotification("ui-save", "Clip Saving…", playSound: false);
                 }
 
                 var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
@@ -3052,11 +3077,11 @@ public sealed partial class MainWindow : Window
                 // say so now rather than let it be discovered on playback later.
                 if (_replayBuffer.LastSaveVideoWasFrozen)
                 {
-                    ShowClipNotification("Clip Saved - video was frozen", playSound: true);
+                    ShowClipNotification("ui-save", "Clip Saved - video was frozen", playSound: true);
                 }
                 else
                 {
-                    ShowClipSavedNotification();
+                    ShowClipSavedNotification("ui-save");
                 }
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
@@ -3115,15 +3140,6 @@ public sealed partial class MainWindow : Window
         catch (Exception error) { AppLog.Info($"Capture worker clip name update failed: {error.Message}"); }
     }
 
-    // Only one clip-notification overlay at a time - a fast save ("Saving
-    // clip..." immediately followed by "Clip saved" before the first one's
-    // 2.2s dwell even finished) used to leave two separate overlay Windows
-    // stacked on top of each other at the same position, visibly overlapping/
-    // flickering. A new notification now instantly closes whatever's already
-    // showing before presenting itself, instead of piling on top of it.
-    private Window? _activeClipOverlay;
-    private DispatcherTimer? _activeClipOverlayCloseTimer;
-
     // Everything the current (or most recent) session put in the library, in
     // the order it arrived, for the "New Clips!" popup shown when the game
     // closes. Paths rather than cards so a deleted clip can be dropped by
@@ -3131,19 +3147,19 @@ public sealed partial class MainWindow : Window
     private readonly List<string> _sessionNewClipPaths = new();
     private bool _sessionCollectingClips;
 
-    private void ShowClipSavedNotification()
+    private void ShowClipSavedNotification(string trigger)
     {
-        ShowClipNotification("Clip Saved", playSound: true);
+        ShowClipNotification(trigger, "Clip Saved", playSound: true);
     }
 
-    private void ShowClipNotification(string text, bool playSound)
+    private void ShowClipNotification(string trigger, string text, bool playSound)
     {
         if (ViewModel is null) return;
         if (ViewModel.Settings.EnableClipOverlay)
         {
             try
             {
-                ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, text, playSound);
+                ShowClipOverlay(trigger, ViewModel.Settings.ClipOverlayPosition, text, playSound);
             }
             catch (Exception error)
             {
@@ -3154,7 +3170,12 @@ public sealed partial class MainWindow : Window
         {
             // Overlay's off but the sound is still wanted - nothing to time it
             // against, so just play it immediately.
+            AppLog.Info($"Clip overlay skipped: trigger={trigger}, reason=EnableClipOverlay=false, sound=true.");
             PlayClipNotificationSound();
+        }
+        else
+        {
+            AppLog.Info($"Clip overlay skipped: trigger={trigger}, reason=EnableClipOverlay=false, sound=false.");
         }
     }
 
@@ -3776,14 +3797,20 @@ public sealed partial class MainWindow : Window
 
     private void ShowGameDetectedNotification(string gameName)
     {
-        if (ViewModel is null || !ViewModel.Settings.EnableGameDetectedOverlay) return;
+        if (ViewModel is null) return;
+        if (!ViewModel.Settings.EnableGameDetectedOverlay)
+        {
+            AppLog.Info("Clip overlay skipped: trigger=game-detected, reason=EnableGameDetectedOverlay=false.");
+            return;
+        }
+
         try
         {
             // The one notification with something to teach: it fires as the
             // buffer arms, which is exactly the moment the save hotkey becomes
             // worth knowing. Every other overlay in this family reports
             // something that already happened and stays a single line.
-            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, $"Clipping started - {gameName}", playSound: false,
+            ShowClipOverlay("game-detected", ViewModel.Settings.ClipOverlayPosition, $"Clipping started - {gameName}", playSound: false,
                 hotkey: ViewModel.Settings.SaveReplayHotkey, hotkeyHint: "to save a clip");
         }
         catch (Exception error)
@@ -3797,10 +3824,16 @@ public sealed partial class MainWindow : Window
     // (EnableClipOverlay covers the actual save lifecycle).
     private void ShowAutoClipPendingNotification(string message)
     {
-        if (ViewModel is null || !ViewModel.Settings.EnableAutoClipPendingOverlay) return;
+        if (ViewModel is null) return;
+        if (!ViewModel.Settings.EnableAutoClipPendingOverlay)
+        {
+            AppLog.Info("Clip overlay skipped: trigger=auto-clip-pending, reason=EnableAutoClipPendingOverlay=false.");
+            return;
+        }
+
         try
         {
-            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, message, playSound: false);
+            ShowClipOverlay("auto-clip-pending", ViewModel.Settings.ClipOverlayPosition, message, playSound: false);
         }
         catch (Exception error)
         {
@@ -3810,10 +3843,16 @@ public sealed partial class MainWindow : Window
 
     private void ShowAutoClipFailedNotification()
     {
-        if (ViewModel is null || !ViewModel.Settings.EnableAutoClipFailedOverlay) return;
+        if (ViewModel is null) return;
+        if (!ViewModel.Settings.EnableAutoClipFailedOverlay)
+        {
+            AppLog.Info("Clip overlay skipped: trigger=auto-clip-failed, reason=EnableAutoClipFailedOverlay=false.");
+            return;
+        }
+
         try
         {
-            ShowClipSavedOverlay(ViewModel.Settings.ClipOverlayPosition, "Auto Clip Failed", playSound: false);
+            ShowClipOverlay("auto-clip-failed", ViewModel.Settings.ClipOverlayPosition, "Auto Clip Failed", playSound: false);
         }
         catch (Exception error)
         {
@@ -3834,649 +3873,90 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private Border? _overlayBadge;
-    private Border? _overlayRoot;
-    private Border? _overlayAccent;
-    private TextBlock? _overlayLabel;
-    private StackPanel? _overlayHintRow;
-    private TranslateTransform? _overlayTranslate;
-    private DispatcherTimer? _overlayHideTimer;
-    private ServerPerPixelOverlay? _clipOverlayPerPixelOverlay;
-    private int _clipOverlayAnimationId;
-    private double _clipOverlayAnimationStartOffset;
-    private double _clipOverlayAnimationTargetOffset;
-    private double _clipOverlayOffset;
-    private Action? _clipOverlayAnimationComplete;
-    private static readonly TimeSpan ClipOverlaySlideDuration = TimeSpan.FromMilliseconds(260);
+    // The badge itself - window, monitor targeting, placement, slide - lives in
+    // ClipOverlayWindow. What stays here is the policy: which notifications are
+    // enabled, and which monitor decision each one belongs to.
+    private ClipOverlayWindow? _clipOverlayWindow;
+    private ClipOverlaySession? _clipNotificationSession;
+    // One clip event's toasts share one monitor decision. Past this the world
+    // has genuinely moved on - a save taking this long means an alt-tab or a
+    // display change is likelier than not - so the next toast re-resolves.
+    private static readonly TimeSpan ClipNotificationSessionMaxAge = TimeSpan.FromSeconds(30);
 
-    // Built once and reused for the process lifetime. Each notification used to
-    // construct a brand-new transparent, topmost Window (and destroy the
-    // previous one), so a single clip save churned two or three compositor
-    // surfaces in about two seconds - which is real GPU/DWM work landing at
-    // exactly the moment the machine is busiest, and the most likely reason a
-    // save made the mouse feel choppy. Show/Hide costs none of that.
-    private void EnsureClipOverlay()
+    private ClipOverlayWindow ClipOverlay
     {
-        if (_activeClipOverlay is not null) return;
-
-        // A full-height accent stripe (not a small dot) plus a solid, near-
-        // opaque background - meant to actually stand out at a glance over
-        // gameplay, not blend in as a subtle little pill. "AccentBrush" is
-        // the same live, OS-accent-colour-tracking resource App.axaml.cs
-        // keeps in sync with Windows' own accent colour (see
-        // InitializeAccentColor/AppThemeService.Apply) - using it here instead of
-        // a fixed hex means the overlay follows the system colour too,
-        // rather than always showing ClypDat's old fixed teal regardless of
-        // what the user picked in Windows.
-        var accentBrush = (Application.Current?.Resources["AccentBrush"] as IBrush) ?? AppThemeService.Brush("Semantic_13C8B5", "#13C8B5");
-        _overlayAccent = new Border
+        get
         {
-            Width = 5,
-            Background = accentBrush,
-            VerticalAlignment = VerticalAlignment.Stretch
-        };
-        _overlayLabel = new TextBlock
-        {
-            Foreground = AppThemeService.Brush("Text_F5F9FF", "#F5F9FF"),
-            FontWeight = Avalonia.Media.FontWeight.Bold,
-            FontSize = 17,
-            VerticalAlignment = VerticalAlignment.Center,
-            // An auto-clip's label (e.g. a long kill-streak/event name) has no
-            // length cap of its own, and this badge sizes itself to whatever
-            // the label measures at - unwrapped, a long one stretched the
-            // badge most of the way across the screen instead of staying the
-            // same compact size every other notification is. Wrapping plus a
-            // width cap keeps it bounded like the rest of them.
-            MaxWidth = 340,
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap
-        };
-        // Second line, only populated when a message has a hotkey to teach -
-        // collapsed otherwise so every other notification stays the single
-        // centred line it has always been rather than growing a blank row.
-        _overlayHintRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 6,
-            VerticalAlignment = VerticalAlignment.Center,
-            IsVisible = false
-        };
-        var textColumn = new StackPanel
-        {
-            Orientation = Orientation.Vertical,
-            Spacing = 7,
-            VerticalAlignment = VerticalAlignment.Center,
-            Children = { _overlayLabel, _overlayHintRow }
-        };
-
-        var icon = new Image
-        {
-            Width = 26,
-            Height = 26,
-            VerticalAlignment = VerticalAlignment.Center,
-            Source = new Avalonia.Media.Imaging.Bitmap(
-                Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-48.png")))
-        };
-
-        var content = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 14,
-            Margin = new Thickness(18, 16, 24, 16),
-            Children = { icon, textColumn }
-        };
-        _overlayTranslate = new TranslateTransform();
-        _overlayBadge = new Border
-        {
-            Background = AppThemeService.Brush("Surface_F5141D24", "#F5141D24"),
-            BorderBrush = AppThemeService.Brush("Surface_3C4C5A", "#3C4C5A"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            BoxShadow = Avalonia.Media.BoxShadows.Parse("0 10 28 0 #70000000"),
-            RenderTransform = _overlayTranslate,
-            ClipToBounds = true,
-            Child = new DockPanel { Children = { _overlayAccent, content } }
-        };
-        _overlayRoot = new Border
-        {
-            Background = Avalonia.Media.Brushes.Transparent,
-            ClipToBounds = true,
-            Child = _overlayBadge
-        };
-
-        _activeClipOverlay = new Window
-        {
-            WindowDecorations = WindowDecorations.None,
-            CanResize = false,
-            ShowInTaskbar = false,
-            ShowActivated = false,
-            Topmost = true,
-            Background = Avalonia.Media.Brushes.Transparent,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            // Height only - Width is assigned per show, since it has to reach
-            // from the badge's resting position out to the screen edge to give
-            // the slide somewhere to go. See ShowClipSavedOverlay.
-            SizeToContent = SizeToContent.Height,
-            WindowStartupLocation = WindowStartupLocation.Manual,
-            Content = _overlayRoot
-        };
-        _activeClipOverlay.Opened += (_, _) =>
-        {
-            OverlayTransparencyDiagnostics.Log(_activeClipOverlay, "clip-toast");
-            if (WindowsPlatformProfile.IsServer())
+            if (_clipOverlayWindow is not null) return _clipOverlayWindow;
+            var overlay = new ClipOverlayWindow(PlayClipNotificationSound);
+            // Only when the session that just came down is still the current
+            // one. A toast superseded by the next clip's first toast hides
+            // AFTER that clip's session exists, and clearing then would send
+            // the rest of that clip's toasts back to re-resolve the monitor.
+            overlay.Hidden += (_, session) =>
             {
-                _clipOverlayPerPixelOverlay?.Dispose();
-                _clipOverlayPerPixelOverlay = new ServerPerPixelOverlay(_activeClipOverlay, _overlayRoot);
-                _clipOverlayPerPixelOverlay.SetPositionOffset(new Vector(_clipOverlayOffset, 0));
-                _clipOverlayPerPixelOverlay.ShowAndRefresh();
-                WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(_activeClipOverlay);
-            }
-            else
-            {
-                WindowTransparencyFallback.ApplyIfNeeded(_activeClipOverlay, _overlayBadge.Background, b => _overlayBadge.Background = b, "clip-toast");
-            }
-        };
-        _activeClipOverlay.Closed += (_, _) =>
-        {
-            _clipOverlayPerPixelOverlay?.Dispose();
-            _clipOverlayPerPixelOverlay = null;
-        };
-
-        // The overlay is pinned flush to one monitor's edge, and this machine's
-        // monitors do not share a DPI. Two things move it off that edge behind
-        // our back:
-        //
-        //   - the badge is sized in DIPs, which the platform converts against
-        //     whatever monitor the window sat on when the size was applied, not
-        //     the monitor it is being sent to;
-        //   - crossing a DPI boundary makes Windows send WM_DPICHANGED with a
-        //     suggested rect, and Avalonia applies that rect verbatim - a move
-        //     AND a resize we never asked for, landing after the position we
-        //     computed.
-        //
-        // Result was a right-pinned badge either floating a fat gap in from the
-        // edge or hanging off it onto the neighbouring display. So the final
-        // placement is not computed once and trusted: it is re-derived from the
-        // window's real size every time the platform rescales, resizes or moves
-        // it, until the overlay is hidden again.
-        _activeClipOverlay.ScalingChanged += (_, _) => PlaceClipOverlay();
-        _activeClipOverlay.Resized += (_, _) => PlaceClipOverlay();
-        _activeClipOverlay.PositionChanged += (_, _) => PlaceClipOverlay();
-
-        // Movement only, deliberately no opacity transition: the badge slides
-        // in and out from off screen and never fades. A cross-fade on top of
-        // the slide is what made the old 28px nudge read as "appears and
-        // disappears" rather than as something arriving from the edge.
-        //
-        // Attached once. Only ever driven by assigning X below, and the enter
-        // state is set without the transition in effect by assigning before the
-        // window is shown.
-        _overlayTranslate.Transitions =
-        [
-            new Avalonia.Animation.DoubleTransition
-            {
-                Property = TranslateTransform.XProperty,
-                Duration = TimeSpan.FromMilliseconds(260),
-                Easing = new Avalonia.Animation.Easings.CubicEaseOut()
-            }
-        ];
-
-        // Warm-up realize: show and immediately hide, fully off-screen, so this
-        // window/control tree is attached to a real compositor context (actual
-        // font metrics, actual DPI scaling) before it is ever measured for real.
-        // ShowActivated=false above means this steals no focus. Without it, the
-        // very FIRST "Saving clip..." of a session measured _overlayBadge
-        // against a NEVER-SHOWN window - Avalonia's Measure falls back to
-        // different (observed: wider) text metrics before a control has ever
-        // been attached to a TopLevel - so only that first toast came out
-        // visibly elongated; every one after it measured correctly because by
-        // then the window had already been shown once. This makes that "once"
-        // happen here, invisibly, instead of live in front of the user.
-        _activeClipOverlay.Position = new PixelPoint(-32000, -32000);
-        _activeClipOverlay.Show();
-        _activeClipOverlay.Hide();
-    }
-
-    // The monitor the GAME is on, not the one the main window happens to be on.
-    // While playing, the main window is usually minimised to the tray or parked
-    // on a second display, and ScreenFromWindow(this) then puts the overlay on a
-    // monitor the player isn't looking at - indistinguishable, from the chair,
-    // from the overlay never appearing at all.
-    //
-    // Resolved per show, so the notifications of one clip could disagree with
-    // each other: "Clipping started" resolved the game window and landed on the
-    // game's display, then "Clip saved" a few seconds later hit a moment where
-    // the handle wasn't resolvable (alt-tabbed, minimised, a fullscreen mode
-    // switch mid-flight) and fell through to the main window's display instead.
-    // From the chair that reads as one overlay wandering between monitors. The
-    // last monitor an overlay actually used is therefore remembered and re-used
-    // for that gap, and only a genuinely stale one (nothing shown for a while)
-    // falls back to the main window.
-    private PixelPoint? _lastOverlayScreenAnchor;
-    private DateTime _lastOverlayScreenAt = DateTime.MinValue;
-    private static readonly TimeSpan OverlayScreenStickiness = TimeSpan.FromMinutes(5);
-
-    private Avalonia.Platform.Screen? ScreenForOverlay()
-    {
-        var gameHandle = ViewModel?.ActiveGameDetection.WindowHandle ?? IntPtr.Zero;
-        // IsWindowVisible is still true for a MINIMISED window, and a minimised
-        // window's rect is parked out at (-32000, -32000) - a centre point on no
-        // monitor at all, which used to silently fall through to the main
-        // window's monitor. IsIconic is the part that was missing.
-        if (gameHandle != IntPtr.Zero && IsWindowVisible(gameHandle) && !IsIconic(gameHandle) && GetWindowRect(gameHandle, out var gameRect))
-        {
-            var centre = new PixelPoint(
-                gameRect.Left + (gameRect.Right - gameRect.Left) / 2,
-                gameRect.Top + (gameRect.Bottom - gameRect.Top) / 2);
-            var gameScreen = Screens.ScreenFromPoint(centre)
-                // A window straddling two displays has a centre that can land in
-                // the dead space between mismatched-height monitors; the screen
-                // holding most of the window is the right answer there.
-                ?? Screens.ScreenFromBounds(new PixelRect(
-                    gameRect.Left,
-                    gameRect.Top,
-                    Math.Max(1, gameRect.Right - gameRect.Left),
-                    Math.Max(1, gameRect.Bottom - gameRect.Top)));
-            if (gameScreen is not null) return RememberOverlayScreen(gameScreen);
-        }
-
-        if (_lastOverlayScreenAnchor is { } anchor && DateTime.UtcNow - _lastOverlayScreenAt < OverlayScreenStickiness)
-        {
-            // Re-resolved rather than cached as a Screen instance: the display
-            // set can change (monitor asleep, resolution change) between shows.
-            var sticky = Screens.ScreenFromPoint(anchor);
-            if (sticky is not null) return RememberOverlayScreen(sticky);
-        }
-
-        var fallback = Screens.ScreenFromWindow(this) ?? Screens.Primary ?? Screens.All.FirstOrDefault();
-        return fallback is null ? null : RememberOverlayScreen(fallback);
-    }
-
-    private Avalonia.Platform.Screen RememberOverlayScreen(Avalonia.Platform.Screen screen)
-    {
-        var bounds = screen.Bounds;
-        _lastOverlayScreenAnchor = new PixelPoint(
-            bounds.X + bounds.Width / 2,
-            bounds.Y + bounds.Height / 2);
-        _lastOverlayScreenAt = DateTime.UtcNow;
-        return screen;
-    }
-
-    // "Ctrl+Shift+F9" -> [Ctrl] + [Shift] + [F9] as keycap chips, followed by
-    // whatever the hint says the keys do. Built from the live setting rather
-    // than hardcoded, so a rebound hotkey teaches the right keys.
-    private void BuildOverlayHint(string hotkey, string trailingText)
-    {
-        if (_overlayHintRow is null) return;
-        _overlayHintRow.Children.Clear();
-
-        var keys = hotkey.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        for (var i = 0; i < keys.Length; i++)
-        {
-            if (i > 0)
-            {
-                _overlayHintRow.Children.Add(new TextBlock
-                {
-                    Text = "+",
-                    Foreground = AppThemeService.Brush("Text_8DA0B4", "#8DA0B4"),
-                    FontSize = 13,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-            }
-
-            _overlayHintRow.Children.Add(new Border
-            {
-                Background = AppThemeService.Brush("Surface_2A323C", "#2A323C"),
-                BorderBrush = AppThemeService.Brush("Surface_49525E", "#49525E"),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(7, 2, 7, 3),
-                VerticalAlignment = VerticalAlignment.Center,
-                Child = new TextBlock
-                {
-                    Text = keys[i],
-                    Foreground = AppThemeService.Brush("Text_E8EEF6", "#E8EEF6"),
-                    FontWeight = Avalonia.Media.FontWeight.Bold,
-                    FontSize = 13
-                }
-            });
-        }
-
-        _overlayHintRow.Children.Add(new TextBlock
-        {
-            Text = trailingText,
-            Foreground = AppThemeService.Brush("Text_A8B8C8", "#A8B8C8"),
-            FontSize = 13,
-            Margin = new Thickness(2, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center
-        });
-    }
-
-    private void ShowClipSavedOverlay(string position, string text, bool playSound, string? hotkey = null, string hotkeyHint = "")
-    {
-        _activeClipOverlayCloseTimer?.Stop();
-        _activeClipOverlayCloseTimer = null;
-        _overlayHideTimer?.Stop();
-        _overlayHideTimer = null;
-
-        EnsureClipOverlay();
-        if (_activeClipOverlay is null || _overlayBadge is null || _overlayRoot is null || _overlayLabel is null || _overlayAccent is null || _overlayTranslate is null) return;
-
-        // Position is a live setting, so the side has to be re-applied on every
-        // show rather than baked in at construction.
-        var isLeft = string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase);
-        _overlayLabel.Text = text;
-
-        var showHint = !string.IsNullOrWhiteSpace(hotkey);
-        if (showHint) BuildOverlayHint(hotkey!, hotkeyHint);
-        if (_overlayHintRow is not null) _overlayHintRow.IsVisible = showHint;
-
-        // Square on the side touching the screen edge, rounded on the side
-        // facing in - a fully rounded badge sitting flush reads as a gap, since
-        // the curve pulls the fill away from the edge at the corners. The
-        // accent stripe stays square and is shaped by the badge's ClipToBounds.
-        _overlayBadge.CornerRadius = isLeft ? new CornerRadius(0, 8, 8, 0) : new CornerRadius(8, 0, 0, 8);
-        _overlayAccent.CornerRadius = new CornerRadius(0);
-        DockPanel.SetDock(_overlayAccent, isLeft ? Dock.Left : Dock.Right);
-
-        var screen = ScreenForOverlay();
-        var area = screen?.WorkingArea ?? new PixelRect(0, 0, 1920, 1080);
-
-        _clipOverlayScreenArea = area;
-        _clipOverlayScreenScaling = screen?.Scaling ?? 1.0;
-        _clipOverlayAnchorLeft = isLeft;
-        _clipOverlayPlacementActive = true;
-
-        // Moved onto the target monitor BEFORE it is measured or sized. Width
-        // below is assigned in DIPs, and the platform converts that against
-        // whichever monitor the window is on AT THE MOMENT it is applied - so
-        // sizing first and moving second gave the window a real pixel width
-        // scaled for the monitor it came FROM. Across a 150%/100% pair that is
-        // a badge either half again too wide (hanging off the edge onto the next
-        // display) or a third too narrow (a visible gap at the edge).
-        PlaceClipOverlay(refreshScaling: true);
-
-        _overlayBadge.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var desiredWidth = _overlayBadge.DesiredSize.Width;
-
-        // Window is exactly the badge's width and sits against the screen edge,
-        // so translating the badge by that full width carries it past the
-        // window's own bounds, where it is clipped - which is what actually
-        // reads as sliding off the screen. A window any wider than the badge
-        // would leave the very gap this is meant not to have.
-        var travel = desiredWidth;
-        _activeClipOverlay.Width = travel;
-
-        _overlayBadge.HorizontalAlignment = HorizontalAlignment.Stretch;
-
-        // Slides in FROM the edge it's pinned to, toward its resting position -
-        // left-pinned slides in moving right, right-pinned slides in moving left
-        // (the "reverse"). Flipped to the resting value one frame later so the
-        // transition has a "from" state to animate away from, instead of both
-        // values landing in the same layout pass with nothing in between.
-        //
-        // Transitions detached while the start state is assigned. X sits at 0
-        // the very first time this runs, so with them attached the assignment
-        // below was itself animated: the badge slid OUT to the start position
-        // in full view before sliding back in. Only visible on the session's
-        // first overlay, because every later one already ends at ±travel and
-        // re-assigning it is a no-op.
-        var transitions = _overlayTranslate.Transitions;
-        StopClipOverlayAnimation();
-        _overlayTranslate.Transitions = null;
-        SetClipOverlayOffset(isLeft ? -travel : travel);
-
-        _activeClipOverlay.Show();
-
-        // Topmost at construction only puts the window in the topmost band once.
-        // A game that goes fullscreen afterwards enters that same band and sits
-        // ABOVE it, and Show() on an already-created window doesn't re-assert
-        // anything - so the second and every later overlay of a session came up
-        // behind the game. Push it back to the front of the band on every show.
-        //
-        // Without activating, and NOACTIVATE on top of that: moving focus onto
-        // a window over a fullscreen game is what makes the game minimise, and
-        // an overlay that costs you the game is worse than no overlay.
-        MakeWindowNonActivating(_activeClipOverlay);
-        MakeWindowClickThrough(_activeClipOverlay);
-        ApplyCaptureExclusion(_activeClipOverlay, ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true);
-        var overlayHandle = NativeHandleOf(_activeClipOverlay);
-        if (overlayHandle != IntPtr.Zero)
-        {
-            SetWindowPos(overlayHandle, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
-        }
-
-        // Show() is where the DIP width above actually reaches the OS, so this
-        // is the first moment the window's real pixel width is known. Flush it
-        // against the edge with that width, then once more after the layout pass
-        // settles - a DPI change triggered by the move lands its own move and
-        // resize in between, and the last word has to be ours.
-        PlaceClipOverlay();
-        Dispatcher.UIThread.Post(() => PlaceClipOverlay(), DispatcherPriority.Loaded);
-
-        if (WindowsPlatformProfile.IsServer())
-        {
-            _clipOverlayPerPixelOverlay?.ShowAndRefresh();
-            _clipOverlayPerPixelOverlay?.SetCaptureExcluded(ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true);
-        }
-
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_overlayTranslate is null) return;
-            if (WindowsPlatformProfile.IsServer())
-            {
-                StartClipOverlayAnimation(0);
-            }
-            else
-            {
-                _overlayTranslate.Transitions = transitions;
-                _overlayTranslate.X = 0;
-            }
-            // Sound used to fire the instant this method was called - well
-            // before the slide transition below even started, so it landed a
-            // couple hundred ms ahead of anything visibly happening. Playing it
-            // here instead, right as the slide-in begins, actually lines the
-            // two up.
-            if (playSound) PlayClipNotificationSound();
-        }, DispatcherPriority.Loaded);
-
-        var closeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2200) };
-        closeTimer.Tick += (_, _) =>
-        {
-            closeTimer.Stop();
-            _activeClipOverlayCloseTimer = null;
-            // Slide back out the same way it came in - no fade, it just leaves -
-            // then hide once that transition has had time to finish playing.
-            var exitOffset = isLeft ? -travel : travel;
-            if (WindowsPlatformProfile.IsServer())
-            {
-                StartClipOverlayAnimation(exitOffset, () =>
-                {
-                    _clipOverlayPerPixelOverlay?.Hide();
-                    HideClipOverlay();
-                });
-                return;
-            }
-
-            if (_overlayTranslate is not null) _overlayTranslate.X = exitOffset;
-            var hideAfterExit = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(260) };
-            hideAfterExit.Tick += (_, _) =>
-            {
-                hideAfterExit.Stop();
-                _overlayHideTimer = null;
-                HideClipOverlay();
+                if (ReferenceEquals(_clipNotificationSession, session)) _clipNotificationSession = null;
             };
-            _overlayHideTimer = hideAfterExit;
-            hideAfterExit.Start();
-        };
-        _activeClipOverlayCloseTimer = closeTimer;
-        closeTimer.Start();
-    }
-
-    // Target placement, kept as state rather than recomputed, because the
-    // platform can move or resize this window on its own (see the handlers
-    // wired in EnsureClipOverlay) and every one of those has to be answered
-    // with the same answer.
-    private PixelRect _clipOverlayScreenArea;
-    private double _clipOverlayScreenScaling = 1.0;
-    private bool _clipOverlayAnchorLeft;
-    private bool _clipOverlayPlacementActive;
-    private bool _clipOverlayPlacing;
-    // Flush to the side it is pinned to - no horizontal gap. Vertically it
-    // still sits down from the top edge so it clears a game's own HUD.
-    private const double ClipOverlayTopMarginDips = 24;
-
-    // Pins the overlay flush to the anchored edge of the ONE monitor it was
-    // assigned, using the window's real pixel size from the OS rather than the
-    // DIP size we asked for - those two disagree by exactly the ratio between
-    // two monitors' scaling for as long as it takes a cross-monitor move to
-    // settle, and that disagreement is the gap (or the overhang onto the next
-    // display) this exists to close. Clamped to the monitor as well, so a badge
-    // that somehow measures wider than the screen is cut off at the far edge
-    // instead of spilling onto its neighbour.
-    private void PlaceClipOverlay(bool refreshScaling = false)
-    {
-        if (!_clipOverlayPlacementActive || _clipOverlayPlacing) return;
-        if (_activeClipOverlay is null) return;
-
-        var area = _clipOverlayScreenArea;
-        if (area.Width <= 0 || area.Height <= 0) return;
-
-        _clipOverlayPlacing = true;
-        try
-        {
-            var widthDevicePixels = 0;
-            var heightDevicePixels = 0;
-            var handle = NativeHandleOf(_activeClipOverlay);
-            if (handle != IntPtr.Zero && GetWindowRect(handle, out var rect))
-            {
-                widthDevicePixels = rect.Right - rect.Left;
-                heightDevicePixels = rect.Bottom - rect.Top;
-            }
-            else
-            {
-                // No hwnd yet (first show): fall back to what Avalonia thinks,
-                // converted with the target monitor's scaling.
-                var size = _activeClipOverlay.FrameSize ?? _activeClipOverlay.ClientSize;
-                widthDevicePixels = (int)Math.Round(size.Width * _clipOverlayScreenScaling);
-                heightDevicePixels = (int)Math.Round(size.Height * _clipOverlayScreenScaling);
-            }
-
-            var x = _clipOverlayAnchorLeft ? area.X : area.X + area.Width - widthDevicePixels;
-            x = Math.Clamp(x, area.X, Math.Max(area.X, area.X + area.Width - widthDevicePixels));
-            var y = area.Y + (int)Math.Round(ClipOverlayTopMarginDips * _clipOverlayScreenScaling);
-            y = Math.Clamp(y, area.Y, Math.Max(area.Y, area.Y + area.Height - heightDevicePixels));
-
-            if (handle == IntPtr.Zero || refreshScaling)
-            {
-                // The move that hands the window to a new monitor goes through
-                // Window.Position on purpose: that setter re-reads the monitor's
-                // effective DPI afterwards, so the DIP width assigned next is
-                // converted against the monitor the badge is actually on.
-                _activeClipOverlay.Position = new PixelPoint(x, y);
-            }
-            else
-            {
-                // Every later correction is driven through the hwnd, for the
-                // same reason the hover-bar paths are (see the IsWindowVisible
-                // note by the P/Invokes) - Avalonia's own position bookkeeping
-                // reports back what we last assigned, which is exactly the value
-                // that is wrong when the platform has moved the window out from
-                // under it.
-                SetWindowPos(handle, HwndTopmost, x, y, 0, 0, SwpNoSize | SwpNoActivate);
-            }
-
-            // Server SKUs mirror this window into a layered one placed off its
-            // rect - moving the source without redrawing the mirror leaves the
-            // visible copy behind at the old spot.
-            _clipOverlayPerPixelOverlay?.Refresh();
-        }
-        finally
-        {
-            _clipOverlayPlacing = false;
+            _clipOverlayWindow = overlay;
+            return overlay;
         }
     }
 
-    // Placement handlers stop answering once the badge is off screen - a hidden
-    // window still gets moved and rescaled by the platform, and correcting a
-    // window nobody can see just fights whatever the next show wants.
-    private void HideClipOverlay()
+    // A save shows two toasts - "Clip Saving…" from the worker's save-started
+    // event and "Clip Saved" two to four seconds later - and they must agree on
+    // which monitor they belong to. Resolving per toast is what let one window
+    // start on one display and finish on another.
+    private ClipOverlaySession EnsureClipNotificationSession(string trigger)
     {
-        _clipOverlayPlacementActive = false;
-        _activeClipOverlay?.Hide();
+        if (_clipNotificationSession is { } existing && existing.Age < ClipNotificationSessionMaxAge)
+        {
+            AppLog.Info($"Clip overlay session: id={existing.Id} reused for trigger={trigger} (age={existing.Age.TotalSeconds:0.0}s).");
+            return existing;
+        }
+
+        var target = ClipOverlayTargeting.Resolve(CurrentClipOverlayTargetInputs());
+        var session = new ClipOverlaySession(trigger, target);
+        _clipNotificationSession = session;
+        AppLog.Info(
+            $"Clip overlay session: id={session.Id}, trigger={trigger}, monitor={target.DeviceName} " +
+            $"({ClipOverlayTargeting.LabelFor(target.DeviceName)}), reason={target.ReasonLabel}, " +
+            $"bounds={target.Bounds.X},{target.Bounds.Y} {target.Bounds.Width}x{target.Bounds.Height}, " +
+            $"work={target.WorkArea.X},{target.WorkArea.Y} {target.WorkArea.Width}x{target.WorkArea.Height}, " +
+            $"scaling={target.Scaling:0.00}.");
+        return session;
     }
 
-    private void StartClipOverlayAnimation(double targetOffset, Action? completed = null)
+    // What is actually being recorded, read off the live replay config rather
+    // than off raw settings - the config is where "Desktop capture, but
+    // auto-switched to Game Capture because a game was detected" has already
+    // been resolved, so the badge follows what is in the clip.
+    private ClipOverlayTargetInputs CurrentClipOverlayTargetInputs()
     {
-        if (_overlayTranslate is null) return;
-
-        StopClipOverlayAnimation();
-        _clipOverlayAnimationStartOffset = _clipOverlayOffset;
-        _clipOverlayAnimationTargetOffset = targetOffset;
-        _clipOverlayAnimationComplete = completed;
-        if (Math.Abs(_clipOverlayAnimationStartOffset - targetOffset) < 0.01)
+        var config = _activeReplayConfigSnapshot ?? _replayConfigSnapshot;
+        if (config is not null)
         {
-            SetClipOverlayOffset(targetOffset);
-            var complete = _clipOverlayAnimationComplete;
-            _clipOverlayAnimationComplete = null;
-            complete?.Invoke();
-            return;
+            return new ClipOverlayTargetInputs(config.CaptureSource, config.CaptureMonitorDeviceName, (nint)config.GameWindowHandle);
         }
 
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null)
-        {
-            SetClipOverlayOffset(targetOffset);
-            var complete = _clipOverlayAnimationComplete;
-            _clipOverlayAnimationComplete = null;
-            complete?.Invoke();
-            return;
-        }
-
-        var animationId = ++_clipOverlayAnimationId;
-        TimeSpan? startTime = null;
-
-        void Step(TimeSpan frameTime)
-        {
-            if (animationId != _clipOverlayAnimationId) return;
-            startTime ??= frameTime;
-            var progress = Math.Clamp((frameTime - startTime.Value).TotalMilliseconds / ClipOverlaySlideDuration.TotalMilliseconds, 0, 1);
-            var eased = 1 - Math.Pow(1 - progress, 3);
-            SetClipOverlayOffset(_clipOverlayAnimationStartOffset + (_clipOverlayAnimationTargetOffset - _clipOverlayAnimationStartOffset) * eased);
-            if (progress < 1)
-            {
-                topLevel.RequestAnimationFrame(Step);
-                return;
-            }
-
-            var complete = _clipOverlayAnimationComplete;
-            StopClipOverlayAnimation();
-            complete?.Invoke();
-        }
-
-        topLevel.RequestAnimationFrame(Step);
+        // Buffer off, so nothing is being captured: fall back to what the user
+        // configured, plus whatever game is detected.
+        var settings = ViewModel?.Settings;
+        return new ClipOverlayTargetInputs(
+            settings?.ReplayCaptureSource ?? "Desktop",
+            settings?.ReplayDesktopMonitorDeviceName ?? string.Empty,
+            ViewModel?.ActiveGameDetection.WindowHandle ?? IntPtr.Zero);
     }
 
-    private void StopClipOverlayAnimation()
+    private void ShowClipOverlay(string trigger, string position, string text, bool playSound, string? hotkey = null, string hotkeyHint = "")
     {
-        _clipOverlayAnimationId++;
-        _clipOverlayAnimationComplete = null;
-    }
-
-    private void SetClipOverlayOffset(double offset)
-    {
-        if (_overlayTranslate is null) return;
-        var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        _clipOverlayOffset = Math.Round(offset * scaling) / scaling;
-        if (WindowsPlatformProfile.IsServer())
-        {
-            _overlayTranslate.X = 0;
-            _clipOverlayPerPixelOverlay?.SetPositionOffset(new Vector(_clipOverlayOffset, 0));
-        }
-        else
-        {
-            _overlayTranslate.X = _clipOverlayOffset;
-        }
-        _clipOverlayPerPixelOverlay?.Refresh();
+        ClipOverlay.Show(new ClipOverlayRequest(
+            EnsureClipNotificationSession(trigger),
+            text,
+            string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase) ? ClipOverlaySide.Left : ClipOverlaySide.Right,
+            playSound,
+            ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true,
+            hotkey,
+            hotkeyHint));
     }
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)

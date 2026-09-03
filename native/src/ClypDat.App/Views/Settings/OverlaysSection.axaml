@@ -95,6 +95,15 @@
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
+          <!-- Shows a real notification on the monitor the badge would actually
+               use, so placement can be checked without saving a clip - and
+               after changing monitors, capture source or scaling. -->
+          <Button Classes="linkButton"
+                  Content="Preview overlay"
+                  HorizontalAlignment="Left"
+                  Margin="0,4,0,0"
+                  Click="OverlayPreview_OnClick"
+                  ToolTip.Tip="Show the clip notification where it would appear" />
         </StackPanel>
       </StackPanel>
     </Border>

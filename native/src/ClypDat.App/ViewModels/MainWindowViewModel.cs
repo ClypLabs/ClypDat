@@ -6145,6 +6145,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public event EventHandler? GameCatalogChanged;
 
+    // Settings > Overlays' preview button. The badge lives in the window layer,
+    // so the view raises this rather than the ViewModel showing anything.
+    public event EventHandler? OverlayPreviewRequested;
+
+    public void RequestOverlayPreview() => OverlayPreviewRequested?.Invoke(this, EventArgs.Empty);
+
     // Raised for a clip that is genuinely NEW to the library, not for the
     // re-adds AddOrUpdateLibraryClipAsync also handles (an edit saved over an
     // existing file, the refresh after the editor closes).

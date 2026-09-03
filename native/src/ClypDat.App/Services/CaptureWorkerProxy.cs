@@ -165,9 +165,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                 {
                     case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => HandleWorkerHealth(health)); break;
                     case "recording-stopped": Dispatcher.UIThread.Post(() => { if (!_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
-                    case "save-started": Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty)); break;
-                    case "save-completed": var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (complete is not null) { Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(complete.Path, complete.Title, complete.CompletedUtc, complete.Error))); _ = SendBestEffortAsync("ack-save", new { complete.Path }); } break;
-                    case "save-failed": var failed = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (failed is not null) Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(failed.Path, failed.Title, failed.CompletedUtc, failed.Error))); break;
+                    case "save-started": AppLog.Info("Capture worker event: save-started."); Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty)); break;
+                    case "save-completed": var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (complete is not null) { AppLog.Info($"Capture worker event: save-completed, path='{complete.Path}', error='{complete.Error}'."); Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(complete.Path, complete.Title, complete.CompletedUtc, complete.Error))); _ = SendBestEffortAsync("ack-save", new { complete.Path }); } break;
+                    case "save-failed": var failed = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (failed is not null) { AppLog.Info($"Capture worker event: save-failed, path='{failed.Path}', error='{failed.Error}'."); } if (failed is not null) Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(failed.Path, failed.Title, failed.CompletedUtc, failed.Error))); break;
                 }
             }
         }
