@@ -71,7 +71,7 @@ public sealed class CustomGameSettingsTests
         settings.CustomGameSettings["game.exe"] = new CustomGameProfile { SaveReplayHotkey = "Alt+F9" };
 
         Assert.True(AppSettingsMigrations.Apply(settings));
-        Assert.Equal(6, settings.SettingsSchemaVersion);
+        Assert.Equal(AppSettingsMigrations.CurrentSchemaVersion, settings.SettingsSchemaVersion);
         Assert.Equal("Ctrl+Alt+F9", settings.CustomGameSettings["game.exe"].SaveReplayHotkey);
     }
 }

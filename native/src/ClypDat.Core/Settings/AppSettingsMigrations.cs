@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
 
     public static bool Apply(AppSettings settings)
     {
@@ -53,6 +53,11 @@ public static class AppSettingsMigrations
             if (settings.CustomGameSettings is not null)
                 foreach (var profile in settings.CustomGameSettings.Values)
                     profile.SaveReplayHotkey = settings.SaveReplayHotkey;
+        }
+
+        if (settings.SettingsSchemaVersion < 7 && string.IsNullOrWhiteSpace(settings.MicrophoneDeviceId))
+        {
+            settings.MicrophoneDeviceId = "default";
         }
 
         settings.CustomThemes ??= new();

@@ -116,6 +116,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _selectedSettingsSection = "General";
     private bool _wasEditorVisibleBeforeSettings;
     private bool _isCapturingHotkey;
+    private int _audioDeviceSnapshotApplyDepth;
     private AudioDeviceOption? _selectedChatAudioDevice;
     private AudioDeviceOption? _selectedMicrophoneDevice;
     private ProcessOption? _selectedChatProcess;
@@ -3470,7 +3471,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _selectedChatAudioDevice, value)) return;
-            Settings.ChatAudioDeviceId = value?.Id ?? string.Empty;
+            var change = AudioDeviceSelectionChange.FromPicker(value, _audioDeviceSnapshotApplyDepth > 0);
+            if (!change.ShouldPersist) return;
+            Settings.ChatAudioDeviceId = change.DeviceId;
             SaveSettings();
         }
     }
@@ -3499,7 +3502,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _selectedMicrophoneDevice, value)) return;
-            Settings.MicrophoneDeviceId = value?.Id ?? string.Empty;
+            var change = AudioDeviceSelectionChange.FromPicker(value, _audioDeviceSnapshotApplyDepth > 0);
+            if (!change.ShouldPersist) return;
+            Settings.MicrophoneDeviceId = change.DeviceId;
             SaveSettings();
             // A running Mic Test is pointed at the old device's endpoint.
             RestartMicTestIfRunning();
@@ -6866,45 +6871,53 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplyAudioDeviceSnapshot((AudioDeviceOption[] RenderDevices, string? DefaultMicrophoneName, AudioDeviceOption[] CaptureDevices) snapshot)
     {
-        ChatAudioDevices.Clear();
-        foreach (var device in snapshot.RenderDevices) ChatAudioDevices.Add(device);
-        MicrophoneDevices.Clear();
-        MicrophoneDevices.Add(new AudioDeviceOption(AudioDeviceOption.DefaultDeviceId,
-            string.IsNullOrWhiteSpace(snapshot.DefaultMicrophoneName) ? "Default" : $"Default - {snapshot.DefaultMicrophoneName}"));
-        foreach (var device in snapshot.CaptureDevices) MicrophoneDevices.Add(device);
-
-        // Restore the saved selection for display without persisting a fallback over it:
-        // the saved device id may just be temporarily missing from this enumeration pass
-        // (driver reinit, USB replug), and overwriting Settings here would permanently
-        // lose the user's real choice even after the device comes back.
-        var chatMatch = ChatAudioDevices.FirstOrDefault(device => device.Id == Settings.ChatAudioDeviceId);
-        SetProperty(ref _selectedChatAudioDevice, chatMatch ?? ChatAudioDevices.FirstOrDefault(), nameof(SelectedChatAudioDevice));
-
-        var micMatch = MicrophoneDevices.FirstOrDefault(device => device.Id == Settings.MicrophoneDeviceId);
-        SetProperty(ref _selectedMicrophoneDevice, micMatch ?? MicrophoneDevices.FirstOrDefault(), nameof(SelectedMicrophoneDevice));
-
-        if (micMatch is null && MicrophoneDevices.Count > 0 && !string.IsNullOrWhiteSpace(Settings.MicrophoneDeviceId))
+        _audioDeviceSnapshotApplyDepth++;
+        try
         {
-            AppLog.Info($"Saved microphone device '{Settings.MicrophoneDeviceId}' not found this pass; showing '{_selectedMicrophoneDevice?.Name}' without changing the saved setting.");
+            ChatAudioDevices.Clear();
+            foreach (var device in snapshot.RenderDevices) ChatAudioDevices.Add(device);
+            MicrophoneDevices.Clear();
+            MicrophoneDevices.Add(new AudioDeviceOption(AudioDeviceOption.DefaultDeviceId,
+                string.IsNullOrWhiteSpace(snapshot.DefaultMicrophoneName) ? "Default" : $"Default - {snapshot.DefaultMicrophoneName}"));
+            foreach (var device in snapshot.CaptureDevices) MicrophoneDevices.Add(device);
+
+            // Restore the saved selection for display without persisting a fallback over it:
+            // the saved device id may just be temporarily missing from this enumeration pass
+            // (driver reinit, USB replug), and overwriting Settings here would permanently
+            // lose the user's real choice even after the device comes back.
+            var chatMatch = ChatAudioDevices.FirstOrDefault(device => device.Id == Settings.ChatAudioDeviceId);
+            SetProperty(ref _selectedChatAudioDevice, chatMatch ?? ChatAudioDevices.FirstOrDefault(), nameof(SelectedChatAudioDevice));
+
+            var micMatch = MicrophoneDevices.FirstOrDefault(device => device.Id == Settings.MicrophoneDeviceId);
+            SetProperty(ref _selectedMicrophoneDevice, micMatch ?? MicrophoneDevices.FirstOrDefault(), nameof(SelectedMicrophoneDevice));
+
+            if (micMatch is null && MicrophoneDevices.Count > 0 && !string.IsNullOrWhiteSpace(Settings.MicrophoneDeviceId))
+            {
+                AppLog.Info($"Saved microphone device '{Settings.MicrophoneDeviceId}' not found this pass; showing '{_selectedMicrophoneDevice?.Name}' without changing the saved setting.");
+            }
+
+            // Refresh display names for already-configured microphones (a device's
+            // friendly name can change enumeration-to-enumeration) without dropping
+            // ones that are temporarily missing (same "don't lose a real choice over a
+            // transient re-enumeration" reasoning as above) - keep the prior entry as-is
+            // if it's not in this pass.
+            for (var i = 0; i < SelectedMicrophones.Count; i++)
+            {
+                var current = SelectedMicrophones[i];
+                var refreshed = MicrophoneDevices.FirstOrDefault(device => device.Id == current.Id);
+                if (refreshed is not null && refreshed.Name != current.Name) SelectedMicrophones[i] = refreshed;
+            }
+
+            foreach (var id in Settings.MicrophoneDeviceIds)
+            {
+                if (SelectedMicrophones.Any(device => device.Id == id)) continue;
+                var match = MicrophoneDevices.FirstOrDefault(device => device.Id == id);
+                SelectedMicrophones.Add(match ?? new AudioDeviceOption(id, id));
+            }
         }
-
-        // Refresh display names for already-configured microphones (a device's
-        // friendly name can change enumeration-to-enumeration) without dropping
-        // ones that are temporarily missing (same "don't lose a real choice over a
-        // transient re-enumeration" reasoning as above) - keep the prior entry as-is
-        // if it's not in this pass.
-        for (var i = 0; i < SelectedMicrophones.Count; i++)
+        finally
         {
-            var current = SelectedMicrophones[i];
-            var refreshed = MicrophoneDevices.FirstOrDefault(device => device.Id == current.Id);
-            if (refreshed is not null && refreshed.Name != current.Name) SelectedMicrophones[i] = refreshed;
-        }
-
-        foreach (var id in Settings.MicrophoneDeviceIds)
-        {
-            if (SelectedMicrophones.Any(device => device.Id == id)) continue;
-            var match = MicrophoneDevices.FirstOrDefault(device => device.Id == id);
-            SelectedMicrophones.Add(match ?? new AudioDeviceOption(id, id));
+            _audioDeviceSnapshotApplyDepth--;
         }
     }
 

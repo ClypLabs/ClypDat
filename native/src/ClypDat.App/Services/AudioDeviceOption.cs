@@ -10,3 +10,9 @@ public sealed record AudioDeviceOption(string Id, string Name, bool IsDisabled =
 
     public override string ToString() => Name;
 }
+
+internal readonly record struct AudioDeviceSelectionChange(bool ShouldPersist, string DeviceId)
+{
+    public static AudioDeviceSelectionChange FromPicker(AudioDeviceOption? selection, bool isApplyingSnapshot) =>
+        new(!isApplyingSnapshot, selection?.Id ?? string.Empty);
+}
