@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Media.Transformation;
 using Avalonia.Rendering.Composition;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -236,7 +237,7 @@ internal sealed class ClipOverlayWindow : IDisposable
         // which is the whole point: the first frame anyone can see is already
         // the new content, sitting outside the badge's own clip bounds.
         var travel = TravelFor(isLeft, size.widthDips);
-        incoming.Translate.X = travel;
+        incoming.SetOffset(travel);
         RaiseAbove(incoming);
         var barrier = await WaitForRenderedFrameAsync(CancellationToken.None);
 
@@ -296,7 +297,7 @@ internal sealed class ClipOverlayWindow : IDisposable
         var isLeft = request.Side == ClipOverlaySide.Left;
         var outgoing = _showing;
         var incoming = _staging;
-        var outgoingFrom = outgoing.Translate.X;
+        var outgoingFrom = outgoing.Offset;
         incoming.Apply(request, isLeft);
         incoming.Root.IsVisible = true;
         RaiseAbove(incoming);
@@ -323,7 +324,7 @@ internal sealed class ClipOverlayWindow : IDisposable
 
         var travel = TravelFor(isLeft, size.widthDips);
         var outgoingTravel = TravelFor(isLeft, outgoing.Width);
-        incoming.Translate.X = travel;
+        incoming.SetOffset(travel);
         var barrier = await WaitForRenderedFrameAsync(CancellationToken.None);
         if (!_presentation.IsCurrent(generation)) return;
 
@@ -345,7 +346,7 @@ internal sealed class ClipOverlayWindow : IDisposable
         if (!_presentation.SwapCompleted(generation)) return;
 
         outgoing.Root.IsVisible = false;
-        outgoing.Translate.X = 0;
+        outgoing.SetOffset(0);
         PromoteStaging();
         _committedSide = request.Side;
         _shownAtUtc = DateTime.UtcNow;
@@ -377,7 +378,7 @@ internal sealed class ClipOverlayWindow : IDisposable
         // A cancellation here means a newer toast cut the exit short; it owns
         // the window from that point and enters from wherever this left the
         // layer, so the exception is deliberately allowed to propagate.
-        await SlideAsync(_showing, _showing.Translate.X, travel, ExitDuration, new CubicEaseIn(), token);
+        await SlideAsync(_showing, _showing.Offset, travel, ExitDuration, new CubicEaseIn(), token);
 
         AppLog.Info($"Clip overlay exit: id={id}, animated={(DateTime.UtcNow - started).TotalMilliseconds:0}ms, requested={ExitDuration.TotalMilliseconds:0}ms.");
         Park(reason);
@@ -406,7 +407,7 @@ internal sealed class ClipOverlayWindow : IDisposable
         foreach (var layer in new[] { _showing, _staging })
         {
             if (layer is null) continue;
-            layer.Translate.X = 0;
+            layer.SetOffset(0);
             layer.Root.IsVisible = false;
         }
 
@@ -423,37 +424,51 @@ internal sealed class ClipOverlayWindow : IDisposable
         if (_staging is not null)
         {
             _staging.Root.IsVisible = false;
-            _staging.Translate.X = 0;
+            _staging.SetOffset(0);
         }
     }
 
     // ---- motion ----------------------------------------------------------
 
-    // An explicit keyframe animation, never a Transition. A Transition needs
-    // its from-value and its to-value committed in separate passes; assigning
-    // both in one batch - which is what happens when a toast is prepared and
-    // revealed in the same beat - silently produces no animation at all. That
-    // is why the badge "sometimes just appeared". A keyframe animation carries
-    // its own endpoints and always plays.
+    // An explicit keyframe animation, never a Transition, and run against the
+    // layer's RenderTransform rather than a TranslateTransform object.
+    //
+    // Both parts matter. A Transition needs its from-value and its to-value
+    // committed in separate passes, and a badge that is prepared and revealed
+    // in one beat can commit both together. And Avalonia's animator for
+    // TranslateTransform.X casts its target to Visual (TransformAnimator), so
+    // running an Animation directly on a TranslateTransform throws - the
+    // supported target is Visual.RenderTransform carrying TransformOperations,
+    // which TransformOperationsAnimator interpolates properly.
     private static async Task SlideAsync(BadgeLayer layer, double from, double to, TimeSpan duration, Easing easing, CancellationToken token)
     {
         var animation = new Animation
         {
             Duration = duration,
             Easing = easing,
+            // Without Forward the value snaps back to its base the instant the
+            // animation ends - the badge would teleport off screen at the end
+            // of its own entrance.
             FillMode = FillMode.Forward,
             Children =
             {
-                new KeyFrame { Cue = new Cue(0d), Setters = { new Setter(TranslateTransform.XProperty, from) } },
-                new KeyFrame { Cue = new Cue(1d), Setters = { new Setter(TranslateTransform.XProperty, to) } }
+                new KeyFrame { Cue = new Cue(0d), Setters = { new Setter(Visual.RenderTransformProperty, TranslateBy(from)) } },
+                new KeyFrame { Cue = new Cue(1d), Setters = { new Setter(Visual.RenderTransformProperty, TranslateBy(to)) } }
             }
         };
 
-        await animation.RunAsync(layer.Translate, token);
+        await animation.RunAsync(layer.Root, token);
         token.ThrowIfCancellationRequested();
-        // FillMode.Forward holds the last frame, but the property itself is
-        // what every later calculation reads, so it is set explicitly.
-        layer.Translate.X = to;
+        // The completion callback runs before the final fill is applied, so the
+        // resting value is assigned explicitly rather than assumed.
+        layer.SetOffset(to);
+    }
+
+    private static TransformOperations TranslateBy(double x)
+    {
+        var builder = TransformOperations.CreateBuilder(1);
+        builder.AppendTranslate(x, 0);
+        return builder.Build();
     }
 
     // Server SKUs cannot do per-pixel transparency, so the badge is mirrored
@@ -921,7 +936,6 @@ internal sealed class ClipOverlayWindow : IDisposable
                 Source = new Bitmap(Avalonia.Platform.AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon-48.png")))
             };
 
-            Translate = new TranslateTransform();
             Badge = new Border
             {
                 Background = AppThemeService.Brush("Surface_F5141D24", "#F5141D24"),
@@ -959,7 +973,7 @@ internal sealed class ClipOverlayWindow : IDisposable
             Root = new Border
             {
                 Background = Brushes.Transparent,
-                RenderTransform = Translate,
+                RenderTransform = TranslateBy(0),
                 Child = Badge
             };
         }
@@ -969,8 +983,15 @@ internal sealed class ClipOverlayWindow : IDisposable
         public Border Accent { get; }
         public TextBlock Label { get; }
         public StackPanel HintRow { get; }
-        public TranslateTransform Translate { get; }
         public string Text { get; private set; } = string.Empty;
+
+        // Where the layer currently sits, read back off the transform rather
+        // than tracked separately: a cancelled animation leaves the interpolated
+        // value in place, and that drawn position is what the next motion has to
+        // start from if it is not going to jump.
+        public double Offset => Root.RenderTransform?.Value.M31 ?? 0;
+
+        public void SetOffset(double x) => Root.RenderTransform = TranslateBy(x);
         public double Width { get; set; }
         public double Height { get; set; }
 
