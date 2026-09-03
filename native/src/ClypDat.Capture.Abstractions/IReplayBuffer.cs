@@ -22,7 +22,6 @@ public enum ReplayCaptureStartupPhase
     None,
     WaitingForForeground,
     OpeningEncoder,
-    Validating,
     Ready,
     Fallback
 }
@@ -135,8 +134,6 @@ public sealed record ReplayCaptureHealth(
     // evidence the machine cannot sustain its settings.
     public bool SaveInProgress { get; init; }
     public ReplayCaptureStartupPhase StartupPhase { get; init; }
-    public int StartupValidationWindow { get; init; }
-    public int StartupValidationWindowCount { get; init; }
     // The FPS selected in settings stays stable for the session while the
     // native backend may temporarily run a lower cadence to protect frames.
     // TargetFrameRate is the active cadence so existing consumers keep showing

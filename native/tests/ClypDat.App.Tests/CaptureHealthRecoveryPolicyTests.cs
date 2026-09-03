@@ -71,39 +71,6 @@ public sealed class CaptureHealthRecoveryPolicyTests
     }
 
     [Fact]
-    public void StartupQualification_RejectsCfrDuplicatesAndInactiveWindows()
-    {
-        Assert.False(ReplayStartupQualificationPolicy.Passes(true, false, true, 90, 90, 0, 0, 0, 12));
-        Assert.False(ReplayStartupQualificationPolicy.Passes(false, false, true, 90, 90, 90, 0, 0, 12));
-        Assert.False(ReplayStartupQualificationPolicy.Passes(true, true, true, 90, 90, 90, 0, 0, 12));
-        Assert.True(ReplayStartupQualificationPolicy.Passes(true, false, true, 90, 90, 90, 0, 0, 12));
-    }
-
-    [Fact]
-    public void StartupQualification_FirstNvencPacketPrimesWithoutGradingWarmup()
-    {
-        Assert.Equal(
-            ReplayStartupQualificationPolicy.WindowDisposition.WaitingForFirstPacket,
-            ReplayStartupQualificationPolicy.ClassifyWindow(primed: false, packetsOut: 0, passes: false));
-        Assert.Equal(
-            ReplayStartupQualificationPolicy.WindowDisposition.Prime,
-            ReplayStartupQualificationPolicy.ClassifyWindow(primed: false, packetsOut: 1, passes: false));
-        Assert.Equal(
-            ReplayStartupQualificationPolicy.WindowDisposition.Fail,
-            ReplayStartupQualificationPolicy.ClassifyWindow(primed: true, packetsOut: 1, passes: false));
-    }
-
-    [Theory]
-    [InlineData(3, 3, true)]
-    [InlineData(0, 7, false)]
-    [InlineData(0, 8, true)]
-    public void StartupQualification_CompletesAfterSuccessOrBoundedSamples(
-        int passedWindows, int sampledWindows, bool expected)
-    {
-        Assert.Equal(expected, ReplayStartupQualificationPolicy.HasCompleted(passedWindows, sampledWindows));
-    }
-
-    [Fact]
     public void SharedSurfaceExhaustionHiddenByCfr_SwitchesToWgcAfterTwoWindows()
     {
         var policy = new CaptureSourceRecoveryPolicy();

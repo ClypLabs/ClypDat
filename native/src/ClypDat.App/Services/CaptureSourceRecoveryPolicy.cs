@@ -13,7 +13,6 @@ internal static class ReplaySaveRecoveryPolicy
         bool transportDegraded) =>
         !capturePaused && (sourceRecoveryAction != CaptureSourceRecoveryAction.None || stalled || transportDegraded);
 }
-
 // Distinguishes acquisition failure from encoder congestion using ownership
 // telemetry, never an encoder vendor name. CFR output can remain exactly at
 // target while it pads a starved source, so output rate is not source health.
@@ -65,30 +64,4 @@ internal sealed class CaptureSourceRecoveryPolicy
         _lastDxgiRecreateUtc = nowUtc;
         return CaptureSourceRecoveryAction.RecreateDxgi;
     }
-}
-
-internal static class ReplayStartupQualificationPolicy
-{
-    // Validation is telemetry, not a gate on replay. A busy foreground game
-    // may never provide three consecutive clean seconds, so it must settle
-    // after a bounded observation window instead of remaining "Validating".
-    internal const int MaximumWindows = ReplayEncoderQualificationPolicy.RequiredWindows + 5;
-
-    internal enum WindowDisposition { WaitingForFirstPacket, Prime, Pass, Fail }
-
-    internal static WindowDisposition ClassifyWindow(bool primed, long packetsOut, bool passes) =>
-        !primed
-            ? packetsOut > 0 ? WindowDisposition.Prime : WindowDisposition.WaitingForFirstPacket
-             : passes ? WindowDisposition.Pass : WindowDisposition.Fail;
-
-    internal static bool HasCompleted(int passedWindows, int sampledWindows) =>
-        passedWindows >= ReplayEncoderQualificationPolicy.RequiredWindows ||
-        sampledWindows >= MaximumWindows;
-
-    internal static bool Passes(bool foreground, bool paused, bool hasRealFrame, int targetFrameRate,
-        double outputFrameRate, double freshVisualFrameRate, long droppedFrames, int queueDepth, int queueCapacity)
-        => foreground && !paused && hasRealFrame && droppedFrames == 0 && queueCapacity > 0 &&
-           queueDepth * 4 < queueCapacity * 3 &&
-           outputFrameRate >= targetFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold &&
-           freshVisualFrameRate >= targetFrameRate * ReplayEncoderQualificationPolicy.TargetThreshold;
 }

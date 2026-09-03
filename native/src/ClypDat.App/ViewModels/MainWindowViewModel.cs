@@ -148,8 +148,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private double _activeReplayUniqueGameFrameRate;
     private ReplayCaptureStartupPhase _activeReplayStartupPhase;
     private bool _activeReplayCapturePaused;
-    private int _activeReplayStartupWindow;
-    private int _activeReplayStartupWindowCount;
     private readonly ReplayFrameRateDisplaySmoother _replayFrameRateDisplaySmoother = new();
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "Medium";
@@ -1956,15 +1954,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Native replay deliberately starts producing provisional packets before
-    // its live encoder windows have proven safe. Keep that implementation
-    // detail out of the primary action surface: the replay is usable only
-    // once the health stream says the encoder is ready. Backends without live
-    // qualification report None and remain usable immediately.
     public bool IsReplayArming => _isReplayRecording && _activeReplayStartupPhase is
         ReplayCaptureStartupPhase.WaitingForForeground or
         ReplayCaptureStartupPhase.OpeningEncoder or
-        ReplayCaptureStartupPhase.Validating or
         ReplayCaptureStartupPhase.Fallback;
 
     public bool IsReplayReady => _isReplayRecording && !IsReplayArming;
@@ -1977,8 +1969,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ? "Replay paused while game is backgrounded. Fresh FPS is not a capture-health sample."
         : _activeReplayStartupPhase == ReplayCaptureStartupPhase.WaitingForForeground
         ? "Waiting for game foreground before replay frames begin."
-        : _activeReplayStartupPhase == ReplayCaptureStartupPhase.Validating
-        ? $"Validating encoder ({_activeReplayStartupWindow}/{_activeReplayStartupWindowCount}): {(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")} output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS; source {_activeReplaySourceFrameRate:0.0} FPS; fresh visual FPS {_activeReplayUniqueGameFrameRate:0.0}."
         : $"{(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")}: output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS; source {_activeReplaySourceFrameRate:0.0} FPS; fresh visual FPS {_activeReplayUniqueGameFrameRate:0.0}.";
 
     public ReplayVideoCodecOption SelectedReplayVideoCodec
@@ -2181,8 +2171,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplaySourceFrameRate = health.InputFrameRate;
         _activeReplayStartupPhase = health.StartupPhase;
         _activeReplayCapturePaused = health.CapturePaused;
-        _activeReplayStartupWindow = health.StartupValidationWindow;
-        _activeReplayStartupWindowCount = health.StartupValidationWindowCount;
         var displayedRates = _replayFrameRateDisplaySmoother.Update(health);
         _activeReplayOutputFrameRate = displayedRates.OutputFrameRate;
         _activeReplayUniqueGameFrameRate = displayedRates.UniqueFrameRate;
@@ -2203,8 +2191,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayOutputFrameRate = 0;
         _activeReplayUniqueGameFrameRate = 0;
         _activeReplayStartupPhase = ReplayCaptureStartupPhase.None;
-        _activeReplayStartupWindow = 0;
-        _activeReplayStartupWindowCount = 0;
         _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(Settings.ReplayFrameRateMode);
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
         OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
