@@ -278,13 +278,13 @@
     <Setter Property="Background" Value="{StaticResource Surface_45566A}" />
   </Style>
   <!--
-    Floating hover bar only (.flatControl is applied in code, see
-    BuildPlaybackBarLayout) - the docked playbar and the fullscreen bar keep
-    the filled-box look above. Over the picture those boxes read as a row of
-    grey tiles; bare icons on the scrim read as controls on the video, which
-    is what every player does here. Hover/press are a translucent white wash
-    rather than a solid fill so the button still visibly responds without
-    reintroducing the tile.
+    Floating hover bar (.flatControl is applied in code, see
+    BuildPlaybackBarLayout) and the fullscreen playbar - the docked playbar
+    keeps the filled-box look above. Over the picture, and along a bar as wide
+    as the screen, those boxes read as a row of grey tiles; bare icons read as
+    controls on the video, which is what every player does here. Hover/press
+    are a translucent white wash rather than a solid fill so the button still
+    visibly responds without reintroducing the tile.
   -->
   <Style Selector="Button.transportButton.flatControl, Button.playButton.flatControl">
     <Setter Property="Background" Value="Transparent" />
@@ -310,6 +310,40 @@
   </Style>
   <Style Selector="Border.muteToggle.flatControl:pointerover">
     <Setter Property="Background" Value="#26FFFFFF" />
+  </Style>
+  <!--
+    Fullscreen playbar seek rail. The Border is the hit target (a press
+    anywhere in the 16px band seeks); the rail inside it is hit-test
+    invisible. The rail keeps a constant 8px layout height and is drawn
+    thinner with a ScaleY transform, so growing it on hover animates on the
+    render thread instead of re-running layout on the whole bar every frame -
+    and there is no Height to interpolate from NaN on first apply. Growth on
+    hover is the rail's only affordance: a ProgressBar has no thumb.
+  -->
+  <Style Selector="Border.fsSeekStrip">
+    <Setter Property="Height" Value="16" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Border.fsSeekStrip ProgressBar.fsSeekRail">
+    <Setter Property="Height" Value="8" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="#2EFFFFFF" />
+    <Setter Property="IsHitTestVisible" Value="False" />
+    <Setter Property="RenderTransform" Value="scaleY(0.5)" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.fsSeekStrip:pointerover ProgressBar.fsSeekRail">
+    <Setter Property="RenderTransform" Value="scaleY(1)" />
   </Style>
   <Style Selector="Button.primaryButton">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />

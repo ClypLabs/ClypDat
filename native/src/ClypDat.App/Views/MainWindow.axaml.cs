@@ -51,6 +51,12 @@ public sealed partial class MainWindow : Window
     // the precision the wider target is meant to provide.
     private double _trimDragGrabOffsetMs;
     private bool _endedAtTrimBoundary;
+    // Press-drag-release state for the playbar seek rails (see
+    // FullscreenProgressBar_OnPointerPressed). Only one rail is ever on
+    // screen at a time - the fullscreen bar and the hover bar are mutually
+    // exclusive - so a single flag covers both.
+    private bool _seekRailScrubActive;
+    private bool _seekRailScrubWasPlaying;
     // Armed whenever a play session starts at/before TrimEnd, so playback
     // naturally running into it still auto-stops there (trim preview);
     // disarmed when the session instead started already past TrimEnd (user
@@ -5854,15 +5860,48 @@ public sealed partial class MainWindow : Window
         AppLog.Info("Video fullscreen exited: EditorVideoView reparented back into EditorVideoHost.");
     }
 
+    // Press-drag-release scrubbing on the seek rail (both the fullscreen bar
+    // and the floating hover bar, which wires the same three handlers). The
+    // press and every move issue the instant no-wait SeekPreview - the same
+    // path held arrow keys take - and only the release settles the transport
+    // once. A plain click still lands as press+release, so it settles exactly
+    // as the old click-only handler did; dragging no longer queues a full
+    // settling seek per pixel moved.
     private void FullscreenProgressBar_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (ViewModel is null || sender is not Control control || ViewModel.Duration <= TimeSpan.Zero) return;
-        var wasPlaying = ViewModel.IsPlaying;
-        var fraction = Math.Clamp(e.GetPosition(control).X / Math.Max(1, control.Bounds.Width), 0, 1);
+        _seekRailScrubActive = true;
+        _seekRailScrubWasPlaying = ViewModel.IsPlaying;
+        e.Pointer.Capture(control);
+        ScrubSeekRail(control, e.GetPosition(control).X);
+        e.Handled = true;
+    }
+
+    private void FullscreenProgressBar_OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_seekRailScrubActive || ViewModel is null || sender is not Control control) return;
+        ScrubSeekRail(control, e.GetPosition(control).X);
+        e.Handled = true;
+    }
+
+    private void FullscreenProgressBar_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_seekRailScrubActive || ViewModel is null) return;
+        _seekRailScrubActive = false;
+        e.Pointer.Capture(null);
+        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, _seekRailScrubWasPlaying);
+        e.Handled = true;
+    }
+
+    private void ScrubSeekRail(Control control, double x)
+    {
+        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
+        _endedAtTrimBoundary = false;
+        var fraction = Math.Clamp(x / Math.Max(1, control.Bounds.Width), 0, 1);
         ViewModel.CurrentTime = TimeSpan.FromMilliseconds(ViewModel.Duration.TotalMilliseconds * fraction);
         ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
-        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
-        e.Handled = true;
+        UpdateTimelineChrome();
+        _playback?.SeekPreview(ViewModel.CurrentTime);
     }
 
     private void CloseEditorButton_OnClick(object? sender, RoutedEventArgs e)
@@ -10047,6 +10086,8 @@ public sealed partial class MainWindow : Window
             Child = progressBar,
         };
         progressStrip.PointerPressed += FullscreenProgressBar_OnPointerPressed;
+        progressStrip.PointerMoved += FullscreenProgressBar_OnPointerMoved;
+        progressStrip.PointerReleased += FullscreenProgressBar_OnPointerReleased;
 
         // One cell with all three groups stacked in it, each aligned to its own
         // edge, rather than three columns. In a three-column split the centre

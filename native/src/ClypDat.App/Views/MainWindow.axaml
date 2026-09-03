@@ -2116,80 +2116,124 @@
                   Margin="4,24"
                   IsVisible="{Binding IsVideoZoomed}" />
         </Grid>
-        <StackPanel Grid.Row="1">
-          <Border Height="14" Background="Transparent" Cursor="Hand"
-                  PointerPressed="FullscreenProgressBar_OnPointerPressed" VerticalAlignment="Center">
-            <ProgressBar Minimum="0" Maximum="{Binding Duration.TotalSeconds}" Value="{Binding CurrentTime.TotalSeconds}"
-                         Height="3" Padding="0" BorderThickness="0" CornerRadius="0" VerticalAlignment="Center"
-                         Background="#33FFFFFF" Foreground="{StaticResource AccentBrush}" IsHitTestVisible="False" />
-          </Border>
-          <Border Background="{StaticResource Surface_0B0F14}" Padding="14,10">
-            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
-              <Button Classes="transportButton" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
-                <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
-              </Button>
-              <Button Classes="transportButton" Click="StepBackButton_OnClick" ToolTip.Tip="Step back">
-                <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M16 5v14L5 12Z" />
-              </Button>
-              <Button Classes="playButton" Click="PlayPauseButton_OnClick" ToolTip.Tip="Play/Pause">
-                <Grid>
-                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_DDE8F6}" Data="M8 5v14l11-7z" IsVisible="{Binding !IsPlaying}" />
-                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_DDE8F6}" Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" IsVisible="{Binding IsPlaying}" />
-                </Grid>
-              </Button>
-              <Button Classes="transportButton" Click="StepForwardButton_OnClick" ToolTip.Tip="Step forward">
-                <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M8 5v14l11-7z" />
-              </Button>
-              <Button Classes="transportButton" Click="EndButton_OnClick" ToolTip.Tip="End">
-                <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
-              </Button>
-              <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
-              <Border Classes="muteToggle"
-                      Width="26"
-                      Height="26"
-                      HorizontalAlignment="Center"
-                      VerticalAlignment="Center"
-                      PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
-                      Cursor="Hand"
-                      ToolTip.Tip="Mute/unmute">
-                <PathIcon Width="15"
-                          Height="15"
-                          HorizontalAlignment="Center"
-                          VerticalAlignment="Center"
-                          Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
-                          Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
-              </Border>
-              <Slider Classes="volumeSlider" Minimum="0" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" Width="90" VerticalAlignment="Center"
-                      Value="{Binding MasterVolumePercent, Mode=TwoWay}"
-                      Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
-              <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
-                         Foreground="{StaticResource Text_C8D6E6}"
-                         FontSize="11"
-                         Width="30"
-                         Margin="0,2,0,0"
+        <!-- Playbar. Seek rail on top, then ONE control row split into three
+             groups - transport + time, clip title, volume + exit - instead of
+             the single centred huddle of grey tiles this used to be. At
+             fullscreen width a centred cluster leaves the entire bar empty
+             either side of it; the split is also the shape the docked hover
+             bar already uses, so the chrome does not rearrange itself when
+             the video goes fullscreen. -->
+        <Border Grid.Row="1"
+                Background="{StaticResource Surface_0B0F14}"
+                BorderBrush="#14FFFFFF"
+                BorderThickness="0,1,0,0">
+          <StackPanel Margin="18,8,18,10" Spacing="4">
+            <!-- 16px hit strip with a hit-test-invisible rail inside it, so a
+                 press anywhere in the band seeks rather than only a hit on the
+                 rail. Rail height and its hover growth live in
+                 Border.fsSeekStrip/.fsSeekRail. Press-drag-release scrubs (see
+                 FullscreenProgressBar_OnPointerMoved). -->
+            <Border Classes="fsSeekStrip"
+                    PointerPressed="FullscreenProgressBar_OnPointerPressed"
+                    PointerMoved="FullscreenProgressBar_OnPointerMoved"
+                    PointerReleased="FullscreenProgressBar_OnPointerReleased">
+              <ProgressBar Classes="fsSeekRail"
+                           Minimum="0"
+                           Maximum="{Binding Duration.TotalSeconds}"
+                           Value="{Binding CurrentTime.TotalSeconds}"
+                           Foreground="{StaticResource AccentBrush}" />
+            </Border>
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <!-- flatControl (bare icons, translucent hover wash) rather than
+                   the filled tiles: on a bar this wide a row of grey boxes is
+                   the loudest thing on screen, and it is not the video. -->
+              <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                <Button Classes="transportButton flatControl" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
+                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                </Button>
+                <Button Classes="transportButton flatControl" Click="StepBackButton_OnClick" ToolTip.Tip="Step back">
+                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M16 5v14L5 12Z" />
+                </Button>
+                <Button Classes="playButton flatControl" Click="PlayPauseButton_OnClick" ToolTip.Tip="Play/Pause">
+                  <Grid>
+                    <PathIcon Width="18" Height="18" Foreground="{StaticResource Text_EDF4FB}" Data="M8 5v14l11-7z" IsVisible="{Binding !IsPlaying}" />
+                    <PathIcon Width="18" Height="18" Foreground="{StaticResource Text_EDF4FB}" Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" IsVisible="{Binding IsPlaying}" />
+                  </Grid>
+                </Button>
+                <Button Classes="transportButton flatControl" Click="StepForwardButton_OnClick" ToolTip.Tip="Step forward">
+                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M8 5v14l11-7z" />
+                </Button>
+                <Button Classes="transportButton flatControl" Click="EndButton_OnClick" ToolTip.Tip="End">
+                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                </Button>
+                <!-- Elapsed / total. The bar carried no readout at all before,
+                     so the rail was the only thing saying where the clip was. -->
+                <TextBlock Text="{Binding TimelineStatusLabel}"
+                           Foreground="{StaticResource Text_8DA0B4}"
+                           FontSize="12"
+                           Margin="10,0,0,0"
+                           VerticalAlignment="Center" />
+              </StackPanel>
+
+              <!-- The clip name, the one piece of context fullscreen drops
+                   along with the rest of the editor chrome. Trimmed, never
+                   wrapped - it shares the row height with the transport. -->
+              <TextBlock Grid.Column="1"
+                         Text="{Binding EditorTitle}"
+                         Foreground="{StaticResource Text_C4D0DF}"
+                         FontSize="12"
+                         FontWeight="SemiBold"
+                         MaxWidth="460"
+                         Margin="16,0"
+                         TextTrimming="CharacterEllipsis"
+                         HorizontalAlignment="Center"
                          VerticalAlignment="Center" />
-              <!-- IsEnabled, not IsVisible - this sits inside a
-                   HorizontalAlignment="Center" StackPanel, so collapsing its
-                   layout space on hide would re-center the whole row and
-                   shift every button in it (Restart through Exit). Always
-                   laid out at the same size; IsEnabled=False just greys it
-                   out (the global Button:disabled style) and blocks the
-                   click, at 100% where there's nothing to reset. -->
-              <Button Classes="linkButton"
-                      Content="Reset"
-                      FontSize="10"
-                      Padding="6,1"
-                      VerticalAlignment="Center"
-                      IsEnabled="{Binding IsMasterVolumeNonDefault}"
-                      Click="MasterVolumeReset_OnClick"
-                      ToolTip.Tip="Reset to 100%" />
-              <Border Width="1" Height="20" Background="#26FFFFFF" Margin="4,0" />
-              <Button Classes="transportButton" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen">
-                <PathIcon Width="14" Height="14" Foreground="{StaticResource Text_C8D6E6}" Data="M19,6.41 L17.59,5 L12,10.59 L6.41,5 L5,6.41 L10.59,12 L5,17.59 L6.41,19 L12,13.41 L17.59,19 L19,17.59 L13.41,12 Z" />
-              </Button>
-            </StackPanel>
-          </Border>
-        </StackPanel>
+
+              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Border Classes="muteToggle flatControl"
+                        Width="28"
+                        Height="28"
+                        VerticalAlignment="Center"
+                        PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
+                        Cursor="Hand"
+                        ToolTip.Tip="Mute/unmute">
+                  <PathIcon Width="15"
+                            Height="15"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
+                            Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
+                </Border>
+                <Slider Classes="volumeSlider" Minimum="0" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" Width="90" VerticalAlignment="Center"
+                        Value="{Binding MasterVolumePercent, Mode=TwoWay}"
+                        Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
+                <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
+                           Foreground="{StaticResource Text_8DA0B4}"
+                           FontSize="11"
+                           Width="32"
+                           VerticalAlignment="Center" />
+                <!-- IsEnabled, not IsVisible - collapsing its layout space on
+                     hide would resize this group and shift the whole volume
+                     run under the pointer at 100%, where there is nothing to
+                     reset. Greyed out by the global Button:disabled style. -->
+                <Button Classes="linkButton"
+                        Content="Reset"
+                        FontSize="11"
+                        Padding="6,1"
+                        VerticalAlignment="Center"
+                        IsEnabled="{Binding IsMasterVolumeNonDefault}"
+                        Click="MasterVolumeReset_OnClick"
+                        ToolTip.Tip="Reset to 100%" />
+                <Border Width="1" Height="18" Background="#26FFFFFF" Margin="4,0" VerticalAlignment="Center" />
+                <!-- The exit-fullscreen glyph, not an X - an X on a playbar
+                     reads as "close the clip". -->
+                <Button Classes="transportButton flatControl" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen (Esc)">
+                  <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M5,16h3v3h2v-5H5V16z M8,8H5v2h5V5H8V8z M14,19h2v-3h3v-2h-5V19z M16,8V5h-2v5h5V8H16z" />
+                </Button>
+              </StackPanel>
+            </Grid>
+          </StackPanel>
+        </Border>
       </Grid>
     </Border>
 
