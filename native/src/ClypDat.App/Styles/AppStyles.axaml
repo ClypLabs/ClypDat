@@ -2014,6 +2014,31 @@
     <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
+  <!--
+    Fluent's rail is not one bar: PART_DecreaseButton and PART_IncreaseButton
+    are two separate RepeatButtons laid out either side of the thumb, and each
+    rounds ALL FOUR of its own corners by ControlCornerRadius. Scoping that
+    radius to half the rail height (above) makes each segment a perfect pill,
+    which is right at the two OUTER ends and wrong at the two inner ones: the
+    filled segment ends in a semicircular cap right where the thumb sits, so
+    the bar looks like it swells and pinches around the circle instead of
+    running straight through it.
+
+    Rounded on the outside edge only, square where they meet the thumb. The
+    inner ends are covered by the (opaque) thumb, so squaring them costs
+    nothing visually and the rail reads as one continuous straight bar.
+
+    Reaching the rail means a second /template/ hop - the Border lives in the
+    RepeatButton's own ControlTheme, not in the Slider's template - which
+    resolves because each hop matches against that element's TemplatedParent.
+    Horizontal only; no volume slider in the app is vertical.
+  -->
+  <Style Selector="Slider.volumeSlider:horizontal /template/ RepeatButton#PART_DecreaseButton /template/ Border#TrackBackground">
+    <Setter Property="CornerRadius" Value="2.25,0,0,2.25" />
+  </Style>
+  <Style Selector="Slider.volumeSlider:horizontal /template/ RepeatButton#PART_IncreaseButton /template/ Border#TrackBackground">
+    <Setter Property="CornerRadius" Value="0,2.25,2.25,0" />
+  </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb">
     <Setter Property="Width" Value="16" />
     <Setter Property="Height" Value="16" />
@@ -2044,6 +2069,13 @@
     </Style.Resources>
     <Setter Property="MinHeight" Value="52" />
     <Setter Property="Background" Value="{StaticResource Surface_273440}" />
+  </Style>
+  <!-- Same inner-end squaring as the base class, at this one's taller rail. -->
+  <Style Selector="Slider.volumeSlider.appVolumeSlider:horizontal /template/ RepeatButton#PART_DecreaseButton /template/ Border#TrackBackground">
+    <Setter Property="CornerRadius" Value="3.5,0,0,3.5" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.appVolumeSlider:horizontal /template/ RepeatButton#PART_IncreaseButton /template/ Border#TrackBackground">
+    <Setter Property="CornerRadius" Value="0,3.5,3.5,0" />
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider /template/ Thumb">
     <Setter Property="Width" Value="22" />
