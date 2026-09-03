@@ -4,6 +4,16 @@ namespace ClypDat.App.Services;
 
 internal enum CaptureSourceRecoveryAction { None, RecreateDxgi, SwitchToWgc, RestartWorker }
 
+internal static class ReplaySaveRecoveryPolicy
+{
+    internal static bool RequiresQuarantine(
+        bool capturePaused,
+        CaptureSourceRecoveryAction sourceRecoveryAction,
+        bool stalled,
+        bool transportDegraded) =>
+        !capturePaused && (sourceRecoveryAction != CaptureSourceRecoveryAction.None || stalled || transportDegraded);
+}
+
 // Distinguishes acquisition failure from encoder congestion using ownership
 // telemetry, never an encoder vendor name. CFR output can remain exactly at
 // target while it pads a starved source, so output rate is not source health.

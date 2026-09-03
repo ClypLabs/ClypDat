@@ -1673,8 +1673,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         consecutiveTransportShortfallWindows = 0;
                     var transportDegraded = consecutiveTransportShortfallWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows;
                     var encoderStage = bottleneckStage is ReplayPipelineStage.EncodeQueue or ReplayPipelineStage.EncoderSubmission or ReplayPipelineStage.EncoderCompletion;
-                    var pipelineUnhealthy = !capturePaused && ((encoderPressure && outputFrameRate < activeFrameRate * 0.5) ||
-                        sourceRecoveryAction != CaptureSourceRecoveryAction.None || isStalled || transportDegraded);
+                    var pipelineUnhealthy = ReplaySaveRecoveryPolicy.RequiresQuarantine(
+                        capturePaused, sourceRecoveryAction, isStalled, transportDegraded);
                     UpdateRecoveryTimeline(pipelineUnhealthy, capturePaused, DateTime.UtcNow);
                     if (!isMonitorMode && wgcCapture is null && dxgiCapture is not null &&
                         dxgiCadenceFallback.ShouldFallback(activeFrameRate, freshTransportRate,
