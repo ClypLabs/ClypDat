@@ -386,7 +386,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         {
             try
             {
-                return enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+                return DefaultMicrophone.Get(enumerator);
             }
             catch
             {

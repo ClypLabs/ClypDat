@@ -22,7 +22,7 @@ public sealed class AudioDeviceService
         try
         {
             using var enumerator = new MMDeviceEnumerator();
-            using var device = enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications);
+            using var device = DefaultMicrophone.Get(enumerator);
             return device.FriendlyName;
         }
         catch

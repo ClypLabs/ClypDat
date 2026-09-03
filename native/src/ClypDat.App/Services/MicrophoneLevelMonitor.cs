@@ -43,7 +43,7 @@ internal sealed class MicrophoneLevelMonitor : IDisposable
             {
                 using var enumerator = new MMDeviceEnumerator();
                 _device = string.IsNullOrWhiteSpace(deviceId) || deviceId == AudioDeviceOption.DefaultDeviceId
-                    ? enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications)
+                    ? DefaultMicrophone.Get(enumerator)
                     : enumerator.GetDevice(deviceId);
 
                 _smoothedDb = FloorDb;

@@ -42,6 +42,7 @@ public sealed class AudioCapturePipeline : IDisposable
     private static readonly SemaphoreSlim FfmpegGate = new(2, 2);
     private readonly List<ReplayAudioCapture> _audioCaptures = new();
     private readonly SemaphoreSlim _routeRefreshGate = new(1, 1);
+    private readonly DefaultMicrophoneWatcher _defaultMicrophoneWatcher;
     private Timer? _audioRouteTimer;
     private string _audioRouteKey = string.Empty;
     private int _stableRoutePasses;
@@ -53,6 +54,7 @@ public sealed class AudioCapturePipeline : IDisposable
     {
         _bufferFolder = bufferFolder;
         Directory.CreateDirectory(_bufferFolder);
+        _defaultMicrophoneWatcher = new DefaultMicrophoneWatcher(RefreshAudioRoutes);
     }
 
     public void Start(ReplayBufferConfig config)
@@ -185,14 +187,14 @@ public sealed class AudioCapturePipeline : IDisposable
 
         AddApplicationTracks(orderedApps.Where(AudioProcessIdentity.IsSocial));
 
-        // config.MicrophoneDeviceIds carries the raw configured value (e.g. the
-        // literal "default" placeholder), but StartAudioCaptures resolves that
-        // through ResolveMicrophoneDeviceIds into the real WASAPI endpoint ID
-        // before using it as a capture's SourceKey. Matching against the raw,
-        // unresolved value here meant "default" never equalled the real GUID
-        // SourceKey, so the mic track always fell back to a silent clip.
+        // SourceKey is the saved logical selection, while DeviceId is the
+        // physical WASAPI endpoint. Keeping "default" as the former lets an
+        // aligned track contain audio from both sides of a Windows default swap.
         using var micEnumerator = new MMDeviceEnumerator();
-        var micIds = ResolveMicrophoneDeviceIds(micEnumerator, config.MicrophoneDeviceIds);
+        var micIds = ResolveMicrophoneRoutes(micEnumerator, config.MicrophoneDeviceIds)
+            .Select(route => route.SourceKey)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         var micIndex = 0;
         foreach (var micId in micIds)
         {
@@ -224,16 +226,20 @@ public sealed class AudioCapturePipeline : IDisposable
         return tracks;
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        Stop();
+        _defaultMicrophoneWatcher.Dispose();
+    }
 
     private void StartAudioCaptures(ReplayBufferConfig config)
     {
         using var scope = new RouteScope();
-        var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(scope.Enumerator, config.MicrophoneDeviceIds);
-        var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds, scope);
+        var microphoneRoutes = ResolveMicrophoneRoutes(scope.Enumerator, config.MicrophoneDeviceIds);
+        var routes = ResolveAudioRoutes(config, microphoneRoutes, scope);
         _audioRouteKey = routes.RouteKey;
         AppLog.Info(
-            $"Audio route resolved: chatApps={routes.ChatRoutes.Length}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}, mics={resolvedMicDeviceIds.Length}.");
+            $"Audio route resolved: chatApps={routes.ChatRoutes.Length}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}, mics={microphoneRoutes.Length}.");
         StopStaleAudioCaptures(routes);
         // StopStaleAudioCaptures keeps a microphone whose device is still
         // selected, which is right for a device change and wrong for a filter
@@ -301,17 +307,17 @@ public sealed class AudioCapturePipeline : IDisposable
             }
         }
 
-        foreach (var micId in resolvedMicDeviceIds)
+        foreach (var route in routes.MicrophoneRoutes)
         {
-            if (HasLiveCapture(AudioCaptureKind.Microphone, micId)) continue;
+            if (string.IsNullOrEmpty(route.DeviceId) || HasLiveCapture(AudioCaptureKind.Microphone, route.SourceKey)) continue;
             try
             {
-                var micDevice = scope.Enumerator.GetDevice(micId);
-                StartMicrophoneCapture(micDevice, $"Microphone - {micDevice.FriendlyName}", micId, config);
+                var micDevice = scope.Enumerator.GetDevice(route.DeviceId);
+                StartMicrophoneCapture(micDevice, $"Microphone - {micDevice.FriendlyName}", route.SourceKey, config);
             }
             catch (Exception error)
             {
-                AppLog.Error($"Microphone capture failed: device={micId}", error);
+                AppLog.Error($"Microphone capture failed: device={route.DeviceId}", error);
             }
         }
 
@@ -418,7 +424,7 @@ public sealed class AudioCapturePipeline : IDisposable
     private void StopStaleAudioCaptures(AudioRoutes routes)
     {
         var wantedChat = routes.ChatRoutes.ToDictionary(route => route.AppName, route => route.ProcessId, StringComparer.OrdinalIgnoreCase);
-        var wantedMics = routes.MicrophoneDeviceIds.ToHashSet(StringComparer.Ordinal);
+        var wantedMics = routes.MicrophoneRoutes.ToDictionary(route => route.SourceKey, StringComparer.Ordinal);
         var excluded = routes.ExcludedProcessIds.ToHashSet();
         ReplayAudioCapture[] live;
         lock (_lock) live = _audioCaptures.Where(capture => capture.EndedAtUtc is null).ToArray();
@@ -432,7 +438,10 @@ public sealed class AudioCapturePipeline : IDisposable
                 // pid still matches - if the app restarted with a new pid, this capture
                 // is stale and a fresh one will start for the new pid.
                 AudioCaptureKind.Chat => wantedChat.TryGetValue(capture.SourceKey, out var wantedPid) && wantedPid == capture.ProcessId,
-                AudioCaptureKind.Microphone => wantedMics.Contains(capture.SourceKey),
+                // Failed default resolution is transient during a driver/device
+                // handover. Keep current capture and retry next notification/poll.
+                AudioCaptureKind.Microphone => wantedMics.TryGetValue(capture.SourceKey, out var wantedMic)
+                    && (string.IsNullOrEmpty(wantedMic.DeviceId) || string.Equals(capture.DeviceId, wantedMic.DeviceId, StringComparison.Ordinal)),
                 _ => false
             };
 
@@ -510,14 +519,14 @@ public sealed class AudioCapturePipeline : IDisposable
             var rolledOver = RollOversizedCaptures();
             TrimMemoryCaptures();
             using var scope = new RouteScope();
-            var resolvedMicDeviceIds = ResolveMicrophoneDeviceIds(scope.Enumerator, config.MicrophoneDeviceIds);
-            var routes = ResolveAudioRoutes(config, resolvedMicDeviceIds, scope);
+            var microphoneRoutes = ResolveMicrophoneRoutes(scope.Enumerator, config.MicrophoneDeviceIds);
+            var routes = ResolveAudioRoutes(config, microphoneRoutes, scope);
             var unchanged = string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal);
             ApplyRouteInterval(unchanged);
             if (!rolledOver && unchanged) return;
             try
             {
-                AppLog.Info("Audio route changed; restarting replay audio captures.");
+                AppLog.Info("Audio route changed; refreshing replay audio captures.");
                 StartAudioCaptures(config);
             }
             catch (Exception error)
@@ -666,7 +675,7 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             try
             {
-                return enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications).ID;
+                return DefaultMicrophone.Get(enumerator).ID;
             }
             catch
             {
@@ -684,17 +693,20 @@ public sealed class AudioCapturePipeline : IDisposable
         }
     }
 
-    private static string[] ResolveMicrophoneDeviceIds(MMDeviceEnumerator enumerator, IReadOnlyList<string>? configuredIds)
+    private static MicrophoneRoute[] ResolveMicrophoneRoutes(MMDeviceEnumerator enumerator, IReadOnlyList<string>? configuredIds)
     {
         var configured = NormalizedList(configuredIds);
-        var resolved = new List<string>();
+        var resolved = new List<MicrophoneRoute>();
         foreach (var id in configured)
         {
             var resolvedId = ResolveMicrophoneDeviceId(enumerator, id);
-            if (!string.IsNullOrEmpty(resolvedId)) resolved.Add(resolvedId);
+            var sourceKey = string.IsNullOrWhiteSpace(id) || id == AudioDeviceOption.DefaultDeviceId
+                ? AudioDeviceOption.DefaultDeviceId
+                : id;
+            resolved.Add(new MicrophoneRoute(sourceKey, resolvedId));
         }
 
-        return resolved.Distinct(StringComparer.Ordinal).ToArray();
+        return resolved.DistinctBy(route => route.SourceKey, StringComparer.Ordinal).ToArray();
     }
 
     private static List<string> NormalizedList(IReadOnlyList<string>? values)
@@ -705,7 +717,7 @@ public sealed class AudioCapturePipeline : IDisposable
             .ToList();
     }
 
-    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, string[] resolvedMicDeviceIds, RouteScope scope)
+    private static AudioRoutes ResolveAudioRoutes(ReplayBufferConfig config, MicrophoneRoute[] microphoneRoutes, RouteScope scope)
     {
         var chatAppNames = AudioProcessIdentity.NormalizeList(config.ChatAudioProcessNames);
         foreach (var appName in AudioProcessIdentity.NormalizeDictionary(config.AdditionalAudioProcesses).Keys)
@@ -759,8 +771,8 @@ public sealed class AudioCapturePipeline : IDisposable
         // device: it is applied live, inside the capture, so changing it has to
         // make the refresh timer see the route as changed and rebuild. Without
         // this the toggle would appear to do nothing until the next launch.
-        var key = $"{useProcessRouting}|{string.Join(',', chatRoutes.OrderBy(route => route.AppName, StringComparer.OrdinalIgnoreCase).Select(route => $"{route.AppName}:{route.ProcessId}"))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{string.Join(',', resolvedMicDeviceIds.OrderBy(id => id, StringComparer.Ordinal))}|{MicrophoneFilterSignature(config)}";
-        return new AudioRoutes(chatRoutes.ToArray(), excludedPids, gamePids, useProcessRouting, key, resolvedMicDeviceIds);
+        var key = $"{useProcessRouting}|{string.Join(',', chatRoutes.OrderBy(route => route.AppName, StringComparer.OrdinalIgnoreCase).Select(route => $"{route.AppName}:{route.ProcessId}"))}|{string.Join(',', excludedPids)}|{string.Join(',', gamePids)}|{string.Join(',', microphoneRoutes.OrderBy(route => route.SourceKey, StringComparer.Ordinal).Select(route => $"{route.SourceKey}:{route.DeviceId}"))}|{MicrophoneFilterSignature(config)}";
+        return new AudioRoutes(chatRoutes.ToArray(), excludedPids, gamePids, useProcessRouting, key, microphoneRoutes);
     }
 
     private static string FormatIds(IEnumerable<int> ids)
@@ -1550,7 +1562,9 @@ public sealed class AudioCapturePipeline : IDisposable
 
     public sealed record ChatRoute(string AppName, int ProcessId);
 
-    public sealed record AudioRoutes(ChatRoute[] ChatRoutes, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey, string[] MicrophoneDeviceIds);
+    internal sealed record MicrophoneRoute(string SourceKey, string DeviceId);
+
+    internal sealed record AudioRoutes(ChatRoute[] ChatRoutes, int[] ExcludedProcessIds, int[] GameProcessIds, bool UseProcessRouting, string RouteKey, MicrophoneRoute[] MicrophoneRoutes);
 
     public enum AudioCaptureKind
     {

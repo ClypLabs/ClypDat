@@ -106,6 +106,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // card for it.
     private readonly SemaphoreSlim _libraryRefreshLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
+    private readonly DefaultMicrophoneWatcher _defaultMicrophoneWatcher;
     private bool _isReplayRecording;
     private bool _isFirstRunOnboarding;
     private bool _isEditorVisible;
@@ -336,6 +337,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // coming up and this can block for seconds. Keep both enumeration and
         // device-name resolution off Avalonia's UI thread; only the finished
         // lists are applied back on the dispatcher.
+        _defaultMicrophoneWatcher = new DefaultMicrophoneWatcher(DefaultMicrophoneWatcher_OnChanged);
         _ = RefreshAudioDevicesAsync();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
@@ -5405,6 +5407,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
         _micLevelMonitor.LevelChanged -= MicLevelMonitor_OnLevelChanged;
         _micLevelMonitor.Dispose();
+        _defaultMicrophoneWatcher.Dispose();
         try { _gameIconSweepCts?.Cancel(); } catch (ObjectDisposedException) { }
         _gameIconSweepCts?.Dispose();
         _gameIconSweepCts = null;
@@ -6831,6 +6834,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CaptureDevices: _audioDevices.GetCaptureDevices().ToArray()));
 
         await Dispatcher.UIThread.InvokeAsync(() => ApplyAudioDeviceSnapshot(snapshot));
+    }
+
+    private void DefaultMicrophoneWatcher_OnChanged()
+    {
+        // The callback is a Core Audio COM thread. Snapshot/apply remains on
+        // its existing worker/UI split, then Default Mic Test reopens against
+        // the new physical endpoint. Explicit selections stay bound.
+        Dispatcher.UIThread.Post(async () =>
+        {
+            var testFollowsDefault = IsMicTestActive && string.Equals(
+                SelectedMicrophoneDevice?.Id ?? Settings.MicrophoneDeviceId,
+                AudioDeviceOption.DefaultDeviceId,
+                StringComparison.Ordinal);
+            await RefreshAudioDevicesAsync();
+            if (testFollowsDefault) RestartMicTestIfRunning();
+        });
     }
 
     public bool AutomaticallyFocusOnGameExit
