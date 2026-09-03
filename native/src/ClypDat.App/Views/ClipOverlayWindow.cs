@@ -78,6 +78,7 @@ internal sealed class ClipOverlayWindow : IDisposable
     private ServerPerPixelOverlay? _perPixel;
 
     private DispatcherTimer? _dwellTimer;
+    private DispatcherTimer? _entryTimer;
     private DispatcherTimer? _exitTimer;
     private DispatcherTimer? _topmostTimer;
     private DispatcherTimer? _watchdogTimer;
@@ -88,14 +89,15 @@ internal sealed class ClipOverlayWindow : IDisposable
     private ClipOverlaySide _committedSide;
     private DateTime _shownAtUtc;
     private double _travelDips;
+    private bool _windowCloaked;
+    private readonly ClipOverlayPresentationState _presentation = new();
+    private int _presentationGeneration;
 
     // Server-SKU manual animation state. On workstation SKUs the slide is a
     // plain Avalonia transition on the translate; on Server the badge is
     // mirrored into a native layered window and the offset has to be stepped by
     // hand.
     private int _animationId;
-    private int _entryId;
-    private bool _entryBegan;
     private double _animationStart;
     private double _animationTarget;
     private double _offset;
@@ -136,45 +138,37 @@ internal sealed class ClipOverlayWindow : IDisposable
         EnsureWindow();
         if (_window is null || _badge is null || _root is null || _label is null || _accent is null || _translate is null) return;
 
-        StopTimer(ref _dwellTimer);
-        StopTimer(ref _exitTimer);
-        StopTimer(ref _watchdogTimer);
-
         var target = request.Session.Target;
         var isLeft = request.Side == ClipOverlaySide.Left;
 
-        _label.Text = request.Text;
-        var showHint = !string.IsNullOrWhiteSpace(request.Hotkey);
-        if (showHint) BuildHint(request.Hotkey!, request.HotkeyHint);
-        if (_hintRow is not null) _hintRow.IsVisible = showHint;
-
-        // Square on the side touching the screen edge, rounded on the side
-        // facing in - a fully rounded badge sitting flush reads as a gap, since
-        // the curve pulls the fill away from the edge at the corners. The accent
-        // stripe stays square and is shaped by the badge's ClipToBounds.
-        _badge.CornerRadius = isLeft ? new CornerRadius(0, 8, 8, 0) : new CornerRadius(8, 0, 0, 8);
-        _accent.CornerRadius = new CornerRadius(0);
-        DockPanel.SetDock(_accent, isLeft ? Dock.Left : Dock.Right);
-
-        ApplyCaptureExclusion(request.ExcludeFromCapture);
-
-        // Same clip, badge already up: swap the text and restart the dwell.
-        // Deliberately no monitor work and no re-entry animation - the window
-        // stays exactly where it was committed, which is what makes "Clip
-        // Saving…" turning into "Clip Saved" a text change rather than a second
-        // arrival somewhere else.
         if (_visibleSession is { } visible && ReferenceEquals(visible, request.Session))
         {
-            ResizeInPlace(target, isLeft);
-            AppLog.Info($"Clip overlay text: id={visible.Id}, text='{request.Text}', rect={Describe(_committedRect)} (in place).");
-            if (_entryBegan) StartDwell();
-            if (request.PlaySound) _playSound();
-            return;
+            var disposition = _presentation.Update(_presentationGeneration, request);
+            if (disposition == ClipOverlayUpdateDisposition.Queue)
+            {
+                AppLog.Info($"Clip overlay update queued: id={visible.Id}, text='{request.Text}', phase={_presentation.Phase}.");
+                return;
+            }
+
+            if (disposition == ClipOverlayUpdateDisposition.Apply) ApplyUpdate(request, target, isLeft);
+            if (disposition != ClipOverlayUpdateDisposition.Restart) return;
+            HideNow("update-during-exit");
         }
 
-        // A different clip while one is still up: take the old one down first
-        // rather than animating the same window from one state into another.
         if (_visibleSession is not null) HideNow("superseded");
+
+        StopTimer(ref _dwellTimer);
+        StopTimer(ref _entryTimer);
+        StopTimer(ref _exitTimer);
+        StopTimer(ref _watchdogTimer);
+        StopAnimation();
+
+        // Hide the old compositor surface before changing text on the reused HWND.
+        _windowCloaked = StartupWindowPresentation.TryCloak(_window);
+        if (!_windowCloaked) _window.Opacity = 0;
+        _perPixel?.Hide();
+        ApplyRequestAppearance(request, isLeft);
+        ApplyCaptureExclusion(request.ExcludeFromCapture);
 
         var handle = NativeHandle();
         // Hand the still-hidden window to the target monitor BEFORE anything is
@@ -202,11 +196,7 @@ internal sealed class ClipOverlayWindow : IDisposable
         _committedSide = isLeft ? ClipOverlaySide.Left : ClipOverlaySide.Right;
         _committedRect = rect;
 
-        // Enter state assigned with the transitions detached, so the assignment
-        // is not itself animated - otherwise the session's first badge slid OUT
-        // to its start position in full view before sliding back in.
         var transitions = _translate.Transitions;
-        StopAnimation();
         _translate.Transitions = null;
         SetOffset(isLeft ? -_travelDips : _travelDips);
 
@@ -223,59 +213,46 @@ internal sealed class ClipOverlayWindow : IDisposable
             CorrectForActualSize(handle, target, isLeft, rect);
         }
 
-        if (WindowsPlatformProfile.IsServer())
-        {
-            _perPixel?.ShowAndRefresh();
-            _perPixel?.SetCaptureExcluded(request.ExcludeFromCapture);
-        }
-
         _visibleSession = request.Session;
-        _entryBegan = false;
+        _presentationGeneration = _presentation.Begin();
         _shownAtUtc = DateTime.UtcNow;
         StartTopmostReassert();
+        ArmWatchdog();
 
         AppLog.Info(
-            $"Clip overlay show: id={request.Session.Id}, trigger={request.Session.Trigger}, text='{request.Text}', " +
+            $"Clip overlay requested: id={request.Session.Id}, trigger={request.Session.Trigger}, text='{request.Text}', " +
             $"side={(isLeft ? "left" : "right")}, monitor={target.DeviceName} ({ClipOverlayTargeting.LabelFor(target.DeviceName)}), " +
             $"reason={target.ReasonLabel}, work={Describe(target.WorkArea)}, scaling={target.Scaling:0.00}, " +
             $"requested={Describe(rect)}, actual={Describe(_committedRect)}, foreground={DescribeForeground()}.");
 
-        var entryId = ++_entryId;
-        Dispatcher.UIThread.Post(() =>
+        var generation = _presentationGeneration;
+        var topLevel = _window as TopLevel;
+        if (topLevel is null) return;
+        topLevel.RequestAnimationFrame(_ =>
         {
-            if (_translate is null || !ReferenceEquals(_visibleSession, request.Session) || entryId != _entryId) return;
-            if (WindowsPlatformProfile.IsServer()) StartAnimation(0);
-            else
-            {
-                _translate.Transitions = transitions;
-                _translate.X = 0;
-            }
-
-            // Fired here rather than at call time so the chime lines up with
-            // the slide starting instead of landing a couple hundred ms early.
-            if (request.PlaySound) _playSound();
-            _entryBegan = true;
-            AppLog.Debug($"Clip overlay entry began: id={request.Session.Id}, text='{request.Text}'.");
-            StartDwell();
-        }, DispatcherPriority.Loaded);
+            if (!IsCurrentPresentation(request.Session, generation)) return;
+            topLevel.RequestAnimationFrame(_ => BeginPreparedEntry(request, transitions, generation));
+        });
     }
 
     public void HideNow(string reason)
     {
         StopTimer(ref _dwellTimer);
+        StopTimer(ref _entryTimer);
         StopTimer(ref _exitTimer);
         StopTimer(ref _topmostTimer);
         StopTimer(ref _watchdogTimer);
         StopAnimation();
 
         var session = _visibleSession;
-        _entryId++;
-        _entryBegan = false;
+        _presentation.Hide();
+        _presentationGeneration = 0;
         _visibleSession = null;
         _committedTarget = null;
 
         _perPixel?.Hide();
         _window?.Hide();
+        RestoreWindowPresentation();
 
         if (session is not null)
         {
@@ -286,14 +263,89 @@ internal sealed class ClipOverlayWindow : IDisposable
 
     public void Dispose()
     {
-        StopTimer(ref _dwellTimer);
-        StopTimer(ref _exitTimer);
-        StopTimer(ref _topmostTimer);
-        StopTimer(ref _watchdogTimer);
+        HideNow("disposed");
         _perPixel?.Dispose();
         _perPixel = null;
         _window?.Close();
         _window = null;
+    }
+
+    private void ApplyRequestAppearance(ClipOverlayRequest request, bool isLeft)
+    {
+        if (_label is null || _badge is null || _accent is null) return;
+        _label.Text = request.Text;
+        var showHint = !string.IsNullOrWhiteSpace(request.Hotkey);
+        if (showHint) BuildHint(request.Hotkey!, request.HotkeyHint);
+        if (_hintRow is not null) _hintRow.IsVisible = showHint;
+        _badge.CornerRadius = isLeft ? new CornerRadius(0, 8, 8, 0) : new CornerRadius(8, 0, 0, 8);
+        _accent.CornerRadius = new CornerRadius(0);
+        DockPanel.SetDock(_accent, isLeft ? Dock.Left : Dock.Right);
+    }
+
+    private void ApplyUpdate(ClipOverlayRequest request, ClipOverlayTarget target, bool isLeft)
+    {
+        ApplyRequestAppearance(request, isLeft);
+        ApplyCaptureExclusion(request.ExcludeFromCapture);
+        ResizeInPlace(target, isLeft);
+        AppLog.Info($"Clip overlay update applied: id={request.Session.Id}, text='{request.Text}', rect={Describe(_committedRect)}.");
+        if (request.PlaySound) _playSound();
+        StartDwell();
+    }
+
+    private bool IsCurrentPresentation(ClipOverlaySession session, int generation) =>
+        ReferenceEquals(_visibleSession, session) && _presentation.IsCurrent(generation);
+
+    private void BeginPreparedEntry(ClipOverlayRequest request, Transitions? transitions, int generation)
+    {
+        if (_translate is null || !IsCurrentPresentation(request.Session, generation) || !_presentation.BeginEntry(generation)) return;
+
+        RestoreWindowPresentation();
+        if (WindowsPlatformProfile.IsServer())
+        {
+            _perPixel?.ShowAndRefresh();
+            _perPixel?.SetCaptureExcluded(request.ExcludeFromCapture);
+            StartAnimation(0, () => CompleteEntry(request.Session, generation));
+        }
+        else
+        {
+            _translate.Transitions = transitions;
+            _translate.X = 0;
+            StartEntryTimer(request.Session, generation);
+        }
+
+        if (request.PlaySound) _playSound();
+        AppLog.Debug($"Clip overlay entry began: id={request.Session.Id}, text='{request.Text}', generation={generation}.");
+        StartDwell();
+    }
+
+    private void StartEntryTimer(ClipOverlaySession session, int generation)
+    {
+        StopTimer(ref _entryTimer);
+        var timer = new DispatcherTimer { Interval = SlideDuration };
+        timer.Tick += (_, _) =>
+        {
+            StopTimer(ref _entryTimer);
+            CompleteEntry(session, generation);
+        };
+        _entryTimer = timer;
+        timer.Start();
+    }
+
+    private void CompleteEntry(ClipOverlaySession session, int generation)
+    {
+        if (!IsCurrentPresentation(session, generation)) return;
+        var queued = _presentation.CompleteEntry(generation);
+        if (_presentation.Phase != ClipOverlayPresentationPhase.Dwelling) return;
+        AppLog.Debug($"Clip overlay entry completed: id={session.Id}, generation={generation}.");
+        if (queued is not null) ApplyUpdate(queued, queued.Session.Target, queued.Side == ClipOverlaySide.Left);
+    }
+
+    private void RestoreWindowPresentation()
+    {
+        if (_window is null) return;
+        if (_windowCloaked) StartupWindowPresentation.Reveal(_window);
+        else _window.Opacity = 1;
+        _windowCloaked = false;
     }
 
     // ---- placement -------------------------------------------------------
@@ -391,9 +443,11 @@ internal sealed class ClipOverlayWindow : IDisposable
         _dwellTimer = dwell;
         dwell.Start();
 
-        // Backstop. The exit path is a chain of timers and, on Server SKUs, an
-        // animation completion callback; anything that breaks that chain used to
-        // leave the badge on screen forever.
+        ArmWatchdog();
+    }
+
+    private void ArmWatchdog()
+    {
         StopTimer(ref _watchdogTimer);
         var watchdog = new DispatcherTimer { Interval = DwellDuration + SlideDuration + SlideDuration + TimeSpan.FromMilliseconds(500) };
         watchdog.Tick += (_, _) =>
@@ -409,7 +463,7 @@ internal sealed class ClipOverlayWindow : IDisposable
 
     private void BeginExit()
     {
-        if (_translate is null) return;
+        if (_translate is null || !_presentation.BeginExit()) return;
         var exitOffset = _committedSide == ClipOverlaySide.Left ? -_travelDips : _travelDips;
 
         if (WindowsPlatformProfile.IsServer())
@@ -646,7 +700,6 @@ internal sealed class ClipOverlayWindow : IDisposable
                 _perPixel?.Dispose();
                 _perPixel = new ServerPerPixelOverlay(_window!, _root!);
                 _perPixel.SetPositionOffset(new Vector(_offset, 0));
-                _perPixel.ShowAndRefresh();
                 WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(_window!);
             }
             else

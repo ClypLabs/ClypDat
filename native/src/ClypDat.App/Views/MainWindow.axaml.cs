@@ -389,7 +389,6 @@ public sealed partial class MainWindow : Window
                     // Always a fresh monitor decision: a preview exists to
                     // answer "where would it show NOW", so it must never inherit
                     // the session a save left behind seconds ago.
-                    _clipNotificationSession = null;
                     ShowClipNotification("preview", "Clip Saved", playSound: true);
                 };
                 ViewModel.PropertyChanged += (_, e) =>
@@ -895,7 +894,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        ShowClipNotification("save-started", "Clip Saving…", playSound: false);
+        ShowClipNotification("save-started", "Clip Saving…", playSound: false, saveStart: true);
     }
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
@@ -909,7 +908,7 @@ public sealed partial class MainWindow : Window
             }
             if (!string.IsNullOrWhiteSpace(completed.Error))
             {
-                ShowClipNotification("save-failed", "Clip Failed", playSound: false);
+                ShowClipNotification("save-failed", "Clip Failed", playSound: false, saveCompletion: true);
                 await ShowMessageAsync("Clip Failed", completed.Error);
                 return;
             }
@@ -3050,7 +3049,7 @@ public sealed partial class MainWindow : Window
                 {
                     var wait = clipWindow.EndUtc - MonotonicClock.UtcNow;
                     if (wait > TimeSpan.Zero) await Task.Delay(wait);
-                    ShowClipNotification("ui-save", $"Saving {autoClipLabel} Clip…", playSound: false);
+                    ShowClipNotification("ui-save", $"Saving {autoClipLabel} Clip…", playSound: false, saveStart: true);
                 }
                 else
                 {
@@ -3061,7 +3060,7 @@ public sealed partial class MainWindow : Window
                     // the whole time it was working. Auto-clips already got this
                     // via the branch above; manual presses just never had the
                     // equivalent.
-                    ShowClipNotification("ui-save", "Clip Saving…", playSound: false);
+                    ShowClipNotification("ui-save", "Clip Saving…", playSound: false, saveStart: true);
                 }
 
                 var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
@@ -3077,7 +3076,7 @@ public sealed partial class MainWindow : Window
                 // say so now rather than let it be discovered on playback later.
                 if (_replayBuffer.LastSaveVideoWasFrozen)
                 {
-                    ShowClipNotification("ui-save", "Clip Saved - video was frozen", playSound: true);
+                    ShowClipNotification("ui-save", "Clip Saved - video was frozen", playSound: true, saveCompletion: true);
                 }
                 else
                 {
@@ -3149,17 +3148,17 @@ public sealed partial class MainWindow : Window
 
     private void ShowClipSavedNotification(string trigger)
     {
-        ShowClipNotification(trigger, "Clip Saved", playSound: true);
+        ShowClipNotification(trigger, "Clip Saved", playSound: true, saveCompletion: true);
     }
 
-    private void ShowClipNotification(string trigger, string text, bool playSound)
+    private void ShowClipNotification(string trigger, string text, bool playSound, bool saveStart = false, bool saveCompletion = false)
     {
         if (ViewModel is null) return;
         if (ViewModel.Settings.EnableClipOverlay)
         {
             try
             {
-                ShowClipOverlay(trigger, ViewModel.Settings.ClipOverlayPosition, text, playSound);
+                ShowClipOverlay(trigger, ViewModel.Settings.ClipOverlayPosition, text, playSound, saveStart, saveCompletion);
             }
             catch (Exception error)
             {
@@ -3877,11 +3876,10 @@ public sealed partial class MainWindow : Window
     // ClipOverlayWindow. What stays here is the policy: which notifications are
     // enabled, and which monitor decision each one belongs to.
     private ClipOverlayWindow? _clipOverlayWindow;
-    private ClipOverlaySession? _clipNotificationSession;
-    // One clip event's toasts share one monitor decision. Past this the world
-    // has genuinely moved on - a save taking this long means an alt-tab or a
-    // display change is likelier than not - so the next toast re-resolves.
-    private static readonly TimeSpan ClipNotificationSessionMaxAge = TimeSpan.FromSeconds(30);
+    private ClipOverlaySessionManager? _clipNotificationSessions;
+
+    private ClipOverlaySessionManager ClipNotificationSessions =>
+        _clipNotificationSessions ??= new ClipOverlaySessionManager(() => ClipOverlayTargeting.Resolve(CurrentClipOverlayTargetInputs()));
 
     private ClipOverlayWindow ClipOverlay
     {
@@ -3889,34 +3887,20 @@ public sealed partial class MainWindow : Window
         {
             if (_clipOverlayWindow is not null) return _clipOverlayWindow;
             var overlay = new ClipOverlayWindow(PlayClipNotificationSound);
-            // Only when the session that just came down is still the current
-            // one. A toast superseded by the next clip's first toast hides
-            // AFTER that clip's session exists, and clearing then would send
-            // the rest of that clip's toasts back to re-resolve the monitor.
-            overlay.Hidden += (_, session) =>
-            {
-                if (ReferenceEquals(_clipNotificationSession, session)) _clipNotificationSession = null;
-            };
+            overlay.Hidden += (_, session) => _clipNotificationSessions?.OnHidden(session);
             _clipOverlayWindow = overlay;
             return overlay;
         }
     }
 
-    // A save shows two toasts - "Clip Saving…" from the worker's save-started
-    // event and "Clip Saved" two to four seconds later - and they must agree on
-    // which monitor they belong to. Resolving per toast is what let one window
-    // start on one display and finish on another.
-    private ClipOverlaySession EnsureClipNotificationSession(string trigger)
+    private ClipOverlaySession CreateClipOverlaySession(string trigger, bool saveStart, bool saveCompletion)
     {
-        if (_clipNotificationSession is { } existing && existing.Age < ClipNotificationSessionMaxAge)
-        {
-            AppLog.Info($"Clip overlay session: id={existing.Id} reused for trigger={trigger} (age={existing.Age.TotalSeconds:0.0}s).");
-            return existing;
-        }
-
-        var target = ClipOverlayTargeting.Resolve(CurrentClipOverlayTargetInputs());
-        var session = new ClipOverlaySession(trigger, target);
-        _clipNotificationSession = session;
+        var session = saveStart
+            ? ClipNotificationSessions.BeginSave(trigger)
+            : saveCompletion
+                ? ClipNotificationSessions.CompleteSave(trigger)
+                : ClipNotificationSessions.CreateStandalone(trigger);
+        var target = session.Target;
         AppLog.Info(
             $"Clip overlay session: id={session.Id}, trigger={trigger}, monitor={target.DeviceName} " +
             $"({ClipOverlayTargeting.LabelFor(target.DeviceName)}), reason={target.ReasonLabel}, " +
@@ -3947,10 +3931,10 @@ public sealed partial class MainWindow : Window
             ViewModel?.ActiveGameDetection.WindowHandle ?? IntPtr.Zero);
     }
 
-    private void ShowClipOverlay(string trigger, string position, string text, bool playSound, string? hotkey = null, string hotkeyHint = "")
+    private void ShowClipOverlay(string trigger, string position, string text, bool playSound, bool saveStart = false, bool saveCompletion = false, string? hotkey = null, string hotkeyHint = "")
     {
         ClipOverlay.Show(new ClipOverlayRequest(
-            EnsureClipNotificationSession(trigger),
+            CreateClipOverlaySession(trigger, saveStart, saveCompletion),
             text,
             string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase) ? ClipOverlaySide.Left : ClipOverlaySide.Right,
             playSound,
