@@ -2143,11 +2143,18 @@
                            Value="{Binding CurrentTime.TotalSeconds}"
                            Foreground="{StaticResource AccentBrush}" />
             </Border>
-            <Grid ColumnDefinitions="Auto,*,Auto">
+            <!-- One cell with all three groups stacked in it, each aligned
+                 to its own edge, rather than three columns - same reason the
+                 hover bar does it (see BuildPlaybackBarLayout). In a column
+                 split the title centres in whatever the transport group
+                 leaves over, so it shifted sideways every time the elapsed
+                 readout changed width. Overlapping centres it on the bar,
+                 which is the only thing that holds still. -->
+            <Grid>
               <!-- flatControl (bare icons, translucent hover wash) rather than
                    the filled tiles: on a bar this wide a row of grey boxes is
                    the loudest thing on screen, and it is not the video. -->
-              <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Left" VerticalAlignment="Center">
                 <Button Classes="transportButton flatControl" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
                   <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </Button>
@@ -2178,8 +2185,7 @@
               <!-- The clip name, the one piece of context fullscreen drops
                    along with the rest of the editor chrome. Trimmed, never
                    wrapped - it shares the row height with the transport. -->
-              <TextBlock Grid.Column="1"
-                         Text="{Binding EditorTitle}"
+              <TextBlock Text="{Binding EditorTitle}"
                          Foreground="{StaticResource Text_C4D0DF}"
                          FontSize="12"
                          FontWeight="SemiBold"
@@ -2189,7 +2195,7 @@
                          HorizontalAlignment="Center"
                          VerticalAlignment="Center" />
 
-              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <Border Classes="muteToggle flatControl"
                         Width="28"
                         Height="28"
