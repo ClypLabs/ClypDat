@@ -2039,6 +2039,26 @@
   <Style Selector="Slider.volumeSlider:horizontal /template/ RepeatButton#PART_IncreaseButton /template/ Border#TrackBackground">
     <Setter Property="CornerRadius" Value="0,2.25,2.25,0" />
   </Style>
+  <!--
+    ...and squaring them is only half of it, because Track reserves the thumb's
+    FULL width for the thumb and gives the two rail segments the space either
+    side of it. The rail genuinely stops at the circle rather than passing
+    behind it, and a flat end butted against a round thumb leaves a crescent of
+    background at the joint - which is the abrupt cut.
+
+    Each segment is pushed back under the thumb by half its width (8 of the
+    16px thumb, 11 of the 22px one), so the two square ends meet exactly at the
+    thumb's centre, behind it. Track arranges these with Arrange(Rect), which
+    applies Margin, so a negative margin genuinely extends the segment past the
+    rect it was given. The rail is now one unbroken bar with the thumb sitting
+    on top of it, which is what every slider that does this well looks like.
+  -->
+  <Style Selector="Slider.volumeSlider:horizontal /template/ RepeatButton#PART_DecreaseButton">
+    <Setter Property="Margin" Value="0,0,-8,0" />
+  </Style>
+  <Style Selector="Slider.volumeSlider:horizontal /template/ RepeatButton#PART_IncreaseButton">
+    <Setter Property="Margin" Value="-8,0,0,0" />
+  </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb">
     <Setter Property="Width" Value="16" />
     <Setter Property="Height" Value="16" />
@@ -2076,6 +2096,12 @@
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider:horizontal /template/ RepeatButton#PART_IncreaseButton /template/ Border#TrackBackground">
     <Setter Property="CornerRadius" Value="0,3.5,3.5,0" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.appVolumeSlider:horizontal /template/ RepeatButton#PART_DecreaseButton">
+    <Setter Property="Margin" Value="0,0,-11,0" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.appVolumeSlider:horizontal /template/ RepeatButton#PART_IncreaseButton">
+    <Setter Property="Margin" Value="-11,0,0,0" />
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider /template/ Thumb">
     <Setter Property="Width" Value="22" />
