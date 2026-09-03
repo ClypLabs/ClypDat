@@ -8,7 +8,6 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Media.Transformation;
 using Avalonia.Rendering.Composition;
-using Avalonia.Styling;
 using Avalonia.Threading;
 using ClypDat.App.Services;
 
@@ -430,37 +429,51 @@ internal sealed class ClipOverlayWindow : IDisposable
 
     // ---- motion ----------------------------------------------------------
 
-    // An explicit keyframe animation, never a Transition, and run against the
-    // layer's RenderTransform rather than a TranslateTransform object.
+    // The slide is stepped by hand off the window's own frame clock rather than
+    // handed to Avalonia's Animation.
     //
-    // Both parts matter. A Transition needs its from-value and its to-value
-    // committed in separate passes, and a badge that is prepared and revealed
-    // in one beat can commit both together. And Avalonia's animator for
-    // TranslateTransform.X casts its target to Visual (TransformAnimator), so
-    // running an Animation directly on a TranslateTransform throws - the
-    // supported target is Visual.RenderTransform carrying TransformOperations,
-    // which TransformOperationsAnimator interpolates properly.
-    private static async Task SlideAsync(BadgeLayer layer, double from, double to, TimeSpan duration, Easing easing, CancellationToken token)
+    // Two attempts at the framework route both failed at runtime, and the
+    // reasons are worth recording so nobody retries them: an Animation on a
+    // TranslateTransform throws, because TransformAnimator casts its target to
+    // Visual; and an Animation on Visual.RenderTransform throws "No animator
+    // registered for the property RenderTransform", because the registry has no
+    // entry for it. Stepping the value ourselves also removes the failure mode
+    // that started all of this - a Transition that silently does not play when
+    // its endpoints commit in one batch - because there are no endpoints to
+    // commit, just a value written every frame.
+    //
+    // Cancellation deliberately leaves the layer at the position it was last
+    // drawn at, which is what lets a superseding notification pick the motion
+    // up from there instead of jumping.
+    private async Task SlideAsync(BadgeLayer layer, double from, double to, TimeSpan duration, Easing easing, CancellationToken token)
     {
-        var animation = new Animation
+        if (_window is not TopLevel topLevel || duration <= TimeSpan.Zero)
         {
-            Duration = duration,
-            Easing = easing,
-            // Without Forward the value snaps back to its base the instant the
-            // animation ends - the badge would teleport off screen at the end
-            // of its own entrance.
-            FillMode = FillMode.Forward,
-            Children =
-            {
-                new KeyFrame { Cue = new Cue(0d), Setters = { new Setter(Visual.RenderTransformProperty, TranslateBy(from)) } },
-                new KeyFrame { Cue = new Cue(1d), Setters = { new Setter(Visual.RenderTransformProperty, TranslateBy(to)) } }
-            }
-        };
+            layer.SetOffset(to);
+            return;
+        }
 
-        await animation.RunAsync(layer.Root, token);
+        var completion = new TaskCompletionSource();
+        TimeSpan? start = null;
+
+        void Step(TimeSpan frameTime)
+        {
+            if (token.IsCancellationRequested)
+            {
+                completion.TrySetResult();
+                return;
+            }
+
+            start ??= frameTime;
+            var progress = Math.Clamp((frameTime - start.Value).TotalMilliseconds / duration.TotalMilliseconds, 0, 1);
+            layer.SetOffset(from + (to - from) * easing.Ease(progress));
+            if (progress < 1) topLevel.RequestAnimationFrame(Step);
+            else completion.TrySetResult();
+        }
+
+        topLevel.RequestAnimationFrame(Step);
+        await completion.Task;
         token.ThrowIfCancellationRequested();
-        // The completion callback runs before the final fill is applied, so the
-        // resting value is assigned explicitly rather than assumed.
         layer.SetOffset(to);
     }
 
