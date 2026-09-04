@@ -671,6 +671,61 @@
   <Style Selector="Button.autoClipGroupToggle:pointerover Border">
     <Setter Property="BorderBrush" Value="{StaticResource Text_A9C9E5}" />
   </Style>
+
+  <!-- Auto-clipping events were a single left-aligned column of bare
+       checkboxes running the whole height of the section, which left the
+       right two thirds of the card empty and made a game with a dozen events
+       an unreadable ladder. As chips in a responsive grid they use the width
+       and each one is a target big enough to hit.
+
+       Fluent paints its own pointerover/pressed/disabled backgrounds straight
+       onto PART_Border, so each of those states has to be answered here or
+       the chip loses its surface the moment the pointer touches it. -->
+  <Style Selector="CheckBox.autoClipEvent">
+    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="MinHeight" Value="38" />
+    <Setter Property="Padding" Value="8,0,10,0" />
+    <Setter Property="Margin" Value="0,0,8,8" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+  </Style>
+  <Style Selector="CheckBox.autoClipEvent /template/ Border#PART_Border">
+    <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource AncestorType=CheckBox}}" />
+    <Setter Property="BorderBrush" Value="{Binding BorderBrush, RelativeSource={RelativeSource AncestorType=CheckBox}}" />
+  </Style>
+  <Style Selector="CheckBox.autoClipEvent:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
+  </Style>
+  <Style Selector="CheckBox.autoClipEvent:pressed">
+    <Setter Property="Background" Value="{StaticResource Surface_22303D}" />
+  </Style>
+  <!-- A checked chip reads at a glance from its surface, not just from a 20px
+       tick - which is the whole point of picking events out of a long list. -->
+  <Style Selector="CheckBox.autoClipEvent:checked">
+    <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+  </Style>
+  <Style Selector="CheckBox.autoClipEvent:checked:pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
+  </Style>
+
+  <!-- The header carries the game's own on/off switch, so the art has no
+       reason to be a full poster any more - it was 84x120 beside a body three
+       times its height, and the column it sat in was empty the rest of the way
+       down. -->
+  <Style Selector="Border.autoClipCover">
+    <Setter Property="Width" Value="52" />
+    <Setter Property="Height" Value="52" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="Background" Value="{StaticResource Surface_1F3341}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
   <Style Selector="MenuFlyoutPresenter">
     <!-- Fluent places its rows through this resource, not the presenter's
          Padding property. Removing its 4px vertical margin makes first and

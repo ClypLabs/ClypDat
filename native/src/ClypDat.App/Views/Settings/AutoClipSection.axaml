@@ -42,32 +42,99 @@
     <ItemsControl ItemsSource="{Binding AutoClipGames}">
       <ItemsControl.ItemTemplate>
         <DataTemplate>
-          <Grid ColumnDefinitions="84,*,Auto" ColumnSpacing="16" Margin="0,0,0,18" IsVisible="{Binding IsSearchMatch}">
-            <Border Width="84" Height="120" CornerRadius="8" ClipToBounds="True" Background="{StaticResource Surface_1F3341}" VerticalAlignment="Top">
-              <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
-            </Border>
-            <StackPanel Grid.Column="1" Spacing="8">
-              <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" opconv:SettingsHighlight.Query="{Binding SearchQuery}" />
-              <TextBlock Classes="settingsRowDescSm" Text="{Binding StatusText}" />
-            <Button Content="Set Up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}" HorizontalAlignment="Left" />
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" IsVisible="{Binding IsCs2}">
-                <StackPanel Spacing="2">
-                  <TextBlock Text="Deathmatch Clipping" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" />
-                  <TextBlock Classes="settingsRowDescSm" Text="CS2 auto-clips save in Competitive matches. Enable this to also save Deathmatch clips." />
+          <!-- One card per game, so two games no longer run together under a
+               single hairline. -->
+          <Border Classes="settingsCard" Margin="0,0,0,14" IsVisible="{Binding IsSearchMatch}">
+            <StackPanel Spacing="0">
+              <!-- The game's own switch belongs beside the game's name. It used
+                   to sit in a third column of the outer grid, vertically
+                   centred against the whole event list, so it floated in space
+                   level with an arbitrary checkbox and looked like it belonged
+                   to that instead. -->
+              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+                <Border Classes="autoClipCover">
+                  <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="15"
+                             opconv:SettingsHighlight.Query="{Binding SearchQuery}" />
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding StatusText}" />
                 </StackPanel>
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DeathmatchClipping}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                <ToggleSwitch Grid.Column="2" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
               </Grid>
-              <ItemsControl ItemsSource="{Binding Groups}">
-                <ItemsControl.ItemTemplate><DataTemplate><StackPanel Spacing="6"><Button Classes="autoClipGroupToggle" Click="AutoClipGroupToggleButton_OnClick"><Grid ColumnDefinitions="20,*" ColumnSpacing="7"><Grid Width="20" Height="20"><Border BorderBrush="{StaticResource TextMutedBrush}" BorderThickness="1" CornerRadius="4" Background="Transparent" /><Border IsVisible="{Binding IsAllEnabled}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><Border IsVisible="{Binding IsIndeterminate}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" /><TextBlock Text="?" IsVisible="{Binding IsAllEnabled}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" /><TextBlock Text="-" IsVisible="{Binding IsIndeterminate}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" /></Grid><TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid></Button><ItemsControl ItemsSource="{Binding Events}" Margin="26,0,0,0"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
-              </ItemsControl>
-              <ItemsControl ItemsSource="{Binding UngroupedEvents}"><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+
+              <!-- Outside the disabled block below: setup is what you do
+                   BEFORE the game can be switched on. -->
+              <Button Content="Set Up Dota 2" Click="SetupDotaAutoClipButton_OnClick" IsVisible="{Binding IsSetupRequired}"
+                      HorizontalAlignment="Left" Margin="66,14,0,0" />
+
+              <!-- Greys out with the switch above it, so what that switch
+                   actually governs is not left to guesswork. -->
+              <StackPanel Spacing="0" IsEnabled="{Binding IsEnabled}">
+                <StackPanel Spacing="16" IsVisible="{Binding IsCs2}">
+                  <Border Classes="settingsDivider" Margin="0,18,0,0" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="settingsRowTitle" Text="Deathmatch Clipping" />
+                      <TextBlock Classes="settingsRowDescSm" Text="CS2 auto-clips save in Competitive matches. Enable this to also save Deathmatch clips." />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding DeathmatchClipping}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
+                </StackPanel>
+
+                <Border Classes="settingsDivider" Margin="0,18,0,16" />
+
+                <ItemsControl ItemsSource="{Binding Groups}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel Spacing="10" Margin="0,0,0,14">
+                        <!-- Kept as the tri-state button it was: it is the one
+                             control that can turn a whole group on or off, and
+                             the dash/tick already says which state it is in. -->
+                        <Button Classes="autoClipGroupToggle" Click="AutoClipGroupToggleButton_OnClick">
+                          <Grid ColumnDefinitions="20,*" ColumnSpacing="8">
+                            <Grid Width="20" Height="20">
+                              <Border BorderBrush="{StaticResource TextMutedBrush}" BorderThickness="1" CornerRadius="4" Background="Transparent" />
+                              <Border IsVisible="{Binding IsAllEnabled}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" />
+                              <Border IsVisible="{Binding IsIndeterminate}" BorderBrush="{DynamicResource CheckBoxCheckBackgroundFillChecked}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource CheckBoxCheckBackgroundFillChecked}" />
+                              <TextBlock Text="&#x2713;" IsVisible="{Binding IsAllEnabled}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="14" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                              <TextBlock Text="-" IsVisible="{Binding IsIndeterminate}" Foreground="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" FontSize="17" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                            </Grid>
+                            <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                          </Grid>
+                        </Button>
+                        <ItemsControl ItemsSource="{Binding Events}" Margin="28,0,-8,0">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                              <controls:ResponsiveUniformGrid MinimumItemWidth="140" MaximumColumns="4" />
+                            </ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <CheckBox Classes="autoClipEvent" Content="{Binding Name}" IsChecked="{Binding IsEnabled}" />
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <ItemsControl ItemsSource="{Binding UngroupedEvents}" Margin="0,0,-8,0">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <controls:ResponsiveUniformGrid MinimumItemWidth="140" MaximumColumns="4" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <CheckBox Classes="autoClipEvent" Content="{Binding Name}" IsChecked="{Binding IsEnabled}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
             </StackPanel>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-              <TextBlock Text="ON" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" VerticalAlignment="Center" />
-              <ToggleSwitch IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-            </StackPanel>
-            <Border Grid.ColumnSpan="3" Height="1" Background="{StaticResource SurfaceHoverBrush}" VerticalAlignment="Bottom" Margin="0,18,0,0" />
-          </Grid>
+          </Border>
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>
