@@ -24,6 +24,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         _settings = settings;
         _save = save;
         if (definition.UsesDetectorPack) _statusText = "Not Installed";
+        else if (definition.UsesDetector) _statusText = "Waiting for Game";
         if (!string.IsNullOrWhiteSpace(definition.CoverAssetPath))
             CoverImage = new Bitmap(AssetLoader.Open(new Uri(definition.CoverAssetPath)));
         if (!string.IsNullOrWhiteSpace(definition.PortraitDetectionKey)) _ = LoadPortraitAsync();

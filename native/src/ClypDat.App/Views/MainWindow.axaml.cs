@@ -141,6 +141,7 @@ public sealed partial class MainWindow : Window
     // Keep the target that started the current buffer so detector ticks only
     // restart when that identity really changes.
     private string _activeReplayTargetIdentity = string.Empty;
+    private string _helldiversPolicyIdentity = string.Empty;
     private readonly EncoderTuningService _encoderTuning = new();
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
@@ -561,6 +562,7 @@ public sealed partial class MainWindow : Window
                 workerEvents.SaveStarted -= Worker_SaveStarted;
                 workerEvents.SaveCompleted -= Worker_SaveCompleted;
                 workerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
+                workerEvents.AutoClipDetected -= Worker_AutoClipDetected;
             }
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -867,6 +869,7 @@ public sealed partial class MainWindow : Window
             workerEvents.SaveStarted += Worker_SaveStarted;
             workerEvents.SaveCompleted += Worker_SaveCompleted;
             workerEvents.FullSessionRecordingToggled += Worker_FullSessionRecordingToggled;
+            workerEvents.AutoClipDetected += Worker_AutoClipDetected;
         }
     }
 
@@ -878,6 +881,7 @@ public sealed partial class MainWindow : Window
             if (!ReferenceEquals(_replayBuffer, buffer) || ViewModel is null) return;
             ViewModel.IsReplayRecording = buffer.IsRecording;
             if (!buffer.IsRecording) UpdateRecorderStatusFromState();
+            UpdateDetectorPackAutoClipStates();
         });
     }
 
@@ -901,6 +905,23 @@ public sealed partial class MainWindow : Window
         }
 
         ShowClipNotification("save-started", "Clip Saving…", playSound: false, saveStart: true);
+    }
+
+    private void Worker_AutoClipDetected(object? sender, AutoClipDetectorEvent detected)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(_replayBuffer, sender) || ViewModel is null || !IsActiveAutoClipGame(detected.GameId)) return;
+            var settings = GetAutoClipSettingsSnapshot(detected.GameId);
+            if (!ViewModel.AutoClippingEnabled || !settings.Enabled || !settings.Events.TryGetValue(detected.EventId, out var enabled) || !enabled) return;
+            AppLog.Info($"Live auto-clip detected: game={detected.GameId}, event={detected.EventId}, confidence={detected.Confidence:F2}.");
+            ShowAutoClipPendingNotification($"Auto clip started — {detected.EventLabel} detected, finishing the clip.");
+            _ = SaveReplayClipAsync(
+                detected.EventLabel,
+                new ReplayClipWindow(detected.TimestampUtc - TimeSpan.FromSeconds(detected.LeadSeconds), detected.TimestampUtc + TimeSpan.FromSeconds(detected.TailSeconds)),
+                "HELLDIVERS™ 2",
+                detected.EventLabel);
+        });
     }
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
@@ -1048,6 +1069,7 @@ public sealed partial class MainWindow : Window
             oldWorkerEvents.SaveStarted -= Worker_SaveStarted;
             oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
             oldWorkerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
+            oldWorkerEvents.AutoClipDetected -= Worker_AutoClipDetected;
         }
         _replayBuffer.Dispose();
         _replayConfigSnapshot = config;
@@ -2855,6 +2877,7 @@ public sealed partial class MainWindow : Window
             // retain the temporary switching label from the scheduler.
             UpdateRecorderStatusFromState();
             if (ViewModel.IsReplayRecording && !ViewModel.IsEffectiveDesktopCapture) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
+            UpdateDetectorPackAutoClipStates();
         }
         catch (Exception error)
         {
@@ -5456,12 +5479,43 @@ public sealed partial class MainWindow : Window
     private void UpdateDetectorPackAutoClipStates()
     {
         if (ViewModel is null) return;
-        foreach (var definition in AutoClipCatalog.Active.Where(item => item.UsesDetectorPack))
+        foreach (var definition in AutoClipCatalog.Active.Where(item => item.UsesDetector))
         {
             if (ViewModel.FindAutoClipGame(definition.Id) is not { } game) continue;
-            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled
-                ? "Not Installed"
-                : "Not Installed — detector assets required";
+            if (!string.Equals(definition.Id, "helldivers2", StringComparison.OrdinalIgnoreCase))
+            {
+                game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled
+                    ? "Not Installed"
+                    : "Not Installed — detector assets required";
+                continue;
+            }
+
+            var active = IsActiveAutoClipGame("helldivers2");
+            var enabled = ViewModel.AutoClippingEnabled && game.IsEnabled && active && _replayBuffer?.IsRecording == true;
+            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled ? "Disabled" : active
+                ? enabled ? "Watching" : "Calibrating — replay starting"
+                : "Waiting for Game";
+            _ = UpdateHelldiversDetectorPolicyAsync(enabled);
+        }
+    }
+
+    private async Task UpdateHelldiversDetectorPolicyAsync(bool enabled)
+    {
+        if (ViewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
+        var settings = GetAutoClipSettingsSnapshot("helldivers2");
+        var events = settings.Events.Where(item => item.Value).Select(item => item.Key).OrderBy(item => item, StringComparer.Ordinal).ToArray();
+        var identity = $"{enabled}:{string.Join(',', events)}";
+        if (string.Equals(identity, _helldiversPolicyIdentity, StringComparison.Ordinal)) return;
+        try
+        {
+            await worker.UpdateAutoClipPolicyAsync(enabled ? "helldivers2" : null, enabled, events);
+            _helldiversPolicyIdentity = identity;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Helldivers detector policy update failed", error);
+            if (ViewModel.FindAutoClipGame("helldivers2") is { } game)
+                game.StatusText = "Failed — detector could not start";
         }
     }
 

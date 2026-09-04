@@ -8,13 +8,14 @@ namespace ClypDat.App.Tests;
 public sealed class AutoClipCatalogTests
 {
     [Fact]
-    public void CvGamesArePresentButDisabledUntilPacksExist()
+    public void CvGamesExposeTheirRuntimeDeliveryAndDefaultDisabledState()
     {
         var fortnite = AutoClipCatalog.Get("fortnite");
         var helldivers = AutoClipCatalog.Get("helldivers2");
 
         Assert.True(fortnite.UsesDetectorPack);
-        Assert.True(helldivers.UsesDetectorPack);
+        Assert.False(helldivers.UsesDetectorPack);
+        Assert.True(helldivers.UsesDetector);
         Assert.False(fortnite.DefaultEnabled);
         Assert.False(helldivers.DefaultEnabled);
         Assert.Equal("clypdat-cv", fortnite.ProviderId);
@@ -22,6 +23,7 @@ public sealed class AutoClipCatalogTests
         Assert.Equal("epic-fortnite", fortnite.PortraitDetectionKey);
         Assert.Equal("steam-553850", helldivers.PortraitDetectionKey);
         Assert.Equal("HELLDIVERS™ 2", helldivers.PortraitDisplayName);
+        Assert.Equal("HELLDIVERS™ 2", helldivers.Name);
     }
 
     [Fact]

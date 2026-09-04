@@ -6,7 +6,7 @@ public sealed record AutoClipEventDefinition(
 
 public sealed record AutoClipGroupDefinition(string Id, string Name);
 
-public enum AutoClipSetupCapability { None, LocalGameStateIntegration, DownloadableDetectorPack }
+public enum AutoClipSetupCapability { None, LocalGameStateIntegration, BuiltInDetector, DownloadableDetectorPack }
 
 public sealed record AutoClipGameDefinition(
     string Id, string Name, IReadOnlyList<AutoClipEventDefinition> Events,
@@ -19,6 +19,7 @@ public sealed record AutoClipGameDefinition(
 {
     public IReadOnlyList<string> Aliases => DetectionAliases ?? Array.Empty<string>();
     public bool UsesDetectorPack => SetupCapability == AutoClipSetupCapability.DownloadableDetectorPack;
+    public bool UsesDetector => SetupCapability is AutoClipSetupCapability.BuiltInDetector or AutoClipSetupCapability.DownloadableDetectorPack;
 }
 
 public static class AutoClipCatalog
@@ -79,7 +80,7 @@ public static class AutoClipCatalog
             DetectionAliases: new[] { "fortnite", "FortniteClient-Win64-Shipping" },
             SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "fortnite", DefaultEnabled: false,
             PortraitDetectionKey: "epic-fortnite", PortraitDisplayName: "Fortnite"),
-        new AutoClipGameDefinition("helldivers2", "Helldivers 2", new[]
+        new AutoClipGameDefinition("helldivers2", "HELLDIVERS™ 2", new[]
         {
             Event("eliminated", "Eliminated", priority: 10, lead: 12, tail: 6),
             Event("killstreak-20", "Killstreak ×20", "streaks", 20, true, 10, 6),
@@ -91,8 +92,8 @@ public static class AutoClipCatalog
             new AutoClipGroupDefinition("streaks", "Killstreaks"),
             new AutoClipGroupDefinition("missions", "Missions")
         }, ProviderId: "clypdat-cv",
-            DetectionAliases: new[] { "helldivers2", "Helldivers 2" },
-            SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "helldivers2", DefaultEnabled: false,
+            DetectionAliases: new[] { "helldivers2", "Helldivers 2", "HELLDIVERS™ 2" },
+            SetupCapability: AutoClipSetupCapability.BuiltInDetector, PackId: "helldivers2-prototype", DefaultEnabled: false,
             PortraitDetectionKey: "steam-553850", PortraitDisplayName: "HELLDIVERS™ 2")
     };
 

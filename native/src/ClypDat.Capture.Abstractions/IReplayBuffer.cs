@@ -215,6 +215,8 @@ public interface IReplayCaptureDiagnostics
 }
 
 public sealed record ReplaySaveCompleted(string Path, string? Title, DateTime CompletedUtc, string? Error = null);
+public sealed record AutoClipDetectorEvent(string GameId, string EventId, string EventLabel, string OccurrenceId,
+    double Confidence, DateTime TimestampUtc, int LeadSeconds, int TailSeconds);
 
 public interface IReplayCaptureWorkerEvents
 {
@@ -222,6 +224,7 @@ public interface IReplayCaptureWorkerEvents
     event EventHandler? SaveStarted;
     event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     event EventHandler<bool>? FullSessionRecordingToggled;
+    event EventHandler<AutoClipDetectorEvent>? AutoClipDetected;
 }
 
 public interface IReplayCaptureWorkerControl
@@ -230,6 +233,8 @@ public interface IReplayCaptureWorkerControl
     Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default);
     Task UpdateFullSessionHotkeyAsync(string hotkey, CancellationToken cancellationToken = default);
     Task UpdateClipGameNameAsync(string gameDisplayName, CancellationToken cancellationToken = default);
+    Task UpdateAutoClipPolicyAsync(string? gameId, bool enabled, IReadOnlyList<string> enabledEventIds,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IStoragePressureObserver

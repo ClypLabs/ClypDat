@@ -8,8 +8,6 @@ namespace ClypDat.DetectorFixtureRunner;
 internal static class Program
 {
     private const double FramesPerSecond = 2;
-    private const double EliminatedTemplateThreshold = 0.35;
-    private const double MissionTemplateThreshold = 0.72;
     private static readonly NormalizedRegion EliminatedRegion = new(0.34, 0.445, 0.32, 0.065);
     private static readonly NormalizedRegion SquadPayoutRegion = new(0.42, 0.335, 0.16, 0.055);
     private static readonly NormalizedRegion KillCounterRegion = new(0.45, 0.72, 0.12, 0.12);
@@ -93,21 +91,16 @@ internal static class Program
             var frameIndex = int.Parse(parts[2], CultureInfo.InvariantCulture);
             return new FrameSample(path, TimeSpan.FromMilliseconds(startMilliseconds + frameIndex * 1000 / FramesPerSecond));
         }).OrderBy(frame => frame.Timestamp).ToArray();
-        var eliminatedTemplate = await TemplateFor("eliminated", EliminatedRegion);
-        var missionTemplate = await TemplateFor("successful-mission", SquadPayoutRegion);
         TimeSpan? previousTimestamp = null;
         for (var index = 0; index < frames.Length; index++)
         {
             var frame = frames[index];
             if (previousTimestamp is { } previous && frame.Timestamp - previous > TimeSpan.FromSeconds(2)) detector.ResetSession();
             previousTimestamp = frame.Timestamp;
-            var eliminatedScore = await eliminatedTemplate.ScoreAsync(frame.Path);
-            var missionScore = await missionTemplate.ScoreAsync(frame.Path);
-            var center = eliminatedScore >= EliminatedTemplateThreshold ? "ELIMINATED" : string.Empty;
-            var mission = missionScore >= MissionTemplateThreshold ? "SQUAD PAYOUT" : string.Empty;
-            if (fixture.Labels.Any(label => string.Equals(label.Kind, "positive", StringComparison.OrdinalIgnoreCase)
-                                            && Math.Abs(label.TimeSeconds - frame.Timestamp.TotalSeconds) <= 1))
-                Console.Error.WriteLine($"score {frame.Timestamp:mm\\:ss\\.fff} eliminated={eliminatedScore:F3} mission={missionScore:F3}");
+            var centerWords = await reader.ReadAsync(frame.Path, EliminatedRegion);
+            var missionWords = await reader.ReadAsync(frame.Path, SquadPayoutRegion);
+            var center = string.Join(' ', centerWords.Select(word => word.Text));
+            var mission = string.Join(' ', missionWords.Select(word => word.Text));
             var needsCounterOcr = fixture.Labels.Any(label => string.Equals(label.Kind, "ocr-observation", StringComparison.OrdinalIgnoreCase)
                                                                && Math.Abs(label.TimeSeconds - frame.Timestamp.TotalSeconds) <= 8);
             var counter = string.Empty;
@@ -128,13 +121,6 @@ internal static class Program
                 Console.Error.WriteLine($"Analyzed {index + 1}/{frames.Length} sampled frames");
         }
         return detections;
-
-        Task<FixedRegionTemplateMatcher> TemplateFor(string eventId, NormalizedRegion region)
-        {
-            var label = fixture.Labels.First(item => string.Equals(item.EventId, eventId, StringComparison.OrdinalIgnoreCase));
-            var frame = frames.MinBy(item => Math.Abs(item.Timestamp.TotalSeconds - label.TimeSeconds))!;
-            return FixedRegionTemplateMatcher.FromImageAsync(frame.Path, region);
-        }
     }
 
     private static int Report(Fixture fixture, IReadOnlyList<Helldivers2DetectedEvent> detections)

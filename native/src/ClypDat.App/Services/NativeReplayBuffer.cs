@@ -60,10 +60,13 @@ namespace ClypDat.App.Services;
 // AudioCapturePipeline - the same Game/Chat/Microphone routing, WASAPI capture, and mux
 // logic WindowsReplayBuffer uses, via its own independent instance.
 [SupportedOSPlatform("windows10.0.17763.0")]
-public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate
+public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource
 {
     internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing) =>
         directBltAvailable && !requiresCopyBeforeProcessing;
+
+    internal static bool IsSupportedDetectorAspectRatio(int width, int height) =>
+        width > 0 && height > 0 && Math.Abs((double)width / height - 16.0 / 9.0) <= 0.01;
 
     internal static TimeSpan NextDxgiAcquireDeadline(TimeSpan scheduled, TimeSpan completed, int frameRate)
     {
@@ -219,6 +222,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public TimeSpan Duration { get; private set; } = TimeSpan.FromSeconds(60);
     public event EventHandler? RecordingStopped;
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
+    public event EventHandler<DetectorFrameSnapshot>? DetectorFrameAvailable;
 
     public ReplayCaptureHealth GetHealthSnapshot() => _health;
 
@@ -753,6 +757,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // while the ring fills for the first time; after that every slot has
         // been written at least once and this pins at the ring's length.
         var nv12RingWritten = 0;
+        // Detector readback is independent from encoder readback. Its three
+        // slots are sampled at 2 FPS and always mapped with DoNotWait, so a
+        // busy GPU drops a detector frame instead of delaying capture.
+        ID3D11Texture2D[]? detectorStagingRing = null;
+        var detectorStagingIndex = 0;
+        var detectorRingWritten = 0;
+        var lastDetectorSample = TimeSpan.MinValue;
         ID3D11VideoProcessorOutputView? outputView = null;
         ID3D11VideoProcessorInputView? inputView = null;
         var useGpuScale = false;
@@ -950,6 +961,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
                     CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
+                detectorStagingRing =
+                [
+                    CreateNv12StagingTexture(device, outputWidth, outputHeight),
+                    CreateNv12StagingTexture(device, outputWidth, outputHeight),
+                    CreateNv12StagingTexture(device, outputWidth, outputHeight)
+                ];
                 (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
                 useGpuScale = true;
                 AppLog.Info("Native capture: GPU downscale (D3D11 Video Processor) available, using it.");
@@ -2499,6 +2516,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         swsSrcData[0] = (byte*)mapped.DataPointer;
                                         swsSrcStride[0] = (int)mapped.RowPitch;
                                         ffmpeg.sws_scale(swsContext, swsSrcData, swsSrcStride, 0, captureHeight, frame->data, frame->linesize);
+                                        TryOfferDetectorSoftwareFrame(frame->data[0], frame->linesize[0]);
                                     }
                                     finally
                                     {
@@ -2693,6 +2711,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             cursorTexture?.Dispose();
                             outputView?.Dispose();
                             if (nv12StagingRing is not null) foreach (var t in nv12StagingRing) t.Dispose();
+                            if (detectorStagingRing is not null) foreach (var t in detectorStagingRing) t.Dispose();
                             nv12Output?.Dispose();
                             videoProcessor?.Dispose();
                             vpEnumerator?.Dispose();
@@ -2707,6 +2726,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             gpuCursorAvailable = false;
                             outputView = null;
                             nv12StagingRing = null;
+                            detectorStagingRing = null;
+                            detectorStagingIndex = 0;
+                            detectorRingWritten = 0;
                             nv12Output = null;
                             videoProcessor = null;
                             vpEnumerator = null;
@@ -2732,6 +2754,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 // rebuild.
                                 (videoDevice, videoContext, vpEnumerator, videoProcessor, nv12Output, nv12StagingRing, outputView) =
                                     CreateGpuScaler(device, captureWidth, captureHeight, outputWidth, outputHeight, config.FrameRate);
+                                detectorStagingRing =
+                                [
+                                    CreateNv12StagingTexture(device, outputWidth, outputHeight),
+                                    CreateNv12StagingTexture(device, outputWidth, outputHeight),
+                                    CreateNv12StagingTexture(device, outputWidth, outputHeight)
+                                ];
                                 (croppedTexture, inputView) = CreateGpuCropInputView(device, videoDevice, vpEnumerator, captureWidth, captureHeight);
                                 if (config.CaptureCursor)
                                 {
@@ -3149,6 +3177,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 2, bltStreams);
                             }
 
+                            TryOfferDetectorGpuFrameUnderLock();
+
                             nv12Ready = false;
                             croppedDirty = false;
                             frameDevice.ImmediateContext.CopySubresourceRegion(poolTexture, arraySlice, 0, 0, 0, nv12Output!, 0);
@@ -3265,6 +3295,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             bltStreams[0].InputSurface = inputView;
                             videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
                         }
+
+                        TryOfferDetectorGpuFrameUnderLock();
 
                         nv12Ready = false;
                         ringLength = nv12StagingRing!.Length;
@@ -3402,6 +3434,61 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     ffmpeg.av_frame_free(&staleGuard);
                 }
                 amfSoftwareFrameGuard = retained;
+            }
+
+            unsafe void TryOfferDetectorGpuFrameUnderLock()
+            {
+                if (DetectorFrameAvailable is null || detectorStagingRing is null || nv12Output is null) return;
+                var now = stopwatch.Elapsed;
+                if (lastDetectorSample != TimeSpan.MinValue && now - lastDetectorSample < TimeSpan.FromMilliseconds(500)) return;
+                lastDetectorSample = now;
+
+                for (var age = 1; age <= detectorRingWritten; age++)
+                {
+                    var candidate = ((detectorStagingIndex - age) % detectorStagingRing.Length + detectorStagingRing.Length) % detectorStagingRing.Length;
+                    var result = device.ImmediateContext.Map(detectorStagingRing[candidate], 0u, MapMode.Read, MapFlags.DoNotWait, out var mapped);
+                    if (result.Failure) continue;
+                    try { OfferDetectorFrame((byte*)mapped.DataPointer, (int)mapped.RowPitch); }
+                    finally { device.ImmediateContext.Unmap(detectorStagingRing[candidate], 0); }
+                    break;
+                }
+
+                device.ImmediateContext.CopyResource(detectorStagingRing[detectorStagingIndex], nv12Output);
+                detectorStagingIndex = (detectorStagingIndex + 1) % detectorStagingRing.Length;
+                if (detectorRingWritten < detectorStagingRing.Length) detectorRingWritten++;
+            }
+
+            unsafe void TryOfferDetectorSoftwareFrame(byte* luminance, int rowPitch)
+            {
+                if (DetectorFrameAvailable is null) return;
+                var now = stopwatch.Elapsed;
+                if (lastDetectorSample != TimeSpan.MinValue && now - lastDetectorSample < TimeSpan.FromMilliseconds(500)) return;
+                lastDetectorSample = now;
+                OfferDetectorFrame(luminance, rowPitch);
+            }
+
+            unsafe void OfferDetectorFrame(byte* luminance, int rowPitch)
+            {
+                // Initial detector pack is deliberately fail-closed outside
+                // standard 16:9 SDR layouts.
+                if (!IsSupportedDetectorAspectRatio(outputWidth, outputHeight)) return;
+                DetectorFrameAvailable?.Invoke(this, new DetectorFrameSnapshot(
+                    MonotonicClock.UtcNow,
+                    CropGray(luminance, rowPitch, new NormalizedRegion(0.34, 0.445, 0.32, 0.065)),
+                    CropGray(luminance, rowPitch, new NormalizedRegion(0.42, 0.335, 0.16, 0.055)),
+                    CropGray(luminance, rowPitch, new NormalizedRegion(0.45, 0.72, 0.12, 0.12))));
+            }
+
+            unsafe GrayDetectorImage CropGray(byte* luminance, int rowPitch, NormalizedRegion region)
+            {
+                var rect = region.ToPixelRect(outputWidth, outputHeight);
+                var pixels = new byte[rect.Width * rect.Height];
+                for (var row = 0; row < rect.Height; row++)
+                {
+                    var source = new ReadOnlySpan<byte>(luminance + (rect.Y + row) * rowPitch + rect.X, rect.Width);
+                    source.CopyTo(pixels.AsSpan(row * rect.Width, rect.Width));
+                }
+                return new GrayDetectorImage(rect.Width, rect.Height, pixels);
             }
 
             // Pacing/encode gate - runs on its own clock regardless of whether
@@ -3767,6 +3854,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 cursorTexture?.Dispose();
                 outputView?.Dispose();
                 if (nv12StagingRing is not null) foreach (var t in nv12StagingRing) t.Dispose();
+                if (detectorStagingRing is not null) foreach (var t in detectorStagingRing) t.Dispose();
                 nv12Output?.Dispose();
                 videoProcessor?.Dispose();
                 vpEnumerator?.Dispose();

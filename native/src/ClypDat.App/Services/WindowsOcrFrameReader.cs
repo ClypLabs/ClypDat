@@ -2,6 +2,7 @@ using Windows.Globalization;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
 using Windows.Storage;
+using System.Runtime.InteropServices.WindowsRuntime;
 
 namespace ClypDat.App.Services;
 
@@ -23,6 +24,16 @@ public sealed class WindowsOcrFrameReader
     }
 
     public Task<IReadOnlyList<OcrWordObservation>> ReadAsync(string imagePath) => ReadAsync(imagePath, null);
+
+    public async Task<string> ReadTextAsync(GrayDetectorImage image)
+    {
+        if (image.Width <= 0 || image.Height <= 0 || image.Pixels.Length != image.Width * image.Height)
+            throw new InvalidDataException("OCR grayscale image dimensions are invalid.");
+        using var bitmap = SoftwareBitmap.CreateCopyFromBuffer(
+            image.Pixels.AsBuffer(), BitmapPixelFormat.Gray8, image.Width, image.Height, BitmapAlphaMode.Ignore);
+        var result = await _engine.RecognizeAsync(bitmap);
+        return string.Join(' ', result.Lines.Select(line => line.Text));
+    }
 
     public async Task<IReadOnlyList<OcrWordObservation>> ReadAsync(string imagePath, NormalizedRegion? region)
     {

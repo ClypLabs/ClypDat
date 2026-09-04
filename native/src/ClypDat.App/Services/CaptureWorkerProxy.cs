@@ -30,6 +30,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private string _hotkey = string.Empty;
     private string _fullSessionHotkey = string.Empty;
     private string? _clipGameName;
+    private string? _autoClipGameId;
+    private bool _autoClipEnabled;
+    private IReadOnlyList<string> _autoClipEventIds = Array.Empty<string>();
     private volatile bool _disposed;
 
     public CaptureWorkerProxy(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
@@ -42,6 +45,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public event EventHandler? SaveStarted;
     public event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     public event EventHandler<bool>? FullSessionRecordingToggled;
+    public event EventHandler<AutoClipDetectorEvent>? AutoClipDetected;
     public ReplayCaptureHealth GetHealthSnapshot() => _health;
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -100,6 +104,16 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
     public async Task UpdateClipGameNameAsync(string gameDisplayName, CancellationToken cancellationToken = default)
     { _clipGameName = gameDisplayName; await EnsureAttachedAsync(cancellationToken); await SendAsync<CaptureWorkerAck>("clip-game-name", new { gameDisplayName }, cancellationToken); }
+
+    public async Task UpdateAutoClipPolicyAsync(string? gameId, bool enabled, IReadOnlyList<string> enabledEventIds,
+        CancellationToken cancellationToken = default)
+    {
+        _autoClipGameId = gameId;
+        _autoClipEnabled = enabled;
+        _autoClipEventIds = enabledEventIds.ToArray();
+        await EnsureAttachedAsync(cancellationToken);
+        Accept(await SendAsync<CaptureWorkerAck>("auto-clip-policy", new { gameId, enabled, enabledEventIds = _autoClipEventIds }, cancellationToken), "apply auto-clip policy");
+    }
 
     public void Dispose() { _disposed = true; _desiredRecording = false; CancelRecovery(false); Disconnect(); }
 
@@ -175,6 +189,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                     case "save-completed": var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (complete is not null) { AppLog.Info($"Capture worker event: save-completed, path='{complete.Path}', error='{complete.Error}'."); Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(complete.Path, complete.Title, complete.CompletedUtc, complete.Error))); _ = SendBestEffortAsync("ack-save", new { complete.Path }); } break;
                     case "save-failed": var failed = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (failed is not null) { AppLog.Info($"Capture worker event: save-failed, path='{failed.Path}', error='{failed.Error}'."); } if (failed is not null) Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(failed.Path, failed.Title, failed.CompletedUtc, failed.Error))); break;
                     case "full-session-toggled": if (message.Payload.TryGetProperty("enabled", out var enabled)) Dispatcher.UIThread.Post(() => FullSessionRecordingToggled?.Invoke(this, enabled.GetBoolean())); break;
+                    case "auto-clip-detected": var detected = message.Payload.Deserialize<AutoClipDetectorEvent>(); if (detected is not null) Dispatcher.UIThread.Post(() => AutoClipDetected?.Invoke(this, detected)); break;
                 }
             }
         }
@@ -258,6 +273,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         await SendAsync<CaptureWorkerAck>("hotkey", new { hotkey = string.IsNullOrWhiteSpace(_hotkey) ? config.SaveReplayHotkey : _hotkey }, token);
         await SendAsync<CaptureWorkerAck>("full-session-hotkey", new { hotkey = string.IsNullOrWhiteSpace(_fullSessionHotkey) ? config.FullSessionHotkey : _fullSessionHotkey }, token);
         await SendAsync<CaptureWorkerAck>("pause", new { paused = _paused }, token);
+        Accept(await SendAsync<CaptureWorkerAck>("auto-clip-policy", new { gameId = _autoClipGameId, enabled = _autoClipEnabled, enabledEventIds = _autoClipEventIds }, token), "restore auto-clip policy");
         if (_frameRate is int frameRate) await SendAsync<CaptureWorkerAck>("frame-rate", new { frameRate }, token);
         if (_desiredRecording && !attach.Recording) Accept(await SendAsync<CaptureWorkerAck>("start", new { }, token), "restart capture");
         if (_desiredRecording) SetRecording(true);

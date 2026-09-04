@@ -20,6 +20,9 @@ internal static class CaptureWorkerHost
     private static GlobalHotkeyService? _hotkey;
     private static GlobalHotkeyService? _fullSessionHotkey;
     private static string? _clipGameName;
+    private static LiveHelldivers2Detector? _helldiversDetector;
+    private static IDetectorFrameSource? _detectorFrameSource;
+    private static bool _autoClipDetectionEnabled;
 
     public static int Run()
     {
@@ -44,6 +47,7 @@ internal static class CaptureWorkerHost
             _hotkey?.Dispose();
             _fullSessionHotkey?.Dispose();
             _buffer?.Dispose();
+            _helldiversDetector?.DisposeAsync().AsTask().GetAwaiter().GetResult();
             Storage.Dispose();
         }
     }
@@ -113,6 +117,9 @@ internal static class CaptureWorkerHost
                     _clipGameName = message.Payload.GetProperty("gameDisplayName").GetString();
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
+                case "auto-clip-policy":
+                    await ReplyAsync(client, message, ApplyAutoClipPolicy(message.Payload), cancellationToken);
+                    break;
                 case "health":
                     await ReplyAsync(client, message, GetHealth(), cancellationToken);
                     break;
@@ -152,6 +159,7 @@ internal static class CaptureWorkerHost
             _config = config;
             _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
             _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
+            AttachDetectorFrameSource(_buffer);
             if (_buffer is IReplayCaptureDiagnostics diagnostics)
                 diagnostics.HealthChanged += (_, health) => _ = SendEventAsync("health", health with { Storage = Storage.Health });
         }
@@ -183,8 +191,57 @@ internal static class CaptureWorkerHost
         {
             if (_config is null) throw new InvalidOperationException("Worker is not attached.");
             _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
+            AttachDetectorFrameSource(_buffer);
         }
     }
+
+    private static CaptureWorkerAck ApplyAutoClipPolicy(JsonElement payload)
+    {
+        try
+        {
+            var gameId = payload.TryGetProperty("gameId", out var game) ? game.GetString() : null;
+            var enabled = payload.TryGetProperty("enabled", out var value) && value.GetBoolean()
+                          && string.Equals(gameId, "helldivers2", StringComparison.OrdinalIgnoreCase);
+            var eventIds = payload.TryGetProperty("enabledEventIds", out var events) && events.ValueKind == JsonValueKind.Array
+                ? events.EnumerateArray().Select(item => item.GetString()).Where(item => !string.IsNullOrWhiteSpace(item)).Cast<string>().ToArray()
+                : Array.Empty<string>();
+
+            if (_helldiversDetector is null && !enabled) return new CaptureWorkerAck(true);
+            _helldiversDetector ??= CreateHelldiversDetector();
+            _autoClipDetectionEnabled = enabled;
+            _helldiversDetector.ApplyPolicy(enabled, eventIds);
+            if (_buffer is not null) AttachDetectorFrameSource(_buffer);
+            CaptureWorkerLog.Info($"Helldivers detector policy: enabled={enabled}, events={string.Join(',', eventIds)}.");
+            return new CaptureWorkerAck(true);
+        }
+        catch (Exception error)
+        {
+            _autoClipDetectionEnabled = false;
+            CaptureWorkerLog.Error("Helldivers detector could not start.", error);
+            return new CaptureWorkerAck(false, error.Message);
+        }
+    }
+
+    private static LiveHelldivers2Detector CreateHelldiversDetector()
+    {
+        var detector = new LiveHelldivers2Detector();
+        detector.Detected += (_, detected) => _ = SendEventAsync("auto-clip-detected", detected);
+        detector.StatusChanged += (_, status) => CaptureWorkerLog.Info($"Helldivers detector status: {status}.");
+        return detector;
+    }
+
+    private static void AttachDetectorFrameSource(IReplayBuffer buffer)
+    {
+        var desired = _autoClipDetectionEnabled ? buffer as IDetectorFrameSource : null;
+        if (ReferenceEquals(_detectorFrameSource, desired)) return;
+        if (_detectorFrameSource is not null)
+            _detectorFrameSource.DetectorFrameAvailable -= DetectorFrameAvailable;
+        _detectorFrameSource = desired;
+        if (_detectorFrameSource is not null)
+            _detectorFrameSource.DetectorFrameAvailable += DetectorFrameAvailable;
+    }
+
+    private static void DetectorFrameAvailable(object? sender, DetectorFrameSnapshot frame) => _helldiversDetector?.Offer(frame);
 
     private static async Task<CaptureWorkerSaveResult> SaveAsync(CaptureWorkerSaveRequest request, CancellationToken cancellationToken)
     {
