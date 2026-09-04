@@ -40,7 +40,17 @@ public sealed class AudioTrackProcessViewModel : ViewModelBase
         {
             var clamped = Math.Clamp(value, 0, 150);
             if (!SetProperty(ref _volumePercent, clamped)) return;
+            OnPropertyChanged(nameof(IsVolumeDefault));
             _changed(this);
         }
     }
+
+    // Drives the row's reset button. Half a percent rather than an exact
+    // compare: the slider snaps to whole ticks, but the value also arrives
+    // from a saved profile where it went through a double round-trip.
+    public bool IsVolumeDefault => Math.Abs(_volumePercent - DefaultVolumePercent) < 0.5;
+
+    public const double DefaultVolumePercent = 100;
+
+    public void ResetVolume() => VolumePercent = DefaultVolumePercent;
 }

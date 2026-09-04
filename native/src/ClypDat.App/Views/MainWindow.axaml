@@ -2128,11 +2128,12 @@
                     PointerPressed="FullscreenProgressBar_OnPointerPressed"
                     PointerMoved="FullscreenProgressBar_OnPointerMoved"
                     PointerReleased="FullscreenProgressBar_OnPointerReleased">
-              <ProgressBar Classes="fsSeekRail"
-                           Minimum="0"
-                           Maximum="{Binding Duration.TotalSeconds}"
-                           Value="{Binding CurrentTime.TotalSeconds}"
-                           Foreground="{StaticResource AccentBrush}" />
+              <controls:SeekRailControl Classes="fsSeekRail"
+                                        Duration="{Binding Duration}"
+                                        Position="{Binding CurrentTime}"
+                                        TrimStartPercent="{Binding TrimStartPercentValue}"
+                                        TrimEndPercent="{Binding TrimEndPercentValue}"
+                                        PlayedBrush="{StaticResource AccentBrush}" />
             </Border>
             <!-- One cell with all three groups stacked in it, each aligned
                  to its own edge, rather than three columns - same reason the

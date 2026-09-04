@@ -325,15 +325,13 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Cursor" Value="Hand" />
   </Style>
-  <Style Selector="Border.fsSeekStrip ProgressBar.fsSeekRail">
+  <Style Selector="Border.fsSeekStrip controls|SeekRailControl.fsSeekRail">
     <Setter Property="Height" Value="8" />
     <Setter Property="MinHeight" Value="0" />
     <Setter Property="MinWidth" Value="0" />
-    <Setter Property="Padding" Value="0" />
-    <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="RailCornerRadius" Value="4" />
     <Setter Property="VerticalAlignment" Value="Center" />
-    <Setter Property="Background" Value="#2EFFFFFF" />
+    <Setter Property="TrackBrush" Value="#2EFFFFFF" />
     <Setter Property="IsHitTestVisible" Value="False" />
     <Setter Property="RenderTransform" Value="scaleY(0.5)" />
     <Setter Property="Transitions">
@@ -342,7 +340,7 @@
       </Transitions>
     </Setter>
   </Style>
-  <Style Selector="Border.fsSeekStrip:pointerover ProgressBar.fsSeekRail">
+  <Style Selector="Border.fsSeekStrip:pointerover controls|SeekRailControl.fsSeekRail">
     <Setter Property="RenderTransform" Value="scaleY(1)" />
   </Style>
   <Style Selector="Button.primaryButton">
@@ -1433,6 +1431,34 @@
     <Setter Property="Foreground" Value="{StaticResource LabelBrush}" />
     <Setter Property="HorizontalAlignment" Value="Center" />
     <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- Only present while a row is off 100%, so the column stays empty on a
+       list nobody has touched. The column keeps its width either way, which is
+       what stops the percentage jumping sideways as a value crosses 100. -->
+  <Style Selector="Button.volumeReset">
+    <Setter Property="Width" Value="26" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.volumeReset:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_22303D}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+  </Style>
+  <Style Selector="Button.volumeReset:pressed">
+    <Setter Property="Background" Value="{StaticResource Surface_2A3947}" />
+  </Style>
+  <Style Selector="Button.volumeReset PathIcon">
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Height" Value="13" />
+    <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
   </Style>
 
   <Style Selector="TextBlock.audioPercent">

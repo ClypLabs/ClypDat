@@ -440,6 +440,14 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         set => Set(v => Profile.MicrophoneVolumePercent = (int)Math.Round(Math.Clamp(v, 0, 150)), Profile.MicrophoneVolumePercent, value);
     }
 
+    // Mirrors MainWindowViewModel's pair so the per-game audio rows get the
+    // same reset button on the same condition.
+    public bool IsGameAudioVolumeDefault =>
+        Math.Abs(GameAudioVolumePercent - AudioTrackProcessViewModel.DefaultVolumePercent) < 0.5;
+
+    public bool IsMicrophoneVolumeDefault =>
+        Math.Abs(MicrophoneVolumePercent - AudioTrackProcessViewModel.DefaultVolumePercent) < 0.5;
+
     public bool MicrophoneNoiseSuppressionEnabled
     {
         get => Profile.MicrophoneNoiseSuppressionEnabled;
@@ -461,6 +469,8 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         if (EqualityComparer<T>.Default.Equals(current, value)) return;
         assign(value);
         OnPropertyChanged(property);
+        if (property is nameof(GameAudioVolumePercent)) OnPropertyChanged(nameof(IsGameAudioVolumeDefault));
+        else if (property is nameof(MicrophoneVolumePercent)) OnPropertyChanged(nameof(IsMicrophoneVolumeDefault));
         if (property is nameof(ReplayMaxHeight) or nameof(ReplayFrameRate) or nameof(ReplayBitrateMbps))
         {
             _qualityWarningAcknowledged = false;
@@ -494,6 +504,8 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedDurationPreset));
         OnPropertyChanged(nameof(GameAudioVolumePercent));
         OnPropertyChanged(nameof(MicrophoneVolumePercent));
+        OnPropertyChanged(nameof(IsGameAudioVolumeDefault));
+        OnPropertyChanged(nameof(IsMicrophoneVolumeDefault));
         OnPropertyChanged(nameof(MicrophoneNoiseSuppressionEnabled));
         OnPropertyChanged(nameof(MicrophoneNoiseGateThresholdDb));
     }

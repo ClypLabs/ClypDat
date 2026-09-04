@@ -262,7 +262,7 @@
             <Border Classes="audioProcessList">
               <StackPanel Spacing="0">
                 <Border Classes="audioProcessRow enabledRow">
-                  <Grid ColumnDefinitions="3,44,34,*,320,52" ColumnSpacing="12" MinHeight="46">
+                  <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
                     <Border Classes="audioRowRail" />
                     <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" ToolTip.Tip="Always captured" />
                     <Border Grid.Column="2" Classes="audioIconTile">
@@ -274,10 +274,11 @@
                     </StackPanel>
                     <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding GameAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding GameAudioVolumePercent}" />
                     <TextBlock Grid.Column="5" Classes="audioPercent" Text="{Binding GameAudioVolumePercent, StringFormat={}{0:0}%}" />
+                    <Button Grid.Column="6" Classes="volumeReset" Click="ResetGameAudioVolumeButton_OnClick" IsVisible="{Binding !IsGameAudioVolumeDefault}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
                   </Grid>
                 </Border>
                 <Border Classes="audioProcessRow enabledRow">
-                  <Grid ColumnDefinitions="3,44,34,*,320,52" ColumnSpacing="12" MinHeight="46">
+                  <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
                     <Border Classes="audioRowRail" />
                     <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" ToolTip.Tip="Always captured" />
                     <Border Grid.Column="2" Classes="audioIconTile">
@@ -289,6 +290,7 @@
                     </StackPanel>
                     <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding MicrophoneVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding MicrophoneVolumePercent}" />
                     <TextBlock Grid.Column="5" Classes="audioPercent" Text="{Binding MicrophoneVolumePercent, StringFormat={}{0:0}%}" />
+                    <Button Grid.Column="6" Classes="volumeReset" Click="ResetMicrophoneVolumeButton_OnClick" IsVisible="{Binding !IsMicrophoneVolumeDefault}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
                   </Grid>
                 </Border>
               </StackPanel>
@@ -302,7 +304,7 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Border Classes="audioProcessRow" Classes.enabledRow="{Binding IsEnabled}">
-                      <Grid ColumnDefinitions="3,44,34,*,320,52" ColumnSpacing="12" MinHeight="46">
+                      <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
                         <Border Classes="audioRowRail" IsVisible="{Binding IsEnabled}" />
                         <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
                         <Border Grid.Column="2" Classes="audioIconTile">
@@ -317,6 +319,7 @@
                         </StackPanel>
                         <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
                         <TextBlock Grid.Column="5" Classes="audioPercent" IsEnabled="{Binding IsEnabled}" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" />
+                        <Button Grid.Column="6" Classes="volumeReset" Click="ResetAppVolumeButton_OnClick" IsVisible="{Binding !IsVolumeDefault}" IsEnabled="{Binding IsEnabled}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
                       </Grid>
                     </Border>
                   </DataTemplate>

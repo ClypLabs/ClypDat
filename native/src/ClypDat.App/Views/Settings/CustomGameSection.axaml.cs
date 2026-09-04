@@ -37,4 +37,13 @@ public sealed partial class CustomGameSection : UserControl
 
     private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.HotkeyCaptureButton_OnClick(sender, e);
+
+    private void ResetGameAudioVolumeButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.ResetGameAudioVolumeButton_OnClick(sender, e);
+
+    private void ResetMicrophoneVolumeButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.ResetMicrophoneVolumeButton_OnClick(sender, e);
+
+    private void ResetAppVolumeButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.ResetAppVolumeButton_OnClick(sender, e);
 }

@@ -5704,6 +5704,35 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // Both settings sections share these. The dedicated-track rows sit on
+    // different data contexts - the global list on MainWindowViewModel, a game
+    // profile's list on its CustomGameTabViewModel - so the row's own context
+    // decides which volume is being reset.
+    internal void ResetGameAudioVolumeButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        switch ((sender as Control)?.DataContext)
+        {
+            case CustomGameTabViewModel tab: tab.GameAudioVolumePercent = AudioTrackProcessViewModel.DefaultVolumePercent; break;
+            case MainWindowViewModel vm: vm.GameAudioVolumePercent = AudioTrackProcessViewModel.DefaultVolumePercent; break;
+        }
+    }
+
+    internal void ResetMicrophoneVolumeButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        switch ((sender as Control)?.DataContext)
+        {
+            case CustomGameTabViewModel tab: tab.MicrophoneVolumePercent = AudioTrackProcessViewModel.DefaultVolumePercent; break;
+            case MainWindowViewModel vm: vm.MicrophoneVolumePercent = AudioTrackProcessViewModel.DefaultVolumePercent; break;
+        }
+    }
+
+    // App rows carry their own view model either way, and it already persists
+    // itself through the callback it was constructed with.
+    internal void ResetAppVolumeButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: AudioTrackProcessViewModel row }) row.ResetVolume();
+    }
+
     internal void AddSelectedMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
     {
         ViewModel?.AddSelectedMicrophone();
@@ -6427,7 +6456,8 @@ public sealed partial class MainWindow : Window
             "This replaces the original clip with just the trimmed range. This can't be undone.",
             showCancel: true,
             confirmLabel: "Save Trim",
-            destructive: false);
+            destructive: false,
+            content: BuildTrimSummary());
         if (!await ShowModalDialogAsync<bool>(dialog)) return;
 
         var tempPath = Path.Combine(Path.GetTempPath(), $"clypdat-save-trim-{Guid.NewGuid():N}{Path.GetExtension(sourcePath)}");
@@ -9359,25 +9389,23 @@ public sealed partial class MainWindow : Window
         // the timeline panel below, even for a small nudge. The 14px Border is
         // the hit target; the 3px bar inside it is hit-test invisible so a
         // click anywhere in that band seeks rather than only a hit on the rail.
-        var progressBar = new ProgressBar
+        var progressBar = new SeekRailControl
         {
-            Minimum = 0,
             Height = 3,
-            Padding = new Thickness(0),
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(0),
             // Top, not Center: centering it in the 14px hit strip left a band
             // of scrim sitting above the progress line, so the bar looked like
             // it started with an empty grey strip instead of with the
             // playback line itself. The strip keeps its full height as a hit
             // target, the line just sits flush with the bar's top edge.
             VerticalAlignment = VerticalAlignment.Top,
-            Background = new SolidColorBrush(Color.Parse("#33FFFFFF")),
-            Foreground = Application.Current?.Resources["AccentBrush"] as IBrush ?? AppThemeService.Brush("AccentBrush", "#5864E8"),
+            TrackBrush = new SolidColorBrush(Color.Parse("#33FFFFFF")),
+            PlayedBrush = Application.Current?.Resources["AccentBrush"] as IBrush ?? AppThemeService.Brush("AccentBrush", "#5864E8"),
             IsHitTestVisible = false,
         };
-        progressBar.Bind(ProgressBar.MaximumProperty, new Binding("Duration.TotalSeconds"));
-        progressBar.Bind(ProgressBar.ValueProperty, new Binding("CurrentTime.TotalSeconds"));
+        progressBar.Bind(SeekRailControl.DurationProperty, new Binding("Duration"));
+        progressBar.Bind(SeekRailControl.PositionProperty, new Binding("CurrentTime"));
+        progressBar.Bind(SeekRailControl.TrimStartPercentProperty, new Binding("TrimStartPercentValue"));
+        progressBar.Bind(SeekRailControl.TrimEndPercentProperty, new Binding("TrimEndPercentValue"));
 
         var progressStrip = new Border
         {
@@ -10136,7 +10164,7 @@ public sealed partial class MainWindow : Window
     // of the app's own dark, chromeless windows (see CreateUpdateDialog). This
     // gives every popup the same opaque rounded card and centered chrome as
     // the Share popup - no native title bar, movement, or square corners.
-    private static (Window Window, Panel Body) CreateChromelessDialog(string titleBarLabel, bool centerTitle = false)
+    private static (Window Window, Panel Body) CreateChromelessDialog(string titleBarLabel, bool centerTitle = true)
     {
         var window = new Window
         {
@@ -10156,19 +10184,23 @@ public sealed partial class MainWindow : Window
             ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
             Height = 56
         };
-        var centeredTitleText = new TextBlock
+        // Centred: the shouty all-caps banner the progress and share dialogs
+        // still use. Left: a normal window title, which is what a confirm gets
+        // now that it no longer repeats the same string as a body heading
+        // directly underneath.
+        var titleText = new TextBlock
         {
-            Text = titleBarLabel.ToUpperInvariant(),
+            Text = centerTitle ? titleBarLabel.ToUpperInvariant() : titleBarLabel,
             Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"),
-            FontSize = 17,
-            FontWeight = Avalonia.Media.FontWeight.Bold,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            FontSize = centerTitle ? 17 : 15,
+            FontWeight = centerTitle ? Avalonia.Media.FontWeight.Bold : Avalonia.Media.FontWeight.SemiBold,
+            HorizontalAlignment = centerTitle ? HorizontalAlignment.Center : HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Avalonia.Thickness(-2, 0, 0, 0),
+            Margin = centerTitle ? new Avalonia.Thickness(-2, 0, 0, 0) : new Avalonia.Thickness(20, 0, 0, 0),
             IsHitTestVisible = false
         };
-        Grid.SetColumnSpan(centeredTitleText, 3);
-        titleBar.Children.Add(centeredTitleText);
+        if (centerTitle) Grid.SetColumnSpan(titleText, 3);
+        titleBar.Children.Add(titleText);
 
         var closeButton = new Button
         {
@@ -10215,15 +10247,22 @@ public sealed partial class MainWindow : Window
         return (window, body);
     }
 
-    private static Window CreateDialog(string title, string message, bool showCancel, string confirmLabel = "Delete", bool destructive = true)
+    private static Window CreateDialog(string title, string message, bool showCancel, string confirmLabel = "Delete", bool destructive = true, Control? content = null)
     {
-        var (window, body) = CreateChromelessDialog(title);
+        var (window, body) = CreateChromelessDialog(title, centerTitle: false);
+        // The heading used to be repeated here at 18px directly under the
+        // title bar's copy of the same string, so every confirm read
+        // "SAVE TRIM?" above "Save trim?". The title bar keeps it.
+        if (body is StackPanel stack) stack.Spacing = 16;
 
         var ok = new Button
         {
             Content = showCancel ? confirmLabel : "OK",
-            Width = 100,
-            Height = 34,
+            // MinWidth, not Width: "Save Trim" and "Replace file" were both
+            // being squeezed into the 100px a fixed width gave them.
+            MinWidth = 104,
+            Height = 36,
+            Padding = new Avalonia.Thickness(16, 0),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center
         };
@@ -10248,7 +10287,7 @@ public sealed partial class MainWindow : Window
 
         if (showCancel)
         {
-            var cancel = new Button { Content = "Cancel", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+            var cancel = new Button { Content = "Cancel", MinWidth = 104, Height = 36, Padding = new Avalonia.Thickness(16, 0), HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
             cancel.Click += (_, _) => window.Close(false);
             buttons.Children.Add(cancel);
         }
@@ -10257,21 +10296,89 @@ public sealed partial class MainWindow : Window
 
         body.Children.Add(new TextBlock
         {
-            Text = title,
-            Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
-            FontWeight = Avalonia.Media.FontWeight.Bold,
-            FontSize = 18
-        });
-        body.Children.Add(new TextBlock
-        {
             Text = message,
             Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
             FontSize = 13,
+            LineHeight = 19,
             TextWrapping = Avalonia.Media.TextWrapping.Wrap
         });
+        if (content is not null) body.Children.Add(content);
         body.Children.Add(buttons);
 
         return window;
+    }
+
+    // What the confirm actually costs, so "this can't be undone" is not the
+    // only thing the user has to go on.
+    //
+    // Sizes are estimates and say so: Save Trim re-encodes at a quality target
+    // (see BuildTrimArguments), so the only honest prediction is the source
+    // scaled by how much of it survives.
+    private Control? BuildTrimSummary()
+    {
+        if (ViewModel is not { } vm) return null;
+
+        var rows = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("64,*"),
+            RowSpacing = 7,
+            ColumnSpacing = 12
+        };
+
+        void AddRow(string label, string value)
+        {
+            var index = rows.RowDefinitions.Count;
+            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+
+            var name = new TextBlock
+            {
+                Text = label,
+                Foreground = AppThemeService.Brush("Text_6B7C8C", "#6B7C8C"),
+                FontSize = 12,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetRow(name, index);
+            rows.Children.Add(name);
+
+            var text = new TextBlock
+            {
+                Text = value,
+                Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+                FontSize = 12.5,
+                FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetRow(text, index);
+            Grid.SetColumn(text, 1);
+            rows.Children.Add(text);
+        }
+
+        AddRow("Length", $"{vm.DurationLabel}  \u2192  {vm.ExportLengthLabel}");
+        if (vm.HasTrimSizeEstimate)
+        {
+            AddRow("Size", $"{FormatFileSize(vm.SelectedSizeBytes)}  \u2192  about {FormatFileSize(vm.TrimEstimatedBytes)}");
+        }
+
+        var stack = new StackPanel { Spacing = 10, Children = { rows } };
+        if (vm.HasTrimSizeEstimate && vm.TrimSavedBytes > 0)
+        {
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"Frees about {FormatFileSize(vm.TrimSavedBytes)}",
+                Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+                FontSize = 12
+            });
+        }
+
+        return new Border
+        {
+            Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
+            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
+            BorderThickness = new Avalonia.Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Avalonia.Thickness(14, 12),
+            Child = stack
+        };
     }
 
     private static bool IsTypingInTextInput(object? source)

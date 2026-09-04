@@ -192,6 +192,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _selectedCreated = "Created: No clip loaded";
     private string _selectedQuality = "Video Quality: Unknown";
     private string _selectedSize = "Size: 0 B";
+    private long _selectedSizeBytes;
     private string _selectedCaptureBackend = string.Empty;
     private string _editorTitle = string.Empty;
     private string _editorDescription = string.Empty;
@@ -3550,6 +3551,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.GameAudioVolumePercent == volume) return;
             Settings.GameAudioVolumePercent = volume;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(IsGameAudioVolumeDefault));
             SaveSettings();
         }
     }
@@ -3563,9 +3565,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.MicrophoneVolumePercent == volume) return;
             Settings.MicrophoneVolumePercent = volume;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(IsMicrophoneVolumeDefault));
             SaveSettings();
         }
     }
+
+    // The two dedicated tracks' equivalent of
+    // AudioTrackProcessViewModel.IsVolumeDefault - each row's reset button is
+    // only there while the row has something to reset.
+    public bool IsGameAudioVolumeDefault =>
+        Math.Abs(GameAudioVolumePercent - AudioTrackProcessViewModel.DefaultVolumePercent) < 0.5;
+
+    public bool IsMicrophoneVolumeDefault =>
+        Math.Abs(MicrophoneVolumePercent - AudioTrackProcessViewModel.DefaultVolumePercent) < 0.5;
 
     // Mono/Stereo for the microphone track. Almost every headset and desk mic
     // is a single capsule that Windows presents through a stereo mix format,
@@ -3971,6 +3983,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _selectedSize, value);
     }
 
+    // SelectedSize is a formatted display string, so the Save Trim estimate
+    // had nothing numeric to work from. Same value, kept as bytes.
+    public long SelectedSizeBytes
+    {
+        get => _selectedSizeBytes;
+        private set
+        {
+            if (!SetProperty(ref _selectedSizeBytes, value)) return;
+            OnTrimSizeEstimateChanged();
+        }
+    }
+
     // Not bound to any UI element - only Share's bitrate/downscale ladder
     // reads these, so a plain get/private-set is enough (no change
     // notification needed).
@@ -4190,9 +4214,31 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public double TrimStartPercentValue => PercentValue(TrimStart);
     public double TrimEndPercentValue => PercentValue(TrimEnd);
     public double PlayheadPercentValue => PercentValue(CurrentTime);
-    public string LeftShadeWidth => TrimStartPercent;
-    public string RightShadeLeft => TrimEndPercent;
-    public string RightShadeWidth => $"{Math.Max(0, 100 - PercentValue(TrimEnd)):0.###}%";
+
+    // What Save Trim is about to cost, for the confirmation dialog.
+    //
+    // Save Trim re-encodes (BuildTrimArguments -> BuildExportCodecArguments is
+    // CRF/CQ, quality-targeted with no bitrate ceiling), so the output size is
+    // genuinely not knowable in advance. Scaling the source by how much of it
+    // survives is the closest honest answer, which is why every figure built
+    // from these is worded "about".
+    //
+    // The ratio is over the SOURCE span, not ExportDuration: clip speed changes
+    // how long the result plays for, not how much source content gets encoded.
+    public bool HasTrimSizeEstimate => SelectedSizeBytes > 0 && Duration > TimeSpan.Zero;
+
+    public long TrimEstimatedBytes
+    {
+        get
+        {
+            if (!HasTrimSizeEstimate) return 0;
+            var end = TrimEnd > TrimStart ? TrimEnd : Duration;
+            var kept = Math.Clamp((end - TrimStart).TotalSeconds / Duration.TotalSeconds, 0, 1);
+            return (long)Math.Round(SelectedSizeBytes * kept);
+        }
+    }
+
+    public long TrimSavedBytes => Math.Max(0, SelectedSizeBytes - TrimEstimatedBytes);
     public string ExportButtonText => IsExporting ? "Exporting..." : "Export";
 
     // Cached state is authoritative for first paint. Read, normalize and build
@@ -7633,6 +7679,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? $"Video Quality: {ResolutionLabel(media.Height)}{FpsSuffix(media.Fps)}"
             : "Video Quality: Unknown";
         SelectedSize = $"Size: {FormatBytes(media.SizeBytes)}";
+        SelectedSizeBytes = media.SizeBytes;
         var isMedalImport = !string.IsNullOrWhiteSpace(ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path)?.MedalImportKey);
         SelectedCaptureBackend = isMedalImport
             ? "Imported from Medal"
@@ -9985,11 +10032,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(TrimEndPercent));
         OnPropertyChanged(nameof(TrimStartPercentValue));
         OnPropertyChanged(nameof(TrimEndPercentValue));
-        OnPropertyChanged(nameof(LeftShadeWidth));
-        OnPropertyChanged(nameof(RightShadeLeft));
-        OnPropertyChanged(nameof(RightShadeWidth));
         OnPropertyChanged(nameof(ExportDuration));
         OnPropertyChanged(nameof(ExportLengthLabel));
+        OnTrimSizeEstimateChanged();
+    }
+
+    private void OnTrimSizeEstimateChanged()
+    {
+        OnPropertyChanged(nameof(HasTrimSizeEstimate));
+        OnPropertyChanged(nameof(TrimEstimatedBytes));
+        OnPropertyChanged(nameof(TrimSavedBytes));
     }
 
     private string Percent(TimeSpan time)
