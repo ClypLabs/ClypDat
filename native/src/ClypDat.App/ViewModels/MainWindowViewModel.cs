@@ -4221,7 +4221,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // CRF/CQ, quality-targeted with no bitrate ceiling), so the output size is
     // genuinely not knowable in advance. Scaling the source by how much of it
     // survives is the closest honest answer, which is why every figure built
-    // from these is worded "about".
+    // from these is prefixed "~".
     //
     // The ratio is over the SOURCE span, not ExportDuration: clip speed changes
     // how long the result plays for, not how much source content gets encoded.

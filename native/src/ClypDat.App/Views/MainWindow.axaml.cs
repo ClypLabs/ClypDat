@@ -10355,7 +10355,7 @@ public sealed partial class MainWindow : Window
         AddRow("Length", $"{vm.DurationLabel}  \u2192  {vm.ExportLengthLabel}");
         if (vm.HasTrimSizeEstimate)
         {
-            AddRow("Size", $"{FormatEstimatedSize(vm.SelectedSizeBytes)}  \u2192  about {FormatEstimatedSize(vm.TrimEstimatedBytes)}");
+            AddRow("Size", $"{FormatEstimatedSize(vm.SelectedSizeBytes)}  \u2192  ~{FormatEstimatedSize(vm.TrimEstimatedBytes)}");
         }
 
         var stack = new StackPanel { Spacing = 12 };
@@ -10368,7 +10368,7 @@ public sealed partial class MainWindow : Window
         {
             stack.Children.Add(new TextBlock
             {
-                Text = $"Frees about {FormatEstimatedSize(vm.TrimSavedBytes)}",
+                Text = $"Frees ~{FormatEstimatedSize(vm.TrimSavedBytes)}",
                 Foreground = AppThemeService.Brush("AccentBrush", "#5864E8"),
                 FontSize = 16,
                 FontWeight = Avalonia.Media.FontWeight.SemiBold
