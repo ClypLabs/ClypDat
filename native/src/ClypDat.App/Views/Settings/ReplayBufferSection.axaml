@@ -21,10 +21,19 @@
     </StackPanel>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Save hotkey|Hotkey}">
-      <StackPanel Spacing="6">
+      <StackPanel Spacing="10">
         <TextBlock Classes="settingsCardLabel" Text="HOTKEY" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <TextBlock Classes="settingsRowTitle" Text="Save Hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <Button Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
+        <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16">
+          <StackPanel Spacing="6">
+            <TextBlock Classes="settingsRowTitle" Text="Save Hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <Button Content="{Binding HotkeyDisplay}" Tag="SaveReplay" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="6">
+            <TextBlock Classes="settingsRowTitle" Text="Full Session Hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <Button Content="{Binding FullSessionHotkeyDisplay}" Tag="FullSession" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
+          </StackPanel>
+        </Grid>
+        <TextBlock Classes="settingsRowDescSm" Text="Full Session starts or stops a full-session recording while replay capture is running." />
       </StackPanel>
     </Border>
 

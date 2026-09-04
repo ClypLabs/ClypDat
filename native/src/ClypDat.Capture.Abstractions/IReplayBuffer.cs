@@ -221,12 +221,14 @@ public interface IReplayCaptureWorkerEvents
     event EventHandler? RecordingStateChanged;
     event EventHandler? SaveStarted;
     event EventHandler<ReplaySaveCompleted>? SaveCompleted;
+    event EventHandler<bool>? FullSessionRecordingToggled;
 }
 
 public interface IReplayCaptureWorkerControl
 {
     Task ShutdownWorkerAsync(CancellationToken cancellationToken = default);
     Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default);
+    Task UpdateFullSessionHotkeyAsync(string hotkey, CancellationToken cancellationToken = default);
     Task UpdateClipGameNameAsync(string gameDisplayName, CancellationToken cancellationToken = default);
 }
 

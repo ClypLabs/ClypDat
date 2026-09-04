@@ -98,6 +98,7 @@ public static class AppSettingsStore
                 ? Math.Clamp(settings.MicrophoneNoiseGateThresholdDb, -100, -25)
                 : -100;
             settings.CustomGameSettings ??= new Dictionary<string, CustomGameProfile>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(settings.FullSessionHotkey)) settings.FullSessionHotkey = "F8";
             // A hand-edited or partially-written profile must not be able to
             // push an out-of-range value into a recording - these are the same
             // bounds the sliders enforce.
@@ -120,6 +121,7 @@ public static class AppSettingsStore
                 if (string.IsNullOrWhiteSpace(profile.ReplayEncoderMode)) profile.ReplayEncoderMode = "GPU";
                 if (string.IsNullOrWhiteSpace(profile.FullSessionVideoCodec)) profile.FullSessionVideoCodec = "H.264";
                 if (string.IsNullOrWhiteSpace(profile.SaveReplayHotkey)) profile.SaveReplayHotkey = settings.SaveReplayHotkey;
+                if (string.IsNullOrWhiteSpace(profile.FullSessionHotkey)) profile.FullSessionHotkey = settings.FullSessionHotkey;
             }
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();

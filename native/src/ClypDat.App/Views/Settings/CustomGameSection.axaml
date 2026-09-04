@@ -238,10 +238,17 @@
           <ListBox Classes="pillGroup"
                    ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayDurationPresets}"
                    SelectedItem="{Binding SelectedDurationPreset}" />
-          <StackPanel Spacing="4">
-            <TextBlock Text="Save Hotkey" Foreground="{StaticResource TextBrush}" FontSize="12" />
-            <Button Content="{Binding SaveReplayHotkey}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
-          </StackPanel>
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16">
+            <StackPanel Spacing="4">
+              <TextBlock Text="Save Hotkey" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <Button Content="{Binding SaveReplayHotkey}" Tag="SaveReplay" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="4">
+              <TextBlock Text="Full Session Hotkey" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <Button Content="{Binding FullSessionHotkey}" Tag="FullSession" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
+            </StackPanel>
+          </Grid>
+          <TextBlock Classes="settingsRowDescSm" Text="Full Session starts or stops a full-session recording for this game." />
         </StackPanel>
       </Border>
 

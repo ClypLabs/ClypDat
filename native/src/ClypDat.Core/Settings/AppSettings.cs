@@ -85,6 +85,7 @@ public sealed class AppSettings
     public string ReplayBackend { get; set; } = "Native";
     public string ExportVideoCodec { get; set; } = "H.264";
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
+    public string FullSessionHotkey { get; set; } = "F8";
     public bool StartReplayOnLaunch { get; set; }
     public bool LaunchOnWindowsStartup { get; set; }
     public bool StartMinimizedToTray { get; set; }
@@ -358,9 +359,10 @@ public sealed class CustomGameProfile
     // not suppress the warning for another game's separate override.
     public bool HideQualityWarning { get; set; }
 
-    // Replay length and save hotkey
+    // Replay length and recording hotkeys
     public int ReplayDurationSeconds { get; set; } = 60;
     public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
+    public string FullSessionHotkey { get; set; } = "F8";
 
     // Audio. Mirrors the global AdditionalAudioProcesses: which apps get their
     // own track for this game, and at what gain. Present-but-empty is a real

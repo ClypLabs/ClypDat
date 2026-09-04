@@ -130,6 +130,7 @@ internal static class CustomGameSettingsResolver
             case ReplayGroup:
                 profile.ReplayDurationSeconds = settings.ReplayDurationSeconds;
                 profile.SaveReplayHotkey = settings.SaveReplayHotkey;
+                profile.FullSessionHotkey = settings.FullSessionHotkey;
                 break;
 
             case AudioGroup:
@@ -171,6 +172,7 @@ internal static class CustomGameSettingsResolver
             ReplayFrameRateMode: quality?.ReplayFrameRateMode ?? settings.ReplayFrameRateMode,
             ReplayDurationSeconds: replay?.ReplayDurationSeconds ?? settings.ReplayDurationSeconds,
             SaveReplayHotkey: replay?.SaveReplayHotkey ?? settings.SaveReplayHotkey,
+            FullSessionHotkey: replay?.FullSessionHotkey ?? settings.FullSessionHotkey,
             AdditionalAudioProcesses: audio?.AdditionalAudioProcesses ?? settings.AdditionalAudioProcesses,
             GameAudioVolumePercent: audio?.GameAudioVolumePercent ?? settings.GameAudioVolumePercent,
             MicrophoneVolumePercent: audio?.MicrophoneVolumePercent ?? settings.MicrophoneVolumePercent,
@@ -215,6 +217,7 @@ internal sealed record EffectiveRecordingSettings(
     string ReplayFrameRateMode,
     int ReplayDurationSeconds,
     string SaveReplayHotkey,
+    string FullSessionHotkey,
     int GameAudioVolumePercent,
     int MicrophoneVolumePercent,
     bool MicrophoneNoiseSuppressionEnabled,

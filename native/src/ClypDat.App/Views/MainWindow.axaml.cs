@@ -125,6 +125,7 @@ public sealed partial class MainWindow : Window
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private CustomGameTabViewModel? _hotkeyCaptureCustomGame;
+    private bool _hotkeyCaptureFullSession;
     // Set only while capture was started from a control living in a popup
     // (the Replay Buffer flyout), so its handlers can be detached again.
     private TopLevel? _hotkeyCaptureTopLevel;
@@ -559,6 +560,7 @@ public sealed partial class MainWindow : Window
                 workerEvents.RecordingStateChanged -= Worker_RecordingStateChanged;
                 workerEvents.SaveStarted -= Worker_SaveStarted;
                 workerEvents.SaveCompleted -= Worker_SaveCompleted;
+                workerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
             }
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -864,6 +866,7 @@ public sealed partial class MainWindow : Window
             workerEvents.RecordingStateChanged += Worker_RecordingStateChanged;
             workerEvents.SaveStarted += Worker_SaveStarted;
             workerEvents.SaveCompleted += Worker_SaveCompleted;
+            workerEvents.FullSessionRecordingToggled += Worker_FullSessionRecordingToggled;
         }
     }
 
@@ -928,6 +931,19 @@ public sealed partial class MainWindow : Window
                 await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
             }
         });
+    }
+
+    private void Worker_FullSessionRecordingToggled(object? sender, bool enabled)
+    {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(() => Worker_FullSessionRecordingToggled(sender, enabled));
+            return;
+        }
+        if (!ReferenceEquals(_replayBuffer, sender)) return;
+        ShowClipNotification("full-session-hotkey",
+            enabled ? "Full Session Recording Started" : "Full Session Recording Stopped",
+            playSound: false);
     }
 
     private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health)
@@ -1031,6 +1047,7 @@ public sealed partial class MainWindow : Window
             oldWorkerEvents.RecordingStateChanged -= Worker_RecordingStateChanged;
             oldWorkerEvents.SaveStarted -= Worker_SaveStarted;
             oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
+            oldWorkerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
         }
         _replayBuffer.Dispose();
         _replayConfigSnapshot = config;
@@ -2691,6 +2708,11 @@ public sealed partial class MainWindow : Window
         {
             if (_replayBuffer is IReplayCaptureWorkerControl worker) await worker.UpdateHotkeyAsync(desired.SaveReplayHotkey);
             _activeReplayConfigSnapshot = active with { SaveReplayHotkey = desired.SaveReplayHotkey };
+        }
+        if (_activeReplayConfigSnapshot is { } hotkeySnapshot && !string.Equals(hotkeySnapshot.FullSessionHotkey, desired.FullSessionHotkey, StringComparison.Ordinal))
+        {
+            if (_replayBuffer is IReplayCaptureWorkerControl worker) await worker.UpdateFullSessionHotkeyAsync(desired.FullSessionHotkey);
+            _activeReplayConfigSnapshot = hotkeySnapshot with { FullSessionHotkey = desired.FullSessionHotkey };
         }
         if (!ViewModel.IsRecordingEnabledForActiveGame)
         {
@@ -5642,6 +5664,9 @@ public sealed partial class MainWindow : Window
         EndHotkeyCapture();
         if (ViewModel is null) return;
         _hotkeyCaptureCustomGame = sender is Control { DataContext: CustomGameTabViewModel tab } ? tab : null;
+        _hotkeyCaptureFullSession = sender is Control { Tag: string tag }
+            && string.Equals(tag, "FullSession", StringComparison.Ordinal);
+        ViewModel.IsCapturingFullSessionHotkey = _hotkeyCaptureFullSession;
         ViewModel.IsCapturingHotkey = true;
 
         // The key handlers live on this window, but a Flyout hosts its content
@@ -5708,7 +5733,12 @@ public sealed partial class MainWindow : Window
 
         _capturedHotkeyKeys.Clear();
         _hotkeyCaptureCustomGame = null;
-        if (ViewModel is not null) ViewModel.IsCapturingHotkey = false;
+        _hotkeyCaptureFullSession = false;
+        if (ViewModel is not null)
+        {
+            ViewModel.IsCapturingHotkey = false;
+            ViewModel.IsCapturingFullSessionHotkey = false;
+        }
     }
 
     internal void AddSelectedProcessButton_OnClick(object? sender, RoutedEventArgs e)
@@ -5994,14 +6024,26 @@ public sealed partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(hotkey))
             {
                 if (_hotkeyCaptureCustomGame is { } customGame)
-                    customGame.SetSaveReplayHotkey(hotkey);
+                {
+                    if (_hotkeyCaptureFullSession) customGame.SetFullSessionHotkey(hotkey);
+                    else customGame.SetSaveReplayHotkey(hotkey);
+                }
                 else
                 {
-                    ViewModel.SetHotkey(hotkey);
-                    if (_replayBuffer is IReplayCaptureWorkerControl worker)
-                        _ = worker.UpdateHotkeyAsync(ViewModel.EffectiveSaveReplayHotkey);
+                    if (_hotkeyCaptureFullSession)
+                    {
+                        ViewModel.SetFullSessionHotkey(hotkey);
+                        if (_replayBuffer is IReplayCaptureWorkerControl worker)
+                            _ = worker.UpdateFullSessionHotkeyAsync(ViewModel.EffectiveFullSessionHotkey);
+                    }
+                    else
+                    {
+                        ViewModel.SetHotkey(hotkey);
+                        if (_replayBuffer is IReplayCaptureWorkerControl worker)
+                            _ = worker.UpdateHotkeyAsync(ViewModel.EffectiveSaveReplayHotkey);
+                    }
                 }
-                AppLog.Info($"Save hotkey set to {hotkey}.");
+                AppLog.Info($"{(_hotkeyCaptureFullSession ? "Full session" : "Save")} hotkey set to {hotkey}.");
             }
 
             // Detaches the popup handlers too - SetHotkey only clears the flag.

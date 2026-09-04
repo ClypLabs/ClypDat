@@ -11,12 +11,14 @@ internal static class CaptureWorkerHost
     private static readonly SemaphoreSlim WriteGate = new(1, 1);
     private static readonly List<CaptureWorkerSaveResult> UnacknowledgedSaves = new();
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
+    private static readonly SemaphoreSlim FullSessionToggleGate = new(1, 1);
     private static readonly StorageProtectionService Storage = new();
     private static readonly CancellationTokenSource Shutdown = new();
     private static NamedPipeServerStream? _client;
     private static ReplayBufferConfig? _config;
     private static IReplayBuffer? _buffer;
     private static GlobalHotkeyService? _hotkey;
+    private static GlobalHotkeyService? _fullSessionHotkey;
     private static string? _clipGameName;
 
     public static int Run()
@@ -40,6 +42,7 @@ internal static class CaptureWorkerHost
         finally
         {
             _hotkey?.Dispose();
+            _fullSessionHotkey?.Dispose();
             _buffer?.Dispose();
             Storage.Dispose();
         }
@@ -102,6 +105,10 @@ internal static class CaptureWorkerHost
                     SetHotkey(message.Payload.GetProperty("hotkey").GetString() ?? string.Empty);
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
+                case "full-session-hotkey":
+                    SetFullSessionHotkey(message.Payload.GetProperty("hotkey").GetString() ?? string.Empty);
+                    await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
+                    break;
                 case "clip-game-name":
                     _clipGameName = message.Payload.GetProperty("gameDisplayName").GetString();
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
@@ -161,6 +168,7 @@ internal static class CaptureWorkerHost
             (config.FullSessionRecordingFolder, "full-session")
         });
         SetHotkey(config.SaveReplayHotkey);
+        SetFullSessionHotkey(config.FullSessionHotkey);
         var response = new CaptureWorkerAttachResponse(
             _buffer?.IsRecording == true,
             ConfigIdentity(_config),
@@ -227,6 +235,45 @@ internal static class CaptureWorkerHost
         _hotkey.Start();
     }
 
+    private static void SetFullSessionHotkey(string hotkey)
+    {
+        if (string.IsNullOrWhiteSpace(hotkey)) return;
+        _fullSessionHotkey ??= new GlobalHotkeyService();
+        _fullSessionHotkey.SetHotkey(hotkey);
+        _fullSessionHotkey.Pressed -= FullSessionHotkeyPressed;
+        _fullSessionHotkey.Pressed += FullSessionHotkeyPressed;
+        _fullSessionHotkey.Start();
+    }
+
+    private static void FullSessionHotkeyPressed(object? sender, ReplayHotkeyPressedEventArgs args) =>
+        _ = ToggleFullSessionRecordingAsync();
+
+    private static async Task ToggleFullSessionRecordingAsync()
+    {
+        if (_buffer?.IsRecording != true || _config is null) return;
+        await FullSessionToggleGate.WaitAsync().ConfigureAwait(false);
+        await SaveGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_buffer?.IsRecording != true || _config is null) return;
+            var enabled = !_config.FullSessionRecordingEnabled;
+            await _buffer.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            _config = _config with { FullSessionRecordingEnabled = enabled };
+            await _buffer.StartAsync(CancellationToken.None).ConfigureAwait(false);
+            CaptureWorkerLog.Info($"Full session recording toggled {(enabled ? "on" : "off")} by hotkey.");
+            await SendEventAsync("full-session-toggled", new { enabled }).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            CaptureWorkerLog.Error("Full session hotkey toggle failed.", error);
+        }
+        finally
+        {
+            SaveGate.Release();
+            FullSessionToggleGate.Release();
+        }
+    }
+
     private static void HotkeyPressed(object? sender, ReplayHotkeyPressedEventArgs args)
     {
         if (_buffer?.IsRecording != true || _config is null) return;
@@ -288,6 +335,18 @@ internal static class CaptureWorkerLog
 {
     private static readonly object Sync = new();
     private static string Path => System.IO.Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "capture-worker.log");
+    public static void Info(string message)
+    {
+        try
+        {
+            lock (Sync)
+            {
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+                File.AppendAllText(Path, $"{DateTime.UtcNow:o} {message}\n");
+            }
+        }
+        catch { }
+    }
     public static void Error(string message, Exception? error = null)
     {
         try

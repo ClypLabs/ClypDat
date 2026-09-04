@@ -1010,7 +1010,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string HotkeyDisplay => IsCapturingHotkey ? "Press keys..." : EffectiveSaveReplayHotkey;
+    public string HotkeyDisplay => IsCapturingHotkey && !IsCapturingFullSessionHotkey ? "Press keys..." : EffectiveSaveReplayHotkey;
+    public string FullSessionHotkeyDisplay => IsCapturingHotkey && IsCapturingFullSessionHotkey ? "Press keys..." : EffectiveFullSessionHotkey;
 
     public string EffectiveSaveReplayHotkey
     {
@@ -1019,6 +1020,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (IsEffectiveDesktopCapture) return Settings.SaveReplayHotkey;
             var key = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
             return CustomGameSettingsResolver.Resolve(Settings, key).SaveReplayHotkey;
+        }
+    }
+
+    public string EffectiveFullSessionHotkey
+    {
+        get
+        {
+            if (IsEffectiveDesktopCapture) return Settings.FullSessionHotkey;
+            var key = string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
+            return CustomGameSettingsResolver.Resolve(Settings, key).FullSessionHotkey;
         }
     }
 
@@ -1584,6 +1595,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _isCapturingHotkey, value)) return;
             OnPropertyChanged(nameof(HotkeyDisplay));
+            OnPropertyChanged(nameof(FullSessionHotkeyDisplay));
+        }
+    }
+
+    private bool _isCapturingFullSessionHotkey;
+    public bool IsCapturingFullSessionHotkey
+    {
+        get => _isCapturingFullSessionHotkey;
+        set
+        {
+            if (!SetProperty(ref _isCapturingFullSessionHotkey, value)) return;
+            OnPropertyChanged(nameof(HotkeyDisplay));
+            OnPropertyChanged(nameof(FullSessionHotkeyDisplay));
         }
     }
 
@@ -6124,6 +6148,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
+    public void SetFullSessionHotkey(string hotkey)
+    {
+        Settings.FullSessionHotkey = hotkey;
+        IsCapturingHotkey = false;
+        OnPropertyChanged(nameof(FullSessionHotkeyDisplay));
+        SaveSettings();
+    }
+
     public void AddExcludedProcess(string processName)
     {
         var normalized = Path.GetFileName(processName.Trim());
@@ -7098,6 +7130,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
             ProcessPriority: Settings.ProcessPriority,
             SaveReplayHotkey: effective.SaveReplayHotkey,
+            FullSessionHotkey: effective.FullSessionHotkey,
             AdditionalAudioProcesses: RecordingAudioProcessPolicy.Filter(effective.AdditionalAudioProcesses),
             GameAudioVolumePercent: effective.GameAudioVolumePercent,
             MicrophoneVolumePercent: effective.MicrophoneVolumePercent,

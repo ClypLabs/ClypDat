@@ -395,6 +395,17 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         _settingChanged?.Invoke(CustomGameSettingChange.Hotkey);
     }
 
+    public string FullSessionHotkey => Profile.FullSessionHotkey;
+
+    public void SetFullSessionHotkey(string hotkey)
+    {
+        if (string.Equals(Profile.FullSessionHotkey, hotkey, StringComparison.Ordinal)) return;
+        Profile.FullSessionHotkey = hotkey;
+        OnPropertyChanged(nameof(FullSessionHotkey));
+        _save();
+        _settingChanged?.Invoke(CustomGameSettingChange.Hotkey);
+    }
+
     // --- audio ------------------------------------------------------------
 
     /// <summary>
@@ -500,6 +511,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReplayFrameRateMode));
         OnPropertyChanged(nameof(ReplayDurationSeconds));
         OnPropertyChanged(nameof(SaveReplayHotkey));
+        OnPropertyChanged(nameof(FullSessionHotkey));
         _selectedDurationPreset = null;
         OnPropertyChanged(nameof(SelectedDurationPreset));
         OnPropertyChanged(nameof(GameAudioVolumePercent));

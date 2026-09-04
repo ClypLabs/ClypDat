@@ -50,6 +50,33 @@ public sealed class CustomGameSettingsTests
     }
 
     [Fact]
+    public void FullSessionHotkey_OnlyAppliesWhenReplayGroupEnabled()
+    {
+        var settings = new AppSettings { FullSessionHotkey = "F8" };
+        settings.CustomGameSettings["game.exe"] = new CustomGameProfile
+        {
+            FullSessionHotkey = "F10",
+            Groups = [CustomGameSettingsResolver.ReplayGroup]
+        };
+
+        Assert.Equal("F10", CustomGameSettingsResolver.Resolve(settings, "game.exe").FullSessionHotkey);
+        settings.CustomGameSettings["game.exe"].Groups.Clear();
+        Assert.Equal("F8", CustomGameSettingsResolver.Resolve(settings, "game.exe").FullSessionHotkey);
+    }
+
+    [Fact]
+    public void ReplayGroupSeedsBothRecordingHotkeys()
+    {
+        var settings = new AppSettings { SaveReplayHotkey = "Insert", FullSessionHotkey = "F8" };
+        var profile = new CustomGameProfile { SaveReplayHotkey = "F9", FullSessionHotkey = "F10" };
+
+        CustomGameSettingsResolver.SeedGroupFromGlobal(settings, profile, CustomGameSettingsResolver.ReplayGroup);
+
+        Assert.Equal("Insert", profile.SaveReplayHotkey);
+        Assert.Equal("F8", profile.FullSessionHotkey);
+    }
+
+    [Fact]
     public void ReplayHotkey_ResolvesAliasProfile()
     {
         var settings = new AppSettings { SaveReplayHotkey = "Ctrl+Shift+F9" };

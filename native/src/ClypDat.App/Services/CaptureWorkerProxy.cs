@@ -28,6 +28,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private int? _frameRate;
     private int _fatalHealthRecoveryUsed;
     private string _hotkey = string.Empty;
+    private string _fullSessionHotkey = string.Empty;
     private string? _clipGameName;
     private volatile bool _disposed;
 
@@ -40,6 +41,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
     public event EventHandler? SaveStarted;
     public event EventHandler<ReplaySaveCompleted>? SaveCompleted;
+    public event EventHandler<bool>? FullSessionRecordingToggled;
     public ReplayCaptureHealth GetHealthSnapshot() => _health;
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -93,6 +95,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public async Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default)
     { _hotkey = hotkey; await EnsureAttachedAsync(cancellationToken); await SendAsync<CaptureWorkerAck>("hotkey", new { hotkey }, cancellationToken); }
 
+    public async Task UpdateFullSessionHotkeyAsync(string hotkey, CancellationToken cancellationToken = default)
+    { _fullSessionHotkey = hotkey; await EnsureAttachedAsync(cancellationToken); await SendAsync<CaptureWorkerAck>("full-session-hotkey", new { hotkey }, cancellationToken); }
+
     public async Task UpdateClipGameNameAsync(string gameDisplayName, CancellationToken cancellationToken = default)
     { _clipGameName = gameDisplayName; await EnsureAttachedAsync(cancellationToken); await SendAsync<CaptureWorkerAck>("clip-game-name", new { gameDisplayName }, cancellationToken); }
 
@@ -116,6 +121,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             ApplyAttach(attach, config, _desiredRecording);
             var gameDisplayName = _clipGameName ?? config.GameDisplayName;
             await SendAsync<CaptureWorkerAck>("clip-game-name", new { gameDisplayName }, cancellationToken);
+            await SendAsync<CaptureWorkerAck>("full-session-hotkey", new { hotkey = string.IsNullOrWhiteSpace(_fullSessionHotkey) ? config.FullSessionHotkey : _fullSessionHotkey }, cancellationToken);
             foreach (var save in attach.UnacknowledgedSaves)
             { SaveCompleted?.Invoke(this, new ReplaySaveCompleted(save.Path, save.Title, save.CompletedUtc, save.Error)); await SendAsync<CaptureWorkerAck>("ack-save", new { save.Path }, cancellationToken); }
         }
@@ -168,6 +174,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                     case "save-started": AppLog.Info("Capture worker event: save-started."); Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty)); break;
                     case "save-completed": var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (complete is not null) { AppLog.Info($"Capture worker event: save-completed, path='{complete.Path}', error='{complete.Error}'."); Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(complete.Path, complete.Title, complete.CompletedUtc, complete.Error))); _ = SendBestEffortAsync("ack-save", new { complete.Path }); } break;
                     case "save-failed": var failed = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (failed is not null) { AppLog.Info($"Capture worker event: save-failed, path='{failed.Path}', error='{failed.Error}'."); } if (failed is not null) Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(failed.Path, failed.Title, failed.CompletedUtc, failed.Error))); break;
+                    case "full-session-toggled": if (message.Payload.TryGetProperty("enabled", out var enabled)) Dispatcher.UIThread.Post(() => FullSessionRecordingToggled?.Invoke(this, enabled.GetBoolean())); break;
                 }
             }
         }
@@ -249,6 +256,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     {
         var config = _configProvider(); var attach = await AttachAsync(config, token); ApplyAttach(attach, config, true);
         await SendAsync<CaptureWorkerAck>("hotkey", new { hotkey = string.IsNullOrWhiteSpace(_hotkey) ? config.SaveReplayHotkey : _hotkey }, token);
+        await SendAsync<CaptureWorkerAck>("full-session-hotkey", new { hotkey = string.IsNullOrWhiteSpace(_fullSessionHotkey) ? config.FullSessionHotkey : _fullSessionHotkey }, token);
         await SendAsync<CaptureWorkerAck>("pause", new { paused = _paused }, token);
         if (_frameRate is int frameRate) await SendAsync<CaptureWorkerAck>("frame-rate", new { frameRate }, token);
         if (_desiredRecording && !attach.Recording) Accept(await SendAsync<CaptureWorkerAck>("start", new { }, token), "restart capture");

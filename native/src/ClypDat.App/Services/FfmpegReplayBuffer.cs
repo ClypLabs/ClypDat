@@ -828,7 +828,8 @@ public sealed record ReplayBufferConfig(
     string MicrophoneChannelMode = "Mono",
     bool MicrophoneNoiseSuppressionEnabled = false,
     double MicrophoneNoiseGateThresholdDb = -100,
-    bool AdaptiveFrameRateProtectionEnabled = true);
+    bool AdaptiveFrameRateProtectionEnabled = true,
+    string FullSessionHotkey = "F8");
 
 internal enum AudioSnapshotPurpose
 {
