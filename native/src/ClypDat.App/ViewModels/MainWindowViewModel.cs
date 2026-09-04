@@ -7454,13 +7454,40 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // the ceiling doesn't fight it), AMF needs rc switched to cqp
             // before qp_i/qp_p mean anything, QSV's ICQ mode is just
             // global_quality on its own, and libx264 is the familiar crf.
+            //
+            // The NUMBER is not codec-independent, though. AV1's quantiser
+            // scale runs 0-63 where H.264's runs 0-51, so the 20 that means
+            // "good" to h264_nvenc means "very nearly lossless" to av1_nvenc:
+            // a 28-second trim of a 183 MB 1440p90 clip came out at 349 MB,
+            // heavier than the entire source. 32 is the AV1 target
+            // BuildExportCodecArguments already settled on.
+            var quality = useAv1 ? "32" : "20";
             args.AddRange(tier switch
             {
-                ShareEncoderTier.Nvenc => new[] { "-cq", "20", "-b:v", "0" },
-                ShareEncoderTier.Amf => new[] { "-rc", "cqp", "-qp_i", "20", "-qp_p", "20" },
-                ShareEncoderTier.Qsv => new[] { "-global_quality", "20" },
+                ShareEncoderTier.Nvenc => new[] { "-cq", quality, "-b:v", "0" },
+                ShareEncoderTier.Amf => new[] { "-rc", "cqp", "-qp_i", quality, "-qp_p", quality },
+                ShareEncoderTier.Qsv => new[] { "-global_quality", quality },
+                // The CPU tier is always libx264 - callers drop useAv1 before
+                // they ever reach it - so this stays on the H.264 scale.
                 _ => new[] { "-crf", "20" }
             });
+
+            // Capped quality. The whole point of this mode is a trimmed clip
+            // that is easy to send, so it must not come out heavier per second
+            // than the recording it was cut from. The quality target above
+            // decides how the bits get spent; this only stops a busy scene
+            // spending more of them than the source itself ever did.
+            //
+            // Speed-adjusted because the ceiling is per second of OUTPUT: a 2x
+            // clip packs two seconds of source into one, and capping that at
+            // the source's own per-second rate would starve it.
+            if (SelectedSizeBytes > 0 && Duration > TimeSpan.Zero && outputSeconds > 0)
+            {
+                var sourceBps = SelectedSizeBytes * 8.0 / Duration.TotalSeconds;
+                var speedRatio = Math.Max(1, durationSeconds / outputSeconds);
+                var capKbps = Math.Max(500, (int)(sourceBps * speedRatio / 1000));
+                args.AddRange(new[] { "-maxrate", $"{capKbps}k", "-bufsize", $"{capKbps * 2}k" });
+            }
         }
         else
         {
