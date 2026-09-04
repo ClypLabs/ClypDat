@@ -707,6 +707,10 @@ public sealed partial class MainWindow : Window
         ViewModel.ActiveGame = detection.DisplayName;
         ViewModel.SetGameActiveForTimelineHydration(detection.IsDetected);
 
+        var previousAutoClipGame = AutoClipCatalog.MatchGame(previousDetection.DetectionKey, previousDetection.ExeName, previousDetection.DisplayName);
+        var activeAutoClipGame = AutoClipCatalog.MatchGame(detection.DetectionKey, detection.ExeName, detection.DisplayName);
+        if (!string.Equals(previousAutoClipGame, activeAutoClipGame, StringComparison.OrdinalIgnoreCase)) UpdateAutoClipStates();
+
         var gameEnded = previousDetection.IsDetected && !detection.IsDetected;
         if (gameEnded)
         {
@@ -5417,6 +5421,26 @@ public sealed partial class MainWindow : Window
         UpdateCs2AutoClipState();
         UpdateDotaAutoClipState();
         UpdateLeagueAutoClipState();
+        UpdateDetectorPackAutoClipStates();
+    }
+
+    private bool IsActiveAutoClipGame(string gameId)
+    {
+        if (ViewModel is null) return false;
+        var detection = ViewModel.ActiveGameDetection;
+        return string.Equals(gameId, AutoClipCatalog.MatchGame(detection.DetectionKey, detection.ExeName, detection.DisplayName), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void UpdateDetectorPackAutoClipStates()
+    {
+        if (ViewModel is null) return;
+        foreach (var definition in AutoClipCatalog.Active.Where(item => item.UsesDetectorPack))
+        {
+            if (ViewModel.FindAutoClipGame(definition.Id) is not { } game) continue;
+            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled
+                ? "Not Installed"
+                : "Not Installed — detector assets required";
+        }
     }
 
     private void UpdateAutoClipSettingsSnapshot(string gameId)
@@ -5440,7 +5464,7 @@ public sealed partial class MainWindow : Window
         var game = ViewModel.FindAutoClipGame("cs2");
         if (game is null) return;
 
-        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled || !IsActiveAutoClipGame("cs2"))
         {
             if (_cs2GsiListener is not null)
             {
@@ -5449,7 +5473,7 @@ public sealed partial class MainWindow : Window
                 _cs2GsiListener.Stop();
             }
 
-            game.StatusText = "Disabled";
+            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled ? "Disabled" : "Waiting for Game";
             return;
         }
 
@@ -5475,10 +5499,10 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         var game = ViewModel.FindAutoClipGame("dota2"); if (game is null) return;
-        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled || !IsActiveAutoClipGame("dota2"))
         {
             if (_dotaGsiListener is not null) { _dotaGsiListener.AutoClipPending -= AutoClip_OnPending; _dotaGsiListener.AutoClipReady -= AutoClip_OnReady; _dotaGsiListener.Stop(); }
-            game.StatusText = "Disabled"; return;
+            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled ? "Disabled" : "Waiting for Game"; return;
         }
         _dotaGsiListener ??= new DotaGsiListener(() => GetAutoClipSettingsSnapshot("dota2"));
         if (!_dotaGsiListener.IsListening)
@@ -5494,9 +5518,10 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         var game = ViewModel.FindAutoClipGame("league"); if (game is null) return;
-        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled)
+        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled || !IsActiveAutoClipGame("league"))
         {
-            _leagueAutoClipListener?.Stop(); game.StatusText = "Disabled"; return;
+            _leagueAutoClipListener?.Stop();
+            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled ? "Disabled" : "Waiting for Game"; return;
         }
         _leagueAutoClipListener ??= new LeagueAutoClipListener(() => GetAutoClipSettingsSnapshot("league"));
         _leagueAutoClipListener.AutoClipPending -= AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady -= AutoClip_OnReady;

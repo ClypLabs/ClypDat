@@ -5,7 +5,7 @@ namespace ClypDat.Capture.Abstractions;
 
 public static class CaptureWorkerProtocol
 {
-    public const int Version = 1;
+    public const int Version = 2;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 

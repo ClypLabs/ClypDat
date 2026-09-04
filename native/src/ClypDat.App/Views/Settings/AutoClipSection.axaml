@@ -16,7 +16,7 @@
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Auto-Clipping" />
-      <TextBlock Classes="settingsSectionDesc" Text="Have ClypDat save the important moments from supported games using their local event feeds." />
+      <TextBlock Classes="settingsSectionDesc" Text="Have ClypDat save important moments using local event feeds or captured game frames." />
       <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6" Margin="0,4,0,0">
         <PathIcon Classes="cautionIcon" />
         <TextBlock Grid.Column="1" Text="Experimental - still being worked on and can miss events, mislabel clips, or misbehave."

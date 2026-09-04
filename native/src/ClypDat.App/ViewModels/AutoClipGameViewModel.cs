@@ -22,7 +22,9 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         Definition = definition;
         _settings = settings;
         _save = save;
-        CoverImage = new Bitmap(AssetLoader.Open(new Uri(definition.CoverAssetPath)));
+        if (definition.UsesDetectorPack) _statusText = "Not Installed";
+        if (!string.IsNullOrWhiteSpace(definition.CoverAssetPath))
+            CoverImage = new Bitmap(AssetLoader.Open(new Uri(definition.CoverAssetPath)));
         Groups = new ObservableCollection<AutoClipGroupViewModel>(definition.Groups.Select(group => new AutoClipGroupViewModel(group, definition.Events.Where(item => item.GroupId == group.Id), _settings, SaveAndRefresh)));
         UngroupedEvents = new ObservableCollection<AutoClipEventViewModel>(definition.Events.Where(item => item.GroupId is null).Select(item => new AutoClipEventViewModel(item, _settings, SaveAndRefresh)));
     }
@@ -30,10 +32,11 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public AutoClipGameDefinition Definition { get; }
     public string Id => Definition.Id;
     public string Name => Definition.Name;
-    public Bitmap CoverImage { get; }
+    public Bitmap? CoverImage { get; }
     public ObservableCollection<AutoClipGroupViewModel> Groups { get; }
     public ObservableCollection<AutoClipEventViewModel> UngroupedEvents { get; }
     public bool IsSetupRequired => Definition.RequiresSetup;
+    public bool UsesDetectorPack => Definition.UsesDetectorPack;
     public bool IsCs2 => string.Equals(Id, "cs2", StringComparison.OrdinalIgnoreCase);
     public bool IsEnabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; OnPropertyChanged(); SaveAndRefresh(); } }
     public bool DeathmatchClipping { get => _settings.DeathmatchClipping; set { if (_settings.DeathmatchClipping == value) return; _settings.DeathmatchClipping = value; OnPropertyChanged(); SaveAndRefresh(); } }

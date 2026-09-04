@@ -2447,24 +2447,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!Settings.AutoClipping.Games.TryGetValue(definition.Id, out var game))
             {
-                game = new AutoClipGameSettings { ListenerPort = definition.DefaultPort };
+                game = new AutoClipGameSettings { Enabled = definition.DefaultEnabled, ListenerPort = definition.DefaultPort };
                 Settings.AutoClipping.Games[definition.Id] = game;
             }
             if (game.ListenerPort == 0) game.ListenerPort = definition.DefaultPort;
             foreach (var item in definition.Events)
             {
-                if (!game.Events.ContainsKey(item.Id)) game.Events[item.Id] = DefaultAutoClipEvent(definition.Id, item.Id);
+                if (!game.Events.ContainsKey(item.Id)) game.Events[item.Id] = item.DefaultEnabled;
             }
         }
     }
-
-    private static bool DefaultAutoClipEvent(string gameId, string eventId) => (gameId, eventId) switch
-    {
-        ("cs2", "3k" or "4k" or "ace") => true,
-        ("dota2", "triple" or "ultra" or "rampage" or "aegis-snatched") => true,
-        ("league", "triple" or "quadra" or "penta" or "baron-steal" or "dragon-steal") => true,
-        _ => false
-    };
 
     // Three-state: true only when all five are on, false only when none are,
     // null (indeterminate - rendered as a filled box with a dash) for any

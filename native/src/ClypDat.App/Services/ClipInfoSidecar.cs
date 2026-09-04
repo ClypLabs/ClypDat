@@ -38,7 +38,14 @@ public sealed record ClipInfo(
     // Null is legacy game capture. New desktop clips use "Desktop" so editor
     // behavior does not depend on transient capture sidecars.
     string? CaptureSource = null,
-    string? SteelSeriesImportKey = null);
+    string? SteelSeriesImportKey = null,
+    string? AutoClipProviderId = null,
+    string? AutoClipGameId = null,
+    IReadOnlyList<string>? AutoClipEventIds = null,
+    string? AutoClipPackId = null,
+    string? AutoClipPackVersion = null,
+    string? AutoClipPackHash = null,
+    Guid? AutoClipPlanId = null);
 
 public static class ClipInfoSidecar
 {
