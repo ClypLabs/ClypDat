@@ -22,6 +22,7 @@ dist-portable/
 out/
 release/
 docs/research/
+research/auto-clip/*/recordings/
 
 # Local app/cache data
 .cache/
