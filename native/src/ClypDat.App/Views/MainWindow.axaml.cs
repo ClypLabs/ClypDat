@@ -260,6 +260,7 @@ public sealed partial class MainWindow : Window
     private bool _startupWindowCloaked;
     private bool _startupLoaderActive;
     private bool _startupInitialized;
+    private bool _startupDialogsStarted;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
     private static readonly TimeSpan LibraryWheelDuration = TimeSpan.FromMilliseconds(140);
@@ -348,6 +349,7 @@ public sealed partial class MainWindow : Window
         // leaves plenty of headroom.
         _updateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         _updateCheckTimer.Tick += async (_, _) => await CheckForUpdatesAsync();
+        Activated += (_, _) => StartStartupDialogsAfterUserActivation();
         Opened += (_, _) =>
         {
             RevealAfterFirstDarkFrame();
@@ -370,7 +372,6 @@ public sealed partial class MainWindow : Window
             // sit in its own DNS/TLS timeout concurrently - staggering them
             // costs nothing (none of this gates the UI) and avoids piling that
             // wait onto the exact moment everything else is also starting up.
-            _ = RunStartupDialogsAsync();
             _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ => RefreshRemoteGameIconsAsync(), TaskScheduler.Default);
             _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ => RefreshRemoteGameCatalogAsync(), TaskScheduler.Default);
             if (ViewModel is not null)
@@ -5709,31 +5710,7 @@ public sealed partial class MainWindow : Window
 
     internal async Task CheckUpdatesAsync()
     {
-        if (ViewModel is null || _updateDialogOpen) return;
-
-        AppUpdateInfo? update;
-        try
-        {
-            update = await AppUpdateService.CheckAsync();
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Update check failed", error);
-            await ShowMessageAsync("Update check failed", error.Message);
-            return;
-        }
-
-        if (update is null)
-        {
-            SetAvailableUpdate(null);
-            var (whatsNew, fixes) = await AppUpdateService.GetCurrentVersionNotesAsync();
-            var upToDateDialog = CreateUpToDateDialog(whatsNew, fixes);
-            await ShowUpdateDialogAsync(upToDateDialog);
-            return;
-        }
-
-        SetAvailableUpdate(update);
-        await ShowUpdateDialogAsync(CreateUpdateDialog(update));
+        await RefreshUpdateAvailabilityAsync(UpdatePresentationPolicy.ForUserAction());
     }
 
     internal void OpenGitHubButton_OnClick(object? sender, RoutedEventArgs e)
@@ -7168,6 +7145,13 @@ public sealed partial class MainWindow : Window
         await CheckForUpdatesAsync();
     }
 
+    private void StartStartupDialogsAfterUserActivation()
+    {
+        if (_startupDialogsStarted || !_startupInitialized) return;
+        _startupDialogsStarted = true;
+        _ = RunStartupDialogsAsync();
+    }
+
     private async Task ShowAudioOnlyClipPromptAsync()
     {
         if (ViewModel is null || ViewModel.Settings.IgnoreAudioOnlyClipPrompt) return;
@@ -7409,6 +7393,11 @@ public sealed partial class MainWindow : Window
 
     private async Task CheckForUpdatesAsync()
     {
+        await RefreshUpdateAvailabilityAsync(UpdatePresentationPolicy.ForAutomaticCheck());
+    }
+
+    private async Task RefreshUpdateAvailabilityAsync(UpdateCheckPresentation presentation)
+    {
         if (ViewModel is null || _updateDialogOpen) return;
         AppUpdateInfo? update;
         if (PendingStartupUpdate is { } fromSplash)
@@ -7425,6 +7414,8 @@ public sealed partial class MainWindow : Window
             catch (Exception error)
             {
                 AppLog.Error("Update check failed", error);
+                if (presentation == UpdateCheckPresentation.Dialog)
+                    await ShowMessageAsync("Update check failed", error.Message);
                 return;
             }
         }
@@ -7432,16 +7423,23 @@ public sealed partial class MainWindow : Window
         if (update is null)
         {
             SetAvailableUpdate(null);
+            if (presentation == UpdateCheckPresentation.Dialog)
+            {
+                var (whatsNew, fixes) = await AppUpdateService.GetCurrentVersionNotesAsync();
+                await ShowUpdateDialogAsync(CreateUpToDateDialog(whatsNew, fixes));
+            }
             return;
         }
-        if (string.Equals(ViewModel.Settings.IgnoredUpdateVersion, update.TagName, StringComparison.OrdinalIgnoreCase))
+        if (presentation == UpdateCheckPresentation.BadgeOnly &&
+            string.Equals(ViewModel.Settings.IgnoredUpdateVersion, update.TagName, StringComparison.OrdinalIgnoreCase))
         {
             SetAvailableUpdate(null);
             return;
         }
 
         SetAvailableUpdate(update);
-        await ShowUpdateDialogAsync(CreateUpdateDialog(update));
+        if (presentation == UpdateCheckPresentation.Dialog)
+            await ShowUpdateDialogAsync(CreateUpdateDialog(update));
     }
 
     private void SetAvailableUpdate(AppUpdateInfo? update)

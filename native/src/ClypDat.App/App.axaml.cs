@@ -58,7 +58,8 @@ public sealed partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var minimized = desktop.Args?.Any(arg => string.Equals(arg, "--minimized", StringComparison.OrdinalIgnoreCase)) == true;
+            var launchPresentation = LaunchPresentationPolicy.Resolve(desktop.Args);
+            var minimized = LaunchPresentationPolicy.StartsInTray(launchPresentation);
             // The playback warmup keeps its session now instead of throwing it
             // away (see PlaybackSession.WarmUp), so it is the difference between
             // the first clip click building a whole LibVLC engine - measured at
@@ -79,7 +80,7 @@ public sealed partial class App : Application
             }
             // The loader is also the startup update check. Autostart still
             // finishes in the tray, but it must not skip that work entirely.
-            var useSplash = !UiPreviewMode.Enabled;
+            var useSplash = !UiPreviewMode.Enabled && LaunchPresentationPolicy.UsesStartupLoader(launchPresentation);
             InitializeAccentColor();
             var viewModel = new MainWindowViewModel();
             ApplyTheme(viewModel.Settings.ThemePreset, viewModel.Settings.UseSystemAccent,
@@ -89,7 +90,11 @@ public sealed partial class App : Application
             {
                 DataContext = viewModel,
                 WindowState = WindowState.Normal,
-                ShowInTaskbar = !minimized
+                ShowInTaskbar = !minimized,
+                // Never let initial Window.Show steal focus. Normal launches
+                // explicitly activate after their interactive loader finishes;
+                // restart/minimized launches stay passive until tray/user input.
+                ShowActivated = false
             };
             _mainWindow.ApplySavedWindowBounds();
             _mainWindow.SetStartupLoaderActive(useSplash);
@@ -101,7 +106,7 @@ public sealed partial class App : Application
                 desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
             }
             InitializeTrayIcon();
-            if (useSplash) StartWithSplash(_mainWindow, minimized);
+            if (useSplash) StartWithSplash(_mainWindow, launchPresentation);
             if (minimized)
             {
                 void HideOnFirstOpen(object? _, EventArgs __)
@@ -133,7 +138,7 @@ public sealed partial class App : Application
         }
     }
 
-    private void StartWithSplash(MainWindow mainWindow, bool finishInTray)
+    private void StartWithSplash(MainWindow mainWindow, LaunchPresentation launchPresentation)
     {
         SplashWindow splash;
         try
@@ -180,11 +185,11 @@ public sealed partial class App : Application
                 // Loader gets out of the way first, then the app it was
                 // loading is uncovered underneath it.
                 await splash.FadeOutAndCloseAsync();
-                if (finishInTray) mainWindow.FinishStartupInTray();
+                if (LaunchPresentationPolicy.StartsInTray(launchPresentation)) mainWindow.FinishStartupInTray();
                 else
                 {
                     mainWindow.RevealFromStartupLoader();
-                    mainWindow.Activate();
+                    if (LaunchPresentationPolicy.ActivatesAfterStartupLoader(launchPresentation)) mainWindow.Activate();
                 }
                 await mainWindow.LiftStartupCurtainAsync();
             }
