@@ -121,8 +121,6 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         _motion = Motion.Entering;
         _motionStarted = Stopwatch.GetTimestamp();
         _visible = true;
-        ShowWindow(_window, 4);
-        SetWindowPos(_window, HwndTopmost, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040);
         Present(0);
         Interlocked.Increment(ref _publishCount);
     }
@@ -172,10 +170,18 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
                 AppLog.Error($"Clip overlay native publish failed: id={_current.Event.WorkflowId}, error={Marshal.GetLastWin32Error()}.");
             _nativeFailureLogged = true;
         }
-        else if (progress > 0 && !_nativePublishLogged)
+        else
         {
-            AppLog.Info($"Clip overlay native publish succeeded: id={_current.Event.WorkflowId}, kind={_current.Event.Kind}, monitor={target.DeviceName}, size={_width}x{_height}.");
-            _nativePublishLogged = true;
+            // UpdateLayeredWindow handles pixels, but DWM can retain an old
+            // z-order for a transparent tool window. Reassert both geometry and
+            // topmost state every presentation so a preview is visible above
+            // borderless games and the desktop alike.
+            SetWindowPos(_window, HwndTopmost, destination.X, destination.Y, _width, _height, 0x0010 | 0x0040);
+            if (progress > 0 && !_nativePublishLogged)
+            {
+                AppLog.Info($"Clip overlay native publish succeeded: id={_current.Event.WorkflowId}, kind={_current.Event.Kind}, monitor={target.DeviceName}, position={destination.X},{destination.Y}, size={_width}x{_height}.");
+                _nativePublishLogged = true;
+            }
         }
     }
 

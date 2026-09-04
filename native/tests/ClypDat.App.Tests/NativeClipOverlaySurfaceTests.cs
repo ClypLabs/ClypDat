@@ -21,6 +21,9 @@ public sealed class NativeClipOverlaySurfaceTests
 
         surface.Publish(Presentation(1, true));
         Assert.True(SpinWait.SpinUntil(() => surface.PublishCount == 1, 1000));
+        Assert.True(SpinWait.SpinUntil(() => GetWindowRect(handle, out var rect) && rect.Left == 1620 && rect.Top == 32, 1000));
+        Assert.True(IsWindowVisible(handle));
+        Assert.Equal(0u, Cloaked(handle));
         Assert.True(GetWindowDisplayAffinity(handle, out var affinity));
         Assert.Equal(0x11u, affinity);
         surface.Publish(Presentation(2, false));
@@ -47,4 +50,21 @@ public sealed class NativeClipOverlaySurfaceTests
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowDisplayAffinity(IntPtr window, out uint affinity);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr window);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr window, out Rect rect);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out uint value, int size);
+
+    private static uint Cloaked(IntPtr window)
+    {
+        Assert.Equal(0, DwmGetWindowAttribute(window, 14, out var value, sizeof(uint)));
+        return value;
+    }
+
+    private struct Rect { public int Left, Top, Right, Bottom; }
 }
