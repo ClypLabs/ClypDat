@@ -1357,31 +1357,46 @@
   <!-- Enablement is a left rail plus a background lift, not an outline. The
        old 3,1,3,1 accent border drew a full box around every enabled row, so a
        list of six apps read as six stacked rectangles instead of one list. -->
+  <!-- No pointer-over background: the row is not clickable as a whole, only
+       its toggle and slider are, so lighting the whole strip on hover just
+       flashed while the pointer travelled to the control. -->
   <Style Selector="Border.audioProcessRow">
     <Setter Property="Padding" Value="10,9,16,9" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_22303C}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
-    <Setter Property="Transitions">
-      <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.12" />
-      </Transitions>
-    </Setter>
-  </Style>
-  <Style Selector="Border.audioProcessRow:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_16202A}" />
   </Style>
   <Style Selector="Border.audioProcessRow.enabledRow">
     <Setter Property="Background" Value="{StaticResource Surface_18232D}" />
   </Style>
-  <Style Selector="Border.audioProcessRow.enabledRow:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
+
+  <!-- Round the end rows to match the list instead of relying on the parent to
+       clip them. Border advertises a rounded clip through
+       IVisualWithRoundRectClip, but only ImmediateRenderer reads it, so under
+       the compositing renderer an enabled first or last row paints a square
+       corner over the list's rounded one. 9 is the list's 10px radius less its
+       1px border. The last row also drops its divider, which would otherwise
+       double up with the list border. -->
+  <Style Selector="Border.audioProcessList &gt; StackPanel &gt; Border.audioProcessRow:nth-child(1)">
+    <Setter Property="CornerRadius" Value="9,9,0,0" />
   </Style>
-  <!-- The last row's own divider would double up with the list border. -->
   <Style Selector="Border.audioProcessList &gt; StackPanel &gt; Border.audioProcessRow:nth-last-child(1)">
+    <Setter Property="CornerRadius" Value="0,0,9,9" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>
+  <Style Selector="Border.audioProcessList &gt; StackPanel &gt; Border.audioProcessRow:nth-child(1):nth-last-child(1)">
+    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Border.audioProcessList ContentPresenter:nth-child(1) &gt; Border.audioProcessRow">
+    <Setter Property="CornerRadius" Value="9,9,0,0" />
+  </Style>
   <Style Selector="Border.audioProcessList ContentPresenter:nth-last-child(1) &gt; Border.audioProcessRow">
+    <Setter Property="CornerRadius" Value="0,0,9,9" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Border.audioProcessList ContentPresenter:nth-child(1):nth-last-child(1) &gt; Border.audioProcessRow">
+    <Setter Property="CornerRadius" Value="9" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>
 
@@ -2177,6 +2192,24 @@
     <Setter Property="CornerRadius" Value="11" />
     <Setter Property="Background" Value="{StaticResource Text_EEF4FF}" />
     <Setter Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
+  </Style>
+  <!-- Fluent's own :pointerover and :pressed states repoint both rail segments
+       at SliderTrackValueFill*/SliderTrackFill*, which are the theme accent and
+       a flat grey. That threw away the volume colour exactly when it matters:
+       drag past 125% and the thumb ring went red while the fill stayed accent
+       green and the boost zone behind it went grey. Hold both segments on the
+       slider's own Foreground and Background in every state instead. -->
+  <Style Selector="Slider.volumeSlider.appVolumeSlider:pointerover /template/ RepeatButton#PART_DecreaseButton">
+    <Setter Property="Background" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.appVolumeSlider:pressed /template/ RepeatButton#PART_DecreaseButton">
+    <Setter Property="Background" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.appVolumeSlider:pointerover /template/ RepeatButton#PART_IncreaseButton">
+    <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource AncestorType=Slider}}" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.appVolumeSlider:pressed /template/ RepeatButton#PART_IncreaseButton">
+    <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource AncestorType=Slider}}" />
   </Style>
   <Style Selector="Slider.volumeSlider.editorTrackVolumeSlider /template/ Thumb">
     <Setter Property="Background" Value="{StaticResource Text_EEF4FF}" />
