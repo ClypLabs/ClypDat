@@ -139,9 +139,9 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private void Render(ClipOverlayPresentation presentation)
     {
         var scale = Math.Clamp(presentation.Event.Target.Scaling, 0.75, 4);
-        var width = (int)Math.Round(400 * scale);
+        var width = (int)Math.Round(300 * scale);
         var lines = string.IsNullOrWhiteSpace(presentation.Event.Detail) ? 0 : Math.Max(1, (int)Math.Ceiling(presentation.Event.Detail!.Length / 38.0));
-        var height = (int)Math.Round((86 + Math.Max(0, lines - 1) * 22) * scale);
+        var height = (int)Math.Round((66 + Math.Max(0, lines - 1) * 20) * scale);
         CreateBitmap(width, height);
         var pixels = (uint*)_bits;
         var radius = (int)Math.Round(8 * scale);
@@ -149,40 +149,53 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         for (var x = 0; x < width; x++)
             if (InsideRoundedRect(x, y, width, height, radius)) pixels[y * width + x] = 0xFF161A1F;
 
-        var rail = Math.Max(3, (int)Math.Round(6 * scale));
+        var rail = Math.Max(3, (int)Math.Round(4 * scale));
         for (var y = radius; y < height - radius; y++)
         for (var x = 0; x < rail; x++) pixels[y * width + x] = presentation.AccentColor;
 
-        var iconX = (int)Math.Round(22 * scale);
-        var iconSize = (int)Math.Round(40 * scale);
+        var iconX = (int)Math.Round(16 * scale);
+        var iconSize = (int)Math.Round(28 * scale);
         var iconY = (height - iconSize) / 2;
-        FillRounded(pixels, width, height, iconX, iconY, iconSize, iconSize, Math.Max(4, radius), presentation.AccentColor);
 
         SetBkMode(_memoryDc, 1);
-        var titleFont = CreateFont(-(int)Math.Round(20 * scale), 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, 5, 0, "Inter");
-        var detailFont = CreateFont(-(int)Math.Round(18 * scale), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Inter");
-        var iconFont = CreateFont(-(int)Math.Round(24 * scale), 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Inter");
+        var titleFont = CreateFont(-(int)Math.Round(18 * scale), 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, 5, 0, "Inter");
+        var detailFont = CreateFont(-(int)Math.Round(16 * scale), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Inter");
         try
         {
-            var old = SelectObject(_memoryDc, iconFont);
+            DrawApplicationIcon(iconX, iconY, iconSize);
+            var old = SelectObject(_memoryDc, titleFont);
             SetTextColor(_memoryDc, ColorRef(242, 244, 249));
-            var iconRect = new RectNative(iconX, iconY + (int)Math.Round(5 * scale), iconX + iconSize, iconY + iconSize);
-            DrawText(_memoryDc, "C", 1, ref iconRect, 0x0001 | 0x0004 | DtNoPrefix);
-            SelectObject(_memoryDc, titleFont);
-            var textX = (int)Math.Round(78 * scale);
-            var titleTop = string.IsNullOrWhiteSpace(presentation.Event.Detail) ? (int)Math.Round(30 * scale) : (int)Math.Round(16 * scale);
+            var textX = (int)Math.Round(58 * scale);
+            var titleTop = string.IsNullOrWhiteSpace(presentation.Event.Detail) ? (int)Math.Round(22 * scale) : (int)Math.Round(10 * scale);
             var titleRect = new RectNative(textX, titleTop, width - (int)Math.Round(18 * scale), height);
             DrawText(_memoryDc, presentation.Event.Title, -1, ref titleRect, DtNoPrefix);
             if (!string.IsNullOrWhiteSpace(presentation.Event.Detail))
             {
                 SelectObject(_memoryDc, detailFont);
                 SetTextColor(_memoryDc, ColorRef(189, 198, 225));
-                var detailRect = new RectNative(textX, (int)Math.Round(44 * scale), width - (int)Math.Round(18 * scale), height - (int)Math.Round(10 * scale));
+                var detailRect = new RectNative(textX, (int)Math.Round(34 * scale), width - (int)Math.Round(16 * scale), height - (int)Math.Round(8 * scale));
                 DrawText(_memoryDc, presentation.Event.Detail!, -1, ref detailRect, DtWordBreak | DtNoPrefix);
             }
             SelectObject(_memoryDc, old);
         }
-        finally { DeleteObject(titleFont); DeleteObject(detailFont); DeleteObject(iconFont); }
+        finally { DeleteObject(titleFont); DeleteObject(detailFont); }
+    }
+
+    private void DrawApplicationIcon(int x, int y, int size)
+    {
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable)) return;
+        if (ExtractIconEx(executable, 0, out var large, out var small, 1) == 0) return;
+        try
+        {
+            var icon = large != 0 ? large : small;
+            if (icon != 0) DrawIconEx(_memoryDc, x, y, icon, size, size, 0, 0, 3);
+        }
+        finally
+        {
+            if (large != 0) DestroyIcon(large);
+            if (small != 0) DestroyIcon(small);
+        }
     }
 
     private void CreateBitmap(int width, int height)
@@ -281,4 +294,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     [DllImport("gdi32.dll")] private static extern uint SetTextColor(nint dc, uint color);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateFont(int height, int width, int escapement, int orientation, int weight, uint italic, uint underline, uint strikeOut, uint charSet, uint outputPrecision, uint clipPrecision, uint quality, uint pitchAndFamily, string faceName);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int DrawText(nint dc, string text, int count, ref RectNative rectangle, uint format);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint ExtractIconEx(string fileName, int iconIndex, out nint largeIcon, out nint smallIcon, uint iconCount);
+    [DllImport("user32.dll")] private static extern bool DrawIconEx(nint dc, int x, int y, nint icon, int width, int height, uint step, nint brush, uint flags);
+    [DllImport("user32.dll")] private static extern bool DestroyIcon(nint icon);
 }

@@ -217,19 +217,21 @@ internal sealed class ClipOverlayCoordinator : IDisposable
 
 internal static class ClipOverlayLayout
 {
-    private const double InsetDips = 40;
+    // Flush horizontal placement makes the overlay read as a screen-edge
+    // notification instead of a floating dialog. Keep vertical breathing room.
+    private const double VerticalInsetDips = 32;
 
     public static PixelPoint Position(ClipOverlayTarget target, ClipOverlayPlacement placement, int width, int height)
     {
-        var inset = (int)Math.Round(InsetDips * target.Scaling);
+        var verticalInset = (int)Math.Round(VerticalInsetDips * target.Scaling);
         var area = target.WorkArea;
         var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
-        var x = left ? area.X + inset : area.Right - inset - width;
+        var x = left ? area.X : area.Right - width;
         var y = placement switch
         {
             ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.CenterRight => area.Y + (area.Height - height) / 2,
-            ClipOverlayPlacement.BottomLeft or ClipOverlayPlacement.BottomRight => area.Bottom - inset - height,
-            _ => area.Y + inset
+            ClipOverlayPlacement.BottomLeft or ClipOverlayPlacement.BottomRight => area.Bottom - verticalInset - height,
+            _ => area.Y + verticalInset
         };
         return new PixelPoint(x, y);
     }

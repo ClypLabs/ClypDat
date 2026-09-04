@@ -68,12 +68,12 @@ public sealed class ClipOverlayCoordinatorTests
     }
 
     [Theory]
-    [InlineData(0, -1840, 80)]
-    [InlineData(1, -480, 80)]
-    [InlineData(2, -1840, 880)]
-    [InlineData(3, -480, 880)]
-    [InlineData(4, -1840, 1680)]
-    [InlineData(5, -480, 1680)]
+    [InlineData(0, -1920, 64)]
+    [InlineData(1, -400, 64)]
+    [InlineData(2, -1920, 880)]
+    [InlineData(3, -400, 880)]
+    [InlineData(4, -1920, 1696)]
+    [InlineData(5, -400, 1696)]
     public void PlacementHandlesNegativeCoordinatesAndMixedDpi(int placementValue, int x, int y)
     {
         var placement = (ClipOverlayPlacement)placementValue;
