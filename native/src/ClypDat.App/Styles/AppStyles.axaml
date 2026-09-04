@@ -668,6 +668,14 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
   </Style>
+  <!-- The box's own outline brightening is the affordance here; without these
+       the generic Button:pointerover paints a slab behind it as well. -->
+  <Style Selector="Button.autoClipGroupToggle:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.autoClipGroupToggle:not(ToggleSwitch):pressed">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
   <Style Selector="Button.autoClipGroupToggle:pointerover Border">
     <Setter Property="BorderBrush" Value="{StaticResource Text_A9C9E5}" />
   </Style>
@@ -684,11 +692,15 @@
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="VerticalAlignment" Value="Stretch" />
   </Style>
+  <!-- Explicitly transparent in both states, not merely left alone: the app's
+       generic Button:pointerover would otherwise light the whole row up. The
+       cursor and the chevron already say the row is clickable, and a strip
+       this wide flashing under the pointer is only noise. -->
   <Style Selector="Button.autoClipRow:not(ToggleSwitch):pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_18232D}" />
+    <Setter Property="Background" Value="Transparent" />
   </Style>
   <Style Selector="Button.autoClipRow:not(ToggleSwitch):pressed">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 
   <Style Selector="PathIcon.autoClipChevron">
