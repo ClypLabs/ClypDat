@@ -19,32 +19,39 @@ internal static class ClipOverlayCardRenderer
         Dispatcher.UIThread.VerifyAccess();
         var application = Application.Current ?? throw new InvalidOperationException("Overlay rendering requires the application.");
         var font = Resource<FontFamily>(application, "ClypDatFontFamily") ?? new FontFamily("fonts:Inter#Inter, $Default");
-        var background = Resource<IBrush>(application, "SurfaceRaisedBrush") ?? Brushes.Black;
+        var background = Resource<IBrush>(application, "PanelBgBrush") ?? Brushes.Black;
+        var edge = Resource<IBrush>(application, "EdgeBrush") ?? Brushes.Gray;
         var titleBrush = Resource<IBrush>(application, "TextStrongBrush") ?? Brushes.White;
         var detailBrush = Resource<IBrush>(application, "TextSubtleBrush") ?? Brushes.LightGray;
         var accent = Resource<IBrush>(application,
             presentation.Event.Kind == ClipOverlayKind.Failure ? "DangerBrush" : "AccentBrush") ?? titleBrush;
         var scale = Math.Clamp(presentation.Event.Target.Scaling, 0.75, 4);
-        var width = Math.Min(300, Math.Max(80, presentation.Event.Target.WorkArea.Width / scale));
-        var textWidth = Math.Max(1, width - 74);
+        var width = Math.Min(260, Math.Max(80, presentation.Event.Target.WorkArea.Width / scale));
+        var textWidth = Math.Max(1, width - 66);
         using var title = new TextLayout(presentation.Event.Title, new Typeface(font, weight: FontWeight.Medium),
-            18, titleBrush, textWrapping: TextWrapping.Wrap, maxWidth: textWidth);
+            15, titleBrush, textWrapping: TextWrapping.Wrap, maxWidth: textWidth);
         using var detail = new TextLayout(presentation.Event.Detail, new Typeface(font),
-            16, detailBrush, textWrapping: TextWrapping.Wrap, maxWidth: textWidth);
+            13, detailBrush, textWrapping: TextWrapping.Wrap, maxWidth: textWidth);
         var hasDetail = !string.IsNullOrWhiteSpace(presentation.Event.Detail);
-        var textHeight = title.Height + (hasDetail ? 4 + detail.Height : 0);
-        var height = Math.Max(66, textHeight + 20);
+        var textHeight = title.Height + (hasDetail ? 3 + detail.Height : 0);
+        var height = Math.Max(58, textHeight + 20);
         var size = new PixelSize((int)Math.Ceiling(width * scale), (int)Math.Ceiling(height * scale));
         var dpi = new Vector(96 * scale, 96 * scale);
         using var bitmap = new RenderTargetBitmap(size, dpi);
         using (var context = bitmap.CreateDrawingContext())
         {
-            context.DrawRectangle(background, null, new Rect(0, 0, width, height), 8, 8);
-            context.DrawRectangle(accent, null, new Rect(0, 8, 4, height - 16));
-            context.DrawImage(AppThemeService.CurrentLogo(large: true), new Rect(16, (height - 28) / 2, 28, 28));
+            var left = presentation.Event.Placement is ClipOverlayPlacement.TopLeft
+                or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
+            var corners = left ? new CornerRadius(0, 6, 6, 0) : new CornerRadius(6, 0, 0, 6);
+            // Square at the screen edge, rounded on the exposed side.
+            context.DrawRectangle(background, null, new RoundedRect(new Rect(0, 0, width, height), corners));
+            context.DrawRectangle(null, new Pen(edge, 1), new RoundedRect(new Rect(0.5, 0.5, width - 1, height - 1), corners));
+            context.DrawRectangle(accent, null, new Rect(left ? 0 : width - 2, 0, 2, height));
+            using (context.PushOpacity(0.8))
+                context.DrawImage(AppThemeService.CurrentLogo(large: true), new Rect(16, (height - 22) / 2, 22, 22));
             var top = (height - textHeight) / 2;
-            title.Draw(context, new Point(58, top));
-            if (hasDetail) detail.Draw(context, new Point(58, top + title.Height + 4));
+            title.Draw(context, new Point(50, top));
+            if (hasDetail) detail.Draw(context, new Point(50, top + title.Height + 3));
         }
 
         var pixels = new byte[checked(size.Width * size.Height * 4)];

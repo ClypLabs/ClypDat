@@ -35,12 +35,18 @@ public sealed class ClipOverlayCardRendererTests
                 {
                     AppThemeService.Apply(application, theme, Colors.Blue, false);
                     var frame = ClipOverlayCardRenderer.Render(presentation);
-                    Assert.Equal(300, frame.Width);
-                    Assert.Equal(66, frame.Height);
-                    Assert.Equal(BrushColor(application, "AccentBrush"), Pixel(frame, 1, 20));
-                    Assert.Equal(BrushColor(application, "SurfaceRaisedBrush"), Pixel(frame, 290, 20));
+                    Assert.Equal(260, frame.Width);
+                    Assert.Equal(58, frame.Height);
+                    Assert.Equal(BrushColor(application, "AccentBrush"), Pixel(frame, frame.Width - 1, 20));
+                    Assert.Equal(BrushColor(application, "PanelBgBrush"), Pixel(frame, frame.Width - 10, 20));
                     Assert.Equal(0u, Pixel(frame, 0, 0));
                     AssertPremultiplied(frame);
+                    var leftFrame = ClipOverlayCardRenderer.Render(presentation with
+                    {
+                        Event = presentation.Event with { Placement = ClipOverlayPlacement.TopLeft }
+                    });
+                    Assert.Equal(BrushColor(application, "AccentBrush"), Pixel(leftFrame, 0, 0));
+                    Assert.Equal(0u, Pixel(leftFrame, leftFrame.Width - 1, 0));
                 }
 
                 var original = ClipOverlayCardRenderer.Render(presentation);
@@ -57,13 +63,13 @@ public sealed class ClipOverlayCardRendererTests
                 {
                     Event = presentation.Event with { Target = presentation.Event.Target with { Scaling = 1.5 } }
                 });
-                Assert.Equal(450, scaled.Width);
-                Assert.Equal(99, scaled.Height);
+                Assert.Equal(390, scaled.Width);
+                Assert.Equal(87, scaled.Height);
                 var failed = ClipOverlayCardRenderer.Render(presentation with
                 {
                     Event = presentation.Event with { Kind = ClipOverlayKind.Failure }
                 });
-                Assert.Equal(BrushColor(application, "DangerBrush"), Pixel(failed, 1, 20));
+                Assert.Equal(BrushColor(application, "DangerBrush"), Pixel(failed, failed.Width - 1, 20));
             }
             catch (Exception error) { failure = error; }
         }) { IsBackground = true };
