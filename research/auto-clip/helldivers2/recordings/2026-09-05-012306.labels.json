@@ -15,10 +15,28 @@
   },
   "detectorContracts": [
     {
+      "eventId": "eliminated",
+      "fixedTemplateMarker": "ELIMINATED",
+      "confirmationFrames": 2,
+      "calibratedCorrelationThreshold": 0.35
+    },
+    {
       "eventId": "successful-mission",
-      "emitOcrMarker": "SQUAD PAYOUT",
+      "emitVisualMarker": "SQUAD PAYOUT",
       "supportingScreenAnchor": "MISSION COMPLETED",
-      "occurrenceRule": "emit once per mission when SQUAD PAYOUT stabilizes"
+      "occurrenceRule": "emit once per mission when SQUAD PAYOUT stabilizes",
+      "fixedTemplateMarker": "SQUAD PAYOUT",
+      "confirmationFrames": 2,
+      "calibratedCorrelationThreshold": 0.72
+    },
+    {
+      "eventIds": [
+        "killstreak-20",
+        "killstreak-50",
+        "killstreak-100"
+      ],
+      "numericOcrMarker": "yellow skull counter",
+      "occurrenceRule": "emit each crossed threshold once per life"
     }
   ],
   "labels": [
