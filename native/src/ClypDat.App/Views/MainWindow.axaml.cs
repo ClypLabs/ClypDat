@@ -3373,7 +3373,11 @@ public sealed partial class MainWindow : Window
     private async void NewClipsDeleteButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || _currentNewClipsEntries.Count == 0) return;
-        foreach (var entry in ChosenNewClips())
+        var selected = ChosenNewClips();
+        var summary = selected.Length == 1 ? selected[0].Clip.Name : $"{selected.Length} clips";
+        if (!await ConfirmDeleteAsync(summary)) return;
+
+        foreach (var entry in selected)
         {
             _sessionNewClipPaths.RemoveAll(path => string.Equals(path, entry.Path, StringComparison.OrdinalIgnoreCase));
             await ViewModel.DeleteClipAsync(entry.Clip);
