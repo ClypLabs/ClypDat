@@ -63,10 +63,12 @@ public partial class ShareDialog : Window
         // while losing it on the far ones, which reads as the picture sitting
         // off-centre inside the outline.
         //
-        // 7 is the outline's 10 less the 3px inset, so the two curves are
-        // concentric rather than merely both round.
+        // The outline's 2px stroke is centred on its own bounds, so it covers
+        // one pixel inward - which is exactly the Image's margin. Radius 9 is
+        // the outline's 10 less that pixel, putting the picture's edge right
+        // under the inner edge of the stroke with the two curves concentric.
         ShareThumbnail.SizeChanged += (_, sizeArgs) =>
-            ShareThumbnail.Clip = new Avalonia.Media.RectangleGeometry(new Rect(sizeArgs.NewSize), 7, 7);
+            ShareThumbnail.Clip = new Avalonia.Media.RectangleGeometry(new Rect(sizeArgs.NewSize), 9, 9);
 
         // The empty dashed box is the drop zone, so it needs the clip's shape
         // before the first encode has produced anything to put in it.

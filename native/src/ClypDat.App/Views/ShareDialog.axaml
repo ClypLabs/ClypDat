@@ -78,7 +78,7 @@
               <Rectangle RadiusX="10" RadiusY="10" Stroke="{StaticResource AccentBrush}" StrokeThickness="2" StrokeDashArray="6,4" Fill="Transparent" />
               <!-- Uniform, not UniformToFill - the box already carries the
                    picture's aspect, so nothing is cropped to fill it. -->
-              <Image x:Name="ShareThumbnail" Stretch="Uniform" Margin="3" IsVisible="False" Cursor="Hand"
+              <Image x:Name="ShareThumbnail" Stretch="Uniform" Margin="1" IsVisible="False" Cursor="Hand"
                      PointerPressed="Thumbnail_OnPointerPressed"
                      PointerMoved="Thumbnail_OnPointerMoved"
                      PointerReleased="Thumbnail_OnPointerReleased" />
