@@ -14,7 +14,8 @@ public sealed record AutoClipGameDefinition(
     bool RequiresSetup = false, int DefaultPort = 0, string CoverAssetPath = "",
     string ProviderId = "local", IReadOnlyList<string>? DetectionAliases = null,
     AutoClipSetupCapability SetupCapability = AutoClipSetupCapability.None,
-    string? PackId = null, bool DefaultEnabled = true)
+    string? PackId = null, bool DefaultEnabled = true,
+    string? PortraitDetectionKey = null, string? PortraitDisplayName = null)
 {
     public IReadOnlyList<string> Aliases => DetectionAliases ?? Array.Empty<string>();
     public bool UsesDetectorPack => SetupCapability == AutoClipSetupCapability.DownloadableDetectorPack;
@@ -76,7 +77,8 @@ public static class AutoClipCatalog
             Event("victory-royale", "Victory Royale", priority: 100, enabled: true, lead: 15, tail: 10)
         }, new[] { new AutoClipGroupDefinition("eliminations", "Eliminations") }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "fortnite", "FortniteClient-Win64-Shipping" },
-            SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "fortnite", DefaultEnabled: false),
+            SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "fortnite", DefaultEnabled: false,
+            PortraitDetectionKey: "epic-fortnite", PortraitDisplayName: "Fortnite"),
         new AutoClipGameDefinition("helldivers2", "Helldivers 2", new[]
         {
             Event("eliminated", "Eliminated", priority: 10, lead: 12, tail: 6),
@@ -85,7 +87,8 @@ public static class AutoClipCatalog
             Event("killstreak-100", "Killstreak ×100", "streaks", 100, true, 10, 6)
         }, new[] { new AutoClipGroupDefinition("streaks", "Killstreaks") }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "helldivers2", "Helldivers 2" },
-            SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "helldivers2", DefaultEnabled: false)
+            SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "helldivers2", DefaultEnabled: false,
+            PortraitDetectionKey: "steam-553850", PortraitDisplayName: "HELLDIVERS™ 2")
     };
 
     public static readonly IReadOnlyList<string> ComingSoon = new[]

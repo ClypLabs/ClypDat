@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.Core.Settings;
 
@@ -25,6 +26,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         if (definition.UsesDetectorPack) _statusText = "Not Installed";
         if (!string.IsNullOrWhiteSpace(definition.CoverAssetPath))
             CoverImage = new Bitmap(AssetLoader.Open(new Uri(definition.CoverAssetPath)));
+        if (!string.IsNullOrWhiteSpace(definition.PortraitDetectionKey)) _ = LoadPortraitAsync();
         Groups = new ObservableCollection<AutoClipGroupViewModel>(definition.Groups.Select(group => new AutoClipGroupViewModel(group, definition.Events.Where(item => item.GroupId == group.Id), _settings, SaveAndRefresh)));
         UngroupedEvents = new ObservableCollection<AutoClipEventViewModel>(definition.Events.Where(item => item.GroupId is null).Select(item => new AutoClipEventViewModel(item, _settings, SaveAndRefresh)));
     }
@@ -32,7 +34,12 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public AutoClipGameDefinition Definition { get; }
     public string Id => Definition.Id;
     public string Name => Definition.Name;
-    public Bitmap? CoverImage { get; }
+    private Bitmap? _coverImage;
+    public Bitmap? CoverImage
+    {
+        get => _coverImage;
+        private set => SetProperty(ref _coverImage, value);
+    }
     public ObservableCollection<AutoClipGroupViewModel> Groups { get; }
     public ObservableCollection<AutoClipEventViewModel> UngroupedEvents { get; }
     public bool IsSetupRequired => Definition.RequiresSetup;
@@ -104,6 +111,25 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         OnPropertyChanged(nameof(SummaryLabel));
     }
     private void SaveAndRefresh() { Refresh(); _save(); SettingsChanged?.Invoke(this, EventArgs.Empty); }
+
+    private async Task LoadPortraitAsync()
+    {
+        var displayName = Definition.PortraitDisplayName ?? Name;
+        try
+        {
+            var portrait = await Task.Run(() => GamePortraitService.TryLoad(displayName)).ConfigureAwait(false);
+            if (portrait is null)
+            {
+                await GamePortraitService.EnsureCachedAsync(Definition.PortraitDetectionKey!, displayName).ConfigureAwait(false);
+                portrait = await Task.Run(() => GamePortraitService.TryLoad(displayName)).ConfigureAwait(false);
+            }
+            if (portrait is not null) await Dispatcher.UIThread.InvokeAsync(() => CoverImage = portrait);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Auto-clip portrait load failed for '{Name}'", error);
+        }
+    }
 }
 
 public sealed class AutoClipGroupViewModel : ViewModelBase

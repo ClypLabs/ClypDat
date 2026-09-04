@@ -19,6 +19,9 @@ public sealed class AutoClipCatalogTests
         Assert.False(helldivers.DefaultEnabled);
         Assert.Equal("clypdat-cv", fortnite.ProviderId);
         Assert.Equal("clypdat-cv", helldivers.ProviderId);
+        Assert.Equal("epic-fortnite", fortnite.PortraitDetectionKey);
+        Assert.Equal("steam-553850", helldivers.PortraitDetectionKey);
+        Assert.Equal("HELLDIVERS™ 2", helldivers.PortraitDisplayName);
     }
 
     [Fact]
