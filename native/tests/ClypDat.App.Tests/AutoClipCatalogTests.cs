@@ -38,6 +38,11 @@ public sealed class AutoClipCatalogTests
         var helldivers = AutoClipCatalog.Get("helldivers2");
         Assert.False(helldivers.Events.Single(item => item.Id == "eliminated").DefaultEnabled);
         Assert.All(helldivers.Events.Where(item => item.Id.StartsWith("killstreak-", StringComparison.Ordinal)), item => Assert.True(item.DefaultEnabled));
+        var successfulMission = helldivers.Events.Single(item => item.Id == "successful-mission");
+        Assert.True(successfulMission.DefaultEnabled);
+        Assert.Equal("missions", successfulMission.GroupId);
+        Assert.Equal(15, successfulMission.LeadSeconds);
+        Assert.Equal(10, successfulMission.TailSeconds);
     }
 
     [Theory]

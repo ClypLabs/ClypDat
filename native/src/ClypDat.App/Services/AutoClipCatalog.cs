@@ -84,8 +84,13 @@ public static class AutoClipCatalog
             Event("eliminated", "Eliminated", priority: 10, lead: 12, tail: 6),
             Event("killstreak-20", "Killstreak ×20", "streaks", 20, true, 10, 6),
             Event("killstreak-50", "Killstreak ×50", "streaks", 50, true, 10, 6),
-            Event("killstreak-100", "Killstreak ×100", "streaks", 100, true, 10, 6)
-        }, new[] { new AutoClipGroupDefinition("streaks", "Killstreaks") }, ProviderId: "clypdat-cv",
+            Event("killstreak-100", "Killstreak ×100", "streaks", 100, true, 10, 6),
+            Event("successful-mission", "Successful Mission", "missions", 80, true, 15, 10)
+        }, new[]
+        {
+            new AutoClipGroupDefinition("streaks", "Killstreaks"),
+            new AutoClipGroupDefinition("missions", "Missions")
+        }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "helldivers2", "Helldivers 2" },
             SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "helldivers2", DefaultEnabled: false,
             PortraitDetectionKey: "steam-553850", PortraitDisplayName: "HELLDIVERS™ 2")
