@@ -96,14 +96,14 @@ public sealed class SeekRailControl : Control
             RailCornerRadiusProperty);
     }
 
-    // Painted OVER the played fill rather than replacing it, so the accent
-    // still reads through the trimmed-away spans - washed out, but recognisably
-    // the theme's colour rather than a neutral grey. Same colour family as
-    // TimelineLaneControl.ShadeBrush; heavier alpha because a 3-8px rail has
-    // far less area to make the difference legible than a full timeline lane.
-    // No diagonal hatch here - that tile is 16px and would be noise at this
-    // height.
-    private static readonly IBrush ShadeBrush = new SolidColorBrush(Color.FromArgb(150, 10, 15, 19));
+    // The trimmed-away spans are the SAME rail, drawn faint - not the rail
+    // with a dark scrim over it. Overlaying a near-black shade turned those
+    // spans into a muddy stripe with its own colour, so a rail with a trim on
+    // it carried four competing tones and the cut-but-played head ended up
+    // more prominent than the kept-but-unplayed middle. Fading instead keeps
+    // the accent recognisably the accent, just receded, and leaves exactly one
+    // idea on the bar: this part counts, that part does not.
+    private const double CutOpacity = 0.3;
 
     public override void Render(DrawingContext context)
     {
@@ -113,22 +113,46 @@ public sealed class SeekRailControl : Control
         if (rect.Width <= 0 || rect.Height <= 0) return;
 
         var radius = Math.Min(RailCornerRadius, Math.Min(rect.Width, rect.Height) / 2);
-
-        if (TrackBrush is { } track) context.DrawRectangle(track, null, rect, radius, radius);
-
         var played = PlayedWidth(rect.Width);
-        if (played > 0 && PlayedBrush is { } fill)
+
+        var start = Math.Clamp(TrimStartPercent, 0, 100) / 100 * rect.Width;
+        var end = Math.Clamp(TrimEndPercent, 0, 100) / 100 * rect.Width;
+        if (end < start) (start, end) = (end, start);
+
+        var hasHead = start > 0.5;
+        var hasTail = end < rect.Width - 0.5;
+        if (!hasHead && !hasTail)
         {
-            // Clipped rather than drawn as its own rounded rect: a short
-            // played span would otherwise be a stubby pill floating on the
-            // rail instead of the rail's left end filled in.
-            using (context.PushClip(new Rect(0, 0, played, rect.Height)))
-            {
-                context.DrawRectangle(fill, null, rect, radius, radius);
-            }
+            DrawRail(context, rect, radius, played);
+            return;
         }
 
-        DrawTrimShade(context, rect, radius);
+        if (hasHead) DrawSpan(context, rect, radius, played, new Rect(0, 0, start, rect.Height), CutOpacity);
+        DrawSpan(context, rect, radius, played, new Rect(start, 0, end - start, rect.Height), 1);
+        if (hasTail) DrawSpan(context, rect, radius, played, new Rect(end, 0, rect.Width - end, rect.Height), CutOpacity);
+    }
+
+    private void DrawSpan(DrawingContext context, Rect rect, double radius, double played, Rect span, double opacity)
+    {
+        if (span.Width <= 0) return;
+        using (context.PushClip(span))
+        using (context.PushOpacity(opacity))
+        {
+            DrawRail(context, rect, radius, played);
+        }
+    }
+
+    // Always the whole rail, clipped by the caller - so the rounded ends stay
+    // rounded and a span boundary is a clean vertical cut rather than a pill
+    // cap floating mid-bar.
+    private void DrawRail(DrawingContext context, Rect rect, double radius, double played)
+    {
+        if (TrackBrush is { } track) context.DrawRectangle(track, null, rect, radius, radius);
+        if (played <= 0 || PlayedBrush is not { } fill) return;
+        using (context.PushClip(new Rect(0, 0, played, rect.Height)))
+        {
+            context.DrawRectangle(fill, null, rect, radius, radius);
+        }
     }
 
     private double PlayedWidth(double width)
@@ -136,37 +160,5 @@ public sealed class SeekRailControl : Control
         var total = Duration.TotalSeconds;
         if (total <= 0) return 0;
         return Math.Clamp(Position.TotalSeconds / total, 0, 1) * width;
-    }
-
-    private void DrawTrimShade(DrawingContext context, Rect rect, double radius)
-    {
-        var start = Math.Clamp(TrimStartPercent, 0, 100) / 100 * rect.Width;
-        var end = Math.Clamp(TrimEndPercent, 0, 100) / 100 * rect.Width;
-        if (end < start) (start, end) = (end, start);
-
-        var hasHead = start > 0.5;
-        var hasTail = end < rect.Width - 0.5;
-        if (!hasHead && !hasTail) return;
-
-        if (hasHead) DrawShade(context, rect, new Rect(0, 0, start, rect.Height), radius);
-        if (hasTail) DrawShade(context, rect, new Rect(end, 0, rect.Width - end, rect.Height), radius);
-
-        // Keeps the two boundaries findable once both sides are shaded - at 3px
-        // tall the change in tint alone is easy to lose against the picture
-        // behind the bar.
-        if (PlayedBrush is not { } tick) return;
-        if (hasHead) context.FillRectangle(tick, new Rect(start - 0.5, 0, 1, rect.Height));
-        if (hasTail) context.FillRectangle(tick, new Rect(end - 0.5, 0, 1, rect.Height));
-    }
-
-    // Clipped to the span but drawn as the full rounded rail, so the shade
-    // follows the rail's rounded ends instead of squaring them off.
-    private static void DrawShade(DrawingContext context, Rect rail, Rect span, double radius)
-    {
-        if (span.Width <= 0) return;
-        using (context.PushClip(span))
-        {
-            context.DrawRectangle(ShadeBrush, null, rail, radius, radius);
-        }
     }
 }

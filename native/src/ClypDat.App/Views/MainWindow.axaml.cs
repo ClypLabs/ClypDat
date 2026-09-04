@@ -10320,8 +10320,8 @@ public sealed partial class MainWindow : Window
 
         var rows = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("64,*"),
-            RowSpacing = 7,
+            ColumnDefinitions = new ColumnDefinitions("58,*"),
+            RowSpacing = 6,
             ColumnSpacing = 12
         };
 
@@ -10343,9 +10343,8 @@ public sealed partial class MainWindow : Window
             var text = new TextBlock
             {
                 Text = value,
-                Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
-                FontSize = 12.5,
-                FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                Foreground = AppThemeService.Brush("Text_D2DEEC", "#D2DEEC"),
+                FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center
             };
             Grid.SetRow(text, index);
@@ -10356,19 +10355,32 @@ public sealed partial class MainWindow : Window
         AddRow("Length", $"{vm.DurationLabel}  \u2192  {vm.ExportLengthLabel}");
         if (vm.HasTrimSizeEstimate)
         {
-            AddRow("Size", $"{FormatFileSize(vm.SelectedSizeBytes)}  \u2192  about {FormatFileSize(vm.TrimEstimatedBytes)}");
+            AddRow("Size", $"{FormatEstimatedSize(vm.SelectedSizeBytes)}  \u2192  about {FormatEstimatedSize(vm.TrimEstimatedBytes)}");
         }
 
-        var stack = new StackPanel { Spacing = 10, Children = { rows } };
+        var stack = new StackPanel { Spacing = 12 };
+
+        // Freed space leads. It was the last and faintest line, which is
+        // backwards - it is the number the question "how much do I save?" is
+        // actually asking for, and the before/after pairs below are the
+        // working behind it.
         if (vm.HasTrimSizeEstimate && vm.TrimSavedBytes > 0)
         {
             stack.Children.Add(new TextBlock
             {
-                Text = $"Frees about {FormatFileSize(vm.TrimSavedBytes)}",
-                Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
-                FontSize = 12
+                Text = $"Frees about {FormatEstimatedSize(vm.TrimSavedBytes)}",
+                Foreground = AppThemeService.Brush("AccentBrush", "#5864E8"),
+                FontSize = 16,
+                FontWeight = Avalonia.Media.FontWeight.SemiBold
+            });
+            stack.Children.Add(new Border
+            {
+                Height = 1,
+                Background = AppThemeService.Brush("Surface_232F3A", "#232F3A")
             });
         }
+
+        stack.Children.Add(rows);
 
         return new Border
         {
@@ -10376,9 +10388,27 @@ public sealed partial class MainWindow : Window
             BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
             BorderThickness = new Avalonia.Thickness(1),
             CornerRadius = new CornerRadius(10),
-            Padding = new Avalonia.Thickness(14, 12),
+            Padding = new Avalonia.Thickness(16, 14),
             Child = stack
         };
+    }
+
+    // FormatFileSize's 0.## is right for a real file on disk. These are
+    // predictions, and "145.16 MB -> about 35.53 MB" claims a precision the
+    // re-encode cannot deliver, so anything over ten units rounds to whole.
+    private static string FormatEstimatedSize(long bytes)
+    {
+        double value = bytes;
+        var units = new[] { "B", "KB", "MB", "GB", "TB" };
+        var unit = 0;
+        while (value >= 1024 && unit < units.Length - 1)
+        {
+            value /= 1024;
+            unit++;
+        }
+
+        var text = value >= 10 || unit == 0 ? value.ToString("0") : value.ToString("0.#");
+        return $"{text} {units[unit]}";
     }
 
     private static bool IsTypingInTextInput(object? source)
