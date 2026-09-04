@@ -60,6 +60,7 @@ public partial class ShareDialog : Window
         // something the user has not asked for yet, and competes with the
         // capture encoder that is protecting their gameplay.
         Opened += (_, _) => SweepStaleShareTempFiles();
+        Opened += (_, _) => UpdateTrimmedOption();
     }
 
     public async Task ShowWithBackdropAsync(Window owner)
@@ -244,6 +245,18 @@ public partial class ShareDialog : Window
     {
     }
 
+    // The pill only exists while there is a trim to send, so a clip nobody
+    // has trimmed still shows the original six.
+    private void UpdateTrimmedOption()
+    {
+        // Same 50ms epsilon as SaveTrimToOriginalAsync's guard: the handles
+        // land on whole frames, so an untouched trim is never bit-exact.
+        var trimEnd = _viewModel.TrimEnd > _viewModel.TrimStart ? _viewModel.TrimEnd : _viewModel.Duration;
+        ShareSizeTrimmed.IsVisible = _viewModel.Duration > TimeSpan.Zero
+            && (_viewModel.TrimStart > TimeSpan.FromMilliseconds(50)
+                || trimEnd < _viewModel.Duration - TimeSpan.FromMilliseconds(50));
+    }
+
     private void SizePreset_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not RadioButton radio) return;
@@ -254,16 +267,28 @@ public partial class ShareDialog : Window
             ShareCustomSizeBox.Focus();
             return; // Wait for Enter - free-entry MB value, nothing to encode yet.
         }
+        if (ReferenceEquals(radio, ShareSizeTrimmed))
+        {
+            // Zero target is the no-size-cap path through BuildShareArguments:
+            // source resolution and fps, a quality target instead of a bitrate
+            // ceiling, and the trim applied like every other encode here.
+            _lastTargetBytes = 0;
+            _hasEncodeSelection = true;
+            _ = StartShareEncodeAsync(0);
+            return;
+        }
         if (radio.Tag is string tagText && double.TryParse(tagText, out var mb))
         {
             _lastTargetBytes = MegabytesToTargetBytes(mb);
             if (_lastTargetBytes == 0)
             {
                 // Set target first, so AV1 change cannot restart encoding.
+                _hasEncodeSelection = false;
                 ShareAv1Toggle.IsChecked = false;
                 PrepareOriginalShare();
                 return;
             }
+            _hasEncodeSelection = true;
             _ = StartShareEncodeAsync(_lastTargetBytes);
         }
     }
@@ -274,6 +299,7 @@ public partial class ShareDialog : Window
         if (double.TryParse(ShareCustomSizeBox.Text, out var mb) && mb > 0)
         {
             _lastTargetBytes = MegabytesToTargetBytes(mb);
+            _hasEncodeSelection = true;
             _ = StartShareEncodeAsync(_lastTargetBytes);
         }
     }
@@ -285,6 +311,9 @@ public partial class ShareDialog : Window
     private static long MegabytesToTargetBytes(double megabytes) => (long)(megabytes * 1_000_000);
 
     private long _lastTargetBytes;
+    // Trimmed encodes at a zero target, so _lastTargetBytes alone can no
+    // longer tell "nothing selected yet" from "selected, no size cap".
+    private bool _hasEncodeSelection;
 
     private void PrepareOriginalShare()
     {
@@ -336,7 +365,7 @@ public partial class ShareDialog : Window
     {
         // Codec change invalidates whatever is already encoded, so redo it at
         // the size that is currently selected.
-        if (!IsLoaded || _lastTargetBytes <= 0) return;
+        if (!IsLoaded || !_hasEncodeSelection) return;
         _ = StartShareEncodeAsync(_lastTargetBytes);
     }
 
@@ -371,7 +400,7 @@ public partial class ShareDialog : Window
         ShareProgressBar.Value = 0;
         ShareProgressPercentText.Text = "0%";
         ShareProgressEtaText.IsVisible = false;
-        ShareStatusText.Text = targetBytes > 0 ? "Encoding..." : "Encoding at original quality...";
+        ShareStatusText.Text = targetBytes > 0 ? "Encoding..." : "Encoding the trimmed range...";
 
         try
         {

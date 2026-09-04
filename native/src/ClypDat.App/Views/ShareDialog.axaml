@@ -5,7 +5,7 @@
         WindowDecorations="None"
         ShowInTaskbar="False"
         CanResize="False"
-        Width="480"
+        Width="500"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         Background="Transparent"
@@ -40,12 +40,19 @@
             <!-- 10 MB is Discord's free-tier cap, 20 MB suits smaller chat
                  uploads, 50 MB Nitro Basic, and 100 MB covers most others. -->
             <StackPanel Orientation="Horizontal" Spacing="1">
-              <RadioButton x:Name="ShareSizeOriginal" Classes="sizePill" GroupName="ShareSize" Content="Original" Tag="0" Padding="9,10" CornerRadius="7,0,0,7" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" Padding="9,10" CornerRadius="0" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize20" Classes="sizePill" GroupName="ShareSize" Content="20 MB" Tag="20" Padding="9,10" CornerRadius="0" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize50" Classes="sizePill" GroupName="ShareSize" Content="50 MB" Tag="50" Padding="9,10" CornerRadius="0" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" Padding="9,10" CornerRadius="0" Click="SizePreset_OnClick" />
-              <RadioButton x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" Padding="9,10" CornerRadius="0,7,7,0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSizeOriginal" Classes="sizePill" GroupName="ShareSize" Content="Original" Tag="0" Padding="8,10" CornerRadius="7,0,0,7" Click="SizePreset_OnClick"
+                           ToolTip.Tip="Sends the clip file exactly as it is on disk. No encode, and no trim - drag it and the whole recording goes." />
+              <!-- Only shown once the trim handles have actually been moved
+                   (UpdateTrimmedOption). Every capped preset already encodes
+                   the trimmed range; this is the same encode with no size cap,
+                   which is the one thing Original cannot do. -->
+              <RadioButton x:Name="ShareSizeTrimmed" Classes="sizePill" GroupName="ShareSize" Content="Trimmed" Padding="8,10" CornerRadius="0" IsVisible="False" Click="SizePreset_OnClick"
+                           ToolTip.Tip="Just the trimmed range, kept at the clip's own resolution and frame rate. No size cap." />
+              <RadioButton x:Name="ShareSize10" Classes="sizePill" GroupName="ShareSize" Content="10 MB" Tag="10" Padding="8,10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSize20" Classes="sizePill" GroupName="ShareSize" Content="20 MB" Tag="20" Padding="8,10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSize50" Classes="sizePill" GroupName="ShareSize" Content="50 MB" Tag="50" Padding="8,10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSize100" Classes="sizePill" GroupName="ShareSize" Content="100 MB" Tag="100" Padding="8,10" CornerRadius="0" Click="SizePreset_OnClick" />
+              <RadioButton x:Name="ShareSizeCustom" Classes="sizePill" GroupName="ShareSize" Content="Custom" Padding="8,10" CornerRadius="0,7,7,0" Click="SizePreset_OnClick" />
             </StackPanel>
             <TextBox x:Name="ShareCustomSizeBox" PlaceholderText="Size in MB" IsVisible="False" Width="140"
                      HorizontalAlignment="Left" KeyDown="CustomSizeBox_OnKeyDown" />
