@@ -3716,8 +3716,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool IsAudioProcessEligible(ActiveAudioProcess process)
     {
         if (process.ProcessId == Environment.ProcessId) return false;
-        if (string.Equals(process.Name, "ClypDat", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(process.Name, "MedalEncoder", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!RecordingAudioProcessPolicy.IsEligible(process.Name)) return false;
         var activeGame = AudioProcessIdentity.Normalize(ActiveGameDetection.ExeName);
         if (!string.IsNullOrWhiteSpace(activeGame) && AudioProcessIdentity.Equals(process.Name, activeGame)) return false;
         return !Settings.GameCaptureOverrides.Any(game =>
@@ -7058,7 +7057,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CaptureCursor: desktopCapture && Settings.ReplayDesktopCaptureCursor,
             ProcessPriority: Settings.ProcessPriority,
             SaveReplayHotkey: effective.SaveReplayHotkey,
-            AdditionalAudioProcesses: AudioProcessIdentity.NormalizeDictionary(effective.AdditionalAudioProcesses),
+            AdditionalAudioProcesses: RecordingAudioProcessPolicy.Filter(effective.AdditionalAudioProcesses),
             GameAudioVolumePercent: effective.GameAudioVolumePercent,
             MicrophoneVolumePercent: effective.MicrophoneVolumePercent,
             MicrophoneChannelMode: Settings.MicrophoneChannelMode,
