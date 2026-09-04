@@ -49,6 +49,25 @@ public partial class ShareDialog : Window
             CleanUp();
         };
         Opened += (_, _) => OverlayTransparencyDiagnostics.Log(this, "share-dialog");
+        // The dashed outline is a 10px rounded rect but the thumbnail inside it
+        // is a plain Image, so the picture's square corners pushed out past the
+        // curve. Wrapping it in a rounded Border does not help - Avalonia's
+        // compositing renderer ignores corner radius when clipping children
+        // (only ImmediateRenderer reads IVisualWithRoundRectClip) - so the
+        // rounding has to be an explicit clip on the Image.
+        //
+        // Taken from the Image's OWN bounds rather than from the box size
+        // SizeSharePreviewBox computed: the margin, Uniform's letterboxing and
+        // layout rounding all sit between those two numbers, and a clip even a
+        // pixel wider than the control keeps the rounding on the near corners
+        // while losing it on the far ones, which reads as the picture sitting
+        // off-centre inside the outline.
+        //
+        // 7 is the outline's 10 less the 3px inset, so the two curves are
+        // concentric rather than merely both round.
+        ShareThumbnail.SizeChanged += (_, sizeArgs) =>
+            ShareThumbnail.Clip = new Avalonia.Media.RectangleGeometry(new Rect(sizeArgs.NewSize), 7, 7);
+
         // The empty dashed box is the drop zone, so it needs the clip's shape
         // before the first encode has produced anything to put in it.
         Opened += (_, _) => SizeSharePreviewBox();
@@ -621,12 +640,12 @@ public partial class ShareDialog : Window
         return new CroppedBitmap(source, new PixelRect(x, y, width, height));
     }
 
-    // Fits the preview's own aspect inside the fixed 424x238 slot (dialog is 480
+    // Fits the preview's own aspect inside the fixed 444x238 slot (dialog is 500
     // wide with 28px margins either side). Vertical crops get narrower, never
     // taller, so picking an aspect never resizes the dialog under the cursor.
     private void SizeSharePreviewBox(bool useSourceDimensions = false)
     {
-        const double MaximumWidth = 424;
+        const double MaximumWidth = 444;
         const double MaximumHeight = 238;
 
         var crop = useSourceDimensions ? null : _viewModel.ActiveCropRect;
@@ -644,17 +663,6 @@ public partial class ShareDialog : Window
 
         SharePreviewBox.Width = boxWidth;
         SharePreviewBox.Height = boxHeight;
-
-        // The dashed outline is a 10px rounded rect but the thumbnail inside it
-        // is a plain Image, so the picture's square corners pushed out past the
-        // curve at all four corners. It cannot be fixed by wrapping it in a
-        // rounded Border: Avalonia's compositing renderer ignores corner radius
-        // when clipping children (only ImmediateRenderer reads
-        // IVisualWithRoundRectClip), so the rounding has to be an explicit clip
-        // on the Image. 7 is the outline's 10 less the 3px inset, which keeps
-        // the two curves concentric instead of merely both round.
-        ShareThumbnail.Clip = new Avalonia.Media.RectangleGeometry(
-            new Rect(0, 0, Math.Max(0, boxWidth - 6), Math.Max(0, boxHeight - 6)), 7, 7);
 
         // The progress panel sits inside the box, so a 9:16 or 4:5 box has to
         // pull the bar in with it rather than let it run over the outline.
