@@ -13,6 +13,7 @@ internal static class CaptureWorkerHost
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
     private static readonly SemaphoreSlim FullSessionToggleGate = new(1, 1);
     private static readonly StorageProtectionService Storage = new();
+    private static readonly AutoClipPackStore AutoClipPacks = new();
     private static readonly CancellationTokenSource Shutdown = new();
     private static NamedPipeServerStream? _client;
     private static ReplayBufferConfig? _config;
@@ -20,7 +21,8 @@ internal static class CaptureWorkerHost
     private static GlobalHotkeyService? _hotkey;
     private static GlobalHotkeyService? _fullSessionHotkey;
     private static string? _clipGameName;
-    private static LiveHelldivers2Detector? _helldiversDetector;
+    private static DetectorHostClient? _detectorHost;
+    private static AutoClipPackSelection? _detectorPack;
     private static IDetectorFrameSource? _detectorFrameSource;
     private static bool _autoClipDetectionEnabled;
 
@@ -47,7 +49,7 @@ internal static class CaptureWorkerHost
             _hotkey?.Dispose();
             _fullSessionHotkey?.Dispose();
             _buffer?.Dispose();
-            _helldiversDetector?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            _detectorHost?.DisposeAsync().AsTask().GetAwaiter().GetResult();
             Storage.Dispose();
         }
     }
@@ -118,7 +120,7 @@ internal static class CaptureWorkerHost
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "auto-clip-policy":
-                    await ReplyAsync(client, message, ApplyAutoClipPolicy(message.Payload), cancellationToken);
+                    await ReplyAsync(client, message, await ApplyAutoClipPolicyAsync(message.Payload, cancellationToken), cancellationToken);
                     break;
                 case "health":
                     await ReplyAsync(client, message, GetHealth(), cancellationToken);
@@ -195,7 +197,7 @@ internal static class CaptureWorkerHost
         }
     }
 
-    private static CaptureWorkerAck ApplyAutoClipPolicy(JsonElement payload)
+    private static async Task<CaptureWorkerAck> ApplyAutoClipPolicyAsync(JsonElement payload, CancellationToken cancellationToken)
     {
         try
         {
@@ -206,10 +208,29 @@ internal static class CaptureWorkerHost
                 ? events.EnumerateArray().Select(item => item.GetString()).Where(item => !string.IsNullOrWhiteSpace(item)).Cast<string>().ToArray()
                 : Array.Empty<string>();
 
-            if (_helldiversDetector is null && !enabled) return new CaptureWorkerAck(true);
-            _helldiversDetector ??= CreateHelldiversDetector();
             _autoClipDetectionEnabled = enabled;
-            _helldiversDetector.ApplyPolicy(enabled, eventIds);
+            if (!enabled)
+            {
+                if (_buffer is not null) AttachDetectorFrameSource(_buffer);
+                if (_detectorHost is not null)
+                {
+                    await _detectorHost.DisposeAsync();
+                    _detectorHost = null;
+                }
+                _detectorPack = null;
+                return new CaptureWorkerAck(true);
+            }
+
+            _detectorPack ??= AutoClipPacks.Resolve("helldivers2");
+            _detectorHost ??= CreateDetectorHost();
+            await _detectorHost.StartAsync(
+                new DetectorHostPolicy(
+                    "helldivers2",
+                    eventIds,
+                    _detectorPack.PackId,
+                    _detectorPack.Version,
+                    _detectorPack.Hash),
+                cancellationToken);
             if (_buffer is not null) AttachDetectorFrameSource(_buffer);
             CaptureWorkerLog.Info($"Helldivers detector policy: enabled={enabled}, events={string.Join(',', eventIds)}.");
             return new CaptureWorkerAck(true);
@@ -222,12 +243,25 @@ internal static class CaptureWorkerHost
         }
     }
 
-    private static LiveHelldivers2Detector CreateHelldiversDetector()
+    private static DetectorHostClient CreateDetectorHost()
     {
-        var detector = new LiveHelldivers2Detector();
-        detector.Detected += (_, detected) => _ = SendEventAsync("auto-clip-detected", detected);
-        detector.StatusChanged += (_, status) => CaptureWorkerLog.Info($"Helldivers detector status: {status}.");
-        return detector;
+        var host = new DetectorHostClient();
+        host.Detected += (_, detected) => _ = SendEventAsync("auto-clip-detected", detected);
+        host.StatusChanged += (_, status) =>
+        {
+            CaptureWorkerLog.Info($"Detector host status: {status}.");
+            _ = SendEventAsync("auto-clip-status", new { gameId = "helldivers2", status });
+        };
+        host.Quarantined += (_, reason) =>
+        {
+            _autoClipDetectionEnabled = false;
+            if (_buffer is not null) AttachDetectorFrameSource(_buffer);
+            if (_detectorPack is not null) AutoClipPacks.Quarantine(_detectorPack);
+            _detectorPack = null;
+            CaptureWorkerLog.Error($"Detector host quarantined: {reason}");
+            _ = SendEventAsync("auto-clip-status", new { gameId = "helldivers2", status = $"Failed — {reason}" });
+        };
+        return host;
     }
 
     private static void AttachDetectorFrameSource(IReplayBuffer buffer)
@@ -241,7 +275,7 @@ internal static class CaptureWorkerHost
             _detectorFrameSource.DetectorFrameAvailable += DetectorFrameAvailable;
     }
 
-    private static void DetectorFrameAvailable(object? sender, DetectorFrameSnapshot frame) => _helldiversDetector?.Offer(frame);
+    private static void DetectorFrameAvailable(object? sender, DetectorFrameSnapshot frame) => _detectorHost?.Offer(frame);
 
     private static async Task<CaptureWorkerSaveResult> SaveAsync(CaptureWorkerSaveRequest request, CancellationToken cancellationToken)
     {

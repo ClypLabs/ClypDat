@@ -46,6 +46,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     public event EventHandler<bool>? FullSessionRecordingToggled;
     public event EventHandler<AutoClipDetectorEvent>? AutoClipDetected;
+    public event EventHandler<AutoClipDetectorStatus>? AutoClipStatusChanged;
     public ReplayCaptureHealth GetHealthSnapshot() => _health;
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -190,6 +191,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                     case "save-failed": var failed = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (failed is not null) { AppLog.Info($"Capture worker event: save-failed, path='{failed.Path}', error='{failed.Error}'."); } if (failed is not null) Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(failed.Path, failed.Title, failed.CompletedUtc, failed.Error))); break;
                     case "full-session-toggled": if (message.Payload.TryGetProperty("enabled", out var enabled)) Dispatcher.UIThread.Post(() => FullSessionRecordingToggled?.Invoke(this, enabled.GetBoolean())); break;
                     case "auto-clip-detected": var detected = message.Payload.Deserialize<AutoClipDetectorEvent>(); if (detected is not null) Dispatcher.UIThread.Post(() => AutoClipDetected?.Invoke(this, detected)); break;
+                    case "auto-clip-status": var status = message.Payload.Deserialize<AutoClipDetectorStatus>(); if (status is not null) Dispatcher.UIThread.Post(() => AutoClipStatusChanged?.Invoke(this, status)); break;
                 }
             }
         }

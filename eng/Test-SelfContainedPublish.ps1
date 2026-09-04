@@ -10,10 +10,14 @@ $publishDirectory = (Resolve-Path -LiteralPath $PublishDirectory).Path
 $requiredFiles = @(
     'ClypDat.exe',
     'ClypDatRecorder.exe',
+    'ClypDatDetectorHost.exe',
     'ClypDat.runtimeconfig.json',
     'ClypDatRecorder.dll',
     'ClypDatRecorder.deps.json',
     'ClypDatRecorder.runtimeconfig.json',
+    'ClypDatDetectorHost.dll',
+    'ClypDatDetectorHost.deps.json',
+    'ClypDatDetectorHost.runtimeconfig.json',
     'coreclr.dll',
     'hostfxr.dll',
     'hostpolicy.dll'
@@ -71,6 +75,15 @@ try {
         -PassThru
     if ($workerProcess.ExitCode -ne 0) {
         throw "Bundled recorder runtime check failed with exit code $($workerProcess.ExitCode)."
+    }
+    $detectorProcess = Start-Process -FilePath (Join-Path $publishDirectory 'ClypDatDetectorHost.exe') `
+        -ArgumentList '--verify-self-contained' `
+        -WorkingDirectory $publishDirectory `
+        -WindowStyle Hidden `
+        -Wait `
+        -PassThru
+    if ($detectorProcess.ExitCode -ne 0) {
+        throw "Bundled detector-host runtime check failed with exit code $($detectorProcess.ExitCode)."
     }
 }
 finally {

@@ -55,6 +55,12 @@ internal static class Program
         // capture devices, or UI initialization can have side effects.
         if (args.Contains("--verify-self-contained", StringComparer.Ordinal)) return;
 
+        if (args.Contains("--detector-host", StringComparer.OrdinalIgnoreCase))
+        {
+            DetectorHostRuntime.Run(args);
+            return;
+        }
+
         // Capture worker must stay independent from Avalonia, UI mutex, SQLite,
         // playback warmup, and all other desktop initialization.
         if (args.Contains("--capture-worker", StringComparer.OrdinalIgnoreCase))

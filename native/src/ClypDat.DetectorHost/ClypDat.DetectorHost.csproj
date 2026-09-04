@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\..\eng\AvaloniaPin.props" />
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>ClypDatDetectorHost</AssemblyName>
+    <RootNamespace>ClypDat.DetectorHost</RootNamespace>
+    <AssemblyTitle>ClypDat Detector Host</AssemblyTitle>
+    <Description>ClypDat isolated auto-clip detector</Description>
+    <Company>ClypLabs</Company>
+    <Product>ClypDat Detector Host</Product>
+    <ApplicationIcon>..\..\..\assets\clypdat-icon.ico</ApplicationIcon>
+    <ApplicationManifest>..\ClypDat.App\app.manifest</ApplicationManifest>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PlatformTarget>x64</PlatformTarget>
+    <Version Condition="'$(Version)' == ''">1.4.1</Version>
+    <PublishReadyToRun>false</PublishReadyToRun>
+  </PropertyGroup>
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+  </ItemGroup>
+  <Target Name="GetDetectorHostOutputFiles" DependsOnTargets="Build" Returns="@(DetectorHostOutputFiles)">
+    <ItemGroup>
+      <DetectorHostOutputFiles Include="$(TargetDir)ClypDatDetectorHost.exe" />
+      <DetectorHostOutputFiles Include="$(TargetDir)ClypDatDetectorHost.dll" />
+      <DetectorHostOutputFiles Include="$(TargetDir)ClypDatDetectorHost.deps.json" />
+      <DetectorHostOutputFiles Include="$(TargetDir)ClypDatDetectorHost.runtimeconfig.json" />
+    </ItemGroup>
+  </Target>
+</Project>

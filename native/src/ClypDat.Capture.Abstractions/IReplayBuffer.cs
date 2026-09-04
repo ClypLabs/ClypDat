@@ -217,6 +217,7 @@ public interface IReplayCaptureDiagnostics
 public sealed record ReplaySaveCompleted(string Path, string? Title, DateTime CompletedUtc, string? Error = null);
 public sealed record AutoClipDetectorEvent(string GameId, string EventId, string EventLabel, string OccurrenceId,
     double Confidence, DateTime TimestampUtc, int LeadSeconds, int TailSeconds);
+public sealed record AutoClipDetectorStatus(string GameId, string Status);
 
 public interface IReplayCaptureWorkerEvents
 {
@@ -225,6 +226,7 @@ public interface IReplayCaptureWorkerEvents
     event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     event EventHandler<bool>? FullSessionRecordingToggled;
     event EventHandler<AutoClipDetectorEvent>? AutoClipDetected;
+    event EventHandler<AutoClipDetectorStatus>? AutoClipStatusChanged;
 }
 
 public interface IReplayCaptureWorkerControl

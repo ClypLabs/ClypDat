@@ -129,6 +129,9 @@
     <ProjectReference Include="..\ClypDat.Recorder\ClypDat.Recorder.csproj"
                       ReferenceOutputAssembly="false"
                       Condition="'$(ClypDatUiPreview)' != 'true'" />
+    <ProjectReference Include="..\ClypDat.DetectorHost\ClypDat.DetectorHost.csproj"
+                      ReferenceOutputAssembly="false"
+                      Condition="'$(ClypDatUiPreview)' != 'true'" />
     <Compile Include="..\ClypDat.DevChannel\DevChannelConstants.cs" Link="Services\DevChannel\DevChannelConstants.cs" />
     <Compile Include="..\ClypDat.DevChannel\DevBuildManifest.cs" Link="Services\DevChannel\DevBuildManifest.cs" />
     <Compile Include="..\ClypDat.DevChannel\DevPackageVerifier.cs" Link="Services\DevChannel\DevPackageVerifier.cs" />
@@ -229,6 +232,24 @@
     <Copy SourceFiles="@(CaptureWorkerPublishFiles)"
           DestinationFolder="$(PublishDir)"
           SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="BuildDetectorHostAppHost" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
+    <MSBuild Projects="..\ClypDat.DetectorHost\ClypDat.DetectorHost.csproj"
+             Targets="GetDetectorHostOutputFiles"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);Version=$(Version)">
+      <Output TaskParameter="TargetOutputs" ItemName="DetectorHostOutputFiles" />
+    </MSBuild>
+    <Copy SourceFiles="@(DetectorHostOutputFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishDetectorHostAppHost" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true'">
+    <MSBuild Projects="..\ClypDat.DetectorHost\ClypDat.DetectorHost.csproj"
+             Targets="GetDetectorHostOutputFiles"
+             Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);Version=$(Version)">
+      <Output TaskParameter="TargetOutputs" ItemName="DetectorHostPublishFiles" />
+    </MSBuild>
+    <Copy SourceFiles="@(DetectorHostPublishFiles)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
 
   <!-- Native replay owns D3D11/FFmpeg state once cut over. Build it through

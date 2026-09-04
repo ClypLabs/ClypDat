@@ -563,6 +563,7 @@ public sealed partial class MainWindow : Window
                 workerEvents.SaveCompleted -= Worker_SaveCompleted;
                 workerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
                 workerEvents.AutoClipDetected -= Worker_AutoClipDetected;
+                workerEvents.AutoClipStatusChanged -= Worker_AutoClipStatusChanged;
             }
             _replayBuffer?.Dispose();
             _playback?.Dispose();
@@ -870,6 +871,7 @@ public sealed partial class MainWindow : Window
             workerEvents.SaveCompleted += Worker_SaveCompleted;
             workerEvents.FullSessionRecordingToggled += Worker_FullSessionRecordingToggled;
             workerEvents.AutoClipDetected += Worker_AutoClipDetected;
+            workerEvents.AutoClipStatusChanged += Worker_AutoClipStatusChanged;
         }
     }
 
@@ -921,6 +923,15 @@ public sealed partial class MainWindow : Window
                 new ReplayClipWindow(detected.TimestampUtc - TimeSpan.FromSeconds(detected.LeadSeconds), detected.TimestampUtc + TimeSpan.FromSeconds(detected.TailSeconds)),
                 "HELLDIVERS™ 2",
                 detected.EventLabel);
+        });
+    }
+
+    private void Worker_AutoClipStatusChanged(object? sender, AutoClipDetectorStatus status)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(_replayBuffer, sender) || ViewModel?.FindAutoClipGame(status.GameId) is not { } game) return;
+            game.StatusText = status.Status;
         });
     }
 
@@ -1070,6 +1081,7 @@ public sealed partial class MainWindow : Window
             oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
             oldWorkerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
             oldWorkerEvents.AutoClipDetected -= Worker_AutoClipDetected;
+            oldWorkerEvents.AutoClipStatusChanged -= Worker_AutoClipStatusChanged;
         }
         _replayBuffer.Dispose();
         _replayConfigSnapshot = config;

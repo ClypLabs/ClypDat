@@ -88,27 +88,23 @@ public static class ReleaseSigning
     /// </summary>
     public static ReleaseManifest Verify(ReadOnlySpan<byte> manifestBytes, ReadOnlySpan<byte> signatureBytes, out PinnedReleaseKey acceptedBy)
     {
-        if (!IsConfigured)
-        {
-            throw new InvalidOperationException("No release signing key is pinned in this build.");
-        }
+        acceptedBy = VerifyDetached(manifestBytes, signatureBytes, "Release manifest");
+        var manifest = JsonSerializer.Deserialize<ReleaseManifest>(manifestBytes) ??
+            throw new InvalidDataException("Release manifest was empty.");
+        if (manifest.Schema != 1) throw new InvalidDataException($"Unsupported release manifest schema {manifest.Schema}.");
+        if (string.IsNullOrWhiteSpace(manifest.Tag)) throw new InvalidDataException("Release manifest has no tag.");
+        if (manifest.Assets is null || manifest.Assets.Count == 0) throw new InvalidDataException("Release manifest lists no assets.");
+        return manifest;
+    }
 
+    public static PinnedReleaseKey VerifyDetached(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signatureBytes, string subject = "Data")
+    {
+        if (!IsConfigured) throw new InvalidOperationException("No release signing key is pinned in this build.");
         byte[] signature;
-        try
-        {
-            signature = Convert.FromBase64String(System.Text.Encoding.UTF8.GetString(signatureBytes).Trim());
-        }
-        catch (FormatException error)
-        {
-            throw new InvalidDataException("Release manifest signature is not base64.", error);
-        }
+        try { signature = Convert.FromBase64String(System.Text.Encoding.UTF8.GetString(signatureBytes).Trim()); }
+        catch (FormatException error) { throw new InvalidDataException($"{subject} signature is not base64.", error); }
 
-        // Verify before parsing, so the JSON reader never sees unauthenticated bytes.
-        // Every pinned key is tried; a signature from any of them is accepted. A key that
-        // will not even import is skipped rather than failing the whole check, so one
-        // malformed entry cannot strand users on a build that trusts nothing.
-        var manifestArray = manifestBytes.ToArray();
-        PinnedReleaseKey? accepted = null;
+        var signedData = data.ToArray();
         foreach (var candidate in PinnedPublicKeys)
         {
             using var rsa = RSA.Create();
@@ -122,27 +118,9 @@ public static class ReleaseSigning
                 continue;
             }
 
-            if (rsa.VerifyData(manifestArray, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss))
-            {
-                accepted = candidate;
-                break;
-            }
+            if (rsa.VerifyData(signedData, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss)) return candidate;
         }
-
-        if (accepted is null)
-        {
-            throw new CryptographicException(
-                $"Release manifest signature did not verify against any of the {PinnedPublicKeys.Count} pinned release key(s).");
-        }
-
-        acceptedBy = accepted;
-
-        var manifest = JsonSerializer.Deserialize<ReleaseManifest>(manifestBytes) ??
-            throw new InvalidDataException("Release manifest was empty.");
-        if (manifest.Schema != 1) throw new InvalidDataException($"Unsupported release manifest schema {manifest.Schema}.");
-        if (string.IsNullOrWhiteSpace(manifest.Tag)) throw new InvalidDataException("Release manifest has no tag.");
-        if (manifest.Assets is null || manifest.Assets.Count == 0) throw new InvalidDataException("Release manifest lists no assets.");
-        return manifest;
+        throw new CryptographicException($"{subject} signature did not verify against any of the {PinnedPublicKeys.Count} pinned release key(s).");
     }
 
     /// <summary>
