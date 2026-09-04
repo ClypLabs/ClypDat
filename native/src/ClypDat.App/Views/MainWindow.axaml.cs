@@ -6404,6 +6404,7 @@ public sealed partial class MainWindow : Window
         var clip = ViewModel.AllClips.FirstOrDefault(card => string.Equals(card.Path, path, StringComparison.OrdinalIgnoreCase));
         if (clip is null) return;
 
+        PauseEditorPlayback();
         var confirmed = await ConfirmDeleteAsync(clip.Name);
         if (!confirmed) return;
 
@@ -6577,6 +6578,7 @@ public sealed partial class MainWindow : Window
     private async Task ExportCurrentClipAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        PauseEditorPlayback();
         var libraryRoot = string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)
             ? DefaultLibraryFolder()
             : ViewModel.Settings.LibraryFolder;
