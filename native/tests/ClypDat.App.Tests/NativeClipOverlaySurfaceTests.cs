@@ -15,9 +15,12 @@ public sealed class NativeClipOverlaySurfaceTests
         using var surface = new NativeClipOverlaySurface(_ => new ClipOverlayFrame(300, 66, new byte[300 * 66 * 4]));
         var handle = surface.WindowHandle;
         Assert.NotEqual(IntPtr.Zero, handle);
+        Assert.Equal("DirectComposition", surface.PresenterName);
         var style = GetWindowLongPtr(handle, -20).ToInt64();
         Assert.NotEqual(0, style & 0x08000000);
         Assert.NotEqual(0, style & 0x00000020);
+        Assert.NotEqual(0, style & 0x00200000);
+        Assert.Equal(0, style & 0x00080000);
 
         surface.Publish(Presentation(1, true));
         Assert.True(SpinWait.SpinUntil(() => surface.PublishCount == 1, 1000));

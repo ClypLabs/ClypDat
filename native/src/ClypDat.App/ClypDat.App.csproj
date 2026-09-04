@@ -116,6 +116,7 @@
     <PackageReference Include="ScreenRecorderLib" Version="6.6.0" Condition="'$(ClypDatUiPreview)' != 'true'" />
     <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" Condition="'$(ClypDatUiPreview)' != 'true'" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
     <!-- Pinned directly to the forked Avalonia version's required version.
