@@ -23,6 +23,24 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private static readonly List<byte[]> InterFontData = [];
     private static readonly List<nint> InterFontHandles = [];
 
+    // Captured on the UI thread at startup (App.PreloadOverlayFonts) rather
+    // than read here. AssetLoader resolves IAssetLoader out of AvaloniaLocator,
+    // and from this surface's own thread that lookup fails outright - "Unable
+    // to locate 'Avalonia.Platform.IAssetLoader'" - so GDI never got the
+    // bundled Inter and every notification rendered in the fallback face
+    // instead of the app's.
+    internal static byte[][]? PreloadedFontData;
+
+    // Follows Settings > Fonts. This was hard-coded to "Inter", which left the
+    // notification the one part of the app still in the old face whenever the
+    // user picked anything else.
+    private static volatile string _fontFace = "Inter";
+    internal static string FontFace
+    {
+        get => _fontFace;
+        set => _fontFace = string.IsNullOrWhiteSpace(value) ? "Inter" : value.Trim();
+    }
+
     private readonly object _gate = new();
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _ready = new();
@@ -68,7 +86,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     {
         try
         {
-            EnsureInterFont();
+            EnsureOverlayFont();
             RegisterWindowClass();
             _window = CreateWindowEx(WsExLayered | WsExTransparent | WsExToolWindow | WsExNoActivate,
                 ClassName, string.Empty, WsPopup, -32000, -32000, 1, 1, 0, 0, GetModuleHandle(null), 0);
@@ -163,8 +181,9 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         var iconY = (height - iconSize) / 2;
 
         SetBkMode(_memoryDc, 1);
-        var titleFont = CreateFont(-(int)Math.Round(18 * scale), 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, 5, 0, "Inter");
-        var detailFont = CreateFont(-(int)Math.Round(16 * scale), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Inter");
+        var face = FontFace;
+        var titleFont = CreateFont(-(int)Math.Round(18 * scale), 0, 0, 0, 500, 0, 0, 0, 1, 0, 0, 5, 0, face);
+        var detailFont = CreateFont(-(int)Math.Round(16 * scale), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, face);
         try
         {
             DrawApplicationIcon(iconX, iconY, iconSize);
@@ -250,32 +269,31 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     }
 
     // Avalonia bundles Inter inside Avalonia.Fonts.Inter; Windows does not
-    // register that private font for GDI, so load the same asset for this HWND.
-    private static void EnsureInterFont()
+    // register that private font for GDI, so it goes into this process's own
+    // font table. Only Inter needs this - any font picked from Settings >
+    // Fonts is installed on the machine and GDI already knows its face name.
+    private static void EnsureOverlayFont()
     {
         lock (InterFontGate)
         {
             if (InterFontHandles.Count != 0) return;
-            try
+            var assets = PreloadedFontData;
+            if (assets is null || assets.Length == 0)
             {
-                foreach (var asset in new[] { "Inter-Regular.ttf", "Inter-Medium.ttf" })
+                AppLog.Info("Native clip overlay has no preloaded font data; notifications fall back to the GDI default face.");
+                return;
+            }
+
+            foreach (var fontData in assets)
+            {
+                fixed (byte* pointer = fontData)
                 {
-                    using var stream = AssetLoader.Open(new Uri($"avares://Avalonia.Fonts.Inter/Assets/{asset}"));
-                    using var data = new MemoryStream();
-                    stream.CopyTo(data);
-                    var fontData = data.ToArray();
-                    fixed (byte* pointer = fontData)
-                    {
-                        var handle = AddFontMemResourceEx((nint)pointer, (uint)fontData.Length, 0, out _);
-                        if (handle != 0) { InterFontData.Add(fontData); InterFontHandles.Add(handle); }
-                    }
+                    var handle = AddFontMemResourceEx((nint)pointer, (uint)fontData.Length, 0, out _);
+                    if (handle != 0) { InterFontData.Add(fontData); InterFontHandles.Add(handle); }
                 }
-                if (InterFontHandles.Count == 0) AppLog.Info("Native clip overlay could not load bundled Inter font.");
             }
-            catch (Exception error)
-            {
-                AppLog.Info($"Native clip overlay could not load bundled Inter font: {error.Message}");
-            }
+
+            if (InterFontHandles.Count == 0) AppLog.Info("Native clip overlay could not register the bundled Inter font with GDI.");
         }
     }
 
