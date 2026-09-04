@@ -216,7 +216,7 @@ public sealed partial class MainWindow : Window
     // a continuous drag never lets it back up mid-resize, short enough not to
     // feel like a lag once the drag ends.
     private static readonly TimeSpan HoverControlsResizeSettle = TimeSpan.FromMilliseconds(220);
-    private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(220);
+    private static readonly TimeSpan LibraryResizeAnchorSettle = TimeSpan.FromMilliseconds(120);
     private const double LibraryScrollOffsetTolerance = 0.01;
     private DateTime _hoverControlsSuppressedUntilUtc = DateTime.MinValue;
     // The hover bar moves inside a fixed window, clipped at the video's lower
@@ -233,7 +233,7 @@ public sealed partial class MainWindow : Window
     private int _hoverControlsAnimationId;
     private bool _hoverControlsAnimationRunning;
     private bool _hoverControlsSlidingOut;
-    private string? _libraryResizeAnchorPath;
+    private LibraryViewportAnchor? _libraryResizeAnchor;
     private DispatcherTimer? _libraryResizeAnchorSettleTimer;
     private int _libraryResizeAnchorGeneration;
     private double? _libraryResizeExpectedOffsetY;
@@ -245,10 +245,10 @@ public sealed partial class MainWindow : Window
     // LibraryScrollViewer's Offset.Y pointing at pixels from the OLD
     // cards-per-row layout once Library became visible (and re-measured
     // with the new width) again.
-    private string? _libraryReturnAnchorPath;
+    private LibraryViewportAnchor? _libraryReturnAnchor;
     private bool _libraryReturnAnchorDirty;
     private bool _libraryResizeAnchorRestorePending;
-    private string? _libraryReturnAnchorRestorePath;
+    private LibraryViewportAnchor? _libraryReturnAnchorRestore;
     private readonly Stopwatch _libraryReturnClock = new();
     private string? _libraryReturnSource;
     private int _libraryReturnTimingGeneration;
@@ -263,11 +263,15 @@ public sealed partial class MainWindow : Window
     private bool _startupDialogsStarted;
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
-    private static readonly TimeSpan LibraryWheelDuration = TimeSpan.FromMilliseconds(140);
-    private const double LibraryWheelDistance = 50;
-    private int _libraryWheelAnimationId;
-    private bool _libraryWheelAnimationActive;
-    private double _libraryWheelTargetOffsetY;
+    private static readonly TimeSpan LibraryMotionSettle = TimeSpan.FromMilliseconds(120);
+    private readonly HashSet<LibraryGridRow> _realizedLibraryRows = [];
+    private readonly HashSet<ClipCardViewModel> _activeLibraryClips = [];
+    private readonly LibraryMotionGate _libraryMotionGate = new();
+    private DispatcherTimer? _libraryMotionSettleTimer;
+    private bool _libraryResizeActive;
+    private bool _libraryLayoutUpdateQueued;
+    private Control? _hoveredLibraryCard;
+    private ClipCardViewModel? _hoveredLibraryClip;
     public MainWindow()
     {
         Background = Brushes.Black;
@@ -286,24 +290,12 @@ public sealed partial class MainWindow : Window
         RootLayout.Margin = OffScreenMargin;
         UpdateViewNavButtons();
         LibraryScrollViewer.ScrollChanged += LibraryScrollViewer_OnScrollChanged;
-        LibraryScrollViewer.AddHandler(PointerWheelChangedEvent, LibraryScrollViewer_OnPointerWheelChanged, RoutingStrategies.Tunnel, true);
+        LibraryScrollViewer.AddHandler(PointerWheelChangedEvent, LibraryScrollViewer_OnMotionWheel, RoutingStrategies.Tunnel, true);
+        LibraryScrollViewer.SizeChanged += (_, _) => QueueLibraryLayoutUpdate();
+        LibraryItemsControl.ContainerPrepared += LibraryItemsControl_OnContainerPrepared;
+        LibraryItemsControl.ContainerClearing += LibraryItemsControl_OnContainerClearing;
         TimelineScrollViewer.AddHandler(PointerWheelChangedEvent, TimelineScrollViewer_OnPointerWheelChanged, RoutingStrategies.Tunnel, true);
-        // Card visibility flips (filtering) and hydration both change the
-        // scroll extent without a size change on this window, so the marker
-        // positions have to be recomputed off layout rather than only off
-        // Window_OnSizeChanged.
-        LibraryScrollViewer.LayoutUpdated += (_, _) =>
-        {
-            if (LibraryScrollViewer.Bounds.Width > 0)
-            {
-                var layout = LibraryCardLayoutCalculator.Calculate(LibraryScrollViewer.Bounds.Width, ViewModel?.ScaleClipsWithWindow == true);
-                ViewModel?.UpdateCardLayout(layout);
-            }
-            CompleteLibraryLayoutPass();
-            TryCompleteLibraryReturnTiming();
-            TryCompleteInitialLibraryLayout();
-            QueueDateScrubberRebuild();
-        };
+        QueueLibraryLayoutUpdate();
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         // Guarded like the hover-bar poll timer below (see SetupEditorHoverControls) -
         // SyncPlaybackPosition repositions the "Playback Paused" badge via
@@ -424,6 +416,8 @@ public sealed partial class MainWindow : Window
                             _clipHoverPreview.Stop("navigation");
                             CancelEditorHoverWarmup();
                         }
+                        UpdateRealizedLibraryClips();
+                        if (ViewModel.IsLibraryVisible) QueueLibraryLayoutUpdate();
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayQualityRestartRequired) && ViewModel.ReplayQualityRestartRequired)
                     {
@@ -435,10 +429,7 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVisible) && ViewModel.IsLibraryVisible && _libraryReturnAnchorDirty)
                     {
                         _libraryReturnAnchorDirty = false;
-                        var anchorPath = _libraryReturnAnchorPath;
-                        // LibraryCardPanel publishes current geometry before its
-                        // children measure. Restore on the first completed pass.
-                        _libraryReturnAnchorRestorePath = anchorPath;
+                        _libraryReturnAnchorRestore = _libraryReturnAnchor;
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVisible) && ViewModel.IsLibraryVisible)
                     {
@@ -449,6 +440,13 @@ public sealed partial class MainWindow : Window
                         StartLibraryReturnTiming("Settings");
                     }
                     if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
+                    if (e.PropertyName == nameof(MainWindowViewModel.LibraryProjection))
+                    {
+                        UpdateRealizedLibraryClips();
+                        _scrubberSignature = (-1, -1, -1, -1);
+                        QueueDateScrubberRebuild();
+                        QueueLibraryLayoutUpdate();
+                    }
                     if (e.PropertyName == nameof(MainWindowViewModel.ClipSpeed)) ApplyEditorSpeedPreview();
                     if (e.PropertyName == nameof(MainWindowViewModel.ClipCropMode)) QueueEditorCropPreview();
                     if (e.PropertyName is nameof(MainWindowViewModel.SelectedThemePreset) or nameof(MainWindowViewModel.UseSystemAccentColor))
@@ -1100,7 +1098,6 @@ public sealed partial class MainWindow : Window
 
     private void ResetLibraryFilterScroll()
     {
-        CancelLibraryWheelAnimation();
         ClearLibraryResizeAnchor();
         _libraryResizeExpectedOffsetY = null;
         if (LibraryScrollViewer.Offset.Y != 0)
@@ -1798,13 +1795,14 @@ public sealed partial class MainWindow : Window
         // brings it straight back, correctly placed, once the drag stops and
         // the layout has settled.
         SuspendHoverControlsForResize();
+        BeginLibraryMotion(resizing: true);
         CaptureLibraryResizeAnchor();
-        if (ViewModel?.IsLibraryVisible == true && _libraryResizeAnchorPath is not null)
+        if (ViewModel?.IsLibraryVisible == true && _libraryResizeAnchor is not null)
         {
             QueueLibraryResizeAnchorRestore();
             ResetLibraryResizeAnchorSettleTimer();
         }
-        else if (ViewModel?.IsLibraryVisible != true && _libraryReturnAnchorPath is not null)
+        else if (ViewModel?.IsLibraryVisible != true && _libraryReturnAnchor is not null)
         {
             // Library is collapsed right now (editor's open) - it won't see
             // its own SizeChanged/reflow until it becomes visible again, so
@@ -1813,6 +1811,7 @@ public sealed partial class MainWindow : Window
             _libraryReturnAnchorDirty = true;
         }
 
+        QueueLibraryLayoutUpdate();
         UpdateTimelineChrome();
     }
 
@@ -1824,101 +1823,31 @@ public sealed partial class MainWindow : Window
     // size - whatever height the lanes give back now goes to the star-sized
     // video row, the same way every other panel in this window behaves.
 
-    // TODO: Replace this with a proper layout-level anchor once the library
-    // moves away from its non-virtualized WrapPanel. This deliberately hacky
-    // fallback latches the first fully visible card before reflow, then makes
-    // sure it is fully visible again after reflow instead of preserving an
-    // unstable exact viewport fraction.
     private void CaptureLibraryResizeAnchor()
     {
         if (ViewModel?.IsLibraryVisible != true) return;
-
-        // First SizeChanged latches the pre-reflow card. Do not replace it
-        // during the same resize drag: subsequent events can already see the
-        // newly wrapped layout, which is exactly what this workaround avoids.
-        if (_libraryResizeAnchorPath is not null) return;
-
-        _libraryResizeAnchorPath = ComputeLibraryAnchorPath();
+        if (_libraryResizeAnchor is not null) return;
+        _libraryResizeAnchor = ComputeLibraryAnchor();
     }
 
-    // Shared by the drag-resize anchor (CaptureLibraryResizeAnchor) and the
-    // editor round-trip anchor (OpenClipCardAsync) - both need "which card is
-    // effectively at the top of the viewport right now", just captured at
-    // different moments.
-    private string? ComputeLibraryAnchorPath()
+    private LibraryViewportAnchor? ComputeLibraryAnchor()
     {
-        var viewportHeight = LibraryScrollViewer.Viewport.Height;
-        if (viewportHeight <= 0) return null;
-
-        var itemsControl = LibraryScrollViewer.Content as ItemsControl
-            ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
-        if (itemsControl is null) return null;
-
-        var viewportTop = LibraryScrollViewer.Offset.Y;
-        var viewportBottom = viewportTop + viewportHeight;
-        const double fullyVisibleTolerance = 1;
-        ClipCardViewModel? firstFullyVisible = null;
-        ClipCardViewModel? firstIntersecting = null;
-        var firstFullyVisibleTop = double.MaxValue;
-        var firstFullyVisibleLeft = double.MaxValue;
-        var firstIntersectingTop = double.MaxValue;
-        var firstIntersectingLeft = double.MaxValue;
-
-        foreach (var container in itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
-        {
-            var clip = container.DataContext switch
-            {
-                ClipCardViewModel direct => direct,
-                LibraryGridRow row => row.Clips.FirstOrDefault(),
-                _ => null
-            };
-            if (clip is null || !clip.IsVisibleInLibrary || !container.IsVisible || container.Bounds.Height <= 0) continue;
-
-            var point = container.TranslatePoint(default, itemsControl);
-            if (point is null) continue;
-
-            var itemTop = point.Value.Y;
-            var itemBottom = itemTop + container.Bounds.Height;
-            if (itemBottom <= viewportTop || itemTop >= viewportBottom) continue;
-            var itemLeft = point.Value.X;
-
-            var isFirstInRow = itemTop < firstIntersectingTop - fullyVisibleTolerance ||
-                               (Math.Abs(itemTop - firstIntersectingTop) <= fullyVisibleTolerance && itemLeft < firstIntersectingLeft);
-            if (isFirstInRow)
-            {
-                firstIntersecting = clip;
-                firstIntersectingTop = itemTop;
-                firstIntersectingLeft = itemLeft;
-            }
-
-            var fullyVisible = itemTop >= viewportTop - fullyVisibleTolerance &&
-                               itemBottom <= viewportBottom + fullyVisibleTolerance;
-            var isFirstFullyVisible = fullyVisible &&
-                                      (itemTop < firstFullyVisibleTop - fullyVisibleTolerance ||
-                                       (Math.Abs(itemTop - firstFullyVisibleTop) <= fullyVisibleTolerance && itemLeft < firstFullyVisibleLeft));
-            if (isFirstFullyVisible)
-            {
-                firstFullyVisible = clip;
-                firstFullyVisibleTop = itemTop;
-                firstFullyVisibleLeft = itemLeft;
-            }
-        }
-
-        return (firstFullyVisible ?? firstIntersecting)?.Path;
+        if (ViewModel is null || ViewModel.LibraryProjection.VisibleCount == 0) return null;
+        return ViewModel.LibraryProjection.CaptureAnchor(
+            LibraryScrollViewer.Offset.Y, ViewModel.StartupLibraryRowPitch, ViewModel.CardColumns);
     }
 
     private void CompleteLibraryLayoutPass()
     {
-        if (_libraryReturnAnchorRestorePath is not null)
+        if (_libraryReturnAnchorRestore is { } returnAnchor)
         {
-            var path = _libraryReturnAnchorRestorePath;
-            _libraryReturnAnchorRestorePath = null;
-            RestoreLibraryResizeAnchor(path);
+            _libraryReturnAnchorRestore = null;
+            RestoreLibraryResizeAnchor(returnAnchor);
         }
 
         if (!_libraryResizeAnchorRestorePending) return;
         _libraryResizeAnchorRestorePending = false;
-        RestoreLibraryResizeAnchor(_libraryResizeAnchorPath);
+        RestoreLibraryResizeAnchor(_libraryResizeAnchor);
     }
 
     private void StartLibraryReturnTiming(string source)
@@ -1958,12 +1887,131 @@ public sealed partial class MainWindow : Window
     private void LibraryCardPanel_OnMetricsChanged(object? sender, LibraryCardLayout layout) =>
         ViewModel?.UpdateCardLayout(layout);
 
+    private void QueueLibraryLayoutUpdate()
+    {
+        if (_libraryLayoutUpdateQueued) return;
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null)
+        {
+            Dispatcher.UIThread.Post(ApplyLibraryLayoutUpdate, DispatcherPriority.Loaded);
+            _libraryLayoutUpdateQueued = true;
+            return;
+        }
+        _libraryLayoutUpdateQueued = true;
+        topLevel.RequestAnimationFrame(_ => ApplyLibraryLayoutUpdate());
+    }
+
+    private void ApplyLibraryLayoutUpdate()
+    {
+        _libraryLayoutUpdateQueued = false;
+        if (LibraryScrollViewer.Bounds.Width > 0)
+            ViewModel?.UpdateCardLayout(LibraryCardLayoutCalculator.Calculate(
+                LibraryScrollViewer.Bounds.Width, ViewModel.ScaleClipsWithWindow));
+        CompleteLibraryLayoutPass();
+        TryCompleteLibraryReturnTiming();
+        TryCompleteInitialLibraryLayout();
+        QueueDateScrubberRebuild();
+    }
+
+    private void LibraryItemsControl_OnContainerPrepared(object? sender, ContainerPreparedEventArgs e)
+    {
+        if (e.Container.DataContext is not LibraryGridRow row) return;
+        row.SetRealized(true);
+        _realizedLibraryRows.Add(row);
+        UpdateRealizedLibraryClips();
+        if (_libraryResizeActive)
+            Dispatcher.UIThread.Post(() => SetRealizedLibraryCardShadows(false), DispatcherPriority.Loaded);
+        TryCompleteInitialLibraryLayout();
+    }
+
+    private void LibraryItemsControl_OnContainerClearing(object? sender, ContainerClearingEventArgs e)
+    {
+        if (e.Container.DataContext is not LibraryGridRow row) return;
+        row.SetRealized(false);
+        _realizedLibraryRows.Remove(row);
+        UpdateRealizedLibraryClips();
+    }
+
+    private void UpdateRealizedLibraryClips()
+    {
+        HashSet<ClipCardViewModel> next = ViewModel?.IsLibraryVisible == true
+            ? _realizedLibraryRows.Where(row => row.IsRealized && ViewModel.LibraryRows.Contains(row))
+                .SelectMany(row => row.ProjectedClips).ToHashSet()
+            : [];
+        foreach (var clip in _activeLibraryClips.Except(next).ToArray())
+        {
+            _clipHoverPreview.StopIfActive(clip, "row unrealized");
+            CancelEditorHoverWarmup(clip.Path);
+            clip.SetPreviewVisible(false);
+            _activeLibraryClips.Remove(clip);
+        }
+        foreach (var clip in next.Except(_activeLibraryClips))
+        {
+            clip.SetPreviewVisible(true);
+            _activeLibraryClips.Add(clip);
+        }
+    }
+
+    private void BeginLibraryMotion(bool resizing)
+    {
+        if (ViewModel?.IsLibraryVisible != true) return;
+        _libraryMotionGate.Begin();
+        _clipHoverPreview.Stop(resizing ? "library resize" : "library scroll");
+        CancelEditorHoverWarmup();
+        if (resizing && !_libraryResizeActive)
+        {
+            _libraryResizeActive = true;
+            SetRealizedLibraryCardShadows(false);
+        }
+        if (_libraryMotionSettleTimer is null)
+        {
+            _libraryMotionSettleTimer = new DispatcherTimer { Interval = LibraryMotionSettle };
+            _libraryMotionSettleTimer.Tick += (_, _) => CompleteLibraryMotion();
+        }
+        _libraryMotionSettleTimer.Stop();
+        _libraryMotionSettleTimer.Start();
+    }
+
+    private void CompleteLibraryMotion()
+    {
+        _libraryMotionSettleTimer?.Stop();
+        if (_libraryResizeActive)
+        {
+            _libraryResizeActive = false;
+            SetRealizedLibraryCardShadows(true);
+        }
+        var control = _hoveredLibraryCard;
+        var clip = _hoveredLibraryClip;
+        var canResume = control is { IsPointerOver: true }
+            && control.IsAttachedToVisualTree()
+            && clip is not null
+            && ViewModel?.IsLibraryVisible == true
+            && _activeLibraryClips.Contains(clip)
+            && ReferenceEquals(control.DataContext, clip);
+        if (!_libraryMotionGate.TrySettle(_libraryMotionGate.Generation, canResume) || control is null || clip is null) return;
+        RequestLibraryHoverPreview(control, clip);
+    }
+
+    private void SetRealizedLibraryCardShadows(bool enabled)
+    {
+        var shadows = enabled ? BoxShadows.Parse("0 6 18 -6 #66000000") : default;
+        foreach (var container in LibraryItemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
+        foreach (var surface in container.GetVisualDescendants().OfType<Border>().Where(border => border.Name == "LibraryClipCardSurface"))
+            surface.BoxShadow = shadows;
+    }
+
     private void LibraryScrollViewer_OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         LibraryLoadingTilesOverlay.ScrollOffsetY = LibraryScrollViewer.Offset.Y;
         UpdateDateScrubberThumb();
         UpdateScrollToTopButtonVisibility();
+        if (e.ExtentDelta.X != 0 || e.ExtentDelta.Y != 0 || e.ViewportDelta.X != 0 || e.ViewportDelta.Y != 0)
+        {
+            QueueDateScrubberRebuild();
+            QueueLibraryLayoutUpdate();
+        }
         if (e.OffsetDelta.Y == 0) return;
+        BeginLibraryMotion(resizing: false);
 
         if (_libraryResizeExpectedOffsetY is double expectedOffsetY)
         {
@@ -1986,67 +2034,9 @@ public sealed partial class MainWindow : Window
 
     private void ScrollToTopButton_OnClick(object? sender, RoutedEventArgs e) => AnimateLibraryScrollToTop();
 
-    private void LibraryScrollViewer_OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
+    private void LibraryScrollViewer_OnMotionWheel(object? sender, PointerWheelEventArgs e)
     {
-        if (ViewModel?.IsLibraryVisible != true || _draggingScrubber || e.Delta.Y == 0) return;
-
-        var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
-        if (maxOffset <= 0) return;
-
-        // Preserve Avalonia's existing 50-DIP wheel distance, only spread it
-        // over compositor frames. Start from the live offset so a reversal
-        // mid-glide never snaps back to an obsolete starting point.
-        var baseOffset = _libraryWheelAnimationActive ? _libraryWheelTargetOffsetY : LibraryScrollViewer.Offset.Y;
-        _libraryWheelTargetOffsetY = Math.Clamp(baseOffset - e.Delta.Y * LibraryWheelDistance, 0, maxOffset);
-        e.Handled = true;
-        StartLibraryWheelAnimation();
-    }
-
-    private void StartLibraryWheelAnimation()
-    {
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null)
-        {
-            SetLibraryWheelOffset(_libraryWheelTargetOffsetY);
-            return;
-        }
-
-        var startOffsetY = LibraryScrollViewer.Offset.Y;
-        var targetOffsetY = _libraryWheelTargetOffsetY;
-        var animationId = ++_libraryWheelAnimationId;
-        _libraryWheelAnimationActive = true;
-        TimeSpan? startTime = null;
-
-        void Step(TimeSpan frameTime)
-        {
-            if (animationId != _libraryWheelAnimationId) return;
-            startTime ??= frameTime;
-            var progress = Math.Min(1, (frameTime - startTime.Value).TotalMilliseconds / LibraryWheelDuration.TotalMilliseconds);
-            var eased = 1 - Math.Pow(1 - progress, 3);
-            SetLibraryWheelOffset(startOffsetY + (targetOffsetY - startOffsetY) * eased);
-            if (progress < 1)
-            {
-                topLevel.RequestAnimationFrame(Step);
-            }
-            else
-            {
-                _libraryWheelAnimationActive = false;
-            }
-        }
-
-        topLevel.RequestAnimationFrame(Step);
-    }
-
-    private void SetLibraryWheelOffset(double offsetY)
-    {
-        LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, offsetY);
-    }
-
-    private void CancelLibraryWheelAnimation()
-    {
-        if (!_libraryWheelAnimationActive) return;
-        _libraryWheelAnimationId++;
-        _libraryWheelAnimationActive = false;
+        if (e.Delta.Y != 0) BeginLibraryMotion(resizing: false);
     }
 
     // Eased Offset animation, stepped off TopLevel.RequestAnimationFrame
@@ -2060,7 +2050,6 @@ public sealed partial class MainWindow : Window
 
     private void AnimateLibraryScrollToTop()
     {
-        CancelLibraryWheelAnimation();
         var startOffsetY = LibraryScrollViewer.Offset.Y;
         if (startOffsetY <= 0) return;
 
@@ -2092,13 +2081,13 @@ public sealed partial class MainWindow : Window
 
     private void QueueLibraryResizeAnchorRestore()
     {
-        if (_libraryResizeAnchorPath is null) return;
+        if (_libraryResizeAnchor is null) return;
         _libraryResizeAnchorRestorePending = true;
     }
 
     private void ResetLibraryResizeAnchorSettleTimer()
     {
-        if (_libraryResizeAnchorPath is null) return;
+        if (_libraryResizeAnchor is null) return;
 
         _libraryResizeAnchorGeneration++;
         if (_libraryResizeAnchorSettleTimer is null)
@@ -2116,81 +2105,30 @@ public sealed partial class MainWindow : Window
         _libraryResizeAnchorSettleTimer?.Stop();
         var generation = _libraryResizeAnchorGeneration;
         if (generation != _libraryResizeAnchorGeneration) return;
-        if (!RestoreLibraryResizeAnchor(_libraryResizeAnchorPath)) ClearLibraryResizeAnchor();
+        RestoreLibraryResizeAnchor(_libraryResizeAnchor);
+        ClearLibraryResizeAnchor();
     }
 
-    private bool RestoreLibraryResizeAnchor(string? anchorPath)
+    private bool RestoreLibraryResizeAnchor(LibraryViewportAnchor? anchor)
     {
-        if (string.IsNullOrWhiteSpace(anchorPath)) return false;
-
-        var itemsControl = LibraryScrollViewer.Content as ItemsControl
-            ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
-        if (itemsControl is null || LibraryScrollViewer.Viewport.Height <= 0) return false;
-
-        var anchorContainer = (itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
-            .FirstOrDefault(container => container.DataContext switch
-            {
-                ClipCardViewModel clip => clip.IsVisibleInLibrary && string.Equals(clip.Path, anchorPath, StringComparison.OrdinalIgnoreCase),
-                LibraryGridRow row => row.Clips.Any(clip => clip.IsVisibleInLibrary && string.Equals(clip.Path, anchorPath, StringComparison.OrdinalIgnoreCase)),
-                _ => false
-            });
-        if (anchorContainer is null) return false;
-
-        var point = anchorContainer.TranslatePoint(default, itemsControl);
-        if (point is null || anchorContainer.Bounds.Height <= 0) return false;
-
-        var viewportTop = LibraryScrollViewer.Offset.Y;
-        var viewportHeight = LibraryScrollViewer.Viewport.Height;
-        var viewportBottom = viewportTop + viewportHeight;
-        var itemTop = point.Value.Y;
-        var itemBottom = itemTop + anchorContainer.Bounds.Height;
-        const double fullyVisibleTolerance = 1;
-
-        double targetOffset;
-        if (anchorContainer.Bounds.Height >= viewportHeight)
-        {
-            // Oversized cards cannot fully fit. Keep their beginning visible.
-            targetOffset = itemTop;
-        }
-        else if (itemTop < viewportTop - fullyVisibleTolerance)
-        {
-            targetOffset = itemTop;
-        }
-        else if (itemBottom > viewportBottom + fullyVisibleTolerance)
-        {
-            targetOffset = itemBottom - viewportHeight;
-        }
-        else
-        {
-            return true;
-        }
-
-        CancelLibraryWheelAnimation();
+        if (anchor is null || ViewModel is null || LibraryScrollViewer.Viewport.Height <= 0) return false;
         var maxOffset = Math.Max(0, LibraryScrollViewer.Extent.Height - LibraryScrollViewer.Viewport.Height);
-        LibraryScrollViewer.Offset = new Vector(
-            LibraryScrollViewer.Offset.X,
-            Math.Clamp(targetOffset, 0, maxOffset));
-        // ScrollChanged comes on a later layout pass. Remember actual coerced
-        // offset so that delayed event does not erase this resize anchor.
+        var targetOffset = ViewModel.LibraryProjection.ResolveAnchor(
+            anchor.Value, ViewModel.StartupLibraryRowPitch, ViewModel.CardColumns, maxOffset);
+        LibraryScrollViewer.Offset = new Vector(LibraryScrollViewer.Offset.X, targetOffset);
         _libraryResizeExpectedOffsetY = LibraryScrollViewer.Offset.Y;
-
         return true;
     }
 
     private void ClearLibraryResizeAnchor()
     {
-        _libraryResizeAnchorPath = null;
+        _libraryResizeAnchor = null;
         _libraryResizeExpectedOffsetY = null;
     }
 
     // ---- Library date scrubber ----------------------------------------
-    // Replaces the library's scrollbar with a date-marker track: labels for
-    // each distinct clip date, positioned at that date's real offset in the
-    // scroll content, plus a viewport thumb. Positions can't be derived from
-    // the data alone (a WrapPanel flows cards continuously, so a date's first
-    // card can start mid-row), so they're measured from the realized
-    // containers after layout. The ItemsControl here is non-virtualizing, so
-    // every card has a container to measure.
+    // Replaces the library scrollbar with projection-derived date markers and
+    // a viewport thumb. Row index and stable row pitch avoid visual-tree scans.
     private bool _scrubberRebuildQueued;
     private bool _draggingScrubber;
     private bool _scrubberOffsetQueued;
@@ -2199,9 +2137,7 @@ public sealed partial class MainWindow : Window
     // Where inside the thumb the drag started, so the thumb keeps its grab
     // point under the cursor instead of snapping its top (or center) there.
     private double _scrubberGrabOffset;
-    // RebuildDateScrubber mutates the Canvas' children, which itself triggers
-    // another LayoutUpdated - without a "nothing actually changed" guard that
-    // would spin forever. Keyed on everything the marker layout depends on.
+    // Keyed on everything marker layout depends on.
     private (double Extent, double Viewport, double Track, int VisibleClips) _scrubberSignature = (-1, -1, -1, -1);
     private const double ScrubberTrackHeightBucket = 8;
     // Each distinct date, the content offset it starts at, and how many
@@ -2215,28 +2151,6 @@ public sealed partial class MainWindow : Window
     private readonly List<Border> _scrubberTicks = new();
     private const double ScrubberTickTopInset = 5;
     private const double ScrubberTickRailOverlap = 3;
-
-    // RebuildDateScrubber runs off LayoutUpdated, so it is entered on every
-    // scroll frame and its "nothing changed" signature has to be cheap to
-    // build. Counting visible cards is O(library), which on a few thousand
-    // clips is real per-frame work spent to reach an early return - so it is
-    // memoized against the version ClipCardViewModel bumps when a card's
-    // visibility actually flips. AllClips.Count is part of the key too: a
-    // newly added card starts visible without flipping anything.
-    private (int Version, int Total, int Count) _visibleClipCountMemo = (-1, -1, 0);
-
-    private int VisibleLibraryClipCount()
-    {
-        if (ViewModel is null) return 0;
-        var version = ClipCardViewModel.LibraryVisibilityVersion;
-        var total = ViewModel.AllClips.Count;
-        if (_visibleClipCountMemo.Version == version && _visibleClipCountMemo.Total == total)
-            return _visibleClipCountMemo.Count;
-
-        var count = ViewModel.AllClips.Count(clip => clip.IsVisibleInLibrary);
-        _visibleClipCountMemo = (version, total, count);
-        return count;
-    }
 
     private void QueueDateScrubberRebuild()
     {
@@ -2259,9 +2173,8 @@ public sealed partial class MainWindow : Window
         var extentHeight = LibraryScrollViewer.Extent.Height;
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
 
-        var usingProjection = ViewModel.LibraryProjection.Rows.Count > 0;
         var signature = (extentHeight, viewportHeight, Math.Floor(trackHeight / ScrubberTrackHeightBucket) * ScrubberTrackHeightBucket,
-            usingProjection ? ViewModel.LibraryProjection.Rows.Count : VisibleLibraryClipCount());
+            ViewModel.LibraryProjection.VisibleCount);
         if (signature == _scrubberSignature) return;
         _scrubberSignature = signature;
 
@@ -2273,45 +2186,8 @@ public sealed partial class MainWindow : Window
         // Nothing to scrub through - everything already fits on screen.
         if (trackHeight <= 0 || extentHeight <= 0 || viewportHeight >= extentHeight) return;
 
-        if (usingProjection)
-        {
-            foreach (var marker in ViewModel.LibraryProjection.DateMarkers)
-                _scrubberDates.Add((marker.Text, marker.RowIndex * ViewModel.StartupLibraryRowPitch, marker.Count));
-
-            if (_scrubberHovered) RebuildScrubberTicks();
-            HighlightCurrentScrubberDate();
-            return;
-        }
-
-        var itemsControl = LibraryScrollViewer.Content as ItemsControl ?? LibraryScrollViewer.GetVisualDescendants().OfType<ItemsControl>().FirstOrDefault();
-        if (itemsControl is null) return;
-
-        // Same local-date key UpdateFirstOfDateFlags groups by, so the count
-        // shown for a date matches what's actually on screen for it.
-        var countsByDate = ViewModel.AllClips
-            .Where(clip => clip.IsVisibleInLibrary)
-            .GroupBy(clip => clip.CreatedAt.ToLocalTime().Date)
-            .ToDictionary(group => group.Key, group => group.Count());
-
-        foreach (var container in itemsControl.GetRealizedContainers() ?? Enumerable.Empty<Control>())
-        {
-            if (container.DataContext is not ClipCardViewModel clip) continue;
-            if (!clip.IsFirstOfDate || !clip.IsVisibleInLibrary) continue;
-
-            var offset = container.TranslatePoint(default, itemsControl);
-            if (offset is null) continue;
-
-            // Every date is kept (nothing is drawn per-date any more, so
-            // there's no crowding to thin out) - the bubble should be able to
-            // name whichever one the viewport actually lands on. The year is
-            // only worth showing once it stops being implied: this year's
-            // clips read as "JUL 25", older ones carry the year to
-            // disambiguate.
-            var localDate = clip.CreatedAt.ToLocalTime();
-            var format = localDate.Year == DateTime.Now.Year ? "MMM d" : "MMM d, yyyy";
-            var count = countsByDate.GetValueOrDefault(localDate.Date, 1);
-            _scrubberDates.Add((localDate.ToString(format).ToUpperInvariant(), offset.Value.Y, count));
-        }
+        foreach (var marker in ViewModel.LibraryProjection.DateMarkers)
+            _scrubberDates.Add((marker.Text, marker.RowIndex * ViewModel.StartupLibraryRowPitch, marker.Count));
 
         // Ticks only actually exist in the visual tree while hovered (see
         // DateScrubber_OnPointerEntered/Exited) - rebuilding N Border
@@ -2330,14 +2206,8 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
 
-        // This runs on every LayoutUpdated, which means every scroll frame,
-        // and what follows walks realized containers and their visual
-        // descendants. Once the library has completed its first layout AND
-        // reported a painted viewport there is nothing left for it to
-        // decide, so bail before paying for that walk 60 times a second.
-        // Both halves below are one-shot (CompleteInitialLibraryLayout is
-        // already gated on !IsInitialLibraryLoadComplete, and the reveal
-        // hand-off is a TrySetResult), so nothing is lost by returning early.
+        // Called only by relevant container/layout events. Both halves are
+        // one-shot, so later calls bail before walking realized visuals.
         if (ViewModel.IsInitialLibraryLoadComplete && ViewModel.IsLibraryFirstViewportRendered) return;
 
         var container = LibraryItemsControl.GetRealizedContainers()?
@@ -2354,9 +2224,8 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        // GetRealizedContainers can lag this LayoutUpdated callback by one
-        // dispatcher turn. Layout itself still completed, so do not turn that
-        // bookkeeping delay into a splash timeout.
+        // Container bookkeeping can precede measured bounds by one dispatcher
+        // turn. Layout completion must not become a splash timeout.
         if (ViewModel.AllClips.Count == 0) return;
 
         // RequestAnimationFrame runs after the layout which realized this
@@ -2556,7 +2425,6 @@ public sealed partial class MainWindow : Window
     // flush with the rail bottom only when the final library rows are shown.
     private void SeekLibraryToThumbTop(double y)
     {
-        CancelLibraryWheelAnimation();
         var trackHeight = DateScrubberHost.Bounds.Height;
         var extentHeight = LibraryScrollViewer.Extent.Height;
         var viewportHeight = LibraryScrollViewer.Viewport.Height;
@@ -4190,7 +4058,7 @@ public sealed partial class MainWindow : Window
         // restore half of this.
         if (ViewModel.IsLibraryVisible)
         {
-            _libraryReturnAnchorPath = ComputeLibraryAnchorPath();
+            _libraryReturnAnchor = ComputeLibraryAnchor();
             _libraryReturnAnchorDirty = false;
         }
         if (!await ViewModel.OpenClipAsync(clip))
@@ -4532,17 +4400,6 @@ public sealed partial class MainWindow : Window
         var isFileTitle = clip.IsAutoClip || clip.IsMedalImport;
         var originalText = isFileTitle ? clip.GameNameLabel : (clip.CustomTitle ?? string.Empty);
 
-        // A plain MaxWidth here isn't enough to keep the card from growing -
-        // the Panel's child is measured with unbounded available width, so
-        // whatever the TextBox's OWN desired size comes out to still grows
-        // the card. An explicit Width pins the TextBox's DesiredSize
-        // outright regardless of content, matching the same CardWidth-minus-
-        // reserve budget SubtractDoubleConverter gives the static title
-        // TextBlock (see MainWindow.axaml), plus the 8px grid gap and the
-        // 40px share button in the adjacent column. This keeps the editor
-        // clear of the share button while editing.
-        var titleWidth = Math.Max(80, (ViewModel?.CardWidth ?? 220) - 80);
-
         var editBox = new TextBox
         {
             Text = originalText,
@@ -4567,8 +4424,7 @@ public sealed partial class MainWindow : Window
             // started, then snapping back when it ended.
             MinHeight = 24,
             VerticalContentAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Width = titleWidth
+            HorizontalAlignment = HorizontalAlignment.Stretch
         };
 
         titleBlock.IsVisible = false;
@@ -4581,21 +4437,6 @@ public sealed partial class MainWindow : Window
             editBox.SelectAll();
         });
 
-        // Width above is a one-time snapshot of CardWidth at the moment
-        // editing started, same as the static TextBlock it's covering (see
-        // that field's own comment for why a fixed Width, not just MaxWidth,
-        // is needed) - but the card itself keeps resizing reactively via a
-        // live CardWidth binding while the window is dragged, so without
-        // this the edit box visibly stopped tracking the card's own width
-        // the instant editing began, going stale/mismatched on any resize.
-        void SyncWidthToCard(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
-        {
-            if (args.PropertyName != nameof(MainWindowViewModel.CardWidth) || ViewModel is null) return;
-            editBox.Width = Math.Max(80, ViewModel.CardWidth - 80);
-        }
-
-        if (ViewModel is not null) ViewModel.PropertyChanged += SyncWidthToCard;
-
         // Enter/blur/click-elsewhere all commit, Escape cancels - guarded by
         // resolved so removing the box (which can itself trigger a blur)
         // can't re-fire and commit a second time.
@@ -4606,7 +4447,6 @@ public sealed partial class MainWindow : Window
             if (resolved) return;
             resolved = true;
 
-            if (ViewModel is not null) ViewModel.PropertyChanged -= SyncWidthToCard;
             container.Children.Remove(editBox);
             titleBlock.IsVisible = true;
             _activeInlineTitleEdit = null;
@@ -4794,6 +4634,14 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip } control) return;
         clip.IsHovered = true;
+        _hoveredLibraryCard = control;
+        _hoveredLibraryClip = clip;
+        if (_libraryMotionGate.IsActive) return;
+        RequestLibraryHoverPreview(control, clip);
+    }
+
+    private void RequestLibraryHoverPreview(Control control, ClipCardViewModel clip)
+    {
         var presenter = control.GetVisualDescendants().OfType<ClipPreviewPresenter>().FirstOrDefault();
         // Decode at the size this card actually paints at, not the clip's own
         // resolution - see ClipHoverPreviewController's class comment.
@@ -4808,6 +4656,11 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
         clip.IsHovered = false;
+        if (ReferenceEquals(_hoveredLibraryClip, clip))
+        {
+            _hoveredLibraryCard = null;
+            _hoveredLibraryClip = null;
+        }
         _clipHoverPreview.PointerLeft(clip);
         CancelEditorHoverWarmup(clip.Path);
     }
@@ -4967,20 +4820,6 @@ public sealed partial class MainWindow : Window
             EditorVideoView.WatchMediaPlayer(null);
         }
         QueueEditorBackgroundStop(session);
-    }
-
-    // Fires as each card's own row scrolls in/out of the library
-    // ScrollViewer's clipped viewport (also on initial layout, so anything
-    // below the fold starts out reporting an empty viewport) - lets
-    // ClipCardViewModel decode/dispose its thumbnail Bitmap lazily instead
-    // of every card in the library holding a decoded bitmap at once.
-    private void ClipCard_OnEffectiveViewportChanged(object? sender, EffectiveViewportChangedEventArgs e)
-    {
-        if (sender is not Control { DataContext: ClipCardViewModel clip }) return;
-        var viewport = e.EffectiveViewport;
-        var visible = viewport.Width > 0 && viewport.Height > 0;
-        if (!visible) _clipHoverPreview.StopIfActive(clip, "card left viewport");
-        clip.SetPreviewVisible(visible);
     }
 
     private void ClipCheckBox_OnClick(object? sender, RoutedEventArgs e)

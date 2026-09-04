@@ -627,7 +627,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ClipCardViewModel> AllClips { get; }
     public ObservableCollection<LibraryGridRow> LibraryRows { get; } = new();
     internal LibraryGridProjectionResult LibraryProjection { get; private set; } =
-        new([], [], 0, new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+        new([], [], 0, new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase), []);
     public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
     public bool ShowLibraryLoadingTiles => !IsInitialLibraryLoadComplete || IsRestoringLibraryCache;
     public int LibraryLoadingTileCount => HasStartupLibraryIndex ? _startupVisibleClipCount : 12;

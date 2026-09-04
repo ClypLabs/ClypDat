@@ -45,9 +45,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         _isVod = ComputeIsVod(media, libraryRoot);
         // Thumbnail Bitmap is NOT decoded here - a library can have hundreds
         // of cards and only a screenful are ever actually on screen at once.
-        // MainWindow.axaml wires each card's EffectiveViewportChanged to
-        // SetPreviewVisible, which does the real decode/dispose lazily as
-        // cards scroll in and out of the ScrollViewer's viewport.
+        // MainWindow tracks virtualized row container prepare/clear events
+        // and calls SetPreviewVisible for their clip diffs.
     }
 
     // Authoritative via path - a clip was already sorted into Clips/ or
@@ -429,10 +428,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
-    // Called by MainWindow's per-card EffectiveViewportChanged handler as
-    // cards cross the ScrollViewer's viewport - decodes the thumbnail on
-    // entry and disposes/releases it on exit, so a large library never has
-    // more than a screenful of decoded bitmaps live at once.
+    // Called from MainWindow's realized-row diff. Decodes on row entry and
+    // releases on row exit, bounding live thumbnails to viewport + overscan.
     public void SetPreviewVisible(bool visible)
     {
         if (_isPreviewVisible == visible) return;
