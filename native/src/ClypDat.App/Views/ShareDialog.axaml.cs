@@ -645,6 +645,17 @@ public partial class ShareDialog : Window
         SharePreviewBox.Width = boxWidth;
         SharePreviewBox.Height = boxHeight;
 
+        // The dashed outline is a 10px rounded rect but the thumbnail inside it
+        // is a plain Image, so the picture's square corners pushed out past the
+        // curve at all four corners. It cannot be fixed by wrapping it in a
+        // rounded Border: Avalonia's compositing renderer ignores corner radius
+        // when clipping children (only ImmediateRenderer reads
+        // IVisualWithRoundRectClip), so the rounding has to be an explicit clip
+        // on the Image. 7 is the outline's 10 less the 3px inset, which keeps
+        // the two curves concentric instead of merely both round.
+        ShareThumbnail.Clip = new Avalonia.Media.RectangleGeometry(
+            new Rect(0, 0, Math.Max(0, boxWidth - 6), Math.Max(0, boxHeight - 6)), 7, 7);
+
         // The progress panel sits inside the box, so a 9:16 or 4:5 box has to
         // pull the bar in with it rather than let it run over the outline.
         var barWidth = Math.Min(160, Math.Max(0, boxWidth - 24));
