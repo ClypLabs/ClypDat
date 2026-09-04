@@ -86,7 +86,6 @@ public sealed partial class App : Application
             ApplyTheme(viewModel.Settings.ThemePreset, viewModel.Settings.UseSystemAccent,
                 viewModel.Settings.CustomThemes.FirstOrDefault(theme => string.Equals(CustomThemeLibrary.Selection(theme), viewModel.Settings.ThemePreset, StringComparison.OrdinalIgnoreCase)));
             ApplyFontFamily(viewModel.Settings.FontFamilyName);
-            PreloadOverlayFonts();
             _mainWindow = new MainWindow
             {
                 DataContext = viewModel,
@@ -300,32 +299,6 @@ public sealed partial class App : Application
 
         Resources["ClypDatFontFamily"] = fontFamily;
         if (_mainWindow is not null) _mainWindow.FontFamily = fontFamily;
-        // The clip notification is drawn by GDI on its own thread and cannot
-        // read an Avalonia FontFamily, so it gets the plain face name.
-        NativeClipOverlaySurface.FontFace = name;
-    }
-
-    // Read on the UI thread because the clip overlay's own thread cannot
-    // resolve IAssetLoader - see NativeClipOverlaySurface.PreloadedFontData.
-    private static void PreloadOverlayFonts()
-    {
-        try
-        {
-            var data = new List<byte[]>(2);
-            foreach (var asset in new[] { "Inter-Regular.ttf", "Inter-Medium.ttf" })
-            {
-                using var stream = AssetLoader.Open(new Uri($"avares://Avalonia.Fonts.Inter/Assets/{asset}"));
-                using var buffer = new MemoryStream();
-                stream.CopyTo(buffer);
-                data.Add(buffer.ToArray());
-            }
-
-            NativeClipOverlaySurface.PreloadedFontData = data.ToArray();
-        }
-        catch (Exception error)
-        {
-            AppLog.Info($"Clip overlay font preload failed; notifications fall back to the GDI default face: {error.Message}");
-        }
     }
 
     private static FontFamily ResolveFontFamily(string name)

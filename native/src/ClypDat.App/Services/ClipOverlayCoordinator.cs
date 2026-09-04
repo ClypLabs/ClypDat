@@ -52,8 +52,7 @@ internal sealed record ClipOverlayEvent(
 
 internal sealed record ClipOverlayPresentation(
     long Generation,
-    ClipOverlayEvent Event,
-    uint AccentColor);
+    ClipOverlayEvent Event);
 
 internal interface IClipOverlaySurface : IDisposable
 {
@@ -175,7 +174,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
             var generation = ++_generation;
             _dismissal?.Dispose();
             _dismissal = _scheduler.Schedule(Dwell, () => Dismiss(generation));
-            presentation = new ClipOverlayPresentation(generation, notification, AccentFor(notification.Kind));
+            presentation = new ClipOverlayPresentation(generation, notification);
 
         Finished:;
         }
@@ -206,13 +205,6 @@ internal sealed class ClipOverlayCoordinator : IDisposable
         _surface.Dispose();
     }
 
-    private static uint AccentFor(ClipOverlayKind kind) => kind switch
-    {
-        ClipOverlayKind.Saved => 0xFF38D996,
-        ClipOverlayKind.Failure => 0xFFFF5B6E,
-        ClipOverlayKind.Recording => 0xFFFF496C,
-        _ => 0xFF7C5CFC
-    };
 }
 
 internal static class ClipOverlayLayout

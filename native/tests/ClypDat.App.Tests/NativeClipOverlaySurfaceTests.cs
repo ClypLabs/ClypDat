@@ -12,7 +12,7 @@ public sealed class NativeClipOverlaySurfaceTests
     public void OneNoActivateHwndAtomicallyReplacesAndDisposes()
     {
         if (!OperatingSystem.IsWindows()) return;
-        var surface = new NativeClipOverlaySurface();
+        using var surface = new NativeClipOverlaySurface(_ => new ClipOverlayFrame(300, 66, new byte[300 * 66 * 4]));
         var handle = surface.WindowHandle;
         Assert.NotEqual(IntPtr.Zero, handle);
         var style = GetWindowLongPtr(handle, -20).ToInt64();
@@ -39,7 +39,7 @@ public sealed class NativeClipOverlaySurfaceTests
         return new ClipOverlayPresentation(generation, new ClipOverlayEvent(
             Guid.NewGuid(), 0, now, now, 30, ClipOverlayKind.Standalone, "Clip Saved", null,
             new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040), 1, ClipOverlayTargetReason.Primary),
-            ClipOverlayPlacement.TopRight, excluded), 0xFF38D996);
+            ClipOverlayPlacement.TopRight, excluded));
     }
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
