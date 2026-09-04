@@ -43,4 +43,44 @@ public sealed class LaunchPresentationPolicyTests
         Assert.Equal(LaunchPresentation.Minimized,
             LaunchPresentationPolicy.Resolve(["--restart", "--minimized"]));
     }
+
+    [Fact]
+    public void PublishRestart_WithoutForegroundGame_IsInteractiveNormalLaunch()
+    {
+        var arguments = new[] { "--publish-restart" };
+
+        Assert.True(LaunchPresentationPolicy.RequiresForegroundGameCheck(arguments));
+        var presentation = LaunchPresentationPolicy.Resolve(arguments, foregroundGameDetected: false);
+
+        Assert.Equal(LaunchPresentation.Normal, presentation);
+        Assert.True(LaunchPresentationPolicy.UsesStartupLoader(presentation));
+        Assert.True(LaunchPresentationPolicy.ActivatesAfterStartupLoader(presentation));
+    }
+
+    [Fact]
+    public void PublishRestart_WithForegroundGame_StartsInTray()
+    {
+        var presentation = LaunchPresentationPolicy.Resolve(["--publish-restart"], foregroundGameDetected: true);
+
+        Assert.Equal(LaunchPresentation.Minimized, presentation);
+        Assert.True(LaunchPresentationPolicy.StartsInTray(presentation));
+        Assert.False(LaunchPresentationPolicy.UsesStartupLoader(presentation));
+    }
+
+    [Fact]
+    public void PublishRestart_WhenGameDetectionFails_StartsInTray()
+    {
+        var presentation = LaunchPresentationPolicy.Resolve(["--publish-restart"], foregroundGameDetectionFailed: true);
+
+        Assert.Equal(LaunchPresentation.Minimized, presentation);
+    }
+
+    [Fact]
+    public void ExplicitMinimized_WinsOverPublishRestart()
+    {
+        var arguments = new[] { "--publish-restart", "--minimized" };
+
+        Assert.False(LaunchPresentationPolicy.RequiresForegroundGameCheck(arguments));
+        Assert.Equal(LaunchPresentation.Minimized, LaunchPresentationPolicy.Resolve(arguments));
+    }
 }

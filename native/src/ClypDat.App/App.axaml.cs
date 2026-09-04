@@ -58,7 +58,8 @@ public sealed partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var launchPresentation = LaunchPresentationPolicy.Resolve(desktop.Args);
+            var viewModel = new MainWindowViewModel();
+            var launchPresentation = ResolveLaunchPresentation(desktop.Args, viewModel);
             var minimized = LaunchPresentationPolicy.StartsInTray(launchPresentation);
             // The playback warmup keeps its session now instead of throwing it
             // away (see PlaybackSession.WarmUp), so it is the difference between
@@ -82,7 +83,6 @@ public sealed partial class App : Application
             // finishes in the tray, but it must not skip that work entirely.
             var useSplash = !UiPreviewMode.Enabled && LaunchPresentationPolicy.UsesStartupLoader(launchPresentation);
             InitializeAccentColor();
-            var viewModel = new MainWindowViewModel();
             ApplyTheme(viewModel.Settings.ThemePreset, viewModel.Settings.UseSystemAccent,
                 viewModel.Settings.CustomThemes.FirstOrDefault(theme => string.Equals(CustomThemeLibrary.Selection(theme), viewModel.Settings.ThemePreset, StringComparison.OrdinalIgnoreCase)));
             ApplyFontFamily(viewModel.Settings.FontFamilyName);
@@ -135,6 +135,31 @@ public sealed partial class App : Application
         {
             Dispatcher.UIThread.Post(DevHealthSignal.SignalIfRequested, DispatcherPriority.ApplicationIdle);
             DevUpdateService.StartBackgroundCheck();
+        }
+    }
+
+    private static LaunchPresentation ResolveLaunchPresentation(
+        IEnumerable<string>? arguments,
+        MainWindowViewModel viewModel)
+    {
+        if (!LaunchPresentationPolicy.RequiresForegroundGameCheck(arguments))
+            return LaunchPresentationPolicy.Resolve(arguments);
+
+        try
+        {
+            var detector = new ForegroundGameDetector();
+            detector.ApplyCustomGameNames(viewModel.Settings.GameCaptureOverrides);
+            detector.ApplyUserIgnoredExecutables(viewModel.Settings.IgnoredGameExecutables);
+            var game = detector.Detect();
+            AppLog.Info(game.IsForeground
+                ? $"Publish restart: foreground game detected ({game.DisplayName}); starting in tray."
+                : "Publish restart: no foreground game detected; showing startup loader.");
+            return LaunchPresentationPolicy.Resolve(arguments, foregroundGameDetected: game.IsForeground);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Publish restart: foreground game detection failed; starting in tray.", error);
+            return LaunchPresentationPolicy.Resolve(arguments, foregroundGameDetectionFailed: true);
         }
     }
 

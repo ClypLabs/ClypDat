@@ -859,7 +859,7 @@ try {
     }
 
     Write-Host 'Starting updated ClypDat.'
-    Start-Process -FilePath $installedExe -ArgumentList '--minimized' -WindowStyle Hidden
+    Start-Process -FilePath $installedExe -ArgumentList '--publish-restart'
 }
 finally {
     try {

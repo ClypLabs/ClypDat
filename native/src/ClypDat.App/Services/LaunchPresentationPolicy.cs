@@ -11,15 +11,31 @@ internal enum LaunchPresentation
 // accidentally regain foreground behavior as startup code changes.
 internal static class LaunchPresentationPolicy
 {
-    public static LaunchPresentation Resolve(IEnumerable<string>? arguments)
+    private const string MinimizedArgument = "--minimized";
+    private const string PublishRestartArgument = "--publish-restart";
+    private const string RestartArgument = "--restart";
+
+    public static bool RequiresForegroundGameCheck(IEnumerable<string>? arguments) =>
+        HasArgument(arguments, PublishRestartArgument) && !HasArgument(arguments, MinimizedArgument);
+
+    public static LaunchPresentation Resolve(
+        IEnumerable<string>? arguments,
+        bool foregroundGameDetected = false,
+        bool foregroundGameDetectionFailed = false)
     {
-        var values = arguments ?? [];
-        if (values.Any(argument => string.Equals(argument, "--minimized", StringComparison.OrdinalIgnoreCase)))
+        if (HasArgument(arguments, MinimizedArgument))
             return LaunchPresentation.Minimized;
-        if (values.Any(argument => string.Equals(argument, "--restart", StringComparison.OrdinalIgnoreCase)))
+        if (HasArgument(arguments, PublishRestartArgument))
+            return foregroundGameDetected || foregroundGameDetectionFailed
+                ? LaunchPresentation.Minimized
+                : LaunchPresentation.Normal;
+        if (HasArgument(arguments, RestartArgument))
             return LaunchPresentation.Restart;
         return LaunchPresentation.Normal;
     }
+
+    private static bool HasArgument(IEnumerable<string>? arguments, string expected) =>
+        arguments?.Any(argument => string.Equals(argument, expected, StringComparison.OrdinalIgnoreCase)) == true;
 
     public static bool UsesStartupLoader(LaunchPresentation presentation) => presentation == LaunchPresentation.Normal;
 

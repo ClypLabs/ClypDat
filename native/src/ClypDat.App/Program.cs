@@ -87,8 +87,9 @@ internal static class Program
 #endif
 
         var singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
-        var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase);
-        // An intentional restart can launch with --restart before old process
+        var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase) ||
+                               args.Contains("--publish-restart", StringComparer.OrdinalIgnoreCase);
+        // An intentional restart can launch with --restart or --publish-restart before old process
         // exits, so only that overlap retries mutex acquisition.
         // Ordinary shortcut launches must signal hidden existing process now,
         // not pay this two-second restart-race allowance.
