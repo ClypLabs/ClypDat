@@ -22,67 +22,90 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
       <StackPanel Spacing="18">
-        <StackPanel Spacing="10" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Spacing="2">
-              <TextBlock Text="Recording Audio" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="16" />
-              <TextBlock Text="Audio Tracks" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" FontWeight="Bold" />
+        <StackPanel Spacing="14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
+          <!-- No card title here: the section heading directly above already
+               says "Recording Audio", so repeating it inside the card left two
+               identical titles stacked a few pixels apart. -->
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <StackPanel Spacing="2" VerticalAlignment="Center">
+              <TextBlock Classes="settingsRowTitle" Text="Audio Tracks" />
+              <TextBlock Classes="settingsRowDescSm" Text="Each row below is saved as its own editable track." />
             </StackPanel>
             <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" VerticalAlignment="Center" />
           </Grid>
-          <Border Classes="audioProcessList">
-            <StackPanel Spacing="0">
-              <Border Classes="audioProcessRow enabledRow">
-                <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
-                  <ToggleSwitch Grid.Column="0" Width="40" IsChecked="True" IsEnabled="False" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                  <Border Grid.Column="1" Width="32" Height="32" Background="{StaticResource EdgeBrush}" CornerRadius="9" VerticalAlignment="Center">
-                    <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="18" Height="18" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                  </Border>
-                  <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="Game Audio" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" /><TextBlock Classes="settingsRowDescSm" Text="Dedicated capture track" /></StackPanel>
-                  <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center">
-                    <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding GameAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding GameAudioVolumePercent}" />
-                    <TextBlock Grid.Column="2" Text="{Binding GameAudioVolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" Foreground="{StaticResource TextStrongBrush}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+
+          <!-- Two lists, because the top two rows behave differently from the
+               rest: they are always captured and cannot be switched off, so
+               mixing them in made their permanently disabled toggles read as
+               broken controls. -->
+          <StackPanel Spacing="7">
+            <TextBlock Classes="settingsCardLabel" Text="DEDICATED TRACKS" />
+            <Border Classes="audioProcessList">
+              <StackPanel Spacing="0">
+                <Border Classes="audioProcessRow enabledRow">
+                  <Grid ColumnDefinitions="3,44,34,*,320,52" ColumnSpacing="12" MinHeight="46">
+                    <Border Classes="audioRowRail" />
+                    <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" ToolTip.Tip="Always captured" />
+                    <Border Grid.Column="2" Classes="audioIconTile">
+                      <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="17" Height="17" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
+                      <TextBlock Classes="audioTrackName" Text="Game Audio" />
+                      <TextBlock Classes="settingsRowDescSm" Text="Always on" />
+                    </StackPanel>
+                    <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding GameAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding GameAudioVolumePercent}" />
+                    <TextBlock Grid.Column="5" Classes="audioPercent" Text="{Binding GameAudioVolumePercent, StringFormat={}{0:0}%}" />
                   </Grid>
-                </Grid>
-              </Border>
-              <Border Classes="audioProcessRow enabledRow">
-                <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
-                  <ToggleSwitch Grid.Column="0" Width="40" IsChecked="True" IsEnabled="False" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                  <Border Grid.Column="1" Width="32" Height="32" Background="{StaticResource EdgeBrush}" CornerRadius="9" VerticalAlignment="Center">
-                    <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="18" Height="18" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                  </Border>
-                  <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="Microphone" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" /><TextBlock Classes="settingsRowDescSm" Text="Dedicated capture track" /></StackPanel>
-                  <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center">
-                    <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding MicrophoneVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding MicrophoneVolumePercent}" />
-                    <TextBlock Grid.Column="2" Text="{Binding MicrophoneVolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" Foreground="{StaticResource TextStrongBrush}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </Border>
+                <Border Classes="audioProcessRow enabledRow">
+                  <Grid ColumnDefinitions="3,44,34,*,320,52" ColumnSpacing="12" MinHeight="46">
+                    <Border Classes="audioRowRail" />
+                    <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" ToolTip.Tip="Always captured" />
+                    <Border Grid.Column="2" Classes="audioIconTile">
+                      <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="17" Height="17" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
+                      <TextBlock Classes="audioTrackName" Text="Microphone" />
+                      <TextBlock Classes="settingsRowDescSm" Text="Always on" />
+                    </StackPanel>
+                    <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding MicrophoneVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding MicrophoneVolumePercent}" />
+                    <TextBlock Grid.Column="5" Classes="audioPercent" Text="{Binding MicrophoneVolumePercent, StringFormat={}{0:0}%}" />
                   </Grid>
-                </Grid>
-              </Border>
+                </Border>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel Spacing="7">
+            <TextBlock Classes="settingsCardLabel" Text="APP TRACKS" />
+            <Border Classes="audioProcessList">
               <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Border Classes="audioProcessRow" Classes.enabledRow="{Binding IsEnabled}">
-                      <Grid ColumnDefinitions="40,32,*,Auto" ColumnSpacing="14" MinHeight="54">
-                        <ToggleSwitch Grid.Column="0" Width="40" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                        <Border Grid.Column="1" Width="32" Height="32" Background="{StaticResource EdgeBrush}" CornerRadius="9" VerticalAlignment="Center">
+                      <Grid ColumnDefinitions="3,44,34,*,320,52" ColumnSpacing="12" MinHeight="46">
+                        <Border Classes="audioRowRail" IsVisible="{Binding IsEnabled}" />
+                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                        <Border Grid.Column="2" Classes="audioIconTile">
                           <Grid>
                             <TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" FontWeight="Bold" />
-                            <Image Source="{Binding Icon}" Stretch="Uniform" />
+                            <Image Source="{Binding Icon}" Stretch="Uniform" Margin="5" />
                           </Grid>
                         </Border>
-                        <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" /><TextBlock Classes="settingsRowDescSm" Text="Separate app track" /></StackPanel>
-                        <Grid Grid.Column="3" ColumnDefinitions="200,10,50" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}">
-                          <Slider Width="200" Height="52" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
-                          <TextBlock Grid.Column="2" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" TextAlignment="Right" HorizontalAlignment="Stretch" Foreground="{StaticResource TextStrongBrush}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
-                        </Grid>
+                        <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
+                          <TextBlock Classes="audioTrackName" Text="{Binding Name}" />
+                          <TextBlock Classes="settingsRowDescSm" Text="Separate app track" />
+                        </StackPanel>
+                        <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
+                        <TextBlock Grid.Column="5" Classes="audioPercent" IsEnabled="{Binding IsEnabled}" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" />
                       </Grid>
                     </Border>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-            </StackPanel>
-          </Border>
-          <TextBlock Classes="settingsRowDescSm" Text="Applications currently in Windows Volume Mixer appear here. Enabled apps stay listed and are always separate tracks; volume supports 0–150% and starts at 100%." />
+            </Border>
+            <TextBlock Classes="settingsRowDescSm" Text="Applications currently in Windows Volume Mixer appear here. Enabled apps stay listed and are always separate tracks; volume supports 0–150% and starts at 100%." />
+          </StackPanel>
         </StackPanel>
 
         <TextBlock Classes="settingsCardLabel" Text="AUDIO SOURCES" IsVisible="False" />

@@ -1354,15 +1354,83 @@
     <Setter Property="ClipToBounds" Value="True" />
   </Style>
 
+  <!-- Enablement is a left rail plus a background lift, not an outline. The
+       old 3,1,3,1 accent border drew a full box around every enabled row, so a
+       list of six apps read as six stacked rectangles instead of one list. -->
   <Style Selector="Border.audioProcessRow">
-    <Setter Property="Padding" Value="14,11" />
+    <Setter Property="Padding" Value="10,9,16,9" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_22303C}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.audioProcessRow:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_16202A}" />
   </Style>
   <Style Selector="Border.audioProcessRow.enabledRow">
-    <Setter Property="Background" Value="{StaticResource Surface_202C3A}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="BorderThickness" Value="3,1,3,1" />
+    <Setter Property="Background" Value="{StaticResource Surface_18232D}" />
+  </Style>
+  <Style Selector="Border.audioProcessRow.enabledRow:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
+  </Style>
+  <!-- The last row's own divider would double up with the list border. -->
+  <Style Selector="Border.audioProcessList &gt; StackPanel &gt; Border.audioProcessRow:nth-last-child(1)">
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Border.audioProcessList ContentPresenter:nth-last-child(1) &gt; Border.audioProcessRow">
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <!-- Inset rail rather than a full-height edge: it reads as a marker on the
+       row instead of a border segment that has to meet its neighbours. -->
+  <Style Selector="Border.audioRowRail">
+    <Setter Property="Width" Value="3" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="CornerRadius" Value="2" />
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- ClipToBounds matters: app icons come from the process, and a square logo
+       (voicemeeter) otherwise paints over the rounded corners. -->
+  <Style Selector="Border.audioIconTile">
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="34" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Background" Value="{StaticResource EdgeBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- Game Audio and Microphone cannot be turned off here, so they get a lock
+       glyph in the toggle column. A permanently disabled ToggleSwitch in that
+       slot reads as a broken control. -->
+  <Style Selector="PathIcon.audioRowLock">
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Height" Value="13" />
+    <Setter Property="Foreground" Value="{StaticResource LabelBrush}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="TextBlock.audioPercent">
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="TextAlignment" Value="Right" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="TextBlock.audioTrackName">
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
   <!-- 100% is the blue reference point. The exposed tail warns before gain
        reaches the yellow/red boost zone, while Fluent keeps the thumb crisp. -->
@@ -2087,7 +2155,7 @@
       <sys:Double x:Key="SliderTrackThemeHeight">7</sys:Double>
       <CornerRadius x:Key="ControlCornerRadius">3.5</CornerRadius>
     </Style.Resources>
-    <Setter Property="MinHeight" Value="52" />
+    <Setter Property="MinHeight" Value="34" />
     <Setter Property="Background" Value="{StaticResource Surface_273440}" />
   </Style>
   <!-- Same inner-end squaring as the base class, at this one's taller rail. -->
