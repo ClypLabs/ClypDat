@@ -1,5 +1,6 @@
 using System.IO.Pipes;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ClypDat.Capture.Abstractions;
 
@@ -41,7 +42,16 @@ public sealed record CaptureWorkerAttachResponse(
     string ConfigIdentity,
     ReplayCaptureHealth Health,
     IReadOnlyList<CaptureWorkerSaveResult> UnacknowledgedSaves);
-public sealed record CaptureWorkerSaveResult(string Path, string? Title, DateTime CompletedUtc, string? Error = null);
+public sealed record CaptureWorkerSaveResult(
+    string Path,
+    string? Title,
+    DateTime CompletedUtc,
+    string? Error = null,
+    Guid? SaveId = null,
+    DateTime? RequestedUtc = null);
+public sealed record CaptureWorkerSaveAcknowledgement(
+    [property: JsonPropertyName("saveId")] Guid? SaveId,
+    [property: JsonPropertyName("path")] string Path);
 
 public static class CaptureWorkerPipe
 {

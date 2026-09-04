@@ -1,0 +1,118 @@
+using Avalonia;
+using ClypDat.App.Services;
+using Xunit;
+
+namespace ClypDat.App.Tests;
+
+public sealed class ClipOverlayCoordinatorTests
+{
+    private readonly DateTime _epoch = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    [Fact]
+    public void CompletionDuringEntry_ReplacesImmediately_AndOldTimerCannotResurrect()
+    {
+        var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch);
+        var save = Guid.NewGuid();
+        coordinator.Publish(Event(save, 0, ClipOverlayKind.Saving, 80, _epoch));
+        Assert.Equal(TimeSpan.FromSeconds(3), scheduler.Delays[0]);
+        coordinator.Publish(Event(save, 1, ClipOverlayKind.Saved, 80, _epoch));
+        Assert.Equal(TimeSpan.FromSeconds(3), scheduler.Delays[1]);
+
+        Assert.Equal(2, surface.Presentations.Count);
+        Assert.Equal("Clip Saved", surface.Presentations[^1].Event.Title);
+        scheduler.Fire(0);
+        Assert.Empty(surface.Dismissals);
+        scheduler.Fire(1);
+        Assert.Single(surface.Dismissals);
+        Assert.Equal(1, sounds);
+    }
+
+    [Fact]
+    public void PriorityLatestWins_WithoutQueue()
+    {
+        var surface = new FakeSurface(); var scheduler = new FakeScheduler();
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => { }, () => _epoch);
+        coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Failure, 100, _epoch));
+        coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Standalone, 30, _epoch.AddSeconds(1)));
+        coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Failure, 100, _epoch.AddSeconds(-1)));
+        coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Failure, 100, _epoch.AddSeconds(2)));
+        Assert.Equal(2, surface.Presentations.Count);
+    }
+
+    [Fact]
+    public void DuplicateRegressiveAndRecoveredEventsAreSuppressed_ButLiveSoundIsIndependent()
+    {
+        var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch);
+        var save = Guid.NewGuid();
+        coordinator.Publish(Event(save, 1, ClipOverlayKind.Saved, 10, _epoch));
+        coordinator.Publish(Event(save, 1, ClipOverlayKind.Saved, 10, _epoch));
+        coordinator.Publish(Event(save, 0, ClipOverlayKind.Saving, 80, _epoch));
+        coordinator.Publish(Event(Guid.NewGuid(), 1, ClipOverlayKind.Saved, 1, _epoch) with { IsRecovered = true });
+        Assert.Single(surface.Presentations);
+        Assert.Equal(1, sounds);
+    }
+
+    [Fact]
+    public void HundredEventBurstLeavesOnlyLatestVisibleGeneration()
+    {
+        var surface = new FakeSurface(); var scheduler = new FakeScheduler();
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => { }, () => _epoch);
+        for (var i = 0; i < 100; i++)
+            coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Standalone, 30, _epoch.AddMilliseconds(i)));
+        Assert.Equal(100, surface.Presentations.Count);
+        scheduler.FireAll();
+        Assert.Single(surface.Dismissals);
+        Assert.Equal(100, surface.Dismissals[0]);
+    }
+
+    [Theory]
+    [InlineData(0, -1840, 80)]
+    [InlineData(1, -480, 80)]
+    [InlineData(2, -1840, 880)]
+    [InlineData(3, -480, 880)]
+    [InlineData(4, -1840, 1680)]
+    [InlineData(5, -480, 1680)]
+    public void PlacementHandlesNegativeCoordinatesAndMixedDpi(int placementValue, int x, int y)
+    {
+        var placement = (ClipOverlayPlacement)placementValue;
+        var target = new ClipOverlayTarget("DISPLAY2", new PixelRect(-1920, 0, 1920, 1920), new PixelRect(-1920, 0, 1920, 1920), 2, ClipOverlayTargetReason.Primary);
+        Assert.Equal(new PixelPoint(x, y), ClipOverlayLayout.Position(target, placement, 400, 160));
+    }
+
+    [Fact]
+    public void UnknownPlacementFallsBackToTopRight()
+        => Assert.Equal(ClipOverlayPlacement.TopRight, ClipOverlayPlacementParser.Parse("future value"));
+
+    private ClipOverlayEvent Event(Guid id, int stage, ClipOverlayKind kind, int priority, DateTime requested) => new(
+        id, stage, requested, _epoch, priority, kind,
+        kind == ClipOverlayKind.Saved ? "Clip Saved" : kind.ToString(), null,
+        new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040), 1, ClipOverlayTargetReason.Primary),
+        ClipOverlayPlacement.TopRight, true);
+
+    private sealed class FakeSurface : IClipOverlaySurface
+    {
+        public List<ClipOverlayPresentation> Presentations { get; } = new();
+        public List<long> Dismissals { get; } = new();
+        public void Publish(ClipOverlayPresentation presentation) => Presentations.Add(presentation);
+        public void Dismiss(long generation) => Dismissals.Add(generation);
+        public void Dispose() { }
+    }
+
+    private sealed class FakeScheduler : IClipOverlayScheduler
+    {
+        private readonly List<Scheduled> _items = new();
+        public List<TimeSpan> Delays { get; } = new();
+        public IDisposable Schedule(TimeSpan delay, Action callback) { var item = new Scheduled(callback); _items.Add(item); Delays.Add(delay); return item; }
+        public void Fire(int index) { var item = _items[index]; if (!item.Cancelled) item.Callback(); }
+        public void FireAll() { for (var i = 0; i < _items.Count; i++) Fire(i); }
+        public void Dispose() { }
+        private sealed class Scheduled(Action callback) : IDisposable
+        {
+            public Action Callback { get; } = callback;
+            public bool Cancelled { get; private set; }
+            public void Dispose() => Cancelled = true;
+        }
+    }
+}

@@ -20,11 +20,11 @@
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay|Hide overlays from screen capture|Show new clips when a game closes|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position|Overlays}">
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip save notifications|Hide overlays from screen capture|Show new clips when a game closes|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position|Overlays}">
       <StackPanel Spacing="18">
         <TextBlock Classes="settingsCardLabel" Text="OVERLAYS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip saved overlay}">
-            <TextBlock Classes="settingsRowTitle" Text="Show Clip Saved Overlay" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip save notifications}">
+            <TextBlock Classes="settingsRowTitle" Text="Show Clip Save Notifications" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
 

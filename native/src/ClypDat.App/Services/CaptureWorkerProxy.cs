@@ -42,7 +42,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public event EventHandler? RecordingStopped;
     public event EventHandler? RecordingStateChanged;
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
-    public event EventHandler? SaveStarted;
+    public event EventHandler<ReplaySaveStarted>? SaveStarted;
     public event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     public event EventHandler<bool>? FullSessionRecordingToggled;
     public event EventHandler<AutoClipDetectorEvent>? AutoClipDetected;
@@ -76,14 +76,17 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         SetRecording(false);
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null, Guid? saveId = null)
     {
         if (_recovery is { IsCompleted: false } || _health.State == ReplayCaptureState.Recovering) throw new InvalidOperationException("Replay is recovering; retry after recording resumes.");
         if (!_desiredRecording || _health.State == ReplayCaptureState.Failed) throw new InvalidOperationException("Replay is not recording; no video can be saved.");
         await EnsureAttachedAsync(cancellationToken);
-        var result = await SendAsync<CaptureWorkerSaveResult>("save", new CaptureWorkerSaveRequest(outputFolder, titleOverride, clipWindow, gameDisplayNameOverride), cancellationToken);
+        var identity = saveId.GetValueOrDefault();
+        if (identity == Guid.Empty) identity = Guid.NewGuid();
+        var requestedUtc = DateTime.UtcNow;
+        var result = await SendAsync<CaptureWorkerSaveResult>("save", new CaptureWorkerSaveRequest(outputFolder, titleOverride, clipWindow, gameDisplayNameOverride, identity, requestedUtc), cancellationToken);
         if (!string.IsNullOrWhiteSpace(result.Error)) throw new InvalidOperationException(result.Error);
-        await SendAsync<CaptureWorkerAck>("ack-save", new { result.Path }, cancellationToken);
+        await SendAsync<CaptureWorkerAck>("ack-save", new CaptureWorkerSaveAcknowledgement(identity, result.Path), cancellationToken);
         return result.Path;
     }
 
@@ -138,7 +141,11 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             await SendAsync<CaptureWorkerAck>("clip-game-name", new { gameDisplayName }, cancellationToken);
             await SendAsync<CaptureWorkerAck>("full-session-hotkey", new { hotkey = string.IsNullOrWhiteSpace(_fullSessionHotkey) ? config.FullSessionHotkey : _fullSessionHotkey }, cancellationToken);
             foreach (var save in attach.UnacknowledgedSaves)
-            { SaveCompleted?.Invoke(this, new ReplaySaveCompleted(save.Path, save.Title, save.CompletedUtc, save.Error)); await SendAsync<CaptureWorkerAck>("ack-save", new { save.Path }, cancellationToken); }
+            {
+                var completed = ToCompletion(save, isRecovered: true);
+                SaveCompleted?.Invoke(this, completed);
+                await SendAsync<CaptureWorkerAck>("ack-save", new CaptureWorkerSaveAcknowledgement(completed.SaveId, completed.Path), cancellationToken);
+            }
         }
         finally { _connectionGate.Release(); }
     }
@@ -186,9 +193,35 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                 {
                     case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => HandleWorkerHealth(health)); break;
                     case "recording-stopped": Dispatcher.UIThread.Post(() => { if (!_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
-                    case "save-started": AppLog.Info("Capture worker event: save-started."); Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, EventArgs.Empty)); break;
-                    case "save-completed": var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (complete is not null) { AppLog.Info($"Capture worker event: save-completed, path='{complete.Path}', error='{complete.Error}'."); Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(complete.Path, complete.Title, complete.CompletedUtc, complete.Error))); _ = SendBestEffortAsync("ack-save", new { complete.Path }); } break;
-                    case "save-failed": var failed = message.Payload.Deserialize<CaptureWorkerSaveResult>(); if (failed is not null) { AppLog.Info($"Capture worker event: save-failed, path='{failed.Path}', error='{failed.Error}'."); } if (failed is not null) Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, new ReplaySaveCompleted(failed.Path, failed.Title, failed.CompletedUtc, failed.Error))); break;
+                    case "save-started":
+                        var started = message.Payload.Deserialize<ReplaySaveStarted>();
+                        if (started is not null)
+                        {
+                            if (started.SaveId == Guid.Empty) started = started with { SaveId = Guid.NewGuid() };
+                            if (started.RequestedUtc == default) started = started with { RequestedUtc = DateTime.UtcNow };
+                            AppLog.Info($"Capture worker event: save-started, id={started.SaveId}.");
+                            SaveStarted?.Invoke(this, started);
+                        }
+                        break;
+                    case "save-completed":
+                        var complete = message.Payload.Deserialize<CaptureWorkerSaveResult>();
+                        if (complete is not null)
+                        {
+                            var completion = ToCompletion(complete, isRecovered: false);
+                            AppLog.Info($"Capture worker event: save-completed, id={completion.SaveId}, path='{complete.Path}', error='{complete.Error}'.");
+                            SaveCompleted?.Invoke(this, completion);
+                            _ = SendBestEffortAsync("ack-save", new CaptureWorkerSaveAcknowledgement(completion.SaveId, completion.Path));
+                        }
+                        break;
+                    case "save-failed":
+                        var failed = message.Payload.Deserialize<CaptureWorkerSaveResult>();
+                        if (failed is not null)
+                        {
+                            var completion = ToCompletion(failed, isRecovered: false);
+                            AppLog.Info($"Capture worker event: save-failed, id={completion.SaveId}, path='{failed.Path}', error='{failed.Error}'.");
+                            SaveCompleted?.Invoke(this, completion);
+                        }
+                        break;
                     case "full-session-toggled": if (message.Payload.TryGetProperty("enabled", out var enabled)) Dispatcher.UIThread.Post(() => FullSessionRecordingToggled?.Invoke(this, enabled.GetBoolean())); break;
                     case "auto-clip-detected": var detected = message.Payload.Deserialize<AutoClipDetectorEvent>(); if (detected is not null) Dispatcher.UIThread.Post(() => AutoClipDetected?.Invoke(this, detected)); break;
                     case "auto-clip-status": var status = message.Payload.Deserialize<AutoClipDetectorStatus>(); if (status is not null) Dispatcher.UIThread.Post(() => AutoClipStatusChanged?.Invoke(this, status)); break;
@@ -197,6 +230,13 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         }
         catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidDataException) { AppLog.Info($"Capture worker connection lost: {error.Message}"); }
         finally { FailPending(); if (ReferenceEquals(_pipe, pipe)) _pipe = null; BeginRecovery(generation, "pipe closed", ExitCode()); }
+    }
+
+    private static ReplaySaveCompleted ToCompletion(CaptureWorkerSaveResult save, bool isRecovered)
+    {
+        var saveId = save.SaveId.GetValueOrDefault();
+        if (saveId == Guid.Empty) saveId = Guid.NewGuid();
+        return new ReplaySaveCompleted(saveId, save.Path, save.Title, save.RequestedUtc ?? save.CompletedUtc, save.CompletedUtc, save.Error, isRecovered);
     }
 
     private void StartWorker()

@@ -434,7 +434,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         _packetPayloads.Deactivate();
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null, Guid? saveId = null)
     {
         if (!_sessionActive) throw new InvalidOperationException("Replay buffer is not recording.");
         if (_health.StartupPhase is ReplayCaptureStartupPhase.WaitingForForeground or ReplayCaptureStartupPhase.OpeningEncoder or ReplayCaptureStartupPhase.Fallback)

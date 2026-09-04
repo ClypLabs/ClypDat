@@ -117,7 +117,7 @@ public sealed class FfmpegReplayBuffer : IReplayBuffer, IDisposable
         }
     }
 
-    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null)
+    public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null, Guid? saveId = null)
     {
         if (!Directory.Exists(outputFolder)) Directory.CreateDirectory(outputFolder);
 

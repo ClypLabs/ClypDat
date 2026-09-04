@@ -305,7 +305,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayCaptureSources = new ObservableCollection<string> { "Game Capture", "Desktop Capture" };
         DesktopMonitors = new ObservableCollection<DesktopMonitorOption>();
-        ClipOverlayPositions = new ObservableCollection<string> { "Top Left", "Top Right" };
+        ClipOverlayPositions = new ObservableCollection<string>
+        {
+            "Top Left", "Top Right", "Center Left", "Center Right", "Bottom Left", "Bottom Right"
+        };
         ClipOverlayVolumes = new ObservableCollection<string> { "Low", "Medium", "High" };
         ProcessPriorityOptions = new ObservableCollection<ProcessPriorityOption>(ProcessPriorityService.Options);
         ClipFileNameSchemes = new ObservableCollection<FileNameSchemeOption>

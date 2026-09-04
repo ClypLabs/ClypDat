@@ -12,6 +12,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using ClypDat.Capture.Abstractions;
 using ClypDat.App.Controls;
@@ -497,7 +498,7 @@ public sealed partial class MainWindow : Window
         // Realise the clip badge now, off-screen, rather than on the first
         // notification: that first realise is the one show that happens before
         // WS_EX_NOACTIVATE is on the hwnd, and it used to land mid-game.
-        ClipOverlay.Warm();
+        _ = ClipNotifications;
         AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
         // Owned windows (the hover bar, the paused badge) can get hidden by
         // Windows itself - owner minimized (alt-tab into an exclusive-
@@ -566,6 +567,7 @@ public sealed partial class MainWindow : Window
                 workerEvents.AutoClipStatusChanged -= Worker_AutoClipStatusChanged;
             }
             _replayBuffer?.Dispose();
+            _clipOverlayCoordinator?.Dispose();
             _playback?.Dispose();
             _recordingPausedOverlay?.Close();
             _editorHoverControlsWindow?.Close();
@@ -887,26 +889,17 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void Worker_SaveStarted(object? sender, EventArgs args)
+    private void Worker_SaveStarted(object? sender, ReplaySaveStarted started)
     {
         if (sender is not IReplayBuffer buffer) return;
-        if (!Dispatcher.UIThread.CheckAccess())
-        {
-            Dispatcher.UIThread.Post(() => Worker_SaveStarted(sender, args));
-            return;
-        }
-
         if (!ReferenceEquals(_replayBuffer, buffer) || ViewModel is null) return;
-        // UI-owned saves already show this immediately before calling the
-        // worker. The event is for global-hotkey saves that originate inside
-        // the worker, so do not restart the toast for the former.
-        if (ViewModel.IsSavingReplayClip)
+        if (_uiOwnedSaveIds.ContainsKey(started.SaveId))
         {
-            AppLog.Info("Clip overlay skipped: trigger=save-started, reason=ui-owned-save-in-flight.");
+            AppLog.Info($"Clip overlay skipped: trigger=save-started, id={started.SaveId}, reason=ui-owned-save.");
             return;
         }
 
-        ShowClipNotification("save-started", "Clip Saving…", playSound: false, saveStart: true);
+        ShowClipNotification("save-started", "Clip Saving…", playSound: false, saveStart: true, saveId: started.SaveId, requestedUtc: started.RequestedUtc);
     }
 
     private void Worker_AutoClipDetected(object? sender, AutoClipDetectorEvent detected)
@@ -937,26 +930,35 @@ public sealed partial class MainWindow : Window
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
     {
+        if (completed.IsRecovered)
+        {
+            Dispatcher.UIThread.Post(async () =>
+            {
+                if (ViewModel is not null && !string.IsNullOrWhiteSpace(completed.Path))
+                    await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
+            });
+            return;
+        }
+        if (_uiOwnedSaveIds.ContainsKey(completed.SaveId))
+        {
+            AppLog.Info($"Clip overlay skipped: trigger=save-completed, id={completed.SaveId}, reason=ui-owned-save.");
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(completed.Error))
+        {
+            ShowClipNotification("save-failed", "Clip Failed", playSound: false, saveCompletion: true, saveId: completed.SaveId, requestedUtc: completed.RequestedUtc);
+            Dispatcher.UIThread.Post(async () => await ShowMessageAsync("Clip Failed", completed.Error));
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(completed.Path))
+        {
+            AppLog.Info("Clip overlay skipped: trigger=save-completed, reason=empty-path.");
+            return;
+        }
+        ShowClipSavedNotification("save-completed", completed.SaveId, completed.RequestedUtc);
         Dispatcher.UIThread.Post(async () =>
         {
-            if (ViewModel?.IsSavingReplayClip == true)
-            {
-                AppLog.Info("Clip overlay skipped: trigger=save-completed, reason=ui-owned-save-in-flight.");
-                return;
-            }
-            if (!string.IsNullOrWhiteSpace(completed.Error))
-            {
-                ShowClipNotification("save-failed", "Clip Failed", playSound: false, saveCompletion: true);
-                await ShowMessageAsync("Clip Failed", completed.Error);
-                return;
-            }
-            if (string.IsNullOrWhiteSpace(completed.Path))
-            {
-                AppLog.Info("Clip overlay skipped: trigger=save-completed, reason=empty-path.");
-                return;
-            }
             RememberSessionClip(completed.Path);
-            ShowClipSavedNotification("save-completed");
             if (ViewModel is not null)
             {
                 ViewModel.RecordDiscordClipSaved();
@@ -2916,6 +2918,13 @@ public sealed partial class MainWindow : Window
     private async Task<bool> SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null)
     {
         var isAutoClip = autoClipLabel is not null;
+        var saveId = Guid.NewGuid();
+        var requestedUtc = DateTime.UtcNow;
+        if (!isAutoClip)
+        {
+            RememberUiOwnedSave(saveId);
+            ShowClipNotification("ui-save", "Clip Saving…", playSound: false, saveStart: true, saveId: saveId, requestedUtc: requestedUtc);
+        }
         // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
         // presses reject outright while one's already running (spam-clicking
         // shouldn't queue a pile of saves), but auto-clip triggers queue instead -
@@ -2929,6 +2938,7 @@ public sealed partial class MainWindow : Window
         }
         else if (!await _clipSaveLock.WaitAsync(0))
         {
+            ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
             return false;
         }
 
@@ -2939,6 +2949,7 @@ public sealed partial class MainWindow : Window
             InitializeReplayServices();
             if (_replayBuffer is null || !_replayBuffer.IsRecording)
             {
+                if (!isAutoClip) ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
                 // A background auto-clip trigger firing before the buffer is actually
                 // recording (e.g. CS2 launched but ClypDat hasn't caught up yet) isn't
                 // worth interrupting the user over - just drop it.
@@ -2979,25 +2990,15 @@ public sealed partial class MainWindow : Window
                 {
                     var wait = clipWindow.EndUtc - MonotonicClock.UtcNow;
                     if (wait > TimeSpan.Zero) await Task.Delay(wait);
-                    ShowClipNotification("ui-save", $"Saving {autoClipLabel} Clip…", playSound: false, saveStart: true);
-                }
-                else
-                {
-                    // Manual hotkey press had NO feedback at all until the remux
-                    // (RemuxWindowToMp4 - thousands of native FFmpeg calls, can
-                    // take a real fraction of a second to over a second for a
-                    // long buffer) finished below - the press felt unregistered
-                    // the whole time it was working. Auto-clips already got this
-                    // via the branch above; manual presses just never had the
-                    // equivalent.
-                    ShowClipNotification("ui-save", "Clip Saving…", playSound: false, saveStart: true);
+                    RememberUiOwnedSave(saveId);
+                    ShowClipNotification("ui-save", $"Saving {autoClipLabel} Clip…", playSound: false, saveStart: true, saveId: saveId, requestedUtc: requestedUtc);
                 }
 
                 var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
                 // Snapshot Xbox activity before encoding starts. Folder, filename,
                 // sidecar, and tile must retain this one capture identity.
                 var effectiveGameName = ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName, replayConfig.CaptureSource);
-                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow, gameDisplayNameOverride: effectiveGameName));
+                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow, gameDisplayNameOverride: effectiveGameName, saveId: saveId));
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 RememberSessionClip(outputPath);
                 ViewModel.RecordDiscordClipSaved();
@@ -3006,11 +3007,11 @@ public sealed partial class MainWindow : Window
                 // say so now rather than let it be discovered on playback later.
                 if (_replayBuffer.LastSaveVideoWasFrozen)
                 {
-                    ShowClipNotification("ui-save", "Clip Saved - video was frozen", playSound: true, saveCompletion: true);
+                    ShowClipNotification("ui-save", "Clip Saved - video was frozen", playSound: true, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
                 }
                 else
                 {
-                    ShowClipSavedNotification("ui-save");
+                    ShowClipSavedNotification("ui-save", saveId, requestedUtc);
                 }
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
@@ -3036,6 +3037,7 @@ public sealed partial class MainWindow : Window
             {
                 AppLog.Error("Replay clip save failed", error);
                 if (isAutoClip) ShowAutoClipFailedNotification();
+                ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
                 if (!isAutoClip) await ShowMessageAsync("Clip Failed", error.Message);
                 return false;
             }
@@ -3076,35 +3078,22 @@ public sealed partial class MainWindow : Window
     private readonly List<string> _sessionNewClipPaths = new();
     private bool _sessionCollectingClips;
 
-    private void ShowClipSavedNotification(string trigger)
+    private void ShowClipSavedNotification(string trigger, Guid? saveId = null, DateTime? requestedUtc = null)
     {
-        ShowClipNotification(trigger, "Clip Saved", playSound: true, saveCompletion: true);
+        ShowClipNotification(trigger, "Clip Saved", playSound: true, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
     }
 
-    private void ShowClipNotification(string trigger, string text, bool playSound, bool saveStart = false, bool saveCompletion = false)
+    private void ShowClipNotification(string trigger, string text, bool playSound, bool saveStart = false, bool saveCompletion = false, Guid? saveId = null, DateTime? requestedUtc = null)
     {
         if (ViewModel is null) return;
-        if (ViewModel.Settings.EnableClipOverlay)
+        try
         {
-            try
-            {
-                ShowClipOverlay(trigger, ViewModel.Settings.ClipOverlayPosition, text, playSound, saveStart, saveCompletion);
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("Clip notification overlay failed", error);
-            }
+            ShowClipOverlay(trigger, ViewModel.Settings.ClipOverlayPosition, text, playSound, saveStart, saveCompletion,
+                saveId: saveId, requestedUtc: requestedUtc, showVisual: ViewModel.Settings.EnableClipOverlay);
         }
-        else if (playSound && ViewModel.Settings.EnableClipOverlaySound)
+        catch (Exception error)
         {
-            // Overlay's off but the sound is still wanted - nothing to time it
-            // against, so just play it immediately.
-            AppLog.Info($"Clip overlay skipped: trigger={trigger}, reason=EnableClipOverlay=false, sound=true.");
-            PlayClipNotificationSound();
-        }
-        else
-        {
-            AppLog.Info($"Clip overlay skipped: trigger={trigger}, reason=EnableClipOverlay=false, sound=false.");
+            AppLog.Error("Clip notification overlay failed", error);
         }
     }
 
@@ -3806,42 +3795,21 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // The badge itself - window, monitor targeting, placement, slide - lives in
-    // ClipOverlayWindow. What stays here is the policy: which notifications are
-    // enabled, and which monitor decision each one belongs to.
-    private ClipOverlayWindow? _clipOverlayWindow;
-    private ClipOverlaySessionManager? _clipNotificationSessions;
+    private readonly ConcurrentDictionary<Guid, byte> _uiOwnedSaveIds = new();
+    private readonly Queue<Guid> _uiOwnedSaveOrder = new();
+    private ClipOverlayCoordinator? _clipOverlayCoordinator;
 
-    private ClipOverlaySessionManager ClipNotificationSessions =>
-        _clipNotificationSessions ??= new ClipOverlaySessionManager(() => ClipOverlayTargeting.Resolve(CurrentClipOverlayTargetInputs()));
+    private ClipOverlayCoordinator ClipNotifications => _clipOverlayCoordinator ??= new ClipOverlayCoordinator(
+        new NativeClipOverlaySurface(),
+        new ClipOverlayScheduler(),
+        PlayClipNotificationSound);
 
-    private ClipOverlayWindow ClipOverlay
+    private void RememberUiOwnedSave(Guid saveId)
     {
-        get
-        {
-            if (_clipOverlayWindow is not null) return _clipOverlayWindow;
-            var overlay = new ClipOverlayWindow(PlayClipNotificationSound);
-            overlay.Hidden += (_, session) => _clipNotificationSessions?.OnHidden(session);
-            _clipOverlayWindow = overlay;
-            return overlay;
-        }
-    }
-
-    private ClipOverlaySession CreateClipOverlaySession(string trigger, bool saveStart, bool saveCompletion)
-    {
-        var session = saveStart
-            ? ClipNotificationSessions.BeginSave(trigger)
-            : saveCompletion
-                ? ClipNotificationSessions.CompleteSave(trigger)
-                : ClipNotificationSessions.CreateStandalone(trigger);
-        var target = session.Target;
-        AppLog.Info(
-            $"Clip overlay session: id={session.Id}, trigger={trigger}, monitor={target.DeviceName} " +
-            $"({ClipOverlayTargeting.LabelFor(target.DeviceName)}), reason={target.ReasonLabel}, " +
-            $"bounds={target.Bounds.X},{target.Bounds.Y} {target.Bounds.Width}x{target.Bounds.Height}, " +
-            $"work={target.WorkArea.X},{target.WorkArea.Y} {target.WorkArea.Width}x{target.WorkArea.Height}, " +
-            $"scaling={target.Scaling:0.00}.");
-        return session;
+        if (_uiOwnedSaveIds.ContainsKey(saveId)) return;
+        _uiOwnedSaveIds[saveId] = 0;
+        _uiOwnedSaveOrder.Enqueue(saveId);
+        while (_uiOwnedSaveOrder.Count > 256) _uiOwnedSaveIds.TryRemove(_uiOwnedSaveOrder.Dequeue(), out _);
     }
 
     // What is actually being recorded, read off the live replay config rather
@@ -3865,16 +3833,57 @@ public sealed partial class MainWindow : Window
             ViewModel?.ActiveGameDetection.WindowHandle ?? IntPtr.Zero);
     }
 
-    private void ShowClipOverlay(string trigger, string position, string text, bool playSound, bool saveStart = false, bool saveCompletion = false, string? hotkey = null, string hotkeyHint = "")
+    private void ShowClipOverlay(string trigger, string position, string text, bool playSound, bool saveStart = false, bool saveCompletion = false, string? hotkey = null, string hotkeyHint = "", Guid? saveId = null, DateTime? requestedUtc = null, bool showVisual = true)
     {
-        ClipOverlay.Show(new ClipOverlayRequest(
-            CreateClipOverlaySession(trigger, saveStart, saveCompletion),
-            text,
-            string.Equals(position, "Top Left", StringComparison.OrdinalIgnoreCase) ? ClipOverlaySide.Left : ClipOverlaySide.Right,
-            playSound,
+        var now = DateTime.UtcNow;
+        var workflowId = saveId.GetValueOrDefault();
+        if (workflowId == Guid.Empty) workflowId = Guid.NewGuid();
+        var kind = text.Contains("Failed", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.Failure
+            : saveStart ? ClipOverlayKind.Saving
+            : saveCompletion || playSound && text.Contains("Saved", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.Saved
+            : trigger.Contains("auto-clip", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.AutoClip
+            : trigger.Contains("game-detected", StringComparison.OrdinalIgnoreCase) || trigger.Contains("full-session", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.Recording
+            : ClipOverlayKind.Standalone;
+        var title = text;
+        string? detail = null;
+        if (text.StartsWith("Clipping started - ", StringComparison.OrdinalIgnoreCase))
+        {
+            title = "Clipping started";
+            detail = text[19..];
+        }
+        else if (text.StartsWith("Auto clip started", StringComparison.OrdinalIgnoreCase))
+        {
+            title = "Auto clip started";
+            var separator = text.IndexOf('—');
+            if (separator >= 0) detail = text[(separator + 1)..].Trim();
+        }
+        else if (text.Contains("video was frozen", StringComparison.OrdinalIgnoreCase))
+        {
+            title = "Clip Saved";
+            detail = "Video was frozen";
+        }
+        else if (saveStart && !string.Equals(text, "Clip Saving…", StringComparison.Ordinal))
+        {
+            title = "Clip Saving…";
+            detail = text.Replace("Saving ", string.Empty, StringComparison.OrdinalIgnoreCase).Replace(" Clip…", string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        if (!string.IsNullOrWhiteSpace(hotkey)) detail = string.IsNullOrWhiteSpace(detail) ? $"{hotkey} {hotkeyHint}" : $"{detail} · {hotkey} {hotkeyHint}";
+
+        var target = ClipOverlayTargeting.Resolve(CurrentClipOverlayTargetInputs());
+        AppLog.Info($"Clip overlay publish: id={workflowId}, trigger={trigger}, stage={(saveCompletion ? 1 : 0)}, monitor={target.DeviceName}, reason={target.ReasonLabel}.");
+        ClipNotifications.Publish(new ClipOverlayEvent(
+            workflowId,
+            saveCompletion ? 1 : 0,
+            requestedUtc ?? now,
+            now,
+            kind switch { ClipOverlayKind.Failure => 100, ClipOverlayKind.Saving or ClipOverlayKind.Saved => 80, ClipOverlayKind.AutoClip => 50, ClipOverlayKind.Recording => 40, _ => 30 },
+            kind,
+            title,
+            detail,
+            target,
+            ClipOverlayPlacementParser.Parse(position),
             ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true,
-            hotkey,
-            hotkeyHint));
+            ShowVisual: showVisual));
     }
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)

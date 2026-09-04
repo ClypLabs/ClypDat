@@ -131,7 +131,11 @@ internal static class CaptureWorkerHost
                     await ReplyAsync(client, message, result, cancellationToken);
                     break;
                 case "ack-save":
-                    if (message.Payload.TryGetProperty("path", out var path)) UnacknowledgedSaves.RemoveAll(item => string.Equals(item.Path, path.GetString(), StringComparison.OrdinalIgnoreCase));
+                    var acknowledgedId = message.Payload.TryGetProperty("saveId", out var saveIdElement) && saveIdElement.TryGetGuid(out var parsedId)
+                        ? parsedId
+                        : Guid.Empty;
+                    var acknowledgedPath = message.Payload.TryGetProperty("path", out var path) ? path.GetString() : null;
+                    RemoveAcknowledgedSaves(UnacknowledgedSaves, acknowledgedId, acknowledgedPath);
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "shutdown":
@@ -196,6 +200,11 @@ internal static class CaptureWorkerHost
             AttachDetectorFrameSource(_buffer);
         }
     }
+
+    internal static int RemoveAcknowledgedSaves(List<CaptureWorkerSaveResult> backlog, Guid saveId, string? path)
+        => backlog.RemoveAll(item =>
+            (saveId != Guid.Empty && item.SaveId == saveId) ||
+            (!string.IsNullOrWhiteSpace(path) && string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase)));
 
     private static async Task<CaptureWorkerAck> ApplyAutoClipPolicyAsync(JsonElement payload, CancellationToken cancellationToken)
     {
@@ -279,17 +288,28 @@ internal static class CaptureWorkerHost
 
     private static async Task<CaptureWorkerSaveResult> SaveAsync(CaptureWorkerSaveRequest request, CancellationToken cancellationToken)
     {
+        var saveId = request.SaveId.GetValueOrDefault();
+        if (saveId == Guid.Empty) saveId = Guid.NewGuid();
+        var requestedUtc = request.RequestedUtc ?? DateTime.UtcNow;
+        await SendEventAsync("save-started", new ReplaySaveStarted(saveId, requestedUtc));
         if (!await SaveGate.WaitAsync(0, cancellationToken))
-            return new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, "A replay save is already in progress.");
+        {
+            var busy = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, "A replay save is already in progress.", saveId, requestedUtc);
+            await SendEventAsync("save-failed", busy);
+            return busy;
+        }
         try
         {
             await EnsureBufferAsync();
             if (!Storage.CanSave(_config?.BitrateMbps ?? 15, TimeSpan.FromSeconds(_config?.DurationSeconds ?? 60), out var storageReason))
-                return new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, storageReason);
-            await SendEventAsync("save-started", new { });
+            {
+                var unavailable = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, storageReason, saveId, requestedUtc);
+                await SendEventAsync("save-failed", unavailable);
+                return unavailable;
+            }
             var stopwatch = Stopwatch.StartNew();
             var gameDisplayName = string.IsNullOrWhiteSpace(request.GameDisplayNameOverride) ? _config?.GameDisplayName : request.GameDisplayNameOverride;
-            var path = await _buffer!.SaveReplayAsync(request.OutputFolder, cancellationToken, request.TitleOverride, request.ClipWindow, gameDisplayName);
+            var path = await _buffer!.SaveReplayAsync(request.OutputFolder, cancellationToken, request.TitleOverride, request.ClipWindow, gameDisplayName, saveId);
             stopwatch.Stop();
             Storage.RecordWrite(path, stopwatch.Elapsed);
             if (_config is not null)
@@ -301,7 +321,7 @@ internal static class CaptureWorkerHost
                     File.GetCreationTimeUtc(path),
                     CaptureSource: _config.CaptureSource));
             }
-            var result = new CaptureWorkerSaveResult(path, request.TitleOverride, DateTime.UtcNow);
+            var result = new CaptureWorkerSaveResult(path, request.TitleOverride, DateTime.UtcNow, null, saveId, requestedUtc);
             UnacknowledgedSaves.Add(result);
             await SendEventAsync("save-completed", result);
             return result;
@@ -309,7 +329,7 @@ internal static class CaptureWorkerHost
         catch (Exception error)
         {
             CaptureWorkerLog.Error("Replay clip save failed.", error);
-            var result = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, error.Message);
+            var result = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, error.Message, saveId, requestedUtc);
             await SendEventAsync("save-failed", result);
             return result;
         }
@@ -371,7 +391,8 @@ internal static class CaptureWorkerHost
         var duration = TimeSpan.FromSeconds(Math.Clamp(_config.DurationSeconds, 30, 1200));
         var folder = LibraryLayout.ClipsRoot(_config.LibraryFolder);
         var gameDisplayName = _clipGameName ?? _config.GameDisplayName;
-        _ = SaveAsync(new CaptureWorkerSaveRequest(folder, null, new ReplayClipWindow(args.PressedAtUtc - duration, args.PressedAtUtc), gameDisplayName), CancellationToken.None);
+        var saveId = Guid.NewGuid();
+        _ = SaveAsync(new CaptureWorkerSaveRequest(folder, null, new ReplayClipWindow(args.PressedAtUtc - duration, args.PressedAtUtc), gameDisplayName, saveId, args.PressedAtUtc), CancellationToken.None);
     }
 
     private static ReplayCaptureHealth GetHealth()
@@ -420,7 +441,13 @@ internal static class CaptureWorkerHost
     }
 }
 
-internal sealed record CaptureWorkerSaveRequest(string OutputFolder, string? TitleOverride, ReplayClipWindow? ClipWindow, string? GameDisplayNameOverride = null);
+internal sealed record CaptureWorkerSaveRequest(
+    string OutputFolder,
+    string? TitleOverride,
+    ReplayClipWindow? ClipWindow,
+    string? GameDisplayNameOverride = null,
+    Guid? SaveId = null,
+    DateTime? RequestedUtc = null);
 
 internal static class CaptureWorkerLog
 {

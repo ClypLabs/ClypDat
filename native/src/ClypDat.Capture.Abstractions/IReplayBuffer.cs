@@ -214,7 +214,15 @@ public interface IReplayCaptureDiagnostics
     event EventHandler<ReplayCaptureHealth>? HealthChanged;
 }
 
-public sealed record ReplaySaveCompleted(string Path, string? Title, DateTime CompletedUtc, string? Error = null);
+public sealed record ReplaySaveStarted(Guid SaveId, DateTime RequestedUtc);
+public sealed record ReplaySaveCompleted(
+    Guid SaveId,
+    string Path,
+    string? Title,
+    DateTime RequestedUtc,
+    DateTime CompletedUtc,
+    string? Error = null,
+    bool IsRecovered = false);
 public sealed record AutoClipDetectorEvent(string GameId, string EventId, string EventLabel, string OccurrenceId,
     double Confidence, DateTime TimestampUtc, int LeadSeconds, int TailSeconds);
 public sealed record AutoClipDetectorStatus(string GameId, string Status);
@@ -222,7 +230,7 @@ public sealed record AutoClipDetectorStatus(string GameId, string Status);
 public interface IReplayCaptureWorkerEvents
 {
     event EventHandler? RecordingStateChanged;
-    event EventHandler? SaveStarted;
+    event EventHandler<ReplaySaveStarted>? SaveStarted;
     event EventHandler<ReplaySaveCompleted>? SaveCompleted;
     event EventHandler<bool>? FullSessionRecordingToggled;
     event EventHandler<AutoClipDetectorEvent>? AutoClipDetected;
@@ -267,7 +275,7 @@ public interface IReplayBuffer : IDisposable
     // titleOverride, when set, replaces the default "{GameName} {timestamp}" clip
     // name entirely (e.g. "4K - Inferno") - used by auto-clip triggers (CS2 GSI
     // kill events) to name the clip after what just happened.
-    Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null);
+    Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null, Guid? saveId = null);
     void SetCapturePaused(bool paused) { }
     // Set by the most recent SaveReplayAsync when no genuinely new video frame
     // landed anywhere inside the saved window - i.e. the clip is one frozen
