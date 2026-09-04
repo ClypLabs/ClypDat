@@ -143,7 +143,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             foreach (var save in attach.UnacknowledgedSaves)
             {
                 var completed = ToCompletion(save, isRecovered: true);
-                SaveCompleted?.Invoke(this, completed);
+                Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, completed));
                 await SendAsync<CaptureWorkerAck>("ack-save", new CaptureWorkerSaveAcknowledgement(completed.SaveId, completed.Path), cancellationToken);
             }
         }
@@ -200,7 +200,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                             if (started.SaveId == Guid.Empty) started = started with { SaveId = Guid.NewGuid() };
                             if (started.RequestedUtc == default) started = started with { RequestedUtc = DateTime.UtcNow };
                             AppLog.Info($"Capture worker event: save-started, id={started.SaveId}.");
-                            SaveStarted?.Invoke(this, started);
+                            Dispatcher.UIThread.Post(() => SaveStarted?.Invoke(this, started));
                         }
                         break;
                     case "save-completed":
@@ -209,7 +209,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                         {
                             var completion = ToCompletion(complete, isRecovered: false);
                             AppLog.Info($"Capture worker event: save-completed, id={completion.SaveId}, path='{complete.Path}', error='{complete.Error}'.");
-                            SaveCompleted?.Invoke(this, completion);
+                            Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, completion));
                             _ = SendBestEffortAsync("ack-save", new CaptureWorkerSaveAcknowledgement(completion.SaveId, completion.Path));
                         }
                         break;
@@ -219,7 +219,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                         {
                             var completion = ToCompletion(failed, isRecovered: false);
                             AppLog.Info($"Capture worker event: save-failed, id={completion.SaveId}, path='{failed.Path}', error='{failed.Error}'.");
-                            SaveCompleted?.Invoke(this, completion);
+                            Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, completion));
                         }
                         break;
                     case "full-session-toggled": if (message.Payload.TryGetProperty("enabled", out var enabled)) Dispatcher.UIThread.Post(() => FullSessionRecordingToggled?.Invoke(this, enabled.GetBoolean())); break;

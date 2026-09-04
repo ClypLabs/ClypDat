@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Avalonia.Platform;
 using ClypDat.App.Services;
 
 namespace ClypDat.App.Views;
@@ -17,7 +18,10 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private static readonly nint HwndTopmost = new(-1);
     private static readonly ConcurrentDictionary<nint, NativeClipOverlaySurface> Instances = new();
     private static readonly WindowProc SharedWindowProc = WindowProcedure;
+    private static readonly object InterFontGate = new();
     private static int _classRegistered;
+    private static readonly List<byte[]> InterFontData = [];
+    private static readonly List<nint> InterFontHandles = [];
 
     private readonly object _gate = new();
     private readonly Thread _thread;
@@ -64,6 +68,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     {
         try
         {
+            EnsureInterFont();
             RegisterWindowClass();
             _window = CreateWindowEx(WsExLayered | WsExTransparent | WsExToolWindow | WsExNoActivate,
                 ClassName, string.Empty, WsPopup, -32000, -32000, 1, 1, 0, 0, GetModuleHandle(null), 0);
@@ -244,6 +249,36 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
             throw new InvalidOperationException($"Could not register clip overlay class ({Marshal.GetLastWin32Error()}).");
     }
 
+    // Avalonia bundles Inter inside Avalonia.Fonts.Inter; Windows does not
+    // register that private font for GDI, so load the same asset for this HWND.
+    private static void EnsureInterFont()
+    {
+        lock (InterFontGate)
+        {
+            if (InterFontHandles.Count != 0) return;
+            try
+            {
+                foreach (var asset in new[] { "Inter-Regular.ttf", "Inter-Medium.ttf" })
+                {
+                    using var stream = AssetLoader.Open(new Uri($"avares://Avalonia.Fonts.Inter/Assets/{asset}"));
+                    using var data = new MemoryStream();
+                    stream.CopyTo(data);
+                    var fontData = data.ToArray();
+                    fixed (byte* pointer = fontData)
+                    {
+                        var handle = AddFontMemResourceEx((nint)pointer, (uint)fontData.Length, 0, out _);
+                        if (handle != 0) { InterFontData.Add(fontData); InterFontHandles.Add(handle); }
+                    }
+                }
+                if (InterFontHandles.Count == 0) AppLog.Info("Native clip overlay could not load bundled Inter font.");
+            }
+            catch (Exception error)
+            {
+                AppLog.Info($"Native clip overlay could not load bundled Inter font: {error.Message}");
+            }
+        }
+    }
+
     private static nint WindowProcedure(nint window, uint message, nint wParam, nint lParam)
     {
         if (!Instances.TryGetValue(window, out var instance)) return DefWindowProc(window, message, wParam, lParam);
@@ -292,6 +327,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint value);
     [DllImport("gdi32.dll")] private static extern int SetBkMode(nint dc, int mode);
     [DllImport("gdi32.dll")] private static extern uint SetTextColor(nint dc, uint color);
+    [DllImport("gdi32.dll", SetLastError = true)] private static extern nint AddFontMemResourceEx(nint fontData, uint dataLength, nint reserved, out uint fontCount);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)] private static extern nint CreateFont(int height, int width, int escapement, int orientation, int weight, uint italic, uint underline, uint strikeOut, uint charSet, uint outputPrecision, uint clipPrecision, uint quality, uint pitchAndFamily, string faceName);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int DrawText(nint dc, string text, int count, ref RectNative rectangle, uint format);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint ExtractIconEx(string fileName, int iconIndex, out nint largeIcon, out nint smallIcon, uint iconCount);
