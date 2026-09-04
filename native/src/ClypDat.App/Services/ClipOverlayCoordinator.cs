@@ -8,6 +8,7 @@ internal enum ClipOverlayKind
     Saved,
     Failure,
     Recording,
+    GameStarted,
     AutoClip,
     Standalone
 }
@@ -173,7 +174,8 @@ internal sealed class ClipOverlayCoordinator : IDisposable
             _visible = notification;
             var generation = ++_generation;
             _dismissal?.Dispose();
-            _dismissal = _scheduler.Schedule(Dwell, () => Dismiss(generation));
+            var dwell = notification.Kind == ClipOverlayKind.GameStarted ? TimeSpan.FromSeconds(5) : Dwell;
+            _dismissal = _scheduler.Schedule(dwell, () => Dismiss(generation));
             presentation = new ClipOverlayPresentation(generation, notification);
 
         Finished:;

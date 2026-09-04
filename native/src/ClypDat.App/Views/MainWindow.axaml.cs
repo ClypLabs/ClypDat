@@ -387,6 +387,9 @@ public sealed partial class MainWindow : Window
                     // the session a save left behind seconds ago.
                     ShowClipNotification("preview", "Clip Saved", playSound: true);
                 };
+                ViewModel.RecordingOverlayPreviewRequested += (_, _) =>
+                    ShowGameDetectedNotification(ViewModel.ActiveGameDetection.IsDetected
+                        ? ViewModel.ActiveGameDetection.DisplayName : "Your game", preview: true);
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
@@ -632,6 +635,7 @@ public sealed partial class MainWindow : Window
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
 
     private bool _gameDetectionInFlight;
+    private readonly GameRecordingNotificationState _gameRecordingNotification = new();
 
     private void RevealAfterFirstDarkFrame()
     {
@@ -760,6 +764,7 @@ public sealed partial class MainWindow : Window
         }
 
         UpdateCapturePauseState(detection);
+        TryShowGameRecordingNotification(detection);
     }
 
     private DateTime _lastIconSweepUtc = DateTime.MinValue;
@@ -2890,7 +2895,6 @@ public sealed partial class MainWindow : Window
             // unchanged value. A successful restart can therefore otherwise
             // retain the temporary switching label from the scheduler.
             UpdateRecorderStatusFromState();
-            if (ViewModel.IsReplayRecording && !ViewModel.IsEffectiveDesktopCapture) ShowGameDetectedNotification(ViewModel.ActiveGameDetection.DisplayName);
             UpdateDetectorPackAutoClipStates();
         }
         catch (Exception error)
@@ -3097,12 +3101,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // Separate toggle from EnableClipOverlay - "clipping started" is a
-    // distinct notification kind (fires once per successful buffer start,
-    // see StartReplayBufferAsync) that a user may want independently of the
-    // clip-saved family. No sound: this fires the instant a game launches,
-    // and an audible cue for that (as opposed to a deliberate clip save) felt
-    // like noise rather than useful feedback.
     // Shown when a game closes, listing what that session actually captured.
     // Re-entrant on purpose: a Full Session VOD landing later calls straight
     // back in, which rebuilds the open popup around the larger set rather than
@@ -3717,10 +3715,23 @@ public sealed partial class MainWindow : Window
         else if (!ViewModel.IsReplayRecording) ShowNewClipsDialog();
     }
 
-    private void ShowGameDetectedNotification(string gameName)
+    private void TryShowGameRecordingNotification(GameDetection detection)
     {
         if (ViewModel is null) return;
-        if (!ViewModel.Settings.EnableGameDetectedOverlay)
+        var active = _activeReplayConfigSnapshot;
+        var targetMatches = active is not null && (ViewModel.IsEffectiveDesktopCapture
+            ? string.Equals(active.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
+            : (nint)active.GameWindowHandle == detection.WindowHandle);
+        var ready = targetMatches && !_replayTransitioning && string.IsNullOrEmpty(_pendingReplayTargetIdentity)
+            && _replayBuffer is { IsRecording: true };
+        if (_gameRecordingNotification.TryAnnounce(detection, ready, ViewModel.Settings.EnableGameDetectedOverlay))
+            ShowGameDetectedNotification(detection.DisplayName);
+    }
+
+    private void ShowGameDetectedNotification(string gameName, bool preview = false)
+    {
+        if (ViewModel is null) return;
+        if (!preview && !ViewModel.Settings.EnableGameDetectedOverlay)
         {
             AppLog.Info("Clip overlay skipped: trigger=game-detected, reason=EnableGameDetectedOverlay=false.");
             return;
@@ -3728,12 +3739,9 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            // The one notification with something to teach: it fires as the
-            // buffer arms, which is exactly the moment the save hotkey becomes
-            // worth knowing. Every other overlay in this family reports
-            // something that already happened and stays a single line.
-            ShowClipOverlay("game-detected", ViewModel.Settings.ClipOverlayPosition, $"Clipping started - {gameName}", playSound: false,
-                hotkey: ViewModel.Settings.SaveReplayHotkey, hotkeyHint: "to save a clip");
+            ShowClipOverlay("game-detected", ViewModel.Settings.ClipOverlayPosition, $"Recording: {gameName}", playSound: false,
+                hotkey: preview ? ViewModel.EffectiveSaveReplayHotkey : _activeReplayConfigSnapshot?.SaveReplayHotkey ?? ViewModel.EffectiveSaveReplayHotkey,
+                hotkeyHint: "to save a clip");
         }
         catch (Exception error)
         {
@@ -3842,7 +3850,8 @@ public sealed partial class MainWindow : Window
             : saveStart ? ClipOverlayKind.Saving
             : saveCompletion || playSound && text.Contains("Saved", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.Saved
             : trigger.Contains("auto-clip", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.AutoClip
-            : trigger.Contains("game-detected", StringComparison.OrdinalIgnoreCase) || trigger.Contains("full-session", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.Recording
+            : trigger.Contains("game-detected", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.GameStarted
+            : trigger.Contains("full-session", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.Recording
             : ClipOverlayKind.Standalone;
         var title = text;
         string? detail = null;
@@ -3876,7 +3885,7 @@ public sealed partial class MainWindow : Window
             saveCompletion ? 1 : 0,
             requestedUtc ?? now,
             now,
-            kind switch { ClipOverlayKind.Failure => 100, ClipOverlayKind.Saving or ClipOverlayKind.Saved => 80, ClipOverlayKind.AutoClip => 50, ClipOverlayKind.Recording => 40, _ => 30 },
+            kind switch { ClipOverlayKind.Failure => 100, ClipOverlayKind.Saving or ClipOverlayKind.Saved => 80, ClipOverlayKind.AutoClip => 50, ClipOverlayKind.Recording or ClipOverlayKind.GameStarted => 40, _ => 30 },
             kind,
             title,
             detail,

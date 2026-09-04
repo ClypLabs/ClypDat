@@ -41,6 +41,19 @@ public sealed class ClipOverlayCoordinatorTests
     }
 
     [Fact]
+    public void GameHintHasReadingTimeButSaveStillReplacesItImmediately()
+    {
+        var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch);
+        coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.GameStarted, 40, _epoch));
+        Assert.Equal(TimeSpan.FromSeconds(5), scheduler.Delays[0]);
+        coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Saving, 80, _epoch));
+        Assert.Equal(2, surface.Presentations.Count);
+        Assert.Equal(TimeSpan.FromSeconds(3), scheduler.Delays[1]);
+        Assert.Equal(0, sounds);
+    }
+
+    [Fact]
     public void DuplicateRegressiveAndRecoveredEventsAreSuppressed_ButLiveSoundIsIndependent()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;

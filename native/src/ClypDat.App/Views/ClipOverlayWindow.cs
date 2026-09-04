@@ -31,6 +31,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private int _width, _height, _publishCount;
     private Motion _motion;
     private bool _visible, _disposed;
+    private bool _nativePublishLogged, _nativeFailureLogged;
 
     public NativeClipOverlaySurface(Func<ClipOverlayPresentation, ClipOverlayFrame>? render = null)
     {
@@ -113,6 +114,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         var presentation = update.Presentation;
         if (_current is { } current && current.Generation > presentation.Generation) return;
         _current = presentation;
+        _nativePublishLogged = _nativeFailureLogged = false;
         CreateBitmap(update.Frame.Width, update.Frame.Height);
         Marshal.Copy(update.Frame.Pixels, 0, _bits, update.Frame.Pixels.Length);
         SetWindowDisplayAffinity(_window, presentation.Event.ExcludeFromCapture ? WdaExcludeFromCapture : 0);
@@ -164,7 +166,17 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         var source = new PointNative(0, 0);
         var size = new SizeNative(_width, _height);
         var blend = new BlendFunction(0, 0, (byte)Math.Clamp((int)Math.Round(255 * progress), 0, 255), 1);
-        UpdateLayeredWindow(_window, 0, ref destination, ref size, _memoryDc, ref source, 0, ref blend, UlwAlpha);
+        if (!UpdateLayeredWindow(_window, 0, ref destination, ref size, _memoryDc, ref source, 0, ref blend, UlwAlpha))
+        {
+            if (!_nativeFailureLogged)
+                AppLog.Error($"Clip overlay native publish failed: id={_current.Event.WorkflowId}, error={Marshal.GetLastWin32Error()}.");
+            _nativeFailureLogged = true;
+        }
+        else if (progress > 0 && !_nativePublishLogged)
+        {
+            AppLog.Info($"Clip overlay native publish succeeded: id={_current.Event.WorkflowId}, kind={_current.Event.Kind}, monitor={target.DeviceName}, size={_width}x{_height}.");
+            _nativePublishLogged = true;
+        }
     }
 
     private void CreateBitmap(int width, int height)

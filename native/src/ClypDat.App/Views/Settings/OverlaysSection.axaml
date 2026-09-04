@@ -52,7 +52,8 @@
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clipping started overlay}">
           <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Show Clipping Started Overlay" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Shown when a detected game's replay buffer actually starts recording." />
+            <TextBlock Classes="settingsRowDescSm" Text="Shows the game and save hotkey once recording is active and the game is foreground." />
+            <Button Content="Preview Recording Notification" Click="RecordingOverlayPreview_OnClick" HorizontalAlignment="Left" Margin="0,6,0,0" />
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableGameDetectedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>

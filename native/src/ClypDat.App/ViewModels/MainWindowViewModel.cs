@@ -6210,8 +6210,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Settings > Overlays' preview button. The badge lives in the window layer,
     // so the view raises this rather than the ViewModel showing anything.
     public event EventHandler? OverlayPreviewRequested;
+    public event EventHandler? RecordingOverlayPreviewRequested;
 
     public void RequestOverlayPreview() => OverlayPreviewRequested?.Invoke(this, EventArgs.Empty);
+    public void RequestRecordingOverlayPreview() => RecordingOverlayPreviewRequested?.Invoke(this, EventArgs.Empty);
 
     // Raised for a clip that is genuinely NEW to the library, not for the
     // re-adds AddOrUpdateLibraryClipAsync also handles (an edit saved over an

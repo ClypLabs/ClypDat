@@ -14,4 +14,7 @@ public sealed partial class OverlaysSection : UserControl
 
     private void OverlayPreview_OnClick(object? sender, RoutedEventArgs e)
         => (DataContext as MainWindowViewModel)?.RequestOverlayPreview();
+
+    private void RecordingOverlayPreview_OnClick(object? sender, RoutedEventArgs e)
+        => (DataContext as MainWindowViewModel)?.RequestRecordingOverlayPreview();
 }
