@@ -682,15 +682,29 @@
        onto PART_Border, so each of those states has to be answered here or
        the chip loses its surface the moment the pointer touches it. -->
   <Style Selector="CheckBox.autoClipEvent">
+    <Style.Resources>
+      <!-- The template reserves a fixed 32px row for the tick and centres the
+           glyph in it; left at Fluent's default the chip could not go below
+           that height however small its own MinHeight was. -->
+      <sys:Double x:Key="CheckBoxMinHeight">32</sys:Double>
+    </Style.Resources>
     <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="MinHeight" Value="38" />
-    <Setter Property="Padding" Value="8,0,10,0" />
-    <Setter Property="Margin" Value="0,0,8,8" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="5,0,10,0" />
+    <Setter Property="Margin" Value="0,0,6,6" />
+    <Setter Property="FontSize" Value="12.5" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+  </Style>
+  <!-- Fluent ties the tick box's own radius to the control's, so the chip's
+       7px turned a 20px square into a circle that read as a radio button. -->
+  <Style Selector="CheckBox.autoClipEvent /template/ Border#NormalRectangle">
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Width" Value="17" />
+    <Setter Property="Height" Value="17" />
   </Style>
   <Style Selector="CheckBox.autoClipEvent /template/ Border#PART_Border">
     <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource AncestorType=CheckBox}}" />
@@ -719,8 +733,8 @@
        times its height, and the column it sat in was empty the rest of the way
        down. -->
   <Style Selector="Border.autoClipCover">
-    <Setter Property="Width" Value="52" />
-    <Setter Property="Height" Value="52" />
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="62" />
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="Background" Value="{StaticResource Surface_1F3341}" />

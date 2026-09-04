@@ -103,10 +103,10 @@
                             <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" VerticalAlignment="Center" />
                           </Grid>
                         </Button>
-                        <ItemsControl ItemsSource="{Binding Events}" Margin="28,0,-8,0">
+                        <ItemsControl ItemsSource="{Binding Events}" Margin="0,0,-6,0">
                           <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
-                              <controls:ResponsiveUniformGrid MinimumItemWidth="140" MaximumColumns="4" />
+                              <controls:ResponsiveUniformGrid MinimumItemWidth="128" MaximumColumns="5" />
                             </ItemsPanelTemplate>
                           </ItemsControl.ItemsPanel>
                           <ItemsControl.ItemTemplate>
@@ -120,10 +120,10 @@
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <ItemsControl ItemsSource="{Binding UngroupedEvents}" Margin="0,0,-8,0">
+                <ItemsControl ItemsSource="{Binding UngroupedEvents}" Margin="0,0,-6,0">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                      <controls:ResponsiveUniformGrid MinimumItemWidth="140" MaximumColumns="4" />
+                      <controls:ResponsiveUniformGrid MinimumItemWidth="128" MaximumColumns="5" />
                     </ItemsPanelTemplate>
                   </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
