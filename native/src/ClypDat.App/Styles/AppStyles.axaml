@@ -672,74 +672,58 @@
     <Setter Property="BorderBrush" Value="{StaticResource Text_A9C9E5}" />
   </Style>
 
-  <!-- Auto-clipping events were a single left-aligned column of bare
-       checkboxes running the whole height of the section, which left the
-       right two thirds of the card empty and made a game with a dozen events
-       an unreadable ladder. As chips in a responsive grid they use the width
-       and each one is a target big enough to hit.
-
-       Fluent paints its own pointerover/pressed/disabled backgrounds straight
-       onto PART_Border, so each of those states has to be answered here or
-       the chip loses its surface the moment the pointer touches it. -->
-  <Style Selector="CheckBox.autoClipEvent">
-    <Style.Resources>
-      <!-- The template reserves a fixed 32px row for the tick and centres the
-           glyph in it; left at Fluent's default the chip could not go below
-           that height however small its own MinHeight was. -->
-      <sys:Double x:Key="CheckBoxMinHeight">32</sys:Double>
-    </Style.Resources>
-    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
-    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="MinHeight" Value="32" />
-    <Setter Property="Padding" Value="5,0,10,0" />
-    <Setter Property="Margin" Value="0,0,6,6" />
-    <Setter Property="FontSize" Value="12.5" />
+  <!-- The expand target for a game row and for a group header. It sits BEHIND
+       the row's real controls and spans every column, so a click anywhere that
+       is not the switch or the tri-state box opens or closes that row. -->
+  <Style Selector="Button.autoClipRow">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Cursor" Value="Hand" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
-    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
   </Style>
-  <!-- Fluent ties the tick box's own radius to the control's, so the chip's
-       7px turned a 20px square into a circle that read as a radio button. -->
-  <Style Selector="CheckBox.autoClipEvent /template/ Border#NormalRectangle">
-    <Setter Property="CornerRadius" Value="4" />
-    <Setter Property="Width" Value="17" />
-    <Setter Property="Height" Value="17" />
+  <Style Selector="Button.autoClipRow:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_18232D}" />
   </Style>
-  <Style Selector="CheckBox.autoClipEvent /template/ Border#PART_Border">
-    <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource AncestorType=CheckBox}}" />
-    <Setter Property="BorderBrush" Value="{Binding BorderBrush, RelativeSource={RelativeSource AncestorType=CheckBox}}" />
-  </Style>
-  <Style Selector="CheckBox.autoClipEvent:pointerover">
+  <Style Selector="Button.autoClipRow:not(ToggleSwitch):pressed">
     <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
-    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
-  </Style>
-  <Style Selector="CheckBox.autoClipEvent:pressed">
-    <Setter Property="Background" Value="{StaticResource Surface_22303D}" />
-  </Style>
-  <!-- A checked chip reads at a glance from its surface, not just from a 20px
-       tick - which is the whole point of picking events out of a long list. -->
-  <Style Selector="CheckBox.autoClipEvent:checked">
-    <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-  </Style>
-  <Style Selector="CheckBox.autoClipEvent:checked:pointerover">
-    <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
 
-  <!-- The header carries the game's own on/off switch, so the art has no
-       reason to be a full poster any more - it was 84x120 beside a body three
-       times its height, and the column it sat in was empty the rest of the way
-       down. -->
+  <Style Selector="PathIcon.autoClipChevron">
+    <Setter Property="Width" Value="11" />
+    <Setter Property="Height" Value="11" />
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+  </Style>
+
+  <!-- Store art, at the proportions it was drawn at. A square tile cropped
+       the middle out of a 2:3 poster and cut Dota's logo in half. -->
   <Style Selector="Border.autoClipCover">
-    <Setter Property="Width" Value="44" />
-    <Setter Property="Height" Value="62" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Width" Value="46" />
+    <Setter Property="Height" Value="64" />
+    <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="Background" Value="{StaticResource Surface_1F3341}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
+
+  <Style Selector="TextBlock.autoClipCount">
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- One event per line, indented under its group. These were briefly chips
+       in a grid; the grid used the width but the section's problem was never
+       one checkbox's shape, it was all of them being on screen at once. -->
+  <Style Selector="CheckBox.autoClipEvent">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+
   <Style Selector="MenuFlyoutPresenter">
     <!-- Fluent places its rows through this resource, not the presenter's
          Padding property. Removing its 4px vertical margin makes first and

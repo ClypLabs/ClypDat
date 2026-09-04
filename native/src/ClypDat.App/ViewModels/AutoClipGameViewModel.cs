@@ -11,6 +11,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     private readonly AutoClipGameSettings _settings;
     private readonly Action _save;
     private bool _isSearchMatch = true;
+    private bool _isExpanded;
     private string _searchQuery = string.Empty;
     private string _statusText = "Waiting for game";
 
@@ -37,6 +38,49 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public bool IsEnabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; OnPropertyChanged(); SaveAndRefresh(); } }
     public bool DeathmatchClipping { get => _settings.DeathmatchClipping; set { if (_settings.DeathmatchClipping == value) return; _settings.DeathmatchClipping = value; OnPropertyChanged(); SaveAndRefresh(); } }
     public bool IsSearchMatch { get => _isSearchMatch; set => SetProperty(ref _isSearchMatch, value); }
+
+    // Every game used to render every one of its events at once, which for
+    // League is 18 checkboxes across three groups - the section ran several
+    // screens and finding one event meant scrolling past all the others.
+    // Collapsed, the whole section is one row per game.
+    public bool IsExpanded { get => _isExpanded; set => SetProperty(ref _isExpanded, value); }
+
+    // Opening a game opens its groups with it, so events are one click away
+    // rather than two. Collapsing a group afterwards is what keeps a game the
+    // size of League manageable.
+    public void SetExpanded(bool expanded)
+    {
+        IsExpanded = expanded;
+        foreach (var group in Groups) group.IsExpanded = expanded;
+    }
+
+    public void ToggleExpanded() => SetExpanded(!IsExpanded);
+
+    // What the collapsed row says instead of showing the checkboxes.
+    public int EnabledEventCount => Definition.Events.Count(item => _settings.Events.TryGetValue(item.Id, out var enabled) && enabled);
+    public string SummaryLabel => EnabledEventCount == 1 ? "1 event" : $"{EnabledEventCount} events";
+
+    // A query that matches something buried inside a collapsed group would
+    // otherwise highlight a row with nothing visible in it.
+    public void ApplySearchExpansion(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            SetExpanded(false);
+            return;
+        }
+
+        var nameMatches = Name.Contains(query, StringComparison.OrdinalIgnoreCase);
+        var expandedAny = false;
+        foreach (var group in Groups)
+        {
+            var hit = nameMatches || group.MatchesSearch(query);
+            group.IsExpanded = hit;
+            expandedAny |= hit;
+        }
+
+        IsExpanded = expandedAny || nameMatches || MatchesSearch(query);
+    }
     // Bound to this row's own Name TextBlock via SettingsHighlight.Query -
     // that attached property needs the query on the SAME DataContext as the
     // TextBlock it's attached to (a per-game row here), not
@@ -49,7 +93,13 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         Name.Contains(query, StringComparison.OrdinalIgnoreCase)
         || Definition.Events.Any(item => item.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
         || (IsCs2 && ("Competitive".Contains(query, StringComparison.OrdinalIgnoreCase) || "Deathmatch Clipping".Contains(query, StringComparison.OrdinalIgnoreCase)));
-    public void Refresh() { foreach (var group in Groups) group.Refresh(); }
+    public void Refresh()
+    {
+        foreach (var group in Groups) group.Refresh();
+        foreach (var item in UngroupedEvents) item.Refresh();
+        OnPropertyChanged(nameof(EnabledEventCount));
+        OnPropertyChanged(nameof(SummaryLabel));
+    }
     private void SaveAndRefresh() { Refresh(); _save(); SettingsChanged?.Invoke(this, EventArgs.Empty); }
 }
 
@@ -65,6 +115,12 @@ public sealed class AutoClipGroupViewModel : ViewModelBase
     }
     public string Name { get; }
     public ObservableCollection<AutoClipEventViewModel> Events { get; }
+    private bool _isExpanded;
+    public bool IsExpanded { get => _isExpanded; set => SetProperty(ref _isExpanded, value); }
+    public void ToggleExpanded() => IsExpanded = !IsExpanded;
+    public int EnabledCount => _definitions.Count(item => _settings.Events.TryGetValue(item.Id, out var enabled) && enabled);
+    public string SummaryLabel => $"{EnabledCount} of {_definitions.Count}";
+    public bool MatchesSearch(string query) => _definitions.Any(item => item.Name.Contains(query, StringComparison.OrdinalIgnoreCase));
     public bool? IsChecked
     {
         get { var count = _definitions.Count(item => _settings.Events.TryGetValue(item.Id, out var enabled) && enabled); return count == 0 ? false : count == _definitions.Count ? true : null; }
@@ -78,6 +134,8 @@ public sealed class AutoClipGroupViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsChecked));
         OnPropertyChanged(nameof(IsAllEnabled));
         OnPropertyChanged(nameof(IsIndeterminate));
+        OnPropertyChanged(nameof(EnabledCount));
+        OnPropertyChanged(nameof(SummaryLabel));
         foreach (var item in Events) item.Refresh();
     }
 }

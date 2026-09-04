@@ -5551,6 +5551,18 @@ public sealed partial class MainWindow : Window
         if (sender is Button { DataContext: AutoClipGroupViewModel group }) group.Toggle();
     }
 
+    // The row-wide expand buttons sit behind their rows and inherit the same
+    // DataContext, so each one only has to ask its own view model to open.
+    internal void AutoClipGameExpandButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: AutoClipGameViewModel game }) game.ToggleExpanded();
+    }
+
+    internal void AutoClipGroupExpandButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: AutoClipGroupViewModel group }) group.ToggleExpanded();
+    }
+
     internal async Task CheckUpdatesAsync()
     {
         await RefreshUpdateAvailabilityAsync(UpdatePresentationPolicy.ForUserAction());

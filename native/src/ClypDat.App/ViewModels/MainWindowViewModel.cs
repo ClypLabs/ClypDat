@@ -2429,6 +2429,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 game.IsSearchMatch = string.IsNullOrWhiteSpace(value) || game.MatchesSearch(value);
                 game.SearchQuery = value;
+                // A hit buried in a collapsed group would otherwise leave the
+                // row highlighted with nothing visible in it.
+                game.ApplySearchExpansion(value);
             }
             OnPropertyChanged(nameof(HasAutoClipSearchResults));
         }

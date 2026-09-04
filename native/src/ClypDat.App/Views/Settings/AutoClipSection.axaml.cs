@@ -22,4 +22,10 @@ public sealed partial class AutoClipSection : UserControl
 
     private void AutoClipGroupToggleButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.AutoClipGroupToggleButton_OnClick(sender, e);
+
+    private void AutoClipGameExpandButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.AutoClipGameExpandButton_OnClick(sender, e);
+
+    private void AutoClipGroupExpandButton_OnClick(object? sender, RoutedEventArgs e)
+        => Owner?.AutoClipGroupExpandButton_OnClick(sender, e);
 }
