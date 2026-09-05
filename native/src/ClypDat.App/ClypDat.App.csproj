@@ -143,9 +143,6 @@
   <ItemGroup>
     <AvaloniaResource Include="..\..\..\assets\clypdat-icon*.png" Link="Assets\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\..\..\assets\clypdat-icon.ico" Link="Assets\clypdat-icon.ico" />
-    <AvaloniaResource Include="..\..\..\assets\cs2-cover.jpg" Link="Assets\cs2-cover.jpg" />
-    <AvaloniaResource Include="..\..\..\assets\dota2-cover.jpg" Link="Assets\dota2-cover.jpg" />
-    <AvaloniaResource Include="..\..\..\assets\league-cover.jpg" Link="Assets\league-cover.jpg" />
   </ItemGroup>
 
   <ItemGroup>

@@ -47,6 +47,35 @@ public sealed class AutoClipCatalogTests
         Assert.Equal(10, successfulMission.TailSeconds);
     }
 
+    // The settings list renders the catalog in order, and every tile now comes
+    // from GamePortraitService rather than a bundled cover - so a new entry
+    // without a portrait key would render a blank box.
+    [Fact]
+    public void ActiveGamesAreAlphabeticalAndAllResolveAPortrait()
+    {
+        var names = AutoClipCatalog.Active.Select(game => game.Name).ToArray();
+
+        Assert.Equal(names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray(), names);
+        Assert.All(AutoClipCatalog.Active, game => Assert.False(string.IsNullOrWhiteSpace(game.PortraitDetectionKey)));
+    }
+
+    [Fact]
+    public void OverwatchShipsAsADetectorPackGameThatIsNotInstalledYet()
+    {
+        var overwatch = AutoClipCatalog.Get("overwatch");
+
+        Assert.True(overwatch.UsesDetectorPack);
+        Assert.False(overwatch.DefaultEnabled);
+        Assert.Equal("overwatch", overwatch.PackId);
+        Assert.Equal("clypdat-cv", overwatch.ProviderId);
+        Assert.Equal("steam-2357570", overwatch.PortraitDetectionKey);
+        Assert.Equal("Overwatch®", overwatch.PortraitDisplayName);
+        Assert.Equal(
+            new HashSet<string> { "multikill", "team-kill", "play-of-the-game" },
+            overwatch.Events.Where(item => item.DefaultEnabled).Select(item => item.Id).ToHashSet());
+        Assert.Equal("overwatch", AutoClipCatalog.MatchGame(null, "Overwatch.exe", null));
+    }
+
     [Theory]
     [InlineData("FortniteClient-Win64-Shipping.exe", "fortnite")]
     [InlineData("helldivers2.exe", "helldivers2")]

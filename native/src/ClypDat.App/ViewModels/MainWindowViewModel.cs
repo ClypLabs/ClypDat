@@ -329,7 +329,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
         GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
         EnsureAutoClipSettings();
-        AutoClipGames = new ObservableCollection<AutoClipGameViewModel>(AutoClipCatalog.Active.Select(definition =>
+        AutoClipGames = new ObservableCollection<AutoClipGameViewModel>(AutoClipCatalog.Active
+            .OrderBy(definition => definition.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(definition =>
             new AutoClipGameViewModel(definition, Settings.AutoClipping.Games[definition.Id], SaveSettings)));
         ComingSoonAutoClipGames = new ObservableCollection<string>(AutoClipCatalog.ComingSoon);
         RebuildGameCaptureRows();

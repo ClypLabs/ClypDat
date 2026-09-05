@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform;
 using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.Core.Settings;
@@ -25,8 +24,6 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         _save = save;
         if (definition.UsesDetectorPack) _statusText = "Not Installed";
         else if (definition.UsesDetector) _statusText = "Waiting for Game";
-        if (!string.IsNullOrWhiteSpace(definition.CoverAssetPath))
-            CoverImage = new Bitmap(AssetLoader.Open(new Uri(definition.CoverAssetPath)));
         if (!string.IsNullOrWhiteSpace(definition.PortraitDetectionKey)) _ = LoadPortraitAsync();
         Groups = new ObservableCollection<AutoClipGroupViewModel>(definition.Groups.Select(group => new AutoClipGroupViewModel(group, definition.Events.Where(item => item.GroupId == group.Id), _settings, SaveAndRefresh)));
         UngroupedEvents = new ObservableCollection<AutoClipEventViewModel>(definition.Events.Where(item => item.GroupId is null).Select(item => new AutoClipEventViewModel(item, _settings, SaveAndRefresh)));

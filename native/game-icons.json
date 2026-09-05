@@ -23,7 +23,13 @@
     "",
     "Games on Steam under their own name need no entry - the store search already finds them.",
     "Anything unresolved falls back to the icon of an installed copy, then the running game's",
-    "own executable, and finally a letter badge - so a missing entry is never fatal."
+    "own executable, and finally a letter badge - so a missing entry is never fatal.",
+    "",
+    "3. portraits - name -> image URL, a SEPARATE map for the tall 600x900 box art shown on",
+    "   the Custom Game Settings cards and the Auto-Clipping game rows (GamePortraitService).",
+    "   Only needed for a game that has no Steam app at all, since a Steam title's portrait",
+    "   comes straight off its appid. Unlike 'icons' this wants 2:3 art - it is centre-cropped",
+    "   into a tall tile, so square or wide art loses most of the frame."
   ],
   "steamAppIds": {
     "Rocket League": 252950,
@@ -52,5 +58,8 @@
     "RobloxPlayerBeta": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/roblox-2025.png",
     "RobloxPlayerLauncher": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/roblox-2025.png",
     "Minecraft": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/minecraft.png"
+  },
+  "portraits": {
+    "League of Legends": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-portraits/league-of-legends.jpg"
   }
 }

@@ -11,7 +11,7 @@ public enum AutoClipSetupCapability { None, LocalGameStateIntegration, BuiltInDe
 public sealed record AutoClipGameDefinition(
     string Id, string Name, IReadOnlyList<AutoClipEventDefinition> Events,
     IReadOnlyList<AutoClipGroupDefinition> Groups, bool IsAvailable = true,
-    bool RequiresSetup = false, int DefaultPort = 0, string CoverAssetPath = "",
+    bool RequiresSetup = false, int DefaultPort = 0,
     string ProviderId = "local", IReadOnlyList<string>? DetectionAliases = null,
     AutoClipSetupCapability SetupCapability = AutoClipSetupCapability.None,
     string? PackId = null, bool DefaultEnabled = true,
@@ -36,8 +36,9 @@ public static class AutoClipCatalog
             Event("ace", "Ace", "kills", 50, true), Event("headshot", "Headshot", priority: 15),
             Event("death", "Death"), Event("assist", "Assist")
         }, new[] { new AutoClipGroupDefinition("kills", "All Kills") }, DefaultPort: 3499,
-            CoverAssetPath: "avares://ClypDat/Assets/cs2-cover.jpg", ProviderId: "valve-gsi",
-            DetectionAliases: new[] { "cs2", "Counter-Strike 2" }, SetupCapability: AutoClipSetupCapability.LocalGameStateIntegration),
+            ProviderId: "valve-gsi",
+            DetectionAliases: new[] { "cs2", "Counter-Strike 2" }, SetupCapability: AutoClipSetupCapability.LocalGameStateIntegration,
+            PortraitDetectionKey: "steam-730", PortraitDisplayName: "Counter-Strike 2"),
         new AutoClipGameDefinition("dota2", "Dota 2", new[]
         {
             Event("kill", "Kill", "kills", 10), Event("double", "Double Kill", "kills", 20),
@@ -46,22 +47,9 @@ public static class AutoClipCatalog
             Event("assist", "Assist"), Event("aegis-picked", "Aegis Picked Up", priority: 35),
             Event("aegis-snatched", "Aegis Snatched", priority: 45, enabled: true)
         }, new[] { new AutoClipGroupDefinition("kills", "All Kills") }, RequiresSetup: true, DefaultPort: 3500,
-            CoverAssetPath: "avares://ClypDat/Assets/dota2-cover.jpg", ProviderId: "valve-gsi",
-            DetectionAliases: new[] { "dota2", "Dota 2" }, SetupCapability: AutoClipSetupCapability.LocalGameStateIntegration),
-        new AutoClipGameDefinition("league", "League of Legends", new[]
-        {
-            Event("kill", "Enemy Slain", "kills", 10), Event("double", "Double Kill", "kills", 20),
-            Event("triple", "Triple Kill", "kills", 30, true), Event("quadra", "Quadra Kill", "kills", 40, true),
-            Event("penta", "Pentakill", "kills", 50, true), Event("ace", "Ace", "kills", 45),
-            Event("baron-steal", "Baron Steal", "monsters", 45, true), Event("baron-kill", "Baron Kill", "monsters", 35),
-            Event("dragon-steal", "Dragon Steal", "monsters", 45, true), Event("dragon-kill", "Dragon Kill", "monsters", 35),
-            Event("herald-steal", "Herald Steal", "monsters", 45), Event("herald-kill", "Herald Kill", "monsters", 35),
-            Event("voidgrub-steal", "Voidgrub Steal", "monsters", 45), Event("voidgrub-kill", "Voidgrub Kill", "monsters", 35),
-            Event("turret", "Turret Destroyed", "objectives", 25), Event("inhibitor", "Inhibitor Destroyed", "objectives", 30),
-            Event("death", "Player Slain"), Event("assist", "Assist")
-        }, new[] { new AutoClipGroupDefinition("kills", "All Kills"), new AutoClipGroupDefinition("monsters", "All Epic Monsters"), new AutoClipGroupDefinition("objectives", "All Objectives") },
-            CoverAssetPath: "avares://ClypDat/Assets/league-cover.jpg", ProviderId: "league-live-client",
-            DetectionAliases: new[] { "league", "League of Legends", "LeagueClient" }),
+            ProviderId: "valve-gsi",
+            DetectionAliases: new[] { "dota2", "Dota 2" }, SetupCapability: AutoClipSetupCapability.LocalGameStateIntegration,
+            PortraitDetectionKey: "steam-570", PortraitDisplayName: "Dota 2"),
         new AutoClipGameDefinition("fortnite", "Fortnite", new[]
         {
             Event("eliminated-player", "Eliminated Player", "eliminations", 10, lead: 8, tail: 6),
@@ -94,7 +82,34 @@ public static class AutoClipCatalog
         }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "helldivers2", "Helldivers 2", "HELLDIVERS™ 2" },
             SetupCapability: AutoClipSetupCapability.BuiltInDetector, PackId: "helldivers2-prototype", DefaultEnabled: false,
-            PortraitDetectionKey: "steam-553850", PortraitDisplayName: "HELLDIVERS™ 2")
+            PortraitDetectionKey: "steam-553850", PortraitDisplayName: "HELLDIVERS™ 2"),
+        new AutoClipGameDefinition("league", "League of Legends", new[]
+        {
+            Event("kill", "Enemy Slain", "kills", 10), Event("double", "Double Kill", "kills", 20),
+            Event("triple", "Triple Kill", "kills", 30, true), Event("quadra", "Quadra Kill", "kills", 40, true),
+            Event("penta", "Pentakill", "kills", 50, true), Event("ace", "Ace", "kills", 45),
+            Event("baron-steal", "Baron Steal", "monsters", 45, true), Event("baron-kill", "Baron Kill", "monsters", 35),
+            Event("dragon-steal", "Dragon Steal", "monsters", 45, true), Event("dragon-kill", "Dragon Kill", "monsters", 35),
+            Event("herald-steal", "Herald Steal", "monsters", 45), Event("herald-kill", "Herald Kill", "monsters", 35),
+            Event("voidgrub-steal", "Voidgrub Steal", "monsters", 45), Event("voidgrub-kill", "Voidgrub Kill", "monsters", 35),
+            Event("turret", "Turret Destroyed", "objectives", 25), Event("inhibitor", "Inhibitor Destroyed", "objectives", 30),
+            Event("death", "Player Slain"), Event("assist", "Assist")
+        }, new[] { new AutoClipGroupDefinition("kills", "All Kills"), new AutoClipGroupDefinition("monsters", "All Epic Monsters"), new AutoClipGroupDefinition("objectives", "All Objectives") },
+            ProviderId: "league-live-client",
+            DetectionAliases: new[] { "league", "League of Legends", "LeagueClient" },
+            // League is not on Steam, so the portrait comes from the curated
+            // "portraits" map in game-icons.json rather than the store search.
+            PortraitDetectionKey: "riot-league of legends", PortraitDisplayName: "League of Legends"),
+        new AutoClipGameDefinition("overwatch", "Overwatch®", new[]
+        {
+            Event("elimination", "Elimination", "eliminations", 10, lead: 8, tail: 6),
+            Event("multikill", "Multikill", "eliminations", 40, true, 8, 6),
+            Event("team-kill", "Team Kill", "eliminations", 60, true, 10, 8),
+            Event("play-of-the-game", "Play of the Game", priority: 100, enabled: true, lead: 15, tail: 10)
+        }, new[] { new AutoClipGroupDefinition("eliminations", "Eliminations") }, ProviderId: "clypdat-cv",
+            DetectionAliases: new[] { "overwatch", "Overwatch®", "Overwatch" },
+            SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "overwatch", DefaultEnabled: false,
+            PortraitDetectionKey: "steam-2357570", PortraitDisplayName: "Overwatch®")
     };
 
     public static readonly IReadOnlyList<string> ComingSoon = new[]
