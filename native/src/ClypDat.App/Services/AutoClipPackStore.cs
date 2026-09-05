@@ -171,6 +171,7 @@ internal sealed class AutoClipPackStore
     {
         "helldivers2" => new("clypdat.helldivers2", gameId, "0.1.0", "builtin", null),
         "overwatch" => new("clypdat.overwatch", gameId, "0.1.0", "builtin", null),
+        "fortnite" => new("clypdat.fortnite", gameId, "0.1.0", "builtin", null),
         _ => throw new InvalidOperationException($"No detector pack is installed for '{gameId}'.")
     };
 

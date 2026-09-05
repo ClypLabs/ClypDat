@@ -57,10 +57,11 @@ public static class AutoClipCatalog
             Event("distance-shot", "Distance Shot", priority: 20, enabled: true, lead: 8, tail: 6),
             Event("double-elimination", "Double Elimination", "eliminations", 40, true, 6, 8),
             Event("multi-elimination", "Multi-Elimination", "eliminations", 50, true, 6, 8),
+            Event("enemy-team-wiped", "Enemy Team Wiped", "eliminations", 60, true, 8, 8),
             Event("victory-royale", "Victory Royale", priority: 100, enabled: true, lead: 15, tail: 10)
         }, new[] { new AutoClipGroupDefinition("eliminations", "Eliminations") }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "fortnite", "FortniteClient-Win64-Shipping" },
-            SetupCapability: AutoClipSetupCapability.DownloadableDetectorPack, PackId: "fortnite", DefaultEnabled: false,
+            SetupCapability: AutoClipSetupCapability.BuiltInDetector, PackId: "fortnite-prototype", DefaultEnabled: false,
             PortraitDetectionKey: "epic-fortnite", PortraitDisplayName: "Fortnite"),
         new AutoClipGameDefinition("helldivers2", "HELLDIVERS™ 2", new[]
         {

@@ -13,7 +13,10 @@ public sealed class AutoClipCatalogTests
         var fortnite = AutoClipCatalog.Get("fortnite");
         var helldivers = AutoClipCatalog.Get("helldivers2");
 
-        Assert.True(fortnite.UsesDetectorPack);
+        // Both ship their detector inside the app now; neither waits on a
+        // downloadable pack.
+        Assert.False(fortnite.UsesDetectorPack);
+        Assert.True(fortnite.UsesDetector);
         Assert.False(helldivers.UsesDetectorPack);
         Assert.True(helldivers.UsesDetector);
         Assert.False(fortnite.DefaultEnabled);
@@ -32,9 +35,10 @@ public sealed class AutoClipCatalogTests
         var fortnite = AutoClipCatalog.Get("fortnite");
         var defaults = fortnite.Events.Where(item => item.DefaultEnabled).Select(item => item.Id).ToHashSet();
 
-        Assert.Equal(new HashSet<string> { "distance-shot", "double-elimination", "multi-elimination", "victory-royale" }, defaults);
+        Assert.Equal(new HashSet<string> { "distance-shot", "double-elimination", "multi-elimination", "enemy-team-wiped", "victory-royale" }, defaults);
         Assert.True(fortnite.Events.Single(item => item.Id == "multi-elimination").Priority > fortnite.Events.Single(item => item.Id == "double-elimination").Priority);
-        Assert.True(fortnite.Events.Single(item => item.Id == "victory-royale").Priority > fortnite.Events.Single(item => item.Id == "multi-elimination").Priority);
+        Assert.True(fortnite.Events.Single(item => item.Id == "enemy-team-wiped").Priority > fortnite.Events.Single(item => item.Id == "multi-elimination").Priority);
+        Assert.True(fortnite.Events.Single(item => item.Id == "victory-royale").Priority > fortnite.Events.Single(item => item.Id == "enemy-team-wiped").Priority);
         // Trimmed to events that are a discrete, clippable on-screen moment.
         // "Top 3" was a threshold on the players-remaining counter - a state,
         // not a moment - so it clipped whatever happened to be on screen when

@@ -314,6 +314,7 @@ internal static class DetectorHostRuntime
         {
             "helldivers2" => new LiveHelldivers2Detector(),
             "overwatch" => new LiveOverwatchDetector(),
+            "fortnite" => new LiveFortniteDetector(),
             _ => null
         };
 

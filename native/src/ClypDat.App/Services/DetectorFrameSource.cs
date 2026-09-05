@@ -42,10 +42,29 @@ public static class DetectorRegions
         new NormalizedRegion(0.43, 0.685, 0.28, 0.115),
         new NormalizedRegion(0.42, 0.20, 0.18, 0.055));
 
+    // Fortnite, measured from real clips (see AutoClipResearch/
+    // fortnite-2026-09-06):
+    //
+    //  First  - kill feed, centre-left. Full sentences rather than labels, so
+    //           this one crop carries eliminations, who did them, and the
+    //           "(64 m)" suffix Fortnite only prints on long-range kills.
+    //  Second - the centred elimination banner: "ELIMINATION!", "DOUBLE ELIM!",
+    //           "TRIPLE ELIM!", and "ENEMY TEAM WIPED!" stacked above it, so it
+    //           needs room for three lines.
+    //  Third  - upper centre, shared by "VICTORY ROYALE" and "ELIMINATED BY".
+    //           They cannot co-occur - one is winning, the other is dying - and
+    //           both live in the same third of the screen. It starts at the very
+    //           top edge because the "ELIMINATED BY" label sits at y 15-42.
+    private static readonly DetectorRegionSet Fortnite = new(
+        new NormalizedRegion(0.01, 0.49, 0.33, 0.12),
+        new NormalizedRegion(0.42, 0.66, 0.19, 0.16),
+        new NormalizedRegion(0.31, 0.005, 0.36, 0.26));
+
     public static DetectorRegionSet? ForGame(string? gameId) => gameId?.ToLowerInvariant() switch
     {
         "helldivers2" => Helldivers2,
         "overwatch" => Overwatch,
+        "fortnite" => Fortnite,
         _ => null
     };
 }
