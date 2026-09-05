@@ -142,7 +142,9 @@ public sealed partial class MainWindow : Window
     // Keep the target that started the current buffer so detector ticks only
     // restart when that identity really changes.
     private string _activeReplayTargetIdentity = string.Empty;
-    private string _helldiversPolicyIdentity = string.Empty;
+    // Per game: only one detector runs at a time, but the identity has to be
+    // keyed by game or switching titles would look like "no change".
+    private readonly Dictionary<string, string> _detectorPolicyIdentity = new(StringComparer.OrdinalIgnoreCase);
     private readonly EncoderTuningService _encoderTuning = new();
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
@@ -5503,7 +5505,9 @@ public sealed partial class MainWindow : Window
         foreach (var definition in AutoClipCatalog.Active.Where(item => item.UsesDetector))
         {
             if (ViewModel.FindAutoClipGame(definition.Id) is not { } game) continue;
-            if (!string.Equals(definition.Id, "helldivers2", StringComparison.OrdinalIgnoreCase))
+            // A built-in detector is one the app already carries; a downloadable
+            // pack has nothing behind it until the assets ship.
+            if (definition.UsesDetectorPack)
             {
                 game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled
                     ? "Not Installed"
@@ -5511,31 +5515,31 @@ public sealed partial class MainWindow : Window
                 continue;
             }
 
-            var active = IsActiveAutoClipGame("helldivers2");
+            var active = IsActiveAutoClipGame(definition.Id);
             var enabled = ViewModel.AutoClippingEnabled && game.IsEnabled && active && _replayBuffer?.IsRecording == true;
             game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled ? "Disabled" : active
                 ? enabled ? "Watching" : "Calibrating — replay starting"
                 : "Waiting for Game";
-            _ = UpdateHelldiversDetectorPolicyAsync(enabled);
+            _ = UpdateDetectorPolicyAsync(definition.Id, enabled);
         }
     }
 
-    private async Task UpdateHelldiversDetectorPolicyAsync(bool enabled)
+    private async Task UpdateDetectorPolicyAsync(string gameId, bool enabled)
     {
         if (ViewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
-        var settings = GetAutoClipSettingsSnapshot("helldivers2");
+        var settings = GetAutoClipSettingsSnapshot(gameId);
         var events = settings.Events.Where(item => item.Value).Select(item => item.Key).OrderBy(item => item, StringComparer.Ordinal).ToArray();
         var identity = $"{enabled}:{string.Join(',', events)}";
-        if (string.Equals(identity, _helldiversPolicyIdentity, StringComparison.Ordinal)) return;
+        if (_detectorPolicyIdentity.TryGetValue(gameId, out var previous) && string.Equals(identity, previous, StringComparison.Ordinal)) return;
         try
         {
-            await worker.UpdateAutoClipPolicyAsync(enabled ? "helldivers2" : null, enabled, events);
-            _helldiversPolicyIdentity = identity;
+            await worker.UpdateAutoClipPolicyAsync(enabled ? gameId : null, enabled, events);
+            _detectorPolicyIdentity[gameId] = identity;
         }
         catch (Exception error)
         {
-            AppLog.Error("Helldivers detector policy update failed", error);
-            if (ViewModel.FindAutoClipGame("helldivers2") is { } game)
+            AppLog.Error($"Auto-clip detector policy update failed for '{gameId}'", error);
+            if (ViewModel.FindAutoClipGame(gameId) is { } game)
                 game.StatusText = "Failed — detector could not start";
         }
     }

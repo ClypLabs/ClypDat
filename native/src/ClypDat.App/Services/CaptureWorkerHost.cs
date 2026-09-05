@@ -30,6 +30,7 @@ internal static class CaptureWorkerHost
     private static AutoClipPackSelection? _detectorPack;
     private static IDetectorFrameSource? _detectorFrameSource;
     private static bool _autoClipDetectionEnabled;
+    private static string? _autoClipGameId;
 
     public static int Run()
     {
@@ -260,13 +261,16 @@ internal static class CaptureWorkerHost
         try
         {
             var gameId = payload.TryGetProperty("gameId", out var game) ? game.GetString() : null;
-            var enabled = payload.TryGetProperty("enabled", out var value) && value.GetBoolean()
-                          && string.Equals(gameId, "helldivers2", StringComparison.OrdinalIgnoreCase);
+            // Any catalog game that ships HUD regions and a detector can run
+            // here; the pair is what makes a game supported, not a hardcoded id.
+            var regions = DetectorRegions.ForGame(gameId);
+            var enabled = payload.TryGetProperty("enabled", out var value) && value.GetBoolean() && regions is not null;
             var eventIds = payload.TryGetProperty("enabledEventIds", out var events) && events.ValueKind == JsonValueKind.Array
                 ? events.EnumerateArray().Select(item => item.GetString()).Where(item => !string.IsNullOrWhiteSpace(item)).Cast<string>().ToArray()
                 : Array.Empty<string>();
 
             _autoClipDetectionEnabled = enabled;
+            _autoClipGameId = enabled ? gameId : null;
             if (!enabled)
             {
                 if (_buffer is not null) AttachDetectorFrameSource(_buffer);
@@ -279,24 +283,24 @@ internal static class CaptureWorkerHost
                 return new CaptureWorkerAck(true);
             }
 
-            _detectorPack ??= AutoClipPacks.Resolve("helldivers2");
+            _detectorPack ??= AutoClipPacks.Resolve(gameId!);
             _detectorHost ??= CreateDetectorHost();
             await _detectorHost.StartAsync(
                 new DetectorHostPolicy(
-                    "helldivers2",
+                    gameId!,
                     eventIds,
                     _detectorPack.PackId,
                     _detectorPack.Version,
                     _detectorPack.Hash),
                 cancellationToken);
             if (_buffer is not null) AttachDetectorFrameSource(_buffer);
-            CaptureWorkerLog.Info($"Helldivers detector policy: enabled={enabled}, events={string.Join(',', eventIds)}.");
+            CaptureWorkerLog.Info($"Auto-clip detector policy: game={gameId}, enabled={enabled}, events={string.Join(',', eventIds)}.");
             return new CaptureWorkerAck(true);
         }
         catch (Exception error)
         {
             _autoClipDetectionEnabled = false;
-            CaptureWorkerLog.Error("Helldivers detector could not start.", error);
+            CaptureWorkerLog.Error("Auto-clip detector could not start.", error);
             return new CaptureWorkerAck(false, error.Message);
         }
     }
@@ -308,7 +312,7 @@ internal static class CaptureWorkerHost
         host.StatusChanged += (_, status) =>
         {
             CaptureWorkerLog.Info($"Detector host status: {status}.");
-            _ = SendEventAsync("auto-clip-status", new { gameId = "helldivers2", status });
+            _ = SendEventAsync("auto-clip-status", new { gameId = _autoClipGameId ?? string.Empty, status });
         };
         host.Quarantined += (_, reason) =>
         {
@@ -317,7 +321,7 @@ internal static class CaptureWorkerHost
             if (_detectorPack is not null) AutoClipPacks.Quarantine(_detectorPack);
             _detectorPack = null;
             CaptureWorkerLog.Error($"Detector host quarantined: {reason}");
-            _ = SendEventAsync("auto-clip-status", new { gameId = "helldivers2", status = $"Failed — {reason}" });
+            _ = SendEventAsync("auto-clip-status", new { gameId = _autoClipGameId ?? string.Empty, status = $"Failed — {reason}" });
         };
         return host;
     }
@@ -325,9 +329,19 @@ internal static class CaptureWorkerHost
     private static void AttachDetectorFrameSource(IReplayBuffer buffer)
     {
         var desired = _autoClipDetectionEnabled ? buffer as IDetectorFrameSource : null;
-        if (ReferenceEquals(_detectorFrameSource, desired)) return;
+        // Set before subscribing and cleared after unsubscribing, so the capture
+        // thread never crops for a game that is no longer being watched.
+        desired?.SetDetectorRegions(DetectorRegions.ForGame(_autoClipGameId));
+        if (ReferenceEquals(_detectorFrameSource, desired))
+        {
+            if (desired is null) (buffer as IDetectorFrameSource)?.SetDetectorRegions(null);
+            return;
+        }
         if (_detectorFrameSource is not null)
+        {
             _detectorFrameSource.DetectorFrameAvailable -= DetectorFrameAvailable;
+            _detectorFrameSource.SetDetectorRegions(null);
+        }
         _detectorFrameSource = desired;
         if (_detectorFrameSource is not null)
             _detectorFrameSource.DetectorFrameAvailable += DetectorFrameAvailable;

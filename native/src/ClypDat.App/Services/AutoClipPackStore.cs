@@ -164,9 +164,13 @@ internal sealed class AutoClipPackStore
             throw new InvalidDataException($"{label} SHA-256 does not match.");
     }
 
+    // Built-in detectors ship inside the app rather than as a downloadable
+    // pack: the "pack" is just an identity for the host policy and the version
+    // the status line reports.
     private static AutoClipPackSelection BuiltIn(string gameId) => gameId switch
     {
         "helldivers2" => new("clypdat.helldivers2", gameId, "0.1.0", "builtin", null),
+        "overwatch" => new("clypdat.overwatch", gameId, "0.1.0", "builtin", null),
         _ => throw new InvalidOperationException($"No detector pack is installed for '{gameId}'.")
     };
 

@@ -21,9 +21,9 @@ public sealed class DetectorHostTests
         var result = DetectorFrameCodec.Read(view, 2);
 
         Assert.Equal(timestamp, result.CapturedUtc);
-        Assert.Equal(frame.CenterBanner.Pixels, result.CenterBanner.Pixels);
-        Assert.Equal(frame.MissionPanel.Pixels, result.MissionPanel.Pixels);
-        Assert.Equal(frame.KillCounter.Pixels, result.KillCounter.Pixels);
+        Assert.Equal(frame.First.Pixels, result.First.Pixels);
+        Assert.Equal(frame.Second.Pixels, result.Second.Pixels);
+        Assert.Equal(frame.Third.Pixels, result.Third.Pixels);
     }
 
     [Fact]

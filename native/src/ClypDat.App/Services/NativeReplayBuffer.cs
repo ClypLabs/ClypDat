@@ -120,6 +120,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private CancellationTokenSource? _captureCts;
     private Task? _captureTask;
     private Task? _backgroundFinalize;
+    // Read from the capture thread on every sampled frame, written from the
+    // worker's policy handler.
+    private DetectorRegionSet? _detectorRegions;
+    public void SetDetectorRegions(DetectorRegionSet? regions) => Volatile.Write(ref _detectorRegions, regions);
     public event EventHandler<IReadOnlyList<FullSessionFinalizeProgress>>? FullSessionFinalizeChanged;
     // Keyed by the visible library path, which is also the library card's key.
     // A dictionary rather than a single "current" because the full-session
@@ -3542,11 +3546,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 // Initial detector pack is deliberately fail-closed outside
                 // standard 16:9 SDR layouts.
                 if (!IsSupportedDetectorAspectRatio(outputWidth, outputHeight)) return;
+                // Null until a game with a detector is switched on, so an
+                // ordinary capture never pays for these crops.
+                if (Volatile.Read(ref _detectorRegions) is not { } regions) return;
                 DetectorFrameAvailable?.Invoke(this, new DetectorFrameSnapshot(
                     MonotonicClock.UtcNow,
-                    CropGray(luminance, rowPitch, new NormalizedRegion(0.34, 0.445, 0.32, 0.065)),
-                    CropGray(luminance, rowPitch, new NormalizedRegion(0.42, 0.335, 0.16, 0.055)),
-                    CropGray(luminance, rowPitch, new NormalizedRegion(0.45, 0.72, 0.12, 0.12))));
+                    CropGray(luminance, rowPitch, regions.First),
+                    CropGray(luminance, rowPitch, regions.Second),
+                    CropGray(luminance, rowPitch, regions.Third)));
             }
 
             unsafe GrayDetectorImage CropGray(byte* luminance, int rowPitch, NormalizedRegion region)

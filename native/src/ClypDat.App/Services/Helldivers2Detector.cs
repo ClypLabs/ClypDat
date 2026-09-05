@@ -87,38 +87,4 @@ public sealed partial class Helldivers2Detector
     [GeneratedRegex(@"(?:X\s*(?<count>\d{1,3})|(?<count>\d{1,3})\s*KILLS?)", RegexOptions.CultureInvariant)]
     private static partial Regex KillCounterRegex();
 
-    private sealed class PhraseLatch(string phrase, int confirmationFrames, int resetFrames)
-    {
-        private int _presentFrames;
-        private int _absentFrames;
-        private bool _latched;
-
-        public bool Observe(string? text)
-        {
-            var present = text?.Contains(phrase, StringComparison.OrdinalIgnoreCase) == true;
-            if (present)
-            {
-                _absentFrames = 0;
-                _presentFrames++;
-                if (!_latched && _presentFrames >= confirmationFrames)
-                {
-                    _latched = true;
-                    return true;
-                }
-            }
-            else
-            {
-                _presentFrames = 0;
-                if (_latched && ++_absentFrames >= resetFrames) Reset();
-            }
-            return false;
-        }
-
-        public void Reset()
-        {
-            _presentFrames = 0;
-            _absentFrames = 0;
-            _latched = false;
-        }
-    }
 }

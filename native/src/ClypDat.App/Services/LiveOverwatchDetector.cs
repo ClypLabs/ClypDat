@@ -3,7 +3,18 @@ using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
 
-internal sealed class LiveHelldivers2Detector : ILiveGameDetector
+/// <summary>
+/// What the sandboxed detector host drives, whichever game is being watched.
+/// </summary>
+internal interface ILiveGameDetector : IAsyncDisposable
+{
+    event EventHandler<AutoClipDetectorEvent>? Detected;
+    event EventHandler<string>? StatusChanged;
+    void ApplyPolicy(bool enabled, IEnumerable<string> enabledEventIds);
+    void Offer(DetectorFrameSnapshot frame);
+}
+
+internal sealed class LiveOverwatchDetector : ILiveGameDetector
 {
     private readonly Channel<DetectorFrameSnapshot> _frames = Channel.CreateBounded<DetectorFrameSnapshot>(
         new BoundedChannelOptions(1)
@@ -13,13 +24,13 @@ internal sealed class LiveHelldivers2Detector : ILiveGameDetector
             FullMode = BoundedChannelFullMode.DropOldest
         });
     private readonly WindowsOcrFrameReader _ocr = new();
-    private readonly Helldivers2Detector _detector = new();
+    private readonly OverwatchDetector _detector = new();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Task _worker;
     private HashSet<string> _enabledEvents = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _enabled;
 
-    public LiveHelldivers2Detector() => _worker = Task.Run(ProcessAsync);
+    public LiveOverwatchDetector() => _worker = Task.Run(ProcessAsync);
 
     public event EventHandler<AutoClipDetectorEvent>? Detected;
     public event EventHandler<string>? StatusChanged;
@@ -49,28 +60,31 @@ internal sealed class LiveHelldivers2Detector : ILiveGameDetector
             {
                 try
                 {
-                    var center = await _ocr.ReadTextAsync(frame.First).ConfigureAwait(false);
-                    var mission = await _ocr.ReadTextAsync(frame.Second).ConfigureAwait(false);
-                    var counter = await _ocr.ReadTextAsync(frame.Third).ConfigureAwait(false);
+                    var leftColumn = await _ocr.ReadTextAsync(frame.First).ConfigureAwait(false);
+                    var killFeed = await _ocr.ReadTextAsync(frame.Second).ConfigureAwait(false);
+                    var teamKill = await _ocr.ReadTextAsync(frame.Third).ConfigureAwait(false);
                     var timestamp = TimeSpan.FromTicks(frame.CapturedUtc.Ticks);
-                    foreach (var item in _detector.Observe(new Helldivers2FrameObservation(
-                                 timestamp, center, mission, counter)))
+                    foreach (var item in _detector.Observe(new OverwatchFrameObservation(
+                                 timestamp, leftColumn, killFeed, teamKill)))
                     {
                         if (!_enabled || !_enabledEvents.Contains(item.EventId)) continue;
+                        // Play of the Game needs a long lead: the banner only
+                        // appears once the replay is already running.
                         var (lead, tail) = item.EventId switch
                         {
-                            "eliminated" => (12, 6),
-                            "successful-mission" => (15, 10),
-                            _ => (10, 6)
+                            "play-of-the-game" => (15, 10),
+                            "team-kill" => (10, 8),
+                            "elimination" => (8, 6),
+                            _ => (8, 6)
                         };
                         Detected?.Invoke(this, new AutoClipDetectorEvent(
-                            "helldivers2", item.EventId, item.Label, item.OccurrenceId,
+                            "overwatch", item.EventId, item.Label, item.OccurrenceId,
                             item.Confidence, frame.CapturedUtc, lead, tail));
                     }
                 }
                 catch (Exception error)
                 {
-                    CaptureWorkerLog.Error("Helldivers detector frame failed.", error);
+                    CaptureWorkerLog.Error("Overwatch detector frame failed.", error);
                     StatusChanged?.Invoke(this, "Degraded — OCR frame failed");
                 }
             }

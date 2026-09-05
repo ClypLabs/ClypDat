@@ -52,13 +52,17 @@ internal static class DetectorHostWire
 
 internal static class DetectorFrameCodec
 {
-    internal const int SlotBytes = 256 * 1024;
+    // Overwatch's left column is a tall strip (~500x864 = 431 KB on its own)
+    // because the Play of the Game banner moves vertically, so the HELLDIVERS-era
+    // 256 KB budget no longer covers a frame. Three slots of this size is 3 MB
+    // of shared memory, which is nothing next to the 512 MB the host is capped at.
+    internal const int SlotBytes = 1024 * 1024;
 
     public static void Write(MemoryMappedViewAccessor view, int slot, DetectorFrameSnapshot frame)
     {
         var offset = (long)slot * SlotBytes;
         view.Write(offset, frame.CapturedUtc.Ticks); offset += 8;
-        foreach (var image in new[] { frame.CenterBanner, frame.MissionPanel, frame.KillCounter })
+        foreach (var image in new[] { frame.First, frame.Second, frame.Third })
         {
             view.Write(offset, image.Width); offset += 4;
             view.Write(offset, image.Height); offset += 4;
@@ -274,25 +278,44 @@ internal static class DetectorHostRuntime
         await pipe.ConnectAsync(5000).ConfigureAwait(false);
         using var map = MemoryMappedFile.OpenExisting(mapName, MemoryMappedFileRights.Read);
         using var view = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-        await using var detector = new LiveHelldivers2Detector();
+        // Which detector runs is the policy's call - the host is a sandbox,
+        // not a HELLDIVERS-specific process.
+        ILiveGameDetector? detector = null;
         var writeGate = new SemaphoreSlim(1, 1);
-        detector.Detected += (_, detected) => _ = Send("detected", detected);
-        detector.StatusChanged += (_, status) => _ = Send("status", status);
         while (await DetectorHostWire.ReadAsync(pipe, CancellationToken.None).ConfigureAwait(false) is { } message)
         {
             switch (message.Type)
             {
                 case "policy":
                     var policy = message.Payload.Deserialize<DetectorHostPolicy>() ?? throw new InvalidDataException("Detector policy is invalid.");
+                    if (detector is not null) await detector.DisposeAsync().ConfigureAwait(false);
+                    detector = CreateDetector(policy.GameId);
+                    if (detector is null)
+                    {
+                        await Send("status", $"Failed - no detector for '{policy.GameId}'").ConfigureAwait(false);
+                        return 1;
+                    }
+                    detector.Detected += (_, detected) => _ = Send("detected", detected);
+                    detector.StatusChanged += (_, status) => _ = Send("status", status);
                     detector.ApplyPolicy(true, policy.EnabledEventIds);
                     break;
                 case "frame":
-                    detector.Offer(DetectorFrameCodec.Read(view, message.Payload.GetProperty("slot").GetInt32()));
+                    detector?.Offer(DetectorFrameCodec.Read(view, message.Payload.GetProperty("slot").GetInt32()));
                     break;
-                case "shutdown": return 0;
+                case "shutdown":
+                    if (detector is not null) await detector.DisposeAsync().ConfigureAwait(false);
+                    return 0;
             }
         }
+        if (detector is not null) await detector.DisposeAsync().ConfigureAwait(false);
         return 0;
+
+        static ILiveGameDetector? CreateDetector(string gameId) => gameId?.ToLowerInvariant() switch
+        {
+            "helldivers2" => new LiveHelldivers2Detector(),
+            "overwatch" => new LiveOverwatchDetector(),
+            _ => null
+        };
 
         async Task Send(string type, object payload)
         {

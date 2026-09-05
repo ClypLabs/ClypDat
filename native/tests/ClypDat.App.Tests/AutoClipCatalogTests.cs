@@ -60,13 +60,15 @@ public sealed class AutoClipCatalogTests
     }
 
     [Fact]
-    public void OverwatchShipsAsADetectorPackGameThatIsNotInstalledYet()
+    public void OverwatchShipsWithABuiltInDetector()
     {
         var overwatch = AutoClipCatalog.Get("overwatch");
 
-        Assert.True(overwatch.UsesDetectorPack);
+        // Built in, not a downloadable pack: the detector ships inside the app.
+        Assert.True(overwatch.UsesDetector);
+        Assert.False(overwatch.UsesDetectorPack);
         Assert.False(overwatch.DefaultEnabled);
-        Assert.Equal("overwatch", overwatch.PackId);
+        Assert.Equal("overwatch-prototype", overwatch.PackId);
         Assert.Equal("clypdat-cv", overwatch.ProviderId);
         Assert.Equal("steam-2357570", overwatch.PortraitDetectionKey);
         Assert.Equal("Overwatch®", overwatch.PortraitDisplayName);
