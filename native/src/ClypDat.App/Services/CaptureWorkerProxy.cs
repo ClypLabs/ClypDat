@@ -144,7 +144,19 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             {
                 var completed = ToCompletion(save, isRecovered: true);
                 Dispatcher.UIThread.Post(() => SaveCompleted?.Invoke(this, completed));
-                await SendAsync<CaptureWorkerAck>("ack-save", new CaptureWorkerSaveAcknowledgement(completed.SaveId, completed.Path), cancellationToken);
+                // The worker empties the backlog as it hands it over, so this
+                // is confirmation for older workers rather than the thing that
+                // clears it. It must never abort the attach: this runs while a
+                // redundant worker is exiting and taking the pipe down with it,
+                // which is exactly when the ack fails.
+                try
+                {
+                    await SendAsync<CaptureWorkerAck>("ack-save", new CaptureWorkerSaveAcknowledgement(completed.SaveId, completed.Path), cancellationToken);
+                }
+                catch (Exception error)
+                {
+                    AppLog.Info($"Capture worker ack-save after attach failed: {error.Message}");
+                }
             }
         }
         finally { _connectionGate.Release(); }

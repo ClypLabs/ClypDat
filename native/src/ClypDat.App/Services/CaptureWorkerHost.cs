@@ -10,6 +10,11 @@ internal static class CaptureWorkerHost
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly SemaphoreSlim WriteGate = new(1, 1);
     private static readonly List<CaptureWorkerSaveResult> UnacknowledgedSaves = new();
+
+    // The worker outlives the app, so this list is bounded rather than
+    // session-long: a client that has been away for 32 saves is recovering
+    // from the library folder anyway.
+    internal const int MaximumUnacknowledgedSaves = 32;
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
     private static readonly SemaphoreSlim FullSessionToggleGate = new(1, 1);
     private static readonly StorageProtectionService Storage = new();
@@ -187,7 +192,7 @@ internal static class CaptureWorkerHost
             _buffer?.IsRecording == true,
             ConfigIdentity(_config),
             GetHealth(),
-            UnacknowledgedSaves.ToArray());
+            DrainUnacknowledgedSaves(UnacknowledgedSaves));
         await ReplyAsync(client, message, response, cancellationToken);
     }
 
@@ -202,9 +207,45 @@ internal static class CaptureWorkerHost
     }
 
     internal static int RemoveAcknowledgedSaves(List<CaptureWorkerSaveResult> backlog, Guid saveId, string? path)
-        => backlog.RemoveAll(item =>
-            (saveId != Guid.Empty && item.SaveId == saveId) ||
-            (!string.IsNullOrWhiteSpace(path) && string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase)));
+    {
+        lock (backlog)
+        {
+            return backlog.RemoveAll(item =>
+                (saveId != Guid.Empty && item.SaveId == saveId) ||
+                (!string.IsNullOrWhiteSpace(path) && string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase)));
+        }
+    }
+
+    /// <summary>
+    /// Takes the backlog for an attaching client and empties it in the same
+    /// step. Delivery is the acknowledgement: the explicit ack that used to
+    /// clear this is sent over a connection that is frequently torn down at
+    /// exactly this moment - a restart spawns a redundant worker which exits
+    /// because the pipe is already owned, and the resulting recovery drops
+    /// every ack - which left the same saves replaying on every restart.
+    /// Nothing is lost by clearing early: startup runs a full library
+    /// reconciliation over the clips folder regardless.
+    /// </summary>
+    internal static IReadOnlyList<CaptureWorkerSaveResult> DrainUnacknowledgedSaves(List<CaptureWorkerSaveResult> backlog)
+    {
+        lock (backlog)
+        {
+            if (backlog.Count == 0) return Array.Empty<CaptureWorkerSaveResult>();
+            var drained = backlog.ToArray();
+            backlog.Clear();
+            return drained;
+        }
+    }
+
+    internal static void RememberUnacknowledgedSave(List<CaptureWorkerSaveResult> backlog, CaptureWorkerSaveResult save)
+    {
+        lock (backlog)
+        {
+            backlog.Add(save);
+            if (backlog.Count > MaximumUnacknowledgedSaves)
+                backlog.RemoveRange(0, backlog.Count - MaximumUnacknowledgedSaves);
+        }
+    }
 
     private static async Task<CaptureWorkerAck> ApplyAutoClipPolicyAsync(JsonElement payload, CancellationToken cancellationToken)
     {
@@ -322,7 +363,7 @@ internal static class CaptureWorkerHost
                     CaptureSource: _config.CaptureSource));
             }
             var result = new CaptureWorkerSaveResult(path, request.TitleOverride, DateTime.UtcNow, null, saveId, requestedUtc);
-            UnacknowledgedSaves.Add(result);
+            RememberUnacknowledgedSave(UnacknowledgedSaves, result);
             await SendEventAsync("save-completed", result);
             return result;
         }
