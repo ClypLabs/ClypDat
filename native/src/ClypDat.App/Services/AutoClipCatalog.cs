@@ -55,13 +55,9 @@ public static class AutoClipCatalog
             Event("eliminated-player", "Eliminated Player", "eliminations", 10, lead: 8, tail: 6),
             Event("got-eliminated", "Got Eliminated", priority: 15, lead: 12, tail: 6),
             Event("distance-shot", "Distance Shot", priority: 20, enabled: true, lead: 8, tail: 6),
-            Event("impossible-shot", "Impossible Shot", priority: 30, enabled: true, lead: 8, tail: 6),
             Event("double-elimination", "Double Elimination", "eliminations", 40, true, 6, 8),
             Event("multi-elimination", "Multi-Elimination", "eliminations", 50, true, 6, 8),
             Event("headshot", "Headshot", priority: 25, lead: 8, tail: 6),
-            Event("match-complete", "Match Complete", priority: 10, lead: 15, tail: 10),
-            Event("bounty-complete", "Bounty Complete", priority: 15, lead: 8, tail: 6),
-            Event("quest-complete", "Quest Complete", priority: 15, lead: 8, tail: 6),
             Event("victory-royale", "Victory Royale", priority: 100, enabled: true, lead: 15, tail: 10)
         }, new[] { new AutoClipGroupDefinition("eliminations", "Eliminations") }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "fortnite", "FortniteClient-Win64-Shipping" },
