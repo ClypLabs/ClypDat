@@ -28,9 +28,7 @@ internal static class ClipOverlayCardRenderer
     private const double ChipSpacing = 6, TrailingGap = 2;
     private const double MinWidth = 220, MaxWidth = 380, MinHeight = 58;
     private const double CardRadius = 8;
-    // Near-opaque rather than solid: enough gameplay bleeds through that the
-    // badge sits in the frame instead of punching a hole in it.
-    private const double FillOpacity = 0.96;
+    private const double FillOpacity = 1;
 
     public static unsafe ClipOverlayFrame Render(ClipOverlayPresentation presentation)
     {

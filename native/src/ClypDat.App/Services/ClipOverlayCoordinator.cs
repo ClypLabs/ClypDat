@@ -57,9 +57,11 @@ internal sealed record ClipOverlayPresentation(
     long Generation,
     ClipOverlayEvent Event);
 
+internal readonly record struct ClipOverlayPresentationResult(long Generation, bool Presented);
+
 internal interface IClipOverlaySurface : IDisposable
 {
-    void Publish(ClipOverlayPresentation presentation);
+    void Publish(ClipOverlayPresentation presentation, Action<ClipOverlayPresentationResult> completion);
     void Dismiss(long generation);
 }
 
@@ -98,6 +100,7 @@ internal sealed class ClipOverlayScheduler : IClipOverlayScheduler
 internal sealed class ClipOverlayCoordinator : IDisposable
 {
     private static readonly TimeSpan Dwell = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan PresentationTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaximumEventAge = TimeSpan.FromSeconds(30);
     private const int SoundHistoryLimit = 512;
 
@@ -112,6 +115,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
     private readonly Queue<Guid> _soundOrder = new();
     private ClipOverlayEvent? _visible;
     private IDisposable? _dismissal;
+    private IDisposable? _presentationTimeout;
     private long _generation;
     private bool _disposed;
 
@@ -167,15 +171,50 @@ internal sealed class ClipOverlayCoordinator : IDisposable
             _visible = notification;
             var generation = ++_generation;
             _dismissal?.Dispose();
-            var dwell = notification.Kind == ClipOverlayKind.GameStarted ? TimeSpan.FromSeconds(5) : Dwell;
-            _dismissal = _scheduler.Schedule(dwell, () => Dismiss(generation));
+            _presentationTimeout?.Dispose();
+            _presentationTimeout = _scheduler.Schedule(PresentationTimeout, () => PresentationTimedOut(generation));
             presentation = new ClipOverlayPresentation(generation, notification);
 
         Finished:;
         }
 
         if (playSound) _playSuccessSound();
-        if (presentation is not null) _surface.Publish(presentation);
+        if (presentation is not null) _surface.Publish(presentation, PresentationCompleted);
+    }
+
+    private void PresentationCompleted(ClipOverlayPresentationResult result)
+    {
+        var dismiss = false;
+        lock (_gate)
+        {
+            if (_disposed || result.Generation != _generation) return;
+            _presentationTimeout?.Dispose();
+            _presentationTimeout = null;
+            if (!result.Presented)
+            {
+                _visible = null;
+                dismiss = true;
+            }
+            else if (_visible is { } notification)
+            {
+                _dismissal?.Dispose();
+                var dwell = notification.Kind == ClipOverlayKind.GameStarted ? TimeSpan.FromSeconds(5) : Dwell;
+                _dismissal = _scheduler.Schedule(dwell, () => Dismiss(result.Generation));
+            }
+        }
+        if (dismiss) _surface.Dismiss(result.Generation);
+    }
+
+    private void PresentationTimedOut(long generation)
+    {
+        lock (_gate)
+        {
+            if (_disposed || generation != _generation) return;
+            _visible = null;
+            _presentationTimeout = null;
+        }
+        AppLog.Info($"Clip overlay skipped: generation={generation}, reason=presentation-timeout.");
+        _surface.Dismiss(generation);
     }
 
     private void Dismiss(long generation)
@@ -195,6 +234,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
             if (_disposed) return;
             _disposed = true;
             _dismissal?.Dispose();
+            _presentationTimeout?.Dispose();
         }
         _scheduler.Dispose();
         _surface.Dispose();

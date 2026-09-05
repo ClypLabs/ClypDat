@@ -26,7 +26,7 @@ public sealed class NativeClipOverlaySurfaceTests
         Assert.Equal(0, style & 0x00080000);
         Assert.Equal(foreground, GetForegroundWindow());
 
-        surface.Publish(Presentation(1, true));
+        surface.Publish(Presentation(1, true), _ => { });
         Assert.True(SpinWait.SpinUntil(() => surface.PublishCount == 1, 1000));
         Assert.True(SpinWait.SpinUntil(() => GetWindowRect(handle, out var rect) && rect.Left == 1620 && rect.Top == 32, 1000));
         Assert.True(IsWindowVisible(handle));
@@ -37,7 +37,7 @@ public sealed class NativeClipOverlaySurfaceTests
         Assert.Equal(0u, Cloaked(handle));
         Assert.True(GetWindowDisplayAffinity(handle, out var affinity));
         Assert.Equal(0x11u, affinity);
-        surface.Publish(Presentation(2, false));
+        surface.Publish(Presentation(2, false), _ => { });
         Assert.True(SpinWait.SpinUntil(() => surface.PublishCount == 2, 1000));
         Assert.Equal(handle, surface.WindowHandle);
         Assert.True(GetWindowDisplayAffinity(handle, out affinity));
@@ -60,7 +60,7 @@ public sealed class NativeClipOverlaySurfaceTests
         var target = new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 3840, 2160), new PixelRect(0, 0, 3840, 2080), 1.5, ClipOverlayTargetReason.Primary);
         var final = ClipOverlayLayout.Position(target, ClipOverlayPlacement.TopRight, 390, 87);
 
-        surface.Publish(Presentation(1, true, target));
+        surface.Publish(Presentation(1, true, target: target), _ => { });
         Assert.True(SpinWait.SpinUntil(() => presenter.Frames.Any(frame => frame.Opacity >= 0.999), 1000));
         surface.Dismiss(1);
         Assert.True(SpinWait.SpinUntil(() => presenter.HideCount == 1, 1000));
@@ -75,11 +75,42 @@ public sealed class NativeClipOverlaySurfaceTests
         });
     }
 
-    private static ClipOverlayPresentation Presentation(long generation, bool excluded, ClipOverlayTarget? target = null)
+    [Fact]
+    public void DirectCompositionUploadPolicyAlwaysUploadsTheFinalOpaqueFrame()
+    {
+        Assert.True(NativeClipOverlaySurface.RequiresFrameUpload(false, true, 0, 1));
+        Assert.True(NativeClipOverlaySurface.RequiresFrameUpload(false, true, .25, 1));
+        Assert.False(NativeClipOverlaySurface.RequiresFrameUpload(false, true, 1, 1));
+        Assert.True(NativeClipOverlaySurface.RequiresFrameUpload(true, true, 1, 1));
+    }
+
+    [Fact]
+    public void SameWorkflowStageUpdateKeepsTheCardVisible()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var presenter = new RecordingPresenter();
+        using var surface = new NativeClipOverlaySurface(
+            presentation => new ClipOverlayFrame(300, 66, Enumerable.Repeat((byte)presentation.Event.Stage, 300 * 66 * 4).ToArray()),
+            _ => presenter);
+        var workflow = Guid.NewGuid();
+
+        surface.Publish(Presentation(1, true, workflow, 0), _ => { });
+        Assert.True(SpinWait.SpinUntil(() => presenter.Frames.Any(frame => frame.Opacity >= .999), 1000));
+        var before = presenter.Frames.Count;
+
+        surface.Publish(Presentation(2, true, workflow, 1), _ => { });
+        Assert.True(SpinWait.SpinUntil(() => presenter.Frames.Count > before, 1000));
+        var updateFrames = presenter.Frames.Skip(before).ToArray();
+        Assert.Contains(updateFrames, frame => frame.FrameMarker == 1 && frame.FrameChanged && frame.Opacity >= .999);
+        Assert.DoesNotContain(updateFrames, frame => frame.Opacity <= 0.001);
+        Assert.Equal(0, presenter.HideCount);
+    }
+
+    private static ClipOverlayPresentation Presentation(long generation, bool excluded, Guid? workflow = null, int stage = 0, ClipOverlayTarget? target = null)
     {
         var now = DateTime.UtcNow;
         return new ClipOverlayPresentation(generation, new ClipOverlayEvent(
-            Guid.NewGuid(), 0, now, now, 30, ClipOverlayKind.Standalone, "Clip Saved", null,
+            workflow ?? Guid.NewGuid(), stage, now, now, 30, ClipOverlayKind.Standalone, "Clip Saved", null,
             target ?? new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040), 1, ClipOverlayTargetReason.Primary),
             ClipOverlayPlacement.TopRight, excluded));
     }
@@ -162,14 +193,14 @@ public sealed class NativeClipOverlaySurfaceTests
 
         public void Present(ClipOverlayFrame frame, NativeClipOverlaySurface.PointNative destination, int width, int height, double opacity, bool frameChanged)
         {
-            lock (_gate) _frames.Add(new PresentedFrame(destination, width, height, opacity));
+            lock (_gate) _frames.Add(new PresentedFrame(destination, width, height, opacity, frameChanged, frame.Pixels[0]));
         }
 
         public void Hide() => Interlocked.Increment(ref _hideCount);
         public void Dispose() { }
     }
 
-    private readonly record struct PresentedFrame(NativeClipOverlaySurface.PointNative Destination, int Width, int Height, double Opacity);
+    private readonly record struct PresentedFrame(NativeClipOverlaySurface.PointNative Destination, int Width, int Height, double Opacity, bool FrameChanged, byte FrameMarker);
 
     private struct Rect { public int Left, Top, Right, Bottom; }
 }

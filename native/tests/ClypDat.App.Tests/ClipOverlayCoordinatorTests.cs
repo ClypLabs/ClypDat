@@ -15,15 +15,15 @@ public sealed class ClipOverlayCoordinatorTests
         using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch);
         var save = Guid.NewGuid();
         coordinator.Publish(Event(save, 0, ClipOverlayKind.Saving, 80, _epoch));
-        Assert.Equal(TimeSpan.FromSeconds(3), scheduler.Delays[0]);
+        Assert.Contains(TimeSpan.FromSeconds(3), scheduler.Delays);
         coordinator.Publish(Event(save, 1, ClipOverlayKind.Saved, 80, _epoch));
-        Assert.Equal(TimeSpan.FromSeconds(3), scheduler.Delays[1]);
+        Assert.Equal(2, scheduler.Delays.Count(delay => delay == TimeSpan.FromSeconds(3)));
 
         Assert.Equal(2, surface.Presentations.Count);
         Assert.Equal("Clip Saved", surface.Presentations[^1].Event.Title);
         scheduler.Fire(0);
         Assert.Empty(surface.Dismissals);
-        scheduler.Fire(1);
+        scheduler.Fire(3);
         Assert.Single(surface.Dismissals);
         Assert.Equal(1, sounds);
     }
@@ -59,10 +59,10 @@ public sealed class ClipOverlayCoordinatorTests
         var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
         using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch);
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.GameStarted, 40, _epoch));
-        Assert.Equal(TimeSpan.FromSeconds(5), scheduler.Delays[0]);
+        Assert.Contains(TimeSpan.FromSeconds(5), scheduler.Delays);
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Saving, 80, _epoch));
         Assert.Equal(2, surface.Presentations.Count);
-        Assert.Equal(TimeSpan.FromSeconds(3), scheduler.Delays[1]);
+        Assert.Contains(TimeSpan.FromSeconds(3), scheduler.Delays);
         Assert.Equal(0, sounds);
     }
 
@@ -91,6 +91,20 @@ public sealed class ClipOverlayCoordinatorTests
         scheduler.FireAll();
         Assert.Single(surface.Dismissals);
         Assert.Equal(100, surface.Dismissals[0]);
+    }
+
+    [Fact]
+    public void DwellStartsOnlyAfterTheSurfaceIsVisible()
+    {
+        var surface = new FakeSurface { AutoPresent = false };
+        var scheduler = new FakeScheduler();
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => { }, () => _epoch);
+
+        coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Saving, 80, _epoch));
+        Assert.Equal([TimeSpan.FromSeconds(5)], scheduler.Delays);
+
+        surface.CompleteLast(true);
+        Assert.Equal(TimeSpan.FromSeconds(3), scheduler.Delays[^1]);
     }
 
     [Fact]
@@ -166,7 +180,20 @@ public sealed class ClipOverlayCoordinatorTests
     {
         public List<ClipOverlayPresentation> Presentations { get; } = new();
         public List<long> Dismissals { get; } = new();
-        public void Publish(ClipOverlayPresentation presentation) => Presentations.Add(presentation);
+        private readonly List<(ClipOverlayPresentation Presentation, Action<ClipOverlayPresentationResult> Completion)> _pending = new();
+        public bool AutoPresent { get; set; } = true;
+        public void Publish(ClipOverlayPresentation presentation, Action<ClipOverlayPresentationResult> completion)
+        {
+            Presentations.Add(presentation);
+            _pending.Add((presentation, completion));
+            if (AutoPresent) CompleteLast(true);
+        }
+        public void CompleteLast(bool presented)
+        {
+            var item = _pending[^1];
+            _pending.RemoveAt(_pending.Count - 1);
+            item.Completion(new ClipOverlayPresentationResult(item.Presentation.Generation, presented));
+        }
         public void Dismiss(long generation) => Dismissals.Add(generation);
         public void Dispose() { }
     }

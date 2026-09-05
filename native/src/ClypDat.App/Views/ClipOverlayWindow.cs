@@ -30,7 +30,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private readonly object _gate = new();
     private readonly Thread _thread;
     private readonly ManualResetEventSlim _ready = new();
-    private (ClipOverlayPresentation Presentation, ClipOverlayFrame Frame)? _pending;
+    private (ClipOverlayPresentation Presentation, ClipOverlayFrame Frame, Action<ClipOverlayPresentationResult> Completion)? _pending;
     private ClipOverlayPresentation? _current;
     private ClipOverlayFrame? _frame;
     private INativeClipOverlayPresenter? _presenter;
@@ -38,6 +38,8 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private nint _window;
     private int _width, _height, _publishCount;
     private Motion _motion;
+    private double _opacity, _motionStartOpacity;
+    private Action<ClipOverlayPresentationResult>? _presentationCompletion;
     private bool _visible, _disposed, _gpuRecoveryAttempted, _nativePublishLogged, _nativeFailureLogged;
 
     public NativeClipOverlaySurface(Func<ClipOverlayPresentation, ClipOverlayFrame>? render = null, Func<nint, INativeClipOverlayPresenter>? presenterFactory = null)
@@ -55,20 +57,33 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     internal int PublishCount => Volatile.Read(ref _publishCount);
     internal string PresenterName => _presenter?.Name ?? "unavailable";
 
-    public void Publish(ClipOverlayPresentation presentation)
+    public void Publish(ClipOverlayPresentation presentation, Action<ClipOverlayPresentationResult> completion)
     {
         lock (_gate) { if (_disposed) return; }
-        if (_requiresUiThread && !Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(() => Publish(presentation)); return; }
+        if (_requiresUiThread && !Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(() => Publish(presentation, completion)); return; }
         ClipOverlayFrame frame;
         try { frame = _render(presentation); }
-        catch (Exception error) { AppLog.Error("Clip overlay card rendering failed", error); return; }
+        catch (Exception error)
+        {
+            AppLog.Error("Clip overlay card rendering failed", error);
+            completion(new ClipOverlayPresentationResult(presentation.Generation, false));
+            return;
+        }
+        (long Generation, Action<ClipOverlayPresentationResult> Completion)? replaced = null;
+        var rejected = false;
         lock (_gate)
         {
-            if (_disposed || presentation.Generation <= _pendingDismissal || presentation.Generation <= _latestGeneration) return;
-            _latestGeneration = presentation.Generation;
-            _pending = (presentation, frame);
+            if (_disposed || presentation.Generation <= _pendingDismissal || presentation.Generation <= _latestGeneration) rejected = true;
+            else
+            {
+                replaced = _pending is { } pending ? (pending.Presentation.Generation, pending.Completion) : null;
+                _latestGeneration = presentation.Generation;
+                _pending = (presentation, frame, completion);
+            }
         }
-        if (_window != 0) PostMessage(_window, WmAppPublish, 0, 0);
+        if (replaced is { } superseded) superseded.Completion(new ClipOverlayPresentationResult(superseded.Generation, false));
+        if (rejected) { completion(new ClipOverlayPresentationResult(presentation.Generation, false)); return; }
+        if (_window == 0 || !PostMessage(_window, WmAppPublish, 0, 0)) completion(new ClipOverlayPresentationResult(presentation.Generation, false));
     }
 
     public void Dismiss(long generation)
@@ -125,9 +140,10 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
 
     private void AcceptPublish()
     {
-        (ClipOverlayPresentation Presentation, ClipOverlayFrame Frame)? pending;
+        (ClipOverlayPresentation Presentation, ClipOverlayFrame Frame, Action<ClipOverlayPresentationResult> Completion)? pending;
         lock (_gate) { pending = _pending; _pending = null; if (pending is { } expired && expired.Presentation.Generation <= _pendingDismissal) return; }
         if (pending is not { } update || (_current is { } current && current.Generation > update.Presentation.Generation)) return;
+        var sameWorkflow = _visible && _current?.Event.WorkflowId == update.Presentation.Event.WorkflowId;
         _current = update.Presentation;
         _frame = update.Frame;
         _width = update.Frame.Width;
@@ -135,10 +151,25 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         _nativePublishLogged = _nativeFailureLogged = false;
         _gpuRecoveryAttempted = false;
         SetWindowDisplayAffinity(_window, _current.Event.ExcludeFromCapture ? WdaExcludeFromCapture : 0);
-        _motion = Motion.Entering;
-        _motionStarted = Stopwatch.GetTimestamp();
+        _presentationCompletion = update.Completion;
         _visible = true;
-        Present(0, true);
+        if (!sameWorkflow)
+        {
+            _motion = Motion.Entering;
+            _motionStartOpacity = _opacity = 0;
+            _motionStarted = Stopwatch.GetTimestamp();
+            Present(0, true);
+        }
+        else
+        {
+            if (_motion == Motion.Exiting)
+            {
+                _motion = Motion.Entering;
+                _motionStartOpacity = _opacity;
+                _motionStarted = Stopwatch.GetTimestamp();
+            }
+            if (Present(_opacity, true) && _opacity > 0) AcknowledgePresentation();
+        }
         Interlocked.Increment(ref _publishCount);
     }
 
@@ -147,6 +178,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         long generation; lock (_gate) generation = _pendingDismissal;
         if (!_visible || _current?.Generation != generation) return;
         _motion = Motion.Exiting;
+        _motionStartOpacity = _opacity;
         _motionStarted = Stopwatch.GetTimestamp();
     }
 
@@ -156,22 +188,29 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         var elapsed = Stopwatch.GetElapsedTime(_motionStarted).TotalMilliseconds;
         if (_motion == Motion.Entering)
         {
-            Present(EaseOut(Math.Min(1, elapsed / 220)), false);
-            if (elapsed >= 220) { _motion = Motion.Still; Present(1, false); }
+            var progress = _motionStartOpacity + (1 - _motionStartOpacity) * EaseOut(Math.Min(1, elapsed / 220));
+            if (Present(progress, false) && progress > 0) AcknowledgePresentation();
+            if (elapsed >= 220) { _motion = Motion.Still; if (Present(1, false)) AcknowledgePresentation(); }
         }
         else if (_motion == Motion.Exiting)
         {
-            Present(1 - EaseIn(Math.Min(1, elapsed / 180)), false);
+            Present(_motionStartOpacity * (1 - EaseIn(Math.Min(1, elapsed / 180))), false);
             if (elapsed >= 180 || elapsed >= 400) Hide();
         }
-        else Present(1, false); // Reassert topmost during full dwell.
+        else if (Present(1, false)) AcknowledgePresentation(); // Reassert topmost during full dwell.
     }
 
-    private void Hide() { _presenter?.Hide(); _visible = false; _motion = Motion.Still; _current = null; _frame = null; }
+    private void Hide() { _presenter?.Hide(); _visible = false; _motion = Motion.Still; _opacity = _motionStartOpacity = 0; _current = null; _frame = null; _presentationCompletion = null; }
 
-    private void Present(double progress, bool frameChanged)
+    private void AcknowledgePresentation()
     {
-        if (_current is null || _frame is null || _presenter is null) return;
+        var completion = Interlocked.Exchange(ref _presentationCompletion, null);
+        completion?.Invoke(new ClipOverlayPresentationResult(_current!.Generation, true));
+    }
+
+    private bool Present(double progress, bool frameChanged)
+    {
+        if (_current is null || _frame is null || _presenter is null) return false;
         var target = _current.Event.Target;
         var placement = _current.Event.Placement;
         var position = ClipOverlayLayout.AnimatedPosition(target, placement, _width, _height, progress);
@@ -179,11 +218,13 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         try
         {
             _presenter.Present(_frame, destination, _width, _height, progress, frameChanged);
+            _opacity = progress;
             if (progress > 0 && !_nativePublishLogged)
             {
                 AppLog.Info($"Clip overlay native publish succeeded: id={_current.Event.WorkflowId}, kind={_current.Event.Kind}, backend={_presenter.Name}, monitor={target.DeviceName}, position={destination.X},{destination.Y}, size={_width}x{_height}.");
                 _nativePublishLogged = true;
             }
+            return true;
         }
         catch (Exception error)
         {
@@ -196,18 +237,21 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
                     _presenter.Dispose();
                     _presenter = new DirectCompositionClipOverlayPresenter(_window);
                     _presenter.Present(_frame, destination, _width, _height, progress, true);
-                    return;
+                    _opacity = progress;
+                    return true;
                 }
                 catch (Exception recoveryError)
                 {
                     AppLog.Error("Clip overlay DirectComposition rebuild failed; using layered fallback", recoveryError);
                     UseLayeredPresenter();
                     _presenter.Present(_frame, destination, _width, _height, progress, true);
-                    return;
+                    _opacity = progress;
+                    return true;
                 }
             }
             if (!_nativeFailureLogged) AppLog.Error($"Clip overlay native publish failed: id={_current.Event.WorkflowId}, backend={_presenter.Name}.", error);
             _nativeFailureLogged = true;
+            return false;
         }
     }
 
@@ -236,6 +280,9 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private static nint Destroyed(NativeClipOverlaySurface instance) { KillTimer(instance._window, TimerId); PostQuitMessage(0); return 0; }
 
     internal interface INativeClipOverlayPresenter : IDisposable { string Name { get; } void Present(ClipOverlayFrame frame, PointNative destination, int width, int height, double opacity, bool frameChanged); void Hide(); }
+    internal static bool RequiresFrameUpload(bool frameChanged, bool hasSwapChain, double lastUploadedOpacity, double opacity)
+        => frameChanged || !hasSwapChain || double.IsNaN(lastUploadedOpacity) || Math.Abs(lastUploadedOpacity - opacity) > 0.0001;
+
     private sealed class DirectCompositionClipOverlayPresenter : INativeClipOverlayPresenter
     {
         private readonly nint _window;
@@ -250,6 +297,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         private IDXGISwapChain3? _swapChain3;
         private byte[]? _fadedPixels;
         private int _width, _height;
+        private double _lastUploadedOpacity = double.NaN;
         public DirectCompositionClipOverlayPresenter(nint window)
         {
             _window = window;
@@ -268,13 +316,14 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         public unsafe void Present(ClipOverlayFrame frame, PointNative destination, int width, int height, double opacity, bool frameChanged)
         {
             SetWindowPos(_window, HwndTopmost, destination.X, destination.Y, width, height, SwpNoActivate | SwpShowWindow);
-            if (!frameChanged && _swapChain is not null && opacity >= 0.999) return;
             EnsureSwapChain(width, height);
+            if (!RequiresFrameUpload(frameChanged, _swapChain is not null, _lastUploadedOpacity, opacity)) return;
             using var texture = _swapChain!.GetBuffer<ID3D11Texture2D>(_swapChain3!.CurrentBackBufferIndex);
             var pixels = opacity >= 0.999 ? frame.Pixels : Fade(frame.Pixels, opacity);
             fixed (byte* source = pixels) _context.UpdateSubresource(texture, 0, null, (nint)source, (uint)(width * 4), 0);
             _swapChain.Present(0, PresentFlags.None).CheckError();
             _composition.Commit().CheckError();
+            _lastUploadedOpacity = opacity;
         }
         public void Hide() => ShowWindow(_window, 0);
         private void EnsureSwapChain(int width, int height)
@@ -289,6 +338,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
             _swapChain3 = _swapChain.QueryInterface<IDXGISwapChain3>();
             _visual.SetContent(_swapChain).CheckError();
             _width = width; _height = height;
+            _lastUploadedOpacity = double.NaN;
         }
         private byte[] Fade(byte[] source, double opacity)
         {

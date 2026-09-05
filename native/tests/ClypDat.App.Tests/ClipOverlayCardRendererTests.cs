@@ -106,20 +106,10 @@ public sealed class ClipOverlayCardRendererTests
         return Assert.IsType<SolidColorBrush>(value).Color.ToUInt32();
     }
 
-    // The card fill is drawn at 96% so gameplay bleeds through, and the raster
-    // is premultiplied - so the expected pixel is the token scaled by that
-    // alpha, within whatever rounding the renderer applies on the way.
+    // The card body must be opaque. Only anti-aliased rounded edges may blend
+    // with gameplay; an interior sample must be the exact theme colour.
     private static void AssertFill(uint token, uint pixel)
-    {
-        const double alpha = 0.96;
-        for (var shift = 0; shift < 32; shift += 8)
-        {
-            var expected = ((token >> shift) & 0xFF) * alpha;
-            var actual = (pixel >> shift) & 0xFF;
-            Assert.True(Math.Abs(expected - actual) <= 2,
-                $"Fill channel at bit {shift}: expected ~{expected:F0}, got {actual} (token 0x{token:X8}, pixel 0x{pixel:X8}).");
-        }
-    }
+        => Assert.Equal(token, pixel);
 
     private static uint Pixel(ClipOverlayFrame frame, int x, int y)
         => BitConverter.ToUInt32(frame.Pixels, (y * frame.Width + x) * 4);
