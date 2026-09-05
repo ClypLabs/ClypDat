@@ -6,7 +6,10 @@ namespace ClypDat.Capture.Abstractions;
 
 public static class CaptureWorkerProtocol
 {
-    public const int Version = 2;
+    // 3 added ActiveFinalizes to the attach response. A worker left over from an
+    // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
+    // the proxy's read loop already routes into recovery.
+    public const int Version = 3;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 
@@ -41,7 +44,10 @@ public sealed record CaptureWorkerAttachResponse(
     bool Recording,
     string ConfigIdentity,
     ReplayCaptureHealth Health,
-    IReadOnlyList<CaptureWorkerSaveResult> UnacknowledgedSaves);
+    IReadOnlyList<CaptureWorkerSaveResult> UnacknowledgedSaves,
+    // Lets an app that restarted while the worker kept running re-lock the cards
+    // for sessions still being muxed, instead of offering a silent video.
+    IReadOnlyList<FullSessionFinalizeProgress>? ActiveFinalizes = null);
 public sealed record CaptureWorkerSaveResult(
     string Path,
     string? Title,

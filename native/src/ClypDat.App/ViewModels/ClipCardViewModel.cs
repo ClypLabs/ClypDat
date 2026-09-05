@@ -18,7 +18,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private ClipEditSettings? _clipEdit;
     private bool _isVod;
     private bool _isPreviewVisible;
-    private string _repairOverlayText = string.Empty;
+    private string _busyOverlayText = string.Empty;
     private CancellationTokenSource? _previewLoadCts;
     private int _previewLoadVersion;
     private static readonly SemaphoreSlim PreviewDecodeSlots = new(2, 2);
@@ -66,28 +66,48 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string Name => Media.Name;
     public string Path => Media.Path;
 
-    // Set while the background sweep has this clip queued for, or is actively
-    // performing, a parameter-set repair. The card dims its thumbnail and shows
-    // this text over it - the clip is unwatchable until the repair lands, so
-    // saying so on the tile itself beats a progress bar elsewhere on the page.
-    public string RepairOverlayText
+    // Set while something is working on this clip and it cannot be watched yet:
+    // a queued/running parameter-set repair, or a full session whose audio is
+    // still being muxed in. The card dims its thumbnail and shows this text over
+    // it - saying so on the tile itself beats a progress bar elsewhere on the
+    // page. Two writers, and finalize wins: a session mid-mux is not enumerable
+    // for repair, so in practice they cannot collide.
+    public string BusyOverlayText
     {
-        get => _repairOverlayText;
+        get => _busyOverlayText;
         set
         {
-            if (!SetProperty(ref _repairOverlayText, value)) return;
-            OnPropertyChanged(nameof(IsRepairOverlayVisible));
-            OnPropertyChanged(nameof(RepairOverlayContent));
+            if (!SetProperty(ref _busyOverlayText, value)) return;
+            OnPropertyChanged(nameof(IsBusyOverlayVisible));
+            OnPropertyChanged(nameof(BusyOverlayContent));
         }
     }
 
-    public bool IsRepairOverlayVisible => !string.IsNullOrEmpty(RepairOverlayText);
+    public bool IsBusyOverlayVisible => !string.IsNullOrEmpty(BusyOverlayText);
 
     // Null, not empty, when there is nothing to say: the overlay's content is
     // realised from a template, and a template that is never realised cannot run
     // the spinner's animation. Otherwise every card in the library would drive a
     // rotation sixty times a second behind a hidden layer.
-    public string? RepairOverlayContent => IsRepairOverlayVisible ? RepairOverlayText : null;
+    public string? BusyOverlayContent => IsBusyOverlayVisible ? BusyOverlayText : null;
+
+    // Kept apart from IsHydrated deliberately. IsHydrated is derived from Media
+    // ("the probe reached this card") and round-trips through the library cache;
+    // this is an external signal from the capture worker that must never be
+    // cached, or a restart would resurrect a locked card. The two also need
+    // different sentences - "still loading its info" versus "still adding audio".
+    private bool _isFinalizing;
+    public bool IsFinalizing
+    {
+        get => _isFinalizing;
+        internal set
+        {
+            if (!SetProperty(ref _isFinalizing, value)) return;
+            OnPropertyChanged(nameof(IsOpenable));
+        }
+    }
+
+    public bool IsOpenable => IsHydrated && !IsFinalizing;
     public DateTimeOffset CreatedAt => IsSteelSeriesImport && _clipInfo?.CapturedAt is { } capturedAt ? capturedAt : Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;
@@ -596,6 +616,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(CreatedAt));
         OnPropertyChanged(nameof(Duration));
         OnPropertyChanged(nameof(IsHydrated));
+        OnPropertyChanged(nameof(IsOpenable));
         OnPropertyChanged(nameof(SizeBytes));
         OnPropertyChanged(nameof(LastWriteTimeUtc));
         OnPropertyChanged(nameof(DateLabel));

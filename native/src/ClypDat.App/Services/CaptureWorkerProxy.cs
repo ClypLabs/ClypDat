@@ -44,6 +44,12 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
     public event EventHandler<ReplaySaveStarted>? SaveStarted;
     public event EventHandler<ReplaySaveCompleted>? SaveCompleted;
+    public event EventHandler<IReadOnlyList<FullSessionFinalizeProgress>>? FullSessionFinalizeChanged;
+
+    // Any route out of a live connection has to unlock the cards, or a session
+    // whose worker died mid-mux would sit on a spinner forever.
+    private void ClearFinalizes() => Dispatcher.UIThread.Post(() =>
+        FullSessionFinalizeChanged?.Invoke(this, Array.Empty<FullSessionFinalizeProgress>()));
     public event EventHandler<bool>? FullSessionRecordingToggled;
     public event EventHandler<AutoClipDetectorEvent>? AutoClipDetected;
     public event EventHandler<AutoClipDetectorStatus>? AutoClipStatusChanged;
@@ -137,6 +143,10 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             await SendAsync<CaptureWorkerHandshake>("handshake", new { ClientId = Environment.ProcessId }, cancellationToken);
             var config = _configProvider(); var attach = await AttachAsync(config, cancellationToken);
             ApplyAttach(attach, config, _desiredRecording);
+            // Re-locks the cards when the app restarted while the worker kept
+            // muxing; an empty list is equally meaningful and unlocks them.
+            var active = attach.ActiveFinalizes ?? Array.Empty<FullSessionFinalizeProgress>();
+            Dispatcher.UIThread.Post(() => FullSessionFinalizeChanged?.Invoke(this, active));
             var gameDisplayName = _clipGameName ?? config.GameDisplayName;
             await SendAsync<CaptureWorkerAck>("clip-game-name", new { gameDisplayName }, cancellationToken);
             await SendAsync<CaptureWorkerAck>("full-session-hotkey", new { hotkey = string.IsNullOrWhiteSpace(_fullSessionHotkey) ? config.FullSessionHotkey : _fullSessionHotkey }, cancellationToken);
@@ -237,11 +247,15 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                     case "full-session-toggled": if (message.Payload.TryGetProperty("enabled", out var enabled)) Dispatcher.UIThread.Post(() => FullSessionRecordingToggled?.Invoke(this, enabled.GetBoolean())); break;
                     case "auto-clip-detected": var detected = message.Payload.Deserialize<AutoClipDetectorEvent>(); if (detected is not null) Dispatcher.UIThread.Post(() => AutoClipDetected?.Invoke(this, detected)); break;
                     case "auto-clip-status": var status = message.Payload.Deserialize<AutoClipDetectorStatus>(); if (status is not null) Dispatcher.UIThread.Post(() => AutoClipStatusChanged?.Invoke(this, status)); break;
+                    case "full-session-finalize":
+                        var finalizes = message.Payload.Deserialize<FullSessionFinalizeProgress[]>();
+                        if (finalizes is not null) Dispatcher.UIThread.Post(() => FullSessionFinalizeChanged?.Invoke(this, finalizes));
+                        break;
                 }
             }
         }
         catch (Exception error) when (error is IOException or ObjectDisposedException or InvalidDataException) { AppLog.Info($"Capture worker connection lost: {error.Message}"); }
-        finally { FailPending(); if (ReferenceEquals(_pipe, pipe)) _pipe = null; BeginRecovery(generation, "pipe closed", ExitCode()); }
+        finally { FailPending(); ClearFinalizes(); if (ReferenceEquals(_pipe, pipe)) _pipe = null; BeginRecovery(generation, "pipe closed", ExitCode()); }
     }
 
     private static ReplaySaveCompleted ToCompletion(CaptureWorkerSaveResult save, bool isRecovered)

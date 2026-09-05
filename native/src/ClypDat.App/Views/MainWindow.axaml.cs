@@ -568,6 +568,7 @@ public sealed partial class MainWindow : Window
                 workerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
                 workerEvents.AutoClipDetected -= Worker_AutoClipDetected;
                 workerEvents.AutoClipStatusChanged -= Worker_AutoClipStatusChanged;
+                workerEvents.FullSessionFinalizeChanged -= Worker_FullSessionFinalizeChanged;
             }
             _replayBuffer?.Dispose();
             _clipOverlayCoordinator?.Dispose();
@@ -879,6 +880,7 @@ public sealed partial class MainWindow : Window
             workerEvents.FullSessionRecordingToggled += Worker_FullSessionRecordingToggled;
             workerEvents.AutoClipDetected += Worker_AutoClipDetected;
             workerEvents.AutoClipStatusChanged += Worker_AutoClipStatusChanged;
+            workerEvents.FullSessionFinalizeChanged += Worker_FullSessionFinalizeChanged;
         }
     }
 
@@ -921,6 +923,15 @@ public sealed partial class MainWindow : Window
                 new ReplayClipWindow(detected.TimestampUtc - TimeSpan.FromSeconds(detected.LeadSeconds), detected.TimestampUtc + TimeSpan.FromSeconds(detected.TailSeconds)),
                 "HELLDIVERS™ 2",
                 detected.EventLabel);
+        });
+    }
+
+    private void Worker_FullSessionFinalizeChanged(object? sender, IReadOnlyList<FullSessionFinalizeProgress> active)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(_replayBuffer, sender)) return;
+            ViewModel?.ApplySessionFinalizes(active);
         });
     }
 
@@ -1089,6 +1100,7 @@ public sealed partial class MainWindow : Window
             oldWorkerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
             oldWorkerEvents.AutoClipDetected -= Worker_AutoClipDetected;
             oldWorkerEvents.AutoClipStatusChanged -= Worker_AutoClipStatusChanged;
+            oldWorkerEvents.FullSessionFinalizeChanged -= Worker_FullSessionFinalizeChanged;
         }
         _replayBuffer.Dispose();
         _replayConfigSnapshot = config;
@@ -4699,6 +4711,11 @@ public sealed partial class MainWindow : Window
 
     private void RequestLibraryHoverPreview(Control control, ClipCardViewModel clip)
     {
+        // Correctness, not just presentation: a session's audio mux finishes by
+        // renaming over this exact path, and LibVLC holding a read handle makes
+        // that File.Move fail - a hover would turn a locked card into a session
+        // that permanently lost its audio.
+        if (clip.IsFinalizing) return;
         var presenter = control.GetVisualDescendants().OfType<ClipPreviewPresenter>().FirstOrDefault();
         // Decode at the size this card actually paints at, not the clip's own
         // resolution - see ClipHoverPreviewController's class comment.
@@ -4755,7 +4772,7 @@ public sealed partial class MainWindow : Window
     // first-frame pause and late-work cancellation) remains local here.
     private void StartEditorHoverWarmup(ClipCardViewModel clip)
     {
-        if (ViewModel?.IsLibraryVisible != true || !clip.IsHydrated || !File.Exists(clip.Path)) return;
+        if (ViewModel?.IsLibraryVisible != true || !clip.IsOpenable || !File.Exists(clip.Path)) return;
         if (_editorHoverWarmup is { } current && string.Equals(current.Path, clip.Path, StringComparison.OrdinalIgnoreCase)) return;
 
         CancelEditorHoverWarmup();

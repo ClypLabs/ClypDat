@@ -1136,6 +1136,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // elsewhere on the page.
     private ClipRepairSweep.Progress _clipRepairProgress;
     private DispatcherTimer? _clipRepairTicker;
+    // Keyed by library path. A dictionary rather than a single "current"
+    // because the full-session hotkey stop-then-starts, so two sessions can be
+    // finalizing at once.
+    private readonly Dictionary<string, FullSessionFinalizeProgress> _sessionFinalizes = new(StringComparer.OrdinalIgnoreCase);
+    private DispatcherTimer? _sessionFinalizeTicker;
 
     public string SelectionSummary
     {
@@ -4328,11 +4333,46 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Clears what a crashed or killed mux leaves in the VODs tree: its staging
+    /// folder, and the "<c>.mp4.muxing.mp4</c>" siblings older builds wrote
+    /// straight into the library (those surfaced as a second card, which is the
+    /// bug this staging folder exists to fix). A finished mux always renames its
+    /// output away, so any survivor is garbage.
+    /// </summary>
+    private static void RemoveAbandonedSessionMuxArtifacts(string root)
+    {
+        try
+        {
+            var vods = LibraryLayout.VodsRoot(root);
+            if (!Directory.Exists(vods)) return;
+            foreach (var stale in Directory.EnumerateDirectories(vods, ".clypdat-mux-*", SearchOption.AllDirectories))
+            {
+                // A live mux is writing into one of these right now, and the
+                // worker is a separate process - only touch folders that have
+                // been untouched long enough to be certainly abandoned.
+                if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(stale) < TimeSpan.FromMinutes(5)) continue;
+                try { Directory.Delete(stale, recursive: true); AppLog.Info($"Full session: removed an abandoned mux staging folder ({stale})."); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            }
+            foreach (var legacy in Directory.EnumerateFiles(vods, "*.mp4.muxing.mp4", SearchOption.AllDirectories))
+            {
+                try { File.Delete(legacy); AppLog.Info($"Full session: removed a leftover mux file from an older build ({legacy})."); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
+        {
+            // Housekeeping must never block the library from loading.
+        }
+    }
+
     private async Task ReconcileLibraryAfterCacheAsync(string root)
     {
         try
         {
             AppLog.Info($"Library reconciliation: starting for '{root}'.");
+            RemoveAbandonedSessionMuxArtifacts(root);
             await RefreshLibraryAsync();
             await PersistLibraryCacheSnapshotAsync();
             AppLog.Info($"Library reconciliation: complete for '{root}'.");
@@ -5075,7 +5115,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             foreach (var clip in AllClips)
             {
-                if (clip.IsRepairOverlayVisible) clip.RepairOverlayText = string.Empty;
+                // Never clear a finalize overlay: the two share one surface and
+                // a session mid-mux outranks a repair that is not running.
+                if (clip.IsBusyOverlayVisible && !clip.IsFinalizing) clip.BusyOverlayText = string.Empty;
             }
             return;
         }
@@ -5115,25 +5157,131 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (repairing && string.Equals(clip.Path, progress.Current, StringComparison.OrdinalIgnoreCase))
             {
                 var percent = (int)Math.Clamp(Math.Round(progress.CurrentFraction * 100), 0, 99);
-                clip.RepairOverlayText = $"Repairing corrupted clip\n{percent}% - ~{Describe(remaining)} left";
+                clip.BusyOverlayText = $"Repairing corrupted clip\n{percent}% - ~{Describe(remaining)} left";
             }
             else if (queueWait.TryGetValue(clip.Path, out var startsIn))
             {
-                clip.RepairOverlayText = $"Queued for repair\nstarts in ~{Describe(startsIn)}";
+                clip.BusyOverlayText = $"Queued for repair\nstarts in ~{Describe(startsIn)}";
             }
             else if (queued.Contains(clip.Path))
             {
-                clip.RepairOverlayText = "Corrupted clip found\nqueued for repair";
+                clip.BusyOverlayText = "Corrupted clip found\nqueued for repair";
             }
-            else if (clip.IsRepairOverlayVisible)
+            else if (clip.IsBusyOverlayVisible && !clip.IsFinalizing)
             {
-                clip.RepairOverlayText = string.Empty;
+                clip.BusyOverlayText = string.Empty;
             }
         }
 
         static string Describe(TimeSpan value) => value.TotalSeconds < 60
             ? $"{Math.Max(1, (int)Math.Round(value.TotalSeconds))}s"
             : $"{(int)Math.Round(value.TotalMinutes)} min";
+    }
+
+    /// <summary>
+    /// Replaces the whole set of finalizing sessions from the worker's snapshot.
+    /// Whole-set rather than deltas so a card cannot be stranded locked: an
+    /// empty list - a completed mux, a failed one, a lost pipe - unlocks
+    /// everything, and there is no reconciliation to drift.
+    /// </summary>
+    public void ApplySessionFinalizes(IReadOnlyList<FullSessionFinalizeProgress> active)
+    {
+        var finished = _sessionFinalizes.Keys.Where(path => !active.Any(entry => string.Equals(entry.Path, path, StringComparison.OrdinalIgnoreCase))).ToArray();
+        _sessionFinalizes.Clear();
+        foreach (var entry in active) _sessionFinalizes[entry.Path] = entry;
+        ApplySessionFinalizeProgress();
+
+        // The file the card points at was just replaced by one with audio in
+        // it, and the swap is a rename the watcher reports as a change to a
+        // path it already knows - re-probe so the card's tracks and duration
+        // come from the finished file rather than the video-only one.
+        foreach (var path in finished)
+        {
+            if (!File.Exists(path)) continue;
+            _ = AddOrUpdateLibraryClipAsync(path);
+        }
+    }
+
+    internal void ApplySessionFinalizeProgress()
+    {
+        var active = _sessionFinalizes.Count > 0;
+        if (active && _sessionFinalizeTicker is null)
+        {
+            _sessionFinalizeTicker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _sessionFinalizeTicker.Tick += (_, _) => ApplySessionFinalizeProgress();
+            _sessionFinalizeTicker.Start();
+        }
+        else if (!active && _sessionFinalizeTicker is not null)
+        {
+            _sessionFinalizeTicker.Stop();
+            _sessionFinalizeTicker = null;
+        }
+
+        // A worker that is alive but wedged emits no progress and no terminal
+        // event, which neither the snapshot nor pipe loss would ever clear.
+        if (active)
+        {
+            var stale = _sessionFinalizes
+                .Where(entry => DateTime.UtcNow - entry.Value.StartedUtc > TimeSpan.FromMinutes(2) && entry.Value.MuxedSeconds <= 0)
+                .Select(entry => entry.Key)
+                .ToArray();
+            foreach (var path in stale)
+            {
+                AppLog.Error($"Full session finalize reported no progress for two minutes; unlocking '{path}'.");
+                _sessionFinalizes.Remove(path);
+            }
+        }
+
+        foreach (var clip in AllClips)
+        {
+            if (!_sessionFinalizes.TryGetValue(clip.Path, out var entry))
+            {
+                if (!clip.IsFinalizing) continue;
+                clip.IsFinalizing = false;
+                if (clip.IsBusyOverlayVisible) clip.BusyOverlayText = string.Empty;
+                continue;
+            }
+
+            clip.IsFinalizing = true;
+            clip.BusyOverlayText = DescribeFinalize(entry);
+        }
+    }
+
+    internal static string DescribeFinalize(FullSessionFinalizeProgress entry)
+    {
+        // ffmpeg's own position only covers the encode; "+faststart" then
+        // rewrites the whole file to move the index to the front. Leaving that
+        // tail out would park the tile at "99% - 1s left" and read as hung.
+        const double EncodeShareOfWork = 0.85;
+        var fraction = entry.SessionSeconds > 0
+            ? Math.Clamp(entry.MuxedSeconds / entry.SessionSeconds, 0, 1) * EncodeShareOfWork
+            : 0;
+
+        // Below a twentieth through, extrapolating from elapsed time is noise -
+        // same threshold the repair overlay uses - so say what is happening
+        // without inventing a countdown.
+        if (fraction < 0.05) return "Adding session audio\nstarting…";
+
+        var elapsed = DateTime.UtcNow - entry.StartedUtc;
+        if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
+        var remaining = TimeSpan.FromSeconds(elapsed.TotalSeconds / fraction) - elapsed;
+        // Never count below a second: an overrun showing "0s" reads as stuck.
+        if (remaining < TimeSpan.FromSeconds(1)) remaining = TimeSpan.FromSeconds(1);
+        var percent = (int)Math.Clamp(Math.Round(fraction * 100), 0, 99);
+        var eta = remaining.TotalSeconds < 60
+            ? $"{Math.Max(1, (int)Math.Round(remaining.TotalSeconds))}s"
+            : $"{(int)Math.Round(remaining.TotalMinutes)} min";
+        return $"Adding session audio\n{percent}% - ~{eta} left";
+    }
+
+    internal bool IsSessionFinalizing(string path) => _sessionFinalizes.ContainsKey(path);
+
+    private string SessionFinalizeWaitMessage(string path)
+    {
+        if (!_sessionFinalizes.TryGetValue(path, out var entry)) return "Still adding this session's audio - try again in a moment.";
+        // Reuses the tile's own wording so the banner and the card agree.
+        var detail = DescribeFinalize(entry).Replace('\n', ' ');
+        return $"Still adding this session's audio ({detail.Split(new[] { " - " }, StringSplitOptions.None).LastOrDefault() ?? "in progress"}).";
     }
 
     private async Task MigrateLibraryLayoutAsync()
@@ -5514,9 +5662,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // user to wait instead is clearer than that.
     public Task<bool> OpenClipAsync(ClipCardViewModel clip)
     {
-        if (!clip.IsHydrated)
+        if (!clip.IsOpenable)
         {
-            ClipNotReadyMessage = "Still loading this clip's info - try again in a moment.";
+            // A full session's video lands in the library before its audio is
+            // muxed in, so "not hydrated" and "still encoding" are different
+            // waits and deserve different sentences.
+            ClipNotReadyMessage = clip.IsFinalizing
+                ? SessionFinalizeWaitMessage(clip.Path)
+                : "Still loading this clip's info - try again in a moment.";
             _clipNotReadyMessageTimer.Stop();
             _clipNotReadyMessageTimer.Start();
             return Task.FromResult(false);
@@ -5544,9 +5697,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // that state without making the Library disappear behind the editor.
     public bool PrepareClipForShare(ClipCardViewModel clip)
     {
-        if (!clip.IsHydrated)
+        if (!clip.IsOpenable)
         {
-            ClipNotReadyMessage = "Still loading this clip's info - try again in a moment.";
+            // A full session's video lands in the library before its audio is
+            // muxed in, so "not hydrated" and "still encoding" are different
+            // waits and deserve different sentences.
+            ClipNotReadyMessage = clip.IsFinalizing
+                ? SessionFinalizeWaitMessage(clip.Path)
+                : "Still loading this clip's info - try again in a moment.";
             _clipNotReadyMessageTimer.Stop();
             _clipNotReadyMessageTimer.Start();
             return false;

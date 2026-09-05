@@ -60,7 +60,7 @@ namespace ClypDat.App.Services;
 // AudioCapturePipeline - the same Game/Chat/Microphone routing, WASAPI capture, and mux
 // logic WindowsReplayBuffer uses, via its own independent instance.
 [SupportedOSPlatform("windows10.0.17763.0")]
-public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource
+public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource, IFullSessionFinalizeReporter
 {
     internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing) =>
         directBltAvailable && !requiresCopyBeforeProcessing;
@@ -120,6 +120,41 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private CancellationTokenSource? _captureCts;
     private Task? _captureTask;
     private Task? _backgroundFinalize;
+    public event EventHandler<IReadOnlyList<FullSessionFinalizeProgress>>? FullSessionFinalizeChanged;
+    // Keyed by the visible library path, which is also the library card's key.
+    // A dictionary rather than a single "current" because the full-session
+    // hotkey stop-then-starts, so two finalizes can overlap.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, FullSessionFinalizeProgress> ActiveFinalizes =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    internal static IReadOnlyList<FullSessionFinalizeProgress> ActiveFinalizeSnapshot() => ActiveFinalizes.Values.ToArray();
+
+    private void PublishFinalize(FullSessionFinalizeProgress progress)
+    {
+        ActiveFinalizes[progress.Path] = progress;
+        FullSessionFinalizeChanged?.Invoke(this, ActiveFinalizeSnapshot());
+    }
+
+    private void ClearFinalize(string path)
+    {
+        ActiveFinalizes.TryRemove(path, out _);
+        FullSessionFinalizeChanged?.Invoke(this, ActiveFinalizeSnapshot());
+    }
+
+    /// <summary>
+    /// Shutdown used to end the worker process the moment StopAsync returned,
+    /// killing ffmpeg mid-mux and losing that session's audio for good - the
+    /// background task was never awaited anywhere.
+    /// </summary>
+    public async Task WaitForBackgroundFinalizeAsync(TimeSpan timeout)
+    {
+        var pending = _backgroundFinalize;
+        if (pending is null || pending.IsCompleted) return;
+        AppLog.Info("Full session: waiting for the background audio mux before shutting down.");
+        var completed = await Task.WhenAny(pending, Task.Delay(timeout)).ConfigureAwait(false);
+        if (!ReferenceEquals(completed, pending))
+            AppLog.Error($"Full session: background mux did not finish within {timeout.TotalMinutes:F0} minutes; shutting down anyway.");
+    }
     // Guards StartAsync's orphan-WAV sweep across the app: a background
     // finalize still owns capture WAVs after its session stopped, and a new
     // session starting meanwhile must not sweep them out from under it.
@@ -402,6 +437,41 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                      .Concat(Directory.EnumerateFiles(_bufferFolder, "audio_*.txt")))
         {
             AudioCapturePipeline.TryDelete(file);
+        }
+
+        RemoveOrphanedSessionTempVideos();
+    }
+
+    /// <summary>
+    /// A full session records to a temp file that background finalize then
+    /// MOVES onto the library path, so the finalize deliberately does not delete
+    /// it. If the app dies mid-session nothing ever does either, and these are
+    /// whole recordings - gigabytes each, accumulating forever.
+    /// </summary>
+    private static void RemoveOrphanedSessionTempVideos()
+    {
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(Path.GetTempPath(), "clypdat-full-session-video-*.mp4"))
+            {
+                try
+                {
+                    // Age alone is not enough - a session can legitimately run
+                    // for hours. An exclusive open is the reliable test for
+                    // "nothing is recording into this any more".
+                    if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < TimeSpan.FromHours(1)) continue;
+                    using (var probe = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None)) { }
+                    File.Delete(file);
+                    AppLog.Info($"Full session: removed an orphaned session temp video ({file}).");
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    // Still being written, or not ours to touch.
+                }
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
+        {
         }
     }
 
@@ -3791,6 +3861,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             : finalizeConfig.GameDisplayName;
                         ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"Session - {immediateGameName}", startWallUtc, CaptureSource: finalizeConfig.CaptureSource));
                         AppLog.Info($"Full session video available immediately (audio attaching in background): {finalPath}.");
+                        // Locked from the same instant the card becomes visible,
+                        // so the library can never offer the silent file.
+                        PublishFinalize(new FullSessionFinalizeProgress(
+                            finalPath,
+                            Math.Max(1, (MonotonicClock.UtcNow - startUtc).TotalSeconds),
+                            0,
+                            false,
+                            DateTime.UtcNow));
                     }
                     catch (Exception error)
                     {
@@ -4806,6 +4884,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             : config.GameDisplayName;
 
         var snapshots = new List<string>();
+        // Sibling of the final file so the swap below stays a rename rather than
+        // a multi-GB copy, and a dot-folder so MediaProbeService.IsVideoFile
+        // hides it - ffmpeg's output used to be a ".mp4.muxing.mp4" sitting in
+        // the library, which the watcher happily turned into a second card for
+        // the whole mux. Deliberately NOT the ".clypdat-repair-" prefix:
+        // ClipRepairSweep deletes those with no age check and would delete a
+        // live mux out from under ffmpeg.
+        var workFolder = Path.Combine(Path.GetDirectoryName(finalOutputPath) ?? string.Empty, $".clypdat-mux-{Guid.NewGuid():N}");
         try
         {
             var sessionEndUtc = MonotonicClock.UtcNow;
@@ -4842,15 +4928,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None, capturesOverride, AudioSnapshotPurpose.BackgroundArchive)
                 .GetAwaiter().GetResult();
 
-            // Background finalize already moved the video-only file onto the
-            // final path so the session is visible immediately - ffmpeg can't
-            // write its own input, so mux to a sibling temp and swap after.
-            var muxInPlace = string.Equals(tempVideoPath, finalOutputPath, StringComparison.OrdinalIgnoreCase);
-            var muxOutputPath = muxInPlace ? finalOutputPath + ".muxing.mp4" : finalOutputPath;
+            // Staged in both modes. Background finalize has already moved the
+            // video-only file onto the final path and ffmpeg cannot write its
+            // own input; synchronous finalize would otherwise create the final
+            // library path at t=0 and grow it for minutes, which is a card for
+            // a file with no moov atom. Same name inside the folder so ffmpeg
+            // still picks the mp4 muxer from the extension.
+            Directory.CreateDirectory(workFolder);
+            var muxOutputPath = Path.Combine(workFolder, Path.GetFileName(finalOutputPath));
 
             List<string> BuildMuxArgs(string[] videoCodecArgs)
             {
-                var muxArgs = new List<string> { "-y", "-i", tempVideoPath };
+                var muxArgs = new List<string> { "-y", "-progress", "pipe:1", "-nostats", "-i", tempVideoPath };
                 foreach (var track in tracks) muxArgs.AddRange(new[] { "-i", track.Path });
                 muxArgs.AddRange(new[] { "-map", "0:v" });
                 for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
@@ -4908,23 +4997,37 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 (_, "AV1", "qsv") => new[] { "-c:v", "av1_qsv", "-preset", "medium", "-global_quality", "32" },
                 _ => new[] { "-c:v", "copy" }
             };
-            var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(codecArgs), CancellationToken.None).GetAwaiter().GetResult();
-            if (result.ExitCode != 0 && codecArgs[1] != "copy")
+            // ffmpeg emits a progress block roughly twice a second; every one
+            // crosses a process boundary and lands on the UI thread, so only
+            // forward a change once a second.
+            var startedUtc = DateTime.UtcNow;
+            var lastPublishUtc = DateTime.MinValue;
+            IProgress<double> MuxProgress(bool reencoding) => new Progress<double>(seconds =>
+            {
+                var now = DateTime.UtcNow;
+                if (now - lastPublishUtc < TimeSpan.FromSeconds(1)) return;
+                lastPublishUtc = now;
+                PublishFinalize(new FullSessionFinalizeProgress(finalOutputPath, durationSeconds, seconds, reencoding, startedUtc));
+            });
+
+            var reencodes = codecArgs[1] != "copy";
+            var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(codecArgs), MuxProgress(reencodes), CancellationToken.None).GetAwaiter().GetResult();
+            if (result.ExitCode != 0 && reencodes)
             {
                 AppLog.Error($"Full session {config.FullSessionVideoCodec} re-encode failed, retrying as stream copy: {result.Error}");
-                result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(new[] { "-c:v", "copy" }), CancellationToken.None).GetAwaiter().GetResult();
+                // The bar restarts from zero on the retry, so restart its clock
+                // too rather than letting the estimate inherit the failed pass.
+                startedUtc = DateTime.UtcNow;
+                lastPublishUtc = DateTime.MinValue;
+                result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(new[] { "-c:v", "copy" }), MuxProgress(false), CancellationToken.None).GetAwaiter().GetResult();
             }
             if (result.ExitCode != 0)
             {
-                AppLog.Error($"Full session recording final mux failed: {result.Error}{(muxInPlace ? " (video-only session file kept)" : string.Empty)}");
-                if (muxInPlace) AudioCapturePipeline.TryDelete(muxOutputPath);
+                AppLog.Error($"Full session recording final mux failed: {result.Error} (video-only session file kept)");
             }
             else
             {
-                if (muxInPlace)
-                {
-                    File.Move(muxOutputPath, finalOutputPath, overwrite: true);
-                }
+                File.Move(muxOutputPath, finalOutputPath, overwrite: true);
                 ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"Session - {gameDisplayName}", sessionStartWallUtc, CaptureSource: config.CaptureSource));
                 AppLog.Info($"Native full session recording saved: path={finalOutputPath}, codec={config.FullSessionVideoCodec}.");
                 EnforceFullSessionQuota(config);
@@ -4936,6 +5039,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
         finally
         {
+            // The one place every exit route passes through, so a card can
+            // never be left locked - success, failed mux and thrown alike.
+            ClearFinalize(finalOutputPath);
+            // Covers the failed mux, the partial output and the swapped-away
+            // success alike - after the rename the folder is simply empty.
+            try { if (Directory.Exists(workFolder)) Directory.Delete(workFolder, recursive: true); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
             // In-place mode the "temp" IS the final file - never delete it.
             if (!string.Equals(tempVideoPath, finalOutputPath, StringComparison.OrdinalIgnoreCase))
             {

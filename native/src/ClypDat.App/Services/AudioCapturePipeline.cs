@@ -1493,12 +1493,40 @@ public sealed class AudioCapturePipeline : IDisposable
     }
 
     public static async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken)
+        => await RunProcessAsync(fileName, args, null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// When <paramref name="position"/> is supplied the caller is expected to
+    /// have passed "-progress pipe:1 -nostats", and stdout is drained a line at
+    /// a time reporting the output position in seconds instead of being
+    /// buffered to the end.
+    /// </summary>
+    public static async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(
+        string fileName, IEnumerable<string> args, IProgress<double>? position, CancellationToken cancellationToken)
     {
         using var process = StartProcess(fileName, args);
-        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var outputTask = position is null
+            ? process.StandardOutput.ReadToEndAsync(cancellationToken)
+            : ReadPositionAsync(process.StandardOutput, position, cancellationToken);
         var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         return (process.ExitCode, await outputTask, await errorTask);
+    }
+
+    private static async Task<string> ReadPositionAsync(StreamReader stdout, IProgress<double> position, CancellationToken token)
+    {
+        while (await stdout.ReadLineAsync(token).ConfigureAwait(false) is { } line)
+        {
+            // out_time_us is microseconds, and is "N/A" until the first frame
+            // is written.
+            if (!line.StartsWith("out_time_us=", StringComparison.Ordinal)) continue;
+            if (long.TryParse(line.AsSpan("out_time_us=".Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out var microseconds) &&
+                microseconds > 0)
+            {
+                position.Report(microseconds / 1_000_000d);
+            }
+        }
+        return string.Empty;
     }
 
     private static Process StartProcess(string fileName, IEnumerable<string> args)

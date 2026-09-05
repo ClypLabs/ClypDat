@@ -147,6 +147,11 @@ internal static class CaptureWorkerHost
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     Shutdown.Cancel();
                     if (_buffer is not null) await _buffer.StopAsync(CancellationToken.None);
+                    // Returning here ends the worker process, which kills any
+                    // ffmpeg still muxing a session's audio - losing it for
+                    // good. Nothing awaited that task before.
+                    if (_buffer is IFullSessionFinalizeReporter pending)
+                        await pending.WaitForBackgroundFinalizeAsync(TimeSpan.FromMinutes(5));
                     return;
                 default:
                     await ReplyAsync(client, message, new CaptureWorkerAck(false, $"Unknown command '{message.Type}'."), cancellationToken);
@@ -170,6 +175,8 @@ internal static class CaptureWorkerHost
             _config = config;
             _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
             _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
+            if (_buffer is IFullSessionFinalizeReporter finalizes)
+                finalizes.FullSessionFinalizeChanged += (_, active) => _ = SendEventAsync("full-session-finalize", active);
             AttachDetectorFrameSource(_buffer);
             if (_buffer is IReplayCaptureDiagnostics diagnostics)
                 diagnostics.HealthChanged += (_, health) => _ = SendEventAsync("health", health with { Storage = Storage.Health });
@@ -192,7 +199,8 @@ internal static class CaptureWorkerHost
             _buffer?.IsRecording == true,
             ConfigIdentity(_config),
             GetHealth(),
-            DrainUnacknowledgedSaves(UnacknowledgedSaves));
+            DrainUnacknowledgedSaves(UnacknowledgedSaves),
+            NativeReplayBuffer.ActiveFinalizeSnapshot());
         await ReplyAsync(client, message, response, cancellationToken);
     }
 
