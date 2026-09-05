@@ -149,6 +149,10 @@
     <Content Include="..\..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\game-catalog.json" Link="game-catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\game-icons.json" Link="game-icons.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- Banner references the detector matches by appearance; OCR cannot read
+         these games' stylised fonts. Loaded from beside the executable, so the
+         sandboxed detector host finds them too. -->
+    <Content Include="..\..\detector-templates\**\*.*" Link="detector-templates\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\official-game-art.json" Link="official-game-art.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\official-game-art\**\*.png" Link="official-game-art\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>

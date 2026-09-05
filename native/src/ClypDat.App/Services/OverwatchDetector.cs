@@ -2,11 +2,18 @@ using System.Text.RegularExpressions;
 
 namespace ClypDat.App.Services;
 
+/// <summary>A banner recognised by appearance rather than read as text.</summary>
+public sealed record DetectedBanner(string EventId, string Label);
+
 public sealed record OverwatchFrameObservation(
     TimeSpan Timestamp,
     string LeftColumnText,
     string KillFeedText,
-    string TeamKillText);
+    string TeamKillText,
+    IReadOnlyList<DetectedBanner>? BannerHits = null)
+{
+    public IReadOnlyList<DetectedBanner> Banners => BannerHits ?? Array.Empty<DetectedBanner>();
+}
 
 public sealed record OverwatchDetectedEvent(
     string EventId,
@@ -28,31 +35,13 @@ public sealed record OverwatchDetectedEvent(
 /// </summary>
 public sealed partial class OverwatchDetector
 {
-    // Ordered high tier first: a quintuple's own label is on screen alongside
-    // nothing else, but the strip can still carry a stale lower tier mid-fade,
-    // and the bigger streak is the one worth clipping.
-    private static readonly (string Id, string Label, string Phrase)[] StreakTiers =
-    [
-        ("quintuple-kill", "Quintuple Kill", "QUINTUPLE KILL"),
-        ("quadruple-kill", "Quadruple Kill", "QUADRUPLE KILL"),
-        ("triple-kill", "Triple Kill", "TRIPLE KILL"),
-        ("double-kill", "Double Kill", "DOUBLE KILL")
-    ];
+    // One latch per banner event, created as the templates report them, so the
+    // detector needs no list of its own to keep in step with templates.json.
+    private readonly Dictionary<string, PhraseLatch> _banners = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly Dictionary<string, PhraseLatch> _streaks = StreakTiers.ToDictionary(
-        tier => tier.Id,
-        _ => new PhraseLatch("", confirmationFrames: 1, resetFrames: 6),
-        StringComparer.OrdinalIgnoreCase);
-
-    private readonly PhraseLatch _teamKill = new("TEAM KILL", confirmationFrames: 1, resetFrames: 10);
     private readonly PhraseLatch _playOfTheGame = new("PLAY OF THE GAME", confirmationFrames: 2, resetFrames: 10);
     private readonly HashSet<string> _recentEliminations = new(StringComparer.OrdinalIgnoreCase);
     private Queue<string> _eliminationOrder = new();
-
-    public OverwatchDetector()
-    {
-        foreach (var tier in StreakTiers) _streaks[tier.Id] = new PhraseLatch(tier.Phrase, 1, 6);
-    }
 
     /// <summary>
     /// True while the frame is showing somebody else's game: a Play of the Game
@@ -78,21 +67,28 @@ public sealed partial class OverwatchDetector
         {
             // Keep the latches fed so a streak that was on screen when the
             // replay started cannot fire the moment it ends.
-            foreach (var tier in StreakTiers) _streaks[tier.Id].Observe(string.Empty);
-            _teamKill.Observe(string.Empty);
+            foreach (var latch in _banners.Values) latch.Observe(string.Empty);
             _recentEliminations.Clear();
             _eliminationOrder.Clear();
             return events;
         }
 
-        foreach (var tier in StreakTiers)
+        // Banner events arrive already matched by appearance - see
+        // GrayTemplateMatcher for why they cannot be read.
+        foreach (var banner in frame.Banners)
         {
-            if (_streaks[tier.Id].Observe(frame.KillFeedText))
-                events.Add(Create(tier.Id, tier.Label, frame.Timestamp, 0.95));
+            if (!_banners.TryGetValue(banner.EventId, out var latch))
+            {
+                latch = new PhraseLatch(banner.EventId, confirmationFrames: 1, resetFrames: 8);
+                _banners[banner.EventId] = latch;
+            }
         }
-
-        if (_teamKill.Observe(frame.TeamKillText))
-            events.Add(Create("team-kill", "Team Kill", frame.Timestamp, 0.96));
+        foreach (var (eventId, latch) in _banners)
+        {
+            var present = frame.Banners.FirstOrDefault(item => string.Equals(item.EventId, eventId, StringComparison.OrdinalIgnoreCase));
+            if (latch.Observe(present is null ? string.Empty : eventId))
+                events.Add(Create(eventId, present!.Label, frame.Timestamp, 0.95));
+        }
 
         foreach (var row in ParseEliminations(frame.KillFeedText))
         {
@@ -109,8 +105,7 @@ public sealed partial class OverwatchDetector
 
     public void ResetSession()
     {
-        foreach (var tier in StreakTiers) _streaks[tier.Id].Reset();
-        _teamKill.Reset();
+        foreach (var latch in _banners.Values) latch.Reset();
         _playOfTheGame.Reset();
         _recentEliminations.Clear();
         _eliminationOrder = new Queue<string>();
@@ -131,7 +126,7 @@ public sealed partial class OverwatchDetector
             var trimmed = line.Trim();
             if (trimmed.Length == 0) continue;
             if (Contains(trimmed, "SAVED BY")) continue;
-            if (StreakTiers.Any(tier => Contains(trimmed, tier.Phrase))) continue;
+            if (Contains(trimmed, "KILL")) continue;
             var match = EliminationRowRegex().Match(trimmed.ToUpperInvariant());
             if (match.Success) rows.Add($"{match.Groups["name"].Value} {match.Groups["damage"].Value}");
         }

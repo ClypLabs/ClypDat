@@ -6,22 +6,26 @@ namespace ClypDat.App.Tests;
 public sealed class OverwatchDetectorTests
 {
     private static OverwatchFrameObservation Frame(
-        int second, string leftColumn = "", string killFeed = "", string teamKill = "") =>
-        new(TimeSpan.FromSeconds(second), leftColumn, killFeed, teamKill);
+        int second, string leftColumn = "", string killFeed = "", string teamKill = "", params DetectedBanner[] banners) =>
+        new(TimeSpan.FromSeconds(second), leftColumn, killFeed, teamKill, banners);
+
+    private static DetectedBanner Banner(string eventId, string label) => new(eventId, label);
 
     private static string[] Observe(OverwatchDetector detector, OverwatchFrameObservation frame) =>
         detector.Observe(frame).Select(item => item.EventId).ToArray();
 
+    // Windows OCR cannot read these banners at all, so they arrive already
+    // recognised by GrayTemplateMatcher rather than as text.
     [Theory]
-    [InlineData("DOUBLE KILL", "double-kill")]
-    [InlineData("TRIPLE KILL", "triple-kill")]
-    [InlineData("QUADRUPLE KILL", "quadruple-kill")]
-    [InlineData("QUINTUPLE KILL", "quintuple-kill")]
-    public void EachStreakTierFiresOnItsOwnPhrase(string phrase, string expected)
+    [InlineData("double-kill", "Double Kill")]
+    [InlineData("triple-kill", "Triple Kill")]
+    [InlineData("quadruple-kill", "Quadruple Kill")]
+    [InlineData("quintuple-kill", "Quintuple Kill")]
+    public void EachStreakTierFiresFromItsBannerMatch(string eventId, string label)
     {
         var detector = new OverwatchDetector();
 
-        Assert.Contains(expected, Observe(detector, Frame(1, killFeed: phrase)));
+        Assert.Contains(eventId, Observe(detector, Frame(1, banners: Banner(eventId, label))));
     }
 
     // The banner sits on screen for many sampled frames; without the latch one
@@ -31,9 +35,10 @@ public sealed class OverwatchDetectorTests
     {
         var detector = new OverwatchDetector();
 
-        Assert.Contains("triple-kill", Observe(detector, Frame(1, killFeed: "TRIPLE KILL")));
-        Assert.Empty(Observe(detector, Frame(2, killFeed: "TRIPLE KILL")));
-        Assert.Empty(Observe(detector, Frame(3, killFeed: "TRIPLE KILL")));
+        var triple = Banner("triple-kill", "Triple Kill");
+        Assert.Contains("triple-kill", Observe(detector, Frame(1, banners: triple)));
+        Assert.Empty(Observe(detector, Frame(2, banners: triple)));
+        Assert.Empty(Observe(detector, Frame(3, banners: triple)));
     }
 
     [Fact]
@@ -41,7 +46,7 @@ public sealed class OverwatchDetectorTests
     {
         var detector = new OverwatchDetector();
 
-        Assert.Contains("team-kill", Observe(detector, Frame(1, teamKill: "TEAM KILL!")));
+        Assert.Contains("team-kill", Observe(detector, Frame(1, banners: Banner("team-kill", "Team Kill"))));
     }
 
     // The whole point of the left column: during a Play of the Game the HUD
@@ -55,8 +60,9 @@ public sealed class OverwatchDetectorTests
 
         // The POTG latch wants two consecutive frames before it commits, so a
         // single OCR misread cannot invent a clip.
-        Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME GOWONSS", killFeed: "QUADRUPLE KILL"));
-        var events = Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME GOWONSS", killFeed: "QUADRUPLE KILL"));
+        var quad = Banner("quadruple-kill", "Quadruple Kill");
+        Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME GOWONSS", banners: quad));
+        var events = Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME GOWONSS", banners: quad));
 
         Assert.Contains("play-of-the-game", events);
         Assert.DoesNotContain("quadruple-kill", events);
@@ -92,10 +98,11 @@ public sealed class OverwatchDetectorTests
     {
         var detector = new OverwatchDetector();
 
-        Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME", killFeed: "TRIPLE KILL"));
-        Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME", killFeed: "TRIPLE KILL"));
+        var triple = Banner("triple-kill", "Triple Kill");
+        Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME", banners: triple));
+        Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME", banners: triple));
 
-        Assert.Empty(Observe(detector, Frame(3, killFeed: string.Empty)));
+        Assert.Empty(Observe(detector, Frame(3)));
     }
 
     [Fact]

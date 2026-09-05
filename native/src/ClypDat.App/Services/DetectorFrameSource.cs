@@ -58,7 +58,7 @@ public static class DetectorRegions
     private static readonly DetectorRegionSet Fortnite = new(
         new NormalizedRegion(0.01, 0.49, 0.33, 0.12),
         new NormalizedRegion(0.42, 0.66, 0.19, 0.16),
-        new NormalizedRegion(0.31, 0.005, 0.36, 0.26));
+        new NormalizedRegion(0.30, 0.005, 0.39, 0.30));
 
     public static DetectorRegionSet? ForGame(string? gameId) => gameId?.ToLowerInvariant() switch
     {

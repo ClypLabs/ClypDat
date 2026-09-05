@@ -1,0 +1,43 @@
+{
+  "_comment": [
+    "Banner templates matched by appearance, because Windows OCR cannot read",
+    "these games' stylised display fonts at all - 'TRIPLE KILL' reads back as",
+    "'&fR/PlfWlEo', and 'TEAM KILL!' and 'VICTORY ROYALE' as nothing. Upscaling,",
+    "contrast and inversion do not help. Correlating against a reference does:",
+    "a matching banner scores ~0.97, a different banner in the same place ~0.50,",
+    "an empty HUD ~0.14.",
+    "",
+    "'region' is [x, y, width, height] as fractions of the FULL 1920x1080 frame -",
+    "the same coordinate system as DetectorRegions - and is converted to a crop",
+    "inside its slot at load. 'slot' is which of the three HUD crops it lives in.",
+    "The region is a SEARCH BAND, deliberately taller than the banner: Fortnite",
+    "stacks these, so 'ELIMINATION!' alone sits ~20px lower than 'DOUBLE ELIM!'",
+    "with an 'ENEMY TEAM WIPED!' above it. The matcher slides the template down",
+    "the band and takes the best score.",
+    "",
+    "Templates are greyscale so they compare directly against the capture's",
+    "luminance plane, and are rescaled at match time, so a 1080p reference still",
+    "matches a 1440p capture. Capture them with ffmpeg's -accurate_seek, or fast",
+    "seek lands on a neighbouring keyframe and you bank the wrong banner.",
+    "",
+    "Plain HUD text - Overwatch's elimination rows, Fortnite's kill feed - is",
+    "still read by OCR. Only the stylised banners are matched this way."
+  ],
+  "games": {
+    "overwatch": [
+      { "eventId": "quintuple-kill", "label": "Quintuple Kill", "slot": 1, "region": [0.4521, 0.6852, 0.1563, 0.0741], "threshold": 0.70, "file": "overwatch/quintuple-kill.png" },
+      { "eventId": "quadruple-kill", "label": "Quadruple Kill", "slot": 1, "region": [0.4521, 0.6852, 0.1563, 0.0741], "threshold": 0.70, "file": "overwatch/quadruple-kill.png" },
+      { "eventId": "triple-kill", "label": "Triple Kill", "slot": 1, "region": [0.4521, 0.6852, 0.1563, 0.0741], "threshold": 0.70, "file": "overwatch/triple-kill.png" },
+      { "eventId": "double-kill", "label": "Double Kill", "slot": 1, "region": [0.4521, 0.6852, 0.1563, 0.0741], "threshold": 0.70, "file": "overwatch/double-kill.png" },
+      { "eventId": "team-kill", "label": "Team Kill", "slot": 2, "region": [0.4557, 0.2037, 0.1094, 0.0509], "threshold": 0.65, "file": "overwatch/team-kill.png" }
+    ],
+    "fortnite": [
+      { "eventId": "enemy-team-wiped", "label": "Enemy Team Wiped", "slot": 1, "region": [0.4453, 0.6685, 0.1406, 0.0389], "threshold": 0.70, "file": "fortnite/enemy-team-wiped.png" },
+      { "eventId": "multi-elimination", "label": "Multi-Elimination", "slot": 1, "region": [0.4490, 0.7130, 0.1146, 0.0630], "threshold": 0.70, "file": "fortnite/multi-elimination.png" },
+      { "eventId": "double-elimination", "label": "Double Elimination", "slot": 1, "region": [0.4490, 0.7130, 0.1146, 0.0630], "threshold": 0.70, "file": "fortnite/double-elimination.png" },
+      { "eventId": "eliminated-player", "label": "Eliminated Player", "slot": 1, "region": [0.4490, 0.7130, 0.1146, 0.0630], "threshold": 0.72, "file": "fortnite/elimination.png" },
+      { "eventId": "victory-royale", "label": "Victory Royale", "slot": 2, "region": [0.3125, 0.0833, 0.3542, 0.1944], "threshold": 0.65, "file": "fortnite/victory-royale.png" },
+      { "eventId": "got-eliminated", "label": "Got Eliminated", "slot": 2, "region": [0.4453, 0.0074, 0.1146, 0.0370], "threshold": 0.65, "file": "fortnite/got-eliminated.png" }
+    ]
+  }
+}

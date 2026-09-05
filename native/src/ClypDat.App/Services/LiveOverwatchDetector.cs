@@ -25,6 +25,8 @@ internal sealed class LiveOverwatchDetector : ILiveGameDetector
         });
     private readonly WindowsOcrFrameReader _ocr = new();
     private readonly OverwatchDetector _detector = new();
+    // Loaded once: the banners cannot be read, only recognised.
+    private IReadOnlyList<LoadedTemplate> _templates = Array.Empty<LoadedTemplate>();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Task _worker;
     private HashSet<string> _enabledEvents = new(StringComparer.OrdinalIgnoreCase);
@@ -44,7 +46,13 @@ internal sealed class LiveOverwatchDetector : ILiveGameDetector
             while (_frames.Reader.TryRead(out _)) { }
             _detector.ResetSession();
         }
-        StatusChanged?.Invoke(this, enabled ? "Watching" : "Disabled");
+        if (enabled && _templates.Count == 0)
+            _templates = DetectorTemplates.Load("overwatch", DetectorRegions.ForGame("overwatch")!);
+        StatusChanged?.Invoke(this, !enabled
+            ? "Disabled"
+            : _templates.Count == 0
+                ? "Watching — streak banners off, templates missing"
+                : "Watching");
     }
 
     public void Offer(DetectorFrameSnapshot frame)
@@ -64,8 +72,16 @@ internal sealed class LiveOverwatchDetector : ILiveGameDetector
                     var killFeed = await _ocr.ReadTextAsync(frame.Second).ConfigureAwait(false);
                     var teamKill = await _ocr.ReadTextAsync(frame.Third).ConfigureAwait(false);
                     var timestamp = TimeSpan.FromTicks(frame.CapturedUtc.Ticks);
+                    // Only the strongest hit per slot: the streak templates all
+                    // share one band, and a quintuple correlates against the
+                    // quadruple reference too.
+                    var banners = DetectorTemplates.Match(_templates, frame)
+                        .GroupBy(hit => hit.Template.Slot)
+                        .Select(group => group.First())
+                        .Select(hit => new DetectedBanner(hit.Template.EventId, hit.Template.Label))
+                        .ToArray();
                     foreach (var item in _detector.Observe(new OverwatchFrameObservation(
-                                 timestamp, leftColumn, killFeed, teamKill)))
+                                 timestamp, leftColumn, killFeed, teamKill, banners)))
                     {
                         if (!_enabled || !_enabledEvents.Contains(item.EventId)) continue;
                         // Play of the Game needs a long lead: the banner only
