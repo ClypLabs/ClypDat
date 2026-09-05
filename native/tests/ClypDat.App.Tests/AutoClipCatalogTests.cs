@@ -42,8 +42,12 @@ public sealed class AutoClipCatalogTests
         // progression popups rather than gameplay, or had no distinct moment
         // of their own to catch.
         Assert.All(
-            new[] { "top-3", "impossible-shot", "match-complete", "bounty-complete", "quest-complete" },
+            new[] { "top-3", "impossible-shot", "match-complete", "bounty-complete", "quest-complete", "headshot" },
             id => Assert.DoesNotContain(fortnite.Events, item => item.Id == id));
+        // CS2 keeps its own headshot event - it reads one from the game state
+        // integration rather than off the screen, so the Fortnite removal is
+        // about detectability, not the event being unwanted everywhere.
+        Assert.Contains(AutoClipCatalog.Get("cs2").Events, item => item.Id == "headshot");
 
         var helldivers = AutoClipCatalog.Get("helldivers2");
         Assert.False(helldivers.Events.Single(item => item.Id == "eliminated").DefaultEnabled);
