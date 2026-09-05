@@ -3855,7 +3855,6 @@ public sealed partial class MainWindow : Window
             title = "Clip Saving…";
             detail = text.Replace("Saving ", string.Empty, StringComparison.OrdinalIgnoreCase).Replace(" Clip…", string.Empty, StringComparison.OrdinalIgnoreCase);
         }
-        if (!string.IsNullOrWhiteSpace(hotkey)) detail = string.IsNullOrWhiteSpace(detail) ? $"{hotkey} {hotkeyHint}" : $"{detail} · {hotkey} {hotkeyHint}";
 
         var target = ClipOverlayTargeting.ResolvePrimary();
         AppLog.Info($"Clip overlay publish: id={workflowId}, trigger={trigger}, stage={(saveCompletion ? 1 : 0)}, monitor={target.DeviceName}, reason={target.ReasonLabel}.");
@@ -3871,7 +3870,9 @@ public sealed partial class MainWindow : Window
             target,
             ClipOverlayPlacementParser.Parse(position),
             ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true,
-            ShowVisual: showVisual));
+            ShowVisual: showVisual,
+            Hotkey: string.IsNullOrWhiteSpace(hotkey) ? null : hotkey,
+            HotkeyHint: hotkeyHint));
     }
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)

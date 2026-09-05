@@ -49,7 +49,9 @@ internal sealed record ClipOverlayEvent(
     ClipOverlayPlacement Placement,
     bool ExcludeFromCapture,
     bool IsRecovered = false,
-    bool ShowVisual = true);
+    bool ShowVisual = true,
+    string? Hotkey = null,
+    string? HotkeyHint = null);
 
 internal sealed record ClipOverlayPresentation(
     long Generation,
