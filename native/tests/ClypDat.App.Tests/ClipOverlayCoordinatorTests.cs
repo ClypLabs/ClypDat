@@ -12,7 +12,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void CompletionDuringEntry_ReplacesImmediately_AndOldTimerCannotResurrect()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch);
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch, play => play());
         var save = Guid.NewGuid();
         coordinator.Publish(Event(save, 0, ClipOverlayKind.Saving, 80, _epoch));
         Assert.Contains(TimeSpan.FromSeconds(3), scheduler.Delays);
@@ -57,7 +57,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void GameHintHasReadingTimeButSaveStillReplacesItImmediately()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch);
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch, play => play());
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.GameStarted, 40, _epoch));
         Assert.Contains(TimeSpan.FromSeconds(5), scheduler.Delays);
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Saving, 80, _epoch));
@@ -70,7 +70,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void DuplicateRegressiveAndRecoveredEventsAreSuppressed_ButLiveSoundIsIndependent()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch);
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch, play => play());
         var save = Guid.NewGuid();
         coordinator.Publish(Event(save, 1, ClipOverlayKind.Saved, 10, _epoch));
         coordinator.Publish(Event(save, 1, ClipOverlayKind.Saved, 10, _epoch));

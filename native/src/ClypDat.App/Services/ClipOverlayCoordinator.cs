@@ -116,6 +116,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
     private ClipOverlayEvent? _visible;
     private IDisposable? _dismissal;
     private IDisposable? _presentationTimeout;
+    private readonly Action<Action> _dispatchSound;
     private long _generation;
     private bool _disposed;
 
@@ -123,12 +124,16 @@ internal sealed class ClipOverlayCoordinator : IDisposable
         IClipOverlaySurface surface,
         IClipOverlayScheduler scheduler,
         Action playSuccessSound,
-        Func<DateTime>? utcNow = null)
+        Func<DateTime>? utcNow = null,
+        Action<Action>? dispatchSound = null)
     {
         _surface = surface;
         _scheduler = scheduler;
         _playSuccessSound = playSuccessSound;
         _utcNow = utcNow ?? (() => DateTime.UtcNow);
+        // Off the caller thread by default; tests hand in an inline dispatcher
+        // so a chime is observable the moment Publish returns.
+        _dispatchSound = dispatchSound ?? (play => ThreadPool.QueueUserWorkItem(_ => play()));
     }
 
     public void Publish(ClipOverlayEvent notification)
@@ -178,8 +183,11 @@ internal sealed class ClipOverlayCoordinator : IDisposable
         Finished:;
         }
 
-        if (playSound) _playSuccessSound();
+        // Pixels first. The chime opens a wave device, and doing that on the
+        // caller's thread - which is the Avalonia UI thread - used to sit
+        // directly in front of the card rasterize.
         if (presentation is not null) _surface.Publish(presentation, PresentationCompleted);
+        if (playSound) _dispatchSound(_playSuccessSound);
     }
 
     private void PresentationCompleted(ClipOverlayPresentationResult result)
@@ -267,10 +275,40 @@ internal static class ClipOverlayLayout
     {
         var final = Position(target, placement, width, height);
         var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
-        var travel = (int)Math.Round(24 * target.Scaling * (1 - Math.Clamp(progress, 0, 1)));
-        var area = target.WorkArea;
-        var maximumX = Math.Max(area.X, area.Right - width);
-        var x = Math.Clamp(final.X + travel * (left ? 1 : -1), area.X, maximumX);
+        var travel = (int)Math.Round(Travel(target, width) * (1 - Math.Clamp(progress, 0, 1)));
+        var x = final.X + travel * (left ? 1 : -1);
         return new PixelPoint(x, final.Y);
     }
+
+    // The compositor path cannot move the window per frame - DirectComposition
+    // animates content inside a window that has to stay where it is for the
+    // whole notification. So the window is made `travel` wider than the card
+    // and the card slides within it, ending flush against the screen edge.
+    // The extra width is taken from the inward side, so the window still fits
+    // inside the work area exactly as the moving one did.
+    public static ClipOverlayFrameLayout Frame(ClipOverlayTarget target, ClipOverlayPlacement placement, int width, int height)
+    {
+        var final = Position(target, placement, width, height);
+        var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
+        var travel = (int)Math.Round(Travel(target, width));
+        var window = new PixelRect(left ? final.X : final.X - travel, final.Y, width + travel, height);
+        return left
+            ? new ClipOverlayFrameLayout(window, 0, travel)
+            : new ClipOverlayFrameLayout(window, travel, 0);
+    }
+
+    // The card slides inward and settles against the edge, and it never leaves
+    // the monitor: on a work area too narrow to hold both the card and the
+    // travel, the travel is what gives way.
+    private static double Travel(ClipOverlayTarget target, int width)
+    {
+        var area = target.WorkArea;
+        var room = Math.Max(0, Math.Max(area.X, area.Right - width) - area.X);
+        return Math.Min(24 * target.Scaling, room);
+    }
 }
+
+// Where the overlay window sits for the life of one notification, plus the two
+// horizontal offsets the card animates between inside it: `Rest` is flush
+// against the screen edge, `Hidden` is one travel inward.
+internal readonly record struct ClipOverlayFrameLayout(PixelRect Window, int RestOffsetX, int HiddenOffsetX);

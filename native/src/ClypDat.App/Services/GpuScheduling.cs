@@ -51,6 +51,13 @@ internal static class GpuScheduling
     private const int MaxGpuThreadPriority = 7;
     internal const int CaptureDevicePriority = 1;
 
+    // The clip overlay is the other side of the same argument, in the UI
+    // process. Its GPU work is one small upload per notification and then
+    // nothing, but it is the most latency-visible thing the app draws: a badge
+    // that arrives after the moment it is describing is worse than no badge.
+    // Cutting ahead of a game costs that game nothing measurable at this size.
+    internal const int OverlayDevicePriority = 7;
+
     private static int _processPriorityRaised;
 
     [DllImport("gdi32.dll")]
@@ -81,8 +88,10 @@ internal static class GpuScheduling
         _ => "HIGH"
     };
 
-    internal static int ResolveDevicePriority(string? value) =>
-        int.TryParse(value, out var parsed) && parsed is >= -7 and <= 7 ? parsed : CaptureDevicePriority;
+    internal static int ResolveDevicePriority(string? value) => ResolveDevicePriority(value, CaptureDevicePriority);
+
+    internal static int ResolveDevicePriority(string? value, int fallback) =>
+        int.TryParse(value, out var parsed) && parsed is >= -7 and <= 7 ? parsed : fallback;
 
     // Kept for existing callers/tests that were named before the two knobs
     // were separated.
@@ -165,6 +174,9 @@ internal static class GpuScheduling
     // GetParent = 3-6): GetAdapter=7, CreateSurface=8, QueryResourceResidency=9,
     // SetGPUThreadPriority=10, GetGPUThreadPriority=11.
     public static int? TryRaiseDeviceGpuPriority(nint devicePointer, string role)
+        => TryRaiseDeviceGpuPriority(devicePointer, role, "Native capture", CaptureDevicePriority, "CLYPDAT_GPU_DEVICE_PRIORITY");
+
+    public static int? TryRaiseDeviceGpuPriority(nint devicePointer, string role, string subsystem, int fallback, string environmentVariable)
     {
         var dxgiDeviceIid = new Guid("54ec77fa-1377-44e6-8c32-88fd5f44c84c");
         var dxgiDevicePtr = nint.Zero;
@@ -173,14 +185,14 @@ internal static class GpuScheduling
             var hr = Marshal.QueryInterface(devicePointer, in dxgiDeviceIid, out dxgiDevicePtr);
             if (hr != 0 || dxgiDevicePtr == nint.Zero)
             {
-                AppLog.Info($"Native capture: {role} D3D11 device does not expose IDXGIDevice (hr=0x{hr:X8}); GPU thread priority remains default.");
+                AppLog.Info($"{subsystem}: {role} D3D11 device does not expose IDXGIDevice (hr=0x{hr:X8}); GPU thread priority remains default.");
                 return null;
             }
 
             var vtable = Marshal.ReadIntPtr(dxgiDevicePtr, 0);
             var setPriorityPtr = Marshal.ReadIntPtr(vtable, 10 * nint.Size);
             var setPriority = Marshal.GetDelegateForFunctionPointer<SetGpuThreadPriorityDelegate>(setPriorityPtr);
-            var requested = ResolveDevicePriority(Environment.GetEnvironmentVariable("CLYPDAT_GPU_DEVICE_PRIORITY"));
+            var requested = ResolveDevicePriority(Environment.GetEnvironmentVariable(environmentVariable), fallback);
             var result = setPriority(dxgiDevicePtr, requested);
             if (result == 0)
             {
@@ -189,21 +201,21 @@ internal static class GpuScheduling
                 var readBackResult = getPriority(dxgiDevicePtr, out var applied);
                 if (readBackResult == 0)
                 {
-                    AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority requested={requested}, applied={applied}.");
+                    AppLog.Info($"{subsystem}: {role} D3D11 device GPU thread priority requested={requested}, applied={applied}.");
                     return applied;
                 }
-                AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority set to {requested}; read-back refused (hr=0x{readBackResult:X8}).");
+                AppLog.Info($"{subsystem}: {role} D3D11 device GPU thread priority set to {requested}; read-back refused (hr=0x{readBackResult:X8}).");
                 return requested;
             }
             else
             {
-                AppLog.Info($"Native capture: {role} D3D11 device GPU thread priority refused (hr=0x{result:X8}); continuing at default.");
+                AppLog.Info($"{subsystem}: {role} D3D11 device GPU thread priority refused (hr=0x{result:X8}); continuing at default.");
                 return null;
             }
         }
         catch (Exception error)
         {
-            AppLog.Info($"Native capture: could not set {role} D3D11 device GPU thread priority (non-fatal): {error.Message}");
+            AppLog.Info($"{subsystem}: could not set {role} D3D11 device GPU thread priority (non-fatal): {error.Message}");
             return null;
         }
         finally
