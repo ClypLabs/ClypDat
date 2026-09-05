@@ -14,6 +14,16 @@ internal sealed record DetectorHostMessage(string Type, JsonElement Payload);
 internal static class DetectorHostWire
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Payloads MUST be read back with this rather than JsonElement.Deserialize,
+    /// which defaults to case-sensitive matching. WriteAsync serializes with web
+    /// defaults, so a "gameId" on the wire silently failed to bind to GameId and
+    /// every field arrived at its default - an empty policy on the host side and
+    /// an empty event on the client side.
+    /// </summary>
+    public static T? Deserialize<T>(JsonElement payload) => payload.Deserialize<T>(JsonOptions);
+
     public static async Task WriteAsync(Stream stream, string type, object payload, CancellationToken token)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(new { version = DetectorHostProtocol.Version, type, payload }, JsonOptions);
@@ -206,7 +216,7 @@ internal sealed class DetectorHostClient : IAsyncDisposable
         {
             while (!_shutdown.IsCancellationRequested && await DetectorHostWire.ReadAsync(pipe, _shutdown.Token).ConfigureAwait(false) is { } message)
             {
-                if (message.Type == "detected" && message.Payload.Deserialize<AutoClipDetectorEvent>() is { } detected)
+                if (message.Type == "detected" && DetectorHostWire.Deserialize<AutoClipDetectorEvent>(message.Payload) is { } detected)
                     Detected?.Invoke(this, detected);
                 else if (message.Type == "status") StatusChanged?.Invoke(this, message.Payload.GetString() ?? "Degraded");
             }
@@ -287,7 +297,7 @@ internal static class DetectorHostRuntime
             switch (message.Type)
             {
                 case "policy":
-                    var policy = message.Payload.Deserialize<DetectorHostPolicy>() ?? throw new InvalidDataException("Detector policy is invalid.");
+                    var policy = DetectorHostWire.Deserialize<DetectorHostPolicy>(message.Payload) ?? throw new InvalidDataException("Detector policy is invalid.");
                     if (detector is not null) await detector.DisposeAsync().ConfigureAwait(false);
                     detector = CreateDetector(policy.GameId);
                     if (detector is null)
