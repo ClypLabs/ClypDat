@@ -62,7 +62,11 @@ public sealed class TemplateMatchProbeTests
     // the live detector does, match, and check the right banner wins. These are
     // the numbers that justify the thresholds in templates.json.
     [Theory]
-    [InlineData("overwatch", "ow-double.png", "double-kill")]
+    // A DIFFERENT double kill from the one the template was cut from - a
+    // self-match proves nothing, and using one is how a broken double-kill
+    // template scored 1.000 while never firing in game.
+    [InlineData("overwatch", "ow-double2.png", "double-kill")]
+    [InlineData("overwatch", "ow-double3.png", "double-kill")]
     [InlineData("overwatch", "ow-triple.png", "triple-kill")]
     [InlineData("overwatch", "ow-quintuple.png", "quintuple-kill")]
     [InlineData("overwatch", "ow-teamkill.png", "team-kill")]
