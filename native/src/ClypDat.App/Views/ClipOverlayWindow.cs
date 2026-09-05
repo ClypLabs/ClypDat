@@ -18,7 +18,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
 {
     private const int TimerId = 1;
     private const uint WmAppPublish = 0x8001, WmAppDismiss = 0x8002, WmClose = 0x0010, WmDestroy = 0x0002, WmTimer = 0x0113;
-    private const int WsExLayered = 0x00080000, WsExTransparent = 0x20, WsExToolWindow = 0x80, WsExNoActivate = 0x08000000, WsExNoRedirectionBitmap = 0x00200000, GwlExStyle = -20;
+    private const int WsExTopmost = 0x00000008, WsExLayered = 0x00080000, WsExTransparent = 0x20, WsExToolWindow = 0x80, WsExNoActivate = 0x08000000, WsExNoRedirectionBitmap = 0x00200000, GwlExStyle = -20;
     private const uint WsPopup = 0x80000000, WdaExcludeFromCapture = 0x11, SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010, SwpShowWindow = 0x0040, SwpFrameChanged = 0x0020;
     private static readonly nint HwndTopmost = new(-1);
     private static readonly ConcurrentDictionary<nint, NativeClipOverlaySurface> Instances = new();
@@ -90,7 +90,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         try
         {
             RegisterWindowClass();
-            _window = CreateWindowEx(WsExNoRedirectionBitmap | WsExTransparent | WsExToolWindow | WsExNoActivate, ClassName, string.Empty, WsPopup, -32000, -32000, 1, 1, 0, 0, GetModuleHandle(null), 0);
+            _window = CreateWindowEx(WsExTopmost | WsExNoRedirectionBitmap | WsExTransparent | WsExToolWindow | WsExNoActivate, ClassName, string.Empty, WsPopup, -32000, -32000, 1, 1, 0, 0, GetModuleHandle(null), 0);
             if (_window == 0) throw new InvalidOperationException($"Could not create clip overlay window ({Marshal.GetLastWin32Error()}).");
             Instances[_window] = this;
             CreatePresenter();
