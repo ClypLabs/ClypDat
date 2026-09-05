@@ -3820,27 +3820,6 @@ public sealed partial class MainWindow : Window
         while (_uiOwnedSaveOrder.Count > 256) _uiOwnedSaveIds.TryRemove(_uiOwnedSaveOrder.Dequeue(), out _);
     }
 
-    // What is actually being recorded, read off the live replay config rather
-    // than off raw settings - the config is where "Desktop capture, but
-    // auto-switched to Game Capture because a game was detected" has already
-    // been resolved, so the badge follows what is in the clip.
-    private ClipOverlayTargetInputs CurrentClipOverlayTargetInputs()
-    {
-        var config = _activeReplayConfigSnapshot ?? _replayConfigSnapshot;
-        if (config is not null)
-        {
-            return new ClipOverlayTargetInputs(config.CaptureSource, config.CaptureMonitorDeviceName, (nint)config.GameWindowHandle);
-        }
-
-        // Buffer off, so nothing is being captured: fall back to what the user
-        // configured, plus whatever game is detected.
-        var settings = ViewModel?.Settings;
-        return new ClipOverlayTargetInputs(
-            settings?.ReplayCaptureSource ?? "Desktop",
-            settings?.ReplayDesktopMonitorDeviceName ?? string.Empty,
-            ViewModel?.ActiveGameDetection.WindowHandle ?? IntPtr.Zero);
-    }
-
     private void ShowClipOverlay(string trigger, string position, string text, bool playSound, bool saveStart = false, bool saveCompletion = false, string? hotkey = null, string hotkeyHint = "", Guid? saveId = null, DateTime? requestedUtc = null, bool showVisual = true)
     {
         var now = DateTime.UtcNow;
@@ -3878,7 +3857,7 @@ public sealed partial class MainWindow : Window
         }
         if (!string.IsNullOrWhiteSpace(hotkey)) detail = string.IsNullOrWhiteSpace(detail) ? $"{hotkey} {hotkeyHint}" : $"{detail} · {hotkey} {hotkeyHint}";
 
-        var target = ClipOverlayTargeting.Resolve(CurrentClipOverlayTargetInputs());
+        var target = ClipOverlayTargeting.ResolvePrimary();
         AppLog.Info($"Clip overlay publish: id={workflowId}, trigger={trigger}, stage={(saveCompletion ? 1 : 0)}, monitor={target.DeviceName}, reason={target.ReasonLabel}.");
         ClipNotifications.Publish(new ClipOverlayEvent(
             workflowId,

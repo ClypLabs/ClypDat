@@ -105,8 +105,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
     private readonly Action _playSuccessSound;
     private readonly Func<DateTime> _utcNow;
     private readonly Dictionary<Guid, int> _workflowStages = new();
-    private readonly Dictionary<Guid, ClipOverlayTarget> _workflowTargets = new();
-    private readonly Queue<Guid> _workflowOrder = new();
+    private readonly Queue<Guid> _workflowStageOrder = new();
     private readonly HashSet<Guid> _soundedSaves = new();
     private readonly Queue<Guid> _soundOrder = new();
     private ClipOverlayEvent? _visible;
@@ -150,26 +149,18 @@ internal sealed class ClipOverlayCoordinator : IDisposable
             if (_workflowStages.TryGetValue(notification.WorkflowId, out var lastStage) && notification.Stage <= lastStage)
                 goto Finished;
 
-            if (_workflowTargets.TryGetValue(notification.WorkflowId, out var workflowTarget))
-                notification = notification with { Target = workflowTarget };
-            else
-            {
-                _workflowTargets[notification.WorkflowId] = notification.Target;
-                _workflowOrder.Enqueue(notification.WorkflowId);
-                while (_workflowOrder.Count > SoundHistoryLimit)
-                {
-                    var expired = _workflowOrder.Dequeue();
-                    _workflowTargets.Remove(expired);
-                    _workflowStages.Remove(expired);
-                }
-            }
-
             if (_visible is { } current && current.WorkflowId != notification.WorkflowId)
             {
                 if (notification.Priority < current.Priority) goto Finished;
                 if (notification.Priority == current.Priority && notification.RequestedUtc <= current.RequestedUtc) goto Finished;
             }
 
+            if (!_workflowStages.ContainsKey(notification.WorkflowId))
+            {
+                _workflowStageOrder.Enqueue(notification.WorkflowId);
+                while (_workflowStageOrder.Count > SoundHistoryLimit)
+                    _workflowStages.Remove(_workflowStageOrder.Dequeue());
+            }
             _workflowStages[notification.WorkflowId] = notification.Stage;
             _visible = notification;
             var generation = ++_generation;
@@ -228,5 +219,16 @@ internal static class ClipOverlayLayout
             _ => area.Y + verticalInset
         };
         return new PixelPoint(x, y);
+    }
+
+    public static PixelPoint AnimatedPosition(ClipOverlayTarget target, ClipOverlayPlacement placement, int width, int height, double progress)
+    {
+        var final = Position(target, placement, width, height);
+        var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
+        var travel = (int)Math.Round(24 * target.Scaling * (1 - Math.Clamp(progress, 0, 1)));
+        var area = target.WorkArea;
+        var maximumX = Math.Max(area.X, area.Right - width);
+        var x = Math.Clamp(final.X + travel * (left ? 1 : -1), area.X, maximumX);
+        return new PixelPoint(x, final.Y);
     }
 }

@@ -174,10 +174,8 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         if (_current is null || _frame is null || _presenter is null) return;
         var target = _current.Event.Target;
         var placement = _current.Event.Placement;
-        var final = ClipOverlayLayout.Position(target, placement, _width, _height);
-        var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
-        var offset = (int)Math.Round(24 * target.Scaling * (1 - progress)) * (left ? -1 : 1);
-        var destination = new PointNative(final.X + offset, final.Y);
+        var position = ClipOverlayLayout.AnimatedPosition(target, placement, _width, _height, progress);
+        var destination = new PointNative(position.X, position.Y);
         try
         {
             _presenter.Present(_frame, destination, _width, _height, progress, frameChanged);

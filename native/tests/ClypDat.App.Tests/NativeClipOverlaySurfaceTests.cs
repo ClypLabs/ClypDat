@@ -49,12 +49,38 @@ public sealed class NativeClipOverlaySurfaceTests
         Assert.Equal(foreground, GetForegroundWindow());
     }
 
-    private static ClipOverlayPresentation Presentation(long generation, bool excluded)
+    [Fact]
+    public void AnimationDestinationsStayInsideTargetWorkArea()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var presenter = new RecordingPresenter();
+        using var surface = new NativeClipOverlaySurface(
+            _ => new ClipOverlayFrame(390, 87, new byte[390 * 87 * 4]),
+            _ => presenter);
+        var target = new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 3840, 2160), new PixelRect(0, 0, 3840, 2080), 1.5, ClipOverlayTargetReason.Primary);
+        var final = ClipOverlayLayout.Position(target, ClipOverlayPlacement.TopRight, 390, 87);
+
+        surface.Publish(Presentation(1, true, target));
+        Assert.True(SpinWait.SpinUntil(() => presenter.Frames.Any(frame => frame.Opacity >= 0.999), 1000));
+        surface.Dismiss(1);
+        Assert.True(SpinWait.SpinUntil(() => presenter.HideCount == 1, 1000));
+
+        var frames = presenter.Frames;
+        Assert.Contains(frames, frame => frame.Destination.X < final.X);
+        Assert.Contains(frames, frame => frame.Destination.X == final.X && frame.Opacity >= 0.999);
+        Assert.All(frames, frame =>
+        {
+            Assert.InRange(frame.Destination.X, target.WorkArea.X, target.WorkArea.Right - frame.Width);
+            Assert.InRange(frame.Destination.Y, target.WorkArea.Y, target.WorkArea.Bottom - frame.Height);
+        });
+    }
+
+    private static ClipOverlayPresentation Presentation(long generation, bool excluded, ClipOverlayTarget? target = null)
     {
         var now = DateTime.UtcNow;
         return new ClipOverlayPresentation(generation, new ClipOverlayEvent(
             Guid.NewGuid(), 0, now, now, 30, ClipOverlayKind.Standalone, "Clip Saved", null,
-            new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040), 1, ClipOverlayTargetReason.Primary),
+            target ?? new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040), 1, ClipOverlayTargetReason.Primary),
             ClipOverlayPlacement.TopRight, excluded));
     }
 
@@ -123,6 +149,27 @@ public sealed class NativeClipOverlaySurfaceTests
 
         public void Dispose() => DestroyWindow(Handle);
     }
+
+    private sealed class RecordingPresenter : NativeClipOverlaySurface.INativeClipOverlayPresenter
+    {
+        private readonly object _gate = new();
+        private readonly List<PresentedFrame> _frames = new();
+        private int _hideCount;
+
+        public string Name => "recording";
+        public IReadOnlyList<PresentedFrame> Frames { get { lock (_gate) return _frames.ToArray(); } }
+        public int HideCount => Volatile.Read(ref _hideCount);
+
+        public void Present(ClipOverlayFrame frame, NativeClipOverlaySurface.PointNative destination, int width, int height, double opacity, bool frameChanged)
+        {
+            lock (_gate) _frames.Add(new PresentedFrame(destination, width, height, opacity));
+        }
+
+        public void Hide() => Interlocked.Increment(ref _hideCount);
+        public void Dispose() { }
+    }
+
+    private readonly record struct PresentedFrame(NativeClipOverlaySurface.PointNative Destination, int Width, int Height, double Opacity);
 
     private struct Rect { public int Left, Top, Right, Bottom; }
 }
