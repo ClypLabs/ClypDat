@@ -12,7 +12,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void CompletionDuringEntry_ReplacesImmediately_AndOldTimerCannotResurrect()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch, play => play());
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => sounds++, () => _epoch, play => play());
         var save = Guid.NewGuid();
         coordinator.Publish(Event(save, 0, ClipOverlayKind.Saving, 80, _epoch));
         Assert.Contains(TimeSpan.FromSeconds(3), scheduler.Delays);
@@ -32,7 +32,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void CompletionUsesFreshPrimaryTarget()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler();
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => { }, () => _epoch);
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => { }, () => _epoch);
         var save = Guid.NewGuid();
         coordinator.Publish(Event(save, 0, ClipOverlayKind.Saving, 80, _epoch));
         var currentPrimary = new ClipOverlayTarget("DISPLAY3", new PixelRect(0, 0, 2560, 1440), new PixelRect(0, 0, 2560, 1400), 1.5, ClipOverlayTargetReason.Primary);
@@ -45,7 +45,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void PriorityLatestWins_WithoutQueue()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler();
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => { }, () => _epoch);
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => { }, () => _epoch);
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Failure, 100, _epoch));
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Standalone, 30, _epoch.AddSeconds(1)));
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Failure, 100, _epoch.AddSeconds(-1)));
@@ -57,7 +57,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void GameHintHasReadingTimeButSaveStillReplacesItImmediately()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch, play => play());
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => sounds++, () => _epoch, play => play());
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.GameStarted, 40, _epoch));
         Assert.Contains(TimeSpan.FromSeconds(5), scheduler.Delays);
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Saving, 80, _epoch));
@@ -70,7 +70,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void DuplicateRegressiveAndRecoveredEventsAreSuppressed_ButLiveSoundIsIndependent()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => sounds++, () => _epoch, play => play());
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => sounds++, () => _epoch, play => play());
         var save = Guid.NewGuid();
         coordinator.Publish(Event(save, 1, ClipOverlayKind.Saved, 10, _epoch));
         coordinator.Publish(Event(save, 1, ClipOverlayKind.Saved, 10, _epoch));
@@ -84,7 +84,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void HundredEventBurstLeavesOnlyLatestVisibleGeneration()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler();
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => { }, () => _epoch);
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => { }, () => _epoch);
         for (var i = 0; i < 100; i++)
             coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Standalone, 30, _epoch.AddMilliseconds(i)));
         Assert.Equal(100, surface.Presentations.Count);
@@ -98,7 +98,7 @@ public sealed class ClipOverlayCoordinatorTests
     {
         var surface = new FakeSurface { AutoPresent = false };
         var scheduler = new FakeScheduler();
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => { }, () => _epoch);
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => { }, () => _epoch);
 
         coordinator.Publish(Event(Guid.NewGuid(), 0, ClipOverlayKind.Saving, 80, _epoch));
         Assert.Equal([TimeSpan.FromSeconds(5)], scheduler.Delays);
@@ -111,7 +111,7 @@ public sealed class ClipOverlayCoordinatorTests
     public void WorkflowStageHistoryEvictsOldestAfterLimit()
     {
         var surface = new FakeSurface(); var scheduler = new FakeScheduler();
-        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, () => { }, () => _epoch);
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => { }, () => _epoch);
         var workflows = Enumerable.Range(0, 513).Select(_ => Guid.NewGuid()).ToArray();
         for (var index = 0; index < workflows.Length; index++)
             coordinator.Publish(Event(workflows[index], 0, ClipOverlayKind.Standalone, 30, _epoch.AddMilliseconds(index)));
@@ -164,6 +164,39 @@ public sealed class ClipOverlayCoordinatorTests
     public void UnknownPlacementFallsBackToTopRight()
         => Assert.Equal(ClipOverlayPlacement.TopRight, ClipOverlayPlacementParser.Parse("future value"));
 
+    [Fact]
+    public void SavedSoundUsesCapturedVolumeOnBackgroundThread()
+    {
+        var surface = new FakeSurface(); var scheduler = new FakeScheduler();
+        using var played = new ManualResetEventSlim();
+        string? volume = null;
+        var callerThread = Environment.CurrentManagedThreadId;
+        var soundThread = callerThread;
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, value =>
+        {
+            volume = value;
+            soundThread = Environment.CurrentManagedThreadId;
+            played.Set();
+        }, () => _epoch);
+
+        coordinator.Publish(Event(Guid.NewGuid(), 1, ClipOverlayKind.Saved, 80, _epoch) with { SoundVolume = "High" });
+
+        Assert.True(played.Wait(TimeSpan.FromSeconds(2)));
+        Assert.Equal("High", volume);
+        Assert.NotEqual(callerThread, soundThread);
+    }
+
+    [Fact]
+    public void SavedEventWithoutSoundSnapshotDoesNotDispatchSound()
+    {
+        var surface = new FakeSurface(); var scheduler = new FakeScheduler(); var sounds = 0;
+        using var coordinator = new ClipOverlayCoordinator(surface, scheduler, _ => sounds++, () => _epoch, play => play());
+
+        coordinator.Publish(Event(Guid.NewGuid(), 1, ClipOverlayKind.Saved, 80, _epoch) with { SoundVolume = null });
+
+        Assert.Equal(0, sounds);
+    }
+
     private static void AssertContained(PixelPoint position, PixelRect area, int width, int height)
     {
         Assert.InRange(position.X, area.X, area.Right - width);
@@ -174,7 +207,8 @@ public sealed class ClipOverlayCoordinatorTests
         id, stage, requested, _epoch, priority, kind,
         kind == ClipOverlayKind.Saved ? "Clip Saved" : kind.ToString(), null,
         new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040), 1, ClipOverlayTargetReason.Primary),
-        ClipOverlayPlacement.TopRight, true);
+        ClipOverlayPlacement.TopRight, true,
+        SoundVolume: kind == ClipOverlayKind.Saved ? "Medium" : null);
 
     private sealed class FakeSurface : IClipOverlaySurface
     {

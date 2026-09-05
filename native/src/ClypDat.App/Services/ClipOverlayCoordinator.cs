@@ -51,7 +51,8 @@ internal sealed record ClipOverlayEvent(
     bool IsRecovered = false,
     bool ShowVisual = true,
     string? Hotkey = null,
-    string? HotkeyHint = null);
+    string? HotkeyHint = null,
+    string? SoundVolume = null);
 
 internal sealed record ClipOverlayPresentation(
     long Generation,
@@ -107,7 +108,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
     private readonly object _gate = new();
     private readonly IClipOverlaySurface _surface;
     private readonly IClipOverlayScheduler _scheduler;
-    private readonly Action _playSuccessSound;
+    private readonly Action<string> _playSuccessSound;
     private readonly Func<DateTime> _utcNow;
     private readonly Dictionary<Guid, int> _workflowStages = new();
     private readonly Queue<Guid> _workflowStageOrder = new();
@@ -123,7 +124,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
     public ClipOverlayCoordinator(
         IClipOverlaySurface surface,
         IClipOverlayScheduler scheduler,
-        Action playSuccessSound,
+        Action<string> playSuccessSound,
         Func<DateTime>? utcNow = null,
         Action<Action>? dispatchSound = null)
     {
@@ -138,7 +139,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
 
     public void Publish(ClipOverlayEvent notification)
     {
-        var playSound = false;
+        string? soundVolume = null;
         ClipOverlayPresentation? presentation = null;
         lock (_gate)
         {
@@ -150,7 +151,7 @@ internal sealed class ClipOverlayCoordinator : IDisposable
             {
                 _soundOrder.Enqueue(notification.WorkflowId);
                 while (_soundOrder.Count > SoundHistoryLimit) _soundedSaves.Remove(_soundOrder.Dequeue());
-                playSound = true;
+                soundVolume = notification.SoundVolume;
             }
 
             if (notification.IsRecovered || _utcNow() - notification.OccurredUtc > MaximumEventAge)
@@ -187,7 +188,11 @@ internal sealed class ClipOverlayCoordinator : IDisposable
         // caller's thread - which is the Avalonia UI thread - used to sit
         // directly in front of the card rasterize.
         if (presentation is not null) _surface.Publish(presentation, PresentationCompleted);
-        if (playSound) _dispatchSound(_playSuccessSound);
+        if (!string.IsNullOrWhiteSpace(soundVolume))
+        {
+            var capturedVolume = soundVolume;
+            _dispatchSound(() => _playSuccessSound(capturedVolume));
+        }
     }
 
     private void PresentationCompleted(ClipOverlayPresentationResult result)

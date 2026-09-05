@@ -3790,19 +3790,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void PlayClipNotificationSound()
-    {
-        if (ViewModel is null || !ViewModel.Settings.EnableClipOverlaySound) return;
-        try
-        {
-            ClipNotificationSound.Play(ViewModel.Settings.ClipOverlayVolume);
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Clip notification sound failed", error);
-        }
-    }
-
     private readonly ConcurrentDictionary<Guid, byte> _uiOwnedSaveIds = new();
     private readonly Queue<Guid> _uiOwnedSaveOrder = new();
     private ClipOverlayCoordinator? _clipOverlayCoordinator;
@@ -3810,7 +3797,7 @@ public sealed partial class MainWindow : Window
     private ClipOverlayCoordinator ClipNotifications => _clipOverlayCoordinator ??= new ClipOverlayCoordinator(
         new NativeClipOverlaySurface(),
         new ClipOverlayScheduler(),
-        PlayClipNotificationSound);
+        ClipNotificationSound.Play);
 
     private void RememberUiOwnedSave(Guid saveId)
     {
@@ -3856,6 +3843,12 @@ public sealed partial class MainWindow : Window
             detail = text.Replace("Saving ", string.Empty, StringComparison.OrdinalIgnoreCase).Replace(" Clip…", string.Empty, StringComparison.OrdinalIgnoreCase);
         }
 
+        // The coordinator deliberately queues sound off the UI thread. Capture
+        // current settings here while this UI-owned window is still the caller,
+        // so its callback has no Avalonia state to read on that worker thread.
+        var soundVolume = playSound && ViewModel?.Settings.EnableClipOverlaySound == true
+            ? ViewModel.Settings.ClipOverlayVolume
+            : null;
         var target = ClipOverlayTargeting.ResolvePrimary();
         AppLog.Info($"Clip overlay publish: id={workflowId}, trigger={trigger}, stage={(saveCompletion ? 1 : 0)}, monitor={target.DeviceName}, reason={target.ReasonLabel}.");
         ClipNotifications.Publish(new ClipOverlayEvent(
@@ -3872,7 +3865,8 @@ public sealed partial class MainWindow : Window
             ViewModel?.Settings.ExcludeOverlaysFromCapture ?? true,
             ShowVisual: showVisual,
             Hotkey: string.IsNullOrWhiteSpace(hotkey) ? null : hotkey,
-            HotkeyHint: hotkeyHint));
+            HotkeyHint: hotkeyHint,
+            SoundVolume: soundVolume));
     }
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)
