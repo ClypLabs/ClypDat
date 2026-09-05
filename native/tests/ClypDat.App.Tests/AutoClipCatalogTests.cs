@@ -32,10 +32,15 @@ public sealed class AutoClipCatalogTests
         var fortnite = AutoClipCatalog.Get("fortnite");
         var defaults = fortnite.Events.Where(item => item.DefaultEnabled).Select(item => item.Id).ToHashSet();
 
-        Assert.Equal(new HashSet<string> { "distance-shot", "impossible-shot", "double-elimination", "multi-elimination", "top-3", "victory-royale" }, defaults);
+        Assert.Equal(new HashSet<string> { "distance-shot", "impossible-shot", "double-elimination", "multi-elimination", "victory-royale" }, defaults);
         Assert.True(fortnite.Events.Single(item => item.Id == "impossible-shot").Priority > fortnite.Events.Single(item => item.Id == "distance-shot").Priority);
         Assert.True(fortnite.Events.Single(item => item.Id == "multi-elimination").Priority > fortnite.Events.Single(item => item.Id == "double-elimination").Priority);
         Assert.True(fortnite.Events.Single(item => item.Id == "victory-royale").Priority > fortnite.Events.Single(item => item.Id == "match-complete").Priority);
+        // Every event has to be a discrete on-screen moment. "Top 3" was a
+        // threshold on the players-remaining counter - a state, not a moment -
+        // so it clipped whatever happened to be on screen when the number
+        // changed, which was usually nothing.
+        Assert.DoesNotContain(fortnite.Events, item => item.Id == "top-3");
 
         var helldivers = AutoClipCatalog.Get("helldivers2");
         Assert.False(helldivers.Events.Single(item => item.Id == "eliminated").DefaultEnabled);

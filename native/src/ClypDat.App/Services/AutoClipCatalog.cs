@@ -62,7 +62,6 @@ public static class AutoClipCatalog
             Event("match-complete", "Match Complete", priority: 10, lead: 15, tail: 10),
             Event("bounty-complete", "Bounty Complete", priority: 15, lead: 8, tail: 6),
             Event("quest-complete", "Quest Complete", priority: 15, lead: 8, tail: 6),
-            Event("top-3", "Top 3", priority: 60, enabled: true, lead: 10, tail: 6),
             Event("victory-royale", "Victory Royale", priority: 100, enabled: true, lead: 15, tail: 10)
         }, new[] { new AutoClipGroupDefinition("eliminations", "Eliminations") }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "fortnite", "FortniteClient-Win64-Shipping" },
