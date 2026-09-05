@@ -71,8 +71,15 @@ public sealed class AutoClipCatalogTests
         Assert.Equal("steam-2357570", overwatch.PortraitDetectionKey);
         Assert.Equal("Overwatch®", overwatch.PortraitDisplayName);
         Assert.Equal(
-            new HashSet<string> { "multikill", "team-kill", "play-of-the-game" },
+            new HashSet<string> { "double-kill", "triple-kill", "quadruple-kill", "quintuple-kill", "team-kill", "play-of-the-game" },
             overwatch.Events.Where(item => item.DefaultEnabled).Select(item => item.Id).ToHashSet());
+        // Each streak tier is its own event because Overwatch prints the tier
+        // name, and the bigger streak has to win a shared clip window.
+        var tiers = new[] { "double-kill", "triple-kill", "quadruple-kill", "quintuple-kill" }
+            .Select(id => overwatch.Events.Single(item => item.Id == id).Priority)
+            .ToArray();
+        Assert.Equal(tiers.OrderBy(priority => priority).ToArray(), tiers);
+        Assert.True(overwatch.Events.Single(item => item.Id == "team-kill").Priority > tiers[^1]);
         Assert.Equal("overwatch", AutoClipCatalog.MatchGame(null, "Overwatch.exe", null));
     }
 

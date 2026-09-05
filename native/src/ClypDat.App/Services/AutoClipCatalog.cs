@@ -102,8 +102,17 @@ public static class AutoClipCatalog
             PortraitDetectionKey: "riot-league of legends", PortraitDisplayName: "League of Legends"),
         new AutoClipGameDefinition("overwatch", "Overwatch®", new[]
         {
+            // Overwatch names each tier outright on screen ("DOUBLE KILL",
+            // "TRIPLE KILL", "QUADRUPLE KILL", "QUINTUPLE KILL"), so they are
+            // separate events rather than one "Multikill" - there is nothing to
+            // infer, and a player who only wants the rare ones can say so.
+            // Priority ascends with the tier so the bigger streak wins when two
+            // land in the same window.
             Event("elimination", "Elimination", "eliminations", 10, lead: 8, tail: 6),
-            Event("multikill", "Multikill", "eliminations", 40, true, 8, 6),
+            Event("double-kill", "Double Kill", "eliminations", 20, true, 8, 6),
+            Event("triple-kill", "Triple Kill", "eliminations", 30, true, 8, 6),
+            Event("quadruple-kill", "Quadruple Kill", "eliminations", 40, true, 8, 6),
+            Event("quintuple-kill", "Quintuple Kill", "eliminations", 50, true, 8, 6),
             Event("team-kill", "Team Kill", "eliminations", 60, true, 10, 8),
             Event("play-of-the-game", "Play of the Game", priority: 100, enabled: true, lead: 15, tail: 10)
         }, new[] { new AutoClipGroupDefinition("eliminations", "Eliminations") }, ProviderId: "clypdat-cv",
