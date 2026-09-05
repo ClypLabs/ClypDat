@@ -6515,7 +6515,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // every time anything in the app moved.
     private string _discordActivityKind = string.Empty;
     private DateTime _discordActivityStartedUtc = DateTime.UtcNow;
-    private int _discordClipsSaved;
+    // Per-game, and zeroed whenever the played game changes - see
+    // DiscordClipTally for why it keys on the game name and not the kind above.
+    private readonly ClypDat.App.Services.DiscordClipTally _clipTally = new();
     private string? _discordGameImageFor;
     private string? _discordGameImageUrl;
     private string? _discordGameProfileUrl;
@@ -6722,6 +6724,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : null;
         var activityName = pcGameActive ? ActiveGameDetection.DisplayName : xboxGame;
 
+        // Ahead of both the early return below and the state string further
+        // down: the tally has to see an empty name while nothing is being
+        // played, or closing a game and relaunching it resumes the old count
+        // instead of starting fresh. Keyed on the game name rather than the
+        // activity kind - the kind also flips when recording starts or stops
+        // for the same game, which would wipe the tally mid-match.
+        _clipTally.ObserveActivity(activityName);
+
         // Game-only presence must not reveal library, editor, or settings
         // activity. Clear the kind too, so the next detected game starts a
         // fresh Discord elapsed timer.
@@ -6762,12 +6772,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             details = recording
                 ? onXbox ? $"Recording {activityName} on an Xbox {(EffectiveXboxSnapshot.ConsoleName ?? "Xbox")}" : $"Recording {activityName}"
                 : onXbox ? $"Playing {activityName} on an Xbox {(EffectiveXboxSnapshot.ConsoleName ?? "Xbox")}" : $"Playing {activityName}";
-            state = _discordClipsSaved switch
-            {
-                0 => "Ready to clip",
-                1 => "1 clip saved",
-                _ => $"{_discordClipsSaved:N0} clips saved"
-            };
+            state = _clipTally.Describe();
         }
         else if (IsSettingsVisible)
         {
@@ -6849,7 +6854,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void RecordDiscordClipSaved()
     {
-        _discordClipsSaved++;
+        _clipTally.Record();
         UpdateDiscordPresence();
     }
 
