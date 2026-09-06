@@ -330,6 +330,10 @@ public sealed class MediaProbeService
         return media;
     }
 
+    // 1: frame rates are normalised (see FrameRateNormalizer) rather than stored
+    // as the raw avg_frame_rate.
+    private const int ProbeCacheSchemaVersion = 1;
+
     private ProbeCacheEntry? TryReadProbeCache(string filePath, FileInfo info)
     {
         try
@@ -343,6 +347,9 @@ public sealed class MediaProbeService
             // build the FileInfo), while still catching the file having
             // changed since it was last probed.
             if (entry.SizeBytes != info.Length || entry.LastWriteTimeUtcTicks != info.LastWriteTimeUtc.Ticks) return null;
+            // An entry from before a change in how these values are derived is
+            // as stale as one for a file that changed underneath us.
+            if (entry.SchemaVersion != ProbeCacheSchemaVersion) return null;
             return entry;
         }
         catch
@@ -364,7 +371,8 @@ public sealed class MediaProbeService
                 media.Fps,
                 media.CaptureBackend,
                 media.Tracks,
-                media.HasVideo);
+                media.HasVideo,
+                ProbeCacheSchemaVersion);
             File.WriteAllText(GetProbeCachePath(filePath), JsonSerializer.Serialize(entry));
         }
         catch
@@ -1736,7 +1744,13 @@ internal sealed record ProbeCacheEntry(
     double Fps,
     string CaptureBackend,
     IReadOnlyList<MediaTrackInfo> Tracks,
-    bool HasVideo = true);
+    bool HasVideo = true,
+    // Size and mtime catch the FILE changing; this catches US changing what the
+    // fields mean. Entries written before frame rates were normalised hold the
+    // raw avg_frame_rate, and since the clips themselves never change they would
+    // have been served from cache forever. Bump it whenever a cached value is
+    // derived differently than it used to be.
+    int SchemaVersion = 0);
 
 public sealed record MediaDurationProbeResult(TimeSpan Duration, string Error);
 
