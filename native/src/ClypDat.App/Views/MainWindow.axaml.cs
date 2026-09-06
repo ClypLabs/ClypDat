@@ -33,6 +33,9 @@ public sealed partial class MainWindow : Window
     private Cs2GsiListener? _cs2GsiListener;
     private DotaGsiListener? _dotaGsiListener;
     private LeagueAutoClipListener? _leagueAutoClipListener;
+    // Detector games have no round or match structure to finalize against the way
+    // the GSI listeners do, so their escalation window lives here instead.
+    private readonly Dictionary<string, AutoClipEscalationBuffer> _autoClipEscalation = new(StringComparer.OrdinalIgnoreCase);
     // GSI listeners run off the UI thread. Never let their settings callback
     // reach ViewModel/Avalonia objects; immutable snapshots cross that boundary.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AutoClipGameSettings> _autoClipSettingsSnapshots = new(StringComparer.OrdinalIgnoreCase);
@@ -559,6 +562,7 @@ public sealed partial class MainWindow : Window
             _cs2GsiListener?.Dispose();
             _dotaGsiListener?.Dispose();
             _leagueAutoClipListener?.Dispose();
+            foreach (var buffer in _autoClipEscalation.Values) buffer.Dispose();
             _gameDetectionTimer.Stop();
             _updateCheckTimer.Stop();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
@@ -723,7 +727,11 @@ public sealed partial class MainWindow : Window
 
         var previousAutoClipGame = AutoClipCatalog.MatchGame(previousDetection.DetectionKey, previousDetection.ExeName, previousDetection.DisplayName);
         var activeAutoClipGame = AutoClipCatalog.MatchGame(detection.DetectionKey, detection.ExeName, detection.DisplayName);
-        if (!string.Equals(previousAutoClipGame, activeAutoClipGame, StringComparison.OrdinalIgnoreCase)) UpdateAutoClipStates();
+        if (!string.Equals(previousAutoClipGame, activeAutoClipGame, StringComparison.OrdinalIgnoreCase))
+        {
+            ResetAutoClipEscalation();
+            UpdateAutoClipStates();
+        }
 
         var gameEnded = previousDetection.IsDetected && !detection.IsDetected;
         if (gameEnded)
@@ -919,13 +927,34 @@ public sealed partial class MainWindow : Window
             var settings = GetAutoClipSettingsSnapshot(detected.GameId);
             if (!ViewModel.AutoClippingEnabled || !settings.Enabled || !settings.Events.TryGetValue(detected.EventId, out var enabled) || !enabled) return;
             AppLog.Info($"Live auto-clip detected: game={detected.GameId}, event={detected.EventId}, confidence={detected.Confidence:F2}.");
-            ShowAutoClipPendingNotification($"Auto clip started — {detected.EventLabel} detected, finishing the clip.");
-            _ = SaveReplayClipAsync(
-                detected.EventLabel,
-                new ReplayClipWindow(detected.TimestampUtc - TimeSpan.FromSeconds(detected.LeadSeconds), detected.TimestampUtc + TimeSpan.FromSeconds(detected.TailSeconds)),
-                "HELLDIVERS™ 2",
-                detected.EventLabel);
+            // Not a save yet: a Double Kill is given a moment to become a Triple.
+            // The buffer decides when the streak is over and raises AutoClip_OnReady.
+            GetAutoClipEscalationBuffer(detected.GameId).Offer(detected);
         });
+    }
+
+    /// <summary>
+    /// One buffer per detector game, created on first detection. Its ready event
+    /// joins the same path Dota and League already save through.
+    /// </summary>
+    private AutoClipEscalationBuffer GetAutoClipEscalationBuffer(string gameId)
+    {
+        if (_autoClipEscalation.TryGetValue(gameId, out var existing)) return existing;
+        var definition = AutoClipCatalog.Get(gameId);
+        var buffer = new AutoClipEscalationBuffer(definition.Id, definition.Name, definition.Events);
+        buffer.Pending += AutoClip_OnPending;
+        buffer.Ready += AutoClip_OnReady;
+        _autoClipEscalation[gameId] = buffer;
+        return buffer;
+    }
+
+    /// <summary>
+    /// Drops any half-open streak window. Called when the watched game changes so
+    /// a window opened in the last game cannot flush a clip into the next one.
+    /// </summary>
+    private void ResetAutoClipEscalation()
+    {
+        foreach (var buffer in _autoClipEscalation.Values) buffer.Reset();
     }
 
     private void Worker_FullSessionFinalizeChanged(object? sender, IReadOnlyList<FullSessionFinalizeProgress> active)

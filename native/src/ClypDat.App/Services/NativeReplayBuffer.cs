@@ -68,6 +68,19 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     internal static bool IsSupportedDetectorAspectRatio(int width, int height) =>
         width > 0 && height > 0 && Math.Abs((double)width / height - 16.0 / 9.0) <= 0.01;
 
+    /// <summary>
+    /// Banner matching reads thin bright strokes, and detail is the first thing a
+    /// downscaled capture loses. Measured on the same hand-labelled frames, the
+    /// gap between a real banner and empty scenery is 0.63..0.89 against 0.089 at
+    /// 1080p and 0.51..0.76 against 0.095 at 1440p, but collapses to 0.20..0.35
+    /// against 0.099 at 720p - straddling the threshold either way. Below this
+    /// floor the detector reports itself unavailable rather than guessing.
+    /// </summary>
+    internal const int MinimumDetectorHeight = 1000;
+
+    internal static bool IsSupportedDetectorResolution(int width, int height) =>
+        IsSupportedDetectorAspectRatio(width, height) && height >= MinimumDetectorHeight;
+
     internal static TimeSpan NextDxgiAcquireDeadline(TimeSpan scheduled, TimeSpan completed, int frameRate)
     {
         var cadence = Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
@@ -838,6 +851,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var detectorStagingIndex = 0;
         var detectorRingWritten = 0;
         var lastDetectorSample = TimeSpan.MinValue;
+        var detectorResolutionRefused = false;
         ID3D11VideoProcessorOutputView? outputView = null;
         ID3D11VideoProcessorInputView? inputView = null;
         var useGpuScale = false;
@@ -3544,8 +3558,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             unsafe void OfferDetectorFrame(byte* luminance, int rowPitch)
             {
                 // Initial detector pack is deliberately fail-closed outside
-                // standard 16:9 SDR layouts.
-                if (!IsSupportedDetectorAspectRatio(outputWidth, outputHeight)) return;
+                // standard 16:9 SDR layouts, and below the resolution where
+                // banner strokes survive the capture. Say so once rather than
+                // leave auto-clipping looking armed while nothing can fire.
+                if (!IsSupportedDetectorResolution(outputWidth, outputHeight))
+                {
+                    if (!detectorResolutionRefused)
+                    {
+                        detectorResolutionRefused = true;
+                        AppLog.Info($"Auto-clip detector inactive: capture is {outputWidth}x{outputHeight}; banner matching needs 16:9 at {MinimumDetectorHeight}p or above.");
+                    }
+                    return;
+                }
                 // Null until a game with a detector is switched on, so an
                 // ordinary capture never pays for these crops.
                 if (Volatile.Read(ref _detectorRegions) is not { } regions) return;

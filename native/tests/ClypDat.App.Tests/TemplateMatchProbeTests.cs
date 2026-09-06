@@ -58,46 +58,79 @@ public sealed class TemplateMatchProbeTests
         Assert.NotEmpty(report);
     }
 
+    /// <summary>
+    /// Frames committed to the repo, so these tests RUN. They used to read a
+    /// folder named by CLYPDAT_FRAME_PROBE_DIR and return quietly when it was
+    /// unset, which meant they never ran anywhere - and that is how a quintuple
+    /// template that outscored every other banner on empty scenery shipped and
+    /// filled a tester's library with clips of nothing.
+    ///
+    /// Cut from that tester's own clips at 1920x1080 greyscale, the plane the
+    /// detector actually reads.
+    /// </summary>
+    private static string FixtureRoot
+    {
+        get
+        {
+            var directory = new DirectoryInfo(AppContext.BaseDirectory);
+            while (directory is not null && !Directory.Exists(Path.Combine(directory.FullName, "tests", "fixtures", "detector")))
+                directory = directory.Parent;
+            return directory is null ? string.Empty : Path.Combine(directory.FullName, "tests", "fixtures", "detector");
+        }
+    }
+
     // Known-answer frames drive the whole pipeline: crop the three slots the way
     // the live detector does, match, and check the right banner wins. These are
     // the numbers that justify the thresholds in templates.json.
+    //
+    // No quintuple-kill or team-kill case: there is no real one to point at. Every
+    // clip the tester's app labelled "Quintuple Kill" turned out to contain no
+    // banner at all. Add them when a genuine frame exists, not before.
     [Theory]
-    // A DIFFERENT double kill from the one the template was cut from - a
-    // self-match proves nothing, and using one is how a broken double-kill
-    // template scored 1.000 while never firing in game.
-    [InlineData("overwatch", "ow-double2.png", "double-kill")]
-    [InlineData("overwatch", "ow-double3.png", "double-kill")]
-    [InlineData("overwatch", "ow-triple.png", "triple-kill")]
-    [InlineData("overwatch", "ow-quintuple.png", "quintuple-kill")]
-    [InlineData("overwatch", "ow-teamkill.png", "team-kill")]
-    [InlineData("fortnite", "fn-double.png", "double-elimination")]
-    [InlineData("fortnite", "fn-victory.png", "victory-royale")]
-    [InlineData("fortnite", "fn-eliminatedby.png", "got-eliminated")]
-    public void TheRightBannerWinsOnAKnownFrame(string game, string file, string expected)
+    // Frames from a single real ladder - DOUBLE KILL, then TRIPLE, then QUADRUPLE -
+    // none of them the frame their template was cut from. A self-match proves
+    // nothing, and using one is how a broken double-kill template scored 1.000
+    // while never firing in game.
+    [InlineData("ow-double.png", "double-kill")]
+    [InlineData("ow-triple.png", "triple-kill")]
+    [InlineData("ow-quadruple.png", "quadruple-kill")]
+    public void TheRightBannerWinsOnAKnownFrame(string file, string expected)
     {
-        var folder = Environment.GetEnvironmentVariable("CLYPDAT_FRAME_PROBE_DIR");
-        if (string.IsNullOrWhiteSpace(folder) || !File.Exists(Path.Combine(folder, file)) || TemplateRoot.Length == 0) return;
+        var path = Path.Combine(FixtureRoot, file);
+        Assert.True(File.Exists(path), $"Missing detector fixture: {path}");
 
-        var regions = DetectorRegions.ForGame(game)!;
-        var templates = DetectorTemplates.Load(game, regions, TemplateRoot);
-        var hits = DetectorTemplates.Match(templates, ToFrame(Path.Combine(folder, file), regions));
+        var regions = DetectorRegions.ForGame("overwatch")!;
+        var templates = DetectorTemplates.Load("overwatch", regions, TemplateRoot);
+        Assert.NotEmpty(templates);
+        var hits = DetectorTemplates.Match(templates, ToFrame(path, regions));
 
         Assert.NotEmpty(hits);
         Assert.Equal(expected, hits[0].Template.EventId);
+        // Nothing else may be close enough to be mistaken for it. These frames
+        // score their own banner at 0.88-0.95 and every other at 0.21 or below.
+        Assert.All(hits.Skip(1), hit => Assert.True(hit.Score < hits[0].Score - 0.3,
+            $"{hit.Template.EventId} scored {hit.Score:F3} against {hits[0].Template.EventId} at {hits[0].Score:F3}."));
     }
 
-    // A frame with no banner must produce nothing, or every clip is a false one.
+    // The regression guard for the false-positive flood: banner-free frames must
+    // match nothing. Two are from a clip the app saved as "Quintuple Kill" that
+    // contains no banner in any of its 31 frames; the third is from one where the
+    // player was killed. Under the old raw correlation the quintuple template
+    // scored up to 0.781 on frames like these, over its 0.70 threshold.
     [Theory]
-    [InlineData("overwatch", "ow-none.png")]
-    [InlineData("fortnite", "fn-none.png")]
-    public void AFrameWithNoBannerMatchesNothing(string game, string file)
+    [InlineData("ow-empty-1.png")]
+    [InlineData("ow-empty-2.png")]
+    [InlineData("ow-empty-3.png")]
+    public void AFrameWithNoBannerMatchesNothing(string file)
     {
-        var folder = Environment.GetEnvironmentVariable("CLYPDAT_FRAME_PROBE_DIR");
-        if (string.IsNullOrWhiteSpace(folder) || !File.Exists(Path.Combine(folder, file)) || TemplateRoot.Length == 0) return;
+        var path = Path.Combine(FixtureRoot, file);
+        Assert.True(File.Exists(path), $"Missing detector fixture: {path}");
 
-        var regions = DetectorRegions.ForGame(game)!;
-        var templates = DetectorTemplates.Load(game, regions, TemplateRoot);
+        var regions = DetectorRegions.ForGame("overwatch")!;
+        var templates = DetectorTemplates.Load("overwatch", regions, TemplateRoot);
+        Assert.NotEmpty(templates);
 
-        Assert.Empty(DetectorTemplates.Match(templates, ToFrame(Path.Combine(folder, file), regions)));
+        var hits = DetectorTemplates.Match(templates, ToFrame(path, regions));
+        Assert.Empty(hits);
     }
 }

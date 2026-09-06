@@ -9,7 +9,7 @@ public sealed class OverwatchDetectorTests
         int second, string leftColumn = "", string killFeed = "", string teamKill = "", params DetectedBanner[] banners) =>
         new(TimeSpan.FromSeconds(second), leftColumn, killFeed, teamKill, banners);
 
-    private static DetectedBanner Banner(string eventId, string label) => new(eventId, label);
+    private static DetectedBanner Banner(string eventId, string label, double score = 0.9) => new(eventId, label, score);
 
     private static string[] Observe(OverwatchDetector detector, OverwatchFrameObservation frame) =>
         detector.Observe(frame).Select(item => item.EventId).ToArray();
@@ -25,7 +25,22 @@ public sealed class OverwatchDetectorTests
     {
         var detector = new OverwatchDetector();
 
-        Assert.Contains(eventId, Observe(detector, Frame(1, banners: Banner(eventId, label))));
+        Observe(detector, Frame(1, banners: Banner(eventId, label)));
+
+        Assert.Contains(eventId, Observe(detector, Frame(2, banners: Banner(eventId, label))));
+    }
+
+    // Frames are sampled every 500ms and a banner stays up around three seconds,
+    // so a real one is seen six times over. Demanding two sightings costs nothing
+    // real and drops the single-frame matches that filled a tester's library.
+    [Fact]
+    public void AOneFrameBannerDoesNotFire()
+    {
+        var detector = new OverwatchDetector();
+
+        Assert.Empty(Observe(detector, Frame(1, banners: Banner("quintuple-kill", "Quintuple Kill"))));
+        Assert.Empty(Observe(detector, Frame(2)));
+        Assert.Empty(Observe(detector, Frame(3)));
     }
 
     // The banner sits on screen for many sampled frames; without the latch one
@@ -36,9 +51,25 @@ public sealed class OverwatchDetectorTests
         var detector = new OverwatchDetector();
 
         var triple = Banner("triple-kill", "Triple Kill");
-        Assert.Contains("triple-kill", Observe(detector, Frame(1, banners: triple)));
-        Assert.Empty(Observe(detector, Frame(2, banners: triple)));
+        Observe(detector, Frame(1, banners: triple));
+        Assert.Contains("triple-kill", Observe(detector, Frame(2, banners: triple)));
         Assert.Empty(Observe(detector, Frame(3, banners: triple)));
+        Assert.Empty(Observe(detector, Frame(4, banners: triple)));
+    }
+
+    // The score that recognised the banner is what the log line reports, so a
+    // future dump says how confident the match actually was instead of repeating
+    // a constant.
+    [Fact]
+    public void TheMatchScoreIsCarriedIntoTheEvent()
+    {
+        var detector = new OverwatchDetector();
+
+        var banner = Banner("double-kill", "Double Kill", score: 0.42);
+        detector.Observe(Frame(1, banners: banner));
+        var fired = detector.Observe(Frame(2, banners: banner)).Single(item => item.EventId == "double-kill");
+
+        Assert.Equal(0.42, fired.Confidence, 3);
     }
 
     [Fact]
@@ -46,7 +77,9 @@ public sealed class OverwatchDetectorTests
     {
         var detector = new OverwatchDetector();
 
-        Assert.Contains("team-kill", Observe(detector, Frame(1, banners: Banner("team-kill", "Team Kill"))));
+        Observe(detector, Frame(1, banners: Banner("team-kill", "Team Kill")));
+
+        Assert.Contains("team-kill", Observe(detector, Frame(2, banners: Banner("team-kill", "Team Kill"))));
     }
 
     // The whole point of the left column: during a Play of the Game the HUD

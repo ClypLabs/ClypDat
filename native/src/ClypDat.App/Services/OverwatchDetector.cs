@@ -2,8 +2,12 @@ using System.Text.RegularExpressions;
 
 namespace ClypDat.App.Services;
 
-/// <summary>A banner recognised by appearance rather than read as text.</summary>
-public sealed record DetectedBanner(string EventId, string Label);
+/// <summary>
+/// A banner recognised by appearance rather than read as text. <see cref="Score"/>
+/// is the correlation that recognised it, carried through to the detected event
+/// so the log line reports a measurement rather than a constant.
+/// </summary>
+public sealed record DetectedBanner(string EventId, string Label, double Score);
 
 public sealed record OverwatchFrameObservation(
     TimeSpan Timestamp,
@@ -79,7 +83,11 @@ public sealed partial class OverwatchDetector
         {
             if (!_banners.TryGetValue(banner.EventId, out var latch))
             {
-                latch = new PhraseLatch(banner.EventId, confirmationFrames: 1, resetFrames: 8);
+                // Two frames, not one. Frames are sampled every 500ms and a
+                // banner stays up ~3s, so a real one is seen six times over;
+                // requiring two consecutive sightings costs nothing real and
+                // drops the single-frame artefacts that survive the matcher.
+                latch = new PhraseLatch(banner.EventId, confirmationFrames: 2, resetFrames: 8);
                 _banners[banner.EventId] = latch;
             }
         }
@@ -87,7 +95,7 @@ public sealed partial class OverwatchDetector
         {
             var present = frame.Banners.FirstOrDefault(item => string.Equals(item.EventId, eventId, StringComparison.OrdinalIgnoreCase));
             if (latch.Observe(present is null ? string.Empty : eventId))
-                events.Add(Create(eventId, present!.Label, frame.Timestamp, 0.95));
+                events.Add(Create(eventId, present!.Label, frame.Timestamp, present.Score));
         }
 
         foreach (var row in ParseEliminations(frame.KillFeedText))

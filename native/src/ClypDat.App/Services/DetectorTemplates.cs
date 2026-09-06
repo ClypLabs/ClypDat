@@ -16,7 +16,10 @@ public sealed record DetectorTemplateEntry(
     [property: JsonPropertyName("slot")] int Slot,
     [property: JsonPropertyName("region")] double[] Region,
     [property: JsonPropertyName("threshold")] double Threshold,
-    [property: JsonPropertyName("file")] string File);
+    [property: JsonPropertyName("file")] string File,
+    // Absent means Raw, so a template that has not had its threshold measured
+    // against the other scoring keeps behaving exactly as it did.
+    [property: JsonPropertyName("scoring")] string? Scoring = null);
 
 public sealed record DetectorTemplateManifest(
     [property: JsonPropertyName("games")] Dictionary<string, DetectorTemplateEntry[]> Games);
@@ -70,7 +73,7 @@ public static class DetectorTemplates
                     entry.Slot,
                     GrayTemplateMatcher.ToSlotRelative(frameRegion, slot.Value),
                     entry.Threshold,
-                    GrayTemplateMatcher.FromGray(template)));
+                    GrayTemplateMatcher.FromGray(template, ParseScoring(entry.Scoring))));
             }
             return loaded;
         }
@@ -79,6 +82,16 @@ public static class DetectorTemplates
             return Array.Empty<LoadedTemplate>();
         }
     }
+
+    /// <summary>
+    /// An unknown name falls back to Raw rather than throwing: a manifest naming
+    /// a scoring this build does not have should degrade to the old behaviour,
+    /// not take the whole pack down with it.
+    /// </summary>
+    private static TemplateScoring ParseScoring(string? scoring) =>
+        string.Equals(scoring, "highpass3", StringComparison.OrdinalIgnoreCase)
+            ? TemplateScoring.HighPass3
+            : TemplateScoring.Raw;
 
     private static NormalizedRegion? SlotRegion(DetectorRegionSet regions, int slot) => slot switch
     {

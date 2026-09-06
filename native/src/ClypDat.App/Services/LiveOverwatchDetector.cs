@@ -78,7 +78,7 @@ internal sealed class LiveOverwatchDetector : ILiveGameDetector
                     var banners = DetectorTemplates.Match(_templates, frame)
                         .GroupBy(hit => hit.Template.Slot)
                         .Select(group => group.First())
-                        .Select(hit => new DetectedBanner(hit.Template.EventId, hit.Template.Label))
+                        .Select(hit => new DetectedBanner(hit.Template.EventId, hit.Template.Label, hit.Score))
                         .ToArray();
                     foreach (var item in _detector.Observe(new OverwatchFrameObservation(
                                  timestamp, leftColumn, killFeed, teamKill, banners)))
