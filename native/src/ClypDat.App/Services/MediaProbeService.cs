@@ -484,7 +484,23 @@ public sealed class MediaProbeService
             await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken).ConfigureAwait(false);
         }
 
-        const int BucketCount = 700;
+        // Sized for the lane at full zoom, not at rest. A lane spans the
+        // timeline's content width - the viewport times the zoom, capped at 8x
+        // in MainWindow - so it reaches roughly 16,000px on a wide display. 700
+        // was sized for the unzoomed lane, which is why zooming in gave a handful
+        // of stretched polygons instead of the audio. The right number depends on
+        // the lane's pixels, not the clip: the lane is the same width whether it
+        // holds fifteen seconds or three hours.
+        //
+        // 8,000 puts a peak every couple of pixels at maximum zoom, which is
+        // indistinguishable from one per pixel in a lane this short and halves
+        // what the cache costs: measured over a real library, 16,000 came to
+        // ~226KB per clip against ~113KB here.
+        //
+        // Bucketing is a pass over samples that were decoded anyway, so the extra
+        // resolution costs decode time nothing. WaveformPeakReducer takes it back
+        // down to the lane's own width at draw time.
+        const int BucketCount = 8000;
         const double SegmentSeconds = 60;
         var totalSeconds = media.Duration.TotalSeconds;
 
@@ -913,7 +929,11 @@ public sealed class MediaProbeService
     // otherwise age out through PruneStaleCache.
     private string GetWaveformPath(string filePath)
     {
-        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-waveforms-v2.json");
+        // v3: peaks are stored at the zoomed lane's resolution, not the
+        // unzoomed one. A v2 file holds 700 buckets for the whole clip and
+        // would keep painting a blocky waveform forever, since the clip it
+        // describes never changes.
+        return Path.Combine(_cacheFolder, $"{CacheKey(filePath)}-waveforms-v3.json");
     }
 
     private static async Task<Dictionary<int, IReadOnlyList<double>>> TryReadWaveformCacheAsync(
@@ -1727,7 +1747,7 @@ public sealed record MediaFileInfo(
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
 
-// Persisted shape of {key}-waveforms-v2.json. Carries the source file's size and
+// Persisted shape of {key}-waveforms-v3.json. Carries the source file's size and
 // mtime so an entry can be rejected once the clip has been rewritten in place -
 // something the v1 format had no room to express.
 internal sealed record WaveformCacheEntry(

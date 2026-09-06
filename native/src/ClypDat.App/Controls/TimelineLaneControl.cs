@@ -228,16 +228,24 @@ public sealed class TimelineLaneControl : Control
             return _cachedWaveformGeometry;
         }
 
+        // Peaks are stored at the resolution the lane reaches when the timeline
+        // is zoomed all the way in, so at lower zoom there are far more of them
+        // than the lane has pixels. Drawing one point per peak would put
+        // thousands of line segments inside a single pixel column; reducing to
+        // the lane's own width keeps the geometry the same size whatever the
+        // zoom, and zooming in simply stops discarding detail.
+        var column = WaveformPeakReducer.Reduce(peaks, rect.Width);
+
         var geometry = new StreamGeometry();
         using (var stream = geometry.Open())
         {
             var mid = rect.Height / 2;
             var max = Math.Max(0.7, rect.Height * 0.36);
-            var count = peaks.Count;
+            var count = column.Length;
             for (var i = 0; i < count; i++)
             {
                 var x = count == 1 ? 0 : i * rect.Width / (count - 1);
-                var y = mid - Math.Clamp(peaks[i], 0, 1) * max;
+                var y = mid - column[i] * max;
                 if (i == 0) stream.BeginFigure(new Point(x, y), true);
                 else stream.LineTo(new Point(x, y));
             }
@@ -245,7 +253,7 @@ public sealed class TimelineLaneControl : Control
             for (var i = count - 1; i >= 0; i--)
             {
                 var x = count == 1 ? 0 : i * rect.Width / (count - 1);
-                var y = mid + Math.Clamp(peaks[i], 0, 1) * max;
+                var y = mid + column[i] * max;
                 stream.LineTo(new Point(x, y));
             }
             stream.EndFigure(true);
@@ -256,6 +264,7 @@ public sealed class TimelineLaneControl : Control
         _cachedWaveformGeometry = geometry;
         return geometry;
     }
+
 
     private void DrawTrimShade(DrawingContext context, Rect rect)
     {
