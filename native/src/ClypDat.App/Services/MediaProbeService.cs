@@ -287,7 +287,10 @@ public sealed class MediaProbeService
                     {
                         width = Math.Max(width, GetInt(stream, "width"));
                         height = Math.Max(height, GetInt(stream, "height"));
-                        fps = Math.Max(fps, ParseRate(GetString(stream, "avg_frame_rate")));
+                        // avg_frame_rate is a mean over the whole file, so a few
+                        // dropped frames drag a steady capture below its real
+                        // rate. See FrameRateNormalizer.
+                        fps = Math.Max(fps, FrameRateNormalizer.Normalize(ParseRate(GetString(stream, "avg_frame_rate"))));
                     }
 
                     if (codecType is "video" or "audio" or "subtitle")
