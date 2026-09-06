@@ -70,11 +70,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     /// <summary>
     /// Banner matching reads thin bright strokes, and detail is the first thing a
-    /// downscaled capture loses. Measured on the same hand-labelled frames, the
-    /// gap between a real banner and empty scenery is 0.63..0.89 against 0.089 at
-    /// 1080p and 0.51..0.76 against 0.095 at 1440p, but collapses to 0.20..0.35
-    /// against 0.099 at 720p - straddling the threshold either way. Below this
-    /// floor the detector reports itself unavailable rather than guessing.
+    /// downscaled capture loses. Measured on hand-labelled frames, the gap between
+    /// a real banner and empty scenery holds everywhere except the bottom end -
+    /// worst real banner against best empty frame: 0.514/0.114 at 1440p (native,
+    /// 585 frames, the resolution the clips were captured at), 0.685/0.117 at
+    /// 1080p, 0.554/0.111 at 2160p, but 0.20/0.099 at 720p, which straddles the
+    /// 0.22 threshold in both directions. Below this floor the detector stands
+    /// down rather than guessing.
+    ///
+    /// Going UP costs nothing because the high pass runs after the resample to
+    /// template size, so the band being compared is the same whatever the capture
+    /// is: a larger frame only changes which source pixels are sampled. The 2160p
+    /// figure is from upscaled 1440p, the largest real capture available - native
+    /// 4K strokes are finer still, and Resample decimates rather than averages, so
+    /// re-measure on native 4K before assuming the margin is identical.
     /// </summary>
     internal const int MinimumDetectorHeight = 1000;
 

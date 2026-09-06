@@ -36,9 +36,14 @@ public enum TemplateScoring
 /// text is thin bright strokes; scenery is smooth gradient. Removing the low
 /// frequencies from both sides drops those same false matches to 0.116 while
 /// real banners stay at 0.305 and above, and every one of 15 hand-labelled
-/// banner frames then picks its own template. Detail is what the capture loses
-/// first, so the margin narrows with resolution - see
-/// <c>IsSupportedDetectorResolution</c> in NativeReplayBuffer for the floor.
+/// banner frames then picks its own template. Detail is what a small capture
+/// loses first, so the margin narrows going DOWN but not up - see
+/// <c>IsSupportedDetectorResolution</c> in NativeReplayBuffer for the floor and
+/// the per-resolution numbers.
+///
+/// Note the order in <see cref="Score"/>: resample first, filter second. The
+/// blur radius is in template pixels, so filtering before the resample would
+/// give the cutoff a different meaning on every capture size.
 ///
 /// <see cref="FixedRegionTemplateMatcher"/> does the same maths against image
 /// files on disk; this one works on the in-memory crops the detector pipeline
