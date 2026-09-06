@@ -43,7 +43,19 @@ public sealed partial class OverwatchDetector
     // detector needs no list of its own to keep in step with templates.json.
     private readonly Dictionary<string, PhraseLatch> _banners = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly PhraseLatch _playOfTheGame = new("PLAY OF THE GAME", confirmationFrames: 2, resetFrames: 10);
+    /// <summary>
+    /// Overwatch names the highlight twice. The intro card says "PLAY OF THE
+    /// GAME", but it is centre-screen - only its left edge falls inside the left
+    /// column crop - low contrast, and gone in about two seconds. The banner
+    /// along the top of the replay says "PLAY OF THE MATCH", and that one is
+    /// large, high contrast, fully inside the crop, and stays up for the whole
+    /// replay. Reading only the first wording is why a tester's Play of the Match
+    /// was saved as a Triple Kill: the highlight went unrecognised, so the
+    /// featured player's streak banners were credited to the local player.
+    /// </summary>
+    private static readonly string[] PlayOfTheGamePhrases = ["PLAY OF THE GAME", "PLAY OF THE MATCH"];
+
+    private readonly PhraseLatch _playOfTheGame = new(PlayOfTheGamePhrases, confirmationFrames: 2, resetFrames: 10);
     private readonly HashSet<string> _recentEliminations = new(StringComparer.OrdinalIgnoreCase);
     private Queue<string> _eliminationOrder = new();
 
@@ -53,7 +65,7 @@ public sealed partial class OverwatchDetector
     /// HUD in either state are not the local player's.
     /// </summary>
     public static bool IsSpectating(string leftColumnText) =>
-        Contains(leftColumnText, "PLAY OF THE GAME")
+        PlayOfTheGamePhrases.Any(phrase => Contains(leftColumnText, phrase))
         || Contains(leftColumnText, "ELIMINATED BY")
         || Contains(leftColumnText, "DEATH SPECTATING");
 

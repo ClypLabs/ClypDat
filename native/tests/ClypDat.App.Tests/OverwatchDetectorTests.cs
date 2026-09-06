@@ -112,6 +112,52 @@ public sealed class OverwatchDetectorTests
         Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME GOWONSS AS FREJA")));
     }
 
+    // The banner across the top of the replay, which is the wording that actually
+    // stays on screen - the centred intro card is gone in about two seconds.
+    [Fact]
+    public void ThePlayOfTheMatchBannerAlsoCounts()
+    {
+        var detector = new OverwatchDetector();
+
+        Observe(detector, Frame(1, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY"));
+
+        Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY")));
+    }
+
+    // The two wordings are one highlight, not two: the intro card gives way to
+    // the replay banner, and that must not re-fire the event.
+    [Fact]
+    public void TheIntroCardAndTheReplayBannerAreOneHighlight()
+    {
+        var detector = new OverwatchDetector();
+
+        Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME IPIXELGALAXY"));
+        Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME IPIXELGALAXY")));
+
+        Assert.Empty(Observe(detector, Frame(3, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY")));
+        Assert.Empty(Observe(detector, Frame(4, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY")));
+    }
+
+    // What actually went wrong for a tester: their Play of the Match was saved as
+    // a Triple Kill, because the streak belonged to the featured player and only
+    // the intro card's wording was recognised as spectating.
+    [Fact]
+    public void StreaksInsideAPlayOfTheMatchReplayAreNotYours()
+    {
+        var detector = new OverwatchDetector();
+        const string replayBanner = "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY";
+
+        Observe(detector, Frame(1, leftColumn: replayBanner));
+        Observe(detector, Frame(2, leftColumn: replayBanner));
+
+        var triple = Banner("triple-kill", "Triple Kill");
+        Observe(detector, Frame(3, leftColumn: replayBanner, banners: triple));
+        var events = Observe(detector, Frame(4, leftColumn: replayBanner, killFeed: "SOJOURN 240", banners: triple));
+
+        Assert.DoesNotContain("triple-kill", events);
+        Assert.DoesNotContain("elimination", events);
+    }
+
     [Theory]
     [InlineData("ELIMINATED BY D.MON GROINCANCER")]
     [InlineData("YOU ARE NOW DEATH SPECTATING: EGG")]
