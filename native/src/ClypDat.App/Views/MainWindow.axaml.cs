@@ -5688,9 +5688,13 @@ public sealed partial class MainWindow : Window
 
     private void AutoClip_OnPending(object? sender, string message) => Dispatcher.UIThread.Post(() => ShowAutoClipPendingNotification(message));
 
+    // Everything except CS2 lands here, so this is where the minimum clip length
+    // is applied - see AutoClipWindowPolicy for why CS2 keeps its own window.
     private void AutoClip_OnReady(object? sender, AutoClipRequest request)
     {
-        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), request.GameName, request.EventType));
+        var (startUtc, endUtc) = AutoClipWindowPolicy.Extend(request.StartUtc, request.EndUtc,
+            _replayBuffer?.Duration ?? AutoClipWindowPolicy.MinimumLength);
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(startUtc, endUtc), request.GameName, request.EventType));
     }
 
     internal void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)

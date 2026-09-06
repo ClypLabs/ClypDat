@@ -7,6 +7,33 @@ namespace ClypDat.App.Services;
 
 public sealed record AutoClipRequest(string GameId, string GameName, string EventId, string EventType, string Title, DateTime StartUtc, DateTime EndUtc, int Priority = 0);
 
+/// <summary>
+/// How long an auto-clip runs. An event's lead is only what the detector or the
+/// game's telemetry needs to be sure of what happened - clipping to it left a
+/// Double Kill as fourteen seconds with no sense of how the fight started.
+///
+/// CS2 does not come through here. Its window is the round, from first kill to
+/// round end, which already means something; the rest of the games have no such
+/// structure to lean on.
+/// </summary>
+public static class AutoClipWindowPolicy
+{
+    public static readonly TimeSpan MinimumLength = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Backs the start off until the clip runs <see cref="MinimumLength"/> up to
+    /// the event's tail. Never shortens a window that is already longer, so a
+    /// streak that escalated for half a minute keeps its opening kill, and never
+    /// asks for more history than the buffer holds.
+    /// </summary>
+    public static (DateTime StartUtc, DateTime EndUtc) Extend(DateTime startUtc, DateTime endUtc, TimeSpan available)
+    {
+        var length = available < MinimumLength ? available : MinimumLength;
+        var extended = endUtc - length;
+        return (extended < startUtc ? extended : startUtc, endUtc);
+    }
+}
+
 public sealed class DotaGsiListener : IDisposable
 {
     private static readonly TimeSpan Padding = TimeSpan.FromSeconds(4);
