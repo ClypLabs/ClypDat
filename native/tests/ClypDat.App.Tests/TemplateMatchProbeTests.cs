@@ -94,6 +94,10 @@ public sealed class TemplateMatchProbeTests
     [InlineData("ow-double.png", "double-kill")]
     [InlineData("ow-triple.png", "triple-kill")]
     [InlineData("ow-quadruple.png", "quadruple-kill")]
+    // The highlight bar, in both the spellings Overwatch uses for it. It is
+    // matched rather than read because OCR returns "PIWOfWfCßMf" for it.
+    [InlineData("ow-potg-game.png", "play-of-the-game")]
+    [InlineData("ow-potg-match.png", "play-of-the-game")]
     public void TheRightBannerWinsOnAKnownFrame(string file, string expected)
     {
         var path = Path.Combine(FixtureRoot, file);
@@ -103,13 +107,19 @@ public sealed class TemplateMatchProbeTests
         var templates = DetectorTemplates.Load("overwatch", regions, TemplateRoot);
         Assert.NotEmpty(templates);
         var hits = DetectorTemplates.Match(templates, ToFrame(path, regions));
-
         Assert.NotEmpty(hits);
-        Assert.Equal(expected, hits[0].Template.EventId);
-        // Nothing else may be close enough to be mistaken for it. These frames
-        // score their own banner at 0.88-0.95 and every other at 0.21 or below.
-        Assert.All(hits.Skip(1), hit => Assert.True(hit.Score < hits[0].Score - 0.3,
-            $"{hit.Template.EventId} scored {hit.Score:F3} against {hits[0].Template.EventId} at {hits[0].Score:F3}."));
+
+        // Best per slot, the way LiveOverwatchDetector reads it. A highlight
+        // frame legitimately carries two: the bar in the left column, and the
+        // spectated player's streak in the kill feed.
+        var winners = hits.GroupBy(hit => hit.Template.Slot).Select(group => group.First()).ToArray();
+        var winner = Assert.Single(winners, hit => hit.Template.EventId == expected);
+
+        // Nothing else in that slot may be close enough to be mistaken for it.
+        Assert.All(hits.Where(hit => hit.Template.Slot == winner.Template.Slot
+                                     && hit.Template.EventId != expected),
+            hit => Assert.True(hit.Score < winner.Score - 0.1,
+                $"{hit.Template.EventId} scored {hit.Score:F3} against {expected} at {winner.Score:F3}."));
     }
 
     // The regression guard for the false-positive flood: banner-free frames must

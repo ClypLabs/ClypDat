@@ -32,9 +32,16 @@ internal sealed class PhraseLatch
         _resetFrames = resetFrames;
     }
 
-    public bool Observe(string? text)
+    public bool Observe(string? text) =>
+        ObservePresence(text is not null && _phrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// The same confirm-and-rearm behaviour for something recognised by
+    /// appearance rather than read as text, where the caller has already decided
+    /// whether it is on screen.
+    /// </summary>
+    public bool ObservePresence(bool present)
     {
-        var present = text is not null && _phrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase));
         if (present)
         {
             _absentFrames = 0;

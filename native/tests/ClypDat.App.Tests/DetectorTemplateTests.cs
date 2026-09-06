@@ -34,9 +34,12 @@ public sealed class DetectorTemplateTests
         var fortnite = DetectorTemplates.Load("fortnite", DetectorRegions.ForGame("fortnite")!, TemplateRoot);
 
         // A missing PNG or a bad slot silently drops the entry, so count it.
-        Assert.Equal(5, overwatch.Count);
+        // Seven for Overwatch: four streak tiers, Team Kill, and the highlight
+        // bar in both the spellings the game uses for it.
+        Assert.Equal(7, overwatch.Count);
         Assert.Equal(6, fortnite.Count);
         Assert.Contains(overwatch, item => item.EventId == "team-kill");
+        Assert.Equal(2, overwatch.Count(item => item.EventId == "play-of-the-game"));
         Assert.Contains(fortnite, item => item.EventId == "victory-royale");
         // Every loaded template must sit inside its slot, or the crop is empty.
         Assert.All(overwatch.Concat(fortnite), item =>

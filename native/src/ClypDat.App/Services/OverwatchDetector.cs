@@ -44,14 +44,15 @@ public sealed partial class OverwatchDetector
     private readonly Dictionary<string, PhraseLatch> _banners = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Overwatch names the highlight twice. The intro card says "PLAY OF THE
-    /// GAME", but it is centre-screen - only its left edge falls inside the left
-    /// column crop - low contrast, and gone in about two seconds. The banner
-    /// along the top of the replay says "PLAY OF THE MATCH", and that one is
-    /// large, high contrast, fully inside the crop, and stays up for the whole
-    /// replay. Reading only the first wording is why a tester's Play of the Match
-    /// was saved as a Triple Kill: the highlight went unrecognised, so the
-    /// featured player's streak banners were credited to the local player.
+    /// Overwatch names the highlight both ways - the bar along the top of the
+    /// replay reads "PLAY OF THE GAME" in one match and "PLAY OF THE MATCH" in
+    /// the next - so both count, and both map to the same event.
+    ///
+    /// These are a fallback only. The bar is drawn in the same stylised display
+    /// font as the streak banners, and Windows OCR cannot read it: it returns
+    /// "PIWOfWfCßMf" for "PLAY OF THE GAME", measured on a tester's clip. The
+    /// working path is the template match in templates.json; this catches the
+    /// case where OCR happens to succeed on a spelling that is not templated.
     /// </summary>
     private static readonly string[] PlayOfTheGamePhrases = ["PLAY OF THE GAME", "PLAY OF THE MATCH"];
 
@@ -73,13 +74,21 @@ public sealed partial class OverwatchDetector
     {
         var events = new List<OverwatchDetectedEvent>(2);
 
+        // The highlight bar is matched by appearance, not read: Windows OCR
+        // returns "PIWOfWfCßMf" for it, the same way it mangles the streak
+        // banners. Reading it as text is why a tester's Play of the Game was
+        // saved as a Triple Kill - the replay went unrecognised, so the featured
+        // player's banners were credited to them. The text phrases below stay as
+        // a second chance at it, and cost nothing when OCR fails.
+        var highlight = frame.Banners.FirstOrDefault(item => string.Equals(item.EventId, "play-of-the-game", StringComparison.OrdinalIgnoreCase));
+
         // Play of the Game is the one event that fires while spectating -
         // it IS the spectated thing, and every POTG is worth keeping even when
         // the featured player is not you.
-        if (_playOfTheGame.Observe(frame.LeftColumnText))
-            events.Add(Create("play-of-the-game", "Play of the Game", frame.Timestamp, 0.97));
+        if (_playOfTheGame.ObservePresence(highlight is not null || PlayOfTheGamePhrases.Any(phrase => Contains(frame.LeftColumnText, phrase))))
+            events.Add(Create("play-of-the-game", "Play of the Game", frame.Timestamp, highlight?.Score ?? 0.97));
 
-        if (IsSpectating(frame.LeftColumnText))
+        if (highlight is not null || IsSpectating(frame.LeftColumnText))
         {
             // Keep the latches fed so a streak that was on screen when the
             // replay started cannot fire the moment it ends.

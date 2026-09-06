@@ -124,6 +124,37 @@ public sealed class OverwatchDetectorTests
         Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY")));
     }
 
+    // The bar is matched by appearance, because Windows OCR returns "PIWOfWfCßMf"
+    // for it. This is the path that actually fires in game.
+    [Fact]
+    public void TheHighlightBannerFiresWithoutReadableText()
+    {
+        var detector = new OverwatchDetector();
+
+        var highlight = Banner("play-of-the-game", "Play of the Game");
+        Observe(detector, Frame(1, leftColumn: "PIWOfWfCßMf BY GHOSTECHO", banners: highlight));
+
+        Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PIWOfWfCßMf BY GHOSTECHO", banners: highlight)));
+    }
+
+    // What went wrong for a tester twice: the replay's own streak was saved as
+    // their Triple Kill because the highlight went unrecognised. The bar and the
+    // streak are on screen together, and the bar wins.
+    [Fact]
+    public void AStreakInsideAHighlightBelongsToTheFeaturedPlayer()
+    {
+        var detector = new OverwatchDetector();
+
+        var highlight = Banner("play-of-the-game", "Play of the Game");
+        var triple = Banner("triple-kill", "Triple Kill");
+        Observe(detector, Frame(1, banners: [highlight, triple]));
+        var events = Observe(detector, Frame(2, killFeed: "SOJOURN 240", banners: [highlight, triple]));
+
+        Assert.Contains("play-of-the-game", events);
+        Assert.DoesNotContain("triple-kill", events);
+        Assert.DoesNotContain("elimination", events);
+    }
+
     // The two wordings are one highlight, not two: the intro card gives way to
     // the replay banner, and that must not re-fire the event.
     [Fact]

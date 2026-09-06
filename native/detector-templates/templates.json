@@ -30,7 +30,13 @@
     "seek lands on a neighbouring keyframe and you bank the wrong banner.",
     "",
     "Plain HUD text - Overwatch's elimination rows, Fortnite's kill feed - is",
-    "still read by OCR. Only the stylised banners are matched this way."
+    "still read by OCR. Only the stylised banners are matched this way.",
+    "",
+    "Overwatch's highlight bar is one of those banners, not text: Windows OCR",
+    "reads 'PLAY OF THE GAME' as 'PIWOfWfCßMf'. It is matched here instead, in",
+    "two spellings because the game says both GAME and MATCH, and both map to",
+    "the same play-of-the-game event. The hero and player names beside it change",
+    "every time, so the regions stop before them."
   ],
   "games": {
     "overwatch": [
@@ -38,7 +44,9 @@
       { "eventId": "quadruple-kill", "label": "Quadruple Kill", "slot": 1, "region": [0.4521, 0.6852, 0.1563, 0.0741], "threshold": 0.22, "scoring": "highpass3", "file": "overwatch/quadruple-kill.png" },
       { "eventId": "triple-kill", "label": "Triple Kill", "slot": 1, "region": [0.4521, 0.6852, 0.1563, 0.0741], "threshold": 0.22, "scoring": "highpass3", "file": "overwatch/triple-kill.png" },
       { "eventId": "double-kill", "label": "Double Kill", "slot": 1, "region": [0.4521, 0.6852, 0.1563, 0.0741], "threshold": 0.22, "scoring": "highpass3", "file": "overwatch/double-kill.png" },
-      { "eventId": "team-kill", "label": "Team Kill", "slot": 2, "region": [0.4557, 0.2037, 0.1094, 0.0509], "threshold": 0.65, "file": "overwatch/team-kill.png" }
+      { "eventId": "team-kill", "label": "Team Kill", "slot": 2, "region": [0.4557, 0.2037, 0.1094, 0.0509], "threshold": 0.65, "file": "overwatch/team-kill.png" },
+      { "eventId": "play-of-the-game", "label": "Play of the Game", "slot": 0, "region": [0.021484, 0.020833, 0.134766, 0.048611], "threshold": 0.22, "scoring": "highpass3", "file": "overwatch/play-of-the-game.png" },
+      { "eventId": "play-of-the-game", "label": "Play of the Game", "slot": 0, "region": [0.021484, 0.020833, 0.144531, 0.048611], "threshold": 0.22, "scoring": "highpass3", "file": "overwatch/play-of-the-match.png" }
     ],
     "fortnite": [
       { "eventId": "enemy-team-wiped", "label": "Enemy Team Wiped", "slot": 1, "region": [0.4453, 0.6685, 0.1406, 0.0389], "threshold": 0.70, "file": "fortnite/enemy-team-wiped.png" },
