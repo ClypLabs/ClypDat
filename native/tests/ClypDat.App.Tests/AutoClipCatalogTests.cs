@@ -26,7 +26,9 @@ public sealed class AutoClipCatalogTests
         Assert.Equal("epic-fortnite", fortnite.PortraitDetectionKey);
         Assert.Equal("steam-553850", helldivers.PortraitDetectionKey);
         Assert.Equal("HELLDIVERS™ 2", helldivers.PortraitDisplayName);
-        Assert.Equal("HELLDIVERS™ 2", helldivers.Name);
+        // Display name drops the trademark mark; the portrait key above keeps it,
+        // because that is the spelling official-game-art.json is indexed on.
+        Assert.Equal("HELLDIVERS 2", helldivers.Name);
     }
 
     [Fact]
@@ -88,6 +90,7 @@ public sealed class AutoClipCatalogTests
         Assert.Equal("clypdat-cv", overwatch.ProviderId);
         Assert.Equal("steam-2357570", overwatch.PortraitDetectionKey);
         Assert.Equal("Overwatch®", overwatch.PortraitDisplayName);
+        Assert.Equal("Overwatch", overwatch.Name);
         Assert.Equal(
             new HashSet<string> { "double-kill", "triple-kill", "quadruple-kill", "quintuple-kill", "team-kill", "play-of-the-game" },
             overwatch.Events.Where(item => item.DefaultEnabled).Select(item => item.Id).ToHashSet());

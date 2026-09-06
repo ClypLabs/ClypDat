@@ -24,6 +24,12 @@ public sealed record AutoClipGameDefinition(
 
 public static class AutoClipCatalog
 {
+    // Name is what the settings list shows, so it drops the ™ and ® the stores
+    // carry. DetectionAliases and PortraitDisplayName keep them: those match what
+    // Steam and the game itself report, and official-game-art.json is keyed on
+    // the decorated spelling. Stripping them there would break detection and
+    // artwork, not tidy anything.
+
     private static AutoClipEventDefinition Event(string id, string name, string? group = null, int priority = 0,
         bool enabled = false, int lead = 4, int tail = 4) => new(id, name, group, priority, enabled, lead, tail);
 
@@ -63,7 +69,7 @@ public static class AutoClipCatalog
             DetectionAliases: new[] { "fortnite", "FortniteClient-Win64-Shipping" },
             SetupCapability: AutoClipSetupCapability.BuiltInDetector, PackId: "fortnite-prototype", DefaultEnabled: false,
             PortraitDetectionKey: "epic-fortnite", PortraitDisplayName: "Fortnite"),
-        new AutoClipGameDefinition("helldivers2", "HELLDIVERS™ 2", new[]
+        new AutoClipGameDefinition("helldivers2", "HELLDIVERS 2", new[]
         {
             Event("eliminated", "Eliminated", priority: 10, lead: 12, tail: 6),
             Event("killstreak-20", "Killstreak ×20", "streaks", 20, true, 10, 6),
@@ -95,7 +101,7 @@ public static class AutoClipCatalog
             // League is not on Steam, so the portrait comes from the curated
             // "portraits" map in game-icons.json rather than the store search.
             PortraitDetectionKey: "riot-league of legends", PortraitDisplayName: "League of Legends"),
-        new AutoClipGameDefinition("overwatch", "Overwatch®", new[]
+        new AutoClipGameDefinition("overwatch", "Overwatch", new[]
         {
             // Overwatch names each tier outright on screen ("DOUBLE KILL",
             // "TRIPLE KILL", "QUADRUPLE KILL", "QUINTUPLE KILL"), so they are
