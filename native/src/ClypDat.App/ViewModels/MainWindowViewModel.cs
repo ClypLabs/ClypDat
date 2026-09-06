@@ -10320,12 +10320,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return $"{value:0.#} {units[unit]}";
     }
 
-    private static string FormatTime(TimeSpan time)
-    {
-        return time.TotalHours >= 1
-            ? time.ToString("h\\:mm\\:ss")
-            : time.ToString("m\\:ss");
-    }
+    private static string FormatTime(TimeSpan time) => ClipDurationFormatter.Format(time);
 
     private static string ClipEditKey(string path)
     {

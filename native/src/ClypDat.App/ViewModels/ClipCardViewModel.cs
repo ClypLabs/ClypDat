@@ -274,7 +274,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         ? Stretch.Uniform
         : Stretch.UniformToFill;
 
-    public string DurationLabel => TrimmedDuration > TimeSpan.Zero ? TrimmedDuration.ToString("m\\:ss") : "0:00";
+    public string DurationLabel => ClipDurationFormatter.Format(TrimmedDuration);
     public string GameLabel => "VIDEO";
     public string CaptureBackendLabel => IsMedalImport
         ? "Imported from Medal"

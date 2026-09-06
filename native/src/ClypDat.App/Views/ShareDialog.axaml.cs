@@ -674,8 +674,7 @@ public partial class ShareDialog : Window
         ShareProgressEtaText.MaxWidth = Math.Max(0, boxWidth - 24);
     }
 
-    private static string FormatShareDuration(TimeSpan duration) =>
-        duration.TotalHours >= 1 ? duration.ToString(@"h\:mm\:ss") : duration.ToString(@"m\:ss");
+    private static string FormatShareDuration(TimeSpan duration) => ClipDurationFormatter.Format(duration);
 
     internal static string FormatOriginalResultSize(long bytes, string quality) =>
         $"{MainWindow.FormatFileSize(bytes)} · {quality}";
