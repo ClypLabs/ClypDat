@@ -83,7 +83,7 @@ public sealed class AutoClipCatalogTests
         // Built in, not a downloadable pack: the detector ships inside the app.
         Assert.True(overwatch.UsesDetector);
         Assert.False(overwatch.UsesDetectorPack);
-        Assert.False(overwatch.DefaultEnabled);
+        Assert.True(overwatch.DefaultEnabled);
         Assert.Equal("overwatch-prototype", overwatch.PackId);
         Assert.Equal("clypdat-cv", overwatch.ProviderId);
         Assert.Equal("steam-2357570", overwatch.PortraitDetectionKey);

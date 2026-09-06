@@ -112,7 +112,7 @@ public static class AutoClipCatalog
             Event("play-of-the-game", "Play of the Game", priority: 100, enabled: true, lead: 15, tail: 10)
         }, new[] { new AutoClipGroupDefinition("eliminations", "Eliminations") }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "overwatch", "Overwatch®", "Overwatch" },
-            SetupCapability: AutoClipSetupCapability.BuiltInDetector, PackId: "overwatch-prototype", DefaultEnabled: false,
+            SetupCapability: AutoClipSetupCapability.BuiltInDetector, PackId: "overwatch-prototype",
             PortraitDetectionKey: "steam-2357570", PortraitDisplayName: "Overwatch®")
     };
 
