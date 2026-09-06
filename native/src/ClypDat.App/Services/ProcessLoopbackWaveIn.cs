@@ -353,8 +353,18 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
             TargetProcessId = processId,
             ProcessLoopbackMode = mode == ProcessLoopbackCaptureMode.IncludeTargetProcessTree ? 0 : 1
         };
+        // ActivateAudioInterfaceAsync is ASYNCHRONOUS: Core Audio keeps reading
+        // these buffers, and keeps its COM pointer to the handler, until it calls
+        // back - which can be long after we have stopped waiting. Freeing them in
+        // a finally around the wait handed Core Audio memory that had already
+        // been returned to the heap, and a callback object nothing referenced any
+        // more. It crashed the recorder well away from here, as a DEP execute
+        // fault at an address in no module, or later as heap corruption. So the
+        // handler owns all of it and releases it when the callback actually
+        // arrives, timeout or not.
         var activationPtr = Marshal.AllocHGlobal(Marshal.SizeOf<AudioClientActivationParamsNative>());
         var propVariantPtr = Marshal.AllocHGlobal(Marshal.SizeOf<PropVariantBlobNative>());
+        var handler = new ActivateAudioInterfaceCompletionHandler(activationPtr, propVariantPtr);
         try
         {
             Marshal.StructureToPtr(activation, activationPtr, false);
@@ -365,7 +375,6 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                 BlobData = activationPtr
             };
             Marshal.StructureToPtr(propVariant, propVariantPtr, false);
-            var handler = new ActivateAudioInterfaceCompletionHandler();
             var audioClientGuid = AudioClientGuid;
             Marshal.ThrowExceptionForHR(ActivateAudioInterfaceAsync(
                 VirtualAudioDeviceProcessLoopback,
@@ -373,14 +382,32 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                 propVariantPtr,
                 handler,
                 out _));
+        }
+        catch
+        {
+            // The activation never reached Core Audio, so nothing else can be
+            // holding the buffers and reclaiming them here is safe.
+            handler.AbandonBeforeActivation();
+            throw;
+        }
+
+        try
+        {
             return (IAudioClient)handler.WaitForResult();
         }
-        finally
+        catch (TimeoutException)
         {
-            Marshal.FreeHGlobal(propVariantPtr);
-            Marshal.FreeHGlobal(activationPtr);
+            // Deliberately no free: the activation is still in flight. The handler
+            // reclaims the buffers if the callback ever arrives, and leaking a few
+            // dozen bytes beats handing Core Audio freed memory.
+            AppLog.Info($"Process loopback activation timed out after {ActivationTimeout.TotalSeconds:0}s: pid={processId}, mode={mode}.");
+            throw;
         }
     }
+
+    // How long a caller waits for Core Audio to finish activating. Reaching it no
+    // longer risks anything beyond the capture failing to start.
+    private static readonly TimeSpan ActivationTimeout = TimeSpan.FromSeconds(5);
 
     private static WaveFormat GetSharedRenderFormat()
     {
@@ -467,9 +494,26 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         void GetActivateResult(out int activateResult, [MarshalAs(UnmanagedType.IUnknown)] out object activatedInterface);
     }
 
+    /// <summary>
+    /// Owns everything Core Audio borrows for the length of an activation: the two
+    /// unmanaged buffers describing what to activate, and a root on itself, since
+    /// Core Audio holds a COM pointer here until it calls back. All of it is
+    /// released when the callback arrives, which may be after the caller has
+    /// already given up and thrown.
+    /// </summary>
     private sealed class ActivateAudioInterfaceCompletionHandler : IActivateAudioInterfaceCompletionHandler
     {
         private readonly TaskCompletionSource<object> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private GCHandle _self;
+        private IntPtr _activationParams;
+        private IntPtr _propVariant;
+
+        public ActivateAudioInterfaceCompletionHandler(IntPtr activationParams, IntPtr propVariant)
+        {
+            _activationParams = activationParams;
+            _propVariant = propVariant;
+            _self = GCHandle.Alloc(this);
+        }
 
         public void ActivateCompleted(IActivateAudioInterfaceAsyncOperation activateOperation)
         {
@@ -483,11 +527,34 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
             {
                 _completion.TrySetException(error);
             }
+            finally
+            {
+                // Core Audio is done reading the buffers by the time it reports a
+                // result, and will not call back again.
+                Release();
+            }
         }
 
         public object WaitForResult()
         {
-            return _completion.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            return _completion.Task.WaitAsync(ActivationTimeout).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Reclaim without waiting for a callback. Only correct when the
+        /// activation call itself failed, so Core Audio never took ownership.
+        /// </summary>
+        public void AbandonBeforeActivation() => Release();
+
+        private void Release()
+        {
+            var propVariant = Interlocked.Exchange(ref _propVariant, IntPtr.Zero);
+            if (propVariant != IntPtr.Zero) Marshal.FreeHGlobal(propVariant);
+            // Freed second: the PROPVARIANT points at it.
+            var activationParams = Interlocked.Exchange(ref _activationParams, IntPtr.Zero);
+            if (activationParams != IntPtr.Zero) Marshal.FreeHGlobal(activationParams);
+            // Safe from inside the callback: `this` is live on the stack.
+            if (_self.IsAllocated) _self.Free();
         }
     }
 }
