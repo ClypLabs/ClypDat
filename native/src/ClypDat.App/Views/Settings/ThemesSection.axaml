@@ -74,13 +74,19 @@
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Accent|Accent colour|Windows accent|System accent'}">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
-        <Grid ColumnDefinitions="*,Auto,Auto">
+        <!-- Dimmed and disabled under a custom theme: the theme's own accent is
+             what gets painted either way, so leaving the toggle live would be
+             offering a choice that changes nothing. -->
+        <Grid ColumnDefinitions="*,Auto,Auto" Opacity="{Binding IsCustomThemeSelected, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}">
           <StackPanel Spacing="3">
             <TextBlock Classes="settingsRowTitle" Text="Use Windows accent colour" />
-            <TextBlock Classes="settingsRowDesc" Text="Follows Settings &gt; Personalization &gt; Colors. Turn this off to use the selected theme's own accent instead." />
+            <TextBlock Classes="settingsRowDesc" Text="Follows Settings &gt; Personalization &gt; Colors. Turn this off to use the selected theme's own accent instead."
+                       IsVisible="{Binding !IsCustomThemeSelected}" />
+            <TextBlock Classes="settingsRowDesc" Text="A custom theme always uses its own accent colour. Pick a preset theme to follow Windows again."
+                       IsVisible="{Binding IsCustomThemeSelected}" />
           </StackPanel>
           <Border Grid.Column="1" Width="18" Height="18" CornerRadius="9" Margin="16,0,14,0" VerticalAlignment="Center" Background="{StaticResource AccentBrush}" />
-          <ToggleSwitch Grid.Column="2" IsChecked="{Binding UseSystemAccentColor}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+          <ToggleSwitch Grid.Column="2" IsChecked="{Binding UseSystemAccentColor}" IsEnabled="{Binding !IsCustomThemeSelected}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
       </StackPanel>
     </Border>

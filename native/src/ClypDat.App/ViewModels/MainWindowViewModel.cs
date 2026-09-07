@@ -469,6 +469,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ThemeColorPickerViewModel AccentPicker { get; }
 
 
+    // A custom theme carries its own accent, and AppThemeService.Apply ignores
+    // the Windows accent entirely while one is selected. The toggle is inert in
+    // that state, so it says so rather than sitting there looking live.
+    public bool IsCustomThemeSelected => CustomThemeLibrary.IsCustomSelection(Settings.ThemePreset);
+
     // The saved rows are a third selector onto the same setting as the two
     // preset grids, so switching between custom themes is one click on the row
     // rather than a trip through the editor.
@@ -512,6 +517,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(UseSystemAccentColor));
             OnPropertyChanged(nameof(SelectedCustomTheme));
             OnPropertyChanged(nameof(IsThemeEditorSaved));
+            OnPropertyChanged(nameof(IsCustomThemeSelected));
         }
     }
 
@@ -567,7 +573,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!Settings.CustomThemes.Remove(theme)) return false;
         if (string.Equals(Settings.ThemePreset, CustomThemeLibrary.Selection(theme), StringComparison.OrdinalIgnoreCase)) Settings.ThemePreset = "System";
-        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(SelectedCustomTheme)); return true;
+        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(SelectedCustomTheme)); OnPropertyChanged(nameof(IsCustomThemeSelected)); return true;
     }
     /// <summary>
     /// Saves the theme being edited and selects it, leaving the editor open.
@@ -587,7 +593,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
         CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
         ThemeEditorError = string.Empty; SaveSettings(); ApplyTheme();
-        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(HasRecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); OnPropertyChanged(nameof(SelectedCustomTheme)); return true;
+        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(HasRecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); OnPropertyChanged(nameof(SelectedCustomTheme)); OnPropertyChanged(nameof(IsCustomThemeSelected)); return true;
     }
 
     /// <summary>
