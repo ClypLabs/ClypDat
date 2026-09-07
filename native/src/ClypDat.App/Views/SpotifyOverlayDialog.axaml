@@ -27,8 +27,14 @@
             <Ellipse Width="10" Height="10" Fill="{StaticResource SpotifyDialogBrush}" VerticalAlignment="Center" />
             <TextBlock Text="SPOTIFY OVERLAY" Foreground="{StaticResource Text_D8E4F2}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
           </StackPanel>
-          <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                  Content="✕" Click="CloseButton_OnClick" />
+          <!-- A square chip inset from the corner rather than a button filling
+               it. Filling the corner means matching the frame's rounding
+               exactly - Avalonia clips children to the bounds rectangle, not to
+               the radius - and a hover fill that misses by a pixel spills over
+               the rounded edge. Inset, there is nothing to line up with. -->
+          <Button Grid.Column="2" Classes="dialogCloseChip" Content="✕" Click="CloseButton_OnClick"
+                  Width="30" Height="30" Margin="0,0,13,0" VerticalAlignment="Center"
+                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
         </Grid>
       </Border>
 
