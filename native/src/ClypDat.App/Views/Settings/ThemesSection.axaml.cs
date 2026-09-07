@@ -1,8 +1,5 @@
 using Avalonia.Controls;
-using Avalonia;
-using Avalonia.Input;
 using Avalonia.Interactivity;
-using Avalonia.VisualTree;
 using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Views.Settings;
@@ -11,9 +8,10 @@ public sealed partial class ThemesSection : UserControl
 {
     public ThemesSection()
     {
+        // Clicking away from a text box, and Enter to leave one, are handled
+        // for every box in the window by MainWindow rather than section by
+        // section.
         InitializeComponent();
-        AddHandler(PointerPressedEvent, ThemeTextBox_OnAnyPointerPressed, RoutingStrategies.Tunnel);
-        AddHandler(KeyDownEvent, ThemeTextBox_OnKeyDown, RoutingStrategies.Tunnel);
     }
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
     private void NewCustomThemeButton_OnClick(object? sender, RoutedEventArgs e) => ViewModel?.NewCustomTheme();
@@ -29,18 +27,4 @@ public sealed partial class ThemesSection : UserControl
     private void BaseRecentThemeColorButton_OnClick(object? sender, RoutedEventArgs e) { if ((sender as Control)?.Tag is string color) ViewModel?.UseRecentBaseColor(color); }
     private void AccentRecentThemeColorButton_OnClick(object? sender, RoutedEventArgs e) { if ((sender as Control)?.Tag is string color) ViewModel?.UseRecentAccentColor(color); }
 
-    private void ThemeTextBox_OnKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter || e.Source is not TextBox) return;
-        e.Handled = true;
-        DropFocus();
-    }
-
-    private void ThemeTextBox_OnAnyPointerPressed(object? sender, PointerEventArgs e)
-    {
-        if (e.Source is not Visual source || source is TextBox || source.FindAncestorOfType<TextBox>() is not null) return;
-        DropFocus();
-    }
-
-    private void DropFocus() => (TopLevel.GetTopLevel(this) as ClypDat.App.Views.MainWindow)?.DropFocus();
 }

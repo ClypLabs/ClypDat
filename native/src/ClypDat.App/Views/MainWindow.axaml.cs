@@ -637,6 +637,17 @@ public sealed partial class MainWindow : Window
         // else means the same. Neither clears the query - the results stay up,
         // the caret just stops owning the keyboard, so Space plays and the
         // editor's own shortcuts work again without a detour through the mouse.
+        // Every text box in the window, rather than the handful that had been
+        // given the behaviour one at a time. A box the user cannot click out of
+        // keeps its focus ring and its caret for the rest of the session, and
+        // that was the default for anything nobody had wired up: the font box,
+        // the auto-clipping search, every provider and custom-game field.
+        AddHandler(PointerPressedEvent, TextEntry_OnAnyPointerPressed, RoutingStrategies.Tunnel);
+        // Bubbling, and only for events nobody else claimed. The boxes that
+        // treat Enter as their own commit - the clip title, the editor's
+        // description - mark it handled on the way up, and this must not
+        // swallow it out from under them.
+        AddHandler(KeyDownEvent, TextEntry_OnKeyDown, RoutingStrategies.Bubble);
         AddHandler(PointerPressedEvent, SearchBox_OnAnyPointerPressed, RoutingStrategies.Tunnel);
         LibrarySearchBox.AddHandler(KeyDownEvent, SearchBox_OnKeyDown, RoutingStrategies.Tunnel);
         SettingsPanelView.SearchBox.AddHandler(KeyDownEvent, SearchBox_OnKeyDown, RoutingStrategies.Tunnel);
@@ -4733,6 +4744,28 @@ public sealed partial class MainWindow : Window
     }
 
     internal void DropFocus() => FocusSink.Focus();
+
+    // A press anywhere that is not inside the focused box ends the edit. The
+    // ancestor test is what keeps the box's own chrome - the clear button, a
+    // selection drag that leaves the bounds - from counting as clicking away.
+    private void TextEntry_OnAnyPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not TextBox focused) return;
+        if (e.Source is Visual source && (ReferenceEquals(source, focused) || focused.IsVisualAncestorOf(source))) return;
+        DropFocus();
+    }
+
+    // Escape and Enter both leave the box. Enter only where the box does not
+    // take newlines - in a multi-line box Enter is a newline and nothing else.
+    private void TextEntry_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Handled || e.Source is not TextBox box) return;
+        if (e.Key is not (Key.Escape or Key.Enter)) return;
+        if (e.Key == Key.Enter && (box.AcceptsReturn || e.KeyModifiers.HasFlag(KeyModifiers.Shift))) return;
+
+        e.Handled = true;
+        DropFocus();
+    }
 
     // Commits and drops focus when a click lands anywhere outside the details
     // card. Clicks INSIDE it are left alone - moving between Title and
