@@ -440,9 +440,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public AppSettings Settings { get; }
     public IReadOnlyList<ThemeOption> ThemeOptions => AppThemeService.Options;
     public IReadOnlyList<ThemeOption> LightThemeOptions => AppThemeService.LightOptions;
-    public IReadOnlyList<CustomThemeSettings> CustomThemes => Settings.CustomThemes;
+    // Snapshots, not the live lists. These are plain Lists - no change
+    // notification of their own - so the ItemsControls only update when the
+    // property raises. Handing back the same List instance every time defeats
+    // that: the binding compares the new value to the old, finds the identical
+    // reference, and skips the update. Applying a theme wrote it to settings and
+    // left the card showing nothing, which read as Apply not saving.
+    public IReadOnlyList<CustomThemeSettings> CustomThemes => Settings.CustomThemes.ToArray();
     public bool IsCustomThemesEmpty => Settings.CustomThemes.Count == 0;
-    public IReadOnlyList<string> RecentThemeColors => Settings.RecentThemeColors;
+    public IReadOnlyList<string> RecentThemeColors => Settings.RecentThemeColors.ToArray();
     public bool HasRecentThemeColors => Settings.RecentThemeColors.Count > 0;
     private CustomThemeSettings? _editingTheme;
     private string _themeEditorName = string.Empty;
