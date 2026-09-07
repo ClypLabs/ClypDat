@@ -218,6 +218,13 @@ public sealed class AppSettings
     // Optional Xbox link. Tokens live in a separately encrypted per-user cache;
     // settings only remember whether the user enabled the activity source.
     public bool XboxActivityEnabled { get; set; }
+
+    /// <summary>
+    /// Whether ClypDat reconnects to Spotify on launch. Set when the user
+    /// connects and cleared when they disconnect, so a signed-out user never
+    /// pays for a poll loop they did not ask for.
+    /// </summary>
+    public bool SpotifyEnabled { get; set; }
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one

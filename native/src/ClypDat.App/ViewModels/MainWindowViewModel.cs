@@ -220,8 +220,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         Settings = AppSettingsStore.Load();
         _xboxActivity.Changed += XboxActivityChanged;
+        _spotify.Changed += SpotifyChanged;
         _clypDatAccount.Changed += ClypDatAccountChanged;
         if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
+        if (Settings.SpotifyEnabled) _ = _spotify.TryRestoreAsync();
         _ = _clypDatAccount.TryRestoreAsync();
         Settings.CustomThemes ??= new();
         Settings.RecentThemeColors ??= new();
@@ -5642,6 +5644,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _xboxActivity.Changed -= XboxActivityChanged;
         _xboxActivity.Dispose();
+        _spotify.Changed -= SpotifyChanged;
+        _spotify.Dispose();
         _clypDatAccount.Changed -= ClypDatAccountChanged;
         _clypDatAccount.Dispose();
         CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
@@ -6553,12 +6557,64 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string? _discordGameImageUrl;
     private string? _discordGameProfileUrl;
     private readonly XboxActivityService _xboxActivity = new();
+    private readonly SpotifyNowPlayingService _spotify = new();
+    private SpotifyNowPlaying _spotifySnapshot = SpotifyNowPlaying.Disconnected;
     private readonly ClypDatAccountActivityService _clypDatAccount = new();
     private XboxActivitySnapshot _xboxSnapshot = XboxActivitySnapshot.Disconnected;
     private XboxActivitySnapshot _clypDatSnapshot = XboxActivitySnapshot.Disconnected;
     private bool _clypDatAccountSetupStarted;
 
     private XboxActivitySnapshot EffectiveXboxSnapshot => _clypDatSnapshot.IsConnected ? _clypDatSnapshot : _xboxSnapshot;
+
+    public bool SpotifyIsConnected => _spotifySnapshot.IsConnected;
+    public bool SpotifyIsConfigured => SpotifyNowPlayingService.IsConfigured;
+    public string SpotifyAccountStatus => _spotifySnapshot.Error
+        ?? (_spotifySnapshot.IsConnected
+            ? string.IsNullOrWhiteSpace(_spotifySnapshot.DisplayName) ? "Connected" : $"Connected as {_spotifySnapshot.DisplayName}"
+            : "Not connected");
+
+    /// <summary>
+    /// The now-playing line. A connected account with an idle player is its own
+    /// state and says so - it is not an error, and it is not silence either.
+    /// </summary>
+    public string SpotifyNowPlayingLabel => !_spotifySnapshot.IsConnected
+        ? "Connect to show the track playing over your clips."
+        : string.IsNullOrWhiteSpace(_spotifySnapshot.Track)
+            ? "Nothing playing"
+            : _spotifySnapshot.IsPlaying ? _spotifySnapshot.Label : $"{_spotifySnapshot.Label} (paused)";
+
+    public string SpotifyTrackLength => _spotifySnapshot.Duration is { } duration
+        ? ClipDurationFormatter.Format(duration)
+        : string.Empty;
+
+    public bool SpotifyHasTrack => _spotifySnapshot.IsConnected && !string.IsNullOrWhiteSpace(_spotifySnapshot.Track);
+
+    public async Task ConnectSpotifyAsync()
+    {
+        if (!await _spotify.ConnectAsync().ConfigureAwait(false)) return;
+        Settings.SpotifyEnabled = true;
+        SaveSettings();
+    }
+
+    public void DisconnectSpotify()
+    {
+        _spotify.Disconnect();
+        Settings.SpotifyEnabled = false;
+        SaveSettings();
+    }
+
+    private void SpotifyChanged(object? sender, SpotifyNowPlaying snapshot)
+    {
+        _spotifySnapshot = snapshot;
+        Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(SpotifyIsConnected));
+            OnPropertyChanged(nameof(SpotifyAccountStatus));
+            OnPropertyChanged(nameof(SpotifyNowPlayingLabel));
+            OnPropertyChanged(nameof(SpotifyTrackLength));
+            OnPropertyChanged(nameof(SpotifyHasTrack));
+        });
+    }
 
     public string XboxConnectionStatus => EffectiveXboxSnapshot.Error ?? (EffectiveXboxSnapshot.IsConnected ? "Connected" : "Not connected");
     public string XboxCurrentTitle => EffectiveXboxSnapshot.CurrentTitle ?? "No active Xbox game";
