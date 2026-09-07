@@ -282,7 +282,15 @@ internal static class AppThemeService
         // colour the theme is painted in and the colour the accent has to stay
         // legible against are the same colour, and it is this one.
         var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor)) : (default, false);
-        var accent = isCustom ? AdjustAccent(Color.Parse(customTheme!.AccentColor), customBase) : useSystemAccent ? systemAccent : PresetAccent(preset);
+        // A custom theme normally owns its accent. The exception is a theme whose
+        // accent was never picked - it inherited one - which can follow Windows
+        // like a preset does, and is the only case where the toggle still means
+        // something while a custom theme is selected.
+        var accent = isCustom
+            ? AdjustAccent(useSystemAccent && customTheme!.AccentFollowsSystem
+                ? systemAccent
+                : Color.Parse(customTheme!.AccentColor), customBase)
+            : useSystemAccent ? systemAccent : PresetAccent(preset);
         var appBackground = isCustom ? customBase : Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
 
         // FluentTheme swaps its whole control-theme resource set on this. Without
