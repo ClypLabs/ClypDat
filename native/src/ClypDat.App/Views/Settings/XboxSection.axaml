@@ -114,6 +114,13 @@
                 <Border Classes="providerBadge" Background="{StaticResource XboxBadgeBrush}">
                   <PathIcon Data="{StaticResource XboxMark}" Foreground="{StaticResource XboxBrandBrush}" />
                 </Border>
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Classes="settingsRowTitle" Text="Xbox" />
+                  <TextBlock Classes="settingsRowDescSm" Text="Name Desktop Capture clips after the game you are playing on Xbox." />
+                </StackPanel>
+                <Button Grid.Column="2" VerticalAlignment="Center" Content="Connect" Click="CreateClypDatButton_OnClick" />
+              </Grid>
+            </Border>
             <!-- Spotify is not a sign-in method and is not brokered by
                  clypdat.xyz - the token only ever leaves this machine to ask
                  Spotify what is playing. It sits in this list anyway, because
@@ -132,13 +139,6 @@
                 </StackPanel>
                 <Button Grid.Column="2" Classes="primaryButton" Content="Connect" VerticalAlignment="Center"
                         Click="ConnectSpotifyButton_OnClick" IsEnabled="{Binding SpotifyIsConfigured}" />
-              </Grid>
-            </Border>
-                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Classes="settingsRowTitle" Text="Xbox" />
-                  <TextBlock Classes="settingsRowDescSm" Text="Name Desktop Capture clips after the game you are playing on Xbox." />
-                </StackPanel>
-                <Button Grid.Column="2" VerticalAlignment="Center" Content="Connect" Click="CreateClypDatButton_OnClick" />
               </Grid>
             </Border>
           </StackPanel>
