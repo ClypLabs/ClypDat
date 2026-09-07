@@ -48,7 +48,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     // own. Registered at developer.spotify.com; the redirect below has to be on
     // that registration verbatim or Spotify rejects the authorize call before
     // the user ever sees a consent screen.
-    public const string ClientId = "";
+    public const string ClientId = "2b86cd1dd2bb4375a378b486312a3ab4";
 
     // Loopback by IP, not by name. Spotify's redirect rules take http only for
     // a loopback ADDRESS - "localhost" is refused - and the port has to be
