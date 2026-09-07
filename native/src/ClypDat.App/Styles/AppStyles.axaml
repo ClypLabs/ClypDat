@@ -1164,9 +1164,18 @@
     <Setter Property="Padding" Value="13,8" />
     <Setter Property="FontSize" Value="14" />
     <Setter Property="MinHeight" Value="38" />
-    <!-- MinHeight is taller than one line plus its padding, and Fluent leaves
-         the slack at the bottom, so the text sat a couple of pixels high in
-         every settings field in the app. The slack is split instead. -->
+  </Style>
+  <!-- MinHeight is taller than one line plus its padding, and Fluent leaves the
+       slack at the bottom, so the text sat a couple of pixels high in every
+       settings field in the app. The slack is split instead.
+
+       One selector per control, not the grouped selector above: a grouped
+       selector resolves its setters against the two types' common base, which
+       is TemplatedControl, and VerticalContentAlignment is not on it. -->
+  <Style Selector="TextBox.settingsInput">
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="ComboBox.settingsInput">
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <!-- The app's search boxes borrow settingsInput's behaviour but not its
