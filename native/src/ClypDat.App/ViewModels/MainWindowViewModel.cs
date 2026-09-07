@@ -4276,6 +4276,35 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool SelectedHasSpotifyTrack => !string.IsNullOrWhiteSpace(_selectedSpotifyTrack);
 
+    /// <summary>
+    /// What the placement preview draws. The open clip's own track first, then
+    /// whatever is playing right now, and a stand-in only when there is neither
+    /// - a preview of an empty string tells the user nothing about placement.
+    /// </summary>
+    public string SpotifyOverlayPreviewText
+    {
+        get
+        {
+            if (SelectedHasSpotifyTrack)
+            {
+                var length = _selectedSpotifyDurationMs is { } milliseconds
+                    ? $"  {ClipDurationFormatter.Format(TimeSpan.FromMilliseconds(milliseconds))}"
+                    : string.Empty;
+                return SelectedSpotifyLabel + length;
+            }
+
+            if (_spotifySnapshot.IsConnected && !string.IsNullOrWhiteSpace(_spotifySnapshot.Track))
+            {
+                var length = _spotifySnapshot.Duration is { } duration
+                    ? $"  {ClipDurationFormatter.Format(duration)}"
+                    : string.Empty;
+                return _spotifySnapshot.Label + length;
+            }
+
+            return "Song name - Artist  3:48";
+        }
+    }
+
     public bool IsPlaying
     {
         get => _isPlaying;
@@ -6685,7 +6714,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (wanted && _spotifyProgressTimer is null)
         {
             _spotifyProgressTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            _spotifyProgressTimer.Tick += (_, _) => OnPropertyChanged(nameof(SpotifyTrackLength));
+            _spotifyProgressTimer.Tick += (_, _) =>
+            {
+                // Re-read rather than extrapolate from the snapshot this view
+                // model was last handed. The service only raises Changed when
+                // the track, the playing state or the error changes - a seek
+                // changes none of those - so a position scrubbed backwards or
+                // skipped forwards never reached here, and the elapsed time
+                // carried on counting up from wherever it last was told.
+                _spotifySnapshot = _spotify.Snapshot;
+                OnPropertyChanged(nameof(SpotifyTrackLength));
+            };
             _spotifyProgressTimer.Start();
         }
         else if (!wanted && _spotifyProgressTimer is not null)
@@ -6705,6 +6744,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(SpotifyNowPlayingLabel));
             OnPropertyChanged(nameof(SpotifyTrackLength));
             OnPropertyChanged(nameof(SpotifyHasTrack));
+            OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
             OnPropertyChanged(nameof(HasAccountsToAdd));
             OnPropertyChanged(nameof(HasLinkedAccounts));
             UpdateSpotifyProgressTimer();
@@ -8095,6 +8135,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedSpotifyDurationMs = clipInfo?.SpotifyDurationMs;
         OnPropertyChanged(nameof(SelectedSpotifyLabel));
         OnPropertyChanged(nameof(SelectedHasSpotifyTrack));
+        OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
         var isMedalImport = !string.IsNullOrWhiteSpace(clipInfo?.MedalImportKey);
         SelectedCaptureBackend = isMedalImport
             ? "Imported from Medal"

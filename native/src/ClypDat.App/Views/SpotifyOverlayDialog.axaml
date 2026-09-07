@@ -8,49 +8,86 @@
         WindowDecorations="None"
         ShowInTaskbar="False"
         CanResize="False"
-        Width="460"
+        Width="560"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         Background="Transparent"
         TransparencyLevelHint="Transparent"
         KeyDown="SpotifyOverlayDialog_OnKeyDown">
+  <Window.Resources>
+    <SolidColorBrush x:Key="SpotifyDialogBrush" Color="#1ED760" />
+    <SolidColorBrush x:Key="OverlayPreviewCardBrush" Color="#B3000000" />
+  </Window.Resources>
+
   <Border CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True">
     <DockPanel LastChildFill="True">
       <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0" PointerPressed="TitleBar_OnPointerPressed">
         <Grid ColumnDefinitions="Auto,*,Auto" Height="56">
-          <TextBlock Grid.Column="0" Grid.ColumnSpan="3" Text="SPOTIFY OVERLAY" Foreground="{StaticResource Text_D8E4F2}" FontSize="17" FontWeight="Bold"
-                     HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" />
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
+            <Ellipse Width="10" Height="10" Fill="{StaticResource SpotifyDialogBrush}" VerticalAlignment="Center" />
+            <TextBlock Text="SPOTIFY OVERLAY" Foreground="{StaticResource Text_D8E4F2}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
+          </StackPanel>
           <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                   Content="✕" Click="CloseButton_OnClick" />
         </Grid>
       </Border>
 
-      <StackPanel Margin="20" Spacing="16">
+      <StackPanel Margin="20,18,20,20" Spacing="16">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="3">
             <TextBlock Classes="settingsRowTitle" Text="Show the track on clips" />
-            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="300"
-                       Text="Lays the song, artist and track length over clips captured while Spotify was playing." />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="380"
+                       Text="Drawn into the picture when a clip is exported, shared or trimmed - never while recording." />
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
 
-        <Border Classes="settingsDivider" />
-
         <StackPanel Spacing="10" IsEnabled="{Binding SpotifyOverlayEnabled}">
+          <!-- A frame with the real card in it, rather than six thumbnails of
+               an abstract rectangle. Placement is the only thing this dialog
+               decides, and the question it answers - "will this sit on top of
+               my crosshair" - needs the actual text at something like the
+               actual size. -->
+          <Border CornerRadius="8" ClipToBounds="True" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" Height="222">
+            <Panel>
+              <!-- Stands in for footage. Two bands rather than a flat fill, so
+                   the card's translucency reads as translucency. -->
+              <Border Background="{StaticResource Surface_18232D}" />
+              <Border Background="{StaticResource Surface_0C1319}" Height="74" VerticalAlignment="Bottom" Opacity="0.55" />
+              <Border Background="{StaticResource SpotifyDialogBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75"
+                      HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+              <Border Margin="14"
+                      Padding="12,8"
+                      CornerRadius="6"
+                      Background="{StaticResource OverlayPreviewCardBrush}"
+                      HorizontalAlignment="{Binding SelectedSpotifyOverlayPosition, Converter={x:Static opconv:OverlayPositionToHorizontalAlignmentConverter.Instance}}"
+                      VerticalAlignment="{Binding SelectedSpotifyOverlayPosition, Converter={x:Static opconv:OverlayPositionToVerticalAlignmentConverter.Instance}}">
+                <TextBlock Text="{Binding SpotifyOverlayPreviewText}" Foreground="White" FontWeight="Bold" FontSize="13"
+                           TextTrimming="CharacterEllipsis" MaxWidth="300" />
+              </Border>
+            </Panel>
+          </Border>
+
           <TextBlock Classes="settingsPickerLabel" Text="PLACEMENT" />
-          <!-- The same tiles the clip-save overlay uses, so a position means
-               the same thing in both places. -->
           <ListBox Classes="pillGroup" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedSpotifyOverlayPosition}">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <!-- Three even columns. Left to its own devices the list gave
+                     each tile its text's width, so the two columns stepped in
+                     and out row by row. -->
+                <UniformGrid Columns="3" />
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                  <Border Width="52" Height="34" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="4">
-                    <Border Width="20" Height="7" Margin="4" CornerRadius="2" Background="{StaticResource SpotifyDialogBrush}"
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Border Width="34" Height="22" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="3">
+                    <Border Width="14" Height="5" Margin="3" CornerRadius="2" Background="{StaticResource SpotifyDialogBrush}"
                             HorizontalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToHorizontalAlignmentConverter.Instance}}"
                             VerticalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToVerticalAlignmentConverter.Instance}}" />
                   </Border>
-                  <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding}" VerticalAlignment="Center" FontSize="12" />
                 </StackPanel>
               </DataTemplate>
             </ListBox.ItemTemplate>
@@ -60,15 +97,11 @@
         <Border Classes="settingsDivider" />
 
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="290" VerticalAlignment="Center"
-                     Text="Clips already captured keep the track they were saved with; placement applies when a clip is exported." />
+          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="360" VerticalAlignment="Center"
+                     Text="A clip carries whatever was playing when it was saved. Placement is read at export, so changing it here applies to clips you already have." />
           <Button Grid.Column="1" Classes="primaryButton" Content="Done" Click="CloseButton_OnClick" VerticalAlignment="Center" />
         </Grid>
       </StackPanel>
     </DockPanel>
   </Border>
-
-  <Window.Resources>
-    <SolidColorBrush x:Key="SpotifyDialogBrush" Color="#1ED760" />
-  </Window.Resources>
 </Window>
