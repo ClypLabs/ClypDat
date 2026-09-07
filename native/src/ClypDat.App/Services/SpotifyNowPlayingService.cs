@@ -25,7 +25,8 @@ internal sealed record SpotifyNowPlaying(
     // Cover art for the card. A URL rather than the image: it is only fetched
     // when a clip is actually saved, so a session that never clips never
     // downloads anything.
-    string? ArtUrl = null)
+    string? ArtUrl = null,
+    string? TrackId = null)
 {
     public static SpotifyNowPlaying Disconnected { get; } = new(false, null, null, null, null, null, null, false, null, null);
 
@@ -101,6 +102,8 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
     public SpotifyNowPlaying Snapshot => _snapshot;
     public event EventHandler<SpotifyNowPlaying>? Changed;
+    /// <summary>Raised for every successful poll, including progress-only corrections.</summary>
+    public event EventHandler<SpotifyNowPlaying>? Sampled;
 
     /// <summary>
     /// The last track this process saw playing, or a disconnected snapshot.
@@ -253,7 +256,8 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             // Spotify returns its images largest first; the card is drawn at a
             // few hundred pixels, so the smallest one that still covers it is
             // the cheapest correct choice.
-            ArtUrl: SmallestUsableArt(item?.Album?.Images)));
+            ArtUrl: SmallestUsableArt(item?.Album?.Images),
+            TrackId: item?.Id));
     }
 
     // 300px is the middle image Spotify publishes for an album, and the card's
@@ -276,6 +280,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         // a real change is worth waking the UI for. Progress is deliberately
         // not compared - it moves on every tick by definition.
         var unchanged = _snapshot.IsConnected == snapshot.IsConnected &&
+            string.Equals(_snapshot.TrackId, snapshot.TrackId, StringComparison.Ordinal) &&
             string.Equals(_snapshot.Track, snapshot.Track, StringComparison.Ordinal) &&
             string.Equals(_snapshot.Artist, snapshot.Artist, StringComparison.Ordinal) &&
             _snapshot.IsPlaying == snapshot.IsPlaying &&
@@ -283,6 +288,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
         _snapshot = snapshot;
         Current = snapshot;
+        Sampled?.Invoke(this, snapshot);
         if (!unchanged) Changed?.Invoke(this, snapshot);
     }
 
@@ -459,6 +465,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
     private sealed class TrackResponse
     {
+        [JsonPropertyName("id")] public string? Id { get; set; }
         [JsonPropertyName("name")] public string? Name { get; set; }
         [JsonPropertyName("duration_ms")] public int? DurationMs { get; set; }
         [JsonPropertyName("artists")] public ArtistResponse[]? Artists { get; set; }

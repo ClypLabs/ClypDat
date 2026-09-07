@@ -4267,13 +4267,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private string? RenderSpotifyCard()
     {
-        if (!Settings.SpotifyOverlayEnabled || string.IsNullOrWhiteSpace(_selectedSpotifyTrack)) return null;
+        if (!Settings.SpotifyOverlayEnabled || _selectedSpotifyOverlayBurned || string.IsNullOrWhiteSpace(_selectedSpotifyTrack)) return null;
 
         try
         {
             var card = new SpotifyCard(
                 _selectedSpotifyTrack!,
                 _selectedSpotifyArtist,
+                _selectedSpotifyAlbum,
                 _selectedSpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
                 _selectedSpotifyProgressMs is { } progress ? TimeSpan.FromMilliseconds(progress) : null,
                 _selectedSpotifyArtPath);
@@ -4291,9 +4292,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private string? _selectedSpotifyTrack;
     private string? _selectedSpotifyArtist;
+    private string? _selectedSpotifyAlbum;
     private int? _selectedSpotifyDurationMs;
     private int? _selectedSpotifyProgressMs;
     private string? _selectedSpotifyArtPath;
+    private bool _selectedSpotifyOverlayBurned;
 
     /// <summary>The track the open clip was captured over, for the editor to say so.</summary>
     public string SelectedSpotifyLabel => string.IsNullOrWhiteSpace(_selectedSpotifyTrack)
@@ -6820,6 +6823,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 SpotifyTrack = track.Track,
                 SpotifyArtist = track.Artist,
+                SpotifyAlbum = track.Album,
                 SpotifyDurationMs = track.Duration is { } length ? (int)length.TotalMilliseconds : null,
                 // ProgressNow rather than the polled value: up to two seconds
                 // have passed since the sample, and the bar is drawn where the
@@ -6858,6 +6862,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var card = new SpotifyCard(
             info.SpotifyTrack!,
             info.SpotifyArtist,
+            info.SpotifyAlbum,
             info.SpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
             info.SpotifyProgressMs is { } progress ? TimeSpan.FromMilliseconds(progress) : null,
             info.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, clipPath));
@@ -6866,12 +6871,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // necessarily the one open in the editor.
         var probed = await _mediaProbe.ProbeMetadataAsync(clipPath).ConfigureAwait(false);
         var height = probed.Height > 0 ? probed.Height : 1080;
-        var cardPath = SpotifyOverlayCardRenderer.Render(card, height, SpotifyOverlayCardRenderer.WorkPath("burn"));
+        var cardPath = SpotifyOverlayCardRenderer.Render(card, height, SpotifyOverlayCardRenderer.WorkPath("burn"), probed.Width);
         if (cardPath is null) return false;
 
-        var filter = ClipRenderFilters.ComposeWithCard(null, cardPath, Settings.SpotifyOverlayPosition, "[in]", null);
-        var burned = await SpotifyOverlayBurner.BurnAsync(clipPath, filter).ConfigureAwait(false);
+        var burned = await SpotifyOverlayBurner.BurnAsync(clipPath, cardPath, Settings.SpotifyOverlayPosition).ConfigureAwait(false);
         if (!burned) return false;
+
+        ClipInfoSidecar.Save(Settings.LibraryFolder, clipPath, info with { SpotifyOverlayBurned = true });
 
         // The tile's thumbnail was made from the file this just replaced.
         CardThumbnailCache.Invalidate(clipPath);
@@ -8281,9 +8287,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(SelectedAutoClipMarkers));
         _selectedSpotifyTrack = clipInfo?.SpotifyTrack;
         _selectedSpotifyArtist = clipInfo?.SpotifyArtist;
+        _selectedSpotifyAlbum = clipInfo?.SpotifyAlbum;
         _selectedSpotifyDurationMs = clipInfo?.SpotifyDurationMs;
         _selectedSpotifyProgressMs = clipInfo?.SpotifyProgressMs;
         _selectedSpotifyArtPath = clipInfo?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
+        _selectedSpotifyOverlayBurned = clipInfo?.SpotifyOverlayBurned == true;
         OnPropertyChanged(nameof(SelectedSpotifyLabel));
         OnPropertyChanged(nameof(SelectedHasSpotifyTrack));
         OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
