@@ -33,11 +33,13 @@
       </Border>
 
       <StackPanel Margin="20,18,20,20" Spacing="16">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="3">
+        <!-- One line of description, not two: at this width the second line
+             wrapped to three words and left the title floating over a ragged
+             block with the switch stranded off to the right. -->
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Show the track on clips" />
-            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="380"
-                       Text="Drawn into the picture when a clip is exported, shared or trimmed - never while recording." />
+            <TextBlock Classes="settingsRowDescSm" Text="Drawn in at export - never while recording." />
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
@@ -48,7 +50,13 @@
                decides, and the question it answers - "will this sit on top of
                my crosshair" - needs the actual text at something like the
                actual size. -->
-          <Border CornerRadius="8" ClipToBounds="True" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" Height="222">
+          <!-- 16:9, because that is what it is standing in for. The dialog's
+               width is fixed, so the frame's own is 560 less the 20 margins and
+               the 1px borders - 518 - and the height is that in the shape of a
+               clip. A frame of some other shape puts the card somewhere the
+               export will not. -->
+          <Border CornerRadius="8" ClipToBounds="True" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
+                  Width="518" Height="291" HorizontalAlignment="Left">
             <Panel>
               <!-- Stands in for footage. Two bands rather than a flat fill, so
                    the card's translucency reads as translucency.
@@ -58,7 +66,7 @@
                    radius, so a square fill inside a rounded frame paints
                    straight over the rounded corners. -->
               <Border Background="{StaticResource Surface_18232D}" CornerRadius="7" />
-              <Border Background="{StaticResource Surface_0C1319}" Height="74" VerticalAlignment="Bottom" Opacity="0.55" CornerRadius="0,0,7,7" />
+              <Border Background="{StaticResource Surface_0C1319}" Height="98" VerticalAlignment="Bottom" Opacity="0.55" CornerRadius="0,0,7,7" />
               <Border Background="{StaticResource SpotifyDialogBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75"
                       HorizontalAlignment="Center" VerticalAlignment="Center" />
 
