@@ -51,9 +51,14 @@
           <Border CornerRadius="8" ClipToBounds="True" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" Height="222">
             <Panel>
               <!-- Stands in for footage. Two bands rather than a flat fill, so
-                   the card's translucency reads as translucency. -->
-              <Border Background="{StaticResource Surface_18232D}" />
-              <Border Background="{StaticResource Surface_0C1319}" Height="74" VerticalAlignment="Bottom" Opacity="0.55" />
+                   the card's translucency reads as translucency.
+
+                   Both carry the frame's own radius: Avalonia clips a Border's
+                   children to its bounds RECTANGLE and not to its corner
+                   radius, so a square fill inside a rounded frame paints
+                   straight over the rounded corners. -->
+              <Border Background="{StaticResource Surface_18232D}" CornerRadius="7" />
+              <Border Background="{StaticResource Surface_0C1319}" Height="74" VerticalAlignment="Bottom" Opacity="0.55" CornerRadius="0,0,7,7" />
               <Border Background="{StaticResource SpotifyDialogBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75"
                       HorizontalAlignment="Center" VerticalAlignment="Center" />
 
