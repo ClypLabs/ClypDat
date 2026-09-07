@@ -1019,7 +1019,10 @@ public sealed partial class MainWindow : Window
             Dispatcher.UIThread.Post(async () =>
             {
                 if (ViewModel is not null && !string.IsNullOrWhiteSpace(completed.Path))
+                {
+                    ViewModel.StampSpotifyTrack(completed.Path);
                     await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
+                }
             });
             return;
         }
@@ -1046,6 +1049,7 @@ public sealed partial class MainWindow : Window
             if (ViewModel is not null)
             {
                 ViewModel.RecordDiscordClipSaved();
+                ViewModel.StampSpotifyTrack(completed.Path);
                 await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
             }
         });

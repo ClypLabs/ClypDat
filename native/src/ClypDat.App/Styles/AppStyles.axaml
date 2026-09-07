@@ -866,29 +866,16 @@
     <Setter Property="CornerRadius" Value="0,11,0,0" />
     <Setter Property="Foreground" Value="{StaticResource Text_8EA1B6}" />
   </Style>
-  <!-- The inset variant: a chip that hovers as a rounded square inside the
-       header rather than a fill that has to meet the window's own corner. -->
-  <Style Selector="Button.dialogCloseChip">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="0" />
-    <Setter Property="FontSize" Value="13" />
-    <Setter Property="Foreground" Value="{StaticResource Text_8EA1B6}" />
-  </Style>
-  <Style Selector="Button.dialogCloseChip /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Background" Value="Transparent" />
-  </Style>
-  <Style Selector="Button.dialogCloseChip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
-  </Style>
-  <Style Selector="Button.dialogCloseChip:pointerover">
-    <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
-  </Style>
   <Style Selector="Button.dialogClose:pointerover">
     <Setter Property="Background" Value="{StaticResource Surface_263544}" />
     <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
+  </Style>
+  <!-- The hover fill is painted by Fluent's own ContentPresenter, which takes
+       its corner radius from the template rather than from the setter above -
+       so the button was rounded and its fill was not, and the square corner
+       spilled over the window's rounded one. -->
+  <Style Selector="Button.dialogClose /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="CornerRadius" Value="0,11,0,0" />
   </Style>
   <!-- Replay Buffer flyout: quiet cards, sentence-case labels, and compact
        controls keep this small surface readable without changing the full

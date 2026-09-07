@@ -6734,6 +6734,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes the track that was playing onto a clip that has just been saved.
+    ///
+    /// Saves arrive from two places and only one of them is in this process:
+    /// the capture worker writes its own sidecar and has never spoken to
+    /// Spotify, so the track has to be added here, once the save comes back.
+    /// A clip that already carries one is left alone - re-stamping would give a
+    /// re-saved or repaired clip whatever happens to be playing now.
+    /// </summary>
+    public void StampSpotifyTrack(string clipPath)
+    {
+        if (string.IsNullOrWhiteSpace(clipPath) || !Settings.SpotifyEnabled) return;
+
+        var track = _spotify.Snapshot;
+        if (!track.IsPlaying || string.IsNullOrWhiteSpace(track.Track)) return;
+
+        try
+        {
+            var info = ClipInfoSidecar.Load(Settings.LibraryFolder, clipPath);
+            if (info is null || !string.IsNullOrWhiteSpace(info.SpotifyTrack)) return;
+
+            ClipInfoSidecar.Save(Settings.LibraryFolder, clipPath, info with
+            {
+                SpotifyTrack = track.Track,
+                SpotifyArtist = track.Artist,
+                SpotifyDurationMs = track.Duration is { } length ? (int)length.TotalMilliseconds : null
+            });
+        }
+        catch (Exception error)
+        {
+            // A clip without its track is a clip without an overlay, not a
+            // broken clip.
+            AppLog.Error($"Spotify: could not record the track on '{clipPath}'.", error);
+        }
+    }
+
     private void SpotifyChanged(object? sender, SpotifyNowPlaying snapshot)
     {
         _spotifySnapshot = snapshot;
