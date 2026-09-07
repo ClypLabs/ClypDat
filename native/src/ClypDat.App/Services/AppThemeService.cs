@@ -84,21 +84,39 @@ internal static class AppThemeService
     // six times the lightness of the thing it replaces, painted across every
     // panel in the app.
     //
-    // So the pick supplies the hue, and its chroma and lightness are clamped
-    // into the band the shipped palette already occupies. Clamped, not scaled:
-    // a pick already inside the band comes back untouched, which is what keeps
-    // a custom theme built on #0D1116 rendering byte-for-byte as System. The
-    // colour the user chose is still what the swatch and the saved theme show -
-    // this is a render step, not an edit of their choice.
-    private const double CustomSurfaceMaxSaturation = 0.30;
+    // So the pick supplies the hue, and its chroma and lightness are damped
+    // towards the band the shipped palette already occupies. A pick inside the
+    // band comes back untouched, which is what keeps a custom theme built on
+    // #0D1116 rendering byte-for-byte as System. The colour the user chose is
+    // still what the swatch and the saved theme show - this is a render step,
+    // not an edit of their choice.
+    //
+    // Damped, not clamped. A hard clamp is what made the picker feel dead: the
+    // band covers S <= 0.30 and L <= 0.13, so ~87% of the spectrum's travel and
+    // 70% of the saturation axis all landed on one single ground per hue, and
+    // the only visible event in the whole picker was the dark/light flip. Above
+    // the knee the pick is compressed into the headroom below the ceiling on a
+    // square-root curve, so movement anywhere on the spectrum moves the app -
+    // fastest just past the knee, where most picks sit, and flattening out at
+    // the vivid end where the ground would otherwise stop being a ground.
+    private const double CustomSurfaceSaturationKnee = 0.30;
+    private const double CustomSurfaceMaxSaturation = 0.45;
     private const double CustomDarkMinLightness = 0.05;
     private const double CustomDarkMaxLightness = 0.13;
+    // Ceilings, reached only by a fully saturated / fully bright pick. 0.20 is
+    // still below the authored family's brightest panel (#2C3B48, L 0.227), so
+    // the derived surfaces above the page stay inside the range the ramp was
+    // fitted against and the authored text (L 0.69-0.93) keeps AA on all of it.
+    private const double CustomDarkCeilingLightness = 0.20;
+    private const double CustomDarkFloorLightness = 0.03;
 
     // Light mode is the same band inverted: 1 - 0.069 = 0.931 is where the light
     // presets' page lands, and RecolorCustom negates its delta there, so the
     // ramp reproduces stock light from an anchor in this range.
     private const double CustomLightMinLightness = 0.90;
     private const double CustomLightMaxLightness = 0.97;
+    private const double CustomLightCeilingLightness = 0.985;
+    private const double CustomLightFloorLightness = 0.86;
 
     // Which band a pick lands in. A light theme needs a pale colour, and pale
     // means two things at once - bright AND washed out. Testing brightness alone
@@ -548,12 +566,28 @@ internal static class AppThemeService
         var light = lightness >= CustomLightMinPickLightness && chroma <= CustomLightMaxPickChroma;
         var ground = FromHsl(
             hue,
-            Math.Min(saturation, CustomSurfaceMaxSaturation),
-            Math.Clamp(lightness,
-                light ? CustomLightMinLightness : CustomDarkMinLightness,
-                light ? CustomLightMaxLightness : CustomDarkMaxLightness),
+            Damp(saturation, 0, CustomSurfaceSaturationKnee, 0, CustomSurfaceMaxSaturation),
+            light
+                ? Damp(lightness, CustomLightMinLightness, CustomLightMaxLightness,
+                    CustomLightFloorLightness, CustomLightCeilingLightness)
+                : Damp(lightness, CustomDarkMinLightness, CustomDarkMaxLightness,
+                    CustomDarkFloorLightness, CustomDarkCeilingLightness),
             picked.A);
         return (ground, light);
+    }
+
+    // Identity inside [kneeLow, kneeHigh]; outside it the remaining travel is
+    // folded into [floor, kneeLow] and [kneeHigh, ceiling]. Monotonic and
+    // continuous at both knees, so dragging the spectrum never stalls and never
+    // jumps. The square root is what puts the response where the picks are: a
+    // linear fold spends the same output range on the last 40% of the axis as
+    // on the first 10% past the knee, and reads as no response at all.
+    private static double Damp(double value, double kneeLow, double kneeHigh, double floor, double ceiling)
+    {
+        if (value <= kneeLow)
+            return kneeLow <= 0 ? kneeLow : floor + Math.Sqrt(Math.Max(value, 0) / kneeLow) * (kneeLow - floor);
+        if (value <= kneeHigh) return value;
+        return kneeHigh >= 1 ? kneeHigh : kneeHigh + Math.Sqrt((Math.Min(value, 1) - kneeHigh) / (1 - kneeHigh)) * (ceiling - kneeHigh);
     }
 
     private static Color RecolorCustom(Color source, ColorRole role, Color baseColor, bool light)
