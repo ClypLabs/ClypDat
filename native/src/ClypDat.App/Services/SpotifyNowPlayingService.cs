@@ -29,6 +29,23 @@ internal sealed record SpotifyNowPlaying(
     public string Label => string.IsNullOrWhiteSpace(Track)
         ? string.Empty
         : string.IsNullOrWhiteSpace(Artist) ? Track! : $"{Track} - {Artist}";
+
+    /// <summary>
+    /// Where the track is now, carried forward from the last poll. A playing
+    /// track advances in real time and the poll only samples it, so a caller
+    /// asking twice between polls should get two different answers - otherwise
+    /// the elapsed time reads as stuck for seconds at a stretch.
+    /// </summary>
+    public TimeSpan? ProgressNow
+    {
+        get
+        {
+            if (Progress is not { } progress) return null;
+            if (!IsPlaying || UpdatedAt is not { } updated) return progress;
+            var advanced = progress + (DateTimeOffset.UtcNow - updated);
+            return Duration is { } duration && advanced > duration ? duration : advanced;
+        }
+    }
 }
 
 /// <summary>
@@ -65,10 +82,12 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     private const string CurrentlyPlayingUri = "https://api.spotify.com/v1/me/player/currently-playing";
     private const string ProfileUri = "https://api.spotify.com/v1/me";
 
-    // Spotify's rate limit is generous, but this runs for the whole session
-    // whether or not anything is recording. Five seconds is inside the error a
-    // song boundary can introduce in a clip's own overlay.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+    // Two seconds, not five. This is what decides how stale the track written
+    // onto a clip can be - a save landing seconds after a song change would
+    // otherwise carry the previous song - and it is what the settings row's
+    // now-playing line reads as responsiveness. At one request per two seconds
+    // per user it is a fraction of Spotify's per-app rolling limit.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly string _cachePath = Path.Combine(AppDataPaths.Root, "spotify-auth.bin");
@@ -78,6 +97,16 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
     public SpotifyNowPlaying Snapshot => _snapshot;
     public event EventHandler<SpotifyNowPlaying>? Changed;
+
+    /// <summary>
+    /// The last track this process saw playing, or a disconnected snapshot.
+    ///
+    /// Static because a clip is saved by the capture worker and the replay
+    /// buffer, neither of which is handed the view model that owns the
+    /// connection - and a save is not a good moment to be starting an HTTP
+    /// request anyway. The poll keeps this current; a save just reads it.
+    /// </summary>
+    public static SpotifyNowPlaying Current { get; private set; } = SpotifyNowPlaying.Disconnected;
 
     /// <summary>Whether the build carries a registration to authorize against.</summary>
     public static bool IsConfigured => !string.IsNullOrWhiteSpace(ClientId);
@@ -141,6 +170,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         _tokens = null;
         TryDeleteCache();
         _snapshot = SpotifyNowPlaying.Disconnected;
+        Current = _snapshot;
         Changed?.Invoke(this, _snapshot);
     }
 
@@ -230,6 +260,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             string.Equals(_snapshot.Error, snapshot.Error, StringComparison.Ordinal);
 
         _snapshot = snapshot;
+        Current = snapshot;
         if (!unchanged) Changed?.Invoke(this, snapshot);
     }
 

@@ -61,7 +61,14 @@ public sealed record ClipInfo(
     string? AutoClipPackVersion = null,
     string? AutoClipPackHash = null,
     Guid? AutoClipPlanId = null,
-    IReadOnlyList<ClipEventMarker>? AutoClipMarkers = null);
+    IReadOnlyList<ClipEventMarker>? AutoClipMarkers = null,
+    // What Spotify was playing when the clip was saved, read from the last poll
+    // rather than fetched at save time - a save is already the most latency
+    // sensitive moment in the app. Null for every clip captured without the
+    // connection, which is what tells the overlay it has nothing to draw.
+    string? SpotifyTrack = null,
+    string? SpotifyArtist = null,
+    int? SpotifyDurationMs = null);
 
 public static class ClipInfoSidecar
 {

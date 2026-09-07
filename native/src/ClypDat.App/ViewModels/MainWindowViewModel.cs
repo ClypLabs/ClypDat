@@ -5648,6 +5648,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _xboxActivity.Dispose();
         _spotify.Changed -= SpotifyChanged;
         _spotify.Dispose();
+        _spotifyProgressTimer?.Stop();
+        _spotifyProgressTimer = null;
         _clypDatAccount.Changed -= ClypDatAccountChanged;
         _clypDatAccount.Dispose();
         CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
@@ -6585,9 +6587,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? "Nothing playing"
             : _spotifySnapshot.IsPlaying ? _spotifySnapshot.Label : $"{_spotifySnapshot.Label} (paused)";
 
-    public string SpotifyTrackLength => _spotifySnapshot.Duration is { } duration
-        ? ClipDurationFormatter.Format(duration)
-        : string.Empty;
+    /// <summary>
+    /// "1:12 / 3:48" while something is playing, the track length alone when it
+    /// is not. Driven by a one-second tick rather than by the poll: the poll
+    /// samples where the track is, and a line that only moved when a request
+    /// came back read as a stuck clock between samples.
+    /// </summary>
+    public string SpotifyTrackLength
+    {
+        get
+        {
+            if (_spotifySnapshot.Duration is not { } duration) return string.Empty;
+            var length = ClipDurationFormatter.Format(duration);
+            return _spotifySnapshot.ProgressNow is { } progress && _spotifySnapshot.IsPlaying
+                ? $"{ClipDurationFormatter.Format(progress)} / {length}"
+                : length;
+        }
+    }
 
     public bool SpotifyHasTrack => _spotifySnapshot.IsConnected && !string.IsNullOrWhiteSpace(_spotifySnapshot.Track);
 
@@ -6605,6 +6621,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
+    // Ticks only while a track is actually playing, and only to move one label.
+    private DispatcherTimer? _spotifyProgressTimer;
+
+    private void UpdateSpotifyProgressTimer()
+    {
+        var wanted = _spotifySnapshot is { IsConnected: true, IsPlaying: true, Duration: not null };
+        if (wanted && _spotifyProgressTimer is null)
+        {
+            _spotifyProgressTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _spotifyProgressTimer.Tick += (_, _) => OnPropertyChanged(nameof(SpotifyTrackLength));
+            _spotifyProgressTimer.Start();
+        }
+        else if (!wanted && _spotifyProgressTimer is not null)
+        {
+            _spotifyProgressTimer.Stop();
+            _spotifyProgressTimer = null;
+        }
+    }
+
     private void SpotifyChanged(object? sender, SpotifyNowPlaying snapshot)
     {
         _spotifySnapshot = snapshot;
@@ -6617,6 +6652,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(SpotifyHasTrack));
             OnPropertyChanged(nameof(HasAccountsToAdd));
             OnPropertyChanged(nameof(HasLinkedAccounts));
+            UpdateSpotifyProgressTimer();
         });
     }
 

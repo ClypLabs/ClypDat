@@ -377,12 +377,18 @@ internal static class CaptureWorkerHost
             Storage.RecordWrite(path, stopwatch.Elapsed);
             if (_config is not null)
             {
+                var track = SpotifyNowPlayingService.Current;
                 ClipInfoSidecar.Save(_config.LibraryFolder, path, new ClipInfo(
                     gameDisplayName,
                     null,
                     request.TitleOverride ?? gameDisplayName,
                     File.GetCreationTimeUtc(path),
-                    CaptureSource: _config.CaptureSource));
+                    CaptureSource: _config.CaptureSource,
+                    // Only a track that was actually playing. A paused player is
+                    // not what the clip was captured over.
+                    SpotifyTrack: track.IsPlaying ? track.Track : null,
+                    SpotifyArtist: track.IsPlaying ? track.Artist : null,
+                    SpotifyDurationMs: track.IsPlaying && track.Duration is { } length ? (int)length.TotalMilliseconds : null));
             }
             var result = new CaptureWorkerSaveResult(path, request.TitleOverride, DateTime.UtcNow, null, saveId, requestedUtc);
             RememberUnacknowledgedSave(UnacknowledgedSaves, result);

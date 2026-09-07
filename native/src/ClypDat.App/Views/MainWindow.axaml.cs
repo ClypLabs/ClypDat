@@ -3106,6 +3106,15 @@ public sealed partial class MainWindow : Window
                     autoClipLabel ?? effectiveGameName,
                     File.GetCreationTimeUtc(outputPath),
                     CaptureSource: replayConfig.CaptureSource,
+                    // Read, not fetched: the poll keeps the current track up to
+                    // date, and a save is the last moment to be waiting on an
+                    // HTTP round trip. Only a track that was actually playing -
+                    // a paused player is not what the clip was captured over.
+                    SpotifyTrack: SpotifyNowPlayingService.Current.IsPlaying ? SpotifyNowPlayingService.Current.Track : null,
+                    SpotifyArtist: SpotifyNowPlayingService.Current.IsPlaying ? SpotifyNowPlayingService.Current.Artist : null,
+                    SpotifyDurationMs: SpotifyNowPlayingService.Current is { IsPlaying: true, Duration: { } length }
+                        ? (int)length.TotalMilliseconds
+                        : null,
                     AutoClipMarkers: clipWindow is { } window && autoClipEvents is not null
                         ? ClipEventMarkerMapping.FromEvents(autoClipEvents, window.StartUtc, window.EndUtc)
                         : null);
