@@ -6613,6 +6613,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(SpotifyNowPlayingLabel));
             OnPropertyChanged(nameof(SpotifyTrackLength));
             OnPropertyChanged(nameof(SpotifyHasTrack));
+            OnPropertyChanged(nameof(HasAccountsToAdd));
+            OnPropertyChanged(nameof(HasLinkedAccounts));
         });
     }
 
@@ -6635,8 +6637,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // The "add an account" and "linked accounts" cards each render an empty
     // titled box once every provider has moved to the other one, so both ask
     // whether they still have a row to show before drawing themselves.
-    public bool HasAccountsToAdd => !_clypDatSnapshot.GoogleConnected || !_clypDatSnapshot.DiscordConnected || !_clypDatSnapshot.IsConnected;
-    public bool HasLinkedAccounts => _clypDatSnapshot.GoogleConnected || _clypDatSnapshot.DiscordConnected || _clypDatSnapshot.IsConnected;
+    public bool HasAccountsToAdd => !_clypDatSnapshot.GoogleConnected || !_clypDatSnapshot.DiscordConnected || !_clypDatSnapshot.IsConnected || !SpotifyIsConnected;
+    public bool HasLinkedAccounts => _clypDatSnapshot.GoogleConnected || _clypDatSnapshot.DiscordConnected || _clypDatSnapshot.IsConnected || SpotifyIsConnected;
     // Unlinking can fail for a reason only the site knows - removing the last
     // sign-in method is refused there, not here - so the message it returns
     // needs somewhere on the page to appear.
