@@ -320,6 +320,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             new("Custom", ClipFileNaming.CustomScheme)
         };
         _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
+        _selectedSpotifyOverlayPosition = ClipOverlayPositions.FirstOrDefault(position =>
+            string.Equals(position, Settings.SpotifyOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Bottom Left";
         _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
         _selectedClipFileNameScheme = ClipFileNameSchemes.FirstOrDefault(item => string.Equals(item.Value, Settings.ClipFileNameScheme, StringComparison.OrdinalIgnoreCase))?.Value ?? ClipFileNaming.StandardScheme;
         _customClipFileNameTemplate = Settings.CustomClipFileNameTemplate;
@@ -4244,8 +4246,35 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // there is no optional form of a filter input).
     private string? BuildRenderVideoFilter(string? tail = null) =>
         SelectedSourceWidth > 0 && SelectedSourceHeight > 0
-            ? ClipRenderFilters.BuildVideoFilter(ActiveCropRect, ClipSpeed, tail)
+            ? ClipRenderFilters.BuildVideoFilter(ActiveCropRect, ClipSpeed, tail, BuildSpotifyOverlayFilter())
             : tail;
+
+    // What Spotify was playing when this clip was captured, drawn into the
+    // picture. Written at export rather than at capture: burning it into the
+    // recording would mean re-encoding every save, and the position is a
+    // setting the user can still change afterwards.
+    private string? BuildSpotifyOverlayFilter() =>
+        Settings.SpotifyOverlayEnabled
+            ? ClipRenderFilters.BuildNowPlayingOverlay(
+                _selectedSpotifyTrack,
+                _selectedSpotifyArtist,
+                _selectedSpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
+                Settings.SpotifyOverlayPosition,
+                ActiveCropRect?.Height ?? SelectedSourceHeight)
+            : null;
+
+    private string? _selectedSpotifyTrack;
+    private string? _selectedSpotifyArtist;
+    private int? _selectedSpotifyDurationMs;
+
+    /// <summary>The track the open clip was captured over, for the editor to say so.</summary>
+    public string SelectedSpotifyLabel => string.IsNullOrWhiteSpace(_selectedSpotifyTrack)
+        ? string.Empty
+        : string.IsNullOrWhiteSpace(_selectedSpotifyArtist)
+            ? _selectedSpotifyTrack!
+            : $"{_selectedSpotifyTrack} - {_selectedSpotifyArtist}";
+
+    public bool SelectedHasSpotifyTrack => !string.IsNullOrWhiteSpace(_selectedSpotifyTrack);
 
     public bool IsPlaying
     {
@@ -6571,6 +6600,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private XboxActivitySnapshot EffectiveXboxSnapshot => _clypDatSnapshot.IsConnected ? _clypDatSnapshot : _xboxSnapshot;
 
     public bool SpotifyIsConnected => _spotifySnapshot.IsConnected;
+
+    public bool SpotifyOverlayEnabled
+    {
+        get => Settings.SpotifyOverlayEnabled;
+        set
+        {
+            if (Settings.SpotifyOverlayEnabled == value) return;
+            Settings.SpotifyOverlayEnabled = value;
+            SaveSettings();
+            OnPropertyChanged();
+        }
+    }
+
+    private string _selectedSpotifyOverlayPosition = string.Empty;
+    public string SelectedSpotifyOverlayPosition
+    {
+        get => _selectedSpotifyOverlayPosition;
+        set
+        {
+            if (string.IsNullOrWhiteSpace(value) || value == _selectedSpotifyOverlayPosition) return;
+            _selectedSpotifyOverlayPosition = value;
+            Settings.SpotifyOverlayPosition = value;
+            SaveSettings();
+            OnPropertyChanged();
+        }
+    }
     public bool SpotifyIsConfigured => SpotifyNowPlayingService.IsConfigured;
     public string SpotifyAccountStatus => _spotifySnapshot.Error
         ?? (_spotifySnapshot.IsConnected
@@ -8035,6 +8090,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var clipInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path);
         SelectedAutoClipMarkers = clipInfo?.AutoClipMarkers ?? Array.Empty<ClipEventMarker>();
         OnPropertyChanged(nameof(SelectedAutoClipMarkers));
+        _selectedSpotifyTrack = clipInfo?.SpotifyTrack;
+        _selectedSpotifyArtist = clipInfo?.SpotifyArtist;
+        _selectedSpotifyDurationMs = clipInfo?.SpotifyDurationMs;
+        OnPropertyChanged(nameof(SelectedSpotifyLabel));
+        OnPropertyChanged(nameof(SelectedHasSpotifyTrack));
         var isMedalImport = !string.IsNullOrWhiteSpace(clipInfo?.MedalImportKey);
         SelectedCaptureBackend = isMedalImport
             ? "Imported from Medal"

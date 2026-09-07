@@ -14,6 +14,13 @@ public sealed partial class XboxSection : UserControl
     {
         if (DataContext is MainWindowViewModel vm) _ = vm.ConnectSpotifyAsync();
     }
+    private void ConfigureSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        if (Avalonia.Controls.TopLevel.GetTopLevel(this) is not Window owner) return;
+        _ = new ClypDat.App.Views.SpotifyOverlayDialog(vm).ShowDialog(owner);
+    }
+
     private void DisconnectSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm) vm.DisconnectSpotify();

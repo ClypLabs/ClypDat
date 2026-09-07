@@ -1,0 +1,74 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ClypDat.App.ViewModels"
+        xmlns:opconv="using:ClypDat.App.Converters"
+        x:Class="ClypDat.App.Views.SpotifyOverlayDialog"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Spotify overlay"
+        WindowDecorations="None"
+        ShowInTaskbar="False"
+        CanResize="False"
+        Width="460"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        KeyDown="SpotifyOverlayDialog_OnKeyDown">
+  <Border CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True">
+    <DockPanel LastChildFill="True">
+      <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0" PointerPressed="TitleBar_OnPointerPressed">
+        <Grid ColumnDefinitions="Auto,*,Auto" Height="56">
+          <TextBlock Grid.Column="0" Grid.ColumnSpan="3" Text="SPOTIFY OVERLAY" Foreground="{StaticResource Text_D8E4F2}" FontSize="17" FontWeight="Bold"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" />
+          <Button Grid.Column="2" Classes="dialogClose" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                  Content="✕" Click="CloseButton_OnClick" />
+        </Grid>
+      </Border>
+
+      <StackPanel Margin="20" Spacing="16">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="3">
+            <TextBlock Classes="settingsRowTitle" Text="Show the track on clips" />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="300"
+                       Text="Lays the song, artist and track length over clips captured while Spotify was playing." />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+
+        <Border Classes="settingsDivider" />
+
+        <StackPanel Spacing="10" IsEnabled="{Binding SpotifyOverlayEnabled}">
+          <TextBlock Classes="settingsPickerLabel" Text="PLACEMENT" />
+          <!-- The same tiles the clip-save overlay uses, so a position means
+               the same thing in both places. -->
+          <ListBox Classes="pillGroup" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedSpotifyOverlayPosition}">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <Border Width="52" Height="34" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="4">
+                    <Border Width="20" Height="7" Margin="4" CornerRadius="2" Background="{StaticResource SpotifyDialogBrush}"
+                            HorizontalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToHorizontalAlignmentConverter.Instance}}"
+                            VerticalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToVerticalAlignmentConverter.Instance}}" />
+                  </Border>
+                  <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+                </StackPanel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+
+        <Border Classes="settingsDivider" />
+
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="290" VerticalAlignment="Center"
+                     Text="Clips already captured keep the track they were saved with; placement applies when a clip is exported." />
+          <Button Grid.Column="1" Classes="primaryButton" Content="Done" Click="CloseButton_OnClick" VerticalAlignment="Center" />
+        </Grid>
+      </StackPanel>
+    </DockPanel>
+  </Border>
+
+  <Window.Resources>
+    <SolidColorBrush x:Key="SpotifyDialogBrush" Color="#1ED760" />
+  </Window.Resources>
+</Window>

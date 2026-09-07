@@ -225,6 +225,15 @@ public sealed class AppSettings
     /// pays for a poll loop they did not ask for.
     /// </summary>
     public bool SpotifyEnabled { get; set; }
+
+    /// <summary>Whether a clip captured while Spotify was playing carries the track.</summary>
+    public bool SpotifyOverlayEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Where that overlay sits, using the same six names as the clip-save
+    /// notification so a position means one thing across the app.
+    /// </summary>
+    public string SpotifyOverlayPosition { get; set; } = "Bottom Left";
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one
