@@ -2,7 +2,8 @@ namespace ClypDat.Capture.Abstractions;
 
 // An event-derived section of the replay timeline. Manual saves leave this null
 // and continue to use the user's configured replay duration.
-public sealed record ReplayClipWindow(DateTime StartUtc, DateTime EndUtc);
+public sealed record ReplayEventMarker(string EventId, string EventLabel, DateTime OccurredUtc);
+public sealed record ReplayClipWindow(DateTime StartUtc, DateTime EndUtc, IReadOnlyList<ReplayEventMarker>? EventMarkers = null);
 
 public enum ReplayCaptureState
 {

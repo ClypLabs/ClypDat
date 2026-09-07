@@ -3980,6 +3980,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _selectedVideoPath, value);
     }
 
+    public IReadOnlyList<ClipEventMarker> SelectedAutoClipMarkers { get; private set; } = Array.Empty<ClipEventMarker>();
+
     internal string SelectedVideoCodec => _selectedVideoCodec;
 
     public string SelectedThumbnailPath
@@ -7994,7 +7996,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : "Video Quality: Unknown";
         SelectedSize = $"Size: {FormatBytes(media.SizeBytes)}";
         SelectedSizeBytes = media.SizeBytes;
-        var isMedalImport = !string.IsNullOrWhiteSpace(ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path)?.MedalImportKey);
+        var clipInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path);
+        SelectedAutoClipMarkers = clipInfo?.AutoClipMarkers ?? Array.Empty<ClipEventMarker>();
+        OnPropertyChanged(nameof(SelectedAutoClipMarkers));
+        var isMedalImport = !string.IsNullOrWhiteSpace(clipInfo?.MedalImportKey);
         SelectedCaptureBackend = isMedalImport
             ? "Imported from Medal"
             : "Captured with: ClypDat";

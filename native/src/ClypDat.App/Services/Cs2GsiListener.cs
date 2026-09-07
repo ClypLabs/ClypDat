@@ -4,7 +4,7 @@ using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
 
-public sealed record Cs2AutoClipRequest(string EventId, string EventType, string Title, DateTime StartUtc, DateTime EndUtc);
+public sealed record Cs2AutoClipRequest(string EventId, string EventType, string Title, DateTime StartUtc, DateTime EndUtc, IReadOnlyList<AutoClipEvent>? Events = null);
 
 // Safe to put in a support bundle: this deliberately records stages and counts,
 // never a payload, token, Steam ID, player name, map name, or filesystem path.
@@ -469,7 +469,7 @@ public sealed class Cs2GsiListener : IDisposable
         _healthFinalizedEvents++;
         SetHealthStageLocked("Event finalized");
         AppLog.Info($"CS2 auto-clip finalized: {title}, window={startUtc:O}..{endUtc:O}.");
-        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(eventId, _pendingLabel, title, startUtc, endUtc));
+        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(eventId, _pendingLabel, title, startUtc, endUtc, _roundEvents.Count == 0 ? new[] { new AutoClipEvent(eventId, _pendingLabel, _roundKillTimes[0], KillPriority(_pendingLabel)) } : _roundEvents.ToArray()));
         ClearRoundLocked();
     }
 
@@ -480,7 +480,7 @@ public sealed class Cs2GsiListener : IDisposable
         SetHealthStageLocked("Event finalized");
         AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, finishing the clip.");
         var eventId = EventIdForLabel(label);
-        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(eventId, label, BuildTitle(new[] { new AutoClipEvent(eventId, label, timestampUtc, KillPriority(label)) }), timestampUtc - EventPadding, timestampUtc + EventPadding));
+        AutoClipReady?.Invoke(this, new Cs2AutoClipRequest(eventId, label, BuildTitle(new[] { new AutoClipEvent(eventId, label, timestampUtc, KillPriority(label)) }), timestampUtc - EventPadding, timestampUtc + EventPadding, new[] { new AutoClipEvent(eventId, label, timestampUtc, KillPriority(label)) }));
     }
 
     private void ClearRoundLocked()

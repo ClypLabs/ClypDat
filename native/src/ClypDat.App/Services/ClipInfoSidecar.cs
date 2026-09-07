@@ -12,6 +12,21 @@ namespace ClypDat.App.Services;
 // deliberately independent of FileTitle/GameDisplayName so renaming a clip
 // never touches the game association or, for a Medal import, its original
 // event title (e.g. "4K - Inferno").
+public sealed record ClipEventMarker(string EventId, string EventLabel, double OffsetSeconds);
+
+public static class ClipEventMarkerMapping
+{
+    public static IReadOnlyList<ClipEventMarker> FromEvents(IEnumerable<AutoClipEvent> events, DateTime clipStartUtc, DateTime clipEndUtc)
+    {
+        return events
+            .Select(item => new ClipEventMarker(item.Id, item.Label, (item.OccurredUtc - clipStartUtc).TotalSeconds))
+            .Where(item => double.IsFinite(item.OffsetSeconds)
+                && item.OffsetSeconds >= 0
+                && item.OffsetSeconds <= (clipEndUtc - clipStartUtc).TotalSeconds)
+            .ToArray();
+    }
+}
+
 public sealed record ClipInfo(
     string? GameDisplayName,
     string? AutoClipEventType,
@@ -45,7 +60,8 @@ public sealed record ClipInfo(
     string? AutoClipPackId = null,
     string? AutoClipPackVersion = null,
     string? AutoClipPackHash = null,
-    Guid? AutoClipPlanId = null);
+    Guid? AutoClipPlanId = null,
+    IReadOnlyList<ClipEventMarker>? AutoClipMarkers = null);
 
 public static class ClipInfoSidecar
 {

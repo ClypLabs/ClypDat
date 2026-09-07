@@ -174,7 +174,7 @@ internal sealed class AutoClipEscalationBuffer : IDisposable
     {
         var primary = events.OrderByDescending(item => item.Priority).ThenBy(item => item.OccurredUtc).First();
         return new AutoClipRequest(_gameId, _gameName, primary.Id, primary.Label,
-            AutoClipTitleFormatter.Format(_gameId, events), startUtc, endUtc, primary.Priority);
+            AutoClipTitleFormatter.Format(_gameId, events), startUtc, endUtc, primary.Priority, events.ToArray());
     }
 
     private static string PendingMessage(string label) => $"Auto clip started — {label} detected, finishing the clip.";

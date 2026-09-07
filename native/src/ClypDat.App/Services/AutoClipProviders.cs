@@ -5,7 +5,7 @@ using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
 
-public sealed record AutoClipRequest(string GameId, string GameName, string EventId, string EventType, string Title, DateTime StartUtc, DateTime EndUtc, int Priority = 0);
+public sealed record AutoClipRequest(string GameId, string GameName, string EventId, string EventType, string Title, DateTime StartUtc, DateTime EndUtc, int Priority = 0, IReadOnlyList<AutoClipEvent>? Events = null);
 
 /// <summary>
 /// How long an auto-clip runs. An event's lead is only what the detector or the
@@ -190,10 +190,10 @@ public sealed class DotaGsiListener : IDisposable
             ? new[] { new AutoClipEvent(eventId, label, _lastKillUtc, KillPriority(_killTimes.Count)) }
             : _pendingEvents;
         end = _lastPlayEventUtc > DateTime.MinValue ? _lastPlayEventUtc + Padding : end;
-        AutoClipReady?.Invoke(this, new AutoClipRequest("dota2", "Dota 2", eventId, label, AutoClipTitleFormatter.Format("dota2", events), start, end, _killTimes.Count));
+        AutoClipReady?.Invoke(this, new AutoClipRequest("dota2", "Dota 2", eventId, label, AutoClipTitleFormatter.Format("dota2", events), start, end, _killTimes.Count, events.ToArray()));
         _killTimes.Clear(); _pendingEvents.Clear(); _pendingLabel = null; _lastPlayEventUtc = default;
     }
-    private void Fire(string id, string label, DateTime now) { AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, finishing the clip."); var events = new[] { new AutoClipEvent(id, label, now) }; AutoClipReady?.Invoke(this, new AutoClipRequest("dota2", "Dota 2", id, label, AutoClipTitleFormatter.Format("dota2", events), now - Padding, now + Padding)); }
+    private void Fire(string id, string label, DateTime now) { AutoClipPending?.Invoke(this, $"Auto clip started — {label} detected, finishing the clip."); var events = new[] { new AutoClipEvent(id, label, now) }; AutoClipReady?.Invoke(this, new AutoClipRequest("dota2", "Dota 2", id, label, AutoClipTitleFormatter.Format("dota2", events), now - Padding, now + Padding, 0, events)); }
     private void Sync(int? kills, int? deaths, int? assists) { if (kills.HasValue) _kills = kills.Value; if (deaths.HasValue) _deaths = deaths.Value; if (assists.HasValue) _assists = assists.Value; }
     private static bool IsEnabled(AutoClipGameSettings settings, string id) => settings.Events.TryGetValue(id, out var enabled) && enabled;
     private static int KillPriority(int chainCount) => chainCount switch { 1 => 10, 2 => 20, 3 => 30, 4 => 40, _ => 50 };
@@ -310,7 +310,7 @@ public sealed class LeagueAutoClipListener : IDisposable
         if (_pendingPlayEvents.Count == 0) return null;
         var primary = _pendingPlayEvents.OrderByDescending(item => item.Priority).ThenBy(item => item.OccurredUtc).First();
         var request = new AutoClipRequest("league", "League of Legends", primary.Id, primary.Label,
-            AutoClipTitleFormatter.Format("league", _pendingPlayEvents), _firstPlayUtc - Padding, _lastPlayUtc + Padding, primary.Priority);
+            AutoClipTitleFormatter.Format("league", _pendingPlayEvents), _firstPlayUtc - Padding, _lastPlayUtc + Padding, primary.Priority, _pendingPlayEvents.ToArray());
         _pendingPlayEvents.Clear(); _firstPlayUtc = _lastPlayUtc = default;
         _playFlushCts?.Dispose(); _playFlushCts = null;
         return request;

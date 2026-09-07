@@ -2999,7 +2999,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task<bool> SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null)
+    private async Task<bool> SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null, IReadOnlyList<AutoClipEvent>? autoClipEvents = null)
     {
         var isAutoClip = autoClipLabel is not null;
         var saveId = Guid.NewGuid();
@@ -3105,7 +3105,10 @@ public sealed partial class MainWindow : Window
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
                     autoClipLabel ?? effectiveGameName,
                     File.GetCreationTimeUtc(outputPath),
-                    CaptureSource: replayConfig.CaptureSource);
+                    CaptureSource: replayConfig.CaptureSource,
+                    AutoClipMarkers: clipWindow is { } window && autoClipEvents is not null
+                        ? ClipEventMarkerMapping.FromEvents(autoClipEvents, window.StartUtc, window.EndUtc)
+                        : null);
                 // Another plain file write with no UI affinity.
                 await Task.Run(() => ClipInfoSidecar.Save(libraryFolder, outputPath, clipInfo));
                 await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
@@ -5770,7 +5773,7 @@ public sealed partial class MainWindow : Window
         listener.MarkSaveRequested();
         try
         {
-            var saved = await SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), "Counter-Strike 2", request.EventType);
+            var saved = await SaveReplayClipAsync(request.Title, new ReplayClipWindow(request.StartUtc, request.EndUtc), "Counter-Strike 2", request.EventType, request.Events);
             listener.MarkSaveCompleted(saved);
         }
         catch (Exception error)
@@ -5789,7 +5792,7 @@ public sealed partial class MainWindow : Window
     {
         var (startUtc, endUtc) = AutoClipWindowPolicy.Extend(request.StartUtc, request.EndUtc,
             _replayBuffer?.Duration ?? AutoClipWindowPolicy.MinimumLength);
-        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(startUtc, endUtc), request.GameName, request.EventType));
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(startUtc, endUtc), request.GameName, request.EventType, request.Events));
     }
 
     internal void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)
@@ -6843,8 +6846,14 @@ public sealed partial class MainWindow : Window
             // been trimmed. LoadPausedRanges refuses to load ranges at all for a
             // trimmed clip, which is what actually makes the badge impossible
             // rather than merely unlikely.
+            var trimStartSeconds = ViewModel.TrimStart.TotalSeconds;
+            var trimEndSeconds = ViewModel.TrimEnd.TotalSeconds;
             var trimmedInfo = ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, sourcePath) ?? new ClipInfo(null, null);
-            ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true });
+            var rebasedMarkers = trimmedInfo.AutoClipMarkers?
+                .Where(marker => marker.OffsetSeconds >= trimStartSeconds && marker.OffsetSeconds <= trimEndSeconds)
+                .Select(marker => marker with { OffsetSeconds = marker.OffsetSeconds - trimStartSeconds })
+                .ToArray();
+            ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true, AutoClipMarkers = rebasedMarkers });
             _pausedRanges.Clear();
             RefreshPausedBadge();
 
@@ -10150,6 +10159,7 @@ public sealed partial class MainWindow : Window
         // trim rails stop exactly at the filmstrip instead of bleeding into
         // the first audio track.
         var videoLaneHeight = ViewModel.TimelineTracks.FirstOrDefault(track => track.IsVideo)?.LaneHeight ?? 0;
+        RenderTimelineMarkers(width, videoLaneHeight);
 
         // Width of the visible pill, which is NOT the handle Border's own width -
         // that is deliberately wider and transparent to make the handle easier to
@@ -10196,6 +10206,41 @@ public sealed partial class MainWindow : Window
         Canvas.SetLeft(PlayheadCap, playheadCenter - 8);
         Canvas.SetTop(PlayheadCap, -12);
         KeepTimelinePlayheadVisible(playheadCenter);
+    }
+
+    private void RenderTimelineMarkers(double width, double videoLaneHeight)
+    {
+        TimelineMarkerLayer.Children.Clear();
+        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero || videoLaneHeight <= 0) return;
+
+        foreach (var marker in ViewModel.SelectedAutoClipMarkers.Where(item => item.OffsetSeconds >= 0 && item.OffsetSeconds <= ViewModel.Duration.TotalSeconds))
+        {
+            var button = new Button
+            {
+                Content = "⚑",
+                Width = 24,
+                Height = 24,
+                Padding = new Thickness(0),
+                Background = Brushes.Transparent,
+                Foreground = AppThemeService.Brush("Semantic_E5A00D", "#E5A00D"),
+                FontSize = 15,
+                FontWeight = FontWeight.Bold,
+                Tag = marker
+            };
+            ToolTip.SetTip(button, $"{marker.EventLabel} — {TimeSpan.FromSeconds(marker.OffsetSeconds):mm\\:ss}");
+            button.Click += TimelineMarker_OnClick;
+            Canvas.SetLeft(button, Math.Clamp(marker.OffsetSeconds / ViewModel.Duration.TotalSeconds * width - 12, 0, Math.Max(0, width - 24)));
+            Canvas.SetTop(button, Math.Max(0, videoLaneHeight - 25));
+            TimelineMarkerLayer.Children.Add(button);
+        }
+    }
+
+    private void TimelineMarker_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: ClipEventMarker marker } || ViewModel is null) return;
+        e.Handled = true;
+        var resume = ViewModel.IsPlaying;
+        _ = ApplyTimelineSeekAsync(TimeSpan.FromSeconds(marker.OffsetSeconds), resume);
     }
 
     private void KeepTimelinePlayheadVisible(double playheadCenter)
