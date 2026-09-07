@@ -100,14 +100,19 @@ internal static class AppThemeService
     // fastest just past the knee, where most picks sit, and flattening out at
     // the vivid end where the ground would otherwise stop being a ground.
     private const double CustomSurfaceSaturationKnee = 0.30;
-    private const double CustomSurfaceMaxSaturation = 0.45;
+    // Chroma is what makes a ground read as the colour that was picked - far
+    // more than lightness does, and lightness is the axis that cannot move
+    // (a page bright enough to match a pick is a page nothing can be read on).
+    // So the saturation ceiling is set high and the page stays dark: the pick's
+    // hue arrives at close to full strength on a ground the app can still use.
+    private const double CustomSurfaceMaxSaturation = 0.80;
     private const double CustomDarkMinLightness = 0.05;
     private const double CustomDarkMaxLightness = 0.13;
     // Ceilings, reached only by a fully saturated / fully bright pick. 0.20 is
-    // still below the authored family's brightest panel (#2C3B48, L 0.227), so
-    // the derived surfaces above the page stay inside the range the ramp was
-    // fitted against and the authored text (L 0.69-0.93) keeps AA on all of it.
-    private const double CustomDarkCeilingLightness = 0.20;
+    // still at the authored family's brightest panel (#2C3B48, L 0.227), so the
+    // derived surfaces above the page stay inside the range the ramp was fitted
+    // against and the authored text (L 0.69-0.93) keeps AA on all of it.
+    private const double CustomDarkCeilingLightness = 0.22;
     private const double CustomDarkFloorLightness = 0.03;
 
     // Light mode is the same band inverted: 1 - 0.069 = 0.931 is where the light
@@ -117,6 +122,23 @@ internal static class AppThemeService
     private const double CustomLightMaxLightness = 0.97;
     private const double CustomLightCeilingLightness = 0.985;
     private const double CustomLightFloorLightness = 0.86;
+
+    // HSL lightness is not brightness. Green carries 71% of relative luminance
+    // and blue 7%, so a ground at L 0.19 S 0.80 is luminance 0.086 in green and
+    // 0.012 in blue - the same numbers, a page seven times brighter. Left there
+    // the picker's hue ring doubles as an unmarked brightness control, and a
+    // green page is bright enough that no accent in the blue-violet half can
+    // clear a contrast floor against it.
+    //
+    // So the damped ground is finally fitted by luminance: hue and saturation
+    // stay exactly where the pick put them, lightness is searched until the
+    // ground lands in the band the shipped pages occupy. #0D1116 is luminance
+    // 0.0054 and the light presets' page 0.85, and both sit inside their band,
+    // so this is inert for a pick that already reproduces a preset.
+    private const double CustomDarkMinLuminance = 0.0025;
+    private const double CustomDarkMaxLuminance = 0.030;
+    private const double CustomLightMinLuminance = 0.62;
+    private const double CustomLightMaxLuminance = 0.92;
 
     // Which band a pick lands in. A light theme needs a pale colour, and pale
     // means two things at once - bright AND washed out. Testing brightness alone
@@ -564,7 +586,7 @@ internal static class AppThemeService
         var (hue, saturation, lightness) = ToHsl(picked);
         var chroma = saturation * (1 - Math.Abs(2 * lightness - 1));
         var light = lightness >= CustomLightMinPickLightness && chroma <= CustomLightMaxPickChroma;
-        var ground = FromHsl(
+        var ground = FitLuminance(
             hue,
             Damp(saturation, 0, CustomSurfaceSaturationKnee, 0, CustomSurfaceMaxSaturation),
             light
@@ -572,8 +594,31 @@ internal static class AppThemeService
                     CustomLightFloorLightness, CustomLightCeilingLightness)
                 : Damp(lightness, CustomDarkMinLightness, CustomDarkMaxLightness,
                     CustomDarkFloorLightness, CustomDarkCeilingLightness),
-            picked.A);
+            picked.A,
+            light ? CustomLightMinLuminance : CustomDarkMinLuminance,
+            light ? CustomLightMaxLuminance : CustomDarkMaxLuminance);
         return (ground, light);
+    }
+
+    // Luminance rises monotonically with lightness at a fixed hue and
+    // saturation, so a bisection on lightness lands on the band edge without
+    // touching the two channels that carry the pick's identity.
+    private static Color FitLuminance(double hue, double saturation, double lightness, byte alpha,
+        double minimum, double maximum)
+    {
+        var ground = FromHsl(hue, saturation, lightness, alpha);
+        var luminance = RelativeLuminance(ground);
+        if (luminance >= minimum && luminance <= maximum) return ground;
+
+        var target = luminance > maximum ? maximum : minimum;
+        var (low, high) = luminance > maximum ? (0d, lightness) : (lightness, 1d);
+        for (var step = 0; step < 24; step++)
+        {
+            var middle = (low + high) / 2;
+            if (RelativeLuminance(FromHsl(hue, saturation, middle, alpha)) > target) high = middle;
+            else low = middle;
+        }
+        return FromHsl(hue, saturation, (low + high) / 2, alpha);
     }
 
     // Identity inside [kneeLow, kneeHigh]; outside it the remaining travel is
@@ -624,22 +669,86 @@ internal static class AppThemeService
         var (_, _, appLightness) = ToHsl(NamedTokens[0].Source);
         var delta = sourceLightness - appLightness;
         var target = Clamp(baseLightness + (light ? -delta : delta));
-        return FromHsl(hue, saturation, target, source.A);
+        // The page carries the pick's chroma; the panels stacked on top of it
+        // give some back. Held at full saturation a vivid pick turns every card,
+        // row and popover into the same neon block and the depth cue the ramp
+        // exists for - each surface a step further from the page - stops
+        // reading. The falloff is on distance from the page in either
+        // direction, so the page itself is untouched.
+        var lift = Math.Abs(target - baseLightness);
+        return FromHsl(hue, saturation / (1 + SurfaceSaturationFalloff * lift), target, source.A);
     }
 
-    private static Color AdjustAccent(Color accent, Color background) => EnsureContrast(accent, background, 3);
+    private const double SurfaceSaturationFalloff = 2.5;
 
-    private static Color EnsureContrast(Color color, Color background, double minimum)
+    // Preferred floor, and the floor that is actually enforced. A fill wants 3:1
+    // against the page, but some hues cannot reach it and stay themselves:
+    // #7A00FF, a violet at full strength, is 2.96 against pure black, because
+    // its blue primary is 7% of the luminance. Draining its chroma to buy the
+    // last 0.04 is what turned a deep violet pick into pale lavender. So the
+    // accent is lifted towards 3, kept at full chroma if it gets past 2, and
+    // only desaturated when even a fully bright version misses that.
+    private const double AccentPreferredContrast = 3;
+    private const double AccentMinimumContrast = 2;
+
+    // An accent has to be legible against the page, and a pick can arrive too
+    // close to it to be - #490098 on any dark ground, say. The lift used to run
+    // on HSL lightness, which is the wrong axis: past L 0.5 raising it is
+    // literally mixing in white, so a deep violet came back as pale lavender
+    // and did not read as the colour that was picked at all.
+    //
+    // Value first instead. Raising HSV value leaves hue and saturation exactly
+    // where they were - #490098 becomes #7A00FF, the same violet at full
+    // strength - and only when the fully bright version still misses the floor
+    // is chroma spent, which is the case for the blue-violet end whose primary
+    // carries 7% of the luminance. So the accent gives up saturation only when
+    // there is nothing else left to give.
+    private static Color AdjustAccent(Color accent, Color background)
     {
-        if (Contrast(color, background) >= minimum) return color;
-        var (hue, saturation, lightness) = ToHsl(color);
-        var towardsWhite = Contrast(Colors.White, background) >= Contrast(Colors.Black, background);
+        if (Contrast(accent, background) >= AccentPreferredContrast) return accent;
+        var (hue, saturation, value) = ToHsv(accent);
+        var up = Contrast(Colors.White, background) >= Contrast(Colors.Black, background);
+
+        var lifted = accent;
         for (var step = 1; step <= 100; step++)
         {
-            var candidate = FromHsl(hue, saturation, Clamp(lightness + (towardsWhite ? step : -step) / 100d), color.A);
-            if (Contrast(candidate, background) >= minimum) return candidate;
+            lifted = FromHsv(hue, saturation, Clamp(value + (up ? step : -step) / 100d), accent.A);
+            if (Contrast(lifted, background) >= AccentPreferredContrast) return lifted;
         }
-        return towardsWhite ? Colors.White : Colors.Black;
+
+        if (Contrast(lifted, background) >= AccentMinimumContrast) return lifted;
+
+        for (var step = 1; step <= 100; step++)
+        {
+            var candidate = FromHsv(hue, Clamp(saturation * (1 - step / 100d)), up ? 1 : 0, accent.A);
+            if (Contrast(candidate, background) >= AccentMinimumContrast) return candidate;
+        }
+
+        return up ? Colors.White : Colors.Black;
+    }
+
+    private static (double Hue, double Saturation, double Value) ToHsv(Color color)
+    {
+        double r = color.R / 255.0, g = color.G / 255.0, b = color.B / 255.0;
+        var max = Math.Max(r, Math.Max(g, b));
+        var min = Math.Min(r, Math.Min(g, b));
+        var delta = max - min;
+        if (delta < 1e-9) return (0, 0, max);
+
+        double hue;
+        if (Math.Abs(max - r) < 1e-9) hue = (g - b) / delta + (g < b ? 6 : 0);
+        else if (Math.Abs(max - g) < 1e-9) hue = (b - r) / delta + 2;
+        else hue = (r - g) / delta + 4;
+        return (hue * 60, max <= 0 ? 0 : delta / max, max);
+    }
+
+    private static Color FromHsv(double hue, double saturation, double value, byte alpha)
+    {
+        var lightness = value * (1 - saturation / 2);
+        var hslSaturation = lightness is <= 0 or >= 1
+            ? 0
+            : (value - lightness) / Math.Min(lightness, 1 - lightness);
+        return FromHsl(hue, hslSaturation, lightness, alpha);
     }
 
     private static Color BestForeground(Color background) =>
