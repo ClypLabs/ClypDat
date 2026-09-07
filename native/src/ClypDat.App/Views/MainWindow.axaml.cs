@@ -81,9 +81,35 @@ public sealed partial class MainWindow : Window
     private long _timelineGestureGeneration;
     private TimelineGesture? _timelineGesture;
     private const double TimelineMinimumZoom = 1;
-    private const double TimelineMaximumZoom = 8;
+    // A flat 8x ceiling is a ceiling on the clip's length, not on the zoom: it
+    // means 7.5s across the viewport for a minute-long clip and five and a half
+    // MINUTES for a 44-minute session, where a frame is what you are trying to
+    // land on. The cap is what it takes to bring TimelineMinimumVisibleSeconds
+    // into the viewport instead, with the old 8x kept as the floor so short
+    // clips do not lose zoom they already had.
+    private const double TimelineMinimumZoomCeiling = 8;
+    private const double TimelineMaximumZoomCeiling = 512;
+    private const double TimelineMaximumContentWidth = 24000;
+    private const double TimelineMinimumVisibleSeconds = 1.5;
     private const double TimelineZoomStep = 1.25;
+    // A wheel notch is 120 units, and a free-spinning or high-resolution wheel
+    // sends fractions of one - Avalonia hands those over as a fractional
+    // Delta.Y. Treating every event as a whole step, which is what a bare
+    // multiply by the step does, turned one flick of such a wheel into five or
+    // six steps in a single frame: the timeline went from fully out to 3x
+    // between two rendered frames. The step is raised to the delta instead, so
+    // a notch is still exactly one step and a fraction of a notch is a
+    // fraction of one, and a single event is capped at one step either way so
+    // one coarse event cannot leap the whole range.
+    private const double TimelineMaximumZoomEventSteps = 1;
     private double _timelineZoom = TimelineMinimumZoom;
+    // Set whenever the user zooms or scrolls the timeline themselves. The
+    // playhead auto-follow below yanks the viewport back to the playhead on
+    // every chrome update, which during playback is every frame - so a zoom
+    // anchored on the pointer was dragged off it before the user let go of the
+    // wheel. Their scroll wins for a moment, then follow resumes.
+    private long _timelineViewportHeldUntilTicks;
+    private static readonly long TimelineViewportHold = TimeSpan.FromSeconds(2).Ticks;
     private readonly Stopwatch _playheadClock = new();
     private TimeSpan _playheadBaseTime = TimeSpan.Zero;
     // Live-previews the actual video frame while dragging the playhead instead
@@ -3993,8 +4019,9 @@ public sealed partial class MainWindow : Window
         var oldWidth = Math.Max(viewportWidth, TimelineContent.Bounds.Width);
         var pointerX = Math.Clamp(e.GetPosition(TimelineScrollViewer).X, 0, viewportWidth);
         var contentFraction = Math.Clamp((TimelineScrollViewer.Offset.X + pointerX) / oldWidth, 0, 1);
-        var factor = e.Delta.Y > 0 ? TimelineZoomStep : 1 / TimelineZoomStep;
-        var zoom = Math.Clamp(_timelineZoom * factor, TimelineMinimumZoom, TimelineMaximumZoom);
+        var steps = Math.Clamp(e.Delta.Y, -TimelineMaximumZoomEventSteps, TimelineMaximumZoomEventSteps);
+        var zoom = Math.Clamp(_timelineZoom * Math.Pow(TimelineZoomStep, steps),
+            TimelineMinimumZoom, TimelineMaximumZoom());
         if (Math.Abs(zoom - _timelineZoom) < 0.001)
         {
             e.Handled = true;
@@ -4002,16 +4029,51 @@ public sealed partial class MainWindow : Window
         }
 
         _timelineZoom = zoom;
+        HoldTimelineViewport();
         var newWidth = UpdateTimelineContentWidth();
         UpdateTimelineChrome();
         var targetOffset = Math.Clamp(contentFraction * newWidth - pointerX, 0, Math.Max(0, newWidth - viewportWidth));
+        // Twice, deliberately. The ScrollViewer still clamps an offset against
+        // the extent it measured before the width changed, so this one can come
+        // up short - but leaving it to the posted callback alone renders a frame
+        // at the new width with the old offset, which is a sideways lurch away
+        // from whatever the pointer was on.
+        TimelineScrollViewer.Offset = new Vector(targetOffset, 0);
         Dispatcher.UIThread.Post(() =>
         {
             if (Math.Abs(_timelineZoom - zoom) < 0.001)
+            {
+                HoldTimelineViewport();
                 TimelineScrollViewer.Offset = new Vector(targetOffset, 0);
+            }
         }, DispatcherPriority.Loaded);
         e.Handled = true;
     }
+
+    // How far in the timeline can go for the clip that is open. Duration is
+    // read per gesture rather than cached: the editor keeps the same timeline
+    // across clips of very different lengths.
+    private double TimelineMaximumZoom()
+    {
+        var seconds = ViewModel?.Duration.TotalSeconds ?? 0;
+        if (seconds <= 0) return TimelineMinimumZoomCeiling;
+
+        // Zoom widens the content rather than windowing it, so the ceiling is
+        // also a ceiling on how wide a surface every lane is asked to draw:
+        // one waveform point per pixel column, one filmstrip stretched across
+        // the lot. Past this the arithmetic per lane per render stops being
+        // free, and no clip is short enough to need it.
+        var viewportWidth = TimelineViewportWidth();
+        var widthCeiling = viewportWidth > 0
+            ? TimelineMaximumContentWidth / viewportWidth
+            : TimelineMaximumZoomCeiling;
+
+        return Math.Clamp(Math.Min(seconds / TimelineMinimumVisibleSeconds, widthCeiling),
+            TimelineMinimumZoomCeiling, TimelineMaximumZoomCeiling);
+    }
+
+    private void HoldTimelineViewport() =>
+        _timelineViewportHeldUntilTicks = DateTime.UtcNow.Ticks + TimelineViewportHold;
 
     private double TimelineViewportWidth()
     {
@@ -10106,6 +10168,9 @@ public sealed partial class MainWindow : Window
     private void KeepTimelinePlayheadVisible(double playheadCenter)
     {
         if (_timelineZoom <= TimelineMinimumZoom) return;
+        // The user just put the viewport somewhere. Dragging it back to the
+        // playhead is what made a zoom look like it had picked its own spot.
+        if (DateTime.UtcNow.Ticks < _timelineViewportHeldUntilTicks) return;
         var viewportWidth = TimelineViewportWidth();
         if (viewportWidth <= 0) return;
 
