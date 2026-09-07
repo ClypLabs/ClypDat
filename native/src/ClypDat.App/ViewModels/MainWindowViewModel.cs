@@ -228,14 +228,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // Each picker owns one of the editor's two colours and writes straight
         // into it. Nothing sits between the spectrum and the value Apply saves.
         BasePicker = new ThemeColorPickerViewModel(_themeEditorBaseColor, hex => { ThemeEditorBaseColor = hex; PreviewThemeEditor(); });
-        AccentPicker = new ThemeColorPickerViewModel(_themeEditorAccentColor, hex =>
-        {
-            ThemeEditorAccentColor = hex;
-            // Only a callback marks the accent chosen. LoadThemeEditor seeds the
-            // picker without one, so opening the editor is not a choice.
-            _themeEditorAccentPicked = true;
-            PreviewThemeEditor();
-        });
+        AccentPicker = new ThemeColorPickerViewModel(_themeEditorAccentColor, hex => { ThemeEditorAccentColor = hex; PreviewThemeEditor(); });
         Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
         if (Settings.LastSettingsSection is "Import from Medal" or "Import from SteelSeries")
@@ -462,7 +455,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _themeEditorBaseColor = "#0D1116";
     private string _themeEditorAccentColor = "#5864E8";
     private string _themeEditorError = string.Empty;
-    private bool _themeEditorAccentPicked;
     public bool IsThemeEditorOpen => _editingTheme is not null;
     // Whether the theme in the editor is the one currently applied, which is
     // what tells the user Apply did something.
@@ -477,15 +469,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ThemeColorPickerViewModel AccentPicker { get; }
 
 
+    // A custom theme carries its own accent, and AppThemeService.Apply ignores
+    // the Windows accent entirely while one is selected. The toggle is inert in
+    // that state, so it says so rather than sitting there looking live.
     public bool IsCustomThemeSelected => CustomThemeLibrary.IsCustomSelection(Settings.ThemePreset);
-
-    // A custom theme whose accent was picked overrides the Windows accent
-    // outright - AppThemeService.Apply never reads the toggle for it - so the
-    // toggle is inert and says so rather than sitting there looking live. A
-    // theme that only ever inherited its accent is overriding nothing and keeps
-    // the choice.
-    public bool IsSystemAccentLocked =>
-        IsCustomThemeSelected && SelectedCustomTheme?.AccentFollowsSystem != true;
 
     // The saved rows are a third selector onto the same setting as the two
     // preset grids, so switching between custom themes is one click on the row
@@ -523,11 +510,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // named preset ships an accent of its own that the Windows one would
             // otherwise override. Still a plain setting - the toggle below can be
             // flipped back either way afterwards.
-            var custom = Settings.CustomThemes.FirstOrDefault(theme =>
-                string.Equals(CustomThemeLibrary.Selection(theme), preset, StringComparison.OrdinalIgnoreCase));
-            Settings.UseSystemAccent = custom is not null
-                ? custom.AccentFollowsSystem && Settings.UseSystemAccent
-                : AppThemeService.IsSystem(preset);
+            Settings.UseSystemAccent = !CustomThemeLibrary.IsCustomSelection(preset) && AppThemeService.IsSystem(preset);
             SaveSettings();
             ApplyTheme();
             OnPropertyChanged();
@@ -535,7 +518,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(SelectedCustomTheme));
             OnPropertyChanged(nameof(IsThemeEditorSaved));
             OnPropertyChanged(nameof(IsCustomThemeSelected));
-            OnPropertyChanged(nameof(IsSystemAccentLocked));
         }
     }
 
@@ -568,7 +550,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var selected = Settings.CustomThemes.FirstOrDefault(theme => string.Equals(CustomThemeLibrary.Selection(theme), Settings.ThemePreset, StringComparison.OrdinalIgnoreCase));
         var baseColor = selected?.BaseColor ?? CurrentThemeColor("AppBgBrush", "#0D1116");
         var accent = selected?.AccentColor ?? CurrentThemeColor("AccentBrush", AppThemeService.PresetAccent(Settings.ThemePreset).ToString());
-        _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName("Custom theme", Settings.CustomThemes), BaseColor = baseColor, AccentColor = accent, AccentFollowsSystem = true };
+        _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName("Custom theme", Settings.CustomThemes), BaseColor = baseColor, AccentColor = accent };
         LoadThemeEditor(_editingTheme);
     }
 
@@ -584,14 +566,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void EditCustomTheme(CustomThemeSettings theme) { _editingTheme = theme; LoadThemeEditor(theme); }
     public void DuplicateCustomTheme(CustomThemeSettings theme)
     {
-        _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName(theme.Name, Settings.CustomThemes), BaseColor = theme.BaseColor, AccentColor = theme.AccentColor, AccentFollowsSystem = theme.AccentFollowsSystem };
+        _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName(theme.Name, Settings.CustomThemes), BaseColor = theme.BaseColor, AccentColor = theme.AccentColor };
         LoadThemeEditor(_editingTheme);
     }
     public bool DeleteCustomTheme(CustomThemeSettings theme)
     {
         if (!Settings.CustomThemes.Remove(theme)) return false;
         if (string.Equals(Settings.ThemePreset, CustomThemeLibrary.Selection(theme), StringComparison.OrdinalIgnoreCase)) Settings.ThemePreset = "System";
-        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(SelectedCustomTheme)); OnPropertyChanged(nameof(IsCustomThemeSelected)); OnPropertyChanged(nameof(IsSystemAccentLocked)); OnPropertyChanged(nameof(UseSystemAccentColor)); return true;
+        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(SelectedCustomTheme)); OnPropertyChanged(nameof(IsCustomThemeSelected)); return true;
     }
     /// <summary>
     /// Saves the theme being edited and selects it, leaving the editor open.
@@ -607,15 +589,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             !CustomThemeLibrary.IsColor(ThemeEditorBaseColor) || !CustomThemeLibrary.IsColor(ThemeEditorAccentColor))
         { ThemeEditorError = error ?? "Colours must use #RRGGBB."; return false; }
         _editingTheme.Name = name; _editingTheme.BaseColor = ThemeEditorBaseColor.ToUpperInvariant(); _editingTheme.AccentColor = ThemeEditorAccentColor.ToUpperInvariant();
-        _editingTheme.AccentFollowsSystem = !_themeEditorAccentPicked;
         if (!Settings.CustomThemes.Contains(_editingTheme)) Settings.CustomThemes.Add(_editingTheme);
-        Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme);
-        // Picking an accent is what takes the Windows one away. A theme that
-        // never had one picked leaves the toggle where the user left it.
-        if (!_editingTheme.AccentFollowsSystem) Settings.UseSystemAccent = false;
+        Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
         CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
         ThemeEditorError = string.Empty; SaveSettings(); ApplyTheme();
-        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(HasRecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); OnPropertyChanged(nameof(SelectedCustomTheme)); OnPropertyChanged(nameof(IsCustomThemeSelected)); OnPropertyChanged(nameof(IsSystemAccentLocked)); OnPropertyChanged(nameof(UseSystemAccentColor)); return true;
+        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(HasRecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); OnPropertyChanged(nameof(SelectedCustomTheme)); OnPropertyChanged(nameof(IsCustomThemeSelected)); return true;
     }
 
     /// <summary>
@@ -632,7 +610,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ThemeEditorBaseColor = theme.BaseColor;
         ThemeEditorAccentColor = theme.AccentColor;
         ThemeEditorError = string.Empty;
-        _themeEditorAccentPicked = !theme.AccentFollowsSystem;
         // Load, not Set: seeding the controls with a theme's saved colours is not
         // the user changing one, and must not repaint the app on the way in.
         BasePicker.Load(theme.BaseColor);
@@ -650,15 +627,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void PreviewThemeEditor()
     {
         if (_editingTheme is null) return;
-        (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), Settings.UseSystemAccent,
-            new CustomThemeSettings
-            {
-                Id = _editingTheme.Id,
-                Name = ThemeEditorName,
-                BaseColor = ThemeEditorBaseColor,
-                AccentColor = ThemeEditorAccentColor,
-                AccentFollowsSystem = !_themeEditorAccentPicked
-            });
+        (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), false,
+            new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = ThemeEditorBaseColor, AccentColor = ThemeEditorAccentColor });
     }
 
 

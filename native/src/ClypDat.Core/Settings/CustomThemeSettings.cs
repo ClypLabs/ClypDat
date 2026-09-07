@@ -9,18 +9,9 @@ public sealed class CustomThemeSettings
     public string Name { get; set; } = "Custom theme";
     public string BaseColor { get; set; } = "#0D1116";
     public string AccentColor { get; set; } = "#5864E8";
-    // True while the theme's accent is whatever it inherited and the user has
-    // not picked one. Only then can the theme follow the Windows accent - once
-    // someone chooses an accent, that choice is the theme.
-    //
-    // Stated this way round, not "AccentCustomized", because a theme file
-    // written before the field existed deserializes it as false, and such a
-    // file always carries an accent someone chose.
-    public bool AccentFollowsSystem { get; set; }
 }
 
-public sealed record ThemeFile(int SchemaVersion, string Name, string BaseColor, string AccentColor,
-    bool AccentFollowsSystem = false);
+public sealed record ThemeFile(int SchemaVersion, string Name, string BaseColor, string AccentColor);
 
 public static class CustomThemeLibrary
 {
@@ -72,7 +63,7 @@ public static class CustomThemeLibrary
     }
 
     public static string Export(CustomThemeSettings theme) => JsonSerializer.Serialize(
-        new ThemeFile(ThemeFileSchemaVersion, theme.Name, theme.BaseColor, theme.AccentColor, theme.AccentFollowsSystem),
+        new ThemeFile(ThemeFileSchemaVersion, theme.Name, theme.BaseColor, theme.AccentColor),
         new JsonSerializerOptions { WriteIndented = true });
 
     public static bool TryImport(string json, IEnumerable<CustomThemeSettings> existing,
@@ -85,7 +76,7 @@ public static class CustomThemeLibrary
             if (file is null || file.SchemaVersion != ThemeFileSchemaVersion) { error = "Unsupported theme schema."; return false; }
             if (!TryNormalizeName(file.Name, existing, null, out var name, out error) && error != "Theme name already exists.") return false;
             if (!IsColor(file.BaseColor) || !IsColor(file.AccentColor)) { error = "Theme colours must use #RRGGBB."; return false; }
-            theme = new CustomThemeSettings { Name = UniqueName(name, existing), BaseColor = file.BaseColor.ToUpperInvariant(), AccentColor = file.AccentColor.ToUpperInvariant(), AccentFollowsSystem = file.AccentFollowsSystem };
+            theme = new CustomThemeSettings { Name = UniqueName(name, existing), BaseColor = file.BaseColor.ToUpperInvariant(), AccentColor = file.AccentColor.ToUpperInvariant() };
             error = null;
             return true;
         }
