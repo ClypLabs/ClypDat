@@ -234,7 +234,10 @@ public sealed class TimelineLaneControl : Control
         // thousands of line segments inside a single pixel column; reducing to
         // the lane's own width keeps the geometry the same size whatever the
         // zoom, and zooming in simply stops discarding detail.
-        var column = WaveformPeakReducer.Reduce(peaks, rect.Width);
+        // Reduced, then gained and curved: a lane is drawn against its own
+        // loudest peak, so a quiet source fills the lane it was given instead
+        // of drawing a flat line across the middle of it.
+        var column = WaveformLaneScale.Shape(peaks, rect.Width);
 
         var geometry = new StreamGeometry();
         using (var stream = geometry.Open())
