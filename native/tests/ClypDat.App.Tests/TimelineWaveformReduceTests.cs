@@ -62,56 +62,53 @@ public sealed class TimelineWaveformReduceTests
         Assert.Equal(0.4, reduced[2]);
     }
 
-    // A music lane at -30 dBFS is 0.03 linear. Drawn straight it is a flat line
-    // in a 40px lane; gained and curved it uses most of the lane it was given.
+    // A music lane at -30 dBFS is 0.03 linear. Drawn linearly it is a flat line
+    // in a 40px lane; on the decibel scale it reaches half of it.
     [Fact]
-    public void QuietLaneFillsTheLane()
+    public void QuietLaneReachesHalfHeight()
     {
         var peaks = new double[1000];
         for (var i = 0; i < peaks.Length; i++) peaks[i] = 0.03;
 
-        var shaped = WaveformLaneScale.Shape(peaks, 200);
-
-        Assert.All(shaped, value => Assert.InRange(value, 0.4, 1.0));
+        Assert.All(WaveformLaneScale.Shape(peaks, 200), value => Assert.InRange(value, 0.45, 0.55));
     }
 
-    // Nothing to amplify, so nothing is. Dither drawn at full height would say
-    // a muted app was making noise.
+    // Below the floor is silence, and silence draws as nothing. Dither drawn at
+    // any height would say a muted app was making noise.
     [Fact]
     public void SilentLaneStaysFlat()
     {
         var peaks = new double[1000];
-        for (var i = 0; i < peaks.Length; i++) peaks[i] = 0.001;
+        for (var i = 0; i < peaks.Length; i++) peaks[i] = 0.0005;
 
-        Assert.All(WaveformLaneScale.Shape(peaks, 200), value => Assert.InRange(value, 0, 0.03));
+        Assert.All(WaveformLaneScale.Shape(peaks, 200), value => Assert.Equal(0, value));
     }
 
-    // Normalization on a near-silent lane is division by nearly nothing.
+    // Full scale is the top of the lane, and the mapping never exceeds it.
     [Fact]
-    public void GainIsCapped()
+    public void FullScaleFillsTheLane()
     {
-        var peaks = new double[100];
-        peaks[0] = 0.006;
-
-        Assert.Equal(WaveformLaneScale.MaximumGain, WaveformLaneScale.Gain(peaks));
+        Assert.Equal(1, WaveformLaneScale.Height(1));
+        Assert.Equal(1, WaveformLaneScale.Height(2));
     }
 
-    // A lane already at full scale is drawn as captured, save for the curve.
+    // A steady source draws steady, at a height that says what it was. This is
+    // what per-lane normalization got wrong: it drew every constant level as a
+    // solid full-height block whatever that level was.
     [Fact]
-    public void FullScaleLaneIsNotGained()
+    public void SteadyQuietLaneIsNotDrawnAsFullHeight()
     {
-        var peaks = new double[100];
-        peaks[0] = 1.0;
+        var peaks = new double[1000];
+        for (var i = 0; i < peaks.Length; i++) peaks[i] = 0.03;
 
-        Assert.Equal(1, WaveformLaneScale.Gain(peaks));
+        Assert.All(WaveformLaneScale.Shape(peaks, 200), value => Assert.True(value < 0.7));
     }
 
-    // Louder still draws taller within a lane - the curve compresses the range,
-    // it does not flatten it.
+    // Louder still draws taller, across the whole range.
     [Fact]
     public void LouderColumnsStayTaller()
     {
-        var shaped = WaveformLaneScale.Shape([0.1, 0.4, 1.0], 3);
+        var shaped = WaveformLaneScale.Shape([0.01, 0.1, 1.0], 3);
 
         Assert.True(shaped[0] < shaped[1]);
         Assert.True(shaped[1] < shaped[2]);

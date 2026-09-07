@@ -134,23 +134,10 @@ public sealed class TimelineLaneControl : Control
         if (_cachedLaneFill is not null && _cachedWaveformFill is not null && _cachedLaneBrushKey == lane) return;
 
         _cachedLaneBrushKey = lane;
-        var laneColor = ParseColor(lane, "#24313B");
-        _cachedLaneFill = new SolidColorBrush(laneColor);
-        _cachedWaveformFill = new SolidColorBrush(WaveformColor(laneColor));
-    }
-
-    // Lightening by a fixed 58 works on the dark lanes and vanishes on the
-    // bright ones. Spotify's #1ED760 is already at 215 green: lightened it is
-    // near enough its own lane to be invisible, so the lane read as a solid
-    // block of colour wherever the trim shade was not darkening it - which is
-    // exactly the part of the clip being kept. A bright lane gets a darkened
-    // waveform instead, so every lane draws its shape against its own fill.
-    private static Color WaveformColor(Color lane)
-    {
-        var luminance = (0.2126 * lane.R + 0.7152 * lane.G + 0.0722 * lane.B) / 255;
-        return luminance > 0.45
-            ? Color.FromArgb(215, Darken(lane.R), Darken(lane.G), Darken(lane.B))
-            : Color.FromArgb(190, Lighten(lane.R), Lighten(lane.G), Lighten(lane.B));
+        _cachedLaneFill = new SolidColorBrush(ParseColor(lane, "#24313B"));
+        var waveColor = ParseColor(lane, "#FFFFFF");
+        _cachedWaveformFill = new SolidColorBrush(
+            Color.FromArgb(190, Lighten(waveColor.R), Lighten(waveColor.G), Lighten(waveColor.B)));
     }
 
     // Filmstrip is cached as ONE spritesheet image (MediaProbeService.
@@ -329,8 +316,6 @@ public sealed class TimelineLaneControl : Control
     }
 
     private static byte Lighten(byte channel) => (byte)Math.Min(255, channel + 58);
-
-    private static byte Darken(byte channel) => (byte)(channel * 0.45);
 
     private static Color ParseColor(string value, string fallback)
     {

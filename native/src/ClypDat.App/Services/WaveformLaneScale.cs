@@ -8,16 +8,17 @@ namespace ClypDat.App.Services;
 /// a 40px Spotify lane got a 1px line and read as "nothing was captured" for a
 /// track that plays through the whole clip.
 ///
-/// Two steps fix that. The lane is normalized against its own loudest peak, so
-/// a quiet source fills the lane it was given, and what is left is put through
-/// a perceptual curve so the quiet passages inside a loud lane lift too.
+/// So the lane is drawn on a decibel scale, which is the scale the loudness
+/// actually lives on. -30 dBFS lands at half height instead of at 3%, and full
+/// scale still draws full height.
 ///
-/// The cost is that lane height no longer compares between lanes - a full
-/// Spotify lane can be 20 dB under a full game lane. That is the right trade
-/// for what these lanes are read for, which is where in the clip a source is
-/// making noise, not which source is loudest. Normalization is per lane and not
-/// per view, so a lane's shape does not shift while the timeline is scrubbed
-/// or zoomed.
+/// Note what this deliberately is not: normalizing each lane against its own
+/// loudest peak. That fills a quiet lane too - and it fills it completely.
+/// Music holds a near-constant level, so dividing by the loudest peak in the
+/// clip put every column of it within a few percent of the top and drew one
+/// solid block of colour edge to edge, which says even less than the flat line
+/// did. A fixed mapping keeps a steady source looking steady, at a height that
+/// still means something, and keeps two lanes comparable to each other.
 ///
 /// Deliberately not on the control, same as <see cref="WaveformPeakReducer"/>:
 /// this is arithmetic, and the control's static constructor needs a render
@@ -25,56 +26,30 @@ namespace ClypDat.App.Services;
 /// </summary>
 public static class WaveformLaneScale
 {
-    // Below this the lane is silence - room tone, a muted app, a Discord lane
-    // nobody spoke on. Amplifying it would draw dither as though it were
-    // content, so a lane this quiet is left flat and reads as empty, which it
-    // is.
-    public const double SilenceFloor = 0.005;
+    // Where the lane bottoms out. -60 dBFS is below anything anyone captured on
+    // purpose - room tone through an open microphone sits around -55 - so a
+    // silent lane still draws as silence rather than as amplified dither.
+    public const double FloorDecibels = -60;
 
-    // A cap, because normalization on a nearly silent lane is division by
-    // nearly nothing. Eight is ~18 dB: enough for music mixed well under the
-    // game, short of turning a -50 dBFS lane into a full-height block.
-    public const double MaximumGain = 8;
-
-    // Normalizing to exactly 1 puts the loudest sample on the lane's edge with
-    // no margin, and the geometry is drawn from the middle outwards - the tips
-    // clip against the lane border.
-    public const double TargetFill = 0.95;
-
-    // Amplitude is not loudness. A 0.5 peak is 6 dB down, not half as loud, and
-    // drawn linearly the whole quiet half of a lane crowds into the middle.
-    // 0.6 is between plain amplitude and a square root, which lifts the quiet
-    // detail without flattening the loud end into one solid bar.
-    private const double CurveExponent = 0.6;
-
-    /// <summary>One drawn height per pixel column, gained and curved.</summary>
+    /// <summary>One drawn height per pixel column, on a decibel scale.</summary>
     public static double[] Shape(IReadOnlyList<double> peaks, double width)
     {
         var columns = WaveformPeakReducer.Reduce(peaks, width);
-        var gain = Gain(columns);
-
         for (var index = 0; index < columns.Length; index++)
         {
-            columns[index] = Curve(Math.Min(1, columns[index] * gain));
+            columns[index] = Height(columns[index]);
         }
         return columns;
     }
 
     /// <summary>
-    /// What the lane is multiplied by. 1 for a lane already at full scale and
-    /// for one that holds nothing but silence.
+    /// One peak's drawn height, 0 at the floor and 1 at full scale. 0.5 is
+    /// -30 dBFS, which is roughly where music mixed under a game sits.
     /// </summary>
-    public static double Gain(IReadOnlyList<double> columns)
+    public static double Height(double peak)
     {
-        var loudest = 0d;
-        for (var index = 0; index < columns.Count; index++)
-        {
-            if (columns[index] > loudest) loudest = columns[index];
-        }
-
-        if (loudest < SilenceFloor) return 1;
-        return Math.Clamp(TargetFill / loudest, 1, MaximumGain);
+        if (peak <= 0) return 0;
+        var decibels = 20 * Math.Log10(Math.Min(peak, 1));
+        return decibels <= FloorDecibels ? 0 : (decibels - FloorDecibels) / -FloorDecibels;
     }
-
-    public static double Curve(double value) => Math.Pow(Math.Clamp(value, 0, 1), CurveExponent);
 }
