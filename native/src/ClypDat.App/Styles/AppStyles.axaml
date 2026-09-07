@@ -1164,6 +1164,10 @@
     <Setter Property="Padding" Value="13,8" />
     <Setter Property="FontSize" Value="14" />
     <Setter Property="MinHeight" Value="38" />
+    <!-- MinHeight is taller than one line plus its padding, and Fluent leaves
+         the slack at the bottom, so the text sat a couple of pixels high in
+         every settings field in the app. The slack is split instead. -->
+    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
   <!-- The app's search boxes borrow settingsInput's behaviour but not its
        proportions. A settings field is a 42px form control on a page of form
@@ -1189,6 +1193,7 @@
     <Setter Property="FontSize" Value="13" />
     <Setter Property="CornerRadius" Value="17" />
     <Setter Property="Padding" Value="6,0" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_243240}" />
   </Style>
