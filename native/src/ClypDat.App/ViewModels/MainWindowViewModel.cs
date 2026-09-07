@@ -4277,6 +4277,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool SelectedHasSpotifyTrack => !string.IsNullOrWhiteSpace(_selectedSpotifyTrack);
 
     /// <summary>
+    /// Raised when the editor's copy of the overlay needs redrawing - a
+    /// different clip, or a change made in the placement dialog while one is
+    /// open behind it.
+    /// </summary>
+    public event EventHandler? SpotifyOverlayPreviewChanged;
+
+    public void RaiseSpotifyOverlayPreviewChanged() => SpotifyOverlayPreviewChanged?.Invoke(this, EventArgs.Empty);
+
+    /// <summary>Draws the open clip's track over a player, or clears it.</summary>
+    public void ApplySpotifyOverlayPreview(LibVLCSharp.Shared.MediaPlayer? player) =>
+        SpotifyEditorMarquee.Apply(
+            player,
+            _selectedSpotifyTrack,
+            _selectedSpotifyArtist,
+            _selectedSpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
+            Settings.SpotifyOverlayPosition,
+            Settings.SpotifyOverlayEnabled);
+
+    /// <summary>
     /// What the placement preview draws. The open clip's own track first, then
     /// whatever is playing right now, and a stand-in only when there is neither
     /// - a preview of an empty string tells the user nothing about placement.
@@ -6639,6 +6658,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.SpotifyOverlayEnabled = value;
             SaveSettings();
             OnPropertyChanged();
+            RaiseSpotifyOverlayPreviewChanged();
         }
     }
 
@@ -6653,6 +6673,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.SpotifyOverlayPosition = value;
             SaveSettings();
             OnPropertyChanged();
+            RaiseSpotifyOverlayPreviewChanged();
         }
     }
     public bool SpotifyIsConfigured => SpotifyNowPlayingService.IsConfigured;
@@ -8172,6 +8193,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(SelectedSpotifyLabel));
         OnPropertyChanged(nameof(SelectedHasSpotifyTrack));
         OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
+        RaiseSpotifyOverlayPreviewChanged();
         var isMedalImport = !string.IsNullOrWhiteSpace(clipInfo?.MedalImportKey);
         SelectedCaptureBackend = isMedalImport
             ? "Imported from Medal"

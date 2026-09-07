@@ -418,6 +418,11 @@ public sealed partial class MainWindow : Window
                     // the session a save left behind seconds ago.
                     ShowClipNotification("preview", "Clip Saved", playSound: true);
                 };
+                // Redraws the editor's Spotify line when the placement dialog
+                // changes it, so the choice is visible against the clip that is
+                // already open behind the dialog.
+                ViewModel.SpotifyOverlayPreviewChanged += (_, _) =>
+                    ViewModel?.ApplySpotifyOverlayPreview(_playback?.VideoPlayer);
                 ViewModel.RecordingOverlayPreviewRequested += (_, _) =>
                     ShowGameDetectedNotification(ViewModel.ActiveGameDetection.IsDetected
                         ? ViewModel.ActiveGameDetection.DisplayName : "Your game", preview: true);
@@ -4972,6 +4977,9 @@ public sealed partial class MainWindow : Window
         _playback = session;
         EditorVideoView.MediaPlayer = session.VideoPlayer;
         EditorVideoView.WatchMediaPlayer(session.VideoPlayer);
+        // The Spotify line, drawn by the video output itself - see
+        // SpotifyEditorMarquee for why it cannot be an Avalonia control.
+        ViewModel?.ApplySpotifyOverlayPreview(session.VideoPlayer);
         warmup.MarkPlayerAttached();
 
         void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
