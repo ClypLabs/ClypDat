@@ -98,7 +98,7 @@ public static class ClipRenderFilters
     /// Video filter chain for the given effects, plus any caller-supplied tail
     /// (Share appends its scale/fps downscale). Null when there is nothing to do.
     /// </summary>
-    public static string? BuildVideoFilter(CropRect? crop, double speed, string? tail = null, string? overlay = null)
+    public static string? BuildVideoFilter(CropRect? crop, double speed, string? tail = null)
     {
         var stages = new List<string>();
         if (crop is { } rect) stages.Add($"crop={rect.Width}:{rect.Height}:{rect.X}:{rect.Y}");
@@ -107,92 +107,49 @@ public static class ClipRenderFilters
         // fast.
         if (IsSpeedActive(speed)) stages.Add($"setpts=PTS/{Format(NormalizeSpeed(speed))}");
         if (!string.IsNullOrWhiteSpace(tail)) stages.Add(tail!);
-        // Last, so it draws at the size the file is actually written at. Ahead
-        // of Share's downscale it would be scaled down with the picture and
-        // come out at two thirds the intended size.
-        if (!string.IsNullOrWhiteSpace(overlay)) stages.Add(overlay!);
         return stages.Count == 0 ? null : string.Join(",", stages);
     }
 
     // Where the card sits, in the same six names the clip-save notification
-    // uses. Margin and text size are fractions of the frame, so a 1080p export
-    // and a 1440p one get the same overlay rather than the same pixel counts.
+    // uses. The margin is a fraction of the frame so a 1080p export and a 1440p
+    // one are laid out the same rather than to the same pixel counts.
     private const double OverlayMarginFraction = 0.035;
-    private const double OverlayFontFraction = 0.030;
-    private const int OverlayMinimumFontSize = 14;
-
-    // Bold, because this is drawn over arbitrary game footage - a regular
-    // weight disappears into a bright frame whatever colour it is.
-    private const string OverlayFontFile = "C:/Windows/Fonts/segoeuib.ttf";
 
     /// <summary>
-    /// The "now playing" card, as one drawtext stage, or null when there is
-    /// nothing to draw.
-    /// </summary>
-    public static string? BuildNowPlayingOverlay(string? track, string? artist, TimeSpan? length, string? position, int frameHeight)
-    {
-        if (string.IsNullOrWhiteSpace(track)) return null;
-
-        var text = string.IsNullOrWhiteSpace(artist) ? track! : $"{track} - {artist}";
-        if (length is { } duration) text += $"  {(int)duration.TotalMinutes}:{duration.Seconds:00}";
-
-        var height = frameHeight > 0 ? frameHeight : 1080;
-        var fontSize = Math.Max(OverlayMinimumFontSize, (int)Math.Round(height * OverlayFontFraction));
-        var margin = Math.Max(fontSize, (int)Math.Round(height * OverlayMarginFraction));
-
-        var x = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true ? $"w-tw-{margin}" : $"{margin}";
-        var y = position?.StartsWith("Top", StringComparison.OrdinalIgnoreCase) == true
-            ? $"{margin}"
-            : position?.StartsWith("Center", StringComparison.OrdinalIgnoreCase) == true
-                ? "(h-th)/2"
-                : $"h-th-{margin}";
-
-        return $"drawtext=fontfile='{EscapeFilterPath(OverlayFontFile)}':text='{EscapeDrawText(text)}'" +
-            $":fontcolor=white:fontsize={fontSize}:box=1:boxcolor=black@0.45:boxborderw={fontSize / 2}:x={x}:y={y}";
-    }
-
-    /// <summary>
-    /// Makes a track title safe to sit inside a filtergraph argument.
+    /// Composites a rendered card over the video.
     ///
-    /// A song title is written by a stranger, and several characters in one are
-    /// syntax by the time it reaches ffmpeg: the colon separates options, the
-    /// comma separates filter stages, the quote ends the argument, the
-    /// backslash escapes, and the percent introduces an expansion. Colons and
-    /// commas are escaped rather than replaced, because "3:48" and
-    /// "Joji, 4batz" are most of what this line is for. The rest are
-    /// substituted - a backslash or a percent in a title is rare enough that
-    /// losing one beats an export that fails.
+    /// The card arrives as a PNG - see SpotifyOverlayCardRenderer - and is
+    /// brought into the graph by the movie source rather than as a second input,
+    /// so the same string works whether the caller is using a plain -vf or is
+    /// already inside a filter_complex for its audio mixdown.
     /// </summary>
-    private static string EscapeDrawText(string text)
+    /// <param name="effects">The clip's own crop/speed chain, or null.</param>
+    /// <param name="inputLabel">"[in]" for a -vf graph, "[0:v:0]" inside a filter_complex.</param>
+    /// <param name="outputLabel">The label the graph must end on, or null for -vf.</param>
+    public static string ComposeWithCard(string? effects, string cardPath, string? position, string inputLabel, string? outputLabel)
     {
-        var cleaned = new System.Text.StringBuilder(text.Length + 8);
-        foreach (var character in text)
+        var margin = $"(main_h*{Format(OverlayMarginFraction)})";
+        var x = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true
+            ? $"main_w-overlay_w-{margin}"
+            : margin;
+        var y = position?.StartsWith("Top", StringComparison.OrdinalIgnoreCase) == true
+            ? margin
+            : position?.StartsWith("Center", StringComparison.OrdinalIgnoreCase) == true
+                ? "(main_h-overlay_h)/2"
+                : $"main_h-overlay_h-{margin}";
+
+        var graph = new System.Text.StringBuilder();
+        graph.Append($"movie='{EscapeFilterPath(cardPath)}'[spotifycard];");
+        if (!string.IsNullOrWhiteSpace(effects))
         {
-            switch (character)
-            {
-                case ':':
-                case ',':
-                    cleaned.Append('\\').Append(character);
-                    break;
-                case '\\':
-                    cleaned.Append('/');
-                    break;
-                // A typographic apostrophe, which a quote inside a quoted
-                // argument cannot be.
-                case '\'':
-                    cleaned.Append('\u2019');
-                    break;
-                case '%':
-                case '\n':
-                case '\r':
-                    cleaned.Append(' ');
-                    break;
-                default:
-                    cleaned.Append(character);
-                    break;
-            }
+            graph.Append($"{inputLabel}{effects}[spotifybase];[spotifybase][spotifycard]overlay={x}:{y}");
         }
-        return cleaned.ToString();
+        else
+        {
+            graph.Append($"{inputLabel}[spotifycard]overlay={x}:{y}");
+        }
+        if (!string.IsNullOrWhiteSpace(outputLabel)) graph.Append(outputLabel);
+        return graph.ToString();
     }
 
     // A Windows path inside a filtergraph needs its drive colon escaped, or the

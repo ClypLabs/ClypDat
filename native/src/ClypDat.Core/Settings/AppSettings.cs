@@ -234,6 +234,14 @@ public sealed class AppSettings
     /// notification so a position means one thing across the app.
     /// </summary>
     public string SpotifyOverlayPosition { get; set; } = "Bottom Left";
+
+    /// <summary>
+    /// Whether a saved clip is re-encoded with the card written into it, so the
+    /// file carries it everywhere - thumbnail, hover preview, and any player
+    /// outside ClypDat. Off by default: it costs an encode per clip and cannot
+    /// be undone afterwards.
+    /// </summary>
+    public bool SpotifyOverlayBurnIn { get; set; }
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one

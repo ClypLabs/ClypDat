@@ -1027,6 +1027,7 @@ public sealed partial class MainWindow : Window
                 {
                     ViewModel.StampSpotifyTrack(completed.Path);
                     await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
+                    await BurnSpotifyOverlayAsync(completed.Path);
                 }
             });
             return;
@@ -1056,8 +1057,19 @@ public sealed partial class MainWindow : Window
                 ViewModel.RecordDiscordClipSaved();
                 ViewModel.StampSpotifyTrack(completed.Path);
                 await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
+                await BurnSpotifyOverlayAsync(completed.Path);
             }
         });
+    }
+
+    // The clip is in the library first and re-encoded second, so the card
+    // appears on a tile that is already there rather than the tile waiting on an
+    // encode. The library entry is refreshed once the file has been replaced.
+    private async Task BurnSpotifyOverlayAsync(string clipPath)
+    {
+        if (ViewModel is null) return;
+        if (!await ViewModel.BurnSpotifyOverlayAsync(clipPath)) return;
+        await ViewModel.AddOrUpdateLibraryClipAsync(clipPath);
     }
 
     private void Worker_FullSessionRecordingToggled(object? sender, bool enabled)

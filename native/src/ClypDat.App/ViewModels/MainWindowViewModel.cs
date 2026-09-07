@@ -4244,28 +4244,56 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // multi-track path labels it as [0:v:0], and a filter_complex label for a
     // stream that does not exist fails the whole encode (unlike "-map 0:v:0?",
     // there is no optional form of a filter input).
-    private string? BuildRenderVideoFilter(string? tail = null) =>
-        SelectedSourceWidth > 0 && SelectedSourceHeight > 0
-            ? ClipRenderFilters.BuildVideoFilter(ActiveCropRect, ClipSpeed, tail, BuildSpotifyOverlayFilter())
+    private string? BuildRenderVideoFilter(string? tail = null, string inputLabel = "[in]", string? outputLabel = null)
+    {
+        var effects = SelectedSourceWidth > 0 && SelectedSourceHeight > 0
+            ? ClipRenderFilters.BuildVideoFilter(ActiveCropRect, ClipSpeed, tail)
             : tail;
 
-    // What Spotify was playing when this clip was captured, drawn into the
-    // picture. Written at export rather than at capture: burning it into the
-    // recording would mean re-encoding every save, and the position is a
-    // setting the user can still change afterwards.
-    private string? BuildSpotifyOverlayFilter() =>
-        Settings.SpotifyOverlayEnabled
-            ? ClipRenderFilters.BuildNowPlayingOverlay(
-                _selectedSpotifyTrack,
+        var card = RenderSpotifyCard();
+        if (card is null) return effects;
+
+        // The card joins the graph last, so it is drawn at the size the file is
+        // actually written at - ahead of Share's downscale it would be scaled
+        // down with the picture.
+        return ClipRenderFilters.ComposeWithCard(effects, card, Settings.SpotifyOverlayPosition, inputLabel, outputLabel);
+    }
+
+    /// <summary>
+    /// Draws the open clip's card to a PNG for the render to composite, or null
+    /// when there is nothing to draw. Rendered per render rather than cached:
+    /// the placement, the clip and the frame height can all have changed since
+    /// the last one.
+    /// </summary>
+    private string? RenderSpotifyCard()
+    {
+        if (!Settings.SpotifyOverlayEnabled || string.IsNullOrWhiteSpace(_selectedSpotifyTrack)) return null;
+
+        try
+        {
+            var card = new SpotifyCard(
+                _selectedSpotifyTrack!,
                 _selectedSpotifyArtist,
                 _selectedSpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
-                Settings.SpotifyOverlayPosition,
-                ActiveCropRect?.Height ?? SelectedSourceHeight)
-            : null;
+                _selectedSpotifyProgressMs is { } progress ? TimeSpan.FromMilliseconds(progress) : null,
+                _selectedSpotifyArtPath);
+
+            var height = ActiveCropRect?.Height ?? SelectedSourceHeight;
+            return SpotifyOverlayCardRenderer.Render(card, height, SpotifyOverlayCardRenderer.WorkPath("editor"));
+        }
+        catch (Exception error)
+        {
+            // A render that cannot draw the card still has a clip to export.
+            AppLog.Error("Spotify: could not draw the overlay card.", error);
+            return null;
+        }
+    }
 
     private string? _selectedSpotifyTrack;
     private string? _selectedSpotifyArtist;
     private int? _selectedSpotifyDurationMs;
+    private int? _selectedSpotifyProgressMs;
+    private string? _selectedSpotifyArtPath;
 
     /// <summary>The track the open clip was captured over, for the editor to say so.</summary>
     public string SelectedSpotifyLabel => string.IsNullOrWhiteSpace(_selectedSpotifyTrack)
@@ -6662,6 +6690,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool SpotifyOverlayBurnIn
+    {
+        get => Settings.SpotifyOverlayBurnIn;
+        set
+        {
+            if (Settings.SpotifyOverlayBurnIn == value) return;
+            Settings.SpotifyOverlayBurnIn = value;
+            SaveSettings();
+            OnPropertyChanged();
+        }
+    }
+
     private string _selectedSpotifyOverlayPosition = string.Empty;
     public string SelectedSpotifyOverlayPosition
     {
@@ -6780,8 +6820,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 SpotifyTrack = track.Track,
                 SpotifyArtist = track.Artist,
-                SpotifyDurationMs = track.Duration is { } length ? (int)length.TotalMilliseconds : null
+                SpotifyDurationMs = track.Duration is { } length ? (int)length.TotalMilliseconds : null,
+                // ProgressNow rather than the polled value: up to two seconds
+                // have passed since the sample, and the bar is drawn where the
+                // clip was saved, not where the last poll landed.
+                SpotifyProgressMs = track.ProgressNow is { } progress ? (int)progress.TotalMilliseconds : null
             });
+
+            // The art is fetched after the sidecar is written, so a clip still
+            // carries its track when the download fails or the machine is
+            // offline - the card just renders without a cover.
+            _ = SpotifyCoverArtStore.FetchAsync(Settings.LibraryFolder, clipPath, track.ArtUrl);
         }
         catch (Exception error)
         {
@@ -6789,6 +6838,44 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // broken clip.
             AppLog.Error($"Spotify: could not record the track on '{clipPath}'.", error);
         }
+    }
+
+    /// <summary>
+    /// Writes the card into a clip that has just been saved, when the user has
+    /// asked for that. Runs after <see cref="StampSpotifyTrack"/> has recorded
+    /// what was playing, and reads the track back from the sidecar rather than
+    /// from the live connection - by the time an encode finishes, the song may
+    /// have moved on.
+    /// </summary>
+    public async Task<bool> BurnSpotifyOverlayAsync(string clipPath)
+    {
+        if (!Settings.SpotifyOverlayBurnIn || !Settings.SpotifyOverlayEnabled) return false;
+        if (string.IsNullOrWhiteSpace(clipPath)) return false;
+
+        var info = ClipInfoSidecar.Load(Settings.LibraryFolder, clipPath);
+        if (info is null || string.IsNullOrWhiteSpace(info.SpotifyTrack)) return false;
+
+        var card = new SpotifyCard(
+            info.SpotifyTrack!,
+            info.SpotifyArtist,
+            info.SpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
+            info.SpotifyProgressMs is { } progress ? TimeSpan.FromMilliseconds(progress) : null,
+            info.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, clipPath));
+
+        // Height comes from the clip itself: a burn runs on a clip that is not
+        // necessarily the one open in the editor.
+        var probed = await _mediaProbe.ProbeMetadataAsync(clipPath).ConfigureAwait(false);
+        var height = probed.Height > 0 ? probed.Height : 1080;
+        var cardPath = SpotifyOverlayCardRenderer.Render(card, height, SpotifyOverlayCardRenderer.WorkPath("burn"));
+        if (cardPath is null) return false;
+
+        var filter = ClipRenderFilters.ComposeWithCard(null, cardPath, Settings.SpotifyOverlayPosition, "[in]", null);
+        var burned = await SpotifyOverlayBurner.BurnAsync(clipPath, filter).ConfigureAwait(false);
+        if (!burned) return false;
+
+        // The tile's thumbnail was made from the file this just replaced.
+        CardThumbnailCache.Invalidate(clipPath);
+        return true;
     }
 
     private void SpotifyChanged(object? sender, SpotifyNowPlaying snapshot)
@@ -7735,14 +7822,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // fine and simpler.
     private void AppendRenderMapsAndFilters(List<string> args, IReadOnlyList<TrackLaneViewModel> audioTracks, string? videoFilterTail = null)
     {
-        var videoFilter = BuildRenderVideoFilter(videoFilterTail);
         var audioSpeed = ClipRenderFilters.BuildAudioSpeedFilter(ClipSpeed);
         args.Add("-sn");
 
         if (audioTracks.Count > 1)
         {
+            // Inside a filter_complex the video chain has to name its own input
+            // and output; a -vf graph gets both for free.
+            var videoFilter = BuildRenderVideoFilter(videoFilterTail, "[0:v:0]", "[vout]");
+            if (videoFilter is not null && !videoFilter.Contains("[vout]", StringComparison.Ordinal))
+                videoFilter = $"[0:v:0]{videoFilter}[vout]";
             var filter = new System.Text.StringBuilder();
-            if (videoFilter is not null) filter.Append($"[0:v:0]{videoFilter}[vout];");
+            if (videoFilter is not null) filter.Append($"{videoFilter};");
 
             var labels = new List<string>();
             foreach (var track in audioTracks)
@@ -7774,10 +7865,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         args.Add("-map");
         args.Add("0:v:0?");
-        if (videoFilter is not null)
+        var simpleVideoFilter = BuildRenderVideoFilter(videoFilterTail);
+        if (simpleVideoFilter is not null)
         {
             args.Add("-vf");
-            args.Add(videoFilter);
+            args.Add(simpleVideoFilter);
         }
 
         if (audioTracks.Count == 1)
@@ -8190,6 +8282,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedSpotifyTrack = clipInfo?.SpotifyTrack;
         _selectedSpotifyArtist = clipInfo?.SpotifyArtist;
         _selectedSpotifyDurationMs = clipInfo?.SpotifyDurationMs;
+        _selectedSpotifyProgressMs = clipInfo?.SpotifyProgressMs;
+        _selectedSpotifyArtPath = clipInfo?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
         OnPropertyChanged(nameof(SelectedSpotifyLabel));
         OnPropertyChanged(nameof(SelectedHasSpotifyTrack));
         OnPropertyChanged(nameof(SpotifyOverlayPreviewText));

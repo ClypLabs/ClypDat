@@ -68,7 +68,14 @@ public sealed record ClipInfo(
     // connection, which is what tells the overlay it has nothing to draw.
     string? SpotifyTrack = null,
     string? SpotifyArtist = null,
-    int? SpotifyDurationMs = null);
+    int? SpotifyDurationMs = null,
+    // Where the track had reached when the clip was saved, so the card's
+    // progress bar says something true rather than sitting at zero.
+    int? SpotifyProgressMs = null,
+    // The cover art, already downloaded and stored beside the library's other
+    // sidecars. A path rather than the URL: the card has to render for a clip
+    // exported months later, offline, after the URL has expired.
+    string? SpotifyArtPath = null);
 
 public static class ClipInfoSidecar
 {

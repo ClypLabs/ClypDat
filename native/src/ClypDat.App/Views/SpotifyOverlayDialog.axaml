@@ -113,6 +113,17 @@
 
         <Border Classes="settingsDivider" />
 
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding SpotifyOverlayEnabled}">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Write it into saved clips" />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="400"
+                       Text="Re-encodes each clip once after saving, so its thumbnail and the file itself carry the card. Costs a few seconds of encoder time per clip, and cannot be undone." />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayBurnIn}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+        </Grid>
+
+        <Border Classes="settingsDivider" />
+
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="360" VerticalAlignment="Center"
                      Text="A clip carries whatever was playing when it was saved. Placement is read at export, so changing it here applies to clips you already have." />

@@ -21,7 +21,11 @@ internal sealed record SpotifyNowPlaying(
     TimeSpan? Progress,
     bool IsPlaying,
     DateTimeOffset? UpdatedAt,
-    string? Error)
+    string? Error,
+    // Cover art for the card. A URL rather than the image: it is only fetched
+    // when a clip is actually saved, so a session that never clips never
+    // downloads anything.
+    string? ArtUrl = null)
 {
     public static SpotifyNowPlaying Disconnected { get; } = new(false, null, null, null, null, null, null, false, null, null);
 
@@ -245,7 +249,25 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             Progress: payload?.ProgressMs is { } progress ? TimeSpan.FromMilliseconds(progress) : null,
             IsPlaying: payload?.IsPlaying ?? false,
             UpdatedAt: DateTimeOffset.UtcNow,
-            Error: null));
+            Error: null,
+            // Spotify returns its images largest first; the card is drawn at a
+            // few hundred pixels, so the smallest one that still covers it is
+            // the cheapest correct choice.
+            ArtUrl: SmallestUsableArt(item?.Album?.Images)));
+    }
+
+    // 300px is the middle image Spotify publishes for an album, and the card's
+    // art is 220 at 1080p. Anything smaller starts to show.
+    private const int MinimumArtSize = 250;
+
+    private static string? SmallestUsableArt(ImageResponse[]? images)
+    {
+        if (images is null || images.Length == 0) return null;
+        return images
+            .Where(image => !string.IsNullOrWhiteSpace(image.Url))
+            .OrderBy(image => image.Width)
+            .FirstOrDefault(image => image.Width >= MinimumArtSize)?.Url
+            ?? images[0].Url;
     }
 
     private void Publish(SpotifyNowPlaying snapshot)
@@ -451,5 +473,12 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     private sealed class AlbumResponse
     {
         [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("images")] public ImageResponse[]? Images { get; set; }
+    }
+
+    private sealed class ImageResponse
+    {
+        [JsonPropertyName("url")] public string? Url { get; set; }
+        [JsonPropertyName("width")] public int Width { get; set; }
     }
 }
