@@ -130,14 +130,14 @@
                 <Border Classes="providerBadge" Background="{StaticResource SpotifyBadgeBrush}">
                   <PathIcon Data="{StaticResource SpotifyMark}" Foreground="{StaticResource SpotifyBrandBrush}" />
                 </Border>
-                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                   <TextBlock Classes="settingsRowTitle" Text="Spotify" />
                   <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Show the song, artist and track length playing while a clip was captured." />
                   <TextBlock Classes="settingsRowDescSm" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap"
                              Text="This build has no Spotify application registered, so connecting is unavailable."
                              IsVisible="{Binding !SpotifyIsConfigured}" />
                 </StackPanel>
-                <Button Grid.Column="2" Classes="primaryButton" Content="Connect" VerticalAlignment="Center"
+                <Button Grid.Column="2" VerticalAlignment="Center" Content="Connect"
                         Click="ConnectSpotifyButton_OnClick" IsEnabled="{Binding SpotifyIsConfigured}" />
               </Grid>
             </Border>
