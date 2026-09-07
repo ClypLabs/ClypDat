@@ -469,6 +469,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ThemeColorPickerViewModel AccentPicker { get; }
 
 
+    // The saved rows are a third selector onto the same setting as the two
+    // preset grids, so switching between custom themes is one click on the row
+    // rather than a trip through the editor.
+    public CustomThemeSettings? SelectedCustomTheme
+    {
+        get => Settings.CustomThemes.FirstOrDefault(theme =>
+            string.Equals(CustomThemeLibrary.Selection(theme), Settings.ThemePreset, StringComparison.OrdinalIgnoreCase));
+        set
+        {
+            // Null arrives when the row list is rebuilt or a preset grid takes
+            // the selection, never from the user clearing a row.
+            if (value is null) return;
+            SelectedThemePreset = CustomThemeLibrary.Selection(value);
+            OnPropertyChanged();
+        }
+    }
+
     public string? SelectedThemePreset
     {
         get => Settings.ThemePreset;
@@ -493,6 +510,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ApplyTheme();
             OnPropertyChanged();
             OnPropertyChanged(nameof(UseSystemAccentColor));
+            OnPropertyChanged(nameof(SelectedCustomTheme));
+            OnPropertyChanged(nameof(IsThemeEditorSaved));
         }
     }
 
@@ -548,7 +567,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!Settings.CustomThemes.Remove(theme)) return false;
         if (string.Equals(Settings.ThemePreset, CustomThemeLibrary.Selection(theme), StringComparison.OrdinalIgnoreCase)) Settings.ThemePreset = "System";
-        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); return true;
+        SaveSettings(); ApplyTheme(); OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(SelectedCustomTheme)); return true;
     }
     /// <summary>
     /// Saves the theme being edited and selects it, leaving the editor open.
@@ -568,7 +587,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
         CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
         ThemeEditorError = string.Empty; SaveSettings(); ApplyTheme();
-        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(HasRecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); return true;
+        OnPropertyChanged(nameof(CustomThemes)); OnPropertyChanged(nameof(IsCustomThemesEmpty)); OnPropertyChanged(nameof(RecentThemeColors)); OnPropertyChanged(nameof(HasRecentThemeColors)); OnPropertyChanged(nameof(IsThemeEditorSaved)); OnPropertyChanged(nameof(SelectedThemePreset)); OnPropertyChanged(nameof(SelectedCustomTheme)); return true;
     }
 
     /// <summary>
