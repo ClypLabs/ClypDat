@@ -20,6 +20,19 @@ public sealed partial class AboutSection : UserControl
     private void LicenseLinkText_OnPointerPressed(object? sender, PointerPressedEventArgs e)
         => Owner?.LicenseLinkText_OnPointerPressed(sender, e);
 
+    private void CreditCard_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string url } || string.IsNullOrWhiteSpace(url)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Opening a browser is best-effort; failing it must not disrupt Settings.
+        }
+    }
+
     private async void CheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (Owner is not { } owner || !CheckNowButton.IsEnabled) return;

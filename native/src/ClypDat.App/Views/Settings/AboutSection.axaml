@@ -6,6 +6,32 @@
              xmlns:opconv="using:ClypDat.App.Converters"
              x:Class="ClypDat.App.Views.Settings.AboutSection"
              x:DataType="vm:MainWindowViewModel">
+  <UserControl.Styles>
+    <Style Selector="Button.creditCard">
+      <Setter Property="Width" Value="260" />
+      <Setter Property="Height" Value="82" />
+      <Setter Property="Padding" Value="14" />
+      <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="HorizontalContentAlignment" Value="Left" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.12" />
+          <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="Button.creditCard:pointerover, Button.creditCard:focus">
+      <Setter Property="Background" Value="{StaticResource Surface_16212B}" />
+      <Setter Property="BorderBrush" Value="{StaticResource LinkBrush}" />
+    </Style>
+    <Style Selector="TextBlock.creditRole">
+      <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
+      <Setter Property="FontSize" Value="11" />
+    </Style>
+  </UserControl.Styles>
   <UserControl.IsVisible>
     <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="About">
       <Binding Path="SettingsSearchText" />
@@ -123,25 +149,40 @@
       <StackPanel Spacing="10">
         <TextBlock Classes="settingsCardLabel" Text="CREDIT" Margin="0,0,0,4" />
         <TextBlock Classes="settingsRowDesc" Text="People who contributed to ClypDat." />
-        <WrapPanel Orientation="Horizontal" ItemWidth="180" ItemHeight="56">
-          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-            <Border Width="42" Height="42" CornerRadius="21" ClipToBounds="True">
-              <Image Source="avares://ClypDat/Assets/contributors/arashii.png" Stretch="UniformToFill" />
-            </Border>
-            <TextBlock Text="Arashii" Classes="settingsRowTitle" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" TextDecorations="Underline" Cursor="Hand" Tag="https://github.com/Stormanzanii" PointerPressed="LicenseLinkText_OnPointerPressed" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-            <Border Width="42" Height="42" CornerRadius="21" ClipToBounds="True">
-              <Image Source="avares://ClypDat/Assets/contributors/ipixelgalaxy.png" Stretch="UniformToFill" />
-            </Border>
-            <TextBlock Text="iPixelGalaxy" Classes="settingsRowTitle" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" TextDecorations="Underline" Cursor="Hand" Tag="https://github.com/iPixelGalaxy" PointerPressed="LicenseLinkText_OnPointerPressed" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-            <Border Width="42" Height="42" CornerRadius="21" ClipToBounds="True">
-              <Image Source="avares://ClypDat/Assets/contributors/spikerko.png" Stretch="UniformToFill" />
-            </Border>
-            <TextBlock Text="Spikerko" Classes="settingsRowTitle" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" TextDecorations="Underline" Cursor="Hand" Tag="https://github.com/Spikerko" PointerPressed="LicenseLinkText_OnPointerPressed" />
-          </StackPanel>
+        <WrapPanel Orientation="Horizontal" ItemWidth="272" ItemHeight="94">
+          <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Stormanzanii" ToolTip.Tip="Open Arashii's GitHub profile" Click="CreditCard_OnClick">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
+                <Image Source="avares://ClypDat/Assets/contributors/arashii.png" Stretch="UniformToFill" />
+              </Border>
+              <StackPanel Spacing="3" VerticalAlignment="Center">
+                <TextBlock Text="Arashii" Classes="settingsRowTitle" />
+                <TextBlock Text="Creator &amp; Developer" Classes="creditRole" />
+              </StackPanel>
+            </StackPanel>
+          </Button>
+          <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/iPixelGalaxy" ToolTip.Tip="Open iPixelGalaxy's GitHub profile" Click="CreditCard_OnClick">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
+                <Image Source="avares://ClypDat/Assets/contributors/ipixelgalaxy.png" Stretch="UniformToFill" />
+              </Border>
+              <StackPanel Spacing="3" VerticalAlignment="Center">
+                <TextBlock Text="iPixelGalaxy" Classes="settingsRowTitle" />
+                <TextBlock Text="Co-Creator &amp; UX Lead" Classes="creditRole" />
+              </StackPanel>
+            </StackPanel>
+          </Button>
+          <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Spikerko" ToolTip.Tip="Open Spikerko's GitHub profile" Click="CreditCard_OnClick">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
+                <Image Source="avares://ClypDat/Assets/contributors/spikerko.png" Stretch="UniformToFill" />
+              </Border>
+              <StackPanel Spacing="3" VerticalAlignment="Center">
+                <TextBlock Text="Spikerko" Classes="settingsRowTitle" />
+                <TextBlock Text="Contributor" Classes="creditRole" />
+              </StackPanel>
+            </StackPanel>
+          </Button>
         </WrapPanel>
       </StackPanel>
     </Border>
