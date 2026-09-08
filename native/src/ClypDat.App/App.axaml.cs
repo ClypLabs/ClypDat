@@ -303,7 +303,7 @@ public sealed partial class App : Application
         var file = FindWindowsFontFile(name);
         if (file is null) return new FontFamily("fonts:Inter#Inter, $Default");
 
-        var selected = new EmbeddedFontCollection(SelectedWindowsFontCollectionKey, new Uri(file));
+        var selected = new InstalledFontCollection(SelectedWindowsFontCollectionKey, new Uri(file));
         if (selected.Count == 0)
         {
             ((IFontCollection)selected).Dispose();
@@ -322,7 +322,7 @@ public sealed partial class App : Application
         var folder = Path.Combine(string.IsNullOrWhiteSpace(windows) ? @"C:\Windows" : windows, "Fonts");
         if (!Directory.Exists(folder)) return null;
 
-        var collection = new EmbeddedFontCollection(
+        var collection = new InstalledFontCollection(
             WindowsFontCollectionKey,
             new Uri(Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar));
         FontManager.Current.AddFontCollection(collection);
