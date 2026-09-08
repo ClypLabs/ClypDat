@@ -147,7 +147,7 @@
 
       <Border Classes="settingsCard" IsVisible="{Binding HasLinkedAccounts}">
         <StackPanel Spacing="14">
-          <TextBlock Classes="settingsCardLabel" Text="LINKED" />
+          <TextBlock Classes="settingsCardLabel" Text="CONNECTED" />
           <TextBlock Classes="settingsRowDescSm" Text="Unlink here. Refresh after changing anything on clypdat.xyz in your browser." />
           <Border Classes="settingsNotice" IsVisible="{Binding ClypDatAccountHasError}">
             <TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountError}" TextWrapping="Wrap" />
