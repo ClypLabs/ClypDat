@@ -14,7 +14,7 @@ internal sealed record ClipOverlayFrame(int Width, int Height, byte[] Pixels);
 // Only premultiplied pixels cross to the native animation thread.
 internal static class ClipOverlayCardRenderer
 {
-    // The badge shape: a full-height accent rail against the screen edge, the
+    // The badge shape: a full-height accent rail facing into the screen, the
     // app mark, a bold title, and the save hotkey as keycap chips. Sized to its
     // content rather than to a fixed width - a game name is as long as it is,
     // and wrapping "HELLDIVERS 2" onto a second line reads as a defect.
@@ -97,13 +97,19 @@ internal static class ClipOverlayCardRenderer
                     var corners = left
                         ? new CornerRadius(0, CardRadius, CardRadius, 0)
                         : new CornerRadius(CardRadius, 0, 0, CardRadius);
+                    var card = new RoundedRect(new Rect(0, 0, width, height), corners);
+                    var railX = left ? width - RailWidth : 0;
                     using (context.PushOpacity(FillOpacity))
-                        context.DrawRectangle(background, null, new RoundedRect(new Rect(0, 0, width, height), corners));
+                        context.DrawRectangle(background, null, card);
+                    // The rail is on the inward side. Clip it to the card so
+                    // its exposed rounded corners stay transparent instead of
+                    // squaring off the silhouette.
+                    using (context.PushClip(card))
+                        context.DrawRectangle(accent, null, new Rect(railX, 0, RailWidth, height));
                     context.DrawRectangle(null, new Pen(edge, 1), new RoundedRect(new Rect(0.5, 0.5, width - 1, height - 1), corners));
-                    context.DrawRectangle(accent, null, new Rect(left ? 0 : width - RailWidth, 0, RailWidth, height));
 
                     var contentTop = (height - content) / 2;
-                    var logoX = (left ? RailWidth : 0) + PadLeft;
+                    var logoX = (left ? 0 : RailWidth) + PadLeft;
                     context.DrawImage(AppThemeService.CurrentLogo(large: true),
                         new Rect(logoX, contentTop + (content - LogoSize) / 2, LogoSize, LogoSize));
 

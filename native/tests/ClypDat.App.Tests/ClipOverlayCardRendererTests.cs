@@ -38,19 +38,24 @@ public sealed class ClipOverlayCardRendererTests
                 foreach (var theme in new[] { "Emerald", "Berry", "Light" })
                 {
                     AppThemeService.Apply(application, theme, Colors.Blue, false);
-                    var frame = ClipOverlayCardRenderer.Render(presentation);
-                    Assert.Equal(220, frame.Width);
-                    Assert.Equal(58, frame.Height);
-                    Assert.Equal(BrushColor(application, "AccentBrush"), Pixel(frame, frame.Width - 1, 20));
-                    AssertFill(BrushColor(application, "SurfaceBrush"), Pixel(frame, frame.Width - 20, 20));
-                    Assert.Equal(0u, Pixel(frame, 0, 0));
-                    AssertPremultiplied(frame);
-                    var leftFrame = ClipOverlayCardRenderer.Render(presentation with
+                    foreach (var placement in Enum.GetValues<ClipOverlayPlacement>())
                     {
-                        Event = presentation.Event with { Placement = ClipOverlayPlacement.TopLeft }
-                    });
-                    Assert.Equal(BrushColor(application, "AccentBrush"), Pixel(leftFrame, 0, 0));
-                    Assert.Equal(0u, Pixel(leftFrame, leftFrame.Width - 1, 0));
+                        foreach (var scaling in new[] { 1d, 1.5d })
+                        {
+                            var frame = ClipOverlayCardRenderer.Render(presentation with
+                            {
+                                Event = presentation.Event with
+                                {
+                                    Placement = placement,
+                                    Target = presentation.Event.Target with { Scaling = scaling }
+                                }
+                            });
+                            Assert.Equal((int)Math.Ceiling(220 * scaling), frame.Width);
+                            Assert.Equal((int)Math.Ceiling(58 * scaling), frame.Height);
+                            AssertAccentAndSilhouette(application, frame, placement, scaling);
+                            AssertPremultiplied(frame);
+                        }
+                    }
                 }
 
                 var original = ClipOverlayCardRenderer.Render(presentation);
@@ -74,7 +79,7 @@ public sealed class ClipOverlayCardRendererTests
                 {
                     Event = presentation.Event with { Kind = ClipOverlayKind.Failure }
                 });
-                Assert.Equal(BrushColor(application, "DangerBrush"), Pixel(failed, failed.Width - 1, 20));
+                Assert.Equal(BrushColor(application, "DangerBrush"), Pixel(failed, 2, 20));
 
                 AppThemeService.Apply(application, "Emerald", Colors.Blue, false);
                 var recording = presentation.Event with
@@ -95,6 +100,25 @@ public sealed class ClipOverlayCardRendererTests
                     recording with { Title = "Recording: HELLDIVERS™ 2", Hotkey = "Insert", HotkeyHint = "to save a clip" }));
                 Assert.True(longTitle.Width > shortTitle.Width, "The card has to size itself to the title.");
                 Assert.Equal(shortTitle.Height, longTitle.Height);
+
+                var richNotification = recording with
+                {
+                    Title = "Recording: HELLDIVERS™ 2",
+                    Hotkey = "Ctrl+Shift+F9",
+                    HotkeyHint = "to save a clip"
+                };
+                foreach (var placement in Enum.GetValues<ClipOverlayPlacement>())
+                foreach (var scaling in new[] { 1d, 1.5d })
+                {
+                    var frame = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(6, richNotification with
+                    {
+                        Placement = placement,
+                        Target = richNotification.Target with { Scaling = scaling }
+                    }));
+                    Assert.True(frame.Width > 220 * scaling, "Long titles must remain on one line.");
+                    Assert.True(frame.Height > 58 * scaling, "Hotkey chips must add a row.");
+                    AssertAccentAndSilhouette(application, frame, placement, scaling);
+                }
                 SpotifyFrameChecks.Run();
             }
             catch (Exception error) { failure = error; }
@@ -119,6 +143,20 @@ public sealed class ClipOverlayCardRendererTests
 
     private static uint Pixel(ClipOverlayFrame frame, int x, int y)
         => BitConverter.ToUInt32(frame.Pixels, (y * frame.Width + x) * 4);
+
+    private static void AssertAccentAndSilhouette(Application application, ClipOverlayFrame frame,
+        ClipOverlayPlacement placement, double scaling)
+    {
+        var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
+        var railX = left ? frame.Width - 1 - PixelAt(2, scaling) : PixelAt(2, scaling);
+        var fillX = left ? frame.Width - 1 - PixelAt(10, scaling) : PixelAt(10, scaling);
+        var y = PixelAt(20, scaling);
+        Assert.Equal(BrushColor(application, "AccentBrush"), Pixel(frame, railX, y));
+        AssertFill(BrushColor(application, "SurfaceBrush"), Pixel(frame, fillX, y));
+        Assert.Equal(0u, Pixel(frame, left ? frame.Width - 1 : 0, 0));
+    }
+
+    private static int PixelAt(double dip, double scaling) => (int)Math.Round(dip * scaling);
 
     private static void AssertPremultiplied(ClipOverlayFrame frame)
     {
