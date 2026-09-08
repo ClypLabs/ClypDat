@@ -58,6 +58,8 @@ internal sealed class SpotifyCardFrames : IDisposable
     private readonly bool _right;
     private readonly bool _dynamicBackground;
     private readonly FontFamily _font;
+    private readonly SpotifyOverlayBounds _cardBounds;
+    private readonly double _rotationRadians;
     private readonly Dictionary<(string, double, bool), TextLayout> _text = new();
     private sealed record Artwork(Bitmap Image, LinearGradientBrush Background) : IDisposable
     {
@@ -70,10 +72,12 @@ internal sealed class SpotifyCardFrames : IDisposable
     public int Height => Bitmap.PixelSize.Height;
     public SpotifyCardFrames(int width, int height, string? position, FontFamily font, bool dynamicBackground = true, SpotifyOverlayTransform? transform = null)
     {
-        var bounds = SpotifyOverlayLayout.Resolve(width, height, position, transform);
+        _cardBounds = SpotifyOverlayLayout.Resolve(width, height, position, transform);
+        var bounds = SpotifyOverlayLayout.ResolveRenderBounds(width, height, position, transform);
         _right = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true;
         _dynamicBackground = dynamicBackground;
         _font = font;
+        _rotationRadians = transform is null ? 0 : SpotifyOverlayLayout.Normalize(width, height, transform).RotationDegrees * Math.PI / 180;
         Bitmap = new RenderTargetBitmap(new PixelSize(bounds.Width, bounds.Height), new Vector(96, 96));
         Pixels = new byte[Width * Height * 4];
     }
@@ -93,9 +97,15 @@ internal sealed class SpotifyCardFrames : IDisposable
         if (_art.Count > 64) { foreach (var art in _art.Values) art?.Dispose(); _art.Clear(); }
         var artwork = GetArtwork(card?.ArtPath);
         using var context = Bitmap.CreateDrawingContext();
-        // Fill the rounded pixel dimensions exactly. Scaling by the unrounded
-        // height leaves a translucent gutter along the bottom/right at 720p etc.
-        using (context.PushTransform(Matrix.CreateScale(Width / 406.0, Height / 140.0))) Draw(context, card, artwork, songSeconds);
+        // Draw into a transparent expanded canvas, then rotate the card around
+        // its centre. This same bitmap is used by preview and FFmpeg.
+        var scaleX = _cardBounds.Width / 406.0;
+        var scaleY = _cardBounds.Height / 140.0;
+        var offsetX = (Width - _cardBounds.Width) / 2.0;
+        var offsetY = (Height - _cardBounds.Height) / 2.0;
+        var transform = Matrix.CreateTranslation(-203, -70) * Matrix.CreateScale(scaleX, scaleY) *
+            Matrix.CreateRotation(_rotationRadians) * Matrix.CreateTranslation(Width / 2.0, Height / 2.0);
+        using (context.PushTransform(transform)) Draw(context, card, artwork, songSeconds);
     }
     private Artwork? GetArtwork(string? path)
     {

@@ -69,7 +69,7 @@ public sealed class SpotifyOverlayAnimation : IDisposable
                 await process.WaitForExitAsync().ConfigureAwait(false);
                 await errors.ConfigureAwait(false);
             }
-            return new(path, spec.Position, SpotifyOverlayLayout.Resolve(spec.Width, spec.Height, spec.Position, spec.Transform));
+            return new(path, spec.Position, SpotifyOverlayLayout.ResolveRenderBounds(spec.Width, spec.Height, spec.Position, spec.Transform));
         }
         catch { try { File.Delete(path); } catch { } token.ThrowIfCancellationRequested(); throw; }
         finally { if (renderer is not null) await Dispatcher.UIThread.InvokeAsync(renderer.Dispose); }

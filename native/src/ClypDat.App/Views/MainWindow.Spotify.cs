@@ -135,7 +135,13 @@ public sealed partial class MainWindow
             _spotifyPreview!.Update(spec, model.CurrentTime.TotalSeconds,
                 Math.Max(1, (int)Math.Round(width * rasterScale)), Math.Max(1, (int)Math.Round(height * rasterScale)));
             if (!_spotifyPreview.HasCard && !_spotifyAdorner.IsVisible) { HideSpotifyPreview(); return; }
-            if (!_spotifyWindow.IsVisible) _spotifyWindow.Show(this);
+            var handle = NativeHandleOf(_spotifyWindow);
+            if (!_spotifyWindow.IsVisible || (handle != IntPtr.Zero && !IsWindowVisible(handle))) _spotifyWindow.Show(this);
+            // LibVLC can create or reattach its child HWND after the owned card
+            // window. Raise without activation so opening a clip does not wait
+            // for unrelated hover controls to repair the stacking order.
+            handle = NativeHandleOf(_spotifyWindow);
+            if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
             _spotifyPerPixel?.ShowAndRefresh();
         }
         catch (InvalidOperationException) { HideSpotifyPreview(); }
@@ -155,6 +161,7 @@ public sealed partial class MainWindow
         var point = e.GetPosition(_spotifySurface);
         var mode = model.IsSpotifyOverlaySelected ? SpotifyOverlayAdorner.HitTest(point, _spotifySurface.Bounds.Size) : SpotifyOverlayDragMode.Move;
         model.IsSpotifyOverlaySelected = true;
+        model.OpenEditorSidebar(EditorSidebarSection.Effects);
         var width = Math.Max(1, (int)_spotifyVideoBounds.Width);
         var height = Math.Max(1, (int)_spotifyVideoBounds.Height);
         var sourceWidth = Math.Max(1, model.ActiveCropRect?.Width ?? model.SelectedSourceWidth);
@@ -221,6 +228,7 @@ public sealed partial class MainWindow
         if (sender is not Control { DataContext: TrackLaneViewModel { IsOverlay: true } } control ||
             !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed || ViewModel is null) return;
         ViewModel.IsSpotifyOverlaySelected = true;
+        ViewModel.OpenEditorSidebar(EditorSidebarSection.Effects);
         e.Handled = true;
         UpdateSpotifyPreview();
     }

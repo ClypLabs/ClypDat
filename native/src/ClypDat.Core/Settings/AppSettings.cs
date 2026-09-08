@@ -234,6 +234,9 @@ public sealed class AppSettings
     /// notification so a position means one thing across the app.
     /// </summary>
     public string SpotifyOverlayPosition { get; set; } = "Bottom Left";
+    // The layout new recordings inherit. Existing clips always use their own
+    // sidecar snapshot, so changing this never moves an older edit.
+    public SpotifyOverlayTransform? SpotifyOverlayDefaultTransform { get; set; }
 
     /// <summary>Whether the cover-colour background moves while the clip plays.</summary>
     public bool SpotifyOverlayDynamicBackground { get; set; } = true;
@@ -315,7 +318,9 @@ public sealed class AppSettings
 
 // Placement is relative to the visible video frame, so it survives output
 // resizing. A null transform retains the app's configured edge placement.
-public sealed record SpotifyOverlayTransform(double X, double Y, double Width);
+// Rotation is deliberately last so existing JSON containing X/Y/Width remains
+// valid. Coordinates describe the unrotated card's top-left corner.
+public sealed record SpotifyOverlayTransform(double X, double Y, double Width, double RotationDegrees = 0);
 
 public sealed class ClipEditSettings
 {

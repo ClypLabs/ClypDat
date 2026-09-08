@@ -16,7 +16,7 @@ public static class SpotifyOverlayLayout
     {
         // Zoom/pan change which part of the output is visible, never the
         // normalized coordinates of the output or its independently edited card.
-        var local = Resolve(frameBounds.Width, frameBounds.Height, position, transform);
+        var local = ResolveRenderBounds(frameBounds.Width, frameBounds.Height, position, transform);
         var card = local with { X = frameBounds.X + local.X, Y = frameBounds.Y + local.Y };
         var left = Math.Max(card.X, viewportBounds.X);
         var top = Math.Max(card.Y, viewportBounds.Y);
@@ -33,7 +33,12 @@ public static class SpotifyOverlayLayout
         var defaultWidth = SpotifyOverlayCardRenderer.SourceWidth * SpotifyOverlayCardRenderer.Scale(frameWidth, frameHeight) / frameWidth;
         var width = Math.Clamp(Finite(transform.Width, defaultWidth), Math.Min(MinimumWidth, maximumWidth), maximumWidth);
         var height = width * frameWidth / AspectRatio / frameHeight;
-        return new(Math.Clamp(Finite(transform.X, 0), 0, 1 - width), Math.Clamp(Finite(transform.Y, 0), 0, Math.Max(0, 1 - height)), width);
+        // Position remains bounded for the unrotated card. Rotation is allowed
+        // to extend past the picture and is clipped by the editor/export frame.
+        var rotation = Finite(transform.RotationDegrees, 0) % 360;
+        if (rotation <= -180) rotation += 360;
+        if (rotation > 180) rotation -= 360;
+        return new(Math.Clamp(Finite(transform.X, 0), 0, 1 - width), Math.Clamp(Finite(transform.Y, 0), 0, Math.Max(0, 1 - height)), width, rotation);
     }
 
     public static SpotifyOverlayBounds Resolve(int frameWidth, int frameHeight, string? position, SpotifyOverlayTransform? transform = null)
@@ -58,6 +63,20 @@ public static class SpotifyOverlayLayout
         var y = position?.StartsWith("Top", StringComparison.OrdinalIgnoreCase) == true ? inset :
             position?.StartsWith("Center", StringComparison.OrdinalIgnoreCase) == true ? Round((frameHeight - cardHeight) / 2.0) : frameHeight - cardHeight - inset;
         return new(x, Math.Clamp(y, 0, frameHeight - cardHeight), cardWidth, cardHeight);
+    }
+
+    /// <summary>Transparent raster bounds needed after rotating an editable card.</summary>
+    public static SpotifyOverlayBounds ResolveRenderBounds(int frameWidth, int frameHeight, string? position, SpotifyOverlayTransform? transform = null)
+    {
+        var card = Resolve(frameWidth, frameHeight, position, transform);
+        var degrees = transform is null ? 0 : Normalize(frameWidth, frameHeight, transform).RotationDegrees;
+        if (Math.Abs(degrees) < .001) return card;
+        var radians = degrees * Math.PI / 180;
+        var width = (int)Math.Ceiling(Math.Abs(card.Width * Math.Cos(radians)) + Math.Abs(card.Height * Math.Sin(radians)));
+        var height = (int)Math.Ceiling(Math.Abs(card.Width * Math.Sin(radians)) + Math.Abs(card.Height * Math.Cos(radians)));
+        return new SpotifyOverlayBounds(
+            (int)Math.Floor(card.X + (card.Width - width) / 2.0),
+            (int)Math.Floor(card.Y + (card.Height - height) / 2.0), Math.Max(1, width), Math.Max(1, height));
     }
 
     private static double Finite(double value, double fallback) => double.IsFinite(value) ? value : fallback;

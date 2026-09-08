@@ -624,6 +624,7 @@ public sealed partial class MainWindow : Window
         // fires when the newly clicked target is itself focusable, so a
         // click on a non-focusable area (e.g. a thumbnail, plain text) would
         // otherwise leave the box open with focus untouched.
+        AddHandler(PointerPressedEvent, SpotifyOverlayDeselect_OnAnyPointerPressed, RoutingStrategies.Bubble, true);
         AddHandler(PointerPressedEvent, ClipTitleEdit_OnAnyPointerPressed, RoutingStrategies.Tunnel);
         // Covers the Settings page's own hotkey button, which lives in this
         // window rather than a popup.
@@ -9904,7 +9905,18 @@ public sealed partial class MainWindow : Window
 
     private void EditorVideoView_OnVideoClicked(object? sender, EventArgs e)
     {
+        if (ViewModel is not null) ViewModel.IsSpotifyOverlaySelected = false;
         PlayPauseButton_OnClick(this, new RoutedEventArgs());
+    }
+
+    private void SpotifyOverlayDeselect_OnAnyPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (ViewModel?.IsSpotifyOverlaySelected != true || _spotifyGesture is not null) return;
+        var visual = e.Source as Visual;
+        if (visual?.FindAncestorOfType<Border>() == SpotifyOverlayEffectsCard ||
+            visual?.GetVisualAncestors().OfType<Border>().Any(border => border == SpotifyOverlayEffectsCard) == true ||
+            (e.Source as Control)?.DataContext is TrackLaneViewModel { IsOverlay: true }) return;
+        ViewModel.IsSpotifyOverlaySelected = false;
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]

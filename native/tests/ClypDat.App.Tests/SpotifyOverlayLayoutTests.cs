@@ -126,4 +126,21 @@ public sealed class SpotifyOverlayLayoutTests
         Assert.Equal(0, projection.VisibleBounds.Width);
         Assert.Equal(0, projection.VisibleBounds.Height);
     }
+
+    [Fact]
+    public void RotationUsesExpandedTransparentRasterAndKeepsLegacyGeometryAtZero()
+    {
+        var plain = SpotifyOverlayLayout.ResolveRenderBounds(1920, 1080, "Bottom Left", new(.1, .2, .3));
+        var rotated = SpotifyOverlayLayout.ResolveRenderBounds(1920, 1080, "Bottom Left", new(.1, .2, .3, 45));
+        Assert.Equal(SpotifyOverlayLayout.Resolve(1920, 1080, "Bottom Left", new(.1, .2, .3)), plain);
+        Assert.True(rotated.Width * rotated.Height > plain.Width * plain.Height);
+        Assert.True(rotated.Height > plain.Height);
+    }
+
+    [Fact]
+    public void RotationNormalizesIntoStableHalfTurnRange()
+    {
+        Assert.Equal(15, SpotifyOverlayLayout.Normalize(1920, 1080, new(.1, .2, .3, 375)).RotationDegrees);
+        Assert.Equal(0, SpotifyOverlayLayout.Normalize(1920, 1080, new(.1, .2, .3, 720)).RotationDegrees);
+    }
 }

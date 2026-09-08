@@ -1707,7 +1707,7 @@
                this tree rather than being built and thrown away per section. -->
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="20,18" Spacing="14">
-              <Border Classes="editorInspectorCard" IsVisible="{Binding IsSpotifyOverlaySelected}"
+              <Border Classes="editorInspectorCard" IsVisible="False"
                       BorderBrush="{StaticResource Semantic_3B6152}">
                 <StackPanel Spacing="12">
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
@@ -1835,6 +1835,28 @@
                     <ListBox Classes="pillGroup compactPills" SelectionMode="Single"
                              ItemsSource="{Binding ClipCropModes}" SelectedItem="{Binding ClipCropMode, Mode=TwoWay}" />
                     <TextBlock Text="{Binding ClipCropSizeLabel}" Foreground="{StaticResource Text_8EA1B6}" FontSize="11" />
+                  </StackPanel>
+                </Border>
+
+                <Border x:Name="SpotifyOverlayEffectsCard" Classes="editorInspectorCard" IsVisible="{Binding HasSpotifyOverlayLayer}"
+                        BorderBrush="{StaticResource Semantic_3B6152}">
+                  <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                      <TextBlock Text="SPOTIFY OVERLAY" Classes="editorCardLabel" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Classes="linkButton" Content="Done" Padding="6,2" Click="SpotifyOverlayDone_OnClick" />
+                    </Grid>
+                    <StackPanel Spacing="12" IsVisible="{Binding HasEditableSpotifyOverlay}">
+                      <TextBlock Text="Drag the card to move it. Use rotation to level or tilt it." Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
+                      <Grid ColumnDefinitions="*,Auto"><TextBlock Text="Show overlay" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" VerticalAlignment="Center" /><ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayLayerVisible, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid>
+                      <StackPanel Spacing="4" IsEnabled="{Binding SpotifyOverlayLayerVisible}">
+                        <Grid ColumnDefinitions="*,Auto"><TextBlock Text="Width" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" /><TextBlock Grid.Column="1" Text="{Binding SpotifyOverlaySizeLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" /></Grid>
+                        <Slider Minimum="5" Maximum="100" Value="{Binding SpotifyOverlaySizePercent, Mode=TwoWay}" />
+                        <Grid ColumnDefinitions="*,Auto"><TextBlock Text="Rotation" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" /><TextBlock Grid.Column="1" Text="{Binding SpotifyOverlayRotationDegrees, StringFormat=\{0:0\}°}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" /></Grid>
+                        <Slider Minimum="-180" Maximum="180" Value="{Binding SpotifyOverlayRotationDegrees, Mode=TwoWay}" ToolTip.Tip="Rotation snaps every 15 degrees" />
+                      </StackPanel>
+                      <Button Content="Reset layout" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="SpotifyOverlayReset_OnClick" />
+                    </StackPanel>
+                    <TextBlock Text="This overlay is already part of the video. Its layout is fixed." Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding !HasEditableSpotifyOverlay}" />
                   </StackPanel>
                 </Border>
 

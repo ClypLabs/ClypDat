@@ -4382,6 +4382,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string SpotifyOverlaySizeLabel => $"{SpotifyOverlaySizePercent:0}% of video width";
 
+    public double SpotifyOverlayRotationDegrees
+    {
+        get => SpotifyOverlayTransform?.RotationDegrees ?? 0;
+        set
+        {
+            if (!HasEditableSpotifyOverlay || !double.IsFinite(value)) return;
+            var width = Math.Max(1, ActiveCropRect?.Width ?? SelectedSourceWidth);
+            var height = Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight);
+            var current = SpotifyOverlayTransform ?? SpotifyOverlayLayout.Normalize(width, height,
+                new SpotifyOverlayTransform(0, 0, SpotifyOverlayCardRenderer.Scale(width, height) * SpotifyOverlayCardRenderer.SourceWidth / width));
+            var snapped = Math.Round(value / 15.0) * 15.0;
+            if (Math.Abs(value - snapped) <= 3) value = snapped;
+            SetSpotifyOverlayTransform(current with { RotationDegrees = value });
+        }
+    }
+
     public void SetSpotifyOverlayTransform(SpotifyOverlayTransform transform, bool persist = true)
     {
         if (!HasEditableSpotifyOverlay) return;
@@ -4391,12 +4407,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!SetProperty(ref _spotifyOverlayTransform, normalized, nameof(SpotifyOverlayTransform))) return;
         OnPropertyChanged(nameof(SpotifyOverlaySizePercent));
         OnPropertyChanged(nameof(SpotifyOverlaySizeLabel));
+        OnPropertyChanged(nameof(SpotifyOverlayRotationDegrees));
         if (persist) CommitSpotifyOverlayTransform();
     }
 
     public void CommitSpotifyOverlayTransform()
     {
         if (!HasEditableSpotifyOverlay) return;
+        Settings.SpotifyOverlayDefaultTransform = SpotifyOverlayTransform;
+        SaveSettings();
         if (!_suppressClipEditSave) SaveSelectedClipEditState();
         RaiseSpotifyOverlayPreviewChanged();
     }
@@ -4405,6 +4424,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (!HasEditableSpotifyOverlay) return;
         _spotifyOverlayTransform = null;
+        Settings.SpotifyOverlayDefaultTransform = null;
+        SaveSettings();
         RefreshSpotifyOverlayLayerState();
         CommitSpotifyOverlayTransform();
     }
@@ -4417,6 +4438,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(SpotifyOverlayTransform));
         OnPropertyChanged(nameof(SpotifyOverlaySizePercent));
         OnPropertyChanged(nameof(SpotifyOverlaySizeLabel));
+        OnPropertyChanged(nameof(SpotifyOverlayRotationDegrees));
         OnPropertyChanged(nameof(IsSpotifyOverlaySelected));
         RefreshSpotifyOverlayLaneState();
     }
@@ -6999,6 +7021,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // Keep playback and artwork separate from the recording. Export/Share
         // composites this editable layer using the clip's current placement.
         var library = Settings.LibraryFolder;
+        // A save id identifies a newly recorded clip. Snapshot the user default
+        // before post-save work can be delayed or retried; old/recovered clips
+        // keep their legacy configured anchor until explicitly edited.
+        if (saveId is not null && ClipEditSidecar.Load(library, clipPath) is null && Settings.SpotifyOverlayDefaultTransform is { } defaultTransform)
+            ClipEditSidecar.Save(library, clipPath, new ClipEditSettings { SpotifyOverlayTransform = defaultTransform });
         var source = SpotifySourceWindow.Load(library, clipPath);
         var timeline = SpotifyTimelineSidecar.Load(library, clipPath);
         if (timeline is null && source is not null)
