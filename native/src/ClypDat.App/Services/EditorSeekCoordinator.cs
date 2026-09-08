@@ -78,6 +78,35 @@ internal sealed class EditorSeekCoordinator
         return Fail("unknown");
     }
 
+    // Opening cannot use SeekAsync's short audio budget: cold initial chunks
+    // must exist before video starts, otherwise the reader emits silence.
+    public async Task<EditorPlaybackStartResult> StartAsync(IEditorSeekTransport transport, TimeSpan target, string startId, Func<bool> isCurrent, CancellationToken cancellationToken)
+    {
+        target = target < TimeSpan.Zero ? TimeSpan.Zero : target;
+        var clock = Stopwatch.StartNew();
+        if (!isCurrent()) return EditorPlaybackStartResult.SupersededResult;
+        transport.LogDebug($"start={startId} prepare: target={target.TotalSeconds:0.###}s, tracks={transport.AudioTrackCount}.");
+        var preparation = transport.PrepareAudioAsync(target, startId, cancellationToken);
+        try
+        {
+            var landed = await LandAsync(transport, target, startId, isCurrent, cancellationToken).ConfigureAwait(false);
+            if (landed is null) return !isCurrent() ? EditorPlaybackStartResult.SupersededResult : EditorPlaybackStartResult.FailedResult;
+            var ready = await preparation.ConfigureAwait(false);
+            if (!isCurrent()) return EditorPlaybackStartResult.SupersededResult;
+            if (ready.ReadyTracks > 0) transport.CommitPlaying(landed.Value, startId);
+            else transport.CommitVideoOnly();
+            transport.LogDebug($"start={startId} commit: position={landed.Value.TotalSeconds:0.###}s, ready={ready.ReadyTracks}, failed={ready.FailedTracks}, ms={clock.ElapsedMilliseconds}.");
+            return new(true, false, landed.Value, ready);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error)
+        {
+            transport.LogError($"start={startId} failed: {error.Message}");
+            if (isCurrent()) { transport.StopAudio(); transport.PauseVideo(); }
+            return EditorPlaybackStartResult.FailedResult;
+        }
+    }
+
     private async Task<TimeSpan?> LandAsync(IEditorSeekTransport transport, TimeSpan target, string id, Func<bool> current, CancellationToken token)
     {
         for (var attempt = 1; attempt <= 2; attempt++) { if (!current()) return null; var clock = Stopwatch.StartNew(); transport.PauseVideo(); if (!await WaitUntilAsync(() => transport.IsPaused, current, token).ConfigureAwait(false)) continue; transport.WritePosition(target); if (!await WaitUntilAsync(() => Math.Abs((transport.Position-target).TotalMilliseconds)<=PositionTolerance.TotalMilliseconds, current, token).ConfigureAwait(false)) continue; var landed=transport.Position; transport.LogDebug($"seek={id} video-landed: attempt={attempt}, requested={target.TotalSeconds:0.###}s, observed={landed.TotalSeconds:0.###}s, landingMs={clock.ElapsedMilliseconds}, deltaMs={(landed-target).TotalMilliseconds:0}."); return landed; } return null;
@@ -88,9 +117,10 @@ internal sealed class EditorSeekCoordinator
 }
 
 internal interface IEditorSeekTransport
-{ bool IsPaused { get; } TimeSpan Position { get; } int AudioTrackCount { get; } double PlaybackRate { get; } string VideoState { get; } bool IsNetworkSource { get; } Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId); void StopAudio(); void PauseVideo(); void ResetVideo(); void WritePosition(TimeSpan target); void CommitPaused(TimeSpan position); void CommitPlaying(TimeSpan position, string seekId); void CommitVideoOnly(); void StartDeferredAudio(TimeSpan position, string seekId); void LogDebug(string line); void LogInfo(string line); void LogError(string line); }
+{ bool IsPaused { get; } TimeSpan Position { get; } int AudioTrackCount { get; } double PlaybackRate { get; } string VideoState { get; } bool IsNetworkSource { get; } Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default); void StopAudio(); void PauseVideo(); void ResetVideo(); void WritePosition(TimeSpan target); void CommitPaused(TimeSpan position); void CommitPlaying(TimeSpan position, string seekId); void CommitVideoOnly(); void StartDeferredAudio(TimeSpan position, string seekId); void LogDebug(string line); void LogInfo(string line); void LogError(string line); }
 internal readonly record struct AudioPreparationResult(int ReadyTracks, int FailedTracks, bool Pending) { public static AudioPreparationResult PendingResult => new(0, 0, true); }
 internal readonly record struct EditorSeekResult(bool Succeeded, bool Resumed, bool Superseded, TimeSpan Landed, TimeSpan AudioAnchor) { public static EditorSeekResult FailedResult => new(false,false,false,default,default); public static EditorSeekResult SupersededResult => new(false,false,true,default,default); }
+internal readonly record struct EditorPlaybackStartResult(bool Succeeded, bool Superseded, TimeSpan Landed, AudioPreparationResult Audio) { public static EditorPlaybackStartResult FailedResult => new(false, false, default, default); public static EditorPlaybackStartResult SupersededResult => new(false, true, default, default); }
 
 internal sealed class EditorAvClockPolicy
 { private const double DriftThresholdMilliseconds=150; private int _direction; private bool _corrected; private long _generation; public void Begin(long generation) { _generation=generation; _direction=0; _corrected=false; } public bool TryGetCorrection(long generation, TimeSpan elapsed, TimeSpan audible, TimeSpan video, out TimeSpan correction) { correction=default; if(generation!=_generation||_corrected||elapsed<TimeSpan.FromMilliseconds(250)||elapsed>TimeSpan.FromSeconds(1.5)) return false; var drift=video-audible; if(Math.Abs(drift.TotalMilliseconds)<=DriftThresholdMilliseconds) { _direction=0; return false; } var direction=Math.Sign(drift.TotalMilliseconds); if(_direction!=direction) { _direction=direction; return false; } _corrected=true; correction=video<TimeSpan.Zero?TimeSpan.Zero:video; return true; } public static TimeSpan ToMediaTime(TimeSpan anchor,long anchorDevicePosition,long devicePosition,int bytesPerSecond) => bytesPerSecond<=0?anchor:anchor+TimeSpan.FromSeconds(Math.Max(0,devicePosition-anchorDevicePosition)/(double)bytesPerSecond); }

@@ -72,6 +72,39 @@ public sealed class EditorSeekCoordinatorTests
         Assert.True(SpinWait.SpinUntil(() => transport.AudioStarts == 1, TimeSpan.FromSeconds(1)));
     }
 
+    [Fact]
+    public async Task Startup_DelayedAudio_DoesNotCommitVideoEarly()
+    {
+        var preparation = new TaskCompletionSource<AudioPreparationResult>();
+        var transport = new RecoveryTransport(preparation.Task);
+        var coordinator = new EditorSeekCoordinator(pollInterval: TimeSpan.FromMilliseconds(1));
+
+        var startup = coordinator.StartAsync(transport, TimeSpan.FromSeconds(10), "start", () => true, CancellationToken.None);
+
+        await Task.Delay(20);
+        Assert.Equal(0, transport.AudioStarts);
+        Assert.True(transport.IsPaused);
+        preparation.SetResult(new AudioPreparationResult(1, 0, false));
+        var result = await startup;
+        Assert.True(result.Succeeded);
+        Assert.Equal(TimeSpan.FromSeconds(10), result.Landed);
+        Assert.Equal(1, transport.AudioStarts);
+        Assert.False(transport.IsPaused);
+    }
+
+    [Fact]
+    public async Task Startup_SilentSource_StartsVideoWithoutAudioWait()
+    {
+        var transport = new RecoveryTransport(Task.FromResult(new AudioPreparationResult(0, 0, false)));
+        var coordinator = new EditorSeekCoordinator(pollInterval: TimeSpan.FromMilliseconds(1));
+
+        var result = await coordinator.StartAsync(transport, TimeSpan.FromSeconds(10), "start", () => true, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(0, transport.AudioStarts);
+        Assert.False(transport.IsPaused);
+    }
+
     private sealed class RecoveryTransport : IEditorSeekTransport
     {
         private readonly bool _videoRolls;
@@ -94,7 +127,7 @@ public sealed class EditorSeekCoordinatorTests
         public bool IsNetworkSource => false;
         public int AudioStarts { get; private set; }
 
-        public Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId) => _preparation;
+        public Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default) => _preparation;
 
         public void StopAudio() { }
         public void PauseVideo() => IsPaused = true;

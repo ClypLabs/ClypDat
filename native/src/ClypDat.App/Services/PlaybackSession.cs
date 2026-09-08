@@ -452,6 +452,24 @@ public sealed class PlaybackSession : IDisposable
         PlayFrom(Position);
     }
 
+    internal async Task<EditorPlaybackStartResult> StartCoordinatedAsync(TimeSpan time, CancellationToken cancellationToken = default)
+    {
+        var generation = Interlocked.Increment(ref _seekVersion);
+        Interlocked.Increment(ref _playVersion);
+        _ended = false;
+        _shouldPlay = true;
+        ResetSlowRateMonitor();
+        _lastRequestedPosition = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+        ForceVideoSilent();
+        await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var startId = $"{GetHashCode():x}:{generation}";
+            return await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _seekLock.Release(); }
+    }
+
     public void PlayFrom(TimeSpan time)
     {
         // A timeline seek can still be waiting for LibVLC to settle when the
@@ -1343,14 +1361,14 @@ public sealed class PlaybackSession : IDisposable
         public string VideoState => session.VideoPlayer.State.ToString();
         public bool IsNetworkSource => IsNetworkPath(session._audioInputPath);
 
-        public async Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId)
+        public async Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default)
         {
             var clock = Stopwatch.StartNew();
             var readers = session._audioSources.Values.Select(source => source.Reader).ToArray();
             if (readers.Length == 0) return new AudioPreparationResult(0, 0, false);
             var results = await Task.WhenAll(readers.Select(async reader =>
             {
-                try { return await reader.EnsureReadyAsync(target).ConfigureAwait(false); }
+                try { return await reader.EnsureReadyAsync(target, cancellationToken).ConfigureAwait(false); }
                 catch (Exception error) { AppLog.Error($"seek={seekId} audio-prepare track failed: {error.Message}"); return false; }
             })).ConfigureAwait(false);
             var ready = results.Count(result => result);

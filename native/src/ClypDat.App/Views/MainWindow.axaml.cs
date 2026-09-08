@@ -8500,13 +8500,21 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         if (cancellationToken.IsCancellationRequested) return;
+        var openingViewModel = ViewModel;
+        var openingPath = openingViewModel.SelectedVideoPath;
+        var openingPosition = openingViewModel.CurrentTime;
+        var openingVolume = openingViewModel.EffectiveMasterVolumePercent;
+        var audioTracks = openingViewModel.TimelineTracks
+            .Where(track => track.IsAudio)
+            .Select(track => new AudioPreviewTrack(track.StreamIndex, track.EffectiveVolumePercent))
+            .ToArray();
 
         try
         {
             await videoLoad;
             AppLog.Debug($"Editor open trace: video load done at {openClock.ElapsedMilliseconds}ms.");
-            if (cancellationToken.IsCancellationRequested) return;
-            playback.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
+            if (cancellationToken.IsCancellationRequested || !ReferenceEquals(ViewModel, openingViewModel) || !string.Equals(ViewModel.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase)) return;
+            playback.SetMasterVolume(openingVolume);
             _playback = playback;
             _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
             ViewModel.IsRecordingPausedAtCurrentTime = false;
@@ -8524,10 +8532,6 @@ public sealed partial class MainWindow : Window
                 EditorVideoView.MediaPlayer = playback.VideoPlayer;
                 EditorVideoView.WatchMediaPlayer(playback.VideoPlayer);
             }
-            var audioTracks = ViewModel.TimelineTracks
-                .Where(track => track.IsAudio)
-                .Select(track => new AudioPreviewTrack(track.StreamIndex, track.EffectiveVolumePercent))
-                .ToArray();
             if (cancellationToken.IsCancellationRequested) return;
 
             ViewModel.IsEditorVideoLoading = true;
@@ -8555,10 +8559,6 @@ public sealed partial class MainWindow : Window
                     if (cancellationToken.IsCancellationRequested) return;
                     if (ViewModel is null) return;
                     ViewModel.IsEditorVideoLoading = false;
-                    StartPlayheadClock(ViewModel.CurrentTime);
-                    _endedAtTrimBoundary = false;
-                    ViewModel.IsPlaying = true;
-                    _playbackTimer.Start();
                 });
             }
             var cropMaskReapplied = 0;
@@ -8621,12 +8621,19 @@ public sealed partial class MainWindow : Window
                 ApplyEditorEffectPreview();
                 ConfirmVideoReady("hover frame");
             }
-            if (resumeWarmFrame) playback.Play();
-            else playback.PlayFrom(ViewModel.CurrentTime);
             // Start generating the restored guide alongside first-frame decode,
-            // rather than after the asynchronous audio setup completes.
+            // rather than after coordinated transport commits.
             if (!resumeWarmFrame) ApplyEditorEffectPreview();
-            _ = LoadEditorAudioAsync(playback, ViewModel.SelectedVideoPath, videoCodec, audioTracks, videoReady.Task, cancellationToken, foregroundScope);
+            var startPosition = resumeWarmFrame ? playback.Position : openingPosition;
+            await LoadEditorAudioAsync(playback, openingPath, videoCodec, audioTracks, cancellationToken, foregroundScope);
+            if (cancellationToken.IsCancellationRequested || _playback != playback) return;
+            var startup = await playback.StartCoordinatedAsync(startPosition, cancellationToken);
+            if (!startup.Succeeded) return;
+            ViewModel.CurrentTime = startup.Landed;
+            StartPlayheadClock(startup.Landed);
+            _endedAtTrimBoundary = false;
+            ViewModel.IsPlaying = true;
+            _playbackTimer.Start();
             await Task.Delay(200, cancellationToken);
             if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
             {
@@ -8688,7 +8695,6 @@ public sealed partial class MainWindow : Window
         string videoPath,
         string videoCodec,
         IReadOnlyList<AudioPreviewTrack> audioTracks,
-        Task videoReady,
         CancellationToken cancellationToken,
         IDisposable? foregroundScope = null)
     {
@@ -8704,22 +8710,6 @@ public sealed partial class MainWindow : Window
                 if (viewModel.TrimStart > TimeSpan.Zero) playback.PrefetchAudioAt(viewModel.TrimStart);
                 if (viewModel.TrimEnd > TimeSpan.Zero && viewModel.TrimEnd < viewModel.Duration) playback.PrefetchAudioAt(viewModel.TrimEnd);
             }
-            // Don't let audio start before the video's first real frame is
-            // actually visible (the same TimeChanged confirmation that
-            // clears IsEditorVideoLoading) - otherwise a clip that's slow to
-            // open plays audio-only while the "Loading" placeholder is still
-            // showing, which sounds like it's running ahead of a black
-            // screen. Already-completed by the time this runs (the common
-            // case, since video usually confirms before audio extraction
-            // finishes) resolves immediately, no extra delay.
-            await videoReady.WaitAsync(cancellationToken).ConfigureAwait(false);
-            if (cancellationToken.IsCancellationRequested || _playback != playback) return;
-            playback.SyncAndPlayMixedAudio();
-            // The clip's saved effects were restored into the view model while
-            // this media was still loading, and loading a new Media resets
-            // libvlc's rate and crop - so the preview has to be re-asserted once
-            // there is something to assert it against.
-            await Dispatcher.UIThread.InvokeAsync(ApplyEditorEffectPreview);
         }
         catch (OperationCanceledException)
         {
