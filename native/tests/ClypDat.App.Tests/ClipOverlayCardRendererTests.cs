@@ -1,7 +1,10 @@
 using System.Runtime.ExceptionServices;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
+using Avalonia.Themes.Fluent;
+using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.App.Views;
 using Xunit;
@@ -23,8 +26,12 @@ public sealed class ClipOverlayCardRendererTests
                 var application = Application.Current!;
                 application.Resources.MergedDictionaries.Add(new ResourceInclude(new Uri("avares://ClypDat/"))
                     { Source = new Uri("avares://ClypDat/Styles/Tokens.axaml") });
+                application.Resources.MergedDictionaries.Add(new ResourceInclude(new Uri("avares://ClypDat/"))
+                    { Source = new Uri("avares://ClypDat/Styles/ThemeRamp.axaml") });
+                application.Styles.Add(new FluentTheme());
                 application.Resources["AccentBrush"] = new SolidColorBrush(Colors.Blue);
                 application.Resources["ClypDatFontFamily"] = new FontFamily("fonts:Inter#Inter, $Default");
+                AssertOnboardingLayout();
                 var now = DateTime.UtcNow;
                 var presentation = new ClipOverlayPresentation(1, new ClipOverlayEvent(Guid.NewGuid(), 0, now, now,
                     80, ClipOverlayKind.Saved, "Clip Saved", null,
@@ -122,6 +129,27 @@ public sealed class ClipOverlayCardRendererTests
         {
             var alpha = frame.Pixels[i + 3];
             Assert.True(frame.Pixels[i] <= alpha && frame.Pixels[i + 1] <= alpha && frame.Pixels[i + 2] <= alpha);
+        }
+    }
+
+    private static void AssertOnboardingLayout()
+    {
+        Dispatcher.UIThread.VerifyAccess();
+        foreach (var scaling in new[] { 1d, 1.5d, 2d })
+        {
+            // Validate against a 1920x1080 desktop at each render scale.
+            var available = new Size(1920 / scaling, 1080 / scaling);
+            var window = new MainWindow();
+            window.Measure(available);
+            window.Arrange(new Rect(available));
+            Dispatcher.UIThread.RunJobs();
+
+            var dialog = window.FindControl<Border>("OnboardingDialog");
+            Assert.NotNull(dialog);
+            Assert.Equal(640, dialog.Width);
+            Assert.Equal(420, dialog.Height);
+            Assert.True(dialog.Bounds.Width <= available.Width);
+            Assert.True(dialog.Bounds.Height <= available.Height);
         }
     }
 }

@@ -6532,9 +6532,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         "Capture",
         "Quality",
         "Audio",
-        "Startup",
-        "SaveClip",
-        "EditShare"
+        "Startup"
     };
 
     public bool IsOnboardingVisible
