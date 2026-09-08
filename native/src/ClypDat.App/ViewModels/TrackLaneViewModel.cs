@@ -16,6 +16,8 @@ public sealed class TrackLaneViewModel : ViewModelBase
     private bool _showVolumePercent;
     private bool _isMuted;
     private bool _isLastAudioTrack;
+    private bool _isOverlaySelected;
+    private bool _isOverlayVisible = true;
     private IReadOnlyList<double> _waveformPeaks = Array.Empty<double>();
     private Bitmap? _filmstrip;
     private int _filmstripFrameCount = MediaProbeService.FilmstripFrameCount;
@@ -52,6 +54,18 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public bool CanAdjustVolume { get; }
     public bool IsAudio => Type == "audio";
     public bool IsVideo => Type == "video";
+    public bool IsOverlay => Type == "overlay";
+    public bool CanEditOverlay { get; init; }
+    public bool IsOverlaySelected
+    {
+        get => _isOverlaySelected;
+        set => SetProperty(ref _isOverlaySelected, value);
+    }
+    public bool IsOverlayVisible
+    {
+        get => _isOverlayVisible;
+        set => SetProperty(ref _isOverlayVisible, value);
+    }
     public bool IsCompactAudioLane { get; }
     // Video bumped from its old 32 (a plain outlined box, no real content)
     // now that it renders filmstrip thumbnails (TimelineLaneControl) - taller
@@ -67,7 +81,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     // More than three audio tracks would otherwise make the timeline consume too
     // much of a shorter editor window. Compact lanes still leave a full label,
     // mute control, and 16px slider thumb, while saving 18px per audio lane.
-    public double LaneHeight => IsVideo ? 44 : IsCompactAudioLane ? CompactAudioLaneHeight : StandardAudioLaneHeight;
+    public double LaneHeight => IsVideo || IsOverlay ? 44 : IsCompactAudioLane ? CompactAudioLaneHeight : StandardAudioLaneHeight;
     // Keep the normal 6px separator between every lane, but do not leave an
     // empty strip below the final audio (normally microphone) lane.
     public Thickness LaneMargin => IsAudio && IsLastAudioTrack ? new Thickness(0) : new Thickness(0, 0, 0, 6);
@@ -87,7 +101,7 @@ public sealed class TrackLaneViewModel : ViewModelBase
     // whole box and centres in it instead of sitting at the top with empty
     // space below - which is what made "Video" look top-aligned next to the
     // audio lanes, whose labels genuinely do sit above their sliders.
-    public int LabelRowSpan => IsVideo ? 2 : 1;
+    public int LabelRowSpan => IsVideo || IsOverlay ? 2 : 1;
     public string VolumeLabel => $"{VolumePercent:0}%";
     public Thickness VolumeBadgeMargin => new(VolumeBadgeX, -8, 0, 0);
     public string HeaderClass => IsAudio ? "audioHeader" : "videoHeader";

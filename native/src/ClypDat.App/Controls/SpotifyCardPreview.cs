@@ -8,15 +8,17 @@ namespace ClypDat.App.Controls;
 internal sealed class SpotifyCardPreview : Control, IDisposable
 {
     private SpotifyCardFrames? _frames;
-    private (int Width, int Height, string Position, FontFamily Font, bool DynamicBackground)? _key;
+    private (int Width, int Height, string Position, FontFamily Font, bool DynamicBackground, double? OverlayWidth)? _key;
     private (SpotifyCard? Card, double SongSeconds)? _state;
+    public bool HasCard => _state?.Card is not null;
     public void Update(SpotifyRenderSpec spec, double seconds, int width, int height)
     {
-        var key = (width, height, spec.Position, spec.Font, spec.DynamicBackground);
+        // Moving a card does not invalidate its cached text, artwork or frame buffer.
+        var key = (width, height, spec.Position, spec.Font, spec.DynamicBackground, spec.Transform?.Width);
         if (_key != key)
         {
             _frames?.Dispose();
-            _frames = new(width, height, spec.Position, spec.Font, spec.DynamicBackground);
+            _frames = new(width, height, spec.Position, spec.Font, spec.DynamicBackground, spec.Transform);
             _key = key;
             _state = null;
         }

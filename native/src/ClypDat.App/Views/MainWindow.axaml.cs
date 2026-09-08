@@ -6841,8 +6841,8 @@ public sealed partial class MainWindow : Window
                     etaText.IsVisible = true;
                 }
             });
-            using var spotifyAnimation = await ViewModel.PrepareSpotifyAnimationAsync(progressCts.Token);
-            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath, animation: spotifyAnimation), exportDuration, progress, progressCts.Token);
+            // Keep Spotify as an editable layer; Save Trim only rewrites source media.
+            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath), exportDuration, progress, progressCts.Token);
             if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
             {
                 // Same hardware-then-CPU fallback as Export.
@@ -6852,7 +6852,7 @@ public sealed partial class MainWindow : Window
                 percentText.Text = string.Empty;
                 etaText.IsVisible = false;
                 encodeClock.Restart();
-                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath, useHardwareEncoder: false, animation: spotifyAnimation), exportDuration, progress, progressCts.Token);
+                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
             }
             progressWindow.Close();
             if (progressCts.IsCancellationRequested) return;
@@ -6921,7 +6921,7 @@ public sealed partial class MainWindow : Window
                 .Where(marker => marker.OffsetSeconds >= trimStartSeconds && marker.OffsetSeconds <= trimEndSeconds)
                 .Select(marker => marker with { OffsetSeconds = marker.OffsetSeconds - trimStartSeconds })
                 .ToArray();
-            ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true, AutoClipMarkers = rebasedMarkers, SpotifyOverlayBurned = trimmedInfo.SpotifyOverlayBurned || spotifyAnimation is not null });
+            ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true, AutoClipMarkers = rebasedMarkers });
             _pausedRanges.Clear();
             RefreshPausedBadge();
 

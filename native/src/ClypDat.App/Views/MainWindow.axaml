@@ -19,6 +19,13 @@
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="-1"
         SizeChanged="Window_OnSizeChanged">
+  <Window.Styles>
+    <Style Selector="Border.editorTrackCard.overlayTrackSelected">
+      <Setter Property="Background" Value="{StaticResource Surface_16242E}" />
+      <Setter Property="BorderBrush" Value="{StaticResource Semantic_8BD9AE}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+  </Window.Styles>
   <!-- Margin is kept in sync with Window.OffScreenMargin in code-behind.
        A maximized window is deliberately oversized by Windows by the
        invisible resize-border width, which normally sits under the system
@@ -1428,7 +1435,9 @@
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
                       <Border Height="{Binding LaneHeight}" Classes="editorTrackCard"
+                              Classes.overlayTrackSelected="{Binding IsOverlaySelected}"
                               Margin="{Binding LaneMargin}"
+                              PointerPressed="SpotifyOverlayTrack_OnPointerPressed"
                               ClipToBounds="False">
                         <Grid Margin="{Binding LaneContentMargin}" RowDefinitions="Auto,*" ColumnDefinitions="20,10,*">
                           <!-- ZIndex so the Reset button below keeps its own
@@ -1448,6 +1457,9 @@
                                        Margin="{Binding LabelMargin}"
                                        VerticalAlignment="Center"
                                        TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="1" Text="LAYER" FontSize="9" FontWeight="SemiBold"
+                                       Foreground="{StaticResource Semantic_8BD9AE}" Margin="5,0,0,0"
+                                       VerticalAlignment="Center" IsVisible="{Binding IsOverlay}" />
                             <!-- Only shown once a track has actually been moved off
                                  its 100% default (IsVolumeNonDefault) - a reset
                                  affordance next to every track's label all the
@@ -1575,6 +1587,11 @@
                                                       Margin="{Binding LaneMargin}"
                                                       LaneBrush="{Binding Color}"
                                                       IsVideo="{Binding IsVideo}"
+                                                      IsOverlay="{Binding IsOverlay}"
+                                                      IsOverlaySelected="{Binding IsOverlaySelected}"
+                                                      IsOverlayVisible="{Binding IsOverlayVisible}"
+                                                      CanEditOverlay="{Binding CanEditOverlay}"
+                                                      PointerPressed="SpotifyOverlayTrack_OnPointerPressed"
                                                       Peaks="{Binding WaveformPeaks}"
                                                       Filmstrip="{Binding Filmstrip}"
                                                       TrimStartPercent="{Binding $parent[Window].DataContext.TrimStartPercentValue}"
@@ -1689,7 +1706,50 @@
                Enter handling is wired there, so the elements have to stay put in
                this tree rather than being built and thrown away per section. -->
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-            <Grid Margin="20,18">
+            <StackPanel Margin="20,18" Spacing="14">
+              <Border Classes="editorInspectorCard" IsVisible="{Binding IsSpotifyOverlaySelected}"
+                      BorderBrush="{StaticResource Semantic_3B6152}">
+                <StackPanel Spacing="12">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="SPOTIFY OVERLAY" Classes="editorCardLabel" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Classes="linkButton" Content="Done" Padding="6,2"
+                            Click="SpotifyOverlayDone_OnClick" />
+                  </Grid>
+                  <StackPanel Spacing="12" IsVisible="{Binding HasEditableSpotifyOverlay}">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding !SpotifyOverlayEnabled}">
+                      <TextBlock Text="Spotify overlays are disabled." Foreground="{StaticResource Text_8EA1B6}"
+                                 FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      <Button Grid.Column="1" Content="Enable" Padding="8,4" VerticalAlignment="Center"
+                              Click="SpotifyOverlayEnable_OnClick" />
+                    </Grid>
+                    <StackPanel Spacing="12" IsEnabled="{Binding SpotifyOverlayEnabled}">
+                      <TextBlock Text="Drag the card on the video to move it. Drag a corner to resize."
+                                 Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="Show overlay" Foreground="{StaticResource Text_D6E2F0}"
+                                   FontSize="12" VerticalAlignment="Center" />
+                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayLayerVisible, Mode=TwoWay}"
+                                      OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                      </Grid>
+                      <StackPanel Spacing="4" IsEnabled="{Binding SpotifyOverlayLayerVisible}">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Text="Width" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                          <TextBlock Grid.Column="1" Text="{Binding SpotifyOverlaySizeLabel}"
+                                     Foreground="{StaticResource Text_D6E2F0}" FontSize="12" />
+                        </Grid>
+                        <Slider Minimum="5" Maximum="100" Value="{Binding SpotifyOverlaySizePercent, Mode=TwoWay}"
+                                ToolTip.Tip="Overlay width as a percentage of the video" />
+                      </StackPanel>
+                      <Button Content="Reset layout" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                              Click="SpotifyOverlayReset_OnClick" />
+                    </StackPanel>
+                  </StackPanel>
+                  <TextBlock Text="This overlay is already part of the video. Its position and size are fixed."
+                             Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap"
+                             IsVisible="{Binding !HasEditableSpotifyOverlay}" />
+                </StackPanel>
+              </Border>
+              <Grid>
               <StackPanel Spacing="14" IsVisible="{Binding IsEditorInfoSidebarActive}">
                 <!-- Focusable so Enter in either box below has somewhere to put
                      focus: committing has no visible effect otherwise, and the
@@ -1831,7 +1891,8 @@
                   </StackPanel>
                 </Border>
               </StackPanel>
-            </Grid>
+              </Grid>
+            </StackPanel>
           </ScrollViewer>
 
           <Border Grid.Row="2" Classes="editorInspectorActions">

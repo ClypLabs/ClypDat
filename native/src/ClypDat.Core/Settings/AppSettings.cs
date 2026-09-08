@@ -239,10 +239,8 @@ public sealed class AppSettings
     public bool SpotifyOverlayDynamicBackground { get; set; } = true;
 
     /// <summary>
-    /// Whether a saved clip is re-encoded with the card written into it, so the
-    /// file carries it everywhere - thumbnail, hover preview, and any player
-    /// outside ClypDat. Off by default: it costs an encode per clip and cannot
-    /// be undone afterwards.
+    /// Retained for older settings files. Ignored: saved clips keep an editable
+    /// overlay layer; Export and Share composite it into their output.
     /// </summary>
     public bool SpotifyOverlayBurnIn { get; set; }
     // Separate from EnableClipOverlay - "clipping started" is a distinct
@@ -315,6 +313,10 @@ public sealed class AppSettings
     public bool FullSessionBackgroundFinalize { get; set; } = true;
 }
 
+// Placement is relative to the visible video frame, so it survives output
+// resizing. A null transform retains the app's configured edge placement.
+public sealed record SpotifyOverlayTransform(double X, double Y, double Width);
+
 public sealed class ClipEditSettings
 {
     public double TrimStartSeconds { get; set; }
@@ -342,6 +344,8 @@ public sealed class ClipEditSettings
     // 0.5 is centred, which is what an aspect crop should default to.
     public double CropOffsetX { get; set; } = 0.5;
     public double CropOffsetY { get; set; } = 0.5;
+    public bool SpotifyOverlayVisible { get; set; } = true;
+    public SpotifyOverlayTransform? SpotifyOverlayTransform { get; set; }
 }
 
 // One game's overrides. Values are seeded from the user's current global

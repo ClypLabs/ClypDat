@@ -27,9 +27,9 @@ internal static class SpotifyOverlayCardRenderer
         return Math.Max(0, overflow - (phase - travel - 2) * 24);
     }
     public static string? Render(SpotifyCard card, int frameHeight, string outputPath, int frameWidth = 1920,
-        string? position = null, double seconds = 0, FontFamily? font = null, bool dynamicBackground = true)
+        string? position = null, double seconds = 0, FontFamily? font = null, bool dynamicBackground = true, SpotifyOverlayTransform? transform = null)
     {
-        using var renderer = new SpotifyCardFrames(frameWidth, frameHeight, position, font ?? ResolveFont(), dynamicBackground);
+        using var renderer = new SpotifyCardFrames(frameWidth, frameHeight, position, font ?? ResolveFont(), dynamicBackground, transform);
         renderer.Render(card, seconds);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         renderer.Bitmap.Save(outputPath, PngBitmapEncoderOptions.Default);
@@ -68,13 +68,13 @@ internal sealed class SpotifyCardFrames : IDisposable
     public byte[] Pixels { get; }
     public int Width => Bitmap.PixelSize.Width;
     public int Height => Bitmap.PixelSize.Height;
-    public SpotifyCardFrames(int width, int height, string? position, FontFamily font, bool dynamicBackground = true)
+    public SpotifyCardFrames(int width, int height, string? position, FontFamily font, bool dynamicBackground = true, SpotifyOverlayTransform? transform = null)
     {
-        var scale = SpotifyOverlayCardRenderer.Scale(width, height);
+        var bounds = SpotifyOverlayLayout.Resolve(width, height, position, transform);
         _right = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true;
         _dynamicBackground = dynamicBackground;
         _font = font;
-        Bitmap = new RenderTargetBitmap(new PixelSize(Math.Max(1, (int)Math.Ceiling(406 * scale)), Math.Max(1, (int)Math.Ceiling(140 * scale))), new Vector(96, 96));
+        Bitmap = new RenderTargetBitmap(new PixelSize(bounds.Width, bounds.Height), new Vector(96, 96));
         Pixels = new byte[Width * Height * 4];
     }
     private TextLayout Text(string? value, double size, bool bold = false)

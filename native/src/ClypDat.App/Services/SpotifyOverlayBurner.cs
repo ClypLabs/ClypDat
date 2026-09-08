@@ -12,7 +12,10 @@ internal static class SpotifyOverlayBurner
 {
     public const string BurnMarker = "CLYPDAT_SPOTIFY_OVERLAY";
 
-    public static async Task<SpotifyOverlayOutcome> BurnAsync(string clipPath, string cardPath, string? position, CancellationToken token = default, IReadOnlyList<string>? preferredCodec = null)
+    public static Task<SpotifyOverlayOutcome> BurnAsync(string clipPath, SpotifyOverlayAnimation animation, CancellationToken token = default, IReadOnlyList<string>? preferredCodec = null) =>
+        BurnAsync(clipPath, animation.Path, animation.Position, token, preferredCodec, animation.Bounds);
+
+    public static async Task<SpotifyOverlayOutcome> BurnAsync(string clipPath, string cardPath, string? position, CancellationToken token = default, IReadOnlyList<string>? preferredCodec = null, SpotifyOverlayBounds? bounds = null)
     {
         if (!FfmpegPathResolver.IsAvailable || !File.Exists(clipPath) || !File.Exists(cardPath)) return SpotifyOverlayOutcome.Failed;
         var folder = Path.Combine(Path.GetDirectoryName(clipPath)!, ".clypdat-overlay-" + Guid.NewGuid().ToString("N"));
@@ -25,7 +28,7 @@ internal static class SpotifyOverlayBurner
             if (original.Burned) return SpotifyOverlayOutcome.Skipped;
             var created = File.GetCreationTimeUtc(clipPath);
             Directory.CreateDirectory(folder);
-            var graph = OverlayGraph(position);
+            var graph = ClipRenderFilters.ComposeWithAnimation(null, position, "[0:v:0]", "[video]", bounds);
             var success = await EncodeAsync(clipPath, cardPath, output, graph, preferredCodec ?? HardwareCodecArguments(), token).ConfigureAwait(false);
             if (!success && (preferredCodec is not null || ExportEncoderProbe.Family is not null))
                 success = await EncodeAsync(clipPath, cardPath, output, graph, SoftwareCodecArguments(), token).ConfigureAwait(false);
@@ -150,9 +153,6 @@ internal static class SpotifyOverlayBurner
         if (!string.IsNullOrWhiteSpace(error)) AppLog.Error($"Spotify overlay: ffmpeg said '{error.Trim()}'.");
         return false;
     }
-
-    private static string OverlayGraph(string? position) =>
-        ClipRenderFilters.ComposeWithAnimation(null, position, "[0:v:0]", "[video]");
 
     private static IReadOnlyList<string> HardwareCodecArguments() => ExportEncoderProbe.Family switch
     {

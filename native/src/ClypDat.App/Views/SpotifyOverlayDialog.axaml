@@ -83,7 +83,7 @@
             <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayDynamicBackground}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
           </Grid>
 
-          <TextBlock Classes="settingsPickerLabel" Text="PLACEMENT" />
+          <TextBlock Classes="settingsPickerLabel" Text="DEFAULT PLACEMENT" />
           <ListBox Classes="pillGroup" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedSpotifyOverlayPosition}">
             <ListBox.ItemsPanel>
               <ItemsPanelTemplate>
@@ -110,20 +110,17 @@
 
         <Border Classes="settingsDivider" />
 
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding SpotifyOverlayEnabled}">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Write it into saved clips" />
-            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="400"
-                       Text="Re-encodes each clip once after saving, so its thumbnail and the file itself carry the card. Costs a few seconds of encoder time per clip, and cannot be undone." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayBurnIn}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
+        <StackPanel Spacing="2">
+          <TextBlock Classes="settingsRowTitle" Text="Edit each clip's overlay track" />
+          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                     Text="Select the Spotify overlay track in the editor. Drag the card to move it, or drag its corners to resize. Saved clips keep the layer editable; exports include it in the video." />
+        </StackPanel>
 
         <Border Classes="settingsDivider" />
 
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="360" VerticalAlignment="Center"
-                     Text="A clip follows recorded Spotify playback. Placement and background changes apply to future exports. Cards already written into clips stay unchanged." />
+                     Text="The overlay follows recorded Spotify playback. Cards already written into older clips cannot be moved or resized." />
           <Button Grid.Column="1" Classes="primaryButton" Content="Done" Click="CloseButton_OnClick" VerticalAlignment="Center" />
         </Grid>
       </StackPanel>

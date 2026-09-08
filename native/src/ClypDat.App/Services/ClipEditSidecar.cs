@@ -65,6 +65,22 @@ public static class ClipEditSidecar
         }
     }
 
+    public static void ResetAfterSavedTrim(string libraryRoot, string clipPath)
+    {
+        var previous = Load(libraryRoot, clipPath);
+        if (previous is null) return;
+        // Timing and crop have become part of the saved video. Audio levels,
+        // the independent overlay and the description remain editor state.
+        Save(libraryRoot, clipPath, new ClipEditSettings
+        {
+            Description = previous.Description,
+            TrackVolumes = previous.TrackVolumes,
+            MutedTrackIndexes = previous.MutedTrackIndexes,
+            SpotifyOverlayVisible = previous.SpotifyOverlayVisible,
+            SpotifyOverlayTransform = previous.SpotifyOverlayTransform
+        });
+    }
+
     // Sidecars are a few hundred bytes. A library refresh reads one per clip, so an
     // oversized file - however it got there - should be skipped rather than loaded.
     private const long MaximumSidecarBytes = 64 * 1024;

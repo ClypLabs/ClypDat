@@ -110,12 +110,13 @@ public static class ClipRenderFilters
         return stages.Count == 0 ? null : string.Join(",", stages);
     }
 
-    public static string ComposeWithAnimation(string? effects, string? position, string inputLabel, string? outputLabel)
+    public static string ComposeWithAnimation(string? effects, string? position, string inputLabel, string? outputLabel, SpotifyOverlayBounds? bounds = null)
     {
         var x = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true ? "main_w-overlay_w" : "0";
         var inset = "main_h*14/1080";
         var y = position?.StartsWith("Top", StringComparison.OrdinalIgnoreCase) == true ? inset :
             position?.StartsWith("Center", StringComparison.OrdinalIgnoreCase) == true ? "(main_h-overlay_h)/2" : $"main_h-overlay_h-{inset}";
+        if (bounds is { } placed) { x = placed.X.ToString(CultureInfo.InvariantCulture); y = placed.Y.ToString(CultureInfo.InvariantCulture); }
         return $"{inputLabel}{(string.IsNullOrWhiteSpace(effects) ? "null" : effects)}[spotifybase];[spotifybase][1:v:0]overlay={x}:{y}:eof_action=pass:repeatlast=0:alpha=straight{outputLabel}";
     }
 

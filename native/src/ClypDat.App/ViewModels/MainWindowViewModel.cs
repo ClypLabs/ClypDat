@@ -4240,6 +4240,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ActiveCropRect));
         OnPropertyChanged(nameof(ExportDuration));
         OnPropertyChanged(nameof(ExportLengthLabel));
+        OnPropertyChanged(nameof(SpotifyOverlaySizePercent));
+        OnPropertyChanged(nameof(SpotifyOverlaySizeLabel));
         if (_suppressClipEditSave) return;
         SaveSelectedClipEditState();
     }
@@ -4261,7 +4263,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // The card joins the graph last, so it is drawn at the size the file is
         // actually written at - ahead of Share's downscale it would be scaled
         // down with the picture.
-        return ClipRenderFilters.ComposeWithAnimation(effects, animation.Position, inputLabel, outputLabel);
+        return ClipRenderFilters.ComposeWithAnimation(effects, animation.Position, inputLabel, outputLabel, animation.Bounds);
     }
 
     /// <summary>
@@ -4277,11 +4279,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         width > 0 ? width : ActiveCropRect?.Width ?? SelectedSourceWidth,
         height > 0 ? height : ActiveCropRect?.Height ?? SelectedSourceHeight,
         TrimStart.TotalSeconds, ExportDuration.TotalSeconds, ClipSpeed, Settings.SpotifyOverlayPosition, SpotifyOverlayCardRenderer.ResolveFont(),
-        Settings.SpotifyOverlayDynamicBackground);
+        Settings.SpotifyOverlayDynamicBackground, SpotifyOverlayTransform);
 
     internal SpotifyRenderSpec? CaptureSpotifyRenderSpec()
     {
-        if (!Settings.SpotifyOverlayEnabled || _selectedSpotifyOverlayBurned || SelectedSourceWidth <= 0) return null;
+        if (!Settings.SpotifyOverlayEnabled || !SpotifyOverlayLayerVisible || _selectedSpotifyOverlayBurned || SelectedSourceWidth <= 0) return null;
         var spec = SelectedSpotifySpec();
         return spec.Timeline is null && spec.LegacyCard is null ? null : spec;
     }
@@ -4313,7 +4315,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     internal SpotifyRenderSpec? SpotifyPreviewSpec()
     {
-        if (!Settings.SpotifyOverlayEnabled || _selectedSpotifyOverlayBurned || !IsEditorVisible) return null;
+        if (!Settings.SpotifyOverlayEnabled || !SpotifyOverlayLayerVisible || _selectedSpotifyOverlayBurned || !IsEditorVisible) return null;
         return SelectedSpotifySpec() with { Start = 0, Speed = 1 };
     }
 
@@ -4324,6 +4326,129 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int? _selectedSpotifyProgressMs;
     private string? _selectedSpotifyArtPath;
     private bool _selectedSpotifyOverlayBurned;
+    private bool _selectedHasSpotifyTimeline;
+    private bool _spotifyOverlayLayerVisible = true;
+    private bool _isSpotifyOverlaySelected;
+    private SpotifyOverlayTransform? _spotifyOverlayTransform;
+
+    public bool HasSpotifyOverlayLayer => _selectedSpotifyOverlayBurned || SelectedHasSpotifyTrack || _selectedHasSpotifyTimeline;
+    public bool HasEditableSpotifyOverlay => HasSpotifyOverlayLayer && !_selectedSpotifyOverlayBurned && SelectedSourceWidth > 0;
+    public SpotifyOverlayTransform? SpotifyOverlayTransform => _spotifyOverlayTransform;
+
+    public bool SpotifyOverlayLayerVisible
+    {
+        get => _spotifyOverlayLayerVisible;
+        set
+        {
+            if (!HasEditableSpotifyOverlay || !SetProperty(ref _spotifyOverlayLayerVisible, value)) return;
+            RefreshSpotifyOverlayLayerState();
+            if (!_suppressClipEditSave) SaveSelectedClipEditState();
+            RaiseSpotifyOverlayPreviewChanged();
+        }
+    }
+
+    public bool IsSpotifyOverlaySelected
+    {
+        get => _isSpotifyOverlaySelected;
+        set
+        {
+            if (!SetProperty(ref _isSpotifyOverlaySelected, value && HasSpotifyOverlayLayer)) return;
+            RefreshSpotifyOverlayLaneState();
+        }
+    }
+
+    public double SpotifyOverlaySizePercent
+    {
+        get
+        {
+            var width = Math.Max(1, ActiveCropRect?.Width ?? SelectedSourceWidth);
+            var height = Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight);
+            return SpotifyOverlayLayout.Resolve(width, height, Settings.SpotifyOverlayPosition, SpotifyOverlayTransform).Width * 100.0 / width;
+        }
+        set
+        {
+            if (!HasEditableSpotifyOverlay || !double.IsFinite(value)) return;
+            var width = Math.Max(1, ActiveCropRect?.Width ?? SelectedSourceWidth);
+            var height = Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight);
+            var current = SpotifyOverlayLayout.Resolve(width, height, Settings.SpotifyOverlayPosition, SpotifyOverlayTransform);
+            var targetWidth = Math.Clamp(value, 5, 100) / 100.0;
+            var targetHeight = targetWidth * width * SpotifyOverlayCardRenderer.SourceHeight / SpotifyOverlayCardRenderer.SourceWidth / height;
+            SetSpotifyOverlayTransform(new(
+                (current.X + current.Width / 2.0) / width - targetWidth / 2,
+                (current.Y + current.Height / 2.0) / height - targetHeight / 2,
+                targetWidth));
+        }
+    }
+
+    public string SpotifyOverlaySizeLabel => $"{SpotifyOverlaySizePercent:0}% of video width";
+
+    public void SetSpotifyOverlayTransform(SpotifyOverlayTransform transform, bool persist = true)
+    {
+        if (!HasEditableSpotifyOverlay) return;
+        var width = Math.Max(1, ActiveCropRect?.Width ?? SelectedSourceWidth);
+        var height = Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight);
+        var normalized = SpotifyOverlayLayout.Normalize(width, height, transform);
+        if (!SetProperty(ref _spotifyOverlayTransform, normalized, nameof(SpotifyOverlayTransform))) return;
+        OnPropertyChanged(nameof(SpotifyOverlaySizePercent));
+        OnPropertyChanged(nameof(SpotifyOverlaySizeLabel));
+        if (persist) CommitSpotifyOverlayTransform();
+    }
+
+    public void CommitSpotifyOverlayTransform()
+    {
+        if (!HasEditableSpotifyOverlay) return;
+        if (!_suppressClipEditSave) SaveSelectedClipEditState();
+        RaiseSpotifyOverlayPreviewChanged();
+    }
+
+    public void ResetSpotifyOverlayTransform()
+    {
+        if (!HasEditableSpotifyOverlay) return;
+        _spotifyOverlayTransform = null;
+        RefreshSpotifyOverlayLayerState();
+        CommitSpotifyOverlayTransform();
+    }
+
+    private void RefreshSpotifyOverlayLayerState()
+    {
+        OnPropertyChanged(nameof(HasSpotifyOverlayLayer));
+        OnPropertyChanged(nameof(HasEditableSpotifyOverlay));
+        OnPropertyChanged(nameof(SpotifyOverlayLayerVisible));
+        OnPropertyChanged(nameof(SpotifyOverlayTransform));
+        OnPropertyChanged(nameof(SpotifyOverlaySizePercent));
+        OnPropertyChanged(nameof(SpotifyOverlaySizeLabel));
+        OnPropertyChanged(nameof(IsSpotifyOverlaySelected));
+        RefreshSpotifyOverlayLaneState();
+    }
+
+    private void RefreshSelectedSpotifyOverlayLane()
+    {
+        var lane = TimelineTracks.FirstOrDefault(track => track.IsOverlay);
+        var hasLayer = HasSpotifyOverlayLayer && SelectedSourceWidth > 0;
+        if (lane is not null && (!hasLayer || lane.CanEditOverlay != HasEditableSpotifyOverlay))
+        {
+            TimelineTracks.Remove(lane);
+            lane = null;
+        }
+        if (hasLayer && lane is null)
+        {
+            TimelineTracks.Insert(0, new TrackLaneViewModel(-1,
+                _selectedSpotifyOverlayBurned ? "Spotify overlay (flattened)" : "Spotify overlay",
+                "overlay", "#38836B", false) { CanEditOverlay = HasEditableSpotifyOverlay });
+        }
+        if (!hasLayer) _isSpotifyOverlaySelected = false;
+        OnPropertyChanged(nameof(TimelineTrackCount));
+        OnPropertyChanged(nameof(EditorTimelineHeight));
+    }
+
+    private void RefreshSpotifyOverlayLaneState()
+    {
+        foreach (var lane in TimelineTracks.Where(track => track.IsOverlay))
+        {
+            lane.IsOverlaySelected = IsSpotifyOverlaySelected;
+            lane.IsOverlayVisible = _selectedSpotifyOverlayBurned || SpotifyOverlayLayerVisible;
+        }
+    }
 
     /// <summary>The track the open clip was captured over, for the editor to say so.</summary>
     public string SelectedSpotifyLabel => string.IsNullOrWhiteSpace(_selectedSpotifyTrack)
@@ -4991,7 +5116,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SpeedMultiplier = ClipSpeed,
             CropMode = ClipCropMode,
             CropOffsetX = ClipCropOffsetX,
-            CropOffsetY = ClipCropOffsetY
+            CropOffsetY = ClipCropOffsetY,
+            SpotifyOverlayVisible = SpotifyOverlayLayerVisible,
+            SpotifyOverlayTransform = SpotifyOverlayTransform
         };
         ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, edit);
 
@@ -6213,21 +6340,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         EditorTitle = newName;
     }
 
-    // Called by the View once it's finished re-encoding the trimmed range over
-    // the original file (see MainWindow.axaml.cs's SaveTrimToOriginalAsync) -
-    // the trim sidecar is deleted rather than reset to 0/Duration because the
-    // file on disk now IS exactly the trimmed range, so there's nothing left
-    // to trim away; leaving stale TrimStart/TrimEndSeconds from the old, longer
-    // duration around would just re-trim the already-trimmed file next open.
+    // Save Trim bakes source effects while retaining the independent overlay.
     public async Task FinalizeSavedTrimAsync(string path)
     {
         _mediaProbe.DeleteCacheFor(path);
-        ClipEditSidecar.Delete(Settings.LibraryFolder, path);
+        ClipEditSidecar.ResetAfterSavedTrim(Settings.LibraryFolder, path);
         // Same reasoning as the trim above, and the same hazard: the file on disk
         // is now already cropped and already re-timed, so leaving the effects set
         // would bake them in a second time on the next export - a 2x clip saved
         // and exported would come out at 4x. Suppressed while resetting so this
-        // does not immediately write a fresh sidecar over the one just deleted.
+        // does not restore baked effects into the reset sidecar.
         _suppressClipEditSave = true;
         try { ResetClipEffects(); }
         finally { _suppressClipEditSave = false; }
@@ -6774,18 +6896,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool SpotifyOverlayBurnIn
-    {
-        get => Settings.SpotifyOverlayBurnIn;
-        set
-        {
-            if (Settings.SpotifyOverlayBurnIn == value) return;
-            Settings.SpotifyOverlayBurnIn = value;
-            SaveSettings();
-            OnPropertyChanged();
-        }
-    }
-
     private string _selectedSpotifyOverlayPosition = string.Empty;
     public string SelectedSpotifyOverlayPosition
     {
@@ -6886,12 +6996,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     internal Task<SpotifyOverlayOutcome> ProcessSavedClipAsync(string clipPath, string? saveId,
         Func<Task> releaseReaders, bool retry = false)
     {
-        // Capture every setting before queueing behind another save.
+        // Keep playback and artwork separate from the recording. Export/Share
+        // composites this editable layer using the clip's current placement.
         var library = Settings.LibraryFolder;
-        var enabled = Settings.SpotifyOverlayBurnIn && Settings.SpotifyOverlayEnabled;
-        var position = Settings.SpotifyOverlayPosition;
-        var font = SpotifyOverlayCardRenderer.ResolveFont();
-        var dynamicBackground = Settings.SpotifyOverlayDynamicBackground;
         var source = SpotifySourceWindow.Load(library, clipPath);
         var timeline = SpotifyTimelineSidecar.Load(library, clipPath);
         if (timeline is null && source is not null)
@@ -6915,14 +7022,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         SpotifyTrack = first.Track, SpotifyArtist = first.Artist, SpotifyAlbum = first.Album,
                         SpotifyDurationMs = first.DurationMs, SpotifyProgressMs = first.ProgressMs, SpotifyArtPath = first.ArtPath });
                 }
-                if (enabled) result = await BurnSpotifyOverlayAsync(clipPath, library, position, font, dynamicBackground, token);
-                if (result == SpotifyOverlayOutcome.Completed) _mediaProbe.DeleteCacheFor(clipPath);
                 await AddOrUpdateLibraryClipAsync(clipPath, hydrateImages: false);
                 var card = AllClips.FirstOrDefault(c => string.Equals(c.Path, clipPath, StringComparison.OrdinalIgnoreCase));
                 if (card is not null) await HydrateClipImagesAsync(card, clipPath);
                 if (string.Equals(SelectedVideoPath, clipPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    _selectedSpotifyOverlayBurned = ClipInfoSidecar.Load(library, clipPath)?.SpotifyOverlayBurned == true;
+                    var info = ClipInfoSidecar.Load(library, clipPath);
+                    if (info is not null)
+                    {
+                        _selectedSpotifyTrack = info.SpotifyTrack;
+                        _selectedSpotifyArtist = info.SpotifyArtist;
+                        _selectedSpotifyAlbum = info.SpotifyAlbum;
+                        _selectedSpotifyDurationMs = info.SpotifyDurationMs;
+                        _selectedSpotifyProgressMs = info.SpotifyProgressMs;
+                        _selectedSpotifyArtPath = info.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(library, clipPath);
+                    }
+                    // A prior burn may have completed before its sidecar was
+                    // written. Never clear provenance already found by ffprobe.
+                    _selectedSpotifyOverlayBurned |= info?.SpotifyOverlayBurned == true || card?.Media.SpotifyOverlayBurned == true;
+                    _selectedHasSpotifyTimeline = timeline?.Samples.Any(sample => sample.Available) == true;
+                    RefreshSelectedSpotifyOverlayLane();
+                    OnPropertyChanged(nameof(SelectedSpotifyLabel));
+                    OnPropertyChanged(nameof(SelectedHasSpotifyTrack));
+                    OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
+                    RefreshSpotifyOverlayLayerState();
                     RaiseSpotifyOverlayPreviewChanged();
                 }
             }
@@ -6932,36 +7055,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }, _spotifyPostSaveCancellation.Token);
         _ = AddOrUpdateLibraryClipAsync(clipPath, hydrateImages: false, hydrateMetadata: false);
         return job;
-    }
-
-    private async Task<SpotifyOverlayOutcome> BurnSpotifyOverlayAsync(string clipPath, string library, string position, Avalonia.Media.FontFamily font, bool dynamicBackground, CancellationToken token)
-    {
-        var info = ClipInfoSidecar.Load(library, clipPath);
-        if (info is null || string.IsNullOrWhiteSpace(info.SpotifyTrack) || info.SpotifyOverlayBurned) return SpotifyOverlayOutcome.Skipped;
-        // Recover provenance after a crash between the atomic replacement and sidecar write.
-        if ((await SpotifyOverlayBurner.InspectAsync(clipPath, token)).Burned)
-        {
-            MarkBurned();
-            return SpotifyOverlayOutcome.Completed;
-        }
-        info = ClipInfoSidecar.Load(library, clipPath) ?? info;
-        var card = new SpotifyCard(info.SpotifyTrack!, info.SpotifyArtist, info.SpotifyAlbum,
-            info.SpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
-            null,
-            info.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(library, clipPath));
-        var probed = await _mediaProbe.ProbeMetadataAsync(clipPath);
-        using var animation = await SpotifyOverlayAnimation.PrepareAsync(new(
-            SpotifyTimelineSidecar.Load(library, clipPath), card, probed.Width, probed.Height,
-            0, probed.Duration.TotalSeconds, 1, position, font, dynamicBackground), token);
-        var result = await SpotifyOverlayBurner.BurnAsync(clipPath, animation.Path, position, token);
-        if (result is SpotifyOverlayOutcome.Completed or SpotifyOverlayOutcome.Skipped) MarkBurned();
-        return result;
-
-        void MarkBurned()
-        {
-            var latest = ClipInfoSidecar.Load(library, clipPath);
-            if (latest is not null) ClipInfoSidecar.Save(library, clipPath, latest with { SpotifyOverlayBurned = true });
-        }
     }
 
     public bool IsSelectedSpotifyProcessing => SpotifyProcessingPaths.IsProcessing(SelectedVideoPath);
@@ -7821,7 +7914,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // editable afterward: mixing here would permanently destroy the per-track
     // mute/volume control the editor is built around. Volumes aren't baked in
     // either, for the same reason.
-    public IReadOnlyList<string> BuildTrimArguments(string outputPath, bool useHardwareEncoder = true, SpotifyOverlayAnimation? animation = null)
+    public IReadOnlyList<string> BuildTrimArguments(string outputPath, bool useHardwareEncoder = true)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
@@ -7847,17 +7940,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // to each output audio stream in turn, which is exactly what is wanted:
         // Game Audio, Chat and Mic all have to be re-timed by the same amount or
         // they drift apart from each other).
-        if (animation is not null)
-        {
-            // Inputs precede output maps and options.
-            var inputEnd = args.IndexOf(SelectedVideoPath) + 1;
-            args.InsertRange(inputEnd, new[] { "-i", animation.Path });
-            args[args.IndexOf("0:v:0?")] = "[vout]";
-        }
-        var trimVideoFilter = BuildRenderVideoFilter(inputLabel: "[0:v:0]", outputLabel: "[vout]", animation: animation);
+        var trimVideoFilter = BuildRenderVideoFilter();
         if (trimVideoFilter is not null)
         {
-            args.Add(animation is null ? "-vf" : "-filter_complex");
+            args.Add("-vf");
             args.Add(trimVideoFilter);
         }
         var trimAudioSpeed = ClipRenderFilters.BuildAudioSpeedFilter(ClipSpeed);
@@ -7872,7 +7958,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         args.Add("-movflags");
         args.Add("+faststart+use_metadata_tags");
         args.AddRange(new[] { "-map_metadata", "0" });
-        if (animation is not null) args.AddRange(new[] { "-metadata", SpotifyOverlayBurner.BurnMarker + "=1" });
         args.Add(outputPath);
         return args;
     }
@@ -8403,6 +8488,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedSpotifyProgressMs = clipInfo?.SpotifyProgressMs;
         _selectedSpotifyArtPath = clipInfo?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
         _selectedSpotifyOverlayBurned = media.SpotifyOverlayBurned || clipInfo?.SpotifyOverlayBurned == true;
+        _selectedHasSpotifyTimeline = SpotifyTimelineSidecar.Load(Settings.LibraryFolder, media.Path)?.Samples.Any(sample => sample.Available) == true;
+        _spotifyOverlayLayerVisible = true;
+        _spotifyOverlayTransform = null;
+        if (!isSameClipRebuild) _isSpotifyOverlaySelected = false;
         OnPropertyChanged(nameof(SelectedSpotifyLabel));
         OnPropertyChanged(nameof(SelectedHasSpotifyTrack));
         OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
@@ -8513,6 +8602,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { Filmstrip = filmstrip });
         }
 
+        RefreshSelectedSpotifyOverlayLane();
+
         // Every lane keeps its 6px separator except final audio lane. This
         // preserves gaps between game/chat/microphone tracks without leaving
         // an empty strip below the microphone row.
@@ -8523,6 +8614,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(EditorTimelineHeight));
 
         ApplyClipEditState(media.Path, restoreDescription: !preserveEditorText);
+        RefreshSpotifyOverlayLayerState();
+        RaiseSpotifyOverlayPreviewChanged();
         IsEditorVisible = showEditor;
         if (showEditor) OpenEditorSidebar(EditorSidebarSection.Info);
         StartFilmstripLoad(media);
@@ -8563,6 +8656,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ClipEdits.Remove(ClipEditKey(path));
             SaveSettings();
         }
+        _spotifyOverlayLayerVisible = edit.SpotifyOverlayVisible;
+        _spotifyOverlayTransform = edit.SpotifyOverlayTransform;
         if (Duration > TimeSpan.Zero)
         {
             var start = TimeSpan.FromSeconds(Math.Clamp(edit.TrimStartSeconds, 0, Duration.TotalSeconds));

@@ -14,6 +14,18 @@ public sealed class TimelineLaneControl : Control
     public static readonly StyledProperty<bool> IsVideoProperty =
         AvaloniaProperty.Register<TimelineLaneControl, bool>(nameof(IsVideo));
 
+    public static readonly StyledProperty<bool> IsOverlayProperty =
+        AvaloniaProperty.Register<TimelineLaneControl, bool>(nameof(IsOverlay));
+
+    public static readonly StyledProperty<bool> IsOverlaySelectedProperty =
+        AvaloniaProperty.Register<TimelineLaneControl, bool>(nameof(IsOverlaySelected));
+
+    public static readonly StyledProperty<bool> IsOverlayVisibleProperty =
+        AvaloniaProperty.Register<TimelineLaneControl, bool>(nameof(IsOverlayVisible), true);
+
+    public static readonly StyledProperty<bool> CanEditOverlayProperty =
+        AvaloniaProperty.Register<TimelineLaneControl, bool>(nameof(CanEditOverlay), true);
+
     public static readonly StyledProperty<IReadOnlyList<double>?> PeaksProperty =
         AvaloniaProperty.Register<TimelineLaneControl, IReadOnlyList<double>?>(nameof(Peaks));
 
@@ -39,6 +51,30 @@ public sealed class TimelineLaneControl : Control
     {
         get => GetValue(IsVideoProperty);
         set => SetValue(IsVideoProperty, value);
+    }
+
+    public bool IsOverlay
+    {
+        get => GetValue(IsOverlayProperty);
+        set => SetValue(IsOverlayProperty, value);
+    }
+
+    public bool IsOverlaySelected
+    {
+        get => GetValue(IsOverlaySelectedProperty);
+        set => SetValue(IsOverlaySelectedProperty, value);
+    }
+
+    public bool IsOverlayVisible
+    {
+        get => GetValue(IsOverlayVisibleProperty);
+        set => SetValue(IsOverlayVisibleProperty, value);
+    }
+
+    public bool CanEditOverlay
+    {
+        get => GetValue(CanEditOverlayProperty);
+        set => SetValue(CanEditOverlayProperty, value);
     }
 
     public IReadOnlyList<double>? Peaks
@@ -76,6 +112,10 @@ public sealed class TimelineLaneControl : Control
         AffectsRender<TimelineLaneControl>(
             LaneBrushProperty,
             IsVideoProperty,
+            IsOverlayProperty,
+            IsOverlaySelectedProperty,
+            IsOverlayVisibleProperty,
+            CanEditOverlayProperty,
             PeaksProperty,
             FilmstripProperty,
             FilmstripFrameCountProperty,
@@ -92,6 +132,10 @@ public sealed class TimelineLaneControl : Control
     private static readonly Pen VideoOutlinePen = new(AppThemeService.Brush("Semantic_13C8B5", "#13C8B5"), 1);
     private static readonly IBrush ShadeBrush = new SolidColorBrush(Color.FromArgb(120, 10, 15, 19));
     private static readonly IBrush HatchBrush = CreateHatchBrush();
+    private static readonly IBrush OverlayInk = new SolidColorBrush(Color.FromRgb(190, 237, 206));
+    private static readonly Pen OverlayOutline = new(OverlayInk, 1);
+    private static readonly Pen OverlaySelection = new(OverlayInk, 2);
+    private static readonly IBrush OverlayArtwork = new SolidColorBrush(Color.FromArgb(150, 139, 217, 174));
 
     private string? _cachedLaneBrushKey;
     private IBrush? _cachedLaneFill;
@@ -100,6 +144,8 @@ public sealed class TimelineLaneControl : Control
     private IReadOnlyList<double>? _cachedPeaks;
     private Size _cachedPeaksSize;
     private StreamGeometry? _cachedWaveformGeometry;
+    private string? _cachedOverlayLabelKey;
+    private FormattedText? _cachedOverlayLabel;
 
     public override void Render(DrawingContext context)
     {
@@ -112,7 +158,11 @@ public sealed class TimelineLaneControl : Control
         var radius = new CornerRadius(3);
         context.DrawRectangle(_cachedLaneFill, null, rect, radius.TopLeft, radius.TopLeft);
 
-        if (IsVideo)
+        if (IsOverlay)
+        {
+            DrawOverlay(context, rect);
+        }
+        else if (IsVideo)
         {
             DrawFilmstrip(context, rect);
             context.DrawRectangle(null, VideoOutlinePen, rect.Deflate(1), 3, 3);
@@ -123,6 +173,35 @@ public sealed class TimelineLaneControl : Control
         }
 
         DrawTrimShade(context, rect);
+
+        if (IsOverlay && IsOverlaySelected)
+            context.DrawRectangle(null, OverlaySelection, rect.Deflate(1), 3, 3);
+    }
+
+    private void DrawOverlay(DrawingContext context, Rect rect)
+    {
+        var label = !CanEditOverlay ? "Spotify overlay · Part of video"
+            : !IsOverlayVisible ? "Spotify overlay · Hidden"
+            : "Spotify overlay · Move and resize in preview";
+        if (_cachedOverlayLabelKey != label)
+        {
+            _cachedOverlayLabelKey = label;
+            _cachedOverlayLabel = new FormattedText(label,
+                System.Globalization.CultureInfo.InvariantCulture,
+                FlowDirection.LeftToRight, Typeface.Default, 12, OverlayInk);
+        }
+
+        using (context.PushClip(rect.Deflate(1)))
+        using (context.PushOpacity(IsOverlayVisible ? 1 : 0.5))
+        {
+            var card = new Rect(12, (rect.Height - 20) / 2, 34, 20);
+            context.DrawRectangle(null, OverlayOutline, card, 4, 4);
+            context.DrawRectangle(OverlayArtwork, null, new Rect(card.X + 4, card.Y + 4, 12, 12), 2, 2);
+            context.DrawLine(OverlayOutline, new Point(card.X + 20, card.Y + 7), new Point(card.Right - 4, card.Y + 7));
+            context.DrawLine(OverlayOutline, new Point(card.X + 20, card.Y + 12), new Point(card.Right - 6, card.Y + 12));
+            if (_cachedOverlayLabel is not null)
+                context.DrawText(_cachedOverlayLabel, new Point(57, (rect.Height - _cachedOverlayLabel.Height) / 2));
+        }
     }
 
     // LaneBrush is a string that changes only when the track it represents

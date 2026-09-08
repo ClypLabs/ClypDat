@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using Avalonia.Media;
 using Avalonia.Threading;
+using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
 
 internal sealed record SpotifyRenderSpec(SpotifyTimeline? Timeline, SpotifyCard? LegacyCard, int Width, int Height,
-    double Start, double Duration, double Speed, string Position, FontFamily Font, bool DynamicBackground = true)
+    double Start, double Duration, double Speed, string Position, FontFamily Font, bool DynamicBackground = true, SpotifyOverlayTransform? Transform = null)
 {
     public (SpotifyCard? Card, double SongSeconds) At(double outputSeconds)
     {
@@ -29,7 +30,8 @@ public sealed class SpotifyOverlayAnimation : IDisposable
 {
     public string Path { get; }
     public string Position { get; }
-    private SpotifyOverlayAnimation(string path, string position) { Path = path; Position = position; }
+    public SpotifyOverlayBounds Bounds { get; }
+    private SpotifyOverlayAnimation(string path, string position, SpotifyOverlayBounds bounds) { Path = path; Position = position; Bounds = bounds; }
     public void Dispose() { try { File.Delete(Path); } catch { } }
     internal static async Task<SpotifyOverlayAnimation> PrepareAsync(SpotifyRenderSpec spec, CancellationToken token)
     {
@@ -40,7 +42,7 @@ public sealed class SpotifyOverlayAnimation : IDisposable
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardError = true } };
         try
         {
-            renderer = await Dispatcher.UIThread.InvokeAsync(() => new SpotifyCardFrames(spec.Width, spec.Height, spec.Position, spec.Font, spec.DynamicBackground));
+            renderer = await Dispatcher.UIThread.InvokeAsync(() => new SpotifyCardFrames(spec.Width, spec.Height, spec.Position, spec.Font, spec.DynamicBackground, spec.Transform));
             foreach (var arg in new[] { "-v", "error", "-y", "-f", "rawvideo", "-pixel_format", "bgra", "-video_size", $"{renderer.Width}x{renderer.Height}",
                 "-framerate", "30", "-i", "pipe:0", "-an", "-c:v", "ffv1", "-level", "3", "-pix_fmt", "bgra", path }) process.StartInfo.ArgumentList.Add(arg);
             token.ThrowIfCancellationRequested();
@@ -67,7 +69,7 @@ public sealed class SpotifyOverlayAnimation : IDisposable
                 await process.WaitForExitAsync().ConfigureAwait(false);
                 await errors.ConfigureAwait(false);
             }
-            return new(path, spec.Position);
+            return new(path, spec.Position, SpotifyOverlayLayout.Resolve(spec.Width, spec.Height, spec.Position, spec.Transform));
         }
         catch { try { File.Delete(path); } catch { } token.ThrowIfCancellationRequested(); throw; }
         finally { if (renderer is not null) await Dispatcher.UIThread.InvokeAsync(renderer.Dispose); }

@@ -4,6 +4,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using ClypDat.App.Services;
+using ClypDat.Core.Settings;
 using Xunit;
 
 namespace ClypDat.App.Tests;
@@ -13,6 +14,7 @@ internal static class SpotifyFrameChecks
 {
     public static void Run()
     {
+        SpotifyOverlayLayerStateTests.OverlayLaneIsIndependentFromMediaStreams();
         var font = SpotifyOverlayCardRenderer.ResolveFont();
         var card = new SpotifyCard("A very long Spotify title that must slide across this narrow column", "Artist", "Album",
             TimeSpan.FromMinutes(123), TimeSpan.FromSeconds(42), null);
@@ -302,6 +304,8 @@ internal static class SpotifyFrameChecks
             Pump(SpotifyOverlayBurnerTests.Run("-f", "lavfi", "-i", "color=green:s=640x360:r=30:d=1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
                 "-map", "0:v", "-map", "1:a", "-map", "1:a", "-map", "1:a", "-map", "1:a", "-t", "1", "-metadata", "title=Test Unicode 音",
                 "-movflags", "+use_metadata_tags", "-c:v", "libx264", "-c:a", "aac", clip).ContinueWith(task => { task.GetAwaiter().GetResult(); return true; }));
+            var movedClip = Path.Combine(folder, "moved.mp4");
+            File.Copy(clip, movedClip);
             // Invalid hardware encoder deliberately exercises reuse on CPU fallback.
             Assert.Equal(SpotifyOverlayOutcome.Completed, SpotifyOverlayBurner.BurnAsync(clip, animation.Path, spec.Position,
                 preferredCodec: new[] { "-c:v", "nonexistent_encoder" }).GetAwaiter().GetResult());
@@ -313,6 +317,38 @@ internal static class SpotifyFrameChecks
             Assert.True(Math.Abs(pixels[firstOffset] - pixels[firstOffset + 1]) < 12); // inset gray artwork on the right
             Assert.True(pixels[lastOffset + 1] > pixels[lastOffset] + 60); // unavailable clears to green video
             Assert.Equal(SpotifyOverlayOutcome.Skipped, SpotifyOverlayBurner.BurnAsync(clip, animation.Path, spec.Position).GetAwaiter().GetResult());
+
+            // A freely placed card has its own raster size and explicit output
+            // coordinates. Neither its old corner nor the base video controls it.
+            var movedSpec = spec with { Transform = new SpotifyOverlayTransform(.125, .5, .5) };
+            using var movedAnimation = Pump(SpotifyOverlayAnimation.PrepareAsync(movedSpec, CancellationToken.None));
+            Assert.Equal(new SpotifyOverlayBounds(80, 180, 320, 111), movedAnimation.Bounds);
+            var movedRaw = ReadPixels(movedAnimation.Path, "-f", "rawvideo", "-pix_fmt", "bgra");
+            Assert.Equal(320 * 111 * 4 * 30, movedRaw.Length);
+            Assert.Equal(SpotifyOverlayOutcome.Completed, SpotifyOverlayBurner.BurnAsync(movedClip, movedAnimation).GetAwaiter().GetResult());
+            var movedPixels = ReadPixels(movedClip, "-f", "rawvideo", "-pix_fmt", "rgb24");
+            var movedArtwork = (220 * 640 + 324) * 3;
+            Assert.True(Math.Abs(movedPixels[movedArtwork] - movedPixels[movedArtwork + 1]) < 12);
+            Assert.True(movedPixels[firstOffset + 1] > movedPixels[firstOffset] + 60);
+            var movedUnavailable = 29 * 640 * 360 * 3 + movedArtwork;
+            Assert.True(movedPixels[movedUnavailable + 1] > movedPixels[movedUnavailable] + 60);
+
+            // Exercise the export filter order: crop, speed and output scaling
+            // happen before the independently sized overlay is composited.
+            var scaledSpec = movedSpec with { Width = 320, Height = 180, Duration = .5, Speed = 2 };
+            using var scaledAnimation = Pump(SpotifyOverlayAnimation.PrepareAsync(scaledSpec, CancellationToken.None));
+            var graph = ClipRenderFilters.ComposeWithAnimation(
+                ClipRenderFilters.BuildVideoFilter(new(160, 20, 320, 320), 2, "scale=320:180"),
+                spec.Position, "[0:v:0]", "[video]", scaledAnimation.Bounds);
+            var scaledClip = Path.Combine(folder, "scaled.mp4");
+            Pump(SpotifyOverlayBurnerTests.Run("-f", "lavfi", "-i", "color=green:s=640x360:r=30:d=1",
+                "-i", scaledAnimation.Path, "-filter_complex", graph, "-map", "[video]", "-an", "-t", "0.5",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", scaledClip).ContinueWith(task => { task.GetAwaiter().GetResult(); return true; }));
+            var scaledPixels = ReadPixels(scaledClip, "-f", "rawvideo", "-pix_fmt", "rgb24");
+            var scaledArtwork = (110 * 320 + 162) * 3;
+            Assert.True(Math.Abs(scaledPixels[scaledArtwork] - scaledPixels[scaledArtwork + 1]) < 12);
+            var scaledOldCorner = (12 * 320 + 306) * 3;
+            Assert.True(scaledPixels[scaledOldCorner + 1] > scaledPixels[scaledOldCorner] + 60);
         }
         finally { Directory.Delete(folder, true); }
 
