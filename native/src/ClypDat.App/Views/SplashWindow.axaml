@@ -7,7 +7,6 @@
         ShowInTaskbar="True"
         WindowDecorations="None"
         WindowStartupLocation="CenterScreen"
-        Topmost="True"
         Background="{StaticResource AppBgBrush}"
         Title="ClypDat">
 

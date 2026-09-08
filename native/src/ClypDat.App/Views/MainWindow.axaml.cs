@@ -40,6 +40,8 @@ public sealed partial class MainWindow : Window
     // reach ViewModel/Avalonia objects; immutable snapshots cross that boundary.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AutoClipGameSettings> _autoClipSettingsSnapshots = new(StringComparer.OrdinalIgnoreCase);
     private PlaybackSession? _playback;
+    private readonly PlaybackSessionOwner _playbackSessionOwner = new();
+    private readonly TaskCompletionSource _openedForPlayback = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private CancellationTokenSource? _playbackStartCts;
     // Held from the moment a clip open starts until its picture AND sound are up, so
     // background library work parks instead of competing for the UI thread and for
@@ -379,6 +381,7 @@ public sealed partial class MainWindow : Window
         Activated += (_, _) => StartStartupDialogsAfterUserActivation();
         Opened += (_, _) =>
         {
+            _openedForPlayback.TrySetResult();
             RevealAfterFirstDarkFrame();
             ShowPendingNewClipsDialog();
             if (_startupInitialized) return;
@@ -611,7 +614,7 @@ public sealed partial class MainWindow : Window
             }
             _replayBuffer?.Dispose();
             _clipOverlayCoordinator?.Dispose();
-            _playback?.Dispose();
+            _playbackSessionOwner.Dispose();
             _recordingPausedOverlay?.Close();
             _editorHoverControlsWindow?.Close();
             EditorVideoView.DisposeClickHandling();
@@ -731,6 +734,12 @@ public sealed partial class MainWindow : Window
     /// Releases the startup-only presentation state without surfacing the main
     /// window. Used after the loader on a Windows autostart launch.
     /// </summary>
+    internal async Task PreparePlaybackAsync()
+    {
+        await _openedForPlayback.Task.ConfigureAwait(false);
+        await _playbackSessionOwner.GetAsync().ConfigureAwait(false);
+    }
+
     internal void FinishStartupInTray()
     {
         _startupLoaderActive = false;
@@ -4986,7 +4995,7 @@ public sealed partial class MainWindow : Window
             // while its old vout is still active, which creates VLC's fallback window.
             await AwaitEditorHoverStopAsync().ConfigureAwait(false);
             warmup.Cancellation.Token.ThrowIfCancellationRequested();
-            session = _playback ?? await Task.Run(PlaybackSession.TakeWarmedOrCreate, warmup.Cancellation.Token).ConfigureAwait(false);
+            session = _playback ?? await _playbackSessionOwner.GetAsync().WaitAsync(warmup.Cancellation.Token).ConfigureAwait(false);
             warmup.Session = session;
             warmup.SessionReady.TrySetResult(session);
             await session.LoadVideoAsync(warmup.Path, warmup.Codec, warmup.ReplayArmed, warmup.Cancellation.Token).ConfigureAwait(false);
@@ -5006,10 +5015,8 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            if (warmup.Cancellation.IsCancellationRequested && session is not null && !ReferenceEquals(_playback, session))
-            {
-                session.Dispose();
-            }
+            // Window owns shared session. Hover cancellation must not tear down
+            // construction another editor request may already await.
         }
     }
 
@@ -7401,6 +7408,12 @@ public sealed partial class MainWindow : Window
             ViewModel.StartOnboarding();
         }
 
+        if (StartupPlaybackWarning is { } playbackWarning)
+        {
+            StartupPlaybackWarning = null;
+            await ShowMessageAsync("Playback warning", playbackWarning);
+        }
+
         await ShowAudioOnlyClipPromptAsync();
         await CheckForUpdatesAsync();
     }
@@ -7603,6 +7616,7 @@ public sealed partial class MainWindow : Window
     /// does not repeat it. Consumed once.
     /// </summary>
     public AppUpdateInfo? PendingStartupUpdate { get; set; }
+    public string? StartupPlaybackWarning { get; set; }
 
     /// <summary>
     /// Exits for real so a downloaded installer can take over. The installer
@@ -8756,13 +8770,10 @@ public sealed partial class MainWindow : Window
         cancellationToken.ThrowIfCancellationRequested();
         if (_playback is not null) return _playback;
 
-        return await Task.Run(() =>
-        {
-            AppLog.Debug($"Editor open trace: engine construction picked up at {openClock.ElapsedMilliseconds}ms.");
-            var created = PlaybackSession.TakeWarmedOrCreate();
-            AppLog.Debug($"Editor open trace: engine ready at {openClock.ElapsedMilliseconds}ms.");
-            return created;
-        }, cancellationToken);
+        AppLog.Debug($"Editor open trace: shared engine requested at {openClock.ElapsedMilliseconds}ms.");
+        var session = await _playbackSessionOwner.GetAsync().WaitAsync(cancellationToken);
+        AppLog.Debug($"Editor open trace: shared engine ready at {openClock.ElapsedMilliseconds}ms.");
+        return session;
     }
 
     private void QueueEditorBackgroundStop(PlaybackSession session)

@@ -228,62 +228,6 @@ public sealed class PlaybackSession : IDisposable
     public bool IsEnded => _ended || VideoPlayer.State == VLCState.Ended;
     public bool IsSeeking => _isSeeking;
 
-    // A session built ahead of the first editor open and parked here for it to
-    // claim. WarmUp used to build a throwaway LibVLC and dispose it, which
-    // pre-paid the DLL load and plugin scan but left the first clip click still
-    // constructing the engine + MediaPlayer it actually plays through. Keeping
-    // the real thing means the first open reuses a session exactly the way
-    // every open after the first already does.
-    // Tracked as the in-flight TASK, not the finished session. Parking only the
-    // finished object left a window where a warm-up had started but not landed,
-    // and a click inside it saw an empty slot and built a SECOND engine - two
-    // cold LibVLC constructions running at once, each scanning the plugin
-    // directory, contending for the same disk. Measured: warm-up begins at
-    // launch+12s, a clip clicked at launch+13.1s, "engine ready at 8691ms".
-    // Waiting on the one already running is always cheaper than starting
-    // another, and the window is exactly when a user who opened the app to
-    // watch something clicks.
-    private static Task<PlaybackSession>? _warming;
-    private static readonly object WarmingLock = new();
-
-    public static void WarmUp()
-    {
-        lock (WarmingLock)
-        {
-            _warming ??= Task.Run(() => new PlaybackSession());
-        }
-    }
-
-    // Claims the warm-up - finished or still running - and otherwise builds one.
-    // Either way the caller owns exactly one session and the slot is left empty
-    // so nothing else can hand the same instance out twice.
-    //
-    // Blocking on the task is deliberate: this is already called from a
-    // background thread (see MainWindow's editor open, which constructs off the
-    // UI thread precisely so a cold engine cannot freeze the window), and the
-    // wait is bounded by a construction that is already underway.
-    public static PlaybackSession TakeWarmedOrCreate()
-    {
-        Task<PlaybackSession>? pending;
-        lock (WarmingLock)
-        {
-            pending = _warming;
-            _warming = null;
-        }
-
-        if (pending is null) return new PlaybackSession();
-        try
-        {
-            return pending.GetAwaiter().GetResult();
-        }
-        catch (Exception error)
-        {
-            // A warm-up that threw must not take the editor open down with it.
-            AppLog.Error("Playback engine warm-up failed; building a fresh session.", error);
-            return new PlaybackSession();
-        }
-    }
-
     // Runs its whole body on a background thread: Stop() is a genuinely
     // blocking libvlc call (real time tearing down decode/output threads for
     // whatever was previously loaded), and the network-path stat below can

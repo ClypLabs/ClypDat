@@ -25,7 +25,7 @@ public sealed partial class SplashWindow : Window
     // network share or a cold spinning disk hands over anyway and finishes
     // filling the grid behind the open window.
     private static readonly TimeSpan LibraryBudget = TimeSpan.FromSeconds(2.5);
-    private static readonly TimeSpan TotalBudget = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan PlaybackBudget = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan FadeStep = TimeSpan.FromMilliseconds(16);
 
     private CancellationTokenSource? _skip;
@@ -65,11 +65,11 @@ public sealed partial class SplashWindow : Window
     /// Runs the startup stages, then hands back the update the check found (if
     /// any) so the main window can offer it without asking GitHub again.
     /// </summary>
-    public async Task<AppUpdateInfo?> RunAsync(Task essentialsLoaded,
-        Func<AppUpdateInfo, bool> shouldInstall, Func<Task> onInstallerStarted)
+    public async Task<AppUpdateInfo?> RunAsync(Task essentialsLoaded, Task playbackPrepared,
+        Func<AppUpdateInfo, bool> shouldInstall, Action<string> onPlaybackWarning, Func<Task> onInstallerStarted)
     {
-        using var budget = new CancellationTokenSource(TotalBudget);
-        var update = await CheckForUpdateAsync(budget.Token).ConfigureAwait(true);
+        using var updateBudget = new CancellationTokenSource();
+        var update = await CheckForUpdateAsync(updateBudget.Token).ConfigureAwait(true);
         if (update is not null && shouldInstall(update) && await InstallAsync(update).ConfigureAwait(true))
         {
             // The installer is running and waiting on this process to exit; the
@@ -83,7 +83,7 @@ public sealed partial class SplashWindow : Window
         SetProgress(null);
         try
         {
-            await essentialsLoaded.WaitAsync(LibraryBudget, budget.Token).ConfigureAwait(true);
+            await essentialsLoaded.WaitAsync(LibraryBudget).ConfigureAwait(true);
         }
         catch (Exception error) when (error is OperationCanceledException or TimeoutException)
         {
@@ -92,6 +92,24 @@ public sealed partial class SplashWindow : Window
         catch (Exception error)
         {
             AppLog.Error("Startup: initial library load failed.", error);
+        }
+
+        SetStage("Preparing playback");
+        try
+        {
+            await playbackPrepared.WaitAsync(PlaybackBudget).ConfigureAwait(true);
+        }
+        catch (TimeoutException)
+        {
+            AppLog.Info("Startup: playback preparation exceeded 30s; opening with playback still preparing.");
+            SetStage("Playback still preparing - starting anyway");
+            onPlaybackWarning("Playback is still preparing. Opening a clip may take longer than usual.");
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Startup: playback preparation failed; opening with recoverable playback warning.", error);
+            SetStage("Playback unavailable - starting anyway");
+            onPlaybackWarning("Playback preparation failed. Try opening the clip again after checking the app log.");
         }
 
         SetStage("Ready");
@@ -176,8 +194,9 @@ public sealed partial class SplashWindow : Window
     }
 
     /// <summary>Fades out and closes. Never throws - a splash that will not go away is a bug worth swallowing.</summary>
-    public async Task FadeOutAndCloseAsync()
+    public async Task<bool> FadeOutAndCloseAsync()
     {
+        var ownedForeground = false;
         try
         {
             for (var opacity = 1d; opacity > 0; opacity -= 0.08)
@@ -185,6 +204,7 @@ public sealed partial class SplashWindow : Window
                 Opacity = opacity;
                 await Task.Delay(FadeStep).ConfigureAwait(true);
             }
+            ownedForeground = IsActive;
         }
         catch (Exception error)
         {
@@ -194,5 +214,6 @@ public sealed partial class SplashWindow : Window
         {
             Close();
         }
+        return ownedForeground;
     }
 }

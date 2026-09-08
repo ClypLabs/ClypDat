@@ -92,6 +92,7 @@ public sealed partial class App : Application
             }
             InitializeTrayIcon();
             if (useSplash) StartWithSplash(_mainWindow, launchPresentation);
+            else if (!UiPreviewMode.Enabled) _ = _mainWindow.PreparePlaybackAsync();
             if (minimized)
             {
                 void HideOnFirstOpen(object? _, EventArgs __)
@@ -181,7 +182,9 @@ public sealed partial class App : Application
                 // check would otherwise ask GitHub again seconds later.
                 mainWindow.PendingStartupUpdate = await splash.RunAsync(
                     essentials,
+                    mainWindow.PreparePlaybackAsync(),
                     ShouldInstall,
+                    message => mainWindow.StartupPlaybackWarning = message,
                     () => mainWindow.ExitForUpdateAsync());
             }
             catch (Exception error)
@@ -194,12 +197,12 @@ public sealed partial class App : Application
                             (mainWindow.PendingStartupUpdate is { } pending ? $"; update {pending.LatestVersion.ToString(3)} is available." : "."));
                 // Loader gets out of the way first, then the app it was
                 // loading is uncovered underneath it.
-                await splash.FadeOutAndCloseAsync();
+                var splashOwnsForeground = await splash.FadeOutAndCloseAsync();
                 if (LaunchPresentationPolicy.StartsInTray(launchPresentation)) mainWindow.FinishStartupInTray();
                 else
                 {
                     mainWindow.RevealFromStartupLoader();
-                    if (LaunchPresentationPolicy.ActivatesAfterStartupLoader(launchPresentation)) mainWindow.Activate();
+                    if (LaunchPresentationPolicy.ActivatesAfterStartupLoader(launchPresentation) && splashOwnsForeground) mainWindow.Activate();
                 }
                 await mainWindow.LiftStartupCurtainAsync();
             }
