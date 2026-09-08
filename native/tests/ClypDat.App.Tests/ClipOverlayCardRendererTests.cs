@@ -15,6 +15,7 @@ namespace ClypDat.App.Tests;
 public sealed class ClipOverlayCardRendererTests
 {
     [Fact]
+    [Trait("Category", "IsolatedSTA")]
     public void RasterUsesCurrentThemeFontDpiAndMeasuredWrapping()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -102,12 +103,6 @@ public sealed class ClipOverlayCardRendererTests
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "Offscreen rasterization timed out.");
 
-        // Avalonia has one process-wide dispatcher. A separate test can claim
-        // it first, making this dedicated STA harness unavailable. Isolated
-        // runs still fail every layout exception and timeout below.
-        if (failure is InvalidOperationException { Message: var message }
-            && message.Contains("different thread owns it", StringComparison.Ordinal)) return;
-
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
@@ -143,10 +138,14 @@ public sealed class ClipOverlayCardRendererTests
 
         foreach (var scaling in new[] { 1d, 1.5d, 2d })
         {
-            // Avalonia layout is DIP-based. Rendering scale must not alter the
-            // minimum/default logical window sizes available to the dialog.
-            foreach (var available in new[] { new Size(1032, 669), new Size(1312, 852) })
+            // Exercise real physical viewport sizes, then convert them back
+            // through the active render scale to layout DIPs.
+            foreach (var logicalAvailable in new[] { new Size(1032, 669), new Size(1312, 852) })
             {
+                var physicalAvailable = new PixelSize(
+                    (int)Math.Round(logicalAvailable.Width * scaling),
+                    (int)Math.Round(logicalAvailable.Height * scaling));
+                var available = new Size(physicalAvailable.Width / scaling, physicalAvailable.Height / scaling);
                 var window = new MainWindow { DataContext = viewModel };
                 window.Measure(available);
                 window.Arrange(new Rect(available));
@@ -156,10 +155,12 @@ public sealed class ClipOverlayCardRendererTests
                 var body = window.FindControl<Grid>("OnboardingBody");
                 var footer = window.FindControl<StackPanel>("OnboardingFooter");
                 var pills = window.FindControl<ListBox>("OnboardingReplayDurationPills");
+                var qualityPresets = window.FindControl<ListBox>("OnboardingQualityPresets");
                 Assert.NotNull(dialog);
                 Assert.NotNull(body);
                 Assert.NotNull(footer);
                 Assert.NotNull(pills);
+                Assert.NotNull(qualityPresets);
                 Assert.Equal(640, dialog.Width);
                 Assert.Equal(500, dialog.Height);
                 Assert.True(dialog.Bounds.Width <= available.Width, $"Dialog overflows width at {scaling:0}% scale.");
@@ -176,6 +177,7 @@ public sealed class ClipOverlayCardRendererTests
                 })
                 {
                     viewModel.OnboardingStep = step;
+                    window.InvalidateMeasure();
                     window.Measure(available);
                     window.Arrange(new Rect(available));
                     Dispatcher.UIThread.RunJobs();
@@ -189,7 +191,57 @@ public sealed class ClipOverlayCardRendererTests
                     Assert.Equal(stationaryFooter, footer.Bounds);
                 }
 
+                viewModel.OnboardingStep = "Quality";
+                var qualityCard = window.FindControl<Border>("OnboardingQualityCard");
+                Assert.NotNull(qualityCard);
+                // A detached Window has no top-level layout manager to
+                // propagate IsVisible. Make the quality page visible before
+                // measuring its real controls and application styles.
+                var qualityPage = Assert.IsType<StackPanel>(qualityCard.Parent);
+                qualityPage.IsVisible = true;
+                qualityPage.Measure(body.Bounds.Size);
+                qualityPage.Arrange(new Rect(body.Bounds.Size));
+                window.InvalidateMeasure();
+                window.Measure(available);
+                window.Arrange(new Rect(available));
+                Dispatcher.UIThread.RunJobs();
+
+                Assert.True(qualityCard.Bounds.Width > 0 && qualityCard.Bounds.Height > 0);
+                Assert.True(qualityPresets.Bounds.Width > 0 && qualityPresets.Bounds.Height > 0);
+                Assert.True(BoundsIn(dialog, body).Contains(BoundsIn(dialog, qualityCard)), $"Quality card leaves body at {scaling:0}% scale.");
+
+                var presetCards = qualityPresets.GetVisualDescendants().OfType<ListBoxItem>().ToArray();
+                Assert.Equal(4, presetCards.Length);
+                Assert.All(presetCards, presetCard =>
+                {
+                    Assert.True(presetCard.Bounds.Width > 0 && presetCard.Bounds.Height > 0);
+                    Assert.True(BoundsIn(dialog, qualityCard).Contains(BoundsIn(dialog, presetCard)), $"Quality preset leaves its card at {scaling:0}% scale.");
+                    Assert.All(presetCard.GetVisualDescendants().OfType<TextBlock>(), textBlock =>
+                        Assert.True(BoundsIn(presetCard, textBlock).Bottom <= presetCard.Bounds.Height, $"Preset text clips at {scaling:0}% scale."));
+                });
+                Assert.All(presetCards.Skip(1), presetCard => Assert.Equal(presetCards[0].Bounds.Size, presetCard.Bounds.Size));
+
+                foreach (var preset in viewModel.ReplayQualityPresets)
+                {
+                    viewModel.SelectedReplayQualityPreset = preset;
+                    window.InvalidateMeasure();
+                    window.Measure(available);
+                    window.Arrange(new Rect(available));
+                    Dispatcher.UIThread.RunJobs();
+                    Assert.Same(preset, qualityPresets.SelectedItem);
+                }
+
+                var qualityInputs = qualityCard.GetVisualDescendants().OfType<ComboBox>().ToArray();
+                Assert.Equal(2, qualityInputs.Length);
+                Assert.All(qualityInputs, input =>
+                {
+                    Assert.True(input.Bounds.Width > 0 && input.Bounds.Height > 0);
+                    Assert.True(BoundsIn(dialog, qualityCard).Contains(BoundsIn(dialog, input)), $"Quality input leaves its card at {scaling:0}% scale.");
+                });
+                Assert.InRange(Math.Abs(qualityInputs[0].Bounds.Width - qualityInputs[1].Bounds.Width), 0, 1);
+
                 viewModel.OnboardingStep = "Capture";
+                window.InvalidateMeasure();
                 window.Measure(available);
                 window.Arrange(new Rect(available));
                 Dispatcher.UIThread.RunJobs();

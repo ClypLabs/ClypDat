@@ -1015,6 +1015,42 @@
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="Padding" Value="15" />
   </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="ItemsPanel"><ItemsPanelTemplate><UniformGrid Columns="2" Rows="2" /></ItemsPanelTemplate></Setter>
+  </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem">
+    <Setter Property="MinHeight" Value="76" />
+    <Setter Property="Margin" Value="5" />
+    <Setter Property="Padding" Value="10" />
+    <Setter Property="Background" Value="{StaticResource Surface_111920}" />
+    <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_405668}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Stretch" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+  </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_223341}" />
+  </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected">
+    <Setter Property="Background" Value="{StaticResource Surface_303840}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:focus">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource Surface_303840}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+  </Style>
   <!-- Custom title-bar min/maximize/close buttons - replace Windows' own
        caption buttons (WindowDecorations="None" on
        MainWindow removes those), matching Fluent's ~46x32 caption button

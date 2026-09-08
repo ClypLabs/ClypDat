@@ -1972,7 +1972,33 @@
             </StackPanel>
             <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Quality}">
               <TextBlock Text="Choose recording quality" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Balanced is strong default. Higher quality uses more GPU and disk." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-              <Border x:Name="OnboardingQualityCard" Classes="onboardingSettingCard" Padding="14"><StackPanel Spacing="10"><StackPanel Spacing="3"><TextBlock Text="Quality preset" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox></StackPanel><Grid ColumnDefinitions="*,*" ColumnSpacing="12"><StackPanel Spacing="3"><TextBlock Text="Resolution" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox></StackPanel><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="Frame rate" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" /></StackPanel></Grid></StackPanel></Border>
+              <Border x:Name="OnboardingQualityCard" Classes="onboardingSettingCard" Padding="10">
+                <StackPanel Spacing="10">
+                  <ListBox x:Name="OnboardingQualityPresets" Classes="onboardingQualityPresetCards" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                          <TextBlock Text="{Binding Label}" FontSize="13" FontWeight="Bold" />
+                          <TextBlock Text="{Binding Description}" Foreground="{StaticResource Text_B9C6D4}" FontSize="10.5" TextWrapping="Wrap" />
+                          <TextBlock Text="{Binding Summary}" Foreground="{StaticResource Text_6B7C8C}" FontSize="10" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Resolution" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" />
+                      <ComboBox Classes="settingsInput" HorizontalAlignment="Stretch" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="3">
+                      <TextBlock Text="Frame rate" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" />
+                      <ComboBox Classes="settingsInput" HorizontalAlignment="Stretch" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" />
+                    </StackPanel>
+                  </Grid>
+                </StackPanel>
+              </Border>
             </StackPanel>
             <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
               <TextBlock Text="Audio" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Choose microphone for clips. Separate tracks keep edits flexible." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
