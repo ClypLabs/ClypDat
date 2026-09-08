@@ -3817,7 +3817,6 @@ public sealed partial class MainWindow : Window
             entry.IsHovered = true;
             var previewSize = ClipHoverPreviewController.ResolvePreviewSize(preview.Bounds.Size, RenderScaling);
             _clipHoverPreview.Request(entry.Clip, ViewModel?.EnableClipHoverPreview == true, preview, previewSize);
-            StartEditorHoverWarmup(entry.Clip);
         };
         card.PointerExited += (_, _) =>
         {
@@ -4918,7 +4917,6 @@ public sealed partial class MainWindow : Window
             presenter?.Bounds.Size ?? default, RenderScaling);
         _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible,
             presenter, previewSize);
-        StartEditorHoverWarmup(clip);
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
