@@ -294,30 +294,11 @@ public sealed class ClipCardViewModel : ViewModelBase
         : "Captured with: ClypDat";
     public bool HasCaptureBackendLabel => !string.IsNullOrWhiteSpace(CaptureBackendLabel);
 
-    // The per-game filter's grouping key - reuses TileTopLabel since that
-    // already resolves to the real game name for both auto-clips (sidecar's
-    // GameDisplayName) and everything else (filename-parsed), for both
-    // ClypDat-recorded and Medal-imported clips.
-    public string GameFilterKey => NormalizeGameDisplayName(_clipInfo?.GameDisplayName ?? TileTopLabel);
+    // The per-game filter's grouping key. Explicit sidecar game assignments
+    // win; otherwise the recording title or filename supplies its game.
+    public string GameFilterKey => GameFilterResolver.Resolve(_clipInfo, Name);
 
-    internal static string NormalizeGameDisplayName(string? name)
-    {
-        var normalized = name?.Trim() ?? string.Empty;
-        if (normalized.EndsWith(" (Trimmed)", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized[..^" (Trimmed)".Length].TrimEnd();
-        }
-
-        return normalized.ToUpperInvariant() switch
-        {
-            "DESKTOP" or "DESKTOPCAPTURE" => "Desktop Capture",
-            "FORTNITECLIENT-WIN64-SHIPPING" or "FORTNITECLIENT-WIN64-SHIPPING.EXE" => "Fortnite",
-            "ROBLOXPLAYERBETA" or "ROBLOXPLAYERBETA.EXE" or "ROBLOXPLAYERLAUNCHER" or "ROBLOXPLAYERLAUNCHER.EXE" => "Roblox",
-            "VALORANT" or "VALORANT-WIN64-SHIPPING" or "VALORANT-WIN64-SHIPPING.EXE" => "Valorant",
-            "LEAGUECLIENT" or "LEAGUECLIENT.EXE" or "LEAGUECLIENTUX" or "LEAGUECLIENTUX.EXE" or "LEAGUECLIENTUXRELEASE" or "LEAGUECLIENTUXRELEASE.EXE" => "League of Legends",
-            _ => normalized
-        };
-    }
+    internal static string NormalizeGameDisplayName(string? name) => GameFilterResolver.NormalizeGameDisplayName(name);
 
     private string _setGameActionLabel = "Change game";
 
