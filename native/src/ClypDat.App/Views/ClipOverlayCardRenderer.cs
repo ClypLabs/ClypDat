@@ -104,6 +104,10 @@ internal static class ClipOverlayCardRenderer
                     // The rail is on the inward side. Clip it to the card so
                     // its exposed rounded corners stay transparent instead of
                     // squaring off the silhouette.
+                    // PushClip clears Skia's cached DPI transform when it is
+                    // disposed. Restore the identity transform afterward so
+                    // TextLayout's per-run translations are scaled once.
+                    using (context.PushTransform(Matrix.Identity))
                     using (context.PushClip(card))
                         context.DrawRectangle(accent, null, new Rect(railX, 0, RailWidth, height));
                     context.DrawRectangle(null, new Pen(edge, 1), new RoundedRect(new Rect(0.5, 0.5, width - 1, height - 1), corners));

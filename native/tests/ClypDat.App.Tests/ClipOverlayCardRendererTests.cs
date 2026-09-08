@@ -53,6 +53,7 @@ public sealed class ClipOverlayCardRendererTests
                             Assert.Equal((int)Math.Ceiling(220 * scaling), frame.Width);
                             Assert.Equal((int)Math.Ceiling(58 * scaling), frame.Height);
                             AssertAccentAndSilhouette(application, frame, placement, scaling);
+                            AssertTitleFits(application, frame, scaling);
                             AssertPremultiplied(frame);
                         }
                     }
@@ -157,6 +158,19 @@ public sealed class ClipOverlayCardRendererTests
     }
 
     private static int PixelAt(double dip, double scaling) => (int)Math.Round(dip * scaling);
+
+    // A clipped 150%-DPI canvas used to lose its logical transform, causing
+    // TextLayout's next per-run translation to apply DPI twice. "Clip Saved"
+    // then extended well beyond its 165-DIP title column.
+    private static void AssertTitleFits(Application application, ClipOverlayFrame frame, double scaling)
+    {
+        var title = BrushColor(application, "TextStrongBrush");
+        var start = PixelAt(165, scaling);
+        var bottom = Math.Min(frame.Height, PixelAt(45, scaling));
+        for (var y = 0; y < bottom; y++)
+        for (var x = start; x < frame.Width; x++)
+            Assert.NotEqual(title, Pixel(frame, x, y));
+    }
 
     private static void AssertPremultiplied(ClipOverlayFrame frame)
     {
