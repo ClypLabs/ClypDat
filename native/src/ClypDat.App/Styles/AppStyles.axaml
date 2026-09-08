@@ -877,6 +877,12 @@
   <Style Selector="Button.dialogClose /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="CornerRadius" Value="0,11,0,0" />
   </Style>
+  <!-- First-run actions use centered labels without changing dialogClose,
+       whose slightly raised glyph is deliberate. -->
+  <Style Selector="Button.onboardingAction">
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
   <!-- Replay Buffer flyout: quiet cards, sentence-case labels, and compact
        controls keep this small surface readable without changing the full
        settings page's control language. -->
@@ -1376,6 +1382,10 @@
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem:selected:pointerover">
     <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
+  </Style>
+  <Style Selector="ListBox.onboardingPills ListBoxItem">
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
 
   <!-- Pills sized for the editor sidebar rather than for the onboarding pages

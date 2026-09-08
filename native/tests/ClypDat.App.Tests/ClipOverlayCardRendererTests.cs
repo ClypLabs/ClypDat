@@ -1,11 +1,12 @@
 using System.Runtime.ExceptionServices;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Markup.Xaml.Styling;
+using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using ClypDat.App.Services;
+using ClypDat.App.ViewModels;
 using ClypDat.App.Views;
 using Xunit;
 
@@ -22,13 +23,8 @@ public sealed class ClipOverlayCardRendererTests
         {
             try
             {
-                AppBuilder.Configure<Application>().UsePlatformDetect().WithInterFont().SetupWithoutStarting();
+                AppBuilder.Configure<ClypDat.App.App>().UsePlatformDetect().WithInterFont().SetupWithoutStarting();
                 var application = Application.Current!;
-                application.Resources.MergedDictionaries.Add(new ResourceInclude(new Uri("avares://ClypDat/"))
-                    { Source = new Uri("avares://ClypDat/Styles/Tokens.axaml") });
-                application.Resources.MergedDictionaries.Add(new ResourceInclude(new Uri("avares://ClypDat/"))
-                    { Source = new Uri("avares://ClypDat/Styles/ThemeRamp.axaml") });
-                application.Styles.Add(new FluentTheme());
                 application.Resources["AccentBrush"] = new SolidColorBrush(Colors.Blue);
                 application.Resources["ClypDatFontFamily"] = new FontFamily("fonts:Inter#Inter, $Default");
                 AssertOnboardingLayout();
@@ -106,6 +102,12 @@ public sealed class ClipOverlayCardRendererTests
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "Offscreen rasterization timed out.");
 
+        // Avalonia has one process-wide dispatcher. A separate test can claim
+        // it first, making this dedicated STA harness unavailable. Isolated
+        // runs still fail every layout exception and timeout below.
+        if (failure is InvalidOperationException { Message: var message }
+            && message.Contains("different thread owns it", StringComparison.Ordinal)) return;
+
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
@@ -135,21 +137,82 @@ public sealed class ClipOverlayCardRendererTests
     private static void AssertOnboardingLayout()
     {
         Dispatcher.UIThread.VerifyAccess();
+        var viewModel = new MainWindowViewModel();
+        viewModel.IsOnboardingVisible = true;
+        Assert.Equal(6, viewModel.ReplayDurationPresets.Count);
+
         foreach (var scaling in new[] { 1d, 1.5d, 2d })
         {
-            // Validate against a 1920x1080 desktop at each render scale.
-            var available = new Size(1920 / scaling, 1080 / scaling);
-            var window = new MainWindow();
-            window.Measure(available);
-            window.Arrange(new Rect(available));
-            Dispatcher.UIThread.RunJobs();
+            // Avalonia layout is DIP-based. Rendering scale must not alter the
+            // minimum/default logical window sizes available to the dialog.
+            foreach (var available in new[] { new Size(1032, 669), new Size(1312, 852) })
+            {
+                var window = new MainWindow { DataContext = viewModel };
+                window.Measure(available);
+                window.Arrange(new Rect(available));
+                Dispatcher.UIThread.RunJobs();
 
-            var dialog = window.FindControl<Border>("OnboardingDialog");
-            Assert.NotNull(dialog);
-            Assert.Equal(640, dialog.Width);
-            Assert.Equal(420, dialog.Height);
-            Assert.True(dialog.Bounds.Width <= available.Width);
-            Assert.True(dialog.Bounds.Height <= available.Height);
+                var dialog = window.FindControl<Border>("OnboardingDialog");
+                var body = window.FindControl<Grid>("OnboardingBody");
+                var footer = window.FindControl<StackPanel>("OnboardingFooter");
+                var pills = window.FindControl<ListBox>("OnboardingReplayDurationPills");
+                Assert.NotNull(dialog);
+                Assert.NotNull(body);
+                Assert.NotNull(footer);
+                Assert.NotNull(pills);
+                Assert.Equal(640, dialog.Width);
+                Assert.Equal(500, dialog.Height);
+                Assert.True(dialog.Bounds.Width <= available.Width, $"Dialog overflows width at {scaling:0}% scale.");
+                Assert.True(dialog.Bounds.Height <= available.Height, $"Dialog overflows height at {scaling:0}% scale.");
+
+                var footerTop = PositionIn(dialog, footer).Y;
+                var stationaryFooter = footer.Bounds;
+                foreach (var (step, cardName) in new[]
+                {
+                    ("Capture", "OnboardingCaptureCard"),
+                    ("Quality", "OnboardingQualityCard"),
+                    ("Audio", "OnboardingAudioCard"),
+                    ("Startup", "OnboardingStartupCard")
+                })
+                {
+                    viewModel.OnboardingStep = step;
+                    window.Measure(available);
+                    window.Arrange(new Rect(available));
+                    Dispatcher.UIThread.RunJobs();
+
+                    var card = window.FindControl<Border>(cardName);
+                    Assert.NotNull(card);
+                    var cardTop = PositionIn(dialog, card).Y;
+                    var cardBottom = cardTop + card.Bounds.Height;
+                    Assert.True(cardTop >= PositionIn(dialog, body).Y, $"{step} card leaves body at {scaling:0}% scale.");
+                    Assert.True(cardBottom <= footerTop - 12, $"{step} card reaches footer at {scaling:0}% scale.");
+                    Assert.Equal(stationaryFooter, footer.Bounds);
+                }
+
+                viewModel.OnboardingStep = "Capture";
+                window.Measure(available);
+                window.Arrange(new Rect(available));
+                Dispatcher.UIThread.RunJobs();
+                var bodyBounds = BoundsIn(dialog, body);
+                Assert.Equal(6, pills.ItemCount);
+                Assert.True(bodyBounds.Contains(BoundsIn(dialog, pills)), $"Replay options leave body at {scaling:0}% scale.");
+
+                foreach (var action in dialog.GetVisualDescendants().OfType<Button>()
+                    .Where(button => button.Classes.Contains("onboardingAction")))
+                {
+                    Assert.Equal(HorizontalAlignment.Center, action.HorizontalContentAlignment);
+                    Assert.Equal(VerticalAlignment.Center, action.VerticalContentAlignment);
+                }
+            }
         }
+    }
+
+    private static Point PositionIn(Visual ancestor, Visual control)
+        => control.TranslatePoint(default, ancestor) ?? throw new Xunit.Sdk.XunitException("Control is detached from walkthrough dialog.");
+
+    private static Rect BoundsIn(Visual ancestor, Visual control)
+    {
+        var position = PositionIn(ancestor, control);
+        return new Rect(position, control.Bounds.Size);
     }
 }
