@@ -76,4 +76,18 @@ public sealed class SpotifyOverlayLayerStateTests
         Assert.Equal(44, lane.LaneHeight);
         Assert.Equal(2, lane.LabelRowSpan);
     }
+
+    [Fact]
+    public void SpotifyOverlayRequiresSpotifyAudioLane()
+    {
+        var tracks = new[]
+        {
+            new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false),
+            new TrackLaneViewModel(1, "Game Audio", "audio", "#607080", true),
+            new TrackLaneViewModel(2, "Spotify", "audio", "#1ED760", true)
+        };
+
+        Assert.True(MainWindowViewModel.HasSpotifyAudioTrack(tracks));
+        Assert.False(MainWindowViewModel.HasSpotifyAudioTrack(tracks.Take(2)));
+    }
 }

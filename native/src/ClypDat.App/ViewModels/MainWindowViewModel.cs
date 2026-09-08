@@ -4283,7 +4283,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     internal SpotifyRenderSpec? CaptureSpotifyRenderSpec()
     {
-        if (!Settings.SpotifyOverlayEnabled || !SpotifyOverlayLayerVisible || _selectedSpotifyOverlayBurned || SelectedSourceWidth <= 0) return null;
+        if (!Settings.SpotifyOverlayEnabled || !SpotifyOverlayLayerVisible || !HasEditableSpotifyOverlay) return null;
         var spec = SelectedSpotifySpec();
         return spec.Timeline is null && spec.LegacyCard is null ? null : spec;
     }
@@ -4315,7 +4315,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     internal SpotifyRenderSpec? SpotifyPreviewSpec()
     {
-        if (!Settings.SpotifyOverlayEnabled || !SpotifyOverlayLayerVisible || _selectedSpotifyOverlayBurned || !IsEditorVisible) return null;
+        if (!Settings.SpotifyOverlayEnabled || !SpotifyOverlayLayerVisible || !HasEditableSpotifyOverlay || !IsEditorVisible) return null;
         return SelectedSpotifySpec() with { Start = 0, Speed = 1 };
     }
 
@@ -4331,7 +4331,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isSpotifyOverlaySelected;
     private SpotifyOverlayTransform? _spotifyOverlayTransform;
 
-    public bool HasSpotifyOverlayLayer => _selectedSpotifyOverlayBurned || SelectedHasSpotifyTrack || _selectedHasSpotifyTimeline;
+    public bool HasSpotifyOverlayLayer => HasSpotifyAudioTrack(TimelineTracks) &&
+        (_selectedSpotifyOverlayBurned || SelectedHasSpotifyTrack || _selectedHasSpotifyTimeline);
     public bool HasEditableSpotifyOverlay => HasSpotifyOverlayLayer && !_selectedSpotifyOverlayBurned && SelectedSourceWidth > 0;
     public SpotifyOverlayTransform? SpotifyOverlayTransform => _spotifyOverlayTransform;
 
@@ -6971,10 +6972,30 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task ConnectSpotifyAsync()
     {
         if (!await _spotify.ConnectAsync().ConfigureAwait(false)) return;
-        Settings.SpotifyEnabled = true;
-        SaveSettings();
+        await Dispatcher.UIThread.InvokeAsync(EnableSpotifyAudioAfterConnect);
     }
 
+    private void EnableSpotifyAudioAfterConnect()
+    {
+        const string spotify = "Spotify";
+        var volume = Settings.AdditionalAudioProcesses
+            .Where(pair => AudioProcessIdentity.Equals(pair.Key, spotify))
+            .Select(pair => pair.Value)
+            .DefaultIfEmpty(100)
+            .First();
+        foreach (var alias in Settings.AdditionalAudioProcesses.Keys
+                     .Where(name => AudioProcessIdentity.Equals(name, spotify))
+                     .ToArray())
+        {
+            Settings.AdditionalAudioProcesses.Remove(alias);
+        }
+
+        Settings.AdditionalAudioProcesses[AudioProcessIdentity.Normalize(spotify)] = volume;
+        Settings.SpotifyEnabled = true;
+        UpdateReplayQualityRestartRequired();
+        SaveSettings();
+        _ = RefreshOpenProcessesAsync();
+    }
     public void DisconnectSpotify()
     {
         _spotify.Disconnect();
@@ -10995,6 +11016,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // with its process name, and which slot it lands in depends on how many chat apps
     // and microphones are also captured - so keying off "the fourth lane" would colour
     // the wrong track as soon as that count changed.
+    internal static bool HasSpotifyAudioTrack(IEnumerable<TrackLaneViewModel> tracks) =>
+        tracks.Any(track => track.IsAudio && IsSpotifyTrack(track.Label));
+
     private static bool IsSpotifyTrack(params string?[] candidates)
     {
         foreach (var candidate in candidates)
