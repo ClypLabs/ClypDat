@@ -145,7 +145,7 @@
       </StackPanel>
     </Border>
 
-    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Credit|Contributor|Arashii|iPixelGalaxy|Spikerko}">
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Credit|Contributor|Arashii|iPixelGalaxy|Spikerko|Corpsehusk|Logo Artist}">
       <StackPanel Spacing="10">
         <TextBlock Classes="settingsCardLabel" Text="CREDIT" Margin="0,0,0,4" />
         <TextBlock Classes="settingsRowDesc" Text="People who contributed to ClypDat." />
@@ -180,6 +180,17 @@
               <StackPanel Spacing="3" VerticalAlignment="Center">
                 <TextBlock Text="Spikerko" Classes="settingsRowTitle" />
                 <TextBlock Text="Contributor" Classes="creditRole" />
+              </StackPanel>
+            </StackPanel>
+          </Button>
+          <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://linktr.ee/corpsehusk" ToolTip.Tip="Open Corpsehusk's profile" Click="CreditCard_OnClick">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
+                <Image Source="avares://ClypDat/Assets/contributors/corpsehusk.png" Stretch="UniformToFill" />
+              </Border>
+              <StackPanel Spacing="3" VerticalAlignment="Center">
+                <TextBlock Text="Corpsehusk" Classes="settingsRowTitle" />
+                <TextBlock Text="Logo Artist" Classes="creditRole" />
               </StackPanel>
             </StackPanel>
           </Button>
