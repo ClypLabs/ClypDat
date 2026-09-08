@@ -16,6 +16,7 @@ internal static class CaptureWorkerHost
     // from the library folder anyway.
     internal const int MaximumUnacknowledgedSaves = 32;
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
+    private static readonly SemaphoreSlim CaptureLifecycleGate = new(1, 1);
     private static readonly SemaphoreSlim FullSessionToggleGate = new(1, 1);
     private static readonly StorageProtectionService Storage = new();
     private static readonly AutoClipPackStore AutoClipPacks = new();
@@ -31,6 +32,9 @@ internal static class CaptureWorkerHost
     private static IDetectorFrameSource? _detectorFrameSource;
     private static bool _autoClipDetectionEnabled;
     private static string? _autoClipGameId;
+    private static DisplayAvailabilityMonitor? _displayAvailability;
+    private static bool _captureRequested;
+    private static bool _desktopAvailable = true;
 
     public static int Run()
     {
@@ -40,6 +44,9 @@ internal static class CaptureWorkerHost
         if (!created) return 0;
 
         ApplyWorkerPriority();
+        _displayAvailability = new DisplayAvailabilityMonitor();
+        _displayAvailability.AvailabilityChanged += (_, available) => _ = SetDesktopAvailabilityAsync(available);
+        _displayAvailability.Start();
         try
         {
             RunLoopAsync().GetAwaiter().GetResult();
@@ -54,6 +61,7 @@ internal static class CaptureWorkerHost
         {
             _hotkey?.Dispose();
             _fullSessionHotkey?.Dispose();
+            _displayAvailability?.Dispose();
             _buffer?.Dispose();
             _detectorHost?.DisposeAsync().AsTask().GetAwaiter().GetResult();
             Storage.Dispose();
@@ -97,12 +105,13 @@ internal static class CaptureWorkerHost
                     await AttachAsync(client, message, cancellationToken);
                     break;
                 case "start":
-                    await EnsureBufferAsync();
-                    await _buffer!.StartAsync(cancellationToken);
-                    await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
+                    _captureRequested = true;
+                    await StartCaptureIfAvailableAsync(cancellationToken);
+                    await ReplyAsync(client, message, new CaptureWorkerStartAck(true, _buffer?.IsRecording == true), cancellationToken);
                     break;
                 case "stop":
-                    if (_buffer is not null) await _buffer.StopAsync(cancellationToken);
+                    _captureRequested = false;
+                    await StopCaptureAfterSavesAsync(cancellationToken);
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "pause":
@@ -145,9 +154,10 @@ internal static class CaptureWorkerHost
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "shutdown":
+                    _captureRequested = false;
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     Shutdown.Cancel();
-                    if (_buffer is not null) await _buffer.StopAsync(CancellationToken.None);
+                    await StopCaptureAfterSavesAsync(CancellationToken.None);
                     // Returning here ends the worker process, which kills any
                     // ffmpeg still muxing a session's audio - losing it for
                     // good. Nothing awaited that task before.
@@ -187,6 +197,8 @@ internal static class CaptureWorkerHost
             _config = config;
         }
 
+        _captureRequested |= _buffer?.IsRecording == true;
+
         ApplyWorkerPriority();
         Storage.Start(new[]
         {
@@ -213,6 +225,65 @@ internal static class CaptureWorkerHost
             _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
             AttachDetectorFrameSource(_buffer);
         }
+    }
+
+    private static async Task StartCaptureIfAvailableAsync(CancellationToken cancellationToken)
+    {
+        if (!_captureRequested || !_desktopAvailable) return;
+        await CaptureLifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await EnsureBufferAsync();
+            if (_buffer!.IsRecording) return;
+            await _buffer.StartAsync(cancellationToken).ConfigureAwait(false);
+            CaptureWorkerLog.Info("Capture resumed after desktop became available.");
+            await SendEventAsync("recording-state", new { recording = true, suspended = false }).ConfigureAwait(false);
+        }
+        finally { CaptureLifecycleGate.Release(); }
+    }
+
+    private static async Task StopCaptureAsync(CancellationToken cancellationToken)
+    {
+        await CaptureLifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_buffer?.IsRecording == true) await _buffer.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally { CaptureLifecycleGate.Release(); }
+    }
+
+    private static async Task StopCaptureAfterSavesAsync(CancellationToken cancellationToken)
+    {
+        await SaveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await StopCaptureAsync(cancellationToken).ConfigureAwait(false); }
+        finally { SaveGate.Release(); }
+    }
+
+    private static async Task SetDesktopAvailabilityAsync(bool available)
+    {
+        _desktopAvailable = available;
+        if (!available)
+        {
+            if (!_captureRequested) return;
+            CaptureWorkerLog.Info("Capture suspended because the session desktop is unavailable.");
+            try
+            {
+                // A completed save owns its own remux. Waiting for SaveGate keeps
+                // the source files alive until that save accepts or fails.
+                await SaveGate.WaitAsync(Shutdown.Token).ConfigureAwait(false);
+                try { await StopCaptureAsync(Shutdown.Token).ConfigureAwait(false); }
+                finally { SaveGate.Release(); }
+                await SendEventAsync("recording-state", new { recording = false, suspended = true }).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (Shutdown.IsCancellationRequested) { }
+            catch (Exception error) { CaptureWorkerLog.Error("Capture suspension failed.", error); }
+            return;
+        }
+
+        if (!_captureRequested || Shutdown.IsCancellationRequested) return;
+        try { await StartCaptureIfAvailableAsync(Shutdown.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (Shutdown.IsCancellationRequested) { }
+        catch (Exception error) { CaptureWorkerLog.Error("Capture resume after desktop availability failed.", error); }
     }
 
     internal static int RemoveAcknowledgedSaves(List<CaptureWorkerSaveResult> backlog, Guid saveId, string? path)
@@ -431,13 +502,15 @@ internal static class CaptureWorkerHost
         if (_buffer?.IsRecording != true || _config is null) return;
         await FullSessionToggleGate.WaitAsync().ConfigureAwait(false);
         await SaveGate.WaitAsync().ConfigureAwait(false);
+        await CaptureLifecycleGate.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_buffer?.IsRecording != true || _config is null) return;
             var enabled = !_config.FullSessionRecordingEnabled;
             await _buffer.StopAsync(CancellationToken.None).ConfigureAwait(false);
             _config = _config with { FullSessionRecordingEnabled = enabled };
-            await _buffer.StartAsync(CancellationToken.None).ConfigureAwait(false);
+            if (_desktopAvailable && _captureRequested)
+                await _buffer.StartAsync(CancellationToken.None).ConfigureAwait(false);
             CaptureWorkerLog.Info($"Full session recording toggled {(enabled ? "on" : "off")} by hotkey.");
             await SendEventAsync("full-session-toggled", new { enabled }).ConfigureAwait(false);
         }
@@ -448,6 +521,7 @@ internal static class CaptureWorkerHost
         finally
         {
             SaveGate.Release();
+            CaptureLifecycleGate.Release();
             FullSessionToggleGate.Release();
         }
     }

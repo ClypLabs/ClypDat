@@ -6,10 +6,11 @@ namespace ClypDat.Capture.Abstractions;
 
 public static class CaptureWorkerProtocol
 {
-    // 3 added ActiveFinalizes to the attach response. A worker left over from an
+    // 4 adds CaptureWorkerStartAck so an unavailable desktop can acknowledge the
+    // start intent without claiming that recording is active. A worker left over from an
     // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
     // the proxy's read loop already routes into recovery.
-    public const int Version = 3;
+    public const int Version = 4;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 
@@ -39,6 +40,7 @@ public sealed record CaptureWorkerEnvelope(
     JsonElement Payload);
 
 public sealed record CaptureWorkerAck(bool Accepted, string Error = "");
+public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "");
 public sealed record CaptureWorkerHandshake(int Version, string ClientId);
 public sealed record CaptureWorkerAttachResponse(
     bool Recording,

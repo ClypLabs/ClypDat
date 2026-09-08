@@ -71,7 +71,12 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             if (!string.Equals(attach.ConfigIdentity, ReplayBufferConfigIdentity.Serialize(config), StringComparison.Ordinal)) throw new InvalidOperationException("Capture worker did not apply requested capture configuration.");
         }
         ApplyAttach(attach, config, false);
-        if (!_isRecording) { Accept(await SendAsync<CaptureWorkerAck>("start", new { }, cancellationToken), "start capture"); SetRecording(true); }
+        if (!_isRecording)
+        {
+            var started = await SendAsync<CaptureWorkerStartAck>("start", new { }, cancellationToken);
+            if (!started.Accepted) throw new InvalidOperationException($"Capture worker failed to start capture: {started.Error}");
+            SetRecording(started.Recording);
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -214,6 +219,10 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                 switch (message.Type)
                 {
                     case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => HandleWorkerHealth(health)); break;
+                    case "recording-state":
+                        if (message.Payload.TryGetProperty("recording", out var recording))
+                            Dispatcher.UIThread.Post(() => SetRecording(recording.GetBoolean()));
+                        break;
                     case "recording-stopped": Dispatcher.UIThread.Post(() => { if (!_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
                     case "save-started":
                         var started = message.Payload.Deserialize<ReplaySaveStarted>();
@@ -343,8 +352,12 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         await SendAsync<CaptureWorkerAck>("pause", new { paused = _paused }, token);
         Accept(await SendAsync<CaptureWorkerAck>("auto-clip-policy", new { gameId = _autoClipGameId, enabled = _autoClipEnabled, enabledEventIds = _autoClipEventIds }, token), "restore auto-clip policy");
         if (_frameRate is int frameRate) await SendAsync<CaptureWorkerAck>("frame-rate", new { frameRate }, token);
-        if (_desiredRecording && !attach.Recording) Accept(await SendAsync<CaptureWorkerAck>("start", new { }, token), "restart capture");
-        if (_desiredRecording) SetRecording(true);
+        if (_desiredRecording && !attach.Recording)
+        {
+            var started = await SendAsync<CaptureWorkerStartAck>("start", new { }, token);
+            if (!started.Accepted) throw new InvalidOperationException($"Capture worker failed to restart capture: {started.Error}");
+            SetRecording(started.Recording);
+        }
     }
 
     private void Breaker(int count, int? exitCode)

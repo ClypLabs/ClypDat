@@ -116,9 +116,9 @@ public sealed class AutoClipCatalogTests
     [Fact]
     public void ProtocolVersionsAndDetectorTransportLimitsArePinned()
     {
-        // 3 added ActiveFinalizes to the attach response, so a worker from an
+        // 4 added CaptureWorkerStartAck, so a worker from an
         // older install is rejected rather than answering without it.
-        Assert.Equal(3, CaptureWorkerProtocol.Version);
+        Assert.Equal(4, CaptureWorkerProtocol.Version);
         Assert.Equal(1, DetectorHostProtocol.Version);
         Assert.Equal(3, DetectorHostProtocol.FrameSlotCount);
         Assert.Equal(10, DetectorHostProtocol.MaximumFramesPerSecond);
