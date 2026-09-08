@@ -16,7 +16,7 @@
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="About" />
-      <TextBlock Classes="settingsSectionDesc" Text="Version, updates, source, and open source licenses." />
+      <TextBlock Classes="settingsSectionDesc" Text="Version, updates, source, credits, and open source licenses." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
 
@@ -116,6 +116,33 @@
           </StackPanel>
           <Button Grid.Column="1" Content="Show Walkthrough" Click="ShowWalkthroughButton_OnClick" VerticalAlignment="Center" />
         </Grid>
+      </StackPanel>
+    </Border>
+
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Credit|Contributor|Arashii|iPixelGalaxy|Spikerko}">
+      <StackPanel Spacing="10">
+        <TextBlock Classes="settingsCardLabel" Text="CREDIT" Margin="0,0,0,4" />
+        <TextBlock Classes="settingsRowDesc" Text="People who contributed to ClypDat." />
+        <WrapPanel Orientation="Horizontal" ItemWidth="180" ItemHeight="56">
+          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+            <Border Width="42" Height="42" CornerRadius="21" ClipToBounds="True">
+              <Image Source="avares://ClypDat/Assets/contributors/arashii.png" Stretch="UniformToFill" />
+            </Border>
+            <TextBlock Text="Arashii" Classes="settingsRowTitle" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" TextDecorations="Underline" Cursor="Hand" Tag="https://github.com/Stormanzanii" PointerPressed="LicenseLinkText_OnPointerPressed" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+            <Border Width="42" Height="42" CornerRadius="21" ClipToBounds="True">
+              <Image Source="avares://ClypDat/Assets/contributors/ipixelgalaxy.png" Stretch="UniformToFill" />
+            </Border>
+            <TextBlock Text="iPixelGalaxy" Classes="settingsRowTitle" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" TextDecorations="Underline" Cursor="Hand" Tag="https://github.com/iPixelGalaxy" PointerPressed="LicenseLinkText_OnPointerPressed" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+            <Border Width="42" Height="42" CornerRadius="21" ClipToBounds="True">
+              <Image Source="avares://ClypDat/Assets/contributors/spikerko.png" Stretch="UniformToFill" />
+            </Border>
+            <TextBlock Text="Spikerko" Classes="settingsRowTitle" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" TextDecorations="Underline" Cursor="Hand" Tag="https://github.com/Spikerko" PointerPressed="LicenseLinkText_OnPointerPressed" />
+          </StackPanel>
+        </WrapPanel>
       </StackPanel>
     </Border>
 

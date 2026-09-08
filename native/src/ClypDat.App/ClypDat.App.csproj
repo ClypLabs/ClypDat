@@ -143,6 +143,7 @@
   <ItemGroup>
     <AvaloniaResource Include="..\..\..\assets\clypdat-icon*.png" Link="Assets\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\..\..\assets\clypdat-icon.ico" Link="Assets\clypdat-icon.ico" />
+    <AvaloniaResource Include="..\..\..\assets\contributors\*.png" Link="Assets\contributors\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
