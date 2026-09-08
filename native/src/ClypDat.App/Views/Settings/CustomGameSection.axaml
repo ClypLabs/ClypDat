@@ -57,6 +57,7 @@
             </ComboBox.ItemTemplate>
           </ComboBox>
         </Grid>
+        <TextBlock Text="{Binding GameAdditionError}" TextWrapping="Wrap" IsVisible="{Binding GameAdditionError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
         <TextBlock Classes="settingsRowDescSm" Text="Every detected game already has custom settings."
                    Margin="0,8,0,0"
                    IsVisible="{Binding !CustomGameCandidates.Count}" />

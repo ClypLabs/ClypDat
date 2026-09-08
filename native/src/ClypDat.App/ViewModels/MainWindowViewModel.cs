@@ -26,6 +26,7 @@ internal readonly record struct LibraryStartupDateMarker(string Text, int FirstV
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
+    private readonly SteamGameLibrary _steamGames = SteamGameLibrary.Shared;
     private const int CurrentThumbnailStartFrameVersion = 1;
     private const int CurrentThumbnailCacheCleanupVersion = 1;
     private readonly MediaProbeService _mediaProbe = new();
@@ -339,6 +340,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .Select(definition =>
             new AutoClipGameViewModel(definition, Settings.AutoClipping.Games[definition.Id], SaveSettings)));
         ComingSoonAutoClipGames = new ObservableCollection<string>(AutoClipCatalog.ComingSoon);
+        _steamGames.Changed += SteamClassificationChanged;
+        _ = _steamGames.Snapshot;
         RebuildGameCaptureRows();
         RebuildCustomGameTabs();
         SyncIgnoredGameExecutableRows();
@@ -5756,6 +5759,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _steamGames.Changed -= SteamClassificationChanged;
         _xboxActivity.Changed -= XboxActivityChanged;
         _xboxActivity.Dispose();
         _spotify.Changed -= SpotifyChanged;
@@ -6597,11 +6601,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AppLog.Info($"Game detection: user un-excluded {executableName}.");
     }
 
+    private string _gameAdditionError = string.Empty;
+    public string GameAdditionError
+    {
+        get => _gameAdditionError;
+        private set => SetProperty(ref _gameAdditionError, value);
+    }
+
+    private bool RejectSoftware(string? path = null, string? executable = null, string? key = null)
+    {
+        var rejected = _steamGames.IsSoftware(path, executable, key);
+        GameAdditionError = rejected ? "This application is software, not a game. It cannot be added to game detection." : string.Empty;
+        return rejected;
+    }
+
+    private bool IsSoftwareSetting(GameCaptureOverride entry) =>
+        _steamGames.IsSoftware(executableName: entry.ProcessName, detectionKey: entry.ExecutableName);
+
+    private void SteamClassificationChanged() => Dispatcher.UIThread.Post(() =>
+    {
+        RebuildGameCaptureRows();
+        RebuildCustomGameTabs();
+        foreach (var process in GameCandidateProcesses.Where(p => !IsGameCandidate(p)).ToArray())
+            GameCandidateProcesses.Remove(process);
+        if (SelectedGameProcess is { } selected && !GameCandidateProcesses.Contains(selected)) SelectedGameProcess = null;
+    });
+
     public void AddCustomGame()
     {
+        if (RejectSoftware(NewCustomGameExecutable.Trim())) return;
         var exe = Path.GetFileName(NewCustomGameExecutable.Trim());
         if (string.IsNullOrWhiteSpace(exe)) return;
         if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) exe += ".exe";
+        if (!Path.IsPathFullyQualified(NewCustomGameExecutable) && RejectSoftware(executable: exe)) return;
         if (string.IsNullOrWhiteSpace(NewCustomGameDisplayName)) return;
         Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, exe, StringComparison.OrdinalIgnoreCase));
         Settings.GameCaptureOverrides.Add(new GameCaptureOverride
@@ -6622,7 +6654,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void AddGameFromProcess()
     {
         if (SelectedGameProcess is not { Name.Length: > 0 } process) return;
-        NewCustomGameExecutable = process.Name;
+        if (RejectSoftware(process.Path, process.Name)) return;
+        NewCustomGameExecutable = string.IsNullOrWhiteSpace(process.Path) ? process.Name : process.Path;
         NewCustomGameDisplayName = string.IsNullOrWhiteSpace(process.WindowTitle)
             ? Path.GetFileNameWithoutExtension(process.Name)
             : process.WindowTitle;
@@ -7387,6 +7420,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         foreach (var entry in Settings.CustomGameSettings.OrderBy(pair => pair.Value.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
+            if (_steamGames.IsSoftware(detectionKey: entry.Key) ||
+                Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, entry.Key, StringComparison.OrdinalIgnoreCase) && IsSoftwareSetting(g))) continue;
             var tab = new CustomGameTabViewModel(entry.Key, entry.Value, Settings, SaveSettings,
                 change => NotifyCustomGameSettingChanged(entry.Key, change));
             tab.SyncAudioProcesses(ActiveAudioProcesses);
@@ -7417,6 +7452,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var query = _customGameSearchText.Trim();
 
         var candidates = Settings.GameCaptureOverrides
+            .Where(game => !IsSoftwareSetting(game))
             .Where(game => !string.IsNullOrWhiteSpace(game.DisplayName))
             .Where(game => !Settings.CustomGameSettings.ContainsKey(game.ExecutableName))
             .Where(game => !Settings.IgnoredGameExecutables.Contains(game.ExecutableName, StringComparer.OrdinalIgnoreCase))
@@ -7441,6 +7477,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void AddCustomGame(string detectionKey, string displayName)
     {
         if (string.IsNullOrWhiteSpace(detectionKey) || Settings.CustomGameSettings.ContainsKey(detectionKey)) return;
+        var entry = Settings.GameCaptureOverrides.FirstOrDefault(g => string.Equals(g.ExecutableName, detectionKey, StringComparison.OrdinalIgnoreCase));
+        if (RejectSoftware(executable: entry?.ProcessName, key: detectionKey)) return;
 
         // Created with no groups switched on: adding a game means "I want to
         // customise this one", not "change how it records right now". Nothing
@@ -7473,6 +7511,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         GameCaptureRows.Clear();
 
         var supplemental = Settings.GameCaptureOverrides
+            .Where(game => !IsSoftwareSetting(game))
             .Where(g => !Settings.IgnoredGameExecutables.Contains(g.ExecutableName, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(g.DisplayName))
             .Select(g => (ExecutableName: g.ExecutableName, DisplayName: g.DisplayName,
                 IsCustom: string.Equals(g.Origin, "UserCustom", StringComparison.OrdinalIgnoreCase)));
@@ -7663,6 +7702,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool IsGameCandidate(ProcessOption process)
     {
+        if (_steamGames.IsSoftware(process.Path, process.Name)) return false;
         if (Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, process.Name, StringComparison.OrdinalIgnoreCase))) return false;
         return true;
     }

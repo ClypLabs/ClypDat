@@ -10,72 +10,70 @@ public sealed class SteamGameLibrary
 {
     private static readonly Regex VdfPath = new("\\\"path\\\"\\s*\\\"(?<path>[^\\\"]+)\\\"", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex ManifestValue = new("\\\"(?<key>appid|name|installdir)\\\"\\s*\\\"(?<value>[^\\\"]*)\\\"", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    public static SteamGameLibrary Shared { get; } = new();
     private readonly object _sync = new();
-    private IReadOnlyList<SteamGameInstall> _installs = Array.Empty<SteamGameInstall>();
-    private volatile Dictionary<string, SteamGameInstall>? _executableIndex;
-    private bool _executableIndexBuilding;
+    private readonly Func<string?> _steamPath;
+    private readonly Action? _beforeIndexBuild;
+    private volatile SteamClassificationSnapshot _snapshot = SteamClassificationSnapshot.Empty;
+    private Task? _refreshTask;
     private DateTime _nextRefreshUtc = DateTime.MinValue;
 
-    public SteamGameInstall? FindByExecutablePath(string? executablePath)
+    public SteamGameLibrary() : this(() => Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath", null) as string) { }
+    internal SteamGameLibrary(Func<string?> steamPath, Action? beforeIndexBuild = null)
     {
-        if (string.IsNullOrWhiteSpace(executablePath)) return null;
-        EnsureLoaded();
-        return _installs.FirstOrDefault(game => IsUnderPath(executablePath, game.InstallPath));
+        _steamPath = steamPath;
+        _beforeIndexBuild = beforeIndexBuild;
     }
 
-    // Fallback for a game whose running executable is NOT under its own
-    // library folder, which the path test above can never match. Launchers
-    // relocate binaries routinely - Ubisoft Connect runs Rainbow Six Siege out
-    // of %LOCALAPPDATA%\Ubisoft\r6s - and with the remote catalog carrying
-    // effectively nothing, a hand-written entry per affected title does not
-    // scale. The same executable name almost always still exists inside the
-    // install folder, so matching on that recovers the game without needing to
-    // know anything about the launcher.
-    public SteamGameInstall? FindByExecutableName(string? executableName)
-    {
-        if (string.IsNullOrWhiteSpace(executableName)) return null;
-        EnsureLoaded();
-        var index = _executableIndex;
-        if (index is null)
-        {
-            StartExecutableIndexBuild();
-            return null;
-        }
+    public event Action? Changed;
+    public SteamClassificationSnapshot Snapshot { get { _ = RefreshAsync(); return _snapshot; } }
 
-        return index.TryGetValue(executableName, out var game) ? game : null;
-    }
+    public SteamGameInstall? FindByExecutablePath(string? path) => Snapshot.FindGameByPath(path);
+    public SteamGameInstall? FindByExecutableName(string? name) => Snapshot.FindGameByName(name);
+    public bool IsSoftware(string? path = null, string? executableName = null, string? detectionKey = null) =>
+        Snapshot.IsSoftware(path, executableName, detectionKey);
 
-    // Built off-thread, and callers get null until it is ready. This is
-    // deliberate: detection runs on a DispatcherTimer, i.e. the UI thread, and
-    // walking every install folder takes long enough (hundreds of ms, seconds
-    // on a cold cache with 40+ games) that doing it inline would freeze the
-    // app - the same failure as the process-table walk that once locked up the
-    // machine at logon. A game therefore resolves a tick or two after launch
-    // rather than instantly, which nothing here is sensitive to.
-    private void StartExecutableIndexBuild()
+    internal Task RefreshAsync(bool force = false)
     {
         lock (_sync)
         {
-            if (_executableIndexBuilding || _executableIndex is not null) return;
-            _executableIndexBuilding = true;
-            var installs = _installs;
-            _ = Task.Run(() =>
+            if (_refreshTask is { IsCompleted: false }) return _refreshTask;
+            if (!force && DateTime.UtcNow < _nextRefreshUtc) return Task.CompletedTask;
+            _nextRefreshUtc = DateTime.UtcNow.AddMinutes(5);
+            return _refreshTask = Task.Run(() =>
             {
                 try
                 {
-                    var index = BuildExecutableIndex(installs);
-                    lock (_sync)
+                    var root = _steamPath();
+                    if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return;
+                    var previous = _snapshot;
+                    var metadataPath = Path.Combine(root, "appcache", "appinfo.vdf");
+                    var metadataStamp = File.GetLastWriteTimeUtc(metadataPath);
+                    System.Collections.Frozen.FrozenDictionary<int, SteamAppKind> kinds;
+                    var hasMetadata = false;
+                    try { kinds = SteamAppInfoReader.Read(metadataPath); hasMetadata = true; }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException)
                     {
-                        _executableIndex = index;
-                        _executableIndexBuilding = false;
+                        AppLog.Debug($"Steam classification read failed: {error.Message}");
+                        if (previous.HasMetadata) return; // retain the entire last valid snapshot
+                        kinds = previous.Kinds;
                     }
-                    AppLog.Debug($"Steam executable index built: {index.Count} unique executables across {installs.Count} installed games.");
+                    var installs = LoadInstalls(root);
+                    // One serialized worker builds and publishes all indexes together. No
+                    // index from an older classification can overwrite newer metadata.
+                    _beforeIndexBuild?.Invoke();
+                    var names = BuildExecutableIndex(installs);
+                    if (File.GetLastWriteTimeUtc(metadataPath) != metadataStamp)
+                    {
+                        lock (_sync) _nextRefreshUtc = DateTime.MinValue;
+                        return; // metadata changed during the directory walk; retry next tick
+                    }
+                    var next = new SteamClassificationSnapshot(installs, kinds, names, hasMetadata);
+                    if (previous.EquivalentTo(next)) return;
+                    _snapshot = next;
+                    Changed?.Invoke();
                 }
-                catch (Exception error)
-                {
-                    lock (_sync) _executableIndexBuilding = false;
-                    AppLog.Error("Steam executable index build failed", error);
-                }
+                catch (Exception error) { AppLog.Error("Steam game library scan failed", error); }
             });
         }
     }
@@ -87,20 +85,21 @@ public sealed class SteamGameLibrary
     // detection loop and locked up the machine at logon. Game binaries live at
     // the top of an install or one or two folders down (Win64/Shipping,
     // Binaries/Win64), so a shallow scan finds them without the risk.
-    private static Dictionary<string, SteamGameInstall> BuildExecutableIndex(IReadOnlyList<SteamGameInstall> installs)
+    private static Dictionary<string, SteamGameInstall?> BuildExecutableIndex(IReadOnlyList<SteamGameInstall> installs)
     {
         const int MaxDepth = 3;
         const int MaxFilesPerGame = 400;
-        // Names seen in more than one game are ambiguous, so they are dropped
-        // rather than guessed at - plenty of games ship an identically named
-        // helper, and attributing a clip to the wrong game is worse than not
-        // detecting it.
+        // Keep ambiguous names as null, including collisions with software and
+        // unknown installs. Neither game matching nor software exclusion may
+        // guess an owner from a shared filename.
         var claimed = new Dictionary<string, SteamGameInstall?>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var game in installs)
         {
             foreach (var executable in EnumerateExecutables(game.InstallPath, MaxDepth, MaxFilesPerGame))
             {
+                // A nested install owns its files, not the enclosing install.
+                if (installs.Any(other => other.InstallPath.Length > game.InstallPath.Length && IsUnderPath(executable, other.InstallPath))) continue;
                 var name = Path.GetFileName(executable);
                 // Shims and stubs are not the game, and are exactly the names
                 // most likely to collide across installs.
@@ -114,17 +113,17 @@ public sealed class SteamGameLibrary
             }
         }
 
-        return claimed
-            .Where(pair => pair.Value is not null)
-            .ToDictionary(pair => pair.Key, pair => pair.Value!, StringComparer.OrdinalIgnoreCase);
+        return claimed;
     }
 
     private static IEnumerable<string> EnumerateExecutables(string root, int maxDepth, int maxFiles)
     {
         var found = 0;
+        var foldersVisited = 0;
+        const int MaxFolders = 1024;
         var queue = new Queue<(string Path, int Depth)>();
         queue.Enqueue((root, 0));
-        while (queue.Count > 0 && found < maxFiles)
+        while (queue.Count > 0 && found < maxFiles && foldersVisited++ < MaxFolders)
         {
             var (folder, depth) = queue.Dequeue();
             string[] files;
@@ -140,35 +139,20 @@ public sealed class SteamGameLibrary
             string[] folders;
             try { folders = Directory.GetDirectories(folder); }
             catch { continue; }
-            foreach (var child in folders) queue.Enqueue((child, depth + 1));
-        }
-    }
-
-    private void EnsureLoaded()
-    {
-        if (DateTime.UtcNow < _nextRefreshUtc) return;
-        lock (_sync)
-        {
-            if (DateTime.UtcNow < _nextRefreshUtc) return;
-            try
+            foreach (var child in folders.Take(Math.Max(0, MaxFolders - foldersVisited - queue.Count)))
             {
-                _installs = LoadInstalls();
-                // Dropped, not rebuilt - the next failed path match kicks off a
-                // fresh build in the background, so a refresh that nobody
-                // follows up on costs nothing. Not cleared mid-build, which
-                // would let two builds race.
-                if (!_executableIndexBuilding) _executableIndex = null;
+                try
+                {
+                    if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) queue.Enqueue((child, depth + 1));
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
             }
-            catch (Exception error) { AppLog.Error("Steam game library scan failed", error); }
-            finally { _nextRefreshUtc = DateTime.UtcNow.AddMinutes(5); }
         }
     }
 
-    private static IReadOnlyList<SteamGameInstall> LoadInstalls()
+    private static IReadOnlyList<SteamGameInstall> LoadInstalls(string steamPath)
     {
-        var steamPath = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath", null) as string;
-        if (string.IsNullOrWhiteSpace(steamPath) || !Directory.Exists(steamPath)) return Array.Empty<SteamGameInstall>();
-
         var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { steamPath };
         var libraryFile = Path.Combine(steamPath, "steamapps", "libraryfolders.vdf");
         if (File.Exists(libraryFile))
@@ -231,7 +215,7 @@ public sealed class SteamGameLibrary
         }
     }
 
-    private static bool IsUnderPath(string candidate, string root)
+    internal static bool IsUnderPath(string candidate, string root)
     {
         try
         {

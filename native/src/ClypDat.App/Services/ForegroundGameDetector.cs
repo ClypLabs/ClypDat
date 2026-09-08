@@ -24,7 +24,8 @@ public sealed record GameDetection(
 
 public sealed class ForegroundGameDetector
 {
-    private readonly SteamGameLibrary _steamGames = new();
+    private readonly SteamGameLibrary _steamGames;
+    private SteamClassificationSnapshot? _steamSnapshot;
     private readonly EpicGameLibrary _epicGames = new();
     private readonly BattleNetGameLibrary _battleNetGames = new();
     private readonly RiotGameLibrary _riotGames = new();
@@ -35,8 +36,11 @@ public sealed class ForegroundGameDetector
     private int _catalogGeneration;
     private GameDetection _lastGame = GameDetection.None;
 
-    public ForegroundGameDetector()
+    public ForegroundGameDetector() : this(SteamGameLibrary.Shared) { }
+
+    internal ForegroundGameDetector(SteamGameLibrary steamGames)
     {
+        _steamGames = steamGames;
         var local = LoadRules(Path.Combine(AppContext.BaseDirectory, "game-catalog.json"))
             .Concat(LoadRules(Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "game-catalog.json")));
         _catalog = BuildCatalog(local.Concat(RemoteGameCatalogService.LoadCached()));
@@ -81,7 +85,7 @@ public sealed class ForegroundGameDetector
             return _lastGame;
         }
 
-        if (_lastGame.IsDetected && IsStillUsable(_lastGame) && !IsIgnored(_lastGame.ExeName) && !IsIgnored(_lastGame.DetectionKey))
+        if (_lastGame.IsDetected && all.Any(game => game.WindowHandle == _lastGame.WindowHandle && game.ProcessId == _lastGame.ProcessId) && IsStillUsable(_lastGame) && !IsIgnored(_lastGame.ExeName) && !IsIgnored(_lastGame.DetectionKey))
         {
             _lastGame = PreferRealGameWindow(_lastGame, all) with { IsForeground = false };
             return _lastGame;
@@ -133,6 +137,7 @@ public sealed class ForegroundGameDetector
 
     private IReadOnlyList<GameDetection> ScanWindows()
     {
+        RefreshSteamClassification();
         var seen = new HashSet<nint>();
         var results = new List<GameDetection>();
         EnumWindows((handle, _) =>
@@ -155,6 +160,22 @@ public sealed class ForegroundGameDetector
         }
         return results;
     }
+
+    internal void RefreshSteamClassification()
+    {
+        var snapshot = _steamGames.Snapshot;
+        if (ReferenceEquals(snapshot, _steamSnapshot)) return;
+        _steamSnapshot = snapshot;
+        Interlocked.Increment(ref _catalogGeneration);
+        _windowCache.Clear();
+        _loggedUnmatched.Clear();
+        // Rebuild the remembered window on the next scan, including custom and
+        // catalog matches that may now be classified as software.
+        _lastGame = GameDetection.None;
+    }
+
+    internal bool IsSoftware(string? path, string? executable = null, string? key = null) =>
+        _steamGames.IsSoftware(path, executable, key);
 
     private GameDetection BuildDetection(nint handle)
     {
@@ -195,7 +216,7 @@ public sealed class ForegroundGameDetector
                 }
             }
 
-            if (IsIgnored(exeName)) return GameDetection.None;
+            if (IsIgnored(exeName) || IsSoftware(executablePath, exeName)) return GameDetection.None;
 
             // Machine-wide anti-cheat services (Vanguard, BEService) identify
             // no single game - resolving one would mean guessing, so it is
@@ -210,63 +231,83 @@ public sealed class ForegroundGameDetector
             var title = GetWindowTitle(handle);
             var className = GetWindowClass(handle);
             if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(className)) return GameDetection.None;
-            var signature = new WindowSignature((int)processId, exeName, executablePath, title, className, width, height, Volatile.Read(ref _catalogGeneration));
-            if (_windowCache.TryGetValue(handle, out var cached) && cached.Signature == signature) return cached.Detection;
-
-            GameDetection detection;
-            if (_customGames.TryGetValue(exeName, out var customName))
-            {
-                detection = Create(customName, exeName, title, className, handle, (int)processId, GameMatchSource.UserCustom, exeName);
-            }
-            else if (TryCatalogMatch(exeName, title, className, width, height, out var rule))
-            {
-                detection = Create(rule.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Catalog, rule.Id);
-            }
-            // Covers an anti-cheat shim that happens to live inside the
-            // game's own install folder - the ordinary path match already
-            // resolves those without any special-casing.
-            else if (TryResolveGameByPath(executablePath, out var libDisplayName, out var libDetectionKey, out var libSource))
-            {
-                detection = Create(libDisplayName, exeName, title, className, handle, (int)processId, libSource, libDetectionKey);
-            }
-            // A shim outside the install folder (its own Program Files entry,
-            // a subfolder the path match missed) gets one more shot: the
-            // largest non-stub binary beside it, then up to three hops of
-            // parent process. Anti-cheat launchers are typically spawned by
-            // (or spawn) the real game, so the chain usually terminates fast.
-            else if (isAntiCheat && TryResolveAntiCheatSibling(executablePath, out var siblingDisplayName, out var siblingDetectionKey, out var siblingSource))
-            {
-                detection = Create(siblingDisplayName, exeName, title, className, handle, (int)processId, siblingSource, siblingDetectionKey);
-                LogUnmatchedOnce($"anticheat-resolved:{exeName}", $"Game detection: resolved anti-cheat {exeName} to {siblingDisplayName} via a sibling binary.");
-            }
-            else if (isAntiCheat && TryResolveAntiCheatParentChain((int)processId, out var parentDisplayName, out var parentDetectionKey, out var parentSource))
-            {
-                detection = Create(parentDisplayName, exeName, title, className, handle, (int)processId, parentSource, parentDetectionKey);
-                LogUnmatchedOnce($"anticheat-resolved:{exeName}", $"Game detection: resolved anti-cheat {exeName} to {parentDisplayName} via its parent process.");
-            }
-            else
-            {
-                detection = GameDetection.None;
-                if (isAntiCheat)
-                {
-                    LogUnmatchedOnce($"anticheat:{exeName}", $"Game detection: could not resolve anti-cheat process {exeName} to a game.");
-                }
-                else
-                {
-                    LogUnmatchedOnce(exeName, $"Game detection: no match for {exeName} (path={executablePath}, title='{title}', class={className}).");
-                }
-            }
-
-            if (detection.IsDetected && IsIgnored(detection.DetectionKey)) detection = GameDetection.None;
-
-            _windowCache[handle] = new CachedWindow(signature, detection);
-            return detection;
+            return MatchWindow(executablePath, exeName, title, className, width, height, handle, (int)processId);
         }
         catch (Exception error)
         {
             AppLog.Debug($"Game detection: skipped window {handle}, reason={error.Message}.");
             return GameDetection.None;
         }
+    }
+
+    internal GameDetection MatchWindow(string executablePath, string exeName, string title, string className,
+        int width = 1280, int height = 720, nint handle = 0, int processId = 0)
+    {
+        RefreshSteamClassification();
+        if (IsSoftware(executablePath, exeName)) return GameDetection.None;
+        var snapshot = _steamGames.Snapshot;
+        if (snapshot.FindGameByPath(executablePath) is null && _catalog.Entries.Any(entry =>
+            (snapshot.IsSoftware(detectionKey: entry.Id) || entry.SteamAppIds.Any(id => snapshot.Classify(id) == SteamAppKind.NonGame)) &&
+            entry.Matchers.Any(matcher => GameCatalogRules.Matches(matcher, exeName, title, className, width, height))))
+            return GameDetection.None;
+        var signature = new WindowSignature(processId, exeName, executablePath, title, className, width, height, Volatile.Read(ref _catalogGeneration));
+        if (_windowCache.TryGetValue(handle, out var cached) && cached.Signature == signature) return cached.Detection;
+        var detection = ResolveWindowMatch(executablePath, exeName, title, className, width, height, handle, processId);
+        _windowCache[handle] = new CachedWindow(signature, detection);
+        return detection;
+    }
+
+    private GameDetection ResolveWindowMatch(string executablePath, string exeName, string title, string className,
+        int width, int height, nint handle, int processId)
+    {
+        var isAntiCheat = InstalledGameLocator.IsAntiCheatExecutable(exeName);
+        GameDetection detection;
+        if (_customGames.TryGetValue(exeName, out var customName))
+        {
+            detection = Create(customName, exeName, title, className, handle, (int)processId, GameMatchSource.UserCustom, exeName);
+        }
+        else if (TryCatalogMatch(exeName, title, className, width, height, out var rule))
+        {
+            detection = Create(rule.DisplayName, exeName, title, className, handle, (int)processId, GameMatchSource.Catalog, rule.Id);
+        }
+        // Covers an anti-cheat shim that happens to live inside the
+        // game's own install folder - the ordinary path match already
+        // resolves those without any special-casing.
+        else if (TryResolveGameByPath(executablePath, out var libDisplayName, out var libDetectionKey, out var libSource))
+        {
+            detection = Create(libDisplayName, exeName, title, className, handle, (int)processId, libSource, libDetectionKey);
+        }
+        // A shim outside the install folder (its own Program Files entry,
+        // a subfolder the path match missed) gets one more shot: the
+        // largest non-stub binary beside it, then up to three hops of
+        // parent process. Anti-cheat launchers are typically spawned by
+        // (or spawn) the real game, so the chain usually terminates fast.
+        else if (isAntiCheat && TryResolveAntiCheatSibling(executablePath, out var siblingDisplayName, out var siblingDetectionKey, out var siblingSource))
+        {
+            detection = Create(siblingDisplayName, exeName, title, className, handle, (int)processId, siblingSource, siblingDetectionKey);
+            LogUnmatchedOnce($"anticheat-resolved:{exeName}", $"Game detection: resolved anti-cheat {exeName} to {siblingDisplayName} via a sibling binary.");
+        }
+        else if (isAntiCheat && TryResolveAntiCheatParentChain((int)processId, out var parentDisplayName, out var parentDetectionKey, out var parentSource))
+        {
+            detection = Create(parentDisplayName, exeName, title, className, handle, (int)processId, parentSource, parentDetectionKey);
+            LogUnmatchedOnce($"anticheat-resolved:{exeName}", $"Game detection: resolved anti-cheat {exeName} to {parentDisplayName} via its parent process.");
+        }
+        else
+        {
+            detection = GameDetection.None;
+            if (isAntiCheat)
+            {
+                LogUnmatchedOnce($"anticheat:{exeName}", $"Game detection: could not resolve anti-cheat process {exeName} to a game.");
+            }
+            else
+            {
+                LogUnmatchedOnce(exeName, $"Game detection: no match for {exeName} (path={executablePath}, title='{title}', class={className}).");
+            }
+        }
+
+        if (detection.IsDetected && (IsIgnored(detection.DetectionKey) || IsSoftware(executablePath, exeName, detection.DetectionKey))) detection = GameDetection.None;
+
+        return detection;
     }
 
     private bool TryCatalogMatch(string executable, string title, string className, int width, int height, out GameCatalogEntry matched)
@@ -300,6 +341,10 @@ public sealed class ForegroundGameDetector
     // executable.
     private bool TryResolveGameByPath(string executablePath, out string displayName, out string detectionKey, out GameMatchSource source)
     {
+        displayName = string.Empty;
+        detectionKey = string.Empty;
+        source = GameMatchSource.None;
+        if (IsSoftware(executablePath)) return false;
         if (_steamGames.FindByExecutablePath(executablePath) is { } steamGame)
         {
             displayName = steamGame.DisplayName;
@@ -332,7 +377,8 @@ public sealed class ForegroundGameDetector
         // game does own that filename. Reported exactly as a path match
         // would be - same source, same steam-{AppId} key - so a game found
         // this way cannot produce a second Game Detection row for itself.
-        if (_steamGames.FindByExecutableName(Path.GetFileName(executablePath)) is { } steamGameByName)
+        if (_steamGames.Snapshot.FindInstall(executablePath) is null &&
+            _steamGames.FindByExecutableName(Path.GetFileName(executablePath)) is { } steamGameByName)
         {
             displayName = steamGameByName.DisplayName;
             detectionKey = $"steam-{steamGameByName.AppId}";

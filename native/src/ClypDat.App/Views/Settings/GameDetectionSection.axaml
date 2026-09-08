@@ -41,6 +41,7 @@
 
         <Border Classes="settingsDivider" />
 
+        <TextBlock Text="{Binding GameAdditionError}" TextWrapping="Wrap" IsVisible="{Binding GameAdditionError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
         <TextBox Classes="settingsInput" PlaceholderText="Search games" Text="{Binding GameSearchText}" />
       </StackPanel>
     </Border>

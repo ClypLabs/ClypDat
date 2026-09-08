@@ -5657,7 +5657,7 @@ public sealed partial class MainWindow : Window
         var file = files.FirstOrDefault();
         if (file?.Path.LocalPath is not { Length: > 0 } path) return;
 
-        ViewModel.NewCustomGameExecutable = Path.GetFileName(path);
+        ViewModel.NewCustomGameExecutable = path;
         ViewModel.NewCustomGameDisplayName = Path.GetFileNameWithoutExtension(path);
         ViewModel.AddCustomGame();
     }
