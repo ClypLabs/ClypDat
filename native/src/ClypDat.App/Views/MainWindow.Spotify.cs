@@ -149,9 +149,11 @@ public sealed partial class MainWindow
 
     private void HideSpotifyPreview()
     {
-        EndSpotifyGesture();
         _spotifyPerPixel?.Hide();
         _spotifyWindow?.Hide();
+        // Hide both native surfaces before releasing pointer capture. Capture
+        // loss can finish a drag and save its layout synchronously.
+        EndSpotifyGesture();
     }
 
     private void SpotifySurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)

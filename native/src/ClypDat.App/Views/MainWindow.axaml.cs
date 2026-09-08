@@ -429,7 +429,7 @@ public sealed partial class MainWindow : Window
                         ? ViewModel.ActiveGameDetection.DisplayName : "Your game", preview: true);
                 ViewModel.PropertyChanged += (_, e) =>
                 {
-                    if (e.PropertyName is nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
+                    if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
                         UpdateEditorSurfaceVisibility();
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
@@ -4316,7 +4316,11 @@ public sealed partial class MainWindow : Window
     private void UpdateEditorSurfaceVisibility()
     {
         if (ViewModel is null) return;
-        var showEditor = ViewModel.IsEditorVisible;
+        // Settings becomes visible before the editor flag is cleared. Treat it
+        // as covering the editor now, so its native Spotify card cannot linger
+        // until the preview timer gets a turn.
+        var showEditor = ViewModel.IsEditorVisible && !ViewModel.IsSettingsVisible;
+        if (!showEditor) HideSpotifyPreview();
         EditorPanelRoot.Opacity = showEditor ? 1 : 0;
         EditorPanelRoot.IsHitTestVisible = showEditor;
         EditorPanelRoot.IsEnabled = showEditor && !ViewModel.IsSelectedSpotifyProcessing;

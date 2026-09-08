@@ -4,7 +4,7 @@
              xmlns:opconv="using:ClypDat.App.Converters"
              xmlns:conv="using:Avalonia.Data.Converters"
              xmlns:controls="using:ClypDat.App.Controls"
-             x:Class="ClypDat.App.Views.Settings.XboxSection"
+             x:Class="ClypDat.App.Views.Settings.IntegrationsSection"
              x:DataType="vm:MainWindowViewModel">
   <UserControl.Resources>
     <!-- Provider marks, from each brand's own asset. Kept here rather than in
@@ -177,7 +177,7 @@
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" ToolTip.Tip="Choose where the track sits on your clips." />
-                  <Button Content="Unlink" Click="DisconnectSpotifyButton_OnClick" />
+                  <Button Content="Disconnect" Click="DisconnectSpotifyButton_OnClick" />
                 </StackPanel>
               </Grid>
             </Border>
@@ -198,10 +198,10 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <Button Tag="google" Click="UnlinkSocialAccountButton_OnClick" IsEnabled="{Binding !GoogleUnlinkBusy}">
                     <Grid>
-                      <TextBlock Text="Unlink" IsVisible="{Binding !GoogleUnlinkBusy}" VerticalAlignment="Center" />
+                      <TextBlock Text="Disconnect" IsVisible="{Binding !GoogleUnlinkBusy}" VerticalAlignment="Center" />
                       <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding GoogleUnlinkBusy}">
                         <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Unlinking…" VerticalAlignment="Center" />
+                        <TextBlock Text="Disconnecting…" VerticalAlignment="Center" />
                       </StackPanel>
                     </Grid>
                   </Button>
@@ -225,10 +225,10 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <Button Tag="discord" Click="UnlinkSocialAccountButton_OnClick" IsEnabled="{Binding !DiscordUnlinkBusy}">
                     <Grid>
-                      <TextBlock Text="Unlink" IsVisible="{Binding !DiscordUnlinkBusy}" VerticalAlignment="Center" />
+                      <TextBlock Text="Disconnect" IsVisible="{Binding !DiscordUnlinkBusy}" VerticalAlignment="Center" />
                       <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding DiscordUnlinkBusy}">
                         <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Unlinking…" VerticalAlignment="Center" />
+                        <TextBlock Text="Disconnecting…" VerticalAlignment="Center" />
                       </StackPanel>
                     </Grid>
                   </Button>
@@ -257,7 +257,7 @@
                       <Border Classes="statusPill ok">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                           <Ellipse />
-                          <TextBlock Text="Linked" />
+                          <TextBlock Text="Connected" />
                         </StackPanel>
                       </Border>
                       <TextBlock Classes="settingsRowDescSm" Text="{Binding XboxCurrentTitle}" VerticalAlignment="Center" />
@@ -265,10 +265,10 @@
                   </StackPanel>
                   <Button Grid.Column="2" VerticalAlignment="Center" Click="UnlinkClypDatXboxButton_OnClick" IsEnabled="{Binding !XboxUnlinkBusy}">
                     <Grid>
-                      <TextBlock Text="Unlink" IsVisible="{Binding !XboxUnlinkBusy}" VerticalAlignment="Center" />
+                      <TextBlock Text="Disconnect" IsVisible="{Binding !XboxUnlinkBusy}" VerticalAlignment="Center" />
                       <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding XboxUnlinkBusy}">
                         <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Unlinking…" VerticalAlignment="Center" />
+                        <TextBlock Text="Disconnecting…" VerticalAlignment="Center" />
                       </StackPanel>
                     </Grid>
                   </Button>

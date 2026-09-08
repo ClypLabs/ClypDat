@@ -107,7 +107,7 @@
           <settings:ThemesSection />
           <settings:DiscordRichPresenceSection />
           <settings:GeneralSection />
-          <settings:XboxSection />
+          <settings:IntegrationsSection />
           <settings:GameDetectionSection />
           <settings:ImportClipsSection />
           <settings:AutoClipSection />

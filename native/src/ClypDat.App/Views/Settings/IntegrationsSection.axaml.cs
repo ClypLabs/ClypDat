@@ -3,9 +3,9 @@ using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Views.Settings;
 
-public sealed partial class XboxSection : UserControl
+public sealed partial class IntegrationsSection : UserControl
 {
-    public XboxSection() => InitializeComponent();
+    public IntegrationsSection() => InitializeComponent();
     private async void LinkClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm) await vm.LinkClypDatAccountAsync();
