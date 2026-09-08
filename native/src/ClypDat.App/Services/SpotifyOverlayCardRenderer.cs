@@ -41,10 +41,24 @@ internal static class SpotifyOverlayCardRenderer
 // the render target and transfer buffer are reused for every frame.
 internal sealed class SpotifyCardFrames : IDisposable
 {
+    private const double TextWidth = 252;
+    private const double TimerWidth = 48, TimerGap = 8;
+    private static readonly IBrush Surface = new LinearGradientBrush
+    {
+        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+        EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+        GradientStops = { new(Color.FromArgb(240, 25, 30, 36), 0), new(Color.FromArgb(228, 12, 16, 21), 1) }
+    };
+    private static readonly Pen Outline = new(new SolidColorBrush(Color.FromArgb(25, 255, 255, 255)), 1);
+    private static readonly IBrush ArtworkSurface = new SolidColorBrush(Color.FromRgb(42, 42, 42));
+    private static readonly Pen ArtworkRing = new(new SolidColorBrush(Color.FromArgb(28, 255, 255, 255)), 1);
+    private static readonly IBrush ProgressTrack = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255));
+    private static readonly IBrush ProgressFill = new SolidColorBrush(Color.FromRgb(188, 233, 206));
+    private static readonly IBrush[] EdgeMasks = { CreateEdgeMask(false, false), CreateEdgeMask(true, false), CreateEdgeMask(false, true), CreateEdgeMask(true, true) };
     private readonly double _scale;
     private readonly bool _right;
     private readonly FontFamily _font;
-    private readonly Dictionary<(string, double, bool, double), TextLayout> _text = new();
+    private readonly Dictionary<(string, double, bool), TextLayout> _text = new();
     private readonly Dictionary<string, Bitmap?> _art = new();
     public RenderTargetBitmap Bitmap { get; }
     public byte[] Pixels { get; }
@@ -58,14 +72,13 @@ internal sealed class SpotifyCardFrames : IDisposable
         Bitmap = new RenderTargetBitmap(new PixelSize(Math.Max(1, (int)Math.Ceiling(406 * _scale)), Math.Max(1, (int)Math.Ceiling(140 * _scale))), new Vector(96, 96));
         Pixels = new byte[Width * Height * 4];
     }
-    private TextLayout Text(string? value, double size, bool bold = false, double width = double.PositiveInfinity)
+    private TextLayout Text(string? value, double size, bool bold = false)
     {
-        var key = ((value ?? "").Replace('\r', ' ').Replace('\n', ' '), size, bold, width);
+        var key = ((value ?? "").Replace('\r', ' ').Replace('\n', ' '), size, bold);
         if (_text.TryGetValue(key, out var layout)) return layout;
         // Timer strings change throughout long clips. Keep the cache bounded.
         layout = new TextLayout(key.Item1, new Typeface(_font, weight: bold ? FontWeight.SemiBold : FontWeight.Normal), size, Brushes.White,
-            textWrapping: TextWrapping.NoWrap, textTrimming: double.IsFinite(width) ? TextTrimming.CharacterEllipsis : TextTrimming.None,
-            maxWidth: width, maxLines: 1);
+            textWrapping: TextWrapping.NoWrap, textTrimming: TextTrimming.None, maxLines: 1);
         _text[key] = layout;
         return layout;
     }
@@ -79,9 +92,13 @@ internal sealed class SpotifyCardFrames : IDisposable
     private void Draw(DrawingContext context, SpotifyCard? card, double songSeconds)
     {
         if (card is null) return;
-        context.DrawRectangle(new SolidColorBrush(Color.FromArgb(128, 0, 0, 0)), null, new Rect(0, 0, 406, 140));
-        var artRect = new Rect(_right ? 266 : 0, 0, 140, 140);
-        context.DrawRectangle(new SolidColorBrush(Color.FromRgb(42, 42, 42)), null, artRect);
+        context.DrawRectangle(Surface, null, new Rect(0, 0, 406, 140), 20, 20);
+        context.DrawRectangle(null, Outline, new Rect(.5, .5, 405, 139), 19.5, 19.5);
+        var artRect = new Rect(_right ? 280 : 14, 14, 112, 112);
+        context.DrawRectangle(ArtworkSurface, null, artRect, 14, 14);
+        context.DrawEllipse(null, ArtworkRing, artRect.Center, 28, 28);
+        context.DrawEllipse(null, ArtworkRing, artRect.Center, 20, 20);
+        context.DrawEllipse(ProgressTrack, null, artRect.Center, 4, 4);
         if (card.ArtPath is { } path)
         {
             if (!_art.TryGetValue(path, out var art))
@@ -89,31 +106,69 @@ internal sealed class SpotifyCardFrames : IDisposable
                 try { art = new Bitmap(path); } catch { art = null; }
                 _art[path] = art;
             }
-            if (art is not null) context.DrawImage(art, new Rect(art.Size), artRect);
+            if (art is not null)
+            {
+                var side = Math.Min(art.Size.Width, art.Size.Height);
+                var source = new Rect((art.Size.Width - side) / 2, (art.Size.Height - side) / 2, side, side);
+                using (context.PushClip(new RoundedRect(artRect, 14))) context.DrawImage(art, source, artRect);
+            }
         }
-        double left = _right ? 14 : 154;
-        const double column = 238;
-        var title = Text(card.Track, 28, true);
-        var overflow = Math.Max(0, title.Width - column);
-        var titleX = left + (overflow > 0 ? -SpotifyOverlayCardRenderer.TitleOffset(overflow, songSeconds) : _right ? column - title.Width : 0);
-        using (context.PushClip(new Rect(left, 8, column, 37))) title.Draw(context, new Point(titleX, 8));
-        Line(card.Artist, 21, 48, .6);
-        Line(card.Album, 13, 77, .4);
+        context.DrawRectangle(null, Outline, artRect.Deflate(.5), 13.5, 13.5);
+        double left = _right ? 14 : 140;
+        Line(card.Track, 25, 17, 31, 1, bold: true);
+        Line(card.Artist, 18, 51, 24, .82);
+        Line(card.Album, 13, 78, 19, .58);
         var elapsed = Text(FormatTime(card.Progress), 12);
         var duration = Text(FormatTime(card.Length), 12);
-        duration.Draw(context, new Point(left + column - duration.Width, 111));
+        Timer(duration, left + TextWidth - TimerWidth, .68, alignRight: true);
         if (card.Progress is null) return;
-        elapsed.Draw(context, new Point(left, 111));
-        var bar = new Rect(left + elapsed.Width + 8, 119, Math.Max(0, column - elapsed.Width - duration.Width - 16), 2);
-        context.DrawRectangle(new SolidColorBrush(Color.FromArgb(51, 255, 255, 255)), null, bar);
+        Timer(elapsed, left, .86);
+        var bar = new Rect(left + TimerWidth + TimerGap, 118.5, TextWidth - 2 * (TimerWidth + TimerGap), 3);
+        context.DrawRectangle(ProgressTrack, null, bar, 1.5, 1.5);
         if (card.Progress is { } played && card.Length is { TotalMilliseconds: > 0 } length)
-            context.DrawRectangle(Brushes.White, null, bar.WithWidth(bar.Width * Math.Clamp(played.TotalMilliseconds / length.TotalMilliseconds, 0, 1)));
-        void Line(string? value, double size, double y, double opacity)
         {
-            var text = Text(value, size, width: column);
-            using (context.PushOpacity(opacity)) text.Draw(context, new Point(left + (_right ? Math.Max(0, column - text.Width) : 0), y));
+            var filled = bar.Width * Math.Clamp(played.TotalMilliseconds / length.TotalMilliseconds, 0, 1);
+            if (filled > 0) context.DrawRectangle(ProgressFill, null, bar.WithWidth(filled), 1.5, 1.5);
+        }
+        void Timer(TextLayout text, double x, double opacity, bool alignRight = false)
+        {
+            // Reserve the same columns for every timestamp and font. Very long
+            // durations fit inside their column without moving the progress rail.
+            var scale = Math.Min(1, TimerWidth / Math.Max(1, text.Width));
+            if (alignRight) x += TimerWidth - text.Width * scale;
+            using (context.PushOpacity(opacity))
+            using (context.PushTransform(Matrix.CreateScale(scale, scale) * Matrix.CreateTranslation(x, 111 + text.Height * (1 - scale) / 2)))
+                text.Draw(context, default);
+        }
+        void Line(string? value, double size, double y, double height, double opacity, bool bold = false)
+        {
+            var text = Text(value, size, bold);
+            var overflow = Math.Max(0, text.Width - TextWidth);
+            var offset = SpotifyOverlayCardRenderer.TitleOffset(overflow, songSeconds);
+            var x = left + (overflow > 0 ? -offset : _right ? TextWidth - text.Width : 0);
+            var bounds = new Rect(left, y, TextWidth, height);
+            using (context.PushClip(bounds))
+            using (context.PushOpacity(opacity))
+            {
+                if (overflow <= 0) text.Draw(context, new Point(x, y));
+                else
+                {
+                    var mask = EdgeMasks[(offset > .01 ? 1 : 0) | (overflow - offset > .01 ? 2 : 0)];
+                    using (context.PushOpacityMask(mask, bounds)) text.Draw(context, new Point(x, y));
+                }
+            }
         }
     }
+    private static IBrush CreateEdgeMask(bool left, bool right) => new LinearGradientBrush
+    {
+        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+        EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
+        GradientStops =
+        {
+            new(left ? Colors.Transparent : Colors.White, 0), new(Colors.White, 8 / TextWidth),
+            new(Colors.White, 1 - 8 / TextWidth), new(right ? Colors.Transparent : Colors.White, 1)
+        }
+    };
     private static string FormatTime(TimeSpan? value) => value is not { } time ? "—:—" : $"{(int)time.TotalMinutes}:{time.Seconds:00}";
     public unsafe void CopyStraightPixels()
     {
