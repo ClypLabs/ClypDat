@@ -61,24 +61,9 @@ public sealed partial class App : Application
             var viewModel = new MainWindowViewModel();
             var launchPresentation = ResolveLaunchPresentation(desktop.Args, viewModel);
             var minimized = LaunchPresentationPolicy.StartsInTray(launchPresentation);
-            // The playback warmup keeps its session now instead of throwing it
-            // away (see PlaybackSession.WarmUp), so it is the difference between
-            // the first clip click building a whole LibVLC engine - measured at
-            // 9-10s cold on a real install - and it reusing one. That makes WHEN
-            // it runs matter, and the answer differs by how the app was started.
-            //
-            // --minimized is the logon autostart: nobody is waiting, and the
-            // logon IO burst is real, so stay out of it. A manual launch is the
-            // opposite - somebody double-clicked the icon, and the overwhelming
-            // reason to do that is to watch a clip. Deferring 12s there just
-            // guaranteed the click landed inside the warm-up window and waited
-            // out the whole construction, which is exactly what the traces kept
-            // showing ("engine ready at 9836ms", clicked at launch+13s).
-            if (!UiPreviewMode.Enabled)
-            {
-                var warmupDelay = minimized ? TimeSpan.FromSeconds(12) : TimeSpan.FromSeconds(1);
-                _ = Task.Delay(warmupDelay).ContinueWith(_ => PlaybackSession.WarmUp(), TaskScheduler.Default);
-            }
+            // LibVLC construction is deferred until the editor asks for it.
+            // Starting its native plugin scan during app launch can terminate
+            // the process before the main window is ready.
             // The loader is also the startup update check. Autostart still
             // finishes in the tray, but it must not skip that work entirely.
             var useSplash = !UiPreviewMode.Enabled && LaunchPresentationPolicy.UsesStartupLoader(launchPresentation);
