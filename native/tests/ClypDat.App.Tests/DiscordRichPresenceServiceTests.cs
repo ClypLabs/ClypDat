@@ -25,6 +25,28 @@ public sealed class DiscordRichPresenceServiceTests
     }
 
     [Fact]
+    public void CreateActivity_ButtonToggles_KeepPresenceFieldsAndRemoveButton()
+    {
+        var presence = new DiscordPresence("Recording DOOM", "Replay ready", new DateTime(2026, 9, 8, 1, 2, 3, DateTimeKind.Utc));
+
+        using var on = JsonDocument.Parse(JsonSerializer.Serialize(
+            DiscordRichPresenceService.CreateActivity(presence, showGetClypDatButton: true)));
+        using var off = JsonDocument.Parse(JsonSerializer.Serialize(
+            DiscordRichPresenceService.CreateActivity(presence, showGetClypDatButton: false)));
+        using var onAgain = JsonDocument.Parse(JsonSerializer.Serialize(
+            DiscordRichPresenceService.CreateActivity(presence, showGetClypDatButton: true)));
+
+        Assert.True(on.RootElement.TryGetProperty("buttons", out var buttons));
+        Assert.Equal("Get ClypDat", buttons[0].GetProperty("label").GetString());
+        Assert.False(off.RootElement.TryGetProperty("buttons", out _));
+        Assert.True(onAgain.RootElement.TryGetProperty("buttons", out _));
+        Assert.Equal(on.RootElement.GetProperty("details").GetString(), off.RootElement.GetProperty("details").GetString());
+        Assert.Equal(on.RootElement.GetProperty("state").GetString(), off.RootElement.GetProperty("state").GetString());
+        Assert.Equal(on.RootElement.GetProperty("timestamps").GetProperty("start").GetInt64(),
+            off.RootElement.GetProperty("timestamps").GetProperty("start").GetInt64());
+    }
+
+    [Fact]
     public async Task CreateActivity_OfficialGameImage_UsesGameArtWithoutOverlay()
     {
         var officialImage = await OfficialGameArtService.ResolveAsync("riot-valorant", "VALORANT");

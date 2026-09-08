@@ -6532,7 +6532,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         "Capture",
         "Quality",
         "Audio",
-        "Startup"
+        "Startup",
+        "SaveClip",
+        "EditShare"
     };
 
     public bool IsOnboardingVisible
@@ -6571,12 +6573,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsFirstRunOnboarding = !Settings.HasSeenOnboarding;
         OnboardingStep = OnboardingStepOrder[0];
         IsOnboardingVisible = true;
-
-        // The running-process list only ever got filled when Settings was
-        // opened or Refresh was pressed, so onboarding's Chat Audio App picker
-        // started empty and looked broken until the user hit Refresh.
-        _ = RefreshOpenProcessesAsync();
-
         // Recorded the moment the walkthrough is SHOWN, not when it's
         // finished. HasSeenOnboarding is false only while no settings file
         // exists, but any save before the user finishes - changing a setting,

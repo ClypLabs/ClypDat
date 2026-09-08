@@ -67,8 +67,14 @@ internal static class DiscordRichPresenceService
 
     private static bool _enabled;
     private static bool _showGetClypDatButton;
-    private static DiscordPresence _desired = DiscordPresence.None;
-    private static DiscordPresence? _sent;
+    // Presence and button state form one activity revision. Keeping button
+    // state separately let an in-flight write acknowledge a newer toggle as
+    // already sent, leaving Discord with the old button until another activity
+    // change happened.
+    private sealed record ActivityRevision(DiscordPresence Presence, bool ShowButton, long Number);
+    private static long _revisionNumber;
+    private static ActivityRevision _desired = new(DiscordPresence.None, false, 0);
+    private static ActivityRevision? _sent;
     private static Task? _worker;
     private static CancellationTokenSource? _cts;
 
@@ -90,7 +96,8 @@ internal static class DiscordRichPresenceService
 
             // Same activity needs sending again when only its Discord button
             // changes; otherwise SetPresence correctly coalesces it away.
-            if (buttonChanged) _sent = null;
+            if (buttonChanged)
+                _desired = new(_desired.Presence, showGetClypDatButton, ++_revisionNumber);
         }
 
         if (!enabled)
@@ -112,8 +119,8 @@ internal static class DiscordRichPresenceService
     {
         lock (Sync)
         {
-            if (_desired == presence) return;
-            _desired = presence;
+            if (_desired.Presence == presence) return;
+            _desired = new ActivityRevision(presence, _showGetClypDatButton, ++_revisionNumber);
         }
 
         // Never blocks: the semaphore is a signal that work exists, and one
@@ -259,7 +266,7 @@ internal static class DiscordRichPresenceService
             // Null means "nothing changed". Resolved under the lock, sent
             // outside it - a pipe write must never be held across a lock the
             // UI thread also takes to push a new presence.
-            DiscordPresence? toSend;
+            ActivityRevision? toSend;
             lock (Sync) toSend = _desired == _sent ? null : _desired;
 
             if (toSend is not null)
@@ -277,9 +284,9 @@ internal static class DiscordRichPresenceService
         await drain.ConfigureAwait(false);
     }
 
-    private static async Task SendActivityAsync(NamedPipeClientStream pipe, DiscordPresence presence, CancellationToken cancellationToken)
+    private static async Task SendActivityAsync(NamedPipeClientStream pipe, ActivityRevision revision, CancellationToken cancellationToken)
     {
-        var activity = CreateActivity(presence, _showGetClypDatButton);
+        var activity = CreateActivity(revision.Presence, revision.ShowButton);
 
         var payload = JsonSerializer.Serialize(new
         {
@@ -305,14 +312,15 @@ internal static class DiscordRichPresenceService
                 ["timestamps"] = presence.StartedUtc is { } started
                     ? new { start = new DateTimeOffset(DateTime.SpecifyKind(started, DateTimeKind.Utc)).ToUnixTimeSeconds() }
                     : null,
-                ["assets"] = CreateAssets(presence),
-                ["buttons"] = showGetClypDatButton
-                    ? new[] { new { label = ButtonLabel, url = ButtonUrl } }
-                    : null
+                ["assets"] = CreateAssets(presence)
             };
 
             if (Trim(presence.Details) is { } details) fields["details"] = details;
             if (Trim(presence.State) is { } state) fields["state"] = state;
+            // Omitting buttons, rather than serializing buttons: null, gives
+            // Discord an unambiguous activity update that removes old buttons.
+            if (showGetClypDatButton)
+                fields["buttons"] = new[] { new { label = ButtonLabel, url = ButtonUrl } };
             return fields;
         }
 

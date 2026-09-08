@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="using:LibVLCSharp.Avalonia"
         xmlns:vm="using:ClypDat.App.ViewModels"
@@ -1950,201 +1950,42 @@
          #F5141D24). Written the wrong way round this parsed as alpha 00 with AA
          landing in the BLUE channel, i.e. fully transparent, so the scrim behind
          this dialog was never actually drawn. -->
-    <Border x:Name="OnboardingOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}"
-            PointerPressed="OnboardingOverlay_OnPointerPressed">
-      <!-- Fixed dimensions keep Back/Next in one place. Long step content scrolls
-           inside the body instead of resizing the dialog and moving its controls. -->
-      <Border Width="640" Height="560" CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1"
-              ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
-        <DockPanel Margin="1">
-          <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0">
-          <Grid ColumnDefinitions="Auto,*,Auto" Height="52">
-            <StackPanel Orientation="Horizontal" Spacing="8" Margin="14,0,0,0" VerticalAlignment="Center">
-              <Image Source="{DynamicResource AppLogoSmall}" Width="16" Height="16" />
-              <StackPanel Spacing="1">
-                <TextBlock Text="Welcome to ClypDat" Foreground="{StaticResource Text_EDF4FB}" FontSize="14" FontWeight="Bold" />
-                <TextBlock Text="Quick setup — you can change everything later" Foreground="{StaticResource Surface_718396}" FontSize="10.5" />
+    <Border x:Name="OnboardingOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}" PointerPressed="OnboardingOverlay_OnPointerPressed">
+      <Border Width="640" Height="560" CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,*,Auto" Margin="1">
+          <Border Grid.Row="0" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0">
+            <Grid ColumnDefinitions="Auto,*,Auto" Height="52">
+              <StackPanel Orientation="Horizontal" Spacing="8" Margin="14,0,0,0" VerticalAlignment="Center">
+                <Image Source="{DynamicResource AppLogoSmall}" Width="16" Height="16" />
+                <StackPanel Spacing="1"><TextBlock Text="Welcome to ClypDat" Foreground="{StaticResource Text_EDF4FB}" FontSize="14" FontWeight="Bold" /><TextBlock Text="Quick setup — you can change everything later" Foreground="{StaticResource Surface_718396}" FontSize="10.5" /></StackPanel>
               </StackPanel>
-            </StackPanel>
-            <Button Grid.Column="2" Classes="dialogClose" FontSize="22" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                    Width="48" Height="50" Click="OnboardingSkipButton_OnClick">
-              <TextBlock Text="×" Margin="0,-4,0,0" />
-            </Button>
-          </Grid>
-          </Border>
-
-          <StackPanel DockPanel.Dock="Bottom" Margin="24,0,24,20" Spacing="14">
-            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-              <TextBlock Text="{Binding OnboardingProgressLabel}" Foreground="{StaticResource Text_A9C9E5}" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
-              <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture}" />
-              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Quality}" />
-              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Audio}" />
-              <Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Startup}" />
-              </StackPanel>
-            </StackPanel>
-            <Grid ColumnDefinitions="Auto,*,Auto">
-              <Button Content="Skip setup" Width="116" HorizontalContentAlignment="Center" VerticalAlignment="Center" Click="OnboardingSkipButton_OnClick" />
-              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
-                <Button Content="Back" Width="96" HorizontalContentAlignment="Center" IsEnabled="{Binding OnboardingBackEnabled}" Click="OnboardingBackButton_OnClick" />
-                <Button Content="{Binding OnboardingNextLabel}" Width="96" HorizontalContentAlignment="Center" Classes="primaryButton" Click="OnboardingNextButton_OnClick" />
-              </StackPanel>
+              <Button Grid.Column="2" Classes="dialogClose" FontSize="22" Width="48" Height="50" Click="OnboardingSkipButton_OnClick"><TextBlock Text="×" Margin="0,-4,0,0" /></Button>
             </Grid>
-          </StackPanel>
-
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="24,22,24,20" Spacing="18">
-
-              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Capture}">
-                <TextBlock Text="Capture in seconds" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Choose where clips save, your save hotkey, and how far back your replay buffer reaches." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-
-                <Border Classes="onboardingSettingCard">
-                <StackPanel Spacing="16">
-                <StackPanel Spacing="6">
-                  <TextBlock Text="Library folder" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
-                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-                    <TextBlock Text="{Binding LibraryFolderDisplay}" Foreground="{StaticResource Text_6B7C8C}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <Button Grid.Column="1" Content="Use Default" Click="ResetLibraryFolderButton_OnClick" />
-                    <Button Grid.Column="2" Content="Change Folder" Click="FolderButton_OnClick" />
-                  </Grid>
-                </StackPanel>
-
-                <StackPanel Spacing="6">
-                  <TextBlock Text="Save hotkey" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
-                  <Button Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
-                </StackPanel>
-
-                <StackPanel Spacing="6">
-                  <TextBlock Text="Replay length" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
-                  <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
-                    <ListBox.ItemTemplate>
-                      <DataTemplate>
-                        <TextBlock Text="{Binding Label}" />
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                  </ListBox>
-                </StackPanel>
-                </StackPanel>
-                </Border>
-              </StackPanel>
-
-              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Quality}">
-                <TextBlock Text="Choose recording quality" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Balanced is a strong default. Higher quality uses more GPU, disk space and capture headroom." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-
-                <Border Classes="onboardingSettingCard">
-                <StackPanel Spacing="16">
-                  <StackPanel Spacing="6">
-                    <TextBlock Text="Quality preset" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
-                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}" HorizontalAlignment="Stretch">
-                      <ComboBox.ItemTemplate>
-                        <DataTemplate>
-                          <StackPanel Spacing="2">
-                            <TextBlock Text="{Binding Label}" />
-                            <TextBlock Text="{Binding Summary}" Foreground="{StaticResource Text_93A6B8}" FontSize="11" />
-                          </StackPanel>
-                        </DataTemplate>
-                      </ComboBox.ItemTemplate>
-                    </ComboBox>
-                  </StackPanel>
-                  <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                    <StackPanel Spacing="4">
-                      <TextBlock Text="Resolution" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="14" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
-                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
-                      </ComboBox>
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Spacing="4">
-                      <TextBlock Text="Frame rate" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="14" />
-                      <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" />
-                    </StackPanel>
-                  </Grid>
-                  <TextBlock Text="Bitrate, encoder and codec stay available in Settings → Capture when you want finer control." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
-                </StackPanel>
-                </Border>
-              </StackPanel>
-
-              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
-                <TextBlock Text="Microphone" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Choose microphone recorded with clips. Noise suppression, gate and Mic Test are ready in Settings → Audio." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-
-                <Border Classes="onboardingSettingCard">
-                <StackPanel Spacing="16">
-                <StackPanel Spacing="6">
-                  <TextBlock Text="Microphone" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" FontSize="15" />
-                  <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
-                  <TextBlock Text="Multiple microphones? Turn that on later in Settings &gt; Audio." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" />
-                </StackPanel>
-                <Border Background="{StaticResource Semantic_102723}" BorderBrush="{StaticResource Semantic_285A50}" BorderThickness="1" CornerRadius="9" Padding="13,11">
-                  <StackPanel Spacing="3">
-                    <TextBlock Text="Separate tracks stay flexible" Foreground="{StaticResource Semantic_B8F1DC}" FontSize="13" FontWeight="Bold" />
-                    <TextBlock Text="Enable Game Audio, Microphone, Spotify, Discord or other apps independently in Settings → Audio." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="11" TextWrapping="Wrap" />
-                    <TextBlock Text="Custom Game Settings and Game Audio exclusions are in Settings → Capture when you need per-game control." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="11" TextWrapping="Wrap" />
-                  </StackPanel>
-                </Border>
-                </StackPanel>
-                </Border>
-              </StackPanel>
-
-              <StackPanel Spacing="16" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}">
-                <TextBlock Text="Ready when you are" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
-                <TextBlock Text="Choose how ClypDat starts. You can revisit this walkthrough anytime from Settings → About." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-
-                <Border Classes="onboardingSettingCard">
-                <StackPanel Spacing="14">
-                  <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel Spacing="3">
-                      <TextBlock Text="Launch ClypDat on Windows boot" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
-                      <TextBlock Text="Keep replay ready after sign-in." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                  </Grid>
-                  <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel Spacing="3">
-                      <TextBlock Text="Start minimized to tray" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
-                      <TextBlock Text="Keep ClypDat out of the way while it records." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                  </Grid>
-                  <Border Height="1" Background="{StaticResource Surface_263544}" />
-                  <Grid ColumnDefinitions="*,Auto">
-                    <StackPanel Spacing="3">
-                      <TextBlock Text="Discord Rich Presence" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
-                      <TextBlock Text="Show your ClypDat activity on Discord. Anyone who can see your profile can see the game name." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                  </Grid>
-                  <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding DiscordRichPresenceEnabled}">
-                    <StackPanel Spacing="3">
-                      <TextBlock Text="Only show while playing a game" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
-                      <TextBlock Text="Hide ClypDat browsing, editing, and settings activity outside detected games." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceOnlyWhenGameActive}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                  </Grid>
-                  <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding DiscordRichPresenceEnabled}">
-                    <StackPanel Spacing="3">
-                      <TextBlock Text="Show Get ClypDat link" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" FontSize="14" />
-                      <TextBlock Text="Add a ClypDat profile link to your Discord activity." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceShowGetClypDatButton}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                  </Grid>
-                </StackPanel>
-                </Border>
-                <Border Background="{StaticResource Semantic_102723}" BorderBrush="{StaticResource Semantic_285A50}" BorderThickness="1" CornerRadius="9" Padding="15,13">
-                  <StackPanel Spacing="4">
-                    <TextBlock Text="You’re all set" Foreground="{StaticResource Semantic_B8F1DC}" FontSize="14" FontWeight="Bold" />
-                    <TextBlock Text="Press Finish, start replay, then capture something great." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="12" TextWrapping="Wrap" />
-                  </StackPanel>
-                </Border>
-              </StackPanel>
-
+          </Border>
+          <Grid Grid.Row="1" Margin="24,22,24,12">
+            <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Capture}">
+              <TextBlock Text="Capture in seconds" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Choose where clips save, your save hotkey, and replay length." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              <Border Classes="onboardingSettingCard" Padding="14"><StackPanel Spacing="9"><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="Library folder" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><TextBlock Text="{Binding LibraryFolderDisplay}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextTrimming="CharacterEllipsis" /></StackPanel><Button Grid.Column="1" Content="Change folder" Click="FolderButton_OnClick" /></Grid><Grid ColumnDefinitions="*,Auto"><TextBlock Text="Save hotkey" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" VerticalAlignment="Center" /><Button Grid.Column="1" Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" /></Grid><StackPanel Spacing="3"><TextBlock Text="Replay length" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ListBox Classes="pillGroup" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ListBox.ItemTemplate></ListBox></StackPanel></StackPanel></Border>
             </StackPanel>
-          </ScrollViewer>
-        </DockPanel>
+            <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Quality}">
+              <TextBlock Text="Choose recording quality" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Balanced is strong default. Higher quality uses more GPU and disk." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              <Border Classes="onboardingSettingCard" Padding="14"><StackPanel Spacing="10"><StackPanel Spacing="3"><TextBlock Text="Quality preset" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox></StackPanel><Grid ColumnDefinitions="*,*" ColumnSpacing="12"><StackPanel Spacing="3"><TextBlock Text="Resolution" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate></ComboBox></StackPanel><StackPanel Grid.Column="1" Spacing="3"><TextBlock Text="Frame rate" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" /></StackPanel></Grid></StackPanel></Border>
+            </StackPanel>
+            <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
+              <TextBlock Text="Audio" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Choose microphone for clips. Separate tracks keep edits flexible." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              <Border Classes="onboardingSettingCard" Padding="14"><StackPanel Spacing="10"><StackPanel Spacing="3"><TextBlock Text="Microphone" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" /></StackPanel><Border Background="{StaticResource Semantic_102723}" BorderBrush="{StaticResource Semantic_285A50}" BorderThickness="1" CornerRadius="9" Padding="12"><TextBlock Text="Enable game audio and microphone as separate tracks in Settings → Audio when you want independent editing later." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="11" TextWrapping="Wrap" /></Border></StackPanel></Border>
+            </StackPanel>
+            <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}">
+              <TextBlock Text="Ready when you are" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Choose how ClypDat starts. Change this later in Settings." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              <Border Classes="onboardingSettingCard" Padding="14"><StackPanel Spacing="12"><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="Launch ClypDat on Windows boot" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="Keep replay ready after sign-in." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="Start minimized to tray" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="Keep ClypDat out of way while it records." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid></StackPanel></Border>
+            </StackPanel>
+            <StackPanel Spacing="14" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=SaveClip}"><TextBlock Text="Save your first clip" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Start replay, let buffer fill, use configured hotkey, find clip in Library." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" /><Border Classes="onboardingSettingCard" Padding="18"><StackPanel Spacing="12"><TextBlock Text="1. Start replay from Library." Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="2. Play long enough to fill replay buffer." Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="3. Press save hotkey. Your clip appears in Library." Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /></StackPanel></Border></StackPanel>
+            <StackPanel Spacing="14" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=EditShare}"><TextBlock Text="Edit and share" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Clips stay local until you choose to export or share." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" /><Border Classes="onboardingSettingCard" Padding="18"><StackPanel Spacing="12"><TextBlock Text="Open clip from Library." Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="Trim what you need, then export or use Share." Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" TextWrapping="Wrap" /><TextBlock Text="Press Finish when ready." Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /></StackPanel></Border></StackPanel>
+          </Grid>
+          <StackPanel Grid.Row="2" Margin="24,0,24,20" Spacing="14"><StackPanel Orientation="Horizontal" Spacing="10"><TextBlock Text="{Binding OnboardingProgressLabel}" Foreground="{StaticResource Text_A9C9E5}" FontSize="11" FontWeight="Bold" /><StackPanel Orientation="Horizontal" Spacing="6"><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Quality}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Audio}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Startup}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=SaveClip}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=EditShare}" /></StackPanel></StackPanel><Grid ColumnDefinitions="Auto,*,Auto"><Button Content="Skip setup" Width="116" Click="OnboardingSkipButton_OnClick" /><StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10"><Button Content="Back" Width="96" IsEnabled="{Binding OnboardingBackEnabled}" Click="OnboardingBackButton_OnClick" /><Button Content="{Binding OnboardingNextLabel}" Width="96" Classes="primaryButton" Click="OnboardingNextButton_OnClick" /></StackPanel></Grid></StackPanel>
+        </Grid>
       </Border>
     </Border>
-
     <!-- New Clips popup - embedded in the main window rather than its own OS
          Window (which is what this used to be, built entirely in code-behind
          via CreateChromelessDialog). A separate Window has its own title bar

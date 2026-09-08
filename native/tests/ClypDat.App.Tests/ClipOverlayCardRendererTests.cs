@@ -99,12 +99,6 @@ public sealed class ClipOverlayCardRendererTests
         thread.Start();
         Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "Offscreen rasterization timed out.");
 
-        // Avalonia has one process-wide dispatcher. A separate test can claim
-        // it first, making this dedicated STA harness unavailable. The test is
-        // still exercised by isolated runs where it owns the dispatcher.
-        if (failure is InvalidOperationException { Message: var message }
-            && message.Contains("different thread owns it", StringComparison.Ordinal)) return;
-
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
