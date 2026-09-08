@@ -344,7 +344,10 @@ internal static class AppThemeService
 
     private static Bitmap Logo(bool large, bool light)
     {
-        var name = $"clypdat-icon-{(large ? 256 : 24)}{(light ? "-light" : string.Empty)}.png";
+        // Keep every in-app small mark backed by a 32px bitmap. Several compact
+        // surfaces draw it at 16–30px, and the old 24px source became soft when
+        // About scaled it up.
+        var name = $"clypdat-icon-{(large ? 256 : 32)}{(light ? "-light" : string.Empty)}.png";
         if (LogoCache.TryGetValue(name, out var cached)) return cached;
         var bitmap = new Bitmap(AssetLoader.Open(new Uri($"avares://ClypDat/Assets/{name}")));
         LogoCache[name] = bitmap;
