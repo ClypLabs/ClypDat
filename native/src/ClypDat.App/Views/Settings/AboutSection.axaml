@@ -25,7 +25,7 @@
     </Style>
     <Style Selector="Button.creditCard:pointerover, Button.creditCard:focus">
       <Setter Property="Background" Value="{StaticResource Surface_16212B}" />
-      <Setter Property="BorderBrush" Value="{StaticResource LinkBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     </Style>
     <Style Selector="TextBlock.creditRole">
       <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
