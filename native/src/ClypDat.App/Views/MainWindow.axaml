@@ -1005,6 +1005,24 @@
                                     </ContentControl.ContentTemplate>
                                   </ContentControl>
                                 </Border>
+                                <Border Background="{StaticResource Surface_CC0E151C}" IsVisible="{Binding IsSpotifyProcessing}" ZIndex="6">
+                                  <ContentControl Content="{Binding SpotifyProcessingText}">
+                                    <ContentControl.ContentTemplate>
+                                      <DataTemplate>
+                                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                                          <controls:ClypDatLoader Width="34" Height="34" HorizontalAlignment="Center" />
+                                          <TextBlock Text="{Binding}" Foreground="{StaticResource Text_DCE7F3}" />
+                                        </StackPanel>
+                                      </DataTemplate>
+                                    </ContentControl.ContentTemplate>
+                                  </ContentControl>
+                                </Border>
+                                <Border Background="{StaticResource Surface_CC0E151C}" IsVisible="{Binding IsSpotifyOverlayFailed}" VerticalAlignment="Bottom" ZIndex="6" Padding="8">
+                                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8">
+                                    <TextBlock Text="Spotify overlay failed" VerticalAlignment="Center" Foreground="{StaticResource Text_DCE7F3}" />
+                                    <Button Content="Retry" Click="SpotifyOverlayRetry_OnClick" />
+                                  </StackPanel>
+                                </Border>
                                 <TextBlock Text="{Binding SelectionOrder}"
                                            IsVisible="{Binding HasSelectionOrder}"
                                            Foreground="#FFFFFF"

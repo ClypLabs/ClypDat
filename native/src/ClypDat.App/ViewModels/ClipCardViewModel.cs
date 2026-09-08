@@ -107,7 +107,18 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
-    public bool IsOpenable => IsHydrated && !IsFinalizing;
+    public bool IsSpotifyProcessing => SpotifyProcessingPaths.IsProcessing(Path);
+    public string? SpotifyProcessingText => IsSpotifyProcessing ? "Adding Spotify overlay\u2026" : null;
+    public bool IsSpotifyOverlayFailed => SpotifyProcessingPaths.Failed(Path);
+    public bool IsOpenable => IsHydrated && !IsFinalizing && !IsSpotifyProcessing;
+
+    internal void RefreshSpotifyProcessing()
+    {
+        OnPropertyChanged(nameof(IsSpotifyProcessing));
+        OnPropertyChanged(nameof(SpotifyProcessingText));
+        OnPropertyChanged(nameof(IsSpotifyOverlayFailed));
+        OnPropertyChanged(nameof(IsOpenable));
+    }
     public DateTimeOffset CreatedAt => IsSteelSeriesImport && _clipInfo?.CapturedAt is { } capturedAt ? capturedAt : Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;

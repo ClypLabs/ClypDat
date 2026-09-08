@@ -46,6 +46,7 @@ public sealed class PlaybackSession : IDisposable
     private double _playbackRate = 1.0;
     private string? _cropMaskPath;
     private Media? _videoMedia;
+    internal string? LoadedPath { get; private set; }
     private volatile bool _disposed;
     private readonly CancellationTokenSource _disposeCts = new();
     // Generous on purpose: a preview decode holding _seekLock is bounded work, and
@@ -312,6 +313,8 @@ public sealed class PlaybackSession : IDisposable
     internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false, CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
         using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);
+        using var processingRead = SpotifyProcessingPaths.TryRead(path);
+        if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlay…");
         cancellationToken.ThrowIfCancellationRequested();
         // Split timings, because the three things this body does have wildly
         // different costs and only the total was ever visible: Stop() is
@@ -329,6 +332,7 @@ public sealed class PlaybackSession : IDisposable
         var teardownMs = loadClock.ElapsedMilliseconds;
         _ended = false;
         _lastRequestedPosition = TimeSpan.Zero;
+        LoadedPath = path;
         _videoMedia = new Media(_libVlc, new Uri(path));
         _videoMedia.AddOption(":no-audio");
         if (IsH264(videoCodec))
@@ -427,6 +431,8 @@ public sealed class PlaybackSession : IDisposable
     public Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, TimeSpan duration, CancellationToken cancellationToken) => Task.Run(() =>
     {
         using var load = _loadGate.Enter(cancellationToken);
+        using var processingRead = SpotifyProcessingPaths.TryRead(path);
+        if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlay…");
         cancellationToken.ThrowIfCancellationRequested();
         DisposeAudioOutput();
         _audioStreamIndexes.Clear();
@@ -605,8 +611,15 @@ public sealed class PlaybackSession : IDisposable
     /// violation. It is the same teardown prefix LoadVideoAsync already runs before
     /// loading a new path, so a later open re-runs it against nulls harmlessly.
     /// </summary>
+    internal Task UnloadMediaAsync(string path) => Task.Run(async () =>
+    {
+        using var load = await _loadGate.EnterAsync(CancellationToken.None).ConfigureAwait(false);
+        if (string.Equals(LoadedPath, path, StringComparison.OrdinalIgnoreCase)) UnloadMedia();
+    });
+
     public void UnloadMedia()
     {
+        LoadedPath = null;
         Stop();
 
         try

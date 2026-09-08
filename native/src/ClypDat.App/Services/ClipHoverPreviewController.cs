@@ -62,7 +62,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
     public void Request(ClipCardViewModel clip, bool enabled, IClipPreviewPresenter? presenter, PixelSize previewSize)
     {
-        if (!enabled || presenter is null || !File.Exists(clip.Path)) return;
+        if (!enabled || clip.IsSpotifyProcessing || presenter is null || !File.Exists(clip.Path)) return;
 
         CancellationTokenSource? warmExitCancellation = null;
         CancellationTokenSource? pendingCancellation = null;
@@ -199,7 +199,9 @@ internal sealed class ClipHoverPreviewController : IDisposable
         _ = ExpireWarmSessionAsync(clip, generation, warmToken);
     }
 
-    public void Stop(string reason)
+    public void Stop(string reason) => _ = StopAsync(reason);
+
+    public Task StopAsync(string reason)
     {
         SessionState state;
         CancellationTokenSource? pendingCancellation;
@@ -213,7 +215,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         }
         pendingCancellation?.Cancel();
         pendingCancellation?.Dispose();
-        _ = DisposeDetachedSessionAsync(state, reason, state.IsActive);
+        return DisposeDetachedSessionAsync(state, reason, state.IsActive);
     }
 
     public void StopIfActive(ClipCardViewModel clip, string reason)
@@ -285,6 +287,8 @@ internal sealed class ClipHoverPreviewController : IDisposable
 
     private async Task RunSessionAsync(ClipCardViewModel clip, int generation, PixelSize previewSize, IClipPreviewPresenter presenter, CancellationToken token, long requestTimestamp)
     {
+        using var processingRead = SpotifyProcessingPaths.TryRead(clip.Path);
+        if (processingRead is null) return;
         var metrics = new PreviewMetrics(requestTimestamp);
         try
         {
@@ -302,18 +306,26 @@ internal sealed class ClipHoverPreviewController : IDisposable
             while (!token.IsCancellationRequested && IsCurrent(clip, generation))
             {
                 using var process = StartDecoder(clip.Path, range, pacer.CurrentFrameRate, previewSize, clip.HoverPreviewCropFilter);
-                SetProcess(clip, generation, process);
-                var stderr = process.StandardError.ReadToEndAsync();
-                var sourceReadsBefore = GetReadBytes(process);
-                var (decoded, displayed) = await DeliverFramesAsync(process.StandardOutput.BaseStream, slots, clip, generation, presenter, previewSize, pacer, expectedFrameCount, metrics, token);
-                await process.WaitForExitAsync(CancellationToken.None);
-                metrics.AddReadBytes(GetReadBytes(process) - sourceReadsBefore);
-                ClearProcess(process);
-                var error = await stderr;
-                if (!token.IsCancellationRequested && IsCurrent(clip, generation) && decoded == 0 && displayed == 0)
+                try
                 {
-                    AppLog.Info($"Clip hover preview decoder failed: {Path.GetFileName(clip.Path)}. {error.Trim()}");
-                    return;
+                    SetProcess(clip, generation, process);
+                    var stderr = process.StandardError.ReadToEndAsync();
+                    var sourceReadsBefore = GetReadBytes(process);
+                    var (decoded, displayed) = await DeliverFramesAsync(process.StandardOutput.BaseStream, slots, clip, generation, presenter, previewSize, pacer, expectedFrameCount, metrics, token);
+                    await process.WaitForExitAsync(CancellationToken.None);
+                    metrics.AddReadBytes(GetReadBytes(process) - sourceReadsBefore);
+                    ClearProcess(process);
+                    var error = await stderr;
+                    if (!token.IsCancellationRequested && IsCurrent(clip, generation) && decoded == 0 && displayed == 0)
+                    {
+                        AppLog.Info($"Clip hover preview decoder failed: {Path.GetFileName(clip.Path)}. {error.Trim()}");
+                        return;
+                    }
+                }
+                finally
+                {
+                    Kill(process);
+                    await process.WaitForExitAsync();
                 }
             }
         }
@@ -530,6 +542,10 @@ internal sealed class ClipHoverPreviewController : IDisposable
     private static async Task DisposeSessionAsync(SessionState state, string reason, bool log, bool presenterDetached = false)
     {
         CancelSession(state);
+        if (state.Process is { } process)
+        {
+            try { await process.WaitForExitAsync(); } catch (InvalidOperationException) { }
+        }
         if (state.Presenter is not null)
         {
             if (!presenterDetached) await state.Presenter.SetAttachedAsync(false);

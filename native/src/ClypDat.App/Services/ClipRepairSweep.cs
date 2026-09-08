@@ -254,6 +254,8 @@ public static class ClipRepairSweep
             {
                 token.ThrowIfCancellationRequested();
                 var (clipPath, key, length) = corrupt[i];
+                using var fileOperation = SpotifyProcessingPaths.TryRead(clipPath);
+                if (fileOperation is null) continue;
                 currentIndex = i;
                 currentStartedUtc = DateTime.UtcNow;
                 currentFraction = 0;

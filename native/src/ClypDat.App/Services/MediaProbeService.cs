@@ -142,7 +142,7 @@ public sealed class MediaProbeService
             cached?.CaptureBackend ?? string.Empty,
             File.Exists(filmstripPath) ? filmstripPath : string.Empty,
             info.LastWriteTimeUtc,
-            cached is null || cached.Tracks.Any(track => track.Type == "video"));
+            cached is null || cached.Tracks.Any(track => track.Type == "video"), cached?.SpotifyOverlayBurned ?? false);
     }
 
     public async Task<TimeSpan> GetDurationAsync(string filePath, CancellationToken cancellationToken = default)
@@ -193,6 +193,8 @@ public sealed class MediaProbeService
     // generation - see HydrateLibraryClipsAsync for why that split matters.
     public async Task<MediaFileInfo> ProbeMetadataAsync(string filePath)
     {
+        using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
+        if (processingRead is null) return CreateLibraryStub(filePath);
         var info = new FileInfo(filePath);
         var thumbnailPath = GetThumbnailPath(filePath);
         var filmstripPath = GetFilmstripPath(filePath);
@@ -218,7 +220,7 @@ public sealed class MediaProbeService
                 cached.CaptureBackend,
                 File.Exists(filmstripPath) ? filmstripPath : string.Empty,
                 info.LastWriteTimeUtc,
-                cached.Tracks.Any(track => track.Type == "video"));
+                cached.Tracks.Any(track => track.Type == "video"), cached.SpotifyOverlayBurned);
         }
 
         var result = await RunProcessAsync("ffprobe", new[]
@@ -236,6 +238,7 @@ public sealed class MediaProbeService
         var height = 0;
         var fps = 0d;
         var captureBackend = string.Empty;
+        var spotifyOverlayBurned = false;
 
         if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
         {
@@ -250,6 +253,9 @@ public sealed class MediaProbeService
                 }
 
                 steelSeriesAudioTracks = ReadSteelSeriesAudioTracks(format);
+                if (format.TryGetProperty("tags", out var provenanceTags))
+                    spotifyOverlayBurned = provenanceTags.EnumerateObject().Any(tag =>
+                        tag.Name.Equals(SpotifyOverlayBurner.BurnMarker, StringComparison.OrdinalIgnoreCase) && tag.Value.GetString() == "1");
                 if (format.TryGetProperty("tags", out var formatTags) &&
                     formatTags.TryGetProperty("comment", out var commentTag))
                 {
@@ -320,7 +326,7 @@ public sealed class MediaProbeService
             captureBackend,
             File.Exists(filmstripPath) ? filmstripPath : string.Empty,
             info.LastWriteTimeUtc,
-            tracks.Any(track => track.Type == "video"));
+            tracks.Any(track => track.Type == "video"), spotifyOverlayBurned);
 
         if (duration > TimeSpan.Zero)
         {
@@ -332,7 +338,7 @@ public sealed class MediaProbeService
 
     // 1: frame rates are normalised (see FrameRateNormalizer) rather than stored
     // as the raw avg_frame_rate.
-    private const int ProbeCacheSchemaVersion = 1;
+    private const int ProbeCacheSchemaVersion = 2;
 
     private ProbeCacheEntry? TryReadProbeCache(string filePath, FileInfo info)
     {
@@ -372,7 +378,7 @@ public sealed class MediaProbeService
                 media.CaptureBackend,
                 media.Tracks,
                 media.HasVideo,
-                ProbeCacheSchemaVersion);
+                ProbeCacheSchemaVersion, media.SpotifyOverlayBurned);
             File.WriteAllText(GetProbeCachePath(filePath), JsonSerializer.Serialize(entry));
         }
         catch
@@ -449,6 +455,8 @@ public sealed class MediaProbeService
         // the first real open.
         bool populateMemoryCache = true)
     {
+        using var processingRead = SpotifyProcessingPaths.TryRead(media.Path);
+        if (processingRead is null) return new Dictionary<int, IReadOnlyList<double>>();
         var audioTracks = media.Tracks.Where(track => track.Type == "audio").ToArray();
         if (audioTracks.Length == 0) return new Dictionary<int, IReadOnlyList<double>>();
 
@@ -682,6 +690,8 @@ public sealed class MediaProbeService
 
     public async Task<string> EnsureThumbnailAsync(string filePath, TimeSpan _)
     {
+        using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
+        if (processingRead is null) return string.Empty;
         var output = GetThumbnailPath(filePath);
         if (File.Exists(output))
         {
@@ -751,6 +761,8 @@ public sealed class MediaProbeService
     // position, so it's shown as-is even if it happens to be black.
     public async Task<string> RegenerateThumbnailAsync(string filePath, TimeSpan atTime, string? cropFilter = null)
     {
+        using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
+        if (processingRead is null) return string.Empty;
         var output = GetThumbnailPath(filePath);
         // Crop before scale, so 960 is the width of the CROPPED frame - scaling
         // first and cropping after would cut a 960-wide picture down to a
@@ -850,6 +862,8 @@ public sealed class MediaProbeService
 
     private static async Task<string> GenerateFilmstripAsync(string filePath, TimeSpan duration, int frameCount, string output)
     {
+        using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
+        if (processingRead is null) return string.Empty;
         try
         {
             var arguments = new List<string> { "-y", "-v", "error" };
@@ -1244,6 +1258,8 @@ public sealed class MediaProbeService
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
@@ -1336,6 +1352,8 @@ public sealed class MediaProbeService
         catch (OperationCanceledException)
         {
             TryKill(process);
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            await errorTask.ConfigureAwait(false);
             throw;
         }
 
@@ -1617,6 +1635,8 @@ public sealed class MediaProbeService
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8,
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
@@ -1661,6 +1681,8 @@ public sealed class MediaProbeService
         catch (OperationCanceledException)
         {
             TryKill(process);
+            await process.WaitForExitAsync().ConfigureAwait(false);
+            await Task.WhenAll(outputTask, errorTask).ConfigureAwait(false);
             throw;
         }
         return new ProcessResult(process.ExitCode, await outputTask.ConfigureAwait(false), await errorTask.ConfigureAwait(false));
@@ -1743,7 +1765,8 @@ public sealed record MediaFileInfo(
     string CaptureBackend = "",
     string FilmstripPath = "",
     DateTime LastWriteTimeUtc = default,
-    bool HasVideo = true);
+    bool HasVideo = true,
+    bool SpotifyOverlayBurned = false);
 
 public sealed record MediaTrackInfo(int Index, string Type, string Codec, string Label, double VolumePercent = 100);
 
@@ -1770,7 +1793,8 @@ internal sealed record ProbeCacheEntry(
     // raw avg_frame_rate, and since the clips themselves never change they would
     // have been served from cache forever. Bump it whenever a cached value is
     // derived differently than it used to be.
-    int SchemaVersion = 0);
+    int SchemaVersion = 0,
+    bool SpotifyOverlayBurned = false);
 
 public sealed record MediaDurationProbeResult(TimeSpan Duration, string Error);
 

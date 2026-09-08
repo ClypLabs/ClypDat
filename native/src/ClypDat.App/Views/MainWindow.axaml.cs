@@ -450,6 +450,7 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
                     if (e.PropertyName == nameof(MainWindowViewModel.SelectedVideoPath)) ResetTimelineZoom();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsSettingsVisible) && ViewModel.IsSettingsVisible) PauseEditorPlayback();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsSelectedSpotifyProcessing)) UpdateEditorSurfaceVisibility();
                     if (e.PropertyName == nameof(MainWindowViewModel.EnableClipHoverPreview) && !ViewModel.EnableClipHoverPreview) _clipHoverPreview.Stop("setting disabled");
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible))
                     {
@@ -1019,15 +1020,16 @@ public sealed partial class MainWindow : Window
 
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
     {
+        // Runs before dispatch and before UI-owned SaveReplayAsync resumes.
+        if (string.IsNullOrWhiteSpace(completed.Error) && !string.IsNullOrWhiteSpace(completed.Path))
+            SpotifyProcessingPaths.Reserve(completed.Path);
         if (completed.IsRecovered)
         {
             Dispatcher.UIThread.Post(async () =>
             {
                 if (ViewModel is not null && !string.IsNullOrWhiteSpace(completed.Path))
                 {
-                    ViewModel.StampSpotifyTrack(completed.Path);
-                    await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
-                    await BurnSpotifyOverlayAsync(completed.Path);
+                    await ProcessSavedClipAsync(completed.Path, completed.SaveId.ToString());
                 }
             });
             return;
@@ -1055,21 +1057,52 @@ public sealed partial class MainWindow : Window
             if (ViewModel is not null)
             {
                 ViewModel.RecordDiscordClipSaved();
-                ViewModel.StampSpotifyTrack(completed.Path);
-                await ViewModel.AddOrUpdateLibraryClipAsync(completed.Path);
-                await BurnSpotifyOverlayAsync(completed.Path);
+                await ProcessSavedClipAsync(completed.Path, completed.SaveId.ToString());
             }
         });
     }
 
-    // The clip is in the library first and re-encoded second, so the card
-    // appears on a tile that is already there rather than the tile waiting on an
-    // encode. The library entry is refreshed once the file has been replaced.
-    private async Task BurnSpotifyOverlayAsync(string clipPath)
+    private async Task ProcessSavedClipAsync(string path, string? saveId = null, bool retry = false)
     {
-        if (ViewModel is null) return;
-        if (!await ViewModel.BurnSpotifyOverlayAsync(clipPath)) return;
-        await ViewModel.AddOrUpdateLibraryClipAsync(clipPath);
+        if (ViewModel is not { } model) return;
+        var restoreEditor = false;
+        var position = TimeSpan.Zero;
+        var resume = false;
+        await model.ProcessSavedClipAsync(path, saveId, async () =>
+        {
+            restoreEditor = model.IsEditorVisible && string.Equals(model.SelectedVideoPath, path, StringComparison.OrdinalIgnoreCase);
+            position = model.CurrentTime;
+            resume = model.IsPlaying;
+            var warmups = new[] { _editorHoverWarmup, _claimedEditorHoverWarmup, _adoptingEditorHoverWarmup }
+                .Where(w => w is not null && string.Equals(w.Path, path, StringComparison.OrdinalIgnoreCase)).ToArray();
+            foreach (var warmup in warmups) CancelEditorHoverWarmup(warmup);
+            if (warmups.Contains(_editorHoverWarmup)) _editorHoverWarmup = null;
+            if (warmups.Contains(_claimedEditorHoverWarmup)) _claimedEditorHoverWarmup = null;
+            if (warmups.Contains(_adoptingEditorHoverWarmup)) _adoptingEditorHoverWarmup = null;
+            if (restoreEditor) StopEditorPlayback(stopMode: PlaybackStopMode.Background);
+            await _clipHoverPreview.StopAsync("Spotify overlay");
+            // A load that started before the reservation must finish before unload.
+            await SpotifyProcessingPaths.DrainAsync(path, CancellationToken.None);
+            await AwaitEditorHoverStopAsync();
+            var sessions = warmups.Select(w => w!.Session).Append(string.Equals(_playback?.LoadedPath, path, StringComparison.OrdinalIgnoreCase) ? _playback : null)
+                .Where(session => session is not null).Distinct().ToArray();
+            foreach (var session in sessions) await session!.UnloadMediaAsync(path);
+        }, retry);
+        if (restoreEditor && model.IsEditorVisible && string.Equals(model.SelectedVideoPath, path, StringComparison.OrdinalIgnoreCase))
+        {
+            model.CurrentTime = position;
+            _spotifyPlaybackRestore = (path, position, resume);
+            QueueEditorPlayback();
+        }
+    }
+
+    private (string Path, TimeSpan Position, bool Resume)? _spotifyPlaybackRestore;
+
+    private async void SpotifyOverlayRetry_OnClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is Button { DataContext: ClipCardViewModel clip })
+            await ProcessSavedClipAsync(clip.Path, retry: true);
     }
 
     private void Worker_FullSessionRecordingToggled(object? sender, bool enabled)
@@ -3104,6 +3137,7 @@ public sealed partial class MainWindow : Window
                 // sidecar, and tile must retain this one capture identity.
                 var effectiveGameName = ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName, replayConfig.CaptureSource);
                 var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow, gameDisplayNameOverride: effectiveGameName, saveId: saveId));
+                SpotifyProcessingPaths.Reserve(outputPath);
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 RememberSessionClip(outputPath);
                 ViewModel.RecordDiscordClipSaved();
@@ -3121,6 +3155,7 @@ public sealed partial class MainWindow : Window
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
+                var savedSpotify = SpotifyNowPlayingService.Current;
                 var clipInfo = new ClipInfo(
                     effectiveGameName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
@@ -3131,9 +3166,11 @@ public sealed partial class MainWindow : Window
                     // date, and a save is the last moment to be waiting on an
                     // HTTP round trip. Only a track that was actually playing -
                     // a paused player is not what the clip was captured over.
-                    SpotifyTrack: SpotifyNowPlayingService.Current.IsPlaying ? SpotifyNowPlayingService.Current.Track : null,
-                    SpotifyArtist: SpotifyNowPlayingService.Current.IsPlaying ? SpotifyNowPlayingService.Current.Artist : null,
-                    SpotifyDurationMs: SpotifyNowPlayingService.Current is { IsPlaying: true, Duration: { } length }
+                    SpotifyTrack: savedSpotify.IsPlaying ? savedSpotify.Track : null,
+                    SpotifyArtist: savedSpotify.IsPlaying ? savedSpotify.Artist : null,
+                    SpotifyAlbum: savedSpotify.IsPlaying ? savedSpotify.Album : null,
+                    SpotifyProgressMs: savedSpotify.IsPlaying && savedSpotify.ProgressNow is { } progress ? (int)progress.TotalMilliseconds : null,
+                    SpotifyDurationMs: savedSpotify is { IsPlaying: true, Duration: { } length }
                         ? (int)length.TotalMilliseconds
                         : null,
                     AutoClipMarkers: clipWindow is { } window && autoClipEvents is not null
@@ -3141,7 +3178,8 @@ public sealed partial class MainWindow : Window
                         : null);
                 // Another plain file write with no UI affinity.
                 await Task.Run(() => ClipInfoSidecar.Save(libraryFolder, outputPath, clipInfo));
-                await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
+                ViewModel.TrackSpotifyArtwork(outputPath, savedSpotify.IsPlaying ? savedSpotify.ArtUrl : null);
+                await ProcessSavedClipAsync(outputPath, saveId.ToString());
                 // Saving a clip muxes the whole window and decodes a thumbnail
                 // for it - a burst with a definite end, so hand the memory back
                 // rather than carrying it for the rest of the session. The
@@ -4287,7 +4325,7 @@ public sealed partial class MainWindow : Window
         var showEditor = ViewModel.IsEditorVisible;
         EditorPanelRoot.Opacity = showEditor ? 1 : 0;
         EditorPanelRoot.IsHitTestVisible = showEditor;
-        EditorPanelRoot.IsEnabled = showEditor;
+        EditorPanelRoot.IsEnabled = showEditor && !ViewModel.IsSelectedSpotifyProcessing;
         EditorPanelRoot.Margin = showEditor ? default : OffscreenPark;
         EditorVideoView.Margin = ViewModel.IsEditorVideoAreaVisible ? default : OffscreenPark;
     }
@@ -6312,7 +6350,7 @@ public sealed partial class MainWindow : Window
 
     private async void PlayPauseButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (ViewModel is null) return;
+        if (ViewModel is null || ViewModel.IsSelectedSpotifyProcessing) return;
         if (_playback is null)
         {
             // Goes through QueueEditorPlayback rather than calling
@@ -6768,6 +6806,8 @@ public sealed partial class MainWindow : Window
     private async Task SaveTrimToOriginalAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        using var fileOperation = SpotifyProcessingPaths.TryRead(ViewModel.SelectedVideoPath);
+        if (fileOperation is null) return;
         var sourcePath = ViewModel.SelectedVideoPath;
 
         var trimEnd = ViewModel.TrimEnd > ViewModel.TrimStart ? ViewModel.TrimEnd : ViewModel.Duration;
@@ -6910,6 +6950,8 @@ public sealed partial class MainWindow : Window
     private async Task ExportCurrentClipAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        using var fileOperation = SpotifyProcessingPaths.TryRead(ViewModel.SelectedVideoPath);
+        if (fileOperation is null) return;
         PauseEditorPlayback();
         var libraryRoot = string.IsNullOrWhiteSpace(ViewModel.Settings.LibraryFolder)
             ? DefaultLibraryFolder()
@@ -7200,6 +7242,8 @@ public sealed partial class MainWindow : Window
     private async Task ShareCurrentClipAsync()
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        using var fileOperation = SpotifyProcessingPaths.TryRead(ViewModel.SelectedVideoPath);
+        if (fileOperation is null) return;
         _playback?.Pause();
         ViewModel.IsPlaying = false;
         CoverEditorSurface();
@@ -8272,6 +8316,7 @@ public sealed partial class MainWindow : Window
 
     private void QueueEditorPlayback()
     {
+        if (ViewModel is { } model && SpotifyProcessingPaths.IsProcessing(model.SelectedVideoPath)) return;
         _playbackStartCts?.Cancel();
         _playbackStartCts?.Dispose();
         var cts = new CancellationTokenSource();
@@ -8373,6 +8418,12 @@ public sealed partial class MainWindow : Window
 
                 if (cts.IsCancellationRequested) return;
                 await StartEditorPlaybackAsync(session, videoLoad, videoCodec, cts.Token, foregroundScope);
+                if (!cts.IsCancellationRequested && _spotifyPlaybackRestore is { } restore &&
+                    string.Equals(restore.Path, ViewModel?.SelectedVideoPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    _spotifyPlaybackRestore = null;
+                    await ApplyTimelineSeekAsync(restore.Position, restore.Resume);
+                }
             },
             DispatcherPriority.Default);
     }
@@ -10099,7 +10150,7 @@ public sealed partial class MainWindow : Window
 
     private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback)
     {
-        if (ViewModel is null) return;
+        if (ViewModel is null || ViewModel.IsSelectedSpotifyProcessing) return;
         resumePlayback = TimelineSeekResumePolicy.Resolve(resumePlayback, _editorSeekResumeIntent);
         _editorSeekResumeIntent = resumePlayback;
         _editorSeekCts?.Cancel();

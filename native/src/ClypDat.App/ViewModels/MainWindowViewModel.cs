@@ -221,6 +221,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         Settings = AppSettingsStore.Load();
         _xboxActivity.Changed += XboxActivityChanged;
         _spotify.Changed += SpotifyChanged;
+        SpotifyProcessingPaths.Changed += SpotifyProcessingChanged;
         _clypDatAccount.Changed += ClypDatAccountChanged;
         if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
         if (Settings.SpotifyEnabled) _ = _spotify.TryRestoreAsync();
@@ -4324,7 +4325,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _selectedSpotifyArtist,
             _selectedSpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
             Settings.SpotifyOverlayPosition,
-            Settings.SpotifyOverlayEnabled);
+            Settings.SpotifyOverlayEnabled && !_selectedSpotifyOverlayBurned);
 
     /// <summary>
     /// What the placement preview draws. The open clip's own track first, then
@@ -4894,6 +4895,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         foreach (var sourcePath in paths)
         {
+            using var fileOperation = SpotifyProcessingPaths.TryRead(sourcePath);
+            if (fileOperation is null) { skipped++; continue; }
             try
             {
                 var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(sourcePath), Settings.LibraryFolder);
@@ -5616,7 +5619,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (newIndex != oldIndex) AllClips.Move(oldIndex, newIndex);
     }
 
-    public async Task AddOrUpdateLibraryClipAsync(string filePath)
+    public async Task AddOrUpdateLibraryClipAsync(string filePath, bool hydrateImages = true, bool hydrateMetadata = true)
     {
         if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return;
         // Marked BEFORE any awaits below - the folder watcher's Created event
@@ -5662,6 +5665,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         AppLog.Debug($"Library quick add: {filePath} in {clock.ElapsedMilliseconds}ms.");
+        if (!hydrateMetadata) return;
 
         // Metadata first (fast - a probe-cache hit is a JSON read, and even a
         // real ffprobe is far lighter than image generation) - this alone is
@@ -5685,13 +5689,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // Without the guard, OpenMedia's unconditional IsEditorVisible =
             // true would pop the editor back open right after the user
             // closed it.
-            if (IsEditorVisible && string.Equals(SelectedVideoPath, filePath, StringComparison.OrdinalIgnoreCase))
+            if (!SpotifyProcessingPaths.IsProcessing(filePath) && IsEditorVisible && string.Equals(SelectedVideoPath, filePath, StringComparison.OrdinalIgnoreCase))
             {
                 OpenMedia(probedMedia, preserveEditorText: true);
             }
         });
 
-        _ = HydrateClipImagesAsync(clip, filePath);
+        if (hydrateImages) _ = HydrateClipImagesAsync(clip, filePath);
     }
 
     // Second stage of AddOrUpdateLibraryClipAsync - thumbnail/filmstrip
@@ -5755,6 +5759,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _xboxActivity.Changed -= XboxActivityChanged;
         _xboxActivity.Dispose();
         _spotify.Changed -= SpotifyChanged;
+        SpotifyProcessingPaths.Changed -= SpotifyProcessingChanged;
+        _spotifyPostSaveCancellation.Cancel();
         _spotify.Dispose();
         _spotifyProgressTimer?.Stop();
         _spotifyProgressTimer = null;
@@ -5792,6 +5798,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public Task OpenVideoFileAsync(string filePath)
     {
+        if (SpotifyProcessingPaths.IsProcessing(filePath)) return Task.CompletedTask;
         // Library hydration deliberately keeps running in the background here
         // - opening a clip shouldn't stop the rest of the library from
         // filling in behind it. Only closing ClypDat (Dispose) should stop it.
@@ -5814,7 +5821,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // A full session's video lands in the library before its audio is
             // muxed in, so "not hydrated" and "still encoding" are different
             // waits and deserve different sentences.
-            ClipNotReadyMessage = clip.IsFinalizing
+            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…" : clip.IsFinalizing
                 ? SessionFinalizeWaitMessage(clip.Path)
                 : "Still loading this clip's info - try again in a moment.";
             _clipNotReadyMessageTimer.Stop();
@@ -5849,7 +5856,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // A full session's video lands in the library before its audio is
             // muxed in, so "not hydrated" and "still encoding" are different
             // waits and deserve different sentences.
-            ClipNotReadyMessage = clip.IsFinalizing
+            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…" : clip.IsFinalizing
                 ? SessionFinalizeWaitMessage(clip.Path)
                 : "Still loading this clip's info - try again in a moment.";
             _clipNotReadyMessageTimer.Stop();
@@ -6007,11 +6014,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task<int> DeleteSelectedAsync()
     {
-        var selected = AllClips.Where(clip => clip.IsSelected).ToArray();
+        var selected = AllClips.Where(clip => clip.IsSelected && !clip.IsSpotifyProcessing).ToArray();
         HashSet<string>? importedKeys = null;
         HashSet<string>? steelSeriesKeys = null;
         foreach (var clip in selected)
         {
+            using var fileOperation = SpotifyProcessingPaths.TryRead(clip.Path);
+            if (fileOperation is null) continue;
             // Read the sidecar's MedalImportKey BEFORE deleting it below - once
             // gone, there's no way to know this clip was ever a Medal import,
             // and its key would stay stuck in the "already imported" history
@@ -6056,6 +6065,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task DeleteClipAsync(ClipCardViewModel clip)
     {
+        using var fileOperation = SpotifyProcessingPaths.TryRead(clip.Path);
+        if (fileOperation is null) return;
         // Read the import keys before anything is deleted - the sidecar that carries
         // them goes below - but PERSIST the history changes only after the file is
         // actually gone. They used to be written first, so a delete that failed (a
@@ -6115,6 +6126,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task RenameClipAsync(ClipCardViewModel clip, string newTitle)
     {
+        using var fileOperation = SpotifyProcessingPaths.TryRead(clip.Path);
+        if (fileOperation is null) return;
         var title = newTitle?.Trim() ?? string.Empty;
         var sanitizedTitle = SanitizeFileTitle(title);
         if (string.IsNullOrWhiteSpace(sanitizedTitle)) return;
@@ -6213,6 +6226,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // to rename it back to.
     public async Task RenameClipTitleAsync(ClipCardViewModel clip, string newCustomTitle)
     {
+        using var fileOperation = SpotifyProcessingPaths.TryRead(clip.Path);
+        if (fileOperation is null) return;
         var sanitized = newCustomTitle.Trim();
         var existingInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, clip.Path);
         var updatedInfo = (existingInfo ?? new ClipInfo(null, null)) with
@@ -6246,6 +6261,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // the library, including a collision-resolved "(2)" suffix.
     public async Task RenameClipForBatchAsync(ClipCardViewModel clip, string newTitle)
     {
+        using var fileOperation = SpotifyProcessingPaths.TryRead(clip.Path);
+        if (fileOperation is null) return;
         var title = newTitle.Trim();
         var sanitizedTitle = SanitizeFileTitle(title);
         if (string.IsNullOrWhiteSpace(sanitizedTitle)) return;
@@ -6807,6 +6824,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// A clip that already carries one is left alone - re-stamping would give a
     /// re-saved or repaired clip whatever happens to be playing now.
     /// </summary>
+    internal void TrackSpotifyArtwork(string path, string? url) =>
+        _spotifyArtwork[path] = SpotifyCoverArtStore.FetchAsync(Settings.LibraryFolder, path, url);
+
     public void StampSpotifyTrack(string clipPath)
     {
         if (string.IsNullOrWhiteSpace(clipPath) || !Settings.SpotifyEnabled) return;
@@ -6834,7 +6854,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // The art is fetched after the sidecar is written, so a clip still
             // carries its track when the download fails or the machine is
             // offline - the card just renders without a cover.
-            _ = SpotifyCoverArtStore.FetchAsync(Settings.LibraryFolder, clipPath, track.ArtUrl);
+            _spotifyArtwork[clipPath] = SpotifyCoverArtStore.FetchAsync(Settings.LibraryFolder, clipPath, track.ArtUrl);
         }
         catch (Exception error)
         {
@@ -6851,38 +6871,90 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// from the live connection - by the time an encode finishes, the song may
     /// have moved on.
     /// </summary>
-    public async Task<bool> BurnSpotifyOverlayAsync(string clipPath)
+    private readonly SpotifyPostSaveCoordinator _spotifyPostSave = new();
+    private readonly Dictionary<string, Task> _spotifyArtwork = new(StringComparer.OrdinalIgnoreCase);
+    private readonly CancellationTokenSource _spotifyPostSaveCancellation = new();
+
+    internal Task<SpotifyOverlayOutcome> ProcessSavedClipAsync(string clipPath, string? saveId,
+        Func<Task> releaseReaders, bool retry = false)
     {
-        if (!Settings.SpotifyOverlayBurnIn || !Settings.SpotifyOverlayEnabled) return false;
-        if (string.IsNullOrWhiteSpace(clipPath)) return false;
+        // Capture every setting before queueing behind another save.
+        var library = Settings.LibraryFolder;
+        var enabled = Settings.SpotifyOverlayBurnIn && Settings.SpotifyOverlayEnabled;
+        var position = Settings.SpotifyOverlayPosition;
+        StampSpotifyTrack(clipPath);
+        var job = _spotifyPostSave.RunAsync(clipPath, saveId, retry, releaseReaders, async token =>
+        {
+            var result = SpotifyOverlayOutcome.Skipped;
+            try
+            {
+                if (enabled) result = await BurnSpotifyOverlayAsync(clipPath, library, position, token);
+                if (result == SpotifyOverlayOutcome.Completed) _mediaProbe.DeleteCacheFor(clipPath);
+                await AddOrUpdateLibraryClipAsync(clipPath, hydrateImages: false);
+                var card = AllClips.FirstOrDefault(c => string.Equals(c.Path, clipPath, StringComparison.OrdinalIgnoreCase));
+                if (card is not null) await HydrateClipImagesAsync(card, clipPath);
+                if (string.Equals(SelectedVideoPath, clipPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    _selectedSpotifyOverlayBurned = ClipInfoSidecar.Load(library, clipPath)?.SpotifyOverlayBurned == true;
+                    RaiseSpotifyOverlayPreviewChanged();
+                }
+            }
+            catch (OperationCanceledException) { result = SpotifyOverlayOutcome.Cancelled; }
+            catch (Exception error) { AppLog.Error($"Spotify overlay post-save: {clipPath}", error); result = SpotifyOverlayOutcome.Failed; }
+            return result;
+        }, _spotifyPostSaveCancellation.Token);
+        _ = AddOrUpdateLibraryClipAsync(clipPath, hydrateImages: false, hydrateMetadata: false);
+        return job;
+    }
 
-        var info = ClipInfoSidecar.Load(Settings.LibraryFolder, clipPath);
-        if (info is null || string.IsNullOrWhiteSpace(info.SpotifyTrack)) return false;
-
-        var card = new SpotifyCard(
-            info.SpotifyTrack!,
-            info.SpotifyArtist,
-            info.SpotifyAlbum,
+    private async Task<SpotifyOverlayOutcome> BurnSpotifyOverlayAsync(string clipPath, string library, string position, CancellationToken token)
+    {
+        var info = ClipInfoSidecar.Load(library, clipPath);
+        if (info is null || string.IsNullOrWhiteSpace(info.SpotifyTrack) || info.SpotifyOverlayBurned) return SpotifyOverlayOutcome.Skipped;
+        // Recover provenance after a crash between the atomic replacement and sidecar write.
+        if ((await SpotifyOverlayBurner.InspectAsync(clipPath, token)).Burned)
+        {
+            MarkBurned();
+            return SpotifyOverlayOutcome.Completed;
+        }
+        if (_spotifyArtwork.TryGetValue(clipPath, out var artwork))
+        {
+            try { await artwork.WaitAsync(TimeSpan.FromSeconds(16), token); }
+            catch (TimeoutException) { }
+            finally { _spotifyArtwork.Remove(clipPath); }
+        }
+        info = ClipInfoSidecar.Load(library, clipPath) ?? info;
+        var card = new SpotifyCard(info.SpotifyTrack!, info.SpotifyArtist, info.SpotifyAlbum,
             info.SpotifyDurationMs is { } milliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null,
             info.SpotifyProgressMs is { } progress ? TimeSpan.FromMilliseconds(progress) : null,
-            info.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, clipPath));
+            info.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(library, clipPath));
+        var probed = await _mediaProbe.ProbeMetadataAsync(clipPath);
+        var cardPath = SpotifyOverlayCardRenderer.Render(card, probed.Height > 0 ? probed.Height : 1080,
+            SpotifyOverlayCardRenderer.WorkPath("burn"), probed.Width);
+        if (cardPath is null) return SpotifyOverlayOutcome.Failed;
+        try
+        {
+            var result = await SpotifyOverlayBurner.BurnAsync(clipPath, cardPath, position, token);
+            if (result is SpotifyOverlayOutcome.Completed or SpotifyOverlayOutcome.Skipped) MarkBurned();
+            return result;
+        }
+        finally { try { File.Delete(cardPath); } catch { } }
 
-        // Height comes from the clip itself: a burn runs on a clip that is not
-        // necessarily the one open in the editor.
-        var probed = await _mediaProbe.ProbeMetadataAsync(clipPath).ConfigureAwait(false);
-        var height = probed.Height > 0 ? probed.Height : 1080;
-        var cardPath = SpotifyOverlayCardRenderer.Render(card, height, SpotifyOverlayCardRenderer.WorkPath("burn"), probed.Width);
-        if (cardPath is null) return false;
-
-        var burned = await SpotifyOverlayBurner.BurnAsync(clipPath, cardPath, Settings.SpotifyOverlayPosition).ConfigureAwait(false);
-        if (!burned) return false;
-
-        ClipInfoSidecar.Save(Settings.LibraryFolder, clipPath, info with { SpotifyOverlayBurned = true });
-
-        // The tile's thumbnail was made from the file this just replaced.
-        CardThumbnailCache.Invalidate(clipPath);
-        return true;
+        void MarkBurned()
+        {
+            var latest = ClipInfoSidecar.Load(library, clipPath);
+            if (latest is not null) ClipInfoSidecar.Save(library, clipPath, latest with { SpotifyOverlayBurned = true });
+        }
     }
+
+    public bool IsSelectedSpotifyProcessing => SpotifyProcessingPaths.IsProcessing(SelectedVideoPath);
+
+    private void SpotifyProcessingChanged(string path) => Dispatcher.UIThread.Post(() =>
+    {
+        foreach (var clip in AllClips.Where(c => string.Equals(c.Path, path, StringComparison.OrdinalIgnoreCase)))
+            clip.RefreshSpotifyProcessing();
+        OnPropertyChanged(nameof(IsSelectedSpotifyProcessing));
+    });
 
     private void SpotifyChanged(object? sender, SpotifyNowPlaying snapshot)
     {
@@ -8238,6 +8310,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false, bool showEditor = true)
     {
+        if (SpotifyProcessingPaths.IsProcessing(media.Path)) return;
         ResetVideoZoom();
         // Answered BEFORE SelectedVideoPath is overwritten one line down.
         // HydrateSelectedMediaAsync, HydrateOpenClipAsync and
@@ -8291,7 +8364,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedSpotifyDurationMs = clipInfo?.SpotifyDurationMs;
         _selectedSpotifyProgressMs = clipInfo?.SpotifyProgressMs;
         _selectedSpotifyArtPath = clipInfo?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
-        _selectedSpotifyOverlayBurned = clipInfo?.SpotifyOverlayBurned == true;
+        _selectedSpotifyOverlayBurned = media.SpotifyOverlayBurned || clipInfo?.SpotifyOverlayBurned == true;
         OnPropertyChanged(nameof(SelectedSpotifyLabel));
         OnPropertyChanged(nameof(SelectedHasSpotifyTrack));
         OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
@@ -8684,6 +8757,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task<string?> MoveClipToGameAsync(string path, TimeSpan knownDuration, string game)
     {
+        using var fileOperation = SpotifyProcessingPaths.TryRead(path);
+        if (fileOperation is null) return null;
         var libraryRoot = Settings.LibraryFolder;
         try
         {
