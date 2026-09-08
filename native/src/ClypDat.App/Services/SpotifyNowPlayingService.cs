@@ -178,6 +178,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         TryDeleteCache();
         _snapshot = SpotifyNowPlaying.Disconnected;
         Current = _snapshot;
+        Sampled?.Invoke(this, _snapshot);
         Changed?.Invoke(this, _snapshot);
     }
 

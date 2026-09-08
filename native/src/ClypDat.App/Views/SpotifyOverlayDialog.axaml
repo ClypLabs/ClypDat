@@ -43,7 +43,7 @@
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
           <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Show the track on clips" />
-            <TextBlock Classes="settingsRowDescSm" Text="Drawn in at export - never while recording." />
+            <TextBlock Classes="settingsRowDescSm" Text="Previewed here; included in exports and optional saved clips." />
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
@@ -74,15 +74,7 @@
               <Border Background="{StaticResource SpotifyDialogBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75"
                       HorizontalAlignment="Center" VerticalAlignment="Center" />
 
-              <Border Margin="14"
-                      Padding="12,8"
-                      CornerRadius="6"
-                      Background="{StaticResource OverlayPreviewCardBrush}"
-                      HorizontalAlignment="{Binding SelectedSpotifyOverlayPosition, Converter={x:Static opconv:OverlayPositionToHorizontalAlignmentConverter.Instance}}"
-                      VerticalAlignment="{Binding SelectedSpotifyOverlayPosition, Converter={x:Static opconv:OverlayPositionToVerticalAlignmentConverter.Instance}}">
-                <TextBlock Text="{Binding SpotifyOverlayPreviewText}" Foreground="White" FontWeight="Bold" FontSize="13"
-                           TextTrimming="CharacterEllipsis" MaxWidth="300" />
-              </Border>
+              <Canvas Name="SpotifyPreviewCanvas" IsHitTestVisible="False" />
             </Panel>
           </Border>
 
@@ -126,7 +118,7 @@
 
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="360" VerticalAlignment="Center"
-                     Text="A clip carries whatever was playing when it was saved. Placement is read at export, so changing it here applies to clips you already have." />
+                     Text="A clip follows recorded Spotify playback. Placement is read at export, so changing it here applies to clips you already have." />
           <Button Grid.Column="1" Classes="primaryButton" Content="Done" Click="CloseButton_OnClick" VerticalAlignment="Center" />
         </Grid>
       </StackPanel>

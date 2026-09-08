@@ -85,7 +85,8 @@ public static class LibraryLayout
 
     public static void MoveSidecars(string libraryRoot, string oldVideoPath, string newVideoPath)
     {
-        foreach (var suffix in new[] { ".info.json", ".eve.json", ".paused.json" })
+        SpotifyTimelineSidecar.Copy(libraryRoot, oldVideoPath, newVideoPath);
+        foreach (var suffix in new[] { ".info.json", ".eve.json", ".paused.json", ".cover.jpg", ".source.json" })
         {
             var newPath = SidecarPath(libraryRoot, newVideoPath, suffix);
             var candidates = new[]
@@ -109,5 +110,13 @@ public static class LibraryLayout
                 break;
             }
         }
+        var info = ClipInfoSidecar.Load(libraryRoot, newVideoPath);
+        if (info is not null)
+        {
+            var art = SpotifyTimelineSidecar.Load(libraryRoot, newVideoPath)?.Samples.FirstOrDefault(item => item.ArtPath is not null)?.ArtPath
+                ?? SpotifyCoverArtStore.Existing(libraryRoot, newVideoPath);
+            ClipInfoSidecar.Save(libraryRoot, newVideoPath, info with { SpotifyArtPath = art });
+        }
+        if (!string.Equals(oldVideoPath, newVideoPath, StringComparison.OrdinalIgnoreCase)) SpotifyTimelineSidecar.Delete(libraryRoot, oldVideoPath);
     }
 }

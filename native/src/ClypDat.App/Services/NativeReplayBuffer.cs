@@ -689,6 +689,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // is long enough to hit the same drift, just less obviously since
             // it's usually the ONLY segment. Chunking here the same way fixes it
             // for any configured replay length, not just multi-hour sessions.
+            SpotifySourceWindow.Save(config.LibraryFolder, outputPath, windowStartUtc, windowDurationSeconds);
             const double SegmentChunkSeconds = 60;
             var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)>();
             var chunkStartUtc = windowStartUtc;

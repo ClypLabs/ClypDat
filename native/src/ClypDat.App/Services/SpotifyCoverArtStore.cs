@@ -12,6 +12,56 @@ namespace ClypDat.App.Services;
 /// </summary>
 internal static class SpotifyCoverArtStore
 {
+    public static async Task<SpotifyTimeline> FetchTimelineAsync(string root, string clip, SpotifyTimeline timeline, CancellationToken token)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(16));
+        using var slots = new SemaphoreSlim(4);
+        var urls = timeline.Samples.Select(item => item.ArtUrl).Where(url => !string.IsNullOrWhiteSpace(url)).Distinct().ToArray();
+        var folder = LibraryLayout.SidecarPath(root, clip, ".spotify-art");
+        var tasks = urls.Select(async url =>
+        {
+            var entered = false;
+            try
+            {
+                await slots.WaitAsync(deadline.Token).ConfigureAwait(false);
+                entered = true;
+                var key = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(url!)));
+                var path = Path.Combine(folder, key + ".jpg");
+                if (!File.Exists(path))
+                {
+                    using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
+                    response.EnsureSuccessStatusCode();
+                    if (response.Content.Headers.ContentLength > 8 * 1024 * 1024) return (url, path: (string?)null);
+                    await using var source = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
+                    using var data = new MemoryStream();
+                    var buffer = new byte[16384];
+                    int read;
+                    while ((read = await source.ReadAsync(buffer, deadline.Token).ConfigureAwait(false)) > 0)
+                    {
+                        if (data.Length + read > 8 * 1024 * 1024) return (url, path: (string?)null);
+                        data.Write(buffer, 0, read);
+                    }
+                    Directory.CreateDirectory(folder);
+                    var temporary = path + ".tmp";
+                    try
+                    {
+                        await File.WriteAllBytesAsync(temporary, data.ToArray(), deadline.Token).ConfigureAwait(false);
+                        File.Move(temporary, path, true);
+                    }
+                    finally { if (File.Exists(temporary)) File.Delete(temporary); }
+                }
+                return (url, path: (string?)path);
+            }
+            catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
+            { return (url, path: (string?)null); }
+            finally { if (entered) slots.Release(); }
+        });
+        var paths = (await Task.WhenAll(tasks).ConfigureAwait(false)).ToDictionary(item => item.url!, item => item.path);
+        token.ThrowIfCancellationRequested();
+        return timeline with { Samples = timeline.Samples.Select(item => item with {
+            ArtPath = item.ArtUrl is { } url && paths.TryGetValue(url, out var path) ? path : item.ArtPath, ArtUrl = null }).ToArray() };
+    }
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
     /// <summary>Where a clip's art lives, whether or not it exists yet.</summary>

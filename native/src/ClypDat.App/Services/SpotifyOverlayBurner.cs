@@ -134,7 +134,8 @@ internal static class SpotifyOverlayBurner
         var args = process.StartInfo.ArgumentList;
         args.Add("-v"); args.Add("error"); args.Add("-y");
         args.Add("-i"); args.Add(clip);
-        args.Add("-loop"); args.Add("1"); args.Add("-i"); args.Add(card);
+        if (Path.GetExtension(card).Equals(".png", StringComparison.OrdinalIgnoreCase)) { args.Add("-loop"); args.Add("1"); }
+        args.Add("-i"); args.Add(card);
         args.Add("-filter_complex"); args.Add(graph);
         args.Add("-map"); args.Add("[video]"); args.Add("-map"); args.Add("0:a?"); args.Add("-map_metadata"); args.Add("0");
         foreach (var item in codec) args.Add(item);
@@ -150,14 +151,8 @@ internal static class SpotifyOverlayBurner
         return false;
     }
 
-    private static string OverlayGraph(string? position)
-    {
-        const string margin = "main_h*0.035";
-        var x = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true ? "main_w-overlay_w-" + margin : margin;
-        var y = position?.StartsWith("Top", StringComparison.OrdinalIgnoreCase) == true ? margin :
-            position?.StartsWith("Center", StringComparison.OrdinalIgnoreCase) == true ? "(main_h-overlay_h)/2" : "main_h-overlay_h-" + margin;
-        return $"[0:v:0][1:v:0]overlay={x}:{y}:shortest=1:eof_action=pass[video]";
-    }
+    private static string OverlayGraph(string? position) =>
+        ClipRenderFilters.ComposeWithAnimation(null, position, "[0:v:0]", "[video]");
 
     private static IReadOnlyList<string> HardwareCodecArguments() => ExportEncoderProbe.Family switch
     {

@@ -1,4 +1,7 @@
 using Avalonia.Controls;
+using Avalonia.Threading;
+using ClypDat.App.Controls;
+using ClypDat.App.Services;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using ClypDat.App.ViewModels;
@@ -22,6 +25,25 @@ public partial class SpotifyOverlayDialog : Window
     public SpotifyOverlayDialog(MainWindowViewModel viewModel) : this()
     {
         DataContext = viewModel;
+        var preview = new SpotifyCardPreview();
+        SpotifyPreviewCanvas.Children.Add(preview);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        string? track = null;
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 30) };
+        timer.Tick += (_, _) =>
+        {
+            var spec = viewModel.SpotifyDialogSpec();
+            if (spec.LegacyCard?.Track != track) { track = spec.LegacyCard?.Track; clock.Restart(); }
+            var scale = SpotifyOverlayCardRenderer.Scale(518, 291);
+            preview.Width = 406 * scale;
+            preview.Height = 140 * scale;
+            Canvas.SetLeft(preview, spec.Position.EndsWith("Right", StringComparison.OrdinalIgnoreCase) ? 518 - preview.Width : 0);
+            Canvas.SetTop(preview, spec.Position.StartsWith("Top", StringComparison.OrdinalIgnoreCase) ? 14 * 291 / 1080.0 :
+                spec.Position.StartsWith("Center", StringComparison.OrdinalIgnoreCase) ? (291 - preview.Height) / 2 : 291 - preview.Height - 14 * 291 / 1080.0);
+            preview.Update(spec, clock.Elapsed.TotalSeconds, 518, 291);
+        };
+        Opened += (_, _) => timer.Start();
+        Closed += (_, _) => { timer.Stop(); preview.Dispose(); };
     }
 
     // The window has no system chrome, so the title bar drags it.

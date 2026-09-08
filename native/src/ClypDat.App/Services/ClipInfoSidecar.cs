@@ -123,6 +123,7 @@ public static class ClipInfoSidecar
 
     public static void Delete(string libraryRoot, string clipPath)
     {
+        SpotifyTimelineSidecar.Delete(libraryRoot, clipPath);
         try
         {
             var paths = new[] { SidecarPath(libraryRoot, clipPath), LibraryLayout.LegacySidecarPath(clipPath, ".info.json") };

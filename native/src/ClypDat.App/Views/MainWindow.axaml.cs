@@ -310,6 +310,7 @@ public sealed partial class MainWindow : Window
     {
         Background = Brushes.Black;
         InitializeComponent();
+        InitializeSpotifyPreview();
         UpdateEditorSurfaceVisibility();
         _startupWindowCloaked = StartupWindowPresentation.TryCloak(this);
         if (!_startupWindowCloaked) Opacity = 0;
@@ -422,7 +423,7 @@ public sealed partial class MainWindow : Window
                 // changes it, so the choice is visible against the clip that is
                 // already open behind the dialog.
                 ViewModel.SpotifyOverlayPreviewChanged += (_, _) =>
-                    ViewModel?.ApplySpotifyOverlayPreview(_playback?.VideoPlayer);
+                    _spotifyPreviewDirty = true;
                 ViewModel.RecordingOverlayPreviewRequested += (_, _) =>
                     ShowGameDetectedNotification(ViewModel.ActiveGameDetection.IsDetected
                         ? ViewModel.ActiveGameDetection.DisplayName : "Your game", preview: true);
@@ -953,6 +954,7 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not IReplayBuffer buffer) return;
         if (!ReferenceEquals(_replayBuffer, buffer) || ViewModel is null) return;
+        ViewModel.PinSpotifySave(started.SaveId);
         if (_uiOwnedSaveIds.ContainsKey(started.SaveId))
         {
             AppLog.Info($"Clip overlay skipped: trigger=save-started, id={started.SaveId}, reason=ui-owned-save.");
@@ -1041,6 +1043,7 @@ public sealed partial class MainWindow : Window
         }
         if (!string.IsNullOrWhiteSpace(completed.Error))
         {
+            ViewModel?.ReleaseSpotifySave(completed.SaveId);
             ShowClipNotification("save-failed", "Clip Failed", playSound: false, saveCompletion: true, saveId: completed.SaveId, requestedUtc: completed.RequestedUtc);
             Dispatcher.UIThread.Post(async () => await ShowMessageAsync("Clip Failed", completed.Error));
             return;
@@ -3057,6 +3060,7 @@ public sealed partial class MainWindow : Window
     {
         var isAutoClip = autoClipLabel is not null;
         var saveId = Guid.NewGuid();
+        ViewModel?.PinSpotifySave(saveId);
         var requestedUtc = DateTime.UtcNow;
         if (!isAutoClip)
         {
@@ -3076,6 +3080,7 @@ public sealed partial class MainWindow : Window
         }
         else if (!await _clipSaveLock.WaitAsync(0))
         {
+            ViewModel?.ReleaseSpotifySave(saveId);
             ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
             return false;
         }
@@ -3155,30 +3160,17 @@ public sealed partial class MainWindow : Window
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
-                var savedSpotify = SpotifyNowPlayingService.Current;
                 var clipInfo = new ClipInfo(
                     effectiveGameName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
                     autoClipLabel ?? effectiveGameName,
                     File.GetCreationTimeUtc(outputPath),
                     CaptureSource: replayConfig.CaptureSource,
-                    // Read, not fetched: the poll keeps the current track up to
-                    // date, and a save is the last moment to be waiting on an
-                    // HTTP round trip. Only a track that was actually playing -
-                    // a paused player is not what the clip was captured over.
-                    SpotifyTrack: savedSpotify.IsPlaying ? savedSpotify.Track : null,
-                    SpotifyArtist: savedSpotify.IsPlaying ? savedSpotify.Artist : null,
-                    SpotifyAlbum: savedSpotify.IsPlaying ? savedSpotify.Album : null,
-                    SpotifyProgressMs: savedSpotify.IsPlaying && savedSpotify.ProgressNow is { } progress ? (int)progress.TotalMilliseconds : null,
-                    SpotifyDurationMs: savedSpotify is { IsPlaying: true, Duration: { } length }
-                        ? (int)length.TotalMilliseconds
-                        : null,
                     AutoClipMarkers: clipWindow is { } window && autoClipEvents is not null
                         ? ClipEventMarkerMapping.FromEvents(autoClipEvents, window.StartUtc, window.EndUtc)
                         : null);
                 // Another plain file write with no UI affinity.
                 await Task.Run(() => ClipInfoSidecar.Save(libraryFolder, outputPath, clipInfo));
-                ViewModel.TrackSpotifyArtwork(outputPath, savedSpotify.IsPlaying ? savedSpotify.ArtUrl : null);
                 await ProcessSavedClipAsync(outputPath, saveId.ToString());
                 // Saving a clip muxes the whole window and decodes a thumbnail
                 // for it - a burst with a definite end, so hand the memory back
@@ -3199,6 +3191,7 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
+            ViewModel?.ReleaseSpotifySave(saveId);
             if (ViewModel is not null) ViewModel.IsSavingReplayClip = false;
             _clipSaveLock.Release();
         }
@@ -5027,9 +5020,8 @@ public sealed partial class MainWindow : Window
         _playback = session;
         EditorVideoView.MediaPlayer = session.VideoPlayer;
         EditorVideoView.WatchMediaPlayer(session.VideoPlayer);
-        // The Spotify line, drawn by the video output itself - see
-        // SpotifyEditorMarquee for why it cannot be an Avalonia control.
-        ViewModel?.ApplySpotifyOverlayPreview(session.VideoPlayer);
+        // Refresh the owned Spotify card after attaching this video surface.
+        _spotifyPreviewDirty = true;
         warmup.MarkPlayerAttached();
 
         void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
@@ -6849,7 +6841,8 @@ public sealed partial class MainWindow : Window
                     etaText.IsVisible = true;
                 }
             });
-            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath), exportDuration, progress, progressCts.Token);
+            using var spotifyAnimation = await ViewModel.PrepareSpotifyAnimationAsync(progressCts.Token);
+            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath, animation: spotifyAnimation), exportDuration, progress, progressCts.Token);
             if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
             {
                 // Same hardware-then-CPU fallback as Export.
@@ -6859,7 +6852,7 @@ public sealed partial class MainWindow : Window
                 percentText.Text = string.Empty;
                 etaText.IsVisible = false;
                 encodeClock.Restart();
-                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
+                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildTrimArguments(tempPath, useHardwareEncoder: false, animation: spotifyAnimation), exportDuration, progress, progressCts.Token);
             }
             progressWindow.Close();
             if (progressCts.IsCancellationRequested) return;
@@ -6892,6 +6885,8 @@ public sealed partial class MainWindow : Window
             }
             File.SetCreationTimeUtc(sourcePath, createdUtc);
             AudioCapturePipeline.TryDelete(backupPath);
+
+            SpotifyTimelineSidecar.Copy(ViewModel.Settings.LibraryFolder, sourcePath, sourcePath, ViewModel.TrimStart.TotalSeconds, ViewModel.TrimEnd.TotalSeconds, ViewModel.ClipSpeed);
 
             // The ".paused.json" sidecar records pause ranges as offsets into
             // the ORIGINAL recording. A trim just replaced that file with a
@@ -6926,15 +6921,17 @@ public sealed partial class MainWindow : Window
                 .Where(marker => marker.OffsetSeconds >= trimStartSeconds && marker.OffsetSeconds <= trimEndSeconds)
                 .Select(marker => marker with { OffsetSeconds = marker.OffsetSeconds - trimStartSeconds })
                 .ToArray();
-            ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true, AutoClipMarkers = rebasedMarkers });
+            ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true, AutoClipMarkers = rebasedMarkers, SpotifyOverlayBurned = trimmedInfo.SpotifyOverlayBurned || spotifyAnimation is not null });
             _pausedRanges.Clear();
             RefreshPausedBadge();
 
             await ViewModel.FinalizeSavedTrimAsync(sourcePath);
             QueueEditorPlayback();
         }
+        catch (OperationCanceledException) when (progressCts.IsCancellationRequested) { }
         catch (Exception error)
         {
+            if (progressWindow.IsVisible) progressWindow.Close();
             await ShowMessageAsync("Save Trim failed", error.Message);
         }
         finally
@@ -7036,7 +7033,8 @@ public sealed partial class MainWindow : Window
                     etaText.IsVisible = true;
                 }
             });
-            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath), exportDuration, progress, progressCts.Token);
+            using var spotifyAnimation = await ViewModel.PrepareSpotifyAnimationAsync(progressCts.Token);
+            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, animation: spotifyAnimation), exportDuration, progress, progressCts.Token);
             if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
             {
                 // The detected hardware encoder still failed on this particular
@@ -7048,7 +7046,7 @@ public sealed partial class MainWindow : Window
                 percentText.Text = string.Empty;
                 etaText.IsVisible = false;
                 encodeClock.Restart();
-                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, useHardwareEncoder: false), exportDuration, progress, progressCts.Token);
+                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, useHardwareEncoder: false, animation: spotifyAnimation), exportDuration, progress, progressCts.Token);
             }
             progressWindow.Close();
             if (progressCts.IsCancellationRequested)
@@ -7077,9 +7075,21 @@ public sealed partial class MainWindow : Window
                     CapturedAt: exportTimestamp,
                     CustomTitle: isCustomTitle ? exportTitle : null,
                     IsExport: true));
+                SpotifyTimelineSidecar.Copy(ViewModel.Settings.LibraryFolder, ViewModel.SelectedVideoPath, outputPath, ViewModel.TrimStart.TotalSeconds, ViewModel.TrimEnd.TotalSeconds, ViewModel.ClipSpeed);
+                var outputInfo = ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, outputPath);
+                if (sourceInfo is not null && outputInfo is not null) ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, outputPath, outputInfo with {
+                    SpotifyTrack = sourceInfo.SpotifyTrack, SpotifyArtist = sourceInfo.SpotifyArtist, SpotifyAlbum = sourceInfo.SpotifyAlbum,
+                    SpotifyDurationMs = sourceInfo.SpotifyDurationMs, SpotifyOverlayBurned = sourceInfo.SpotifyOverlayBurned || spotifyAnimation is not null,
+                    SpotifyArtPath = SpotifyTimelineSidecar.Load(ViewModel.Settings.LibraryFolder, outputPath)?.Samples.FirstOrDefault(item => item.ArtPath is not null)?.ArtPath ?? SpotifyCoverArtStore.Existing(libraryRoot, outputPath) });
                 if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 ExplorerService.Open(outputPath, selectFile: true);
             }
+        }
+        catch (OperationCanceledException) when (progressCts.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            if (progressWindow.IsVisible) progressWindow.Close();
+            await ShowMessageAsync("Export failed", error.Message);
         }
         finally
         {
@@ -10513,6 +10523,8 @@ public sealed partial class MainWindow : Window
         catch (OperationCanceledException)
         {
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            await process.WaitForExitAsync();
+            await errorTask;
             return new ProcessResult(-1, outputBuilder.ToString(), "Cancelled.");
         }
 

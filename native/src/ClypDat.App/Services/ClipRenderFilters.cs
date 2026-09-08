@@ -110,51 +110,14 @@ public static class ClipRenderFilters
         return stages.Count == 0 ? null : string.Join(",", stages);
     }
 
-    // Where the card sits, in the same six names the clip-save notification
-    // uses. The margin is a fraction of the frame so a 1080p export and a 1440p
-    // one are laid out the same rather than to the same pixel counts.
-    private const double OverlayMarginFraction = 0.035;
-
-    /// <summary>
-    /// Composites a rendered card over the video.
-    ///
-    /// The card arrives as a PNG - see SpotifyOverlayCardRenderer - and is
-    /// brought into the graph by the movie source rather than as a second input,
-    /// so the same string works whether the caller is using a plain -vf or is
-    /// already inside a filter_complex for its audio mixdown.
-    /// </summary>
-    /// <param name="effects">The clip's own crop/speed chain, or null.</param>
-    /// <param name="inputLabel">"[in]" for a -vf graph, "[0:v:0]" inside a filter_complex.</param>
-    /// <param name="outputLabel">The label the graph must end on, or null for -vf.</param>
-    public static string ComposeWithCard(string? effects, string cardPath, string? position, string inputLabel, string? outputLabel)
+    public static string ComposeWithAnimation(string? effects, string? position, string inputLabel, string? outputLabel)
     {
-        var margin = $"(main_h*{Format(OverlayMarginFraction)})";
-        var x = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true
-            ? $"main_w-overlay_w-{margin}"
-            : margin;
-        var y = position?.StartsWith("Top", StringComparison.OrdinalIgnoreCase) == true
-            ? margin
-            : position?.StartsWith("Center", StringComparison.OrdinalIgnoreCase) == true
-                ? "(main_h-overlay_h)/2"
-                : $"main_h-overlay_h-{margin}";
-
-        var graph = new System.Text.StringBuilder();
-        graph.Append($"movie='{EscapeFilterPath(cardPath)}'[spotifycard];");
-        if (!string.IsNullOrWhiteSpace(effects))
-        {
-            graph.Append($"{inputLabel}{effects}[spotifybase];[spotifybase][spotifycard]overlay={x}:{y}");
-        }
-        else
-        {
-            graph.Append($"{inputLabel}[spotifycard]overlay={x}:{y}");
-        }
-        if (!string.IsNullOrWhiteSpace(outputLabel)) graph.Append(outputLabel);
-        return graph.ToString();
+        var x = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true ? "main_w-overlay_w" : "0";
+        var inset = "main_h*14/1080";
+        var y = position?.StartsWith("Top", StringComparison.OrdinalIgnoreCase) == true ? inset :
+            position?.StartsWith("Center", StringComparison.OrdinalIgnoreCase) == true ? "(main_h-overlay_h)/2" : $"main_h-overlay_h-{inset}";
+        return $"{inputLabel}{(string.IsNullOrWhiteSpace(effects) ? "null" : effects)}[spotifybase];[spotifybase][1:v:0]overlay={x}:{y}:eof_action=pass:repeatlast=0:alpha=straight{outputLabel}";
     }
-
-    // A Windows path inside a filtergraph needs its drive colon escaped, or the
-    // parser reads "C" as a complete option value.
-    private static string EscapeFilterPath(string path) => path.Replace(":", "\\:");
 
     /// <summary>
     /// Audio tempo chain, or an empty string when the clip plays at 1x.

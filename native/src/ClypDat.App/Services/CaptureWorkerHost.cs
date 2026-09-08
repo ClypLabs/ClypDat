@@ -451,7 +451,7 @@ internal static class CaptureWorkerHost
                 // No Spotify track here on purpose: this runs in the capture
                 // worker, a separate process, where nothing has ever polled
                 // Spotify. The app stamps the track onto the sidecar when the
-                // save reaches it - see MainWindowViewModel.StampSpotifyTrack.
+                // save reaches it, using the persisted source clock window.
                 ClipInfoSidecar.Save(_config.LibraryFolder, path, new ClipInfo(
                     gameDisplayName,
                     null,

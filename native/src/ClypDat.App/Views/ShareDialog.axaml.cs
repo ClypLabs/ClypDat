@@ -425,6 +425,7 @@ public partial class ShareDialog : Window
 
         try
         {
+            using var spotifyAnimations = new SpotifyAnimationCache(_viewModel.CaptureSpotifyRenderSpec());
             var exportDuration = _viewModel.ExportDuration;
             // Restarted per attempt (CPU fallback, size retry) - each one is a
             // fresh encode at a different speed, so carrying the previous
@@ -453,8 +454,15 @@ public partial class ShareDialog : Window
             long actualBytes = 0;
             MainWindow.ProcessResult result;
 
-            async Task<MainWindow.ProcessResult> TryTierAsync() =>
-                await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, tier, useAv1, bitrateScale, useAdvancedNvenc), exportDuration, progress, cts.Token, background: true);
+            async Task<MainWindow.ProcessResult> TryTierAsync()
+            {
+                var crop = _viewModel.ActiveCropRect;
+                var output = _viewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds,
+                    crop?.Width ?? _viewModel.SelectedSourceWidth, crop?.Height ?? _viewModel.SelectedSourceHeight,
+                    _viewModel.SelectedSourceFps, targetBytes, useAv1);
+                var animation = await spotifyAnimations.GetAsync(output.Width, output.Height, cts.Token);
+                return await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, tier, useAv1, bitrateScale, useAdvancedNvenc, animation), exportDuration, progress, cts.Token, background: true);
+            }
 
             // Walks NVENC -> AMD AMF -> Intel QSV -> CPU from wherever `tier`
             // currently sits, same "try, fall through if this vendor doesn't

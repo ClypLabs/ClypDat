@@ -91,12 +91,13 @@ public sealed class ClipOverlayCardRendererTests
                     recording with { Title = "Recording: HELLDIVERS™ 2", Hotkey = "Insert", HotkeyHint = "to save a clip" }));
                 Assert.True(longTitle.Width > shortTitle.Width, "The card has to size itself to the title.");
                 Assert.Equal(shortTitle.Height, longTitle.Height);
+                SpotifyFrameChecks.Run();
             }
             catch (Exception error) { failure = error; }
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "Offscreen rasterization timed out.");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "Offscreen rasterization timed out.");
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
