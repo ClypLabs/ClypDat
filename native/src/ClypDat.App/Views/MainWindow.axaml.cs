@@ -3826,6 +3826,7 @@ public sealed partial class MainWindow : Window
             entry.IsHovered = true;
             var previewSize = ClipHoverPreviewController.ResolvePreviewSize(preview.Bounds.Size, RenderScaling);
             _clipHoverPreview.Request(entry.Clip, ViewModel?.EnableClipHoverPreview == true, preview, previewSize);
+            if (ViewModel?.EnableClipHoverPreview == true) StartEditorHoverWarmup(entry.Clip);
         };
         card.PointerExited += (_, _) =>
         {
@@ -4289,12 +4290,10 @@ public sealed partial class MainWindow : Window
     // the user actually stares at the thumbnail placeholder for (engine
     // construction, thread-pool pickup, the previous clip's teardown) was
     // entirely invisible in the logs. Marked at each stage below.
-    private readonly System.Diagnostics.Stopwatch _editorOpenClock = new();
-
     private async Task<bool> OpenClipCardAsync(ClipCardViewModel clip)
     {
         if (ViewModel is null) return false;
-        _editorOpenClock.Restart();
+        var openClock = System.Diagnostics.Stopwatch.StartNew();
         var warmup = ClaimEditorHoverWarmup(clip.Path);
         _clipHoverPreview.Stop("clip opened");
         // Snapshot while Library is still visible/laid out - once
@@ -4313,8 +4312,8 @@ public sealed partial class MainWindow : Window
             return false;
         }
         _claimedEditorHoverWarmup = warmup;
-        AppLog.Debug($"Editor open trace: editor state ready at {_editorOpenClock.ElapsedMilliseconds}ms (UI thread).");
-        QueueEditorPlayback();
+        AppLog.Debug($"Editor open trace: editor state ready at {openClock.ElapsedMilliseconds}ms (UI thread).");
+        QueueEditorPlayback(openClock);
         return true;
     }
 
@@ -4926,6 +4925,7 @@ public sealed partial class MainWindow : Window
             presenter?.Bounds.Size ?? default, RenderScaling);
         _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible,
             presenter, previewSize);
+        if (ViewModel?.EnableClipHoverPreview == true) StartEditorHoverWarmup(clip);
     }
 
     private void ClipCard_OnPointerExited(object? sender, PointerEventArgs e)
@@ -8341,8 +8341,9 @@ public sealed partial class MainWindow : Window
         return window;
     }
 
-    private void QueueEditorPlayback()
+    private void QueueEditorPlayback(System.Diagnostics.Stopwatch? requestedOpenClock = null)
     {
+        var openClock = requestedOpenClock ?? System.Diagnostics.Stopwatch.StartNew();
         if (ViewModel is { } model && SpotifyProcessingPaths.IsProcessing(model.SelectedVideoPath)) return;
         _playbackStartCts?.Cancel();
         _playbackStartCts?.Dispose();
@@ -8378,7 +8379,7 @@ public sealed partial class MainWindow : Window
         if (claimedWarmup is not null)
         {
             _adoptingEditorHoverWarmup = claimedWarmup;
-            QueueClaimedEditorHoverWarmup(claimedWarmup, cts);
+            QueueClaimedEditorHoverWarmup(claimedWarmup, cts, openClock);
             return;
         }
         StopEditorPlayback(cancelQueuedStart: false, stopMode: PlaybackStopMode.Skip);
@@ -8409,7 +8410,6 @@ public sealed partial class MainWindow : Window
         //   "UI thread stalled: no response for 5s" ... "recovered after 10.9s".
         // Off-thread, a cold open still waits on libvlc, but the window keeps
         // painting and the editor shows its loading state instead of hanging.
-        var openClock = _editorOpenClock;
         var sessionTask = GetEditorPlaybackSessionAfterPendingStopAsync(cts.Token, openClock);
         // Read off the view model here, not inside the continuation - by the
         // time that runs the selection may already have moved on.
@@ -8444,7 +8444,7 @@ public sealed partial class MainWindow : Window
                 }
 
                 if (cts.IsCancellationRequested) return;
-                await StartEditorPlaybackAsync(session, videoLoad, videoCodec, cts.Token, foregroundScope);
+                await StartEditorPlaybackAsync(session, videoLoad, videoCodec, cts.Token, openClock, foregroundScope);
                 if (!cts.IsCancellationRequested && _spotifyPlaybackRestore is { } restore &&
                     string.Equals(restore.Path, ViewModel?.SelectedVideoPath, StringComparison.OrdinalIgnoreCase))
                 {
@@ -8455,7 +8455,7 @@ public sealed partial class MainWindow : Window
             DispatcherPriority.Default);
     }
 
-    private void QueueClaimedEditorHoverWarmup(EditorHoverWarmup warmup, CancellationTokenSource cts)
+    private void QueueClaimedEditorHoverWarmup(EditorHoverWarmup warmup, CancellationTokenSource cts, System.Diagnostics.Stopwatch openClock)
     {
         if (ViewModel is null) return;
         _editorForegroundScope?.Dispose();
@@ -8471,7 +8471,7 @@ public sealed partial class MainWindow : Window
                 {
                     var session = await warmup.SessionReady.Task;
                     if (cts.IsCancellationRequested) return;
-                    await StartEditorPlaybackAsync(session, warmup.VideoLoaded.Task, warmup.Codec, cts.Token, foregroundScope, warmup);
+                    await StartEditorPlaybackAsync(session, warmup.VideoLoaded.Task, warmup.Codec, cts.Token, openClock, foregroundScope, warmup);
                 }
                 catch (OperationCanceledException)
                 {
@@ -8494,6 +8494,7 @@ public sealed partial class MainWindow : Window
         Task videoLoad,
         string videoCodec,
         CancellationToken cancellationToken,
+        System.Diagnostics.Stopwatch openClock,
         IDisposable? foregroundScope = null,
         EditorHoverWarmup? hoverWarmup = null)
     {
@@ -8503,7 +8504,7 @@ public sealed partial class MainWindow : Window
         try
         {
             await videoLoad;
-            AppLog.Debug($"Editor open trace: video load done at {_editorOpenClock.ElapsedMilliseconds}ms.");
+            AppLog.Debug($"Editor open trace: video load done at {openClock.ElapsedMilliseconds}ms.");
             if (cancellationToken.IsCancellationRequested) return;
             playback.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
             _playback = playback;
@@ -8548,7 +8549,7 @@ public sealed partial class MainWindow : Window
             void ConfirmVideoReady(string source)
             {
                 if (!videoReady.TrySetResult()) return;
-                AppLog.Debug($"Editor {source} ready at {_editorOpenClock.ElapsedMilliseconds}ms.");
+                AppLog.Debug($"Editor {source} ready at {openClock.ElapsedMilliseconds}ms.");
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (cancellationToken.IsCancellationRequested) return;
@@ -8588,11 +8589,20 @@ public sealed partial class MainWindow : Window
                 // "how slow is this clip's storage" number for network-drive
                 // diagnosis (pairs with the "Editor video load: network=..."
                 // line logged at LoadVideo).
-                AppLog.Debug($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms (total from click {_editorOpenClock.ElapsedMilliseconds}ms).");
+                AppLog.Debug($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms (total from click {openClock.ElapsedMilliseconds}ms).");
                 ConfirmVideoReady("first frame");
             }
             playback.VideoPlayer.TimeChanged += OnTimeChanged;
             playback.VideoPlayer.Vout += OnVout;
+            // A reused player can still emit callbacks after a newer click has
+            // cancelled this request. Remove this request's handlers at the
+            // cancellation boundary rather than letting a later clip consume
+            // them. Register invokes immediately when cancellation won a race.
+            using var eventCleanup = cancellationToken.Register(() =>
+            {
+                playback.VideoPlayer.TimeChanged -= OnTimeChanged;
+                playback.VideoPlayer.Vout -= OnVout;
+            });
 
             // A claimed hover player already rendered a frame through this
             // exact HWND, then paused. Reveal it immediately; PlayFrom below
