@@ -5,7 +5,7 @@ using Avalonia.Threading;
 namespace ClypDat.App.Services;
 
 internal sealed record SpotifyRenderSpec(SpotifyTimeline? Timeline, SpotifyCard? LegacyCard, int Width, int Height,
-    double Start, double Duration, double Speed, string Position, FontFamily Font)
+    double Start, double Duration, double Speed, string Position, FontFamily Font, bool DynamicBackground = true)
 {
     public (SpotifyCard? Card, double SongSeconds) At(double outputSeconds)
     {
@@ -40,7 +40,7 @@ public sealed class SpotifyOverlayAnimation : IDisposable
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardError = true } };
         try
         {
-            renderer = await Dispatcher.UIThread.InvokeAsync(() => new SpotifyCardFrames(spec.Width, spec.Height, spec.Position, spec.Font));
+            renderer = await Dispatcher.UIThread.InvokeAsync(() => new SpotifyCardFrames(spec.Width, spec.Height, spec.Position, spec.Font, spec.DynamicBackground));
             foreach (var arg in new[] { "-v", "error", "-y", "-f", "rawvideo", "-pixel_format", "bgra", "-video_size", $"{renderer.Width}x{renderer.Height}",
                 "-framerate", "30", "-i", "pipe:0", "-an", "-c:v", "ffv1", "-level", "3", "-pix_fmt", "bgra", path }) process.StartInfo.ArgumentList.Add(arg);
             token.ThrowIfCancellationRequested();

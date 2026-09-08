@@ -27,9 +27,9 @@ internal static class SpotifyOverlayCardRenderer
         return Math.Max(0, overflow - (phase - travel - 2) * 24);
     }
     public static string? Render(SpotifyCard card, int frameHeight, string outputPath, int frameWidth = 1920,
-        string? position = null, double seconds = 0, FontFamily? font = null)
+        string? position = null, double seconds = 0, FontFamily? font = null, bool dynamicBackground = true)
     {
-        using var renderer = new SpotifyCardFrames(frameWidth, frameHeight, position, font ?? ResolveFont());
+        using var renderer = new SpotifyCardFrames(frameWidth, frameHeight, position, font ?? ResolveFont(), dynamicBackground);
         renderer.Render(card, seconds);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
         renderer.Bitmap.Save(outputPath, PngBitmapEncoderOptions.Default);
@@ -47,7 +47,7 @@ internal sealed class SpotifyCardFrames : IDisposable
     {
         StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
         EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
-        GradientStops = { new(Color.FromArgb(240, 25, 30, 36), 0), new(Color.FromArgb(228, 12, 16, 21), 1) }
+        GradientStops = { new(Color.FromArgb(236, 25, 30, 36), 0), new(Color.FromArgb(236, 12, 16, 21), 1) }
     };
     private static readonly Pen Outline = new(new SolidColorBrush(Color.FromArgb(25, 255, 255, 255)), 1);
     private static readonly IBrush ArtworkSurface = new SolidColorBrush(Color.FromRgb(42, 42, 42));
@@ -55,21 +55,26 @@ internal sealed class SpotifyCardFrames : IDisposable
     private static readonly IBrush ProgressTrack = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255));
     private static readonly IBrush ProgressFill = new SolidColorBrush(Color.FromRgb(188, 233, 206));
     private static readonly IBrush[] EdgeMasks = { CreateEdgeMask(false, false), CreateEdgeMask(true, false), CreateEdgeMask(false, true), CreateEdgeMask(true, true) };
-    private readonly double _scale;
     private readonly bool _right;
+    private readonly bool _dynamicBackground;
     private readonly FontFamily _font;
     private readonly Dictionary<(string, double, bool), TextLayout> _text = new();
-    private readonly Dictionary<string, Bitmap?> _art = new();
+    private sealed record Artwork(Bitmap Image, LinearGradientBrush Background) : IDisposable
+    {
+        public void Dispose() => Image.Dispose();
+    }
+    private readonly Dictionary<string, Artwork?> _art = new();
     public RenderTargetBitmap Bitmap { get; }
     public byte[] Pixels { get; }
     public int Width => Bitmap.PixelSize.Width;
     public int Height => Bitmap.PixelSize.Height;
-    public SpotifyCardFrames(int width, int height, string? position, FontFamily font)
+    public SpotifyCardFrames(int width, int height, string? position, FontFamily font, bool dynamicBackground = true)
     {
-        _scale = SpotifyOverlayCardRenderer.Scale(width, height);
+        var scale = SpotifyOverlayCardRenderer.Scale(width, height);
         _right = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true;
+        _dynamicBackground = dynamicBackground;
         _font = font;
-        Bitmap = new RenderTargetBitmap(new PixelSize(Math.Max(1, (int)Math.Ceiling(406 * _scale)), Math.Max(1, (int)Math.Ceiling(140 * _scale))), new Vector(96, 96));
+        Bitmap = new RenderTargetBitmap(new PixelSize(Math.Max(1, (int)Math.Ceiling(406 * scale)), Math.Max(1, (int)Math.Ceiling(140 * scale))), new Vector(96, 96));
         Pixels = new byte[Width * Height * 4];
     }
     private TextLayout Text(string? value, double size, bool bold = false)
@@ -86,32 +91,44 @@ internal sealed class SpotifyCardFrames : IDisposable
     {
         if (_text.Count > 256) { foreach (var text in _text.Values) text.Dispose(); _text.Clear(); }
         if (_art.Count > 64) { foreach (var art in _art.Values) art?.Dispose(); _art.Clear(); }
+        var artwork = GetArtwork(card?.ArtPath);
         using var context = Bitmap.CreateDrawingContext();
-        using (context.PushTransform(Matrix.CreateScale(_scale, _scale))) Draw(context, card, songSeconds);
+        // Fill the rounded pixel dimensions exactly. Scaling by the unrounded
+        // height leaves a translucent gutter along the bottom/right at 720p etc.
+        using (context.PushTransform(Matrix.CreateScale(Width / 406.0, Height / 140.0))) Draw(context, card, artwork, songSeconds);
     }
-    private void Draw(DrawingContext context, SpotifyCard? card, double songSeconds)
+    private Artwork? GetArtwork(string? path)
+    {
+        if (path is null) return null;
+        if (_art.TryGetValue(path, out var artwork)) return artwork;
+        Bitmap? image = null;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            image = Avalonia.Media.Imaging.Bitmap.DecodeToWidth(stream, 512);
+            artwork = new Artwork(image, SpotifyCoverPalette.FromBitmap(image).CreateBrush());
+        }
+        catch { image?.Dispose(); artwork = null; }
+        _art[path] = artwork;
+        return artwork;
+    }
+    private void Draw(DrawingContext context, SpotifyCard? card, Artwork? artwork, double songSeconds)
     {
         if (card is null) return;
-        context.DrawRectangle(Surface, null, new Rect(0, 0, 406, 140), 20, 20);
+        if (artwork is not null) SpotifyCoverPalette.Animate(artwork.Background, _dynamicBackground ? songSeconds : 0);
+        context.DrawRectangle(artwork?.Background ?? Surface, null, new Rect(0, 0, 406, 140), 20, 20);
         context.DrawRectangle(null, Outline, new Rect(.5, .5, 405, 139), 19.5, 19.5);
         var artRect = new Rect(_right ? 280 : 14, 14, 112, 112);
         context.DrawRectangle(ArtworkSurface, null, artRect, 14, 14);
         context.DrawEllipse(null, ArtworkRing, artRect.Center, 28, 28);
         context.DrawEllipse(null, ArtworkRing, artRect.Center, 20, 20);
         context.DrawEllipse(ProgressTrack, null, artRect.Center, 4, 4);
-        if (card.ArtPath is { } path)
+        if (artwork is not null)
         {
-            if (!_art.TryGetValue(path, out var art))
-            {
-                try { art = new Bitmap(path); } catch { art = null; }
-                _art[path] = art;
-            }
-            if (art is not null)
-            {
-                var side = Math.Min(art.Size.Width, art.Size.Height);
-                var source = new Rect((art.Size.Width - side) / 2, (art.Size.Height - side) / 2, side, side);
-                using (context.PushClip(new RoundedRect(artRect, 14))) context.DrawImage(art, source, artRect);
-            }
+            var art = artwork.Image;
+            var side = Math.Min(art.Size.Width, art.Size.Height);
+            var source = new Rect((art.Size.Width - side) / 2, (art.Size.Height - side) / 2, side, side);
+            using (context.PushClip(new RoundedRect(artRect, 14))) context.DrawImage(art, source, artRect);
         }
         context.DrawRectangle(null, Outline, artRect.Deflate(.5), 13.5, 13.5);
         double left = _right ? 14 : 140;

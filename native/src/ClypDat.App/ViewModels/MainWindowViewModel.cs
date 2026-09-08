@@ -4276,7 +4276,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _selectedSpotifyAlbum, _selectedSpotifyDurationMs is { } d ? TimeSpan.FromMilliseconds(d) : null, null, _selectedSpotifyArtPath),
         width > 0 ? width : ActiveCropRect?.Width ?? SelectedSourceWidth,
         height > 0 ? height : ActiveCropRect?.Height ?? SelectedSourceHeight,
-        TrimStart.TotalSeconds, ExportDuration.TotalSeconds, ClipSpeed, Settings.SpotifyOverlayPosition, SpotifyOverlayCardRenderer.ResolveFont());
+        TrimStart.TotalSeconds, ExportDuration.TotalSeconds, ClipSpeed, Settings.SpotifyOverlayPosition, SpotifyOverlayCardRenderer.ResolveFont(),
+        Settings.SpotifyOverlayDynamicBackground);
 
     internal SpotifyRenderSpec? CaptureSpotifyRenderSpec()
     {
@@ -4291,16 +4292,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return spec is null ? null : await SpotifyOverlayAnimation.PrepareAsync(spec, token);
     }
 
-    internal SpotifyRenderSpec SpotifyDialogSpec()
+    internal SpotifyNowPlaying SpotifyDialogNowPlaying => _spotify.Snapshot;
+
+    internal SpotifyRenderSpec SpotifyDialogSpec(SpotifyNowPlaying? snapshot = null, string? artworkPath = null)
     {
-        var now = _spotify.Snapshot;
+        var now = snapshot ?? _spotify.Snapshot;
+        var liveArt = artworkPath ?? (string.Equals(now.Track, _selectedSpotifyTrack, StringComparison.Ordinal)
+            && string.Equals(now.Artist, _selectedSpotifyArtist, StringComparison.Ordinal)
+            && string.Equals(now.Album, _selectedSpotifyAlbum, StringComparison.Ordinal)
+            ? _selectedSpotifyArtPath : null);
         var card = !string.IsNullOrWhiteSpace(now.Track)
-            ? new SpotifyCard(now.Track, now.Artist, now.Album, now.Duration, now.ProgressNow, null)
+            ? new SpotifyCard(now.Track, now.Artist, now.Album, now.Duration, now.ProgressNow, liveArt)
             : string.IsNullOrWhiteSpace(_selectedSpotifyTrack)
                 ? new SpotifyCard("Your Spotify track", "Artist", "Album", TimeSpan.FromMinutes(4), TimeSpan.FromSeconds(42), null)
                 : new SpotifyCard(_selectedSpotifyTrack, _selectedSpotifyArtist, _selectedSpotifyAlbum,
                     _selectedSpotifyDurationMs is { } d ? TimeSpan.FromMilliseconds(d) : null, null, _selectedSpotifyArtPath);
-        return new(null, card, 518, 291, 0, 1, 1, Settings.SpotifyOverlayPosition, SpotifyOverlayCardRenderer.ResolveFont());
+        return new(null, card, 518, 291, 0, 1, 1, Settings.SpotifyOverlayPosition, SpotifyOverlayCardRenderer.ResolveFont(),
+            Settings.SpotifyOverlayDynamicBackground);
     }
 
     internal SpotifyRenderSpec? SpotifyPreviewSpec()
@@ -6753,6 +6761,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool SpotifyOverlayDynamicBackground
+    {
+        get => Settings.SpotifyOverlayDynamicBackground;
+        set
+        {
+            if (Settings.SpotifyOverlayDynamicBackground == value) return;
+            Settings.SpotifyOverlayDynamicBackground = value;
+            SaveSettings();
+            OnPropertyChanged();
+            RaiseSpotifyOverlayPreviewChanged();
+        }
+    }
+
     public bool SpotifyOverlayBurnIn
     {
         get => Settings.SpotifyOverlayBurnIn;
@@ -6870,6 +6891,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var enabled = Settings.SpotifyOverlayBurnIn && Settings.SpotifyOverlayEnabled;
         var position = Settings.SpotifyOverlayPosition;
         var font = SpotifyOverlayCardRenderer.ResolveFont();
+        var dynamicBackground = Settings.SpotifyOverlayDynamicBackground;
         var source = SpotifySourceWindow.Load(library, clipPath);
         var timeline = SpotifyTimelineSidecar.Load(library, clipPath);
         if (timeline is null && source is not null)
@@ -6893,7 +6915,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         SpotifyTrack = first.Track, SpotifyArtist = first.Artist, SpotifyAlbum = first.Album,
                         SpotifyDurationMs = first.DurationMs, SpotifyProgressMs = first.ProgressMs, SpotifyArtPath = first.ArtPath });
                 }
-                if (enabled) result = await BurnSpotifyOverlayAsync(clipPath, library, position, font, token);
+                if (enabled) result = await BurnSpotifyOverlayAsync(clipPath, library, position, font, dynamicBackground, token);
                 if (result == SpotifyOverlayOutcome.Completed) _mediaProbe.DeleteCacheFor(clipPath);
                 await AddOrUpdateLibraryClipAsync(clipPath, hydrateImages: false);
                 var card = AllClips.FirstOrDefault(c => string.Equals(c.Path, clipPath, StringComparison.OrdinalIgnoreCase));
@@ -6912,7 +6934,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return job;
     }
 
-    private async Task<SpotifyOverlayOutcome> BurnSpotifyOverlayAsync(string clipPath, string library, string position, Avalonia.Media.FontFamily font, CancellationToken token)
+    private async Task<SpotifyOverlayOutcome> BurnSpotifyOverlayAsync(string clipPath, string library, string position, Avalonia.Media.FontFamily font, bool dynamicBackground, CancellationToken token)
     {
         var info = ClipInfoSidecar.Load(library, clipPath);
         if (info is null || string.IsNullOrWhiteSpace(info.SpotifyTrack) || info.SpotifyOverlayBurned) return SpotifyOverlayOutcome.Skipped;
@@ -6930,7 +6952,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var probed = await _mediaProbe.ProbeMetadataAsync(clipPath);
         using var animation = await SpotifyOverlayAnimation.PrepareAsync(new(
             SpotifyTimelineSidecar.Load(library, clipPath), card, probed.Width, probed.Height,
-            0, probed.Duration.TotalSeconds, 1, position, font), token);
+            0, probed.Duration.TotalSeconds, 1, position, font, dynamicBackground), token);
         var result = await SpotifyOverlayBurner.BurnAsync(clipPath, animation.Path, position, token);
         if (result is SpotifyOverlayOutcome.Completed or SpotifyOverlayOutcome.Skipped) MarkBurned();
         return result;

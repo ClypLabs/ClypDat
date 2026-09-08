@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -59,6 +60,8 @@ internal static class SpotifyFrameChecks
         }
         MetadataRowsAnimate(font);
         TimerDigitsKeepProgressRailFixed(font);
+        CoverBackgroundsFollowArtwork(font);
+        RoundedCornersStaySymmetric(font);
         AnimationAndComposition(font);
     }
 
@@ -145,6 +148,133 @@ internal static class SpotifyFrameChecks
                 Assert.False(RegionEqual(initial, renderer.Pixels, renderer.Width, left + 195, 119, 1, 1),
                     "Progress rail right endpoint is missing.");
             }
+        }
+    }
+
+    private static void CoverBackgroundsFollowArtwork(FontFamily font)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "Spotify palettes " + Guid.NewGuid());
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var warmPath = Path.Combine(folder, "warm.png");
+            var coolPath = Path.Combine(folder, "cool.png");
+            SaveArtwork(warmPath, Color.FromRgb(238, 58, 32), Color.FromRgb(210, 35, 111));
+            SaveArtwork(coolPath, Color.FromRgb(28, 83, 238), Color.FromRgb(29, 192, 219));
+            var card = new SpotifyCard("Title", "Artist", "Album", TimeSpan.FromMinutes(4), TimeSpan.FromSeconds(42), warmPath);
+            using var still = new SpotifyCardFrames(1920, 1080, "Top Left", font, dynamicBackground: false);
+            var warm = Frame(still, card, 0);
+            Assert.Equal(warm, Frame(still, card, 9));
+            var cool = Frame(still, card with { ArtPath = coolPath }, 9);
+            Assert.False(RegionEqual(warm, cool, still.Width, 140, 98, 252, 8), "Cover colors did not change the background.");
+            Assert.False(RegionEqual(warm, cool, still.Width, 22, 35, 20, 20), "Cover artwork did not change with its palette.");
+            Assert.Equal(warm, Frame(still, card, 0));
+
+            using var moving = new SpotifyCardFrames(1920, 1080, "Top Left", font, dynamicBackground: true);
+            var start = Frame(moving, card, 0);
+            var later = Frame(moving, card, 4);
+            var artifactDirectory = Environment.GetEnvironmentVariable("CLYPDAT_SPOTIFY_RENDER_CHECK");
+            if (!string.IsNullOrWhiteSpace(artifactDirectory))
+                moving.Bitmap.Save(Path.Combine(artifactDirectory, "Cover-Gradient.png"), PngBitmapEncoderOptions.Default);
+            Assert.False(RegionEqual(start, later, moving.Width, 140, 98, 252, 8), "Dynamic cover background did not animate.");
+            Assert.True(RegionEqual(start, later, moving.Width, 22, 35, 20, 20), "Background animation changed the cover artwork.");
+            Assert.Equal(start, Frame(moving, card, 0));
+            Assert.Equal(later, Frame(moving, card, 4));
+            using var replay = new SpotifyCardFrames(1920, 1080, "Top Left", font, dynamicBackground: true);
+            Assert.Equal(later, Frame(replay, card, 4));
+            var changed = Frame(moving, card with { ArtPath = coolPath }, 4);
+            Assert.False(RegionEqual(later, changed, moving.Width, 140, 98, 252, 8), "Animated background retained the previous cover palette.");
+            Assert.False(RegionEqual(later, changed, moving.Width, 22, 35, 20, 20), "Animated card retained the previous cover artwork.");
+
+            var noArtwork = card with { ArtPath = null };
+            var fallback = Frame(moving, noArtwork, 0);
+            Assert.Equal(fallback, Frame(moving, noArtwork, 9));
+            Assert.Equal(fallback, Frame(moving, noArtwork with { ArtPath = Path.Combine(folder, "missing.png") }, 9));
+            Assert.Equal(fallback, Frame(still, noArtwork, 9));
+            var backgroundPixel = (102 * moving.Width + 250) * 4;
+            var channels = fallback.AsSpan(backgroundPixel, 3).ToArray();
+            Assert.InRange(channels.Max() - channels.Min(), 0, 16);
+
+            // Exercise the settings snapshot through the actual FFV1 pipeline.
+            // Short text and fixed timers leave only the background free to move.
+            FfmpegPathResolver.EnsureBundledFfmpeg();
+            var spec = new SpotifyRenderSpec(null, card, 640, 360, 0, 1, 1, "Top Left", font, DynamicBackground: false);
+            using var staticAnimation = Pump(SpotifyOverlayAnimation.PrepareAsync(spec, CancellationToken.None));
+            var encodedStill = ReadPixels(staticAnimation.Path, "-f", "rawvideo", "-pix_fmt", "bgra");
+            var frameBytes = encodedStill.Length / 30;
+            Assert.True(encodedStill.AsSpan(0, frameBytes).SequenceEqual(encodedStill.AsSpan(29 * frameBytes, frameBytes)));
+            using var dynamicAnimation = Pump(SpotifyOverlayAnimation.PrepareAsync(spec with { DynamicBackground = true }, CancellationToken.None));
+            var encodedMoving = ReadPixels(dynamicAnimation.Path, "-f", "rawvideo", "-pix_fmt", "bgra");
+            Assert.Equal(encodedStill.Length, encodedMoving.Length);
+            Assert.True(encodedStill.AsSpan(0, frameBytes).SequenceEqual(encodedMoving.AsSpan(0, frameBytes)));
+            Assert.False(encodedMoving.AsSpan(0, frameBytes).SequenceEqual(encodedMoving.AsSpan(29 * frameBytes, frameBytes)));
+        }
+        finally { Directory.Delete(folder, true); }
+
+        static byte[] Frame(SpotifyCardFrames renderer, SpotifyCard card, double seconds)
+        {
+            renderer.Render(card, seconds);
+            renderer.CopyStraightPixels();
+            return renderer.Pixels.ToArray();
+        }
+        static void SaveArtwork(string path, Color primary, Color secondary)
+        {
+            using var bitmap = new RenderTargetBitmap(new PixelSize(64, 64), new Vector(96, 96));
+            using (var drawing = bitmap.CreateDrawingContext())
+            {
+                drawing.DrawRectangle(new SolidColorBrush(primary), null, new Rect(0, 0, 64, 64));
+                drawing.DrawRectangle(new SolidColorBrush(secondary), null, new Rect(32, 0, 32, 64));
+            }
+            bitmap.Save(path, PngBitmapEncoderOptions.Default);
+        }
+    }
+
+    private static void RoundedCornersStaySymmetric(FontFamily font)
+    {
+        var card = new SpotifyCard("", null, null, null, null, null);
+        foreach (var (width, height) in new[] { (640, 360), (518, 291), (1280, 720), (1366, 768), (1920, 1080), (2560, 1440), (60, 100) })
+        {
+            using var renderer = new SpotifyCardFrames(width, height, "Top Left", font, dynamicBackground: false);
+            renderer.Render(card, 0); renderer.CopyStraightPixels();
+            var scaleX = renderer.Width / 406.0;
+            var scaleY = renderer.Height / 140.0;
+            var cornerWidth = (int)Math.Ceiling(22 * scaleX);
+            var cornerHeight = (int)Math.Ceiling(22 * scaleY);
+            // Raster antialias coverage differs between mirrored curves, even
+            // at integer scale. Compare contour positions, not individual alpha.
+            foreach (var threshold in new[] { 32, 64, 118, 128, 192, 224 })
+            {
+                for (var y = 0; y < cornerHeight; y++)
+                    AssertContourClose(new[] {
+                        Depth(cornerWidth, x => Alpha(x, y)),
+                        Depth(cornerWidth, x => Alpha(renderer.Width - 1 - x, y)),
+                        Depth(cornerWidth, x => Alpha(x, renderer.Height - 1 - y)),
+                        Depth(cornerWidth, x => Alpha(renderer.Width - 1 - x, renderer.Height - 1 - y)) });
+                for (var x = 0; x < cornerWidth; x++)
+                    AssertContourClose(new[] {
+                        Depth(cornerHeight, y => Alpha(x, y)),
+                        Depth(cornerHeight, y => Alpha(renderer.Width - 1 - x, y)),
+                        Depth(cornerHeight, y => Alpha(x, renderer.Height - 1 - y)),
+                        Depth(cornerHeight, y => Alpha(renderer.Width - 1 - x, renderer.Height - 1 - y)) });
+
+                int Depth(int limit, Func<int, byte> alpha)
+                {
+                    var depth = 0;
+                    while (depth < limit && alpha(depth) < threshold) depth++;
+                    return depth;
+                }
+                void AssertContourClose(int[] depths) => Assert.True(depths.Max() - depths.Min() <= 1,
+                    $"Rounded contours differ at {width}x{height}, alpha {threshold}: {string.Join(",", depths)}.");
+            }
+            var top = Alpha(renderer.Width / 2, 0);
+            var bottom = Alpha(renderer.Width / 2, renderer.Height - 1);
+            Assert.InRange(top, 230, 255);
+            Assert.InRange(bottom, 230, 255);
+            AssertAlphaClose(top, bottom);
+
+            byte Alpha(int x, int y) => renderer.Pixels[(y * renderer.Width + x) * 4 + 3];
+            void AssertAlphaClose(byte first, byte second) => Assert.True(Math.Abs(first - second) <= 2,
+                $"Rounded silhouette differs at {width}x{height}: alpha {first} versus {second}.");
         }
     }
 

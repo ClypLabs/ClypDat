@@ -37,7 +37,8 @@ public sealed partial class MainWindow
         { _spotifyPerPixel?.Hide(); _spotifyWindow?.Hide(); return; }
         try
         {
-            var spec = original with { Position = model.Settings.SpotifyOverlayPosition, Font = SpotifyOverlayCardRenderer.ResolveFont() };
+            var spec = original with { Position = model.Settings.SpotifyOverlayPosition, Font = SpotifyOverlayCardRenderer.ResolveFont(),
+                DynamicBackground = model.Settings.SpotifyOverlayDynamicBackground };
             var top = EditorVideoView.PointToScreen(default);
             var bottom = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
             var fullWidth = Math.Max(1, bottom.X - top.X);

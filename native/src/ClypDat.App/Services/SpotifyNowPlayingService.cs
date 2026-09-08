@@ -22,9 +22,7 @@ internal sealed record SpotifyNowPlaying(
     bool IsPlaying,
     DateTimeOffset? UpdatedAt,
     string? Error,
-    // Cover art for the card. A URL rather than the image: it is only fetched
-    // when a clip is actually saved, so a session that never clips never
-    // downloads anything.
+    // Cover art is fetched when saving clips or previewing the overlay dialog.
     string? ArtUrl = null,
     string? TrackId = null)
 {

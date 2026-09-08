@@ -49,11 +49,7 @@
         </Grid>
 
         <StackPanel Spacing="10" IsEnabled="{Binding SpotifyOverlayEnabled}">
-          <!-- A frame with the real card in it, rather than six thumbnails of
-               an abstract rectangle. Placement is the only thing this dialog
-               decides, and the question it answers - "will this sit on top of
-               my crosshair" - needs the actual text at something like the
-               actual size. -->
+          <!-- Show the same animated card used by the editor and exports. -->
           <!-- 16:9, because that is what it is standing in for. The dialog's
                width is fixed, so the frame's own is 560 less the 20 margins and
                the 1px borders - 518 - and the height is that in the shape of a
@@ -77,6 +73,15 @@
               <Canvas Name="SpotifyPreviewCanvas" IsHitTestVisible="False" />
             </Panel>
           </Border>
+
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Margin="0,4,0,4">
+            <StackPanel Spacing="2" VerticalAlignment="Center">
+              <TextBlock Classes="settingsRowTitle" Text="Dynamic background" />
+              <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="400"
+                         Text="Gently animate colours from the song cover. Turn off for a still gradient in the same colours." />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayDynamicBackground}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+          </Grid>
 
           <TextBlock Classes="settingsPickerLabel" Text="PLACEMENT" />
           <ListBox Classes="pillGroup" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedSpotifyOverlayPosition}">
@@ -118,7 +123,7 @@
 
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="360" VerticalAlignment="Center"
-                     Text="A clip follows recorded Spotify playback. Placement is read at export, so changing it here applies to clips you already have." />
+                     Text="A clip follows recorded Spotify playback. Placement and background changes apply to future exports. Cards already written into clips stay unchanged." />
           <Button Grid.Column="1" Classes="primaryButton" Content="Done" Click="CloseButton_OnClick" VerticalAlignment="Center" />
         </Grid>
       </StackPanel>

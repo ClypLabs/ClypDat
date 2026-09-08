@@ -26,13 +26,16 @@ public partial class SpotifyOverlayDialog : Window
     {
         DataContext = viewModel;
         var preview = new SpotifyCardPreview();
+        var artwork = new SpotifyPreviewArtCache();
         SpotifyPreviewCanvas.Children.Add(preview);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         string? track = null;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 30) };
         timer.Tick += (_, _) =>
         {
-            var spec = viewModel.SpotifyDialogSpec();
+            var now = viewModel.SpotifyDialogNowPlaying;
+            var artPath = string.IsNullOrWhiteSpace(now.Track) ? null : artwork.Get(now.ArtUrl);
+            var spec = viewModel.SpotifyDialogSpec(now, artPath);
             if (spec.LegacyCard?.Track != track) { track = spec.LegacyCard?.Track; clock.Restart(); }
             var scale = SpotifyOverlayCardRenderer.Scale(518, 291);
             preview.Width = 406 * scale;
@@ -43,7 +46,7 @@ public partial class SpotifyOverlayDialog : Window
             preview.Update(spec, clock.Elapsed.TotalSeconds, 518, 291);
         };
         Opened += (_, _) => timer.Start();
-        Closed += (_, _) => { timer.Stop(); preview.Dispose(); };
+        Closed += (_, _) => { timer.Stop(); preview.Dispose(); artwork.Dispose(); };
     }
 
     // The window has no system chrome, so the title bar drags it.

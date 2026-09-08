@@ -28,30 +28,7 @@ internal static class SpotifyCoverArtStore
                 entered = true;
                 var key = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(url!)));
                 var path = Path.Combine(folder, key + ".jpg");
-                if (!File.Exists(path))
-                {
-                    using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
-                    response.EnsureSuccessStatusCode();
-                    if (response.Content.Headers.ContentLength > 8 * 1024 * 1024) return (url, path: (string?)null);
-                    await using var source = await response.Content.ReadAsStreamAsync(deadline.Token).ConfigureAwait(false);
-                    using var data = new MemoryStream();
-                    var buffer = new byte[16384];
-                    int read;
-                    while ((read = await source.ReadAsync(buffer, deadline.Token).ConfigureAwait(false)) > 0)
-                    {
-                        if (data.Length + read > 8 * 1024 * 1024) return (url, path: (string?)null);
-                        data.Write(buffer, 0, read);
-                    }
-                    Directory.CreateDirectory(folder);
-                    var temporary = path + ".tmp";
-                    try
-                    {
-                        await File.WriteAllBytesAsync(temporary, data.ToArray(), deadline.Token).ConfigureAwait(false);
-                        File.Move(temporary, path, true);
-                    }
-                    finally { if (File.Exists(temporary)) File.Delete(temporary); }
-                }
-                return (url, path: (string?)path);
+                return (url, path: await DownloadAsync(url!, path, deadline.Token).ConfigureAwait(false));
             }
             catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
             { return (url, path: (string?)null); }
@@ -62,6 +39,34 @@ internal static class SpotifyCoverArtStore
         return timeline with { Samples = timeline.Samples.Select(item => item with {
             ArtPath = item.ArtUrl is { } url && paths.TryGetValue(url, out var path) ? path : item.ArtPath, ArtUrl = null }).ToArray() };
     }
+    /// <summary>Downloads one cover with a byte limit and an atomic file replacement.</summary>
+    internal static async Task<string?> DownloadAsync(string url, string path, CancellationToken token)
+    {
+        if (File.Exists(path)) return path;
+        using var response = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength > 8 * 1024 * 1024) return null;
+        await using var source = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
+        using var data = new MemoryStream();
+        var buffer = new byte[16384];
+        int read;
+        while ((read = await source.ReadAsync(buffer, token).ConfigureAwait(false)) > 0)
+        {
+            if (data.Length + read > 8 * 1024 * 1024) return null;
+            data.Write(buffer, 0, read);
+        }
+        if (data.Length == 0) return null;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllBytesAsync(temporary, data.ToArray(), token).ConfigureAwait(false);
+            File.Move(temporary, path, true);
+            return path;
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
 
     /// <summary>Where a clip's art lives, whether or not it exists yet.</summary>

@@ -7,6 +7,16 @@ namespace ClypDat.App.Tests;
 public sealed class AppSettingsTests
 {
     [Fact]
+    public void SpotifyBackground_OlderSettingsUseDynamicAndStaticChoiceSurvivesReload()
+    {
+        var settings = JsonSerializer.Deserialize<AppSettings>("{}")!;
+        Assert.True(settings.SpotifyOverlayDynamicBackground);
+        settings.SpotifyOverlayDynamicBackground = false;
+        var reloaded = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings))!;
+        Assert.False(reloaded.SpotifyOverlayDynamicBackground);
+    }
+
+    [Fact]
     public void DiscordRichPresenceOnlyWhenGameActive_MissingJsonValue_DefaultsTrue()
     {
         var settings = JsonSerializer.Deserialize<AppSettings>("{}");

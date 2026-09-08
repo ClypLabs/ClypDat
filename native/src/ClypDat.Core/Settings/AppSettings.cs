@@ -235,6 +235,9 @@ public sealed class AppSettings
     /// </summary>
     public string SpotifyOverlayPosition { get; set; } = "Bottom Left";
 
+    /// <summary>Whether the cover-colour background moves while the clip plays.</summary>
+    public bool SpotifyOverlayDynamicBackground { get; set; } = true;
+
     /// <summary>
     /// Whether a saved clip is re-encoded with the card written into it, so the
     /// file carries it everywhere - thumbnail, hover preview, and any player
