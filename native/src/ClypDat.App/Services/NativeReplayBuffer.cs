@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using ClypDat.Core.Settings;
 using SharpGen.Runtime;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
@@ -772,6 +773,23 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
 
         AppLog.Info($"Native replay saved: path={outputPath}, packets={window.Length}.");
+        // Capture selection is clip provenance, not a live settings toggle.
+        // Assets are attached by the worker capture service when available;
+        // retaining unavailable selections lets the editor distinguish that
+        // result from old clips which predate overlay capture entirely.
+        var overlays = JsonSerializer.Deserialize<VideoOverlaySettings>(Volatile.Read(ref _videoOverlaySettingsJson));
+        if (overlays is not null)
+        {
+            var camera = overlays.Camera is null ? null : new ClipOverlayLayer(
+                overlays.Camera.FriendlyName, false, InitialTransform: overlays.CameraTransform,
+                Error: "Camera capture asset was unavailable.");
+            var peripherals = string.Equals(overlays.KeyboardLayout, "None", StringComparison.OrdinalIgnoreCase) ? null : new ClipOverlayLayer(
+                overlays.KeyboardLayout, false, InitialTransform: overlays.KeyboardTransform,
+                Error: "Keyboard and mouse capture asset was unavailable.");
+            ClipInfoSidecar.Save(config.LibraryFolder, outputPath, new ClipInfo(gameDisplayName, null, clipName,
+                File.GetCreationTimeUtc(outputPath), CaptureSource: config.CaptureSource,
+                OverlayManifest: new ClipOverlayManifest(ClipOverlayManifest.CurrentVersion, camera, peripherals)));
+        }
         return outputPath;
         }
         finally

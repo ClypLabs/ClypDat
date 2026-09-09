@@ -9,7 +9,7 @@ public sealed record ClipOverlayManifest(
     ClipOverlayLayer? Camera = null,
     ClipOverlayLayer? Peripherals = null)
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
     public static ClipOverlayManifest Empty { get; } = new(CurrentVersion);
 
     /// <summary>
@@ -30,6 +30,16 @@ public sealed record ClipOverlayManifest(
 
     public static bool IsUsable(string libraryRoot, ClipOverlayLayer? layer) =>
         layer is { Available: true } && (string.IsNullOrWhiteSpace(layer.AssetPath) || File.Exists(ResolveAssetPath(libraryRoot, layer.AssetPath)));
+
+    /// <summary>Returns only references which are safe to delete from this library.</summary>
+    public static IEnumerable<string> ExistingAssetPaths(string libraryRoot, ClipOverlayManifest? manifest)
+    {
+        foreach (var layer in new[] { manifest?.Camera, manifest?.Peripherals })
+        {
+            var path = ResolveAssetPath(libraryRoot, layer?.AssetPath);
+            if (path is not null && File.Exists(path)) yield return path;
+        }
+    }
 }
 
 public sealed record ClipOverlayLayer(

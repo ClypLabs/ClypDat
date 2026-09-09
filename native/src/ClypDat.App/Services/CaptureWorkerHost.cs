@@ -463,12 +463,22 @@ internal static class CaptureWorkerHost
                 // worker, a separate process, where nothing has ever polled
                 // Spotify. The app stamps the track onto the sidecar when the
                 // save reaches it, using the persisted source clock window.
-                ClipInfoSidecar.Save(_config.LibraryFolder, path, new ClipInfo(
+                // SaveReplayAsync may have already recorded capture provenance.
+                // Do not replace that metadata while stamping worker-owned clip
+                // fields (this was why an otherwise captured layer disappeared
+                // the instant a saved clip reached the library).
+                var existing = ClipInfoSidecar.Load(_config.LibraryFolder, path);
+                ClipInfoSidecar.Save(_config.LibraryFolder, path, (existing ?? new ClipInfo(
                     gameDisplayName,
                     null,
                     request.TitleOverride ?? gameDisplayName,
                     File.GetCreationTimeUtc(path),
-                    CaptureSource: _config.CaptureSource));
+                    CaptureSource: _config.CaptureSource)) with
+                {
+                    GameDisplayName = gameDisplayName,
+                    FileTitle = request.TitleOverride ?? gameDisplayName,
+                    CaptureSource = _config.CaptureSource
+                });
             }
             var result = new CaptureWorkerSaveResult(path, request.TitleOverride, DateTime.UtcNow, null, saveId, requestedUtc);
             RememberUnacknowledgedSave(UnacknowledgedSaves, result);

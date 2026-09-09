@@ -127,6 +127,11 @@ public static class ClipInfoSidecar
         SpotifyTimelineSidecar.Delete(libraryRoot, clipPath);
         try
         {
+            // Overlay captures are owned by this clip, unlike Spotify artwork
+            // which lives in a content-addressed archive. Remove them before
+            // dropping the only manifest that can identify them.
+            foreach (var asset in ClipOverlayManifest.ExistingAssetPaths(libraryRoot, Load(libraryRoot, clipPath)?.OverlayManifest))
+                File.Delete(asset);
             var paths = new[] { SidecarPath(libraryRoot, clipPath), LibraryLayout.LegacySidecarPath(clipPath, ".info.json") };
             foreach (var path in paths.Where(File.Exists)) File.Delete(path);
         }

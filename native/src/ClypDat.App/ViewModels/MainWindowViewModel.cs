@@ -4330,6 +4330,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string? _selectedSpotifyArtPath;
     private bool _selectedSpotifyOverlayBurned;
     private ClipOverlayManifest _selectedOverlayManifest = ClipOverlayManifest.Empty;
+    private bool _selectedOverlayManifestRecorded;
     private bool _cameraOverlayLayerVisible = true;
     private bool _peripheralOverlayLayerVisible = true;
     private VideoOverlayTransform? _cameraOverlayTransform;
@@ -4503,7 +4504,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private string OverlayStatus(ClipOverlayLayer? layer, string name)
     {
-        if (layer is null) return $"{name} was not selected for this clip.";
+        if (layer is null) return _selectedOverlayManifestRecorded
+            ? $"{name} was not selected for this clip."
+            : "No overlay capture data in this clip.";
         if (!layer.Available) return string.IsNullOrWhiteSpace(layer.Error) ? $"{name} was unavailable while this clip recorded." : layer.Error;
         return ClipOverlayManifest.IsUsable(Settings.LibraryFolder, layer) ? $"{name} captured with this clip." : $"{name} capture asset is missing.";
     }
@@ -8568,6 +8571,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedSpotifyProgressMs = clipInfo?.SpotifyProgressMs;
         _selectedSpotifyArtPath = clipInfo?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
         _selectedSpotifyOverlayBurned = media.SpotifyOverlayBurned || clipInfo?.SpotifyOverlayBurned == true;
+        _selectedOverlayManifestRecorded = clipInfo?.OverlayManifest is not null;
         _selectedOverlayManifest = clipInfo?.OverlayManifest ?? ClipOverlayManifest.Empty;
         _cameraOverlayLayerVisible = true;
         _peripheralOverlayLayerVisible = true;
