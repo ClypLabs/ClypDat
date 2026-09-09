@@ -275,11 +275,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     public bool IsRecording => _sessionActive;
 
-    public void SetVideoOverlaySettings(string settingsJson)
+    public void SetVideoOverlaySettings(VideoOverlayCaptureSettings settings)
     {
-        var json = string.IsNullOrWhiteSpace(settingsJson) ? "{}" : settingsJson;
-        Interlocked.Exchange(ref _videoOverlaySettingsJson, json);
-        _overlayCapture.Apply(JsonSerializer.Deserialize<VideoOverlaySettings>(json) ?? new VideoOverlaySettings());
+        ArgumentNullException.ThrowIfNull(settings);
+        Interlocked.Exchange(ref _videoOverlaySettingsJson, JsonSerializer.Serialize(settings));
+        _overlayCapture.Apply(settings);
     }
 
     public void RequestFrameRate(int frameRate)
@@ -785,7 +785,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // Assets are attached by the worker capture service when available;
         // retaining unavailable selections lets the editor distinguish that
         // result from old clips which predate overlay capture entirely.
-        var overlays = JsonSerializer.Deserialize<VideoOverlaySettings>(Volatile.Read(ref _videoOverlaySettingsJson));
+        var overlays = JsonSerializer.Deserialize<VideoOverlayCaptureSettings>(Volatile.Read(ref _videoOverlaySettingsJson));
         if (overlays is not null)
         {
             // requestedStartUtc is adjusted for recovery before the replay

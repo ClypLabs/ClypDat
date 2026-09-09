@@ -155,6 +155,10 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             _ = Task.Run(() => ReadLoopAsync(pipe, generation));
             await SendAsync<CaptureWorkerHandshake>("handshake", new { ClientId = Environment.ProcessId }, cancellationToken);
             var config = _configProvider(); var attach = await AttachAsync(config, cancellationToken);
+            // A restarted worker begins with no UI-owned state. Re-send this
+            // immutable JSON snapshot before any restored recording can save.
+            if (!string.IsNullOrWhiteSpace(_videoOverlaySettingsJson))
+                Accept(await SendAsync<CaptureWorkerAck>("video-overlays", new { settingsJson = _videoOverlaySettingsJson }, cancellationToken), "restore video overlays");
             ApplyAttach(attach, config, _desiredRecording);
             // Re-locks the cards when the app restarted while the worker kept
             // muxing; an empty list is equally meaningful and unlocks them.

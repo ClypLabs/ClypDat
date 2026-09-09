@@ -34,6 +34,34 @@ public sealed class VideoOverlaySettingsTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WorkerSnapshot_PreservesSelectedCameraAndFullKeyboardAcrossWebJson(bool legacyEnabled)
+    {
+        var selected = new VideoOverlaySettings
+        {
+            Enabled = legacyEnabled,
+            Camera = new VideoOverlayCameraSelection("@device_pnp_\\?\\usb#facecam", "Elgato Facecam 4K"),
+            KeyboardLayout = KeyboardOverlayCatalog.QwertyFull
+        };
+        var json = JsonSerializer.Serialize(selected, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        var workerSettings = JsonSerializer.Deserialize<VideoOverlaySettings>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var snapshot = VideoOverlayCaptureSettings.From(workerSettings);
+
+        Assert.Equal(selected.Camera, snapshot.Camera);
+        Assert.Equal(KeyboardOverlayCatalog.QwertyFull, snapshot.KeyboardLayout);
+    }
+
+    [Fact]
+    public void WorkerSnapshot_UsesNoneForUnknownKeyboardInsteadOfCompactDefault()
+    {
+        var snapshot = VideoOverlayCaptureSettings.From(new VideoOverlaySettings { KeyboardLayout = "Unknown layout" });
+
+        Assert.Equal("None", snapshot.KeyboardLayout);
+    }
+
+    [Theory]
     [InlineData(1.0, 1.0, .80, 16d / 9d)]
     [InlineData(-1.0, -1.0, .01, 16d / 9d)]
     [InlineData(.9, .9, .5, 2.4)]

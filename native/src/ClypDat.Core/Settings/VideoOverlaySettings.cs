@@ -22,6 +22,31 @@ public sealed record VideoOverlayCameraSelection(string DeviceMoniker, string Fr
 
 public sealed record VideoOverlayTransform(double X, double Y, double Width);
 
+/// <summary>
+/// Immutable source selection passed from the capture worker to its recorder.
+/// It deliberately excludes presentation-only and legacy fields: <see cref="VideoOverlaySettings.Enabled"/>
+/// used to suppress burn-in and must not change whether a selected source records.
+/// </summary>
+public sealed record VideoOverlayCaptureSettings(
+    VideoOverlayCameraSelection? Camera,
+    string KeyboardLayout,
+    VideoOverlayTransform CameraTransform,
+    VideoOverlayTransform KeyboardTransform)
+{
+    public static VideoOverlayCaptureSettings From(VideoOverlaySettings? settings)
+    {
+        settings ??= new VideoOverlaySettings();
+        var layout = KeyboardOverlayCatalog.IsKnown(settings.KeyboardLayout)
+            ? settings.KeyboardLayout
+            : "None";
+        return new(
+            settings.Camera,
+            layout,
+            settings.CameraTransform,
+            settings.KeyboardTransform);
+    }
+}
+
 public static class VideoOverlayLayout
 {
     public const double MinimumWidth = .05;

@@ -3017,9 +3017,11 @@ public sealed partial class MainWindow : Window
             ApplyCaptureBounds();
             _replayConfigSnapshot = ViewModel.CreateReplayConfig();
             await UpdateWorkerClipGameNameAsync(_replayConfigSnapshot);
+            // The worker opens selected overlay sources when capture starts.
+            // Apply this before StartAsync so first segments retain selection.
+            await UpdateVideoOverlaySettingsAsync();
             CaptureBackgroundWorkGate.BeginCapture();
             await Task.Run(() => _replayBuffer.StartAsync());
-            await UpdateVideoOverlaySettingsAsync();
             AppLog.Info("Replay started.");
             var activeConfig = _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable after start.");
             _activeReplayConfigSnapshot = activeConfig;

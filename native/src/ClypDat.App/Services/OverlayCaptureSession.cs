@@ -13,7 +13,7 @@ internal sealed class OverlayCaptureSession : IDisposable
     private const int SegmentSeconds = 2;
     private readonly object _gate = new();
     private readonly string _workRoot;
-    private VideoOverlaySettings _settings = new();
+    private VideoOverlayCaptureSettings _settings = VideoOverlayCaptureSettings.From(null);
     private Process? _camera;
     private DateTime _cameraStartedUtc;
     private string? _cameraError;
@@ -21,7 +21,7 @@ internal sealed class OverlayCaptureSession : IDisposable
 
     public OverlayCaptureSession(string workRoot) => _workRoot = Path.Combine(workRoot, "overlays");
 
-    public void Apply(VideoOverlaySettings settings)
+    public void Apply(VideoOverlayCaptureSettings settings)
     {
         lock (_gate)
         {

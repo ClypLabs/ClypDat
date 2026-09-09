@@ -36,7 +36,7 @@ internal static class CaptureWorkerHost
     private static DisplayAvailabilityMonitor? _displayAvailability;
     private static bool _captureRequested;
     private static bool _desktopAvailable = true;
-    private static VideoOverlaySettings _videoOverlays = new();
+    private static VideoOverlayCaptureSettings _videoOverlays = VideoOverlayCaptureSettings.From(null);
 
     public static int Run()
     {
@@ -141,9 +141,10 @@ internal static class CaptureWorkerHost
                     break;
                 case "video-overlays":
                     var overlayJson = message.Payload.GetProperty("settingsJson").GetString();
-                    _videoOverlays = JsonSerializer.Deserialize<VideoOverlaySettings>(overlayJson ?? string.Empty, JsonOptions) ?? new VideoOverlaySettings();
+                    _videoOverlays = VideoOverlayCaptureSettings.From(
+                        JsonSerializer.Deserialize<VideoOverlaySettings>(overlayJson ?? string.Empty, JsonOptions));
                     if (_buffer is IVideoOverlaySettingsReceiver overlays)
-                        overlays.SetVideoOverlaySettings(JsonSerializer.Serialize(_videoOverlays, JsonOptions));
+                        overlays.SetVideoOverlaySettings(_videoOverlays);
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "health":
@@ -195,7 +196,7 @@ internal static class CaptureWorkerHost
             _config = config;
             _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
             if (_buffer is IVideoOverlaySettingsReceiver overlays)
-                overlays.SetVideoOverlaySettings(JsonSerializer.Serialize(_videoOverlays, JsonOptions));
+                overlays.SetVideoOverlaySettings(_videoOverlays);
             _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
             if (_buffer is IFullSessionFinalizeReporter finalizes)
                 finalizes.FullSessionFinalizeChanged += (_, active) => _ = SendEventAsync("full-session-finalize", active);
