@@ -65,6 +65,14 @@ public static class SpotifyOverlayLayout
         return new(x, Math.Clamp(y, 0, frameHeight - cardHeight), cardWidth, cardHeight);
     }
 
+    /// <summary>Artwork stays on the outer edge; exact midpoint is left.</summary>
+    public static bool IsRight(int frameWidth, int frameHeight, string? position, SpotifyOverlayTransform? transform = null)
+    {
+        if (transform is null) return position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true;
+        var card = Resolve(frameWidth, frameHeight, position, transform);
+        return card.X + card.Width / 2.0 > Math.Max(1, frameWidth) / 2.0;
+    }
+
     /// <summary>Transparent raster bounds needed after rotating an editable card.</summary>
     public static SpotifyOverlayBounds ResolveRenderBounds(int frameWidth, int frameHeight, string? position, SpotifyOverlayTransform? transform = null)
     {

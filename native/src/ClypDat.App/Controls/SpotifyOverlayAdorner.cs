@@ -11,24 +11,48 @@ internal sealed class SpotifyOverlayAdorner : Control
     private static readonly Pen Selection = new(new SolidColorBrush(Color.FromRgb(99, 235, 171)), 1.5);
     private static readonly Pen HandleOutline = new(new SolidColorBrush(Color.FromRgb(18, 44, 34)), 1);
 
+    public Rect CardBounds { get; set; }
+    public double RotationDegrees { get; set; }
+    public const double HandleSize = 10;
+    public const double RotationHandleOffset = 24;
+
     public override void Render(DrawingContext context)
     {
-        var bounds = new Rect(Bounds.Size);
+        var bounds = CardBounds;
         if (bounds.Width < 3 || bounds.Height < 3) return;
-        context.DrawRectangle(null, Selection, bounds.Deflate(1), 3, 3);
-        var size = Math.Min(8, Math.Min(bounds.Width, bounds.Height) / 3);
-        foreach (var x in new[] { 1.0, bounds.Width - size - 1 })
-        foreach (var y in new[] { 1.0, bounds.Height - size - 1 })
-            context.DrawRectangle(Brushes.White, HandleOutline, new Rect(x, y, size, size), 2, 2);
+        var center = bounds.Center;
+        using (context.PushTransform(Matrix.CreateRotation(RotationDegrees * Math.PI / 180, center)))
+        {
+            context.DrawRectangle(null, Selection, bounds.Deflate(1));
+            foreach (var x in new[] { bounds.Left, bounds.Right })
+            foreach (var y in new[] { bounds.Top, bounds.Bottom })
+                context.DrawRectangle(Brushes.White, HandleOutline, new Rect(x - HandleSize / 2, y - HandleSize / 2, HandleSize, HandleSize), 2, 2);
+            var handle = RotationHandle(bounds);
+            context.DrawLine(Selection, new Point(center.X, handle.Y < center.Y ? bounds.Top : bounds.Bottom), handle);
+            context.DrawEllipse(Brushes.White, HandleOutline, handle, HandleSize / 2, HandleSize / 2);
+        }
     }
 
-    public static SpotifyOverlayDragMode HitTest(Point point, Size size)
+    public SpotifyOverlayDragMode HitTest(Point point)
     {
-        var reach = Math.Min(16, Math.Min(size.Width, size.Height) * .35);
-        if (point.X <= reach && point.Y <= reach) return SpotifyOverlayDragMode.TopLeft;
-        if (point.X >= size.Width - reach && point.Y <= reach) return SpotifyOverlayDragMode.TopRight;
-        if (point.X <= reach && point.Y >= size.Height - reach) return SpotifyOverlayDragMode.BottomLeft;
-        if (point.X >= size.Width - reach && point.Y >= size.Height - reach) return SpotifyOverlayDragMode.BottomRight;
+        var center = CardBounds.Center;
+        var radians = -RotationDegrees * Math.PI / 180;
+        var dx = point.X - center.X;
+        var dy = point.Y - center.Y;
+        var local = new Point(center.X + dx * Math.Cos(radians) - dy * Math.Sin(radians), center.Y + dx * Math.Sin(radians) + dy * Math.Cos(radians));
+        var rotation = RotationHandle(CardBounds);
+        var rotationDx = local.X - rotation.X;
+        var rotationDy = local.Y - rotation.Y;
+        if (rotationDx * rotationDx + rotationDy * rotationDy <= (HandleSize + 3) * (HandleSize + 3)) return SpotifyOverlayDragMode.Rotate;
+        var reach = HandleSize + 4;
+        if (Math.Abs(local.X - CardBounds.Left) <= reach && Math.Abs(local.Y - CardBounds.Top) <= reach) return SpotifyOverlayDragMode.TopLeft;
+        if (Math.Abs(local.X - CardBounds.Right) <= reach && Math.Abs(local.Y - CardBounds.Top) <= reach) return SpotifyOverlayDragMode.TopRight;
+        if (Math.Abs(local.X - CardBounds.Left) <= reach && Math.Abs(local.Y - CardBounds.Bottom) <= reach) return SpotifyOverlayDragMode.BottomLeft;
+        if (Math.Abs(local.X - CardBounds.Right) <= reach && Math.Abs(local.Y - CardBounds.Bottom) <= reach) return SpotifyOverlayDragMode.BottomRight;
         return SpotifyOverlayDragMode.Move;
     }
+
+    // At a frame edge keep rotation grab inside card, not clipped outside host.
+    private static Point RotationHandle(Rect bounds) => new(bounds.Center.X,
+        bounds.Top - RotationHandleOffset < HandleSize ? bounds.Top + RotationHandleOffset : bounds.Top - RotationHandleOffset);
 }

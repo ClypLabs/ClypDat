@@ -46,4 +46,25 @@ public sealed class SpotifyOverlayManipulationTests
         Assert.InRange(bounds.X, 0, 1920 - bounds.Width);
         Assert.InRange(bounds.Y, 0, 1080 - bounds.Height);
     }
+
+    [Fact]
+    public void RotationTurnsAroundCardCenterAndSnapsNearFifteenDegrees()
+    {
+        var start = new SpotifyOverlayTransform(.2, .3, .25);
+        var center = new Avalonia.Point(624, 406.75);
+        var rotated = SpotifyOverlayManipulation.Rotate(start, new Avalonia.Point(center.X + 100, center.Y),
+            new Avalonia.Point(center.X, center.Y + 100), 1920, 1080);
+        Assert.Equal(90, rotated.RotationDegrees, 8);
+        Assert.Equal(start.X, rotated.X, 8);
+        Assert.Equal(start.Y, rotated.Y, 8);
+    }
+
+    [Fact]
+    public void RotatedResizeKeepsRotationAndOppositeCorner()
+    {
+        var start = new SpotifyOverlayTransform(.2, .3, .25, 30);
+        var resized = SpotifyOverlayManipulation.Apply(start, SpotifyOverlayDragMode.BottomRight, 120, 70, 1920, 1080);
+        Assert.Equal(30, resized.RotationDegrees, 8);
+        Assert.True(resized.Width > start.Width);
+    }
 }

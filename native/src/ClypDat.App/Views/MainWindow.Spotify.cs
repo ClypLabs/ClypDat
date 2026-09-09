@@ -128,6 +128,12 @@ public sealed partial class MainWindow
             _spotifySurface.Height = bounds.Height / dpi;
             Canvas.SetLeft(_spotifySurface, (bounds.X - visible.X) / dpi);
             Canvas.SetTop(_spotifySurface, (bounds.Y - visible.Y) / dpi);
+            var displayCard = SpotifyOverlayLayout.Resolve(width, height, spec.Position, spec.Transform);
+            var displayRaster = SpotifyOverlayLayout.ResolveRenderBounds(width, height, spec.Position, spec.Transform);
+            _spotifyAdorner!.CardBounds = new Rect((displayCard.X - displayRaster.X) / dpi, (displayCard.Y - displayRaster.Y) / dpi,
+                displayCard.Width / dpi, displayCard.Height / dpi);
+            _spotifyAdorner.RotationDegrees = spec.Transform is null ? 0 : SpotifyOverlayLayout.Normalize(width, height, spec.Transform).RotationDegrees;
+            _spotifyAdorner.InvalidateVisual();
             _spotifyAdorner!.IsVisible = model.IsSpotifyOverlaySelected && model.HasEditableSpotifyOverlay;
             // A four-times zoom must not allocate a monitor-sized offscreen
             // bitmap four times over. This caps preview raster size only.
@@ -161,14 +167,14 @@ public sealed partial class MainWindow
         if (_spotifySurface is null || ViewModel is not { HasEditableSpotifyOverlay: true } model ||
             !e.GetCurrentPoint(_spotifySurface).Properties.IsLeftButtonPressed) return;
         var point = e.GetPosition(_spotifySurface);
-        var mode = model.IsSpotifyOverlaySelected ? SpotifyOverlayAdorner.HitTest(point, _spotifySurface.Bounds.Size) : SpotifyOverlayDragMode.Move;
+        var mode = model.IsSpotifyOverlaySelected && _spotifyAdorner is not null ? _spotifyAdorner.HitTest(point) : SpotifyOverlayDragMode.Move;
         model.IsSpotifyOverlaySelected = true;
         model.OpenEditorSidebar(EditorSidebarSection.Effects);
         var width = Math.Max(1, (int)_spotifyVideoBounds.Width);
         var height = Math.Max(1, (int)_spotifyVideoBounds.Height);
         var sourceWidth = Math.Max(1, model.ActiveCropRect?.Width ?? model.SelectedSourceWidth);
         var sourceHeight = Math.Max(1, model.ActiveCropRect?.Height ?? model.SelectedSourceHeight);
-        var bounds = SpotifyOverlayLayout.Resolve(sourceWidth, sourceHeight, model.Settings.SpotifyOverlayPosition);
+        var bounds = SpotifyOverlayLayout.Resolve(sourceWidth, sourceHeight, model.Settings.SpotifyOverlayPosition, model.SpotifyOverlayTransform);
         // Preserve stored precision: rebuilding from a rounded preview width
         // would resize the exported overlay every time it is moved.
         var start = model.SpotifyOverlayTransform ?? new SpotifyOverlayTransform(
@@ -186,11 +192,12 @@ public sealed partial class MainWindow
         if (_spotifySurface is null) return;
         var point = e.GetPosition(_spotifySurface);
         var mode = _spotifyGesture?.Mode ?? (ViewModel?.IsSpotifyOverlaySelected == true
-            ? SpotifyOverlayAdorner.HitTest(point, _spotifySurface.Bounds.Size) : SpotifyOverlayDragMode.Move);
+            && _spotifyAdorner is not null ? _spotifyAdorner.HitTest(point) : SpotifyOverlayDragMode.Move);
         _spotifySurface.Cursor = mode switch
         {
             SpotifyOverlayDragMode.TopLeft or SpotifyOverlayDragMode.BottomRight => SpotifyNorthWestCursor,
             SpotifyOverlayDragMode.TopRight or SpotifyOverlayDragMode.BottomLeft => SpotifyNorthEastCursor,
+            SpotifyOverlayDragMode.Rotate => new Cursor(StandardCursorType.Hand),
             _ => SpotifyMoveCursor
         };
         if (_spotifyGesture is not { } gesture || ViewModel is not { } model) return;
@@ -198,8 +205,13 @@ public sealed partial class MainWindow
         var screen = _spotifySurface.PointToScreen(point);
         if (!_spotifyGestureChanged && Math.Abs(screen.X - gesture.PointerStart.X) < 2 && Math.Abs(screen.Y - gesture.PointerStart.Y) < 2) return;
         _spotifyGestureChanged = true;
-        model.SetSpotifyOverlayTransform(SpotifyOverlayManipulation.Apply(gesture.Start, gesture.Mode,
-            screen.X - gesture.PointerStart.X, screen.Y - gesture.PointerStart.Y, gesture.FrameWidth, gesture.FrameHeight), persist: false);
+        var transform = gesture.Mode == SpotifyOverlayDragMode.Rotate
+            ? SpotifyOverlayManipulation.Rotate(gesture.Start,
+                new Point(gesture.PointerStart.X - _spotifyVideoBounds.X, gesture.PointerStart.Y - _spotifyVideoBounds.Y),
+                new Point(screen.X - _spotifyVideoBounds.X, screen.Y - _spotifyVideoBounds.Y), gesture.FrameWidth, gesture.FrameHeight)
+            : SpotifyOverlayManipulation.Apply(gesture.Start, gesture.Mode,
+                screen.X - gesture.PointerStart.X, screen.Y - gesture.PointerStart.Y, gesture.FrameWidth, gesture.FrameHeight);
+        model.SetSpotifyOverlayTransform(transform, persist: false);
         e.Handled = true;
         // The shared 30fps timer updates position and imagery together.
     }

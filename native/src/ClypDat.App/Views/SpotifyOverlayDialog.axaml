@@ -70,7 +70,9 @@
               <Border Background="{StaticResource SpotifyDialogBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75"
                       HorizontalAlignment="Center" VerticalAlignment="Center" />
 
-              <Canvas Name="SpotifyPreviewCanvas" IsHitTestVisible="False" />
+              <Canvas Name="SpotifyPreviewCanvas" PointerPressed="Preview_OnPointerPressed"
+                      PointerMoved="Preview_OnPointerMoved" PointerReleased="Preview_OnPointerReleased"
+                      PointerCaptureLost="Preview_OnPointerCaptureLost" />
             </Panel>
           </Border>
 
@@ -83,29 +85,6 @@
             <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayDynamicBackground}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
           </Grid>
 
-          <TextBlock Classes="settingsPickerLabel" Text="DEFAULT PLACEMENT" />
-          <ListBox Classes="pillGroup" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedSpotifyOverlayPosition}">
-            <ListBox.ItemsPanel>
-              <ItemsPanelTemplate>
-                <!-- Three even columns. Left to its own devices the list gave
-                     each tile its text's width, so the two columns stepped in
-                     and out row by row. -->
-                <UniformGrid Columns="3" />
-              </ItemsPanelTemplate>
-            </ListBox.ItemsPanel>
-            <ListBox.ItemTemplate>
-              <DataTemplate>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Border Width="34" Height="22" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="3">
-                    <Border Width="14" Height="5" Margin="3" CornerRadius="2" Background="{StaticResource SpotifyDialogBrush}"
-                            HorizontalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToHorizontalAlignmentConverter.Instance}}"
-                            VerticalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToVerticalAlignmentConverter.Instance}}" />
-                  </Border>
-                  <TextBlock Text="{Binding}" VerticalAlignment="Center" FontSize="12" />
-                </StackPanel>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
         </StackPanel>
 
         <Border Classes="settingsDivider" />
@@ -113,7 +92,7 @@
         <StackPanel Spacing="2">
           <TextBlock Classes="settingsRowTitle" Text="Edit each clip's overlay track" />
           <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
-                     Text="Select the Spotify overlay track in the editor. Drag the card to move it, or drag its corners to resize. Saved clips keep the layer editable; exports include it in the video." />
+                     Text="Drag card to move. White corners resize. Top handle rotates. Saved clips keep the layer editable; exports include it in the video." />
         </StackPanel>
 
         <Border Classes="settingsDivider" />

@@ -143,4 +143,11 @@ public sealed class SpotifyOverlayLayoutTests
         Assert.Equal(15, SpotifyOverlayLayout.Normalize(1920, 1080, new(.1, .2, .3, 375)).RotationDegrees);
         Assert.Equal(0, SpotifyOverlayLayout.Normalize(1920, 1080, new(.1, .2, .3, 720)).RotationDegrees);
     }
+
+    [Fact]
+    public void TransformSideFollowsCenterAndMidpointUsesLeftLayout()
+    {
+        Assert.False(SpotifyOverlayLayout.IsRight(1920, 1080, "Bottom Right", new(.25, .2, .5)));
+        Assert.True(SpotifyOverlayLayout.IsRight(1920, 1080, "Bottom Left", new(.26, .2, .5)));
+    }
 }

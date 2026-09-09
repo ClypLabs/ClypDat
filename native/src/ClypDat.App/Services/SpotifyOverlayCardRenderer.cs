@@ -74,7 +74,7 @@ internal sealed class SpotifyCardFrames : IDisposable
     {
         _cardBounds = SpotifyOverlayLayout.Resolve(width, height, position, transform);
         var bounds = SpotifyOverlayLayout.ResolveRenderBounds(width, height, position, transform);
-        _right = position?.EndsWith("Right", StringComparison.OrdinalIgnoreCase) == true;
+        _right = SpotifyOverlayLayout.IsRight(width, height, position, transform);
         _dynamicBackground = dynamicBackground;
         _font = font;
         _rotationRadians = transform is null ? 0 : SpotifyOverlayLayout.Normalize(width, height, transform).RotationDegrees * Math.PI / 180;

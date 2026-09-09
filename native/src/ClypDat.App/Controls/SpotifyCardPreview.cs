@@ -8,7 +8,7 @@ namespace ClypDat.App.Controls;
 internal sealed class SpotifyCardPreview : Control, IDisposable
 {
     private SpotifyCardFrames? _frames;
-    private (int Width, int Height, string Position, FontFamily Font, bool DynamicBackground, double? OverlayWidth, double? Rotation)? _key;
+    private (int Width, int Height, string Position, FontFamily Font, bool DynamicBackground, double? OverlayWidth, double? Rotation, bool Right)? _key;
     private (SpotifyCard? Card, double SongSeconds)? _state;
     public bool HasCard => _state?.Card is not null;
     public void Update(SpotifyRenderSpec spec, double seconds, int width, int height)
@@ -16,7 +16,8 @@ internal sealed class SpotifyCardPreview : Control, IDisposable
         // Moving a card does not invalidate its cached text, artwork or frame buffer.
         // Translation only changes the owner-window position. Width and
         // rotation change the cached raster itself.
-        var key = (width, height, spec.Position, spec.Font, spec.DynamicBackground, spec.Transform?.Width, spec.Transform?.RotationDegrees);
+        var key = (width, height, spec.Position, spec.Font, spec.DynamicBackground, spec.Transform?.Width, spec.Transform?.RotationDegrees,
+            SpotifyOverlayLayout.IsRight(width, height, spec.Position, spec.Transform));
         if (_key != key)
         {
             _frames?.Dispose();

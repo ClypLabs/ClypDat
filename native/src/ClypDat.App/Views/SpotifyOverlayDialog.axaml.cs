@@ -4,7 +4,10 @@ using ClypDat.App.Controls;
 using ClypDat.App.Services;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia;
+using Avalonia.Media;
 using ClypDat.App.ViewModels;
+using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Views;
 
@@ -18,6 +21,13 @@ namespace ClypDat.App.Views;
 /// </summary>
 public partial class SpotifyOverlayDialog : Window
 {
+    private const int PreviewWidth = 518, PreviewHeight = 291;
+    private SpotifyCardPreview? _preview;
+    private SpotifyOverlayAdorner? _adorner;
+    private SpotifyOverlayTransform? _transform;
+    private SpotifyOverlayDragMode? _dragMode;
+    private Point _dragStart;
+    private SpotifyOverlayTransform? _dragTransform;
     // Avalonia's XAML loader needs a parameterless constructor to accept this
     // as a top-level control; the one below is what actually opens.
     public SpotifyOverlayDialog() => InitializeComponent();
@@ -25,9 +35,13 @@ public partial class SpotifyOverlayDialog : Window
     public SpotifyOverlayDialog(MainWindowViewModel viewModel) : this()
     {
         DataContext = viewModel;
-        var preview = new SpotifyCardPreview();
+        var preview = new SpotifyCardPreview { IsHitTestVisible = false };
+        _preview = preview;
+        _adorner = new SpotifyOverlayAdorner { IsHitTestVisible = false };
         var artwork = new SpotifyPreviewArtCache();
         SpotifyPreviewCanvas.Children.Add(preview);
+        SpotifyPreviewCanvas.Children.Add(_adorner);
+        _transform = ResolveTransform(viewModel);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         string? track = null;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 30) };
@@ -35,15 +49,22 @@ public partial class SpotifyOverlayDialog : Window
         {
             var now = viewModel.SpotifyDialogNowPlaying;
             var artPath = string.IsNullOrWhiteSpace(now.Track) ? null : artwork.Get(now.ArtUrl);
-            var spec = viewModel.SpotifyDialogSpec(now, artPath);
+            var spec = viewModel.SpotifyDialogSpec(now, artPath) with { Transform = _transform };
             if (spec.LegacyCard?.Track != track) { track = spec.LegacyCard?.Track; clock.Restart(); }
-            var scale = SpotifyOverlayCardRenderer.Scale(518, 291);
-            preview.Width = 406 * scale;
-            preview.Height = 140 * scale;
-            Canvas.SetLeft(preview, spec.Position.EndsWith("Right", StringComparison.OrdinalIgnoreCase) ? 518 - preview.Width : 0);
-            Canvas.SetTop(preview, spec.Position.StartsWith("Top", StringComparison.OrdinalIgnoreCase) ? 14 * 291 / 1080.0 :
-                spec.Position.StartsWith("Center", StringComparison.OrdinalIgnoreCase) ? (291 - preview.Height) / 2 : 291 - preview.Height - 14 * 291 / 1080.0);
-            preview.Update(spec, clock.Elapsed.TotalSeconds, 518, 291);
+            var raster = SpotifyOverlayLayout.ResolveRenderBounds(PreviewWidth, PreviewHeight, spec.Position, _transform);
+            var cardBounds = SpotifyOverlayLayout.Resolve(PreviewWidth, PreviewHeight, spec.Position, _transform);
+            preview.Width = raster.Width;
+            preview.Height = raster.Height;
+            Canvas.SetLeft(preview, raster.X);
+            Canvas.SetTop(preview, raster.Y);
+            _adorner!.Width = raster.Width;
+            _adorner.Height = raster.Height;
+            Canvas.SetLeft(_adorner, raster.X);
+            Canvas.SetTop(_adorner, raster.Y);
+            _adorner.CardBounds = new Rect(cardBounds.X - raster.X, cardBounds.Y - raster.Y, cardBounds.Width, cardBounds.Height);
+            _adorner.RotationDegrees = _transform?.RotationDegrees ?? 0;
+            _adorner.InvalidateVisual();
+            preview.Update(spec, clock.Elapsed.TotalSeconds, PreviewWidth, PreviewHeight);
         };
         Opened += (_, _) => timer.Start();
         Closed += (_, _) => { timer.Stop(); preview.Dispose(); artwork.Dispose(); };
@@ -65,4 +86,50 @@ public partial class SpotifyOverlayDialog : Window
     // Every control writes straight through to settings, so leaving is the only
     // thing left to do - there is nothing here to apply or discard.
     private void CloseButton_OnClick(object? sender, RoutedEventArgs e) => Close();
+
+    private SpotifyOverlayTransform ResolveTransform(MainWindowViewModel model)
+    {
+        if (model.Settings.SpotifyOverlayDefaultTransform is { } value)
+            return SpotifyOverlayLayout.Normalize(PreviewWidth, PreviewHeight, value);
+        var legacy = SpotifyOverlayLayout.Resolve(PreviewWidth, PreviewHeight, model.Settings.SpotifyOverlayPosition);
+        return new((double)legacy.X / PreviewWidth, (double)legacy.Y / PreviewHeight, (double)legacy.Width / PreviewWidth);
+    }
+
+    private void Preview_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel model || !e.GetCurrentPoint(SpotifyPreviewCanvas).Properties.IsLeftButtonPressed || _adorner is null) return;
+        _dragStart = e.GetPosition(SpotifyPreviewCanvas);
+        var local = _dragStart - new Point(Canvas.GetLeft(_adorner), Canvas.GetTop(_adorner));
+        _dragMode = _adorner.HitTest(local);
+        _dragTransform = _transform ?? ResolveTransform(model);
+        e.Pointer.Capture(SpotifyPreviewCanvas);
+        e.Handled = true;
+    }
+
+    private void Preview_OnPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_dragMode is not { } mode || _dragTransform is not { } start || DataContext is not MainWindowViewModel model) return;
+        var point = e.GetPosition(SpotifyPreviewCanvas);
+        _transform = mode == SpotifyOverlayDragMode.Rotate
+            ? SpotifyOverlayManipulation.Rotate(start, _dragStart, point, PreviewWidth, PreviewHeight)
+            : SpotifyOverlayManipulation.Apply(start, mode, point.X - _dragStart.X, point.Y - _dragStart.Y, PreviewWidth, PreviewHeight);
+        model.Settings.SpotifyOverlayDefaultTransform = _transform;
+        model.RaiseSpotifyOverlayPreviewChanged();
+        e.Handled = true;
+    }
+
+    private void Preview_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (_dragMode is null) return;
+        if (DataContext is MainWindowViewModel model) model.SaveSettings();
+        EndPreviewDrag(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void Preview_OnPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (_dragMode is not null && DataContext is MainWindowViewModel model) model.SaveSettings();
+        EndPreviewDrag(e.Pointer);
+    }
+    private void EndPreviewDrag(IPointer pointer) { _dragMode = null; _dragTransform = null; pointer.Capture(null); }
 }
