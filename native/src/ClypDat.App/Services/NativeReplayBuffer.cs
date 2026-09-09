@@ -107,9 +107,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
 
     private readonly Func<ReplayBufferConfig> _configProvider;
-    // Updated on the worker pipe thread, consumed at frame boundaries by the
-    // capture loop. A complete JSON value prevents partially-mutated settings.
-    private string _videoOverlaySettingsSnapshot = "{}";
+    // Updated on the worker pipe thread and read while a save is finalized.
+    // OverlayCaptureSettings is immutable, so swapping its reference cannot
+    // expose a partially-updated camera selection or transform.
+    private OverlayCaptureSettings _videoOverlaySettings = OverlayCaptureSettings.None;
     private readonly OverlayCaptureSession _overlayCapture;
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
@@ -278,7 +279,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public void SetVideoOverlaySettings(OverlayCaptureSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        Interlocked.Exchange(ref _videoOverlaySettingsSnapshot, JsonSerializer.Serialize(settings));
+        Interlocked.Exchange(ref _videoOverlaySettings, settings);
         _overlayCapture.Apply(settings);
     }
 
@@ -785,8 +786,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // Assets are attached by the worker capture service when available;
         // retaining unavailable selections lets the editor distinguish that
         // result from old clips which predate overlay capture entirely.
-        var overlays = JsonSerializer.Deserialize<OverlayCaptureSettings>(Volatile.Read(ref _videoOverlaySettingsSnapshot));
-        if (overlays is not null)
+        var overlays = Volatile.Read(ref _videoOverlaySettings);
+        if (overlays != OverlayCaptureSettings.None)
         {
             // requestedStartUtc is adjusted for recovery before the replay
             // window is borrowed.  It remains available after muxing, unlike

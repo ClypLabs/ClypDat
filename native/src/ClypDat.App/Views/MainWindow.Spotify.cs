@@ -19,6 +19,12 @@ public sealed partial class MainWindow
     private Canvas? _spotifyViewport;
     private SpotifyOverlayAdorner? _spotifyAdorner;
     private ServerPerPixelOverlay? _spotifyPerPixel;
+    // Captured layers share the editor's native-overlay lifetime and stacking
+    // rules. Spotify keeps its specialised interactive surface; camera uses a
+    // frame surface when no Spotify card is present.
+    private Window? _capturedOverlayWindow;
+    private Image? _capturedCamera;
+    private CapturedOverlayPlayback? _capturedPlayback;
     private SpotifyRenderSpec? _spotifyPreviewSpec;
     private string? _spotifyPreviewPath;
     private bool _spotifyPreviewDirty = true;
@@ -36,13 +42,13 @@ public sealed partial class MainWindow
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 30) };
         timer.Tick += (_, _) => UpdateSpotifyPreview();
         Opened += (_, _) => timer.Start();
-        Closed += (_, _) => { timer.Stop(); EndSpotifyGesture(); _spotifyPerPixel?.Dispose(); _spotifyWindow?.Close(); _spotifyPreview?.Dispose(); };
+        Closed += (_, _) => { timer.Stop(); EndSpotifyGesture(); _spotifyPerPixel?.Dispose(); _spotifyWindow?.Close(); _spotifyPreview?.Dispose(); _capturedOverlayWindow?.Close(); _capturedPlayback?.Dispose(); };
     }
     private void UpdateSpotifyPreview()
     {
         var model = ViewModel;
         if (model is null || !model.IsEditorVisible || !IsVisible || WindowState == WindowState.Minimized || IsEditorSurfaceCovered || _playback is null)
-        { HideSpotifyPreview(); return; }
+        { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
         if (_spotifyPreviewDirty || _spotifyPreviewPath != model.SelectedVideoPath)
         {
             _spotifyPreviewSpec = model.SpotifyPreviewSpec();
@@ -50,7 +56,8 @@ public sealed partial class MainWindow
             _spotifyPreviewDirty = false;
         }
         if (_spotifyPreviewSpec is not { } original || !model.Settings.SpotifyOverlayEnabled || !model.SpotifyOverlayLayerVisible || model.SelectedSourceWidth <= 0)
-        { HideSpotifyPreview(); return; }
+        { HideSpotifyPreview(); UpdateCapturedOverlayPreview(model); return; }
+        HideCapturedOverlayPreview();
         try
         {
             var spec = original with { Position = model.Settings.SpotifyOverlayPosition, Font = SpotifyOverlayCardRenderer.ResolveFont(),
@@ -149,6 +156,7 @@ public sealed partial class MainWindow
             handle = NativeHandleOf(_spotifyWindow);
             if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
             _spotifyPerPixel?.ShowAndRefresh();
+            UpdateCapturedOverlayPreview(model);
         }
         catch (InvalidOperationException) { HideSpotifyPreview(); }
     }
@@ -161,6 +169,48 @@ public sealed partial class MainWindow
         // loss can finish a drag and save its layout synchronously.
         EndSpotifyGesture();
     }
+
+    private void UpdateCapturedOverlayPreview(MainWindowViewModel model)
+    {
+        if (!model.HasCameraOverlayLayer || !model.CameraOverlayLayerVisible || model.CameraOverlayTransform is not { } transform)
+        { HideCapturedOverlayPreview(); return; }
+        var top = EditorVideoView.PointToScreen(default);
+        var bottom = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
+        var fullWidth = Math.Max(1, bottom.X - top.X);
+        var fullHeight = Math.Max(1, bottom.Y - top.Y);
+        var ratio = Math.Min((double)fullWidth / model.SelectedSourceWidth, (double)fullHeight / model.SelectedSourceHeight);
+        var width = (int)Math.Max(1, Math.Round(model.SelectedSourceWidth * ratio));
+        var height = (int)Math.Max(1, Math.Round(model.SelectedSourceHeight * ratio));
+        double x = top.X + (fullWidth - width) / 2;
+        double y = top.Y + (fullHeight - height) / 2;
+        if (model.ActiveCropRect is { } crop) { x += crop.X * ratio; y += crop.Y * ratio; width = (int)(crop.Width * ratio); height = (int)(crop.Height * ratio); }
+        var normalized = VideoOverlayLayout.Normalize(transform, VideoOverlayLayout.CameraAspectRatio);
+        var layerWidth = Math.Max(1, (int)Math.Round(width * normalized.Width));
+        var layerHeight = Math.Max(1, (int)Math.Round(layerWidth / VideoOverlayLayout.CameraAspectRatio));
+        if (_capturedOverlayWindow is null)
+        {
+            _capturedCamera = new Image { Stretch = Stretch.Fill, IsHitTestVisible = false };
+            _capturedOverlayWindow = new Window { WindowDecorations = WindowDecorations.None, ShowInTaskbar = false, CanResize = false, ShowActivated = false,
+                Topmost = false, Background = Brushes.Transparent, TransparencyLevelHint = [WindowTransparencyLevel.Transparent], Content = _capturedCamera };
+            _capturedPlayback = new CapturedOverlayPlayback();
+            _capturedPlayback.FrameReady += image => { if (_capturedCamera is not null) _capturedCamera.Source = image; };
+            _capturedOverlayWindow.Opened += (_, _) =>
+            {
+                var handle = NativeHandleOf(_capturedOverlayWindow);
+                var style = (long)GetWindowLongPtr(handle, GwlExStyle);
+                SetWindowLongPtr(handle, (int)GwlExStyle, (IntPtr)(style | WsExNoActivate | WsExTransparent));
+            };
+        }
+        _capturedOverlayWindow.Position = new PixelPoint((int)Math.Round(x + width * normalized.X), (int)Math.Round(y + height * normalized.Y));
+        var dpi = _capturedOverlayWindow.RenderScaling;
+        _capturedOverlayWindow.Width = layerWidth / dpi; _capturedOverlayWindow.Height = layerHeight / dpi;
+        _capturedPlayback!.Request(model.Settings.LibraryFolder, model.SelectedOverlayManifestCamera(), model.CurrentTime.TotalSeconds);
+        if (!_capturedOverlayWindow.IsVisible) _capturedOverlayWindow.Show(this);
+        var overlayHandle = NativeHandleOf(_capturedOverlayWindow);
+        if (overlayHandle != IntPtr.Zero) SetWindowPos(overlayHandle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+    }
+
+    private void HideCapturedOverlayPreview() => _capturedOverlayWindow?.Hide();
 
     private void SpotifySurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -264,6 +314,24 @@ public sealed partial class MainWindow
     {
         EndSpotifyGesture();
         if (ViewModel is not null) ViewModel.IsSpotifyOverlaySelected = false;
+        UpdateSpotifyPreview();
+    }
+
+    private void CameraOverlayReset_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.ResetCameraOverlayTransform();
+        UpdateSpotifyPreview();
+    }
+
+    private void PeripheralOverlayReset_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ViewModel?.ResetPeripheralOverlayTransform();
+        UpdateSpotifyPreview();
+    }
+
+    private void CapturedOverlayDone_OnClick(object? sender, RoutedEventArgs e)
+    {
+        EndSpotifyGesture();
         UpdateSpotifyPreview();
     }
 }

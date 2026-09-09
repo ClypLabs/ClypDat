@@ -1756,24 +1756,42 @@
                 </StackPanel>
               </Border>
               <Border Classes="editorInspectorCard" IsVisible="{Binding IsEditorOverlaysSidebarActive}">
-                <StackPanel Spacing="6">
-                  <TextBlock Text="CAMERA" Classes="editorCardLabel" />
+                <StackPanel Spacing="8">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="CAMERA" Classes="editorCardLabel" />
+                    <Button Grid.Column="1" Classes="linkButton" Content="Done" Padding="6,2" Click="CapturedOverlayDone_OnClick" />
+                  </Grid>
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="Show overlay" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" VerticalAlignment="Center" />
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding CameraOverlayLayerVisible, Mode=TwoWay}"
                                   IsEnabled="{Binding HasCameraOverlayLayer}" OnContent="{x:Null}" OffContent="{x:Null}" />
                   </Grid>
+                  <StackPanel Spacing="4" IsEnabled="{Binding CameraOverlayLayerVisible}">
+                    <Grid ColumnDefinitions="*,Auto"><TextBlock Text="Width" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                      <TextBlock Grid.Column="1" Text="{Binding CameraOverlaySizeLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" /></Grid>
+                    <Slider Minimum="5" Maximum="100" Value="{Binding CameraOverlaySizePercent, Mode=TwoWay}" ToolTip.Tip="Overlay width as a percentage of the video" />
+                    <Button Content="Reset layout" Click="CameraOverlayReset_OnClick" />
+                  </StackPanel>
                   <TextBlock Text="{Binding CameraOverlayStatus}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>
               <Border Classes="editorInspectorCard" IsVisible="{Binding IsEditorOverlaysSidebarActive}">
-                <StackPanel Spacing="6">
-                  <TextBlock Text="PERIPHERALS" Classes="editorCardLabel" />
+                <StackPanel Spacing="8">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Text="PERIPHERALS" Classes="editorCardLabel" />
+                    <Button Grid.Column="1" Classes="linkButton" Content="Done" Padding="6,2" Click="CapturedOverlayDone_OnClick" />
+                  </Grid>
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="Show overlay" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" VerticalAlignment="Center" />
                     <ToggleSwitch Grid.Column="1" IsChecked="{Binding PeripheralOverlayLayerVisible, Mode=TwoWay}"
                                   IsEnabled="{Binding HasPeripheralOverlayLayer}" OnContent="{x:Null}" OffContent="{x:Null}" />
                   </Grid>
+                  <StackPanel Spacing="4" IsEnabled="{Binding PeripheralOverlayLayerVisible}">
+                    <Grid ColumnDefinitions="*,Auto"><TextBlock Text="Width" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                      <TextBlock Grid.Column="1" Text="{Binding PeripheralOverlaySizeLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" /></Grid>
+                    <Slider Minimum="5" Maximum="100" Value="{Binding PeripheralOverlaySizePercent, Mode=TwoWay}" ToolTip.Tip="Overlay width as a percentage of the video" />
+                    <Button Content="Reset layout" Click="PeripheralOverlayReset_OnClick" />
+                  </StackPanel>
                   <TextBlock Text="{Binding PeripheralOverlayStatus}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>

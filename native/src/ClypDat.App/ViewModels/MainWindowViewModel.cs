@@ -4501,6 +4501,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool PeripheralOverlayLayerVisible { get => _peripheralOverlayLayerVisible; set { if (SetProperty(ref _peripheralOverlayLayerVisible, value) && !_suppressClipEditSave) SaveSelectedClipEditState(); } }
     public VideoOverlayTransform? CameraOverlayTransform => _cameraOverlayTransform;
     public VideoOverlayTransform? PeripheralOverlayTransform => _peripheralOverlayTransform;
+    public ClipOverlayLayer? SelectedOverlayManifestCamera() => _selectedOverlayManifest.Camera;
+    public double CameraOverlaySizePercent { get => OverlaySizePercent(CameraOverlayTransform, _selectedOverlayManifest.Camera); set => ResizeCapturedOverlay("Camera", value); }
+    public double PeripheralOverlaySizePercent { get => OverlaySizePercent(PeripheralOverlayTransform, _selectedOverlayManifest.Peripherals); set => ResizeCapturedOverlay("Peripherals", value); }
+    public string CameraOverlaySizeLabel => $"{CameraOverlaySizePercent:0}% of video width";
+    public string PeripheralOverlaySizeLabel => $"{PeripheralOverlaySizePercent:0}% of video width";
+    public void SetCameraOverlayTransform(VideoOverlayTransform transform, bool persist = true) => SetCapturedOverlayTransform("Camera", transform, persist);
+    public void SetPeripheralOverlayTransform(VideoOverlayTransform transform, bool persist = true) => SetCapturedOverlayTransform("Peripherals", transform, persist);
+    public void ResetCameraOverlayTransform() => ResetCapturedOverlayTransform("Camera");
+    public void ResetPeripheralOverlayTransform() => ResetCapturedOverlayTransform("Peripherals");
+    private double OverlaySizePercent(VideoOverlayTransform? transform, ClipOverlayLayer? layer) => transform is null || layer is null ? 0 : transform.Width * 100;
+    private void ResizeCapturedOverlay(string name, double percent) { if (!double.IsFinite(percent)) return; var transform = name == "Camera" ? _cameraOverlayTransform : _peripheralOverlayTransform; if (transform is not null) SetCapturedOverlayTransform(name, transform with { Width = Math.Clamp(percent, 5, 100) / 100 }, true); }
+    private void SetCapturedOverlayTransform(string name, VideoOverlayTransform transform, bool persist) { var layer = name == "Camera" ? _selectedOverlayManifest.Camera : _selectedOverlayManifest.Peripherals; if (!ClipOverlayManifest.IsUsable(Settings.LibraryFolder, layer)) return; var aspect = name == "Camera" ? VideoOverlayLayout.CameraAspectRatio : KeyboardOverlayCatalog.Get(layer?.Source ?? "QWERTY Compact").AspectRatio; var normalized = VideoOverlayLayout.Normalize(transform, aspect); if (name == "Camera") _cameraOverlayTransform = normalized; else _peripheralOverlayTransform = normalized; RefreshCapturedOverlayLayerState(); if (persist && !_suppressClipEditSave) SaveSelectedClipEditState(); }
+    private void ResetCapturedOverlayTransform(string name) { var layer = name == "Camera" ? _selectedOverlayManifest.Camera : _selectedOverlayManifest.Peripherals; if (name == "Camera") _cameraOverlayTransform = layer?.InitialTransform; else _peripheralOverlayTransform = layer?.InitialTransform; RefreshCapturedOverlayLayerState(); if (!_suppressClipEditSave) SaveSelectedClipEditState(); }
 
     private string OverlayStatus(ClipOverlayLayer? layer, string name)
     {
@@ -4517,6 +4530,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CameraOverlayStatus)); OnPropertyChanged(nameof(PeripheralOverlayStatus));
         OnPropertyChanged(nameof(CameraOverlayLayerVisible)); OnPropertyChanged(nameof(PeripheralOverlayLayerVisible));
         OnPropertyChanged(nameof(CameraOverlayTransform)); OnPropertyChanged(nameof(PeripheralOverlayTransform));
+        OnPropertyChanged(nameof(CameraOverlaySizePercent)); OnPropertyChanged(nameof(PeripheralOverlaySizePercent));
+        OnPropertyChanged(nameof(CameraOverlaySizeLabel)); OnPropertyChanged(nameof(PeripheralOverlaySizeLabel));
     }
 
     /// <summary>
