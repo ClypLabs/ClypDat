@@ -90,7 +90,7 @@ build_windows_installer:
       if (-not (Test-Path -LiteralPath $avaloniaPackagePath)) { Write-Error "Avalonia package feed was not created: $packageFeed"; exit 1 }
 
       # The pinned Avalonia pack graph does not include build-task and
-      # generator outputs in Avalonia.nupkg. Add them, matching publish.ps1's
+      # generator outputs in Avalonia.nupkg. Add them, matching build.ps1's
       # stable-package repair path, before the app restore consumes the feed.
       $buildTasksProject = Join-Path $avaloniaRoot 'src\Avalonia.Build.Tasks\Avalonia.Build.Tasks.csproj'
       $buildTasksOutput = Join-Path $avaloniaRoot 'src\Avalonia.Build.Tasks\bin\Release\netstandard2.0'

@@ -61,7 +61,7 @@
 
   <!-- The preview target is deliberately UI-only. It makes the Avalonia
        shell runnable on macOS while the capture backends remain Windows-only;
-       publish.ps1 and the normal Windows build do not use this property. -->
+       build.ps1 and the normal Windows build do not use this property. -->
   <PropertyGroup Condition="'$(ClypDatUiPreview)' == 'true'">
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Exe</OutputType>

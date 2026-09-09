@@ -60,7 +60,7 @@ foreach ($compressionAssembly in @('System.IO.Compression', 'System.IO.Compressi
 
 if (-not ('System.IO.Compression.ZipFile' -as [type]) -or
     -not ('System.IO.Compression.ZipArchiveMode' -as [type])) {
-    throw "This host cannot load System.IO.Compression. Run publish.ps1 under PowerShell 7 (pwsh) or Windows PowerShell 5.1."
+    throw "This host cannot load System.IO.Compression. Run build.ps1 under PowerShell 7 (pwsh) or Windows PowerShell 5.1."
 }
 
 function Invoke-Git {
@@ -96,7 +96,7 @@ function Get-GitPosition {
 function Assert-CleanWorktree {
     $changes = @(Invoke-Git status --porcelain=v1 --untracked-files=all)
     if ($changes.Count -gt 0) {
-        throw 'Ref publishing requires a clean worktree. Commit, stash, or remove changes, then rerun. Use ./publish.ps1 local to publish current worktree without Git switching.'
+        throw 'Ref publishing requires a clean worktree. Commit, stash, or remove changes, then rerun. Use ./build.ps1 local to publish current worktree without Git switching.'
     }
 }
 

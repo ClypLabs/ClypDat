@@ -53,7 +53,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not check out pinned Avalonia commit $commit." }
           # The fork package closure includes Avalonia.Controls.Media. `local`
           # selects that exact closure while keeping this tag checkout intact.
-          .\publish.ps1 local
+          .\build.ps1 local
 
       # Untrusted values reach PowerShell through env: only. Interpolating
       # ${{ inputs.* }} directly into a run: block splices the caller's text into
