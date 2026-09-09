@@ -38,4 +38,29 @@ public sealed class VideoOverlaySettingsTests
         Assert.Equal(.75, result.X, 3);
         Assert.Equal(1 - .25 / VideoOverlayLayout.CameraAspectRatio, result.Y, 3);
     }
+
+    [Fact]
+    public void Resize_AnchorsOppositeCornerAndKeepsSourceAspect()
+    {
+        var start = VideoOverlayLayout.Corner("Bottom Right", .25, VideoOverlayLayout.CameraAspectRatio);
+        var result = VideoOverlayManipulation.Apply(start, VideoOverlayManipulationMode.TopLeft,
+            -.10, -.10, 16d / 9d, VideoOverlayLayout.CameraAspectRatio);
+
+        Assert.Equal(1, result.X + result.Width, 3);
+        Assert.Equal(1, result.Y + result.Width, 3);
+        Assert.True(result.Width > start.Width);
+    }
+
+    [Fact]
+    public void Migration_AddsAnchorsWithoutChangingLegacyTransform()
+    {
+        var settings = new AppSettings { SettingsSchemaVersion = 8 };
+        var camera = new VideoOverlayTransform(.31, .42, .22);
+        settings.VideoOverlays.CameraTransform = camera;
+
+        Assert.True(AppSettingsMigrations.Apply(settings));
+        Assert.Equal(camera, settings.VideoOverlays.CameraTransform);
+        Assert.Equal("Top Right", settings.VideoOverlays.CameraAnchor);
+        Assert.Equal("Bottom Left", settings.VideoOverlays.KeyboardAnchor);
+    }
 }

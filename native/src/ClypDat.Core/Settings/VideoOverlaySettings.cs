@@ -7,9 +7,13 @@ public sealed class VideoOverlaySettings
     public bool Enabled { get; set; }
     public bool IncludeVirtualCameras { get; set; }
     public VideoOverlayCameraSelection? Camera { get; set; }
-    public string KeyboardLayout { get; set; } = "None";
+    public string KeyboardLayout { get; set; } = "QWERTY Compact";
     public VideoOverlayTransform CameraTransform { get; set; } = new(.70, .05, .25);
     public VideoOverlayTransform KeyboardTransform { get; set; } = new(.05, .70, .35);
+    // Source placement is separate from its transform.  A source can keep its
+    // assigned picker corner after being freely moved around the frame.
+    public string? CameraAnchor { get; set; } = "Top Right";
+    public string? KeyboardAnchor { get; set; } = "Bottom Left";
 }
 
 public sealed record VideoOverlayCameraSelection(string DeviceMoniker, string FriendlyName);
@@ -65,22 +69,20 @@ public static class VideoOverlayManipulation
         if (mode == VideoOverlayManipulationMode.Move)
             return VideoOverlayLayout.Normalize(new(start.X + deltaX, start.Y + deltaY, start.Width), aspect);
 
-        var left = start.X;
-        var top = start.Y;
-        var right = start.X + start.Width;
-        var bottom = start.Y + start.Width / aspect;
-        if (mode is VideoOverlayManipulationMode.TopLeft or VideoOverlayManipulationMode.BottomLeft) left += deltaX;
-        else right += deltaX;
-        if (mode is VideoOverlayManipulationMode.TopLeft or VideoOverlayManipulationMode.TopRight) top += deltaY;
-        else bottom += deltaY;
-
-        var width = mode is VideoOverlayManipulationMode.TopLeft or VideoOverlayManipulationMode.BottomLeft ? right - left : right - left;
-        width = Math.Max(VideoOverlayLayout.MinimumWidth, width);
+        var leftHandle = mode is VideoOverlayManipulationMode.TopLeft or VideoOverlayManipulationMode.BottomLeft;
+        var topHandle = mode is VideoOverlayManipulationMode.TopLeft or VideoOverlayManipulationMode.TopRight;
+        var fixedX = leftHandle ? start.X + start.Width : start.X;
+        var fixedY = topHandle ? start.Y + start.Width / aspect : start.Y;
+        // Horizontal pointer distance is authoritative.  It keeps source
+        // aspect fixed and anchors the opposite resize corner.
+        var width = leftHandle ? fixedX - (start.X + deltaX) : start.Width + deltaX;
+        var maximumWidth = Math.Min(leftHandle ? fixedX : 1 - fixedX,
+            (topHandle ? fixedY : 1 - fixedY) * aspect);
+        width = Math.Clamp(width, VideoOverlayLayout.MinimumWidth, Math.Max(VideoOverlayLayout.MinimumWidth, maximumWidth));
         var height = width / aspect;
-        if (mode is VideoOverlayManipulationMode.TopLeft or VideoOverlayManipulationMode.TopRight) top = bottom - height;
-        else bottom = top + height;
-        if (mode is VideoOverlayManipulationMode.TopLeft or VideoOverlayManipulationMode.BottomLeft) left = right - width;
-        else right = left + width;
-        return VideoOverlayLayout.Normalize(new(left, top, width), aspect);
+        var x = leftHandle ? fixedX - width : fixedX;
+        var y = topHandle ? fixedY - height : fixedY;
+        return VideoOverlayLayout.Normalize(new(x, y, width), aspect);
     }
+
 }

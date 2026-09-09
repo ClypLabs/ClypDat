@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
 
     public static bool Apply(AppSettings settings)
     {
@@ -66,6 +66,15 @@ public static class AppSettingsMigrations
             // byte-for-byte unchanged until a user enables it.
             settings.VideoOverlays ??= new VideoOverlaySettings();
             settings.VideoOverlays.Enabled = false;
+        }
+
+        if (settings.SettingsSchemaVersion < 9)
+        {
+            settings.VideoOverlays ??= new VideoOverlaySettings();
+            // Existing normalized transforms remain authoritative.  Anchors
+            // only restore which corner picker owns each legacy source.
+            settings.VideoOverlays.CameraAnchor ??= "Top Right";
+            settings.VideoOverlays.KeyboardAnchor ??= "Bottom Left";
         }
 
         settings.CustomThemes ??= new();

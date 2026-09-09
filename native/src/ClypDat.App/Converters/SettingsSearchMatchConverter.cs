@@ -56,6 +56,11 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
             "Full session recording", "Destination folder", "Session codec",
             "Finalize in background", "Storage limit", "Custom limit"
         },
+        ["Video Overlays"] = new[]
+        {
+            "Video Overlay Preview", "camera", "keyboard", "input", "virtual cameras",
+            "Show Preview", "Hide Preview", "Top left", "Top right", "Bottom left", "Bottom right"
+        },
         ["Overlays and Notifications"] = new[]
         {
             "Overlays", "clip saved overlay", "Hide overlays from screen capture",
