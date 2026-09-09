@@ -3019,6 +3019,7 @@ public sealed partial class MainWindow : Window
             await UpdateWorkerClipGameNameAsync(_replayConfigSnapshot);
             CaptureBackgroundWorkGate.BeginCapture();
             await Task.Run(() => _replayBuffer.StartAsync());
+            await UpdateVideoOverlaySettingsAsync();
             AppLog.Info("Replay started.");
             var activeConfig = _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable after start.");
             _activeReplayConfigSnapshot = activeConfig;
@@ -7165,6 +7166,20 @@ public sealed partial class MainWindow : Window
         }
         if (viewModel.IsPlaying && outcome == PlaybackRateChangeOutcome.Applied)
             RebasePlayheadClock(viewModel.CurrentTime);
+    }
+
+    public async Task UpdateVideoOverlaySettingsAsync()
+    {
+        if (ViewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
+        try
+        {
+            var settingsJson = System.Text.Json.JsonSerializer.Serialize(ViewModel.Settings.VideoOverlays);
+            await worker.UpdateVideoOverlaySettingsAsync(settingsJson);
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"Video overlay update failed: {error.Message}");
+        }
     }
 
     // Shows what a crop will KEEP by dimming what it will cut, rather than

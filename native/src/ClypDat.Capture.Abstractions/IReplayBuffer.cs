@@ -273,6 +273,7 @@ public interface IReplayCaptureWorkerControl
     Task UpdateClipGameNameAsync(string gameDisplayName, CancellationToken cancellationToken = default);
     Task UpdateAutoClipPolicyAsync(string? gameId, bool enabled, IReadOnlyList<string> enabledEventIds,
         CancellationToken cancellationToken = default);
+    Task UpdateVideoOverlaySettingsAsync(string settingsJson, CancellationToken cancellationToken = default);
 }
 
 public interface IStoragePressureObserver

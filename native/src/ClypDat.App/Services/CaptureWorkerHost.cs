@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text.Json;
 using ClypDat.Capture.Abstractions;
+using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
 
@@ -35,6 +36,7 @@ internal static class CaptureWorkerHost
     private static DisplayAvailabilityMonitor? _displayAvailability;
     private static bool _captureRequested;
     private static bool _desktopAvailable = true;
+    private static VideoOverlaySettings _videoOverlays = new();
 
     public static int Run()
     {
@@ -136,6 +138,11 @@ internal static class CaptureWorkerHost
                     break;
                 case "auto-clip-policy":
                     await ReplyAsync(client, message, await ApplyAutoClipPolicyAsync(message.Payload, cancellationToken), cancellationToken);
+                    break;
+                case "video-overlays":
+                    var overlayJson = message.Payload.GetProperty("settingsJson").GetString();
+                    _videoOverlays = JsonSerializer.Deserialize<VideoOverlaySettings>(overlayJson ?? string.Empty, JsonOptions) ?? new VideoOverlaySettings();
+                    await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "health":
                     await ReplyAsync(client, message, GetHealth(), cancellationToken);

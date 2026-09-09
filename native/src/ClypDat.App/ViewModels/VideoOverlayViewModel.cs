@@ -8,14 +8,15 @@ public sealed class VideoOverlayViewModel : ViewModelBase
 {
     private readonly VideoOverlaySettings _settings;
     private readonly Action _save;
+    private readonly Action? _apply;
     private string _sourceStatus = "No sources selected.";
     private bool _previewVisible;
     private string? _selectedLayer;
     private double _previewWidth = 640, _previewHeight = 360;
 
-    public VideoOverlayViewModel(VideoOverlaySettings settings, Action save)
+    public VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply = null)
     {
-        _settings = settings; _save = save;
+        _settings = settings; _save = save; _apply = apply;
         Cameras = new() { CameraOption.None }; Sources = new(); RebuildSources();
         _ = RefreshCamerasAsync(); UpdateStatus();
     }
@@ -70,16 +71,35 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     }
     private OverlaySourceOption? SourceAt(string corner)
     {
-        if (_settings.CameraAnchor == corner && HasCamera) return Sources.FirstOrDefault(source => source.Kind == OverlaySourceKind.Camera);
+        if (_settings.CameraAnchor == corner && HasCamera)
+            return Sources.FirstOrDefault(source => source.Kind == OverlaySourceKind.Camera && source.Value == _settings.Camera!.DeviceMoniker);
         if (_settings.KeyboardAnchor == corner && HasKeyboard) return Sources.FirstOrDefault(source => source.Kind == OverlaySourceKind.Keyboard && source.Value == _settings.KeyboardLayout);
         return OverlaySourceOption.None;
     }
     private void SetSource(string corner, OverlaySourceOption? source)
     {
         if (source is null) return;
-        if (source.Kind == OverlaySourceKind.None) { if (_settings.CameraAnchor == corner) { _settings.Camera = null; _settings.CameraAnchor = null; } if (_settings.KeyboardAnchor == corner) { _settings.KeyboardLayout = "None"; _settings.KeyboardAnchor = null; } }
-        else if (source.Kind == OverlaySourceKind.Camera) { _settings.Camera = new(source.Value, source.Name); _settings.CameraAnchor = corner; _settings.CameraTransform = VideoOverlayLayout.Corner(corner, .25, NormalizedAspect("Camera")); _selectedLayer = "Camera"; }
-        else { _settings.KeyboardLayout = source.Value; _settings.KeyboardAnchor = corner; _settings.KeyboardTransform = VideoOverlayLayout.Corner(corner, .25, NormalizedAspect("Keyboard")); _selectedLayer = "Keyboard"; }
+        if (source.Kind == OverlaySourceKind.None)
+        {
+            if (_settings.CameraAnchor == corner) { _settings.Camera = null; _settings.CameraAnchor = null; }
+            if (_settings.KeyboardAnchor == corner) { _settings.KeyboardLayout = "None"; _settings.KeyboardAnchor = null; }
+        }
+        else if (source.Kind == OverlaySourceKind.Camera)
+        {
+            if (_settings.KeyboardAnchor == corner) { _settings.KeyboardLayout = "None"; _settings.KeyboardAnchor = null; }
+            _settings.Camera = new(source.Value, source.Name);
+            _settings.CameraAnchor = corner;
+            _settings.CameraTransform = VideoOverlayLayout.Corner(corner, .25, NormalizedAspect("Camera"));
+            _selectedLayer = "Camera";
+        }
+        else
+        {
+            if (_settings.CameraAnchor == corner) { _settings.Camera = null; _settings.CameraAnchor = null; }
+            _settings.KeyboardLayout = source.Value;
+            _settings.KeyboardAnchor = corner;
+            _settings.KeyboardTransform = VideoOverlayLayout.Corner(corner, .25, NormalizedAspect("Keyboard"));
+            _selectedLayer = "Keyboard";
+        }
         Save(); UpdateStatus(); NotifyLayout();
     }
     private void RebuildSources()
@@ -92,7 +112,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     private double SourceAspect(string layer) => layer == "Camera" ? VideoOverlayLayout.CameraAspectRatio : 2.4;
     private double NormalizedAspect(string layer) => SourceAspect(layer) / (_previewWidth / _previewHeight);
     private static bool AtAnchor(VideoOverlayTransform transform, string? corner, double aspect) { if (corner is null) return false; var anchor = VideoOverlayLayout.Corner(corner, transform.Width, aspect); return Math.Abs(transform.X - anchor.X) < .002 && Math.Abs(transform.Y - anchor.Y) < .002; }
-    private void Save() => _save();
+    private void Save() { _save(); _apply?.Invoke(); }
     private void NotifyLayout()
     {
         foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(CameraSelected), nameof(KeyboardSelected), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource) }) OnPropertyChanged(name);

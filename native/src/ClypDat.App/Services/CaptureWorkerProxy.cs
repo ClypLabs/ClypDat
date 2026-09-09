@@ -33,6 +33,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private string? _autoClipGameId;
     private bool _autoClipEnabled;
     private IReadOnlyList<string> _autoClipEventIds = Array.Empty<string>();
+    private string _videoOverlaySettingsJson = string.Empty;
     private volatile bool _disposed;
 
     public CaptureWorkerProxy(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
@@ -128,6 +129,13 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         _autoClipEventIds = enabledEventIds.ToArray();
         await EnsureAttachedAsync(cancellationToken);
         Accept(await SendAsync<CaptureWorkerAck>("auto-clip-policy", new { gameId, enabled, enabledEventIds = _autoClipEventIds }, cancellationToken), "apply auto-clip policy");
+    }
+
+    public async Task UpdateVideoOverlaySettingsAsync(string settingsJson, CancellationToken cancellationToken = default)
+    {
+        _videoOverlaySettingsJson = settingsJson;
+        await EnsureAttachedAsync(cancellationToken);
+        Accept(await SendAsync<CaptureWorkerAck>("video-overlays", new { settingsJson }, cancellationToken), "apply video overlays");
     }
 
     public void Dispose() { _disposed = true; _desiredRecording = false; CancelRecovery(false); Disconnect(); }
@@ -351,6 +359,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         await SendAsync<CaptureWorkerAck>("full-session-hotkey", new { hotkey = string.IsNullOrWhiteSpace(_fullSessionHotkey) ? config.FullSessionHotkey : _fullSessionHotkey }, token);
         await SendAsync<CaptureWorkerAck>("pause", new { paused = _paused }, token);
         Accept(await SendAsync<CaptureWorkerAck>("auto-clip-policy", new { gameId = _autoClipGameId, enabled = _autoClipEnabled, enabledEventIds = _autoClipEventIds }, token), "restore auto-clip policy");
+        if (!string.IsNullOrEmpty(_videoOverlaySettingsJson))
+            Accept(await SendAsync<CaptureWorkerAck>("video-overlays", new { settingsJson = _videoOverlaySettingsJson }, token), "restore video overlays");
         if (_frameRate is int frameRate) await SendAsync<CaptureWorkerAck>("frame-rate", new { frameRate }, token);
         if (_desiredRecording && !attach.Recording)
         {
