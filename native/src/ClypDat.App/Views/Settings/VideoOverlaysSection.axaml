@@ -10,7 +10,7 @@
          the source name printed across it, so an empty corner looked like a
          keyboard and the name was unreadable over the keycaps. -->
     <DataTemplate x:Key="VideoOverlayEmptyMock">
-      <Grid Margin="9,8">
+      <Grid Margin="11,9">
         <Rectangle Classes="videoOverlayEmptyMock" />
         <TextBlock Classes="videoOverlayEmptyLabel" Text="Empty" HorizontalAlignment="Center" VerticalAlignment="Center" />
       </Grid>
@@ -21,7 +21,7 @@
       </Border>
     </DataTemplate>
     <DataTemplate x:Key="VideoOverlayKeyboardMock">
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5" Margin="9,8">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="11,9">
         <UniformGrid Rows="3" Columns="8">
           <Border Classes="videoOverlayKeyMock" />
           <Border Classes="videoOverlayKeyMock" />
@@ -82,7 +82,7 @@
              settings page had - 880px of empty preview on a wide window. The
              canvas is capped and centred, and the cards are laid over it at
              their own pixel size. -->
-        <Grid HorizontalAlignment="Center" MaxWidth="720">
+        <Grid HorizontalAlignment="Center" MaxWidth="1200">
           <Viewbox Stretch="Uniform">
             <Border Classes="videoOverlayCanvas" Width="960" Height="540">
             <Grid ClipToBounds="True">
@@ -98,9 +98,9 @@
             </Grid>
             </Border>
           </Viewbox>
-          <Grid x:Name="WidePickers" Margin="14" IsVisible="{Binding ShowPickers}" RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto">
+          <Grid x:Name="WidePickers" Margin="18" IsVisible="{Binding ShowPickers}" RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto">
             <Border Classes="videoOverlayPicker" VerticalAlignment="Top">
-              <StackPanel Spacing="7">
+              <StackPanel Spacing="8">
                 <TextBlock Classes="videoOverlayPickerLabel" Text="TOP LEFT" />
                 <Border Classes="videoOverlayPickerPreview" Tag="Top Left" PointerPressed="PickerPreview_OnPointerPressed">
                   <Panel>
@@ -113,7 +113,7 @@
               </StackPanel>
             </Border>
             <Border Grid.Column="2" Classes="videoOverlayPicker" VerticalAlignment="Top">
-              <StackPanel Spacing="7">
+              <StackPanel Spacing="8">
                 <TextBlock Classes="videoOverlayPickerLabel" Text="TOP RIGHT" />
                 <Border Classes="videoOverlayPickerPreview" Tag="Top Right" PointerPressed="PickerPreview_OnPointerPressed">
                   <Panel>
@@ -126,7 +126,7 @@
               </StackPanel>
             </Border>
             <Border Grid.Row="2" Classes="videoOverlayPicker" VerticalAlignment="Bottom">
-              <StackPanel Spacing="7">
+              <StackPanel Spacing="8">
                 <TextBlock Classes="videoOverlayPickerLabel" Text="BOTTOM LEFT" />
                 <Border Classes="videoOverlayPickerPreview" Tag="Bottom Left" PointerPressed="PickerPreview_OnPointerPressed">
                   <Panel>
@@ -139,7 +139,7 @@
               </StackPanel>
             </Border>
             <Border Grid.Row="2" Grid.Column="2" Classes="videoOverlayPicker" VerticalAlignment="Bottom">
-              <StackPanel Spacing="7">
+              <StackPanel Spacing="8">
                 <TextBlock Classes="videoOverlayPickerLabel" Text="BOTTOM RIGHT" />
                 <Border Classes="videoOverlayPickerPreview" Tag="Bottom Right" PointerPressed="PickerPreview_OnPointerPressed">
                   <Panel>
