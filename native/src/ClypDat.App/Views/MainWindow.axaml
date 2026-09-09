@@ -1360,13 +1360,8 @@
                     </TransformGroup>
                   </controls:ClickableVideoView.RenderTransform>
                 </controls:ClickableVideoView>
-                <!-- Captured layers live in same clipped host as playback.
-                     No click-through top-level window can paint over hoverbar,
-                     timeline, or sidebar. -->
-                <controls:OverlaySceneControl x:Name="CapturedOverlayScene"
-                                              IsHitTestVisible="False"
-                                              HorizontalAlignment="Stretch"
-                                              VerticalAlignment="Stretch" />
+                <!-- Captured layers use owned native overlay scene. LibVLC owns
+                     native child window, covering Avalonia siblings on Windows. -->
                 <!-- VideoView is hidden while LibVLC decodes its first frame,
                      allowing this Avalonia image to show instead of native
                      video's black surface. SelectedThumbnail is swapped

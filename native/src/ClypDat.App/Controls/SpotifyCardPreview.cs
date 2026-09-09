@@ -11,6 +11,11 @@ internal sealed class SpotifyCardPreview : Control, IDisposable
     private (int Width, int Height, string Position, FontFamily Font, bool DynamicBackground, double? OverlayWidth, double? Rotation, bool Right)? _key;
     private (SpotifyCard? Card, double SongSeconds)? _state;
     public bool HasCard => _state?.Card is not null;
+    public void Clear()
+    {
+        _state = null;
+        InvalidateVisual();
+    }
     public void Update(SpotifyRenderSpec spec, double seconds, int width, int height)
     {
         // Moving a card does not invalidate its cached text, artwork or frame buffer.

@@ -4502,6 +4502,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public VideoOverlayTransform? CameraOverlayTransform => _cameraOverlayTransform;
     public VideoOverlayTransform? PeripheralOverlayTransform => _peripheralOverlayTransform;
     public ClipOverlayLayer? SelectedOverlayManifestCamera() => _selectedOverlayManifest.Camera;
+    public ClipOverlayLayer? SelectedOverlayManifestPeripherals() => _selectedOverlayManifest.Peripherals;
     public double CameraOverlaySizePercent { get => OverlaySizePercent(CameraOverlayTransform, _selectedOverlayManifest.Camera); set => ResizeCapturedOverlay("Camera", value); }
     public double PeripheralOverlaySizePercent { get => OverlaySizePercent(PeripheralOverlayTransform, _selectedOverlayManifest.Peripherals); set => ResizeCapturedOverlay("Peripherals", value); }
     public string CameraOverlaySizeLabel => $"{CameraOverlaySizePercent:0}% of video width";

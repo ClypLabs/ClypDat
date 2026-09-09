@@ -15,7 +15,10 @@ public sealed partial class MainWindow
 {
     private Window? _spotifyWindow;
     private SpotifyCardPreview? _spotifyPreview;
-    private Grid? _spotifySurface;
+    // One owned native scene sits above LibVLC. A native video child always
+    // covers Avalonia siblings, so every editable overlay belongs here.
+    private OverlaySceneControl? _capturedOverlayScene;
+    private Canvas? _spotifySurface;
     private Canvas? _spotifyViewport;
     private SpotifyOverlayAdorner? _spotifyAdorner;
     private ServerPerPixelOverlay? _spotifyPerPixel;
@@ -50,11 +53,15 @@ public sealed partial class MainWindow
             _spotifyPreviewPath = model.SelectedVideoPath;
             _spotifyPreviewDirty = false;
         }
-        if (_spotifyPreviewSpec is not { } original || !model.Settings.SpotifyOverlayEnabled || !model.SpotifyOverlayLayerVisible || model.SelectedSourceWidth <= 0)
-        { HideSpotifyPreview(); UpdateCapturedOverlayPreview(model); return; }
+        if (model.SelectedSourceWidth <= 0) { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
         try
         {
-            var spec = original with { Position = model.Settings.SpotifyOverlayPosition, Font = SpotifyOverlayCardRenderer.ResolveFont(),
+            var original = _spotifyPreviewSpec;
+            var showSpotify = original is not null && model.Settings.SpotifyOverlayEnabled && model.SpotifyOverlayLayerVisible;
+            var showCamera = model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible && model.CameraOverlayTransform is not null;
+            var showPeripherals = model.HasPeripheralOverlayLayer && model.PeripheralOverlayLayerVisible && model.PeripheralOverlayTransform is not null;
+            if (!showSpotify && !showCamera && !showPeripherals) { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
+            var spec = original is null ? null : original with { Position = model.Settings.SpotifyOverlayPosition, Font = SpotifyOverlayCardRenderer.ResolveFont(),
                 DynamicBackground = model.Settings.SpotifyOverlayDynamicBackground, Transform = model.SpotifyOverlayTransform };
             var top = EditorVideoView.PointToScreen(default);
             var bottom = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
@@ -78,11 +85,17 @@ public sealed partial class MainWindow
             _spotifyVideoBounds = new Rect(x, y, width, height);
             // Geometry belongs to the full projected video, including zoom/pan.
             // Only the visible card pixels are clipped to the editor viewport.
-            var projection = SpotifyOverlayLayout.Project(
-                new((int)Math.Round(x), (int)Math.Round(y), width, height),
-                new(hostTop.X, hostTop.Y, hostBottom.X - hostTop.X, hostBottom.Y - hostTop.Y), spec.Position, spec.Transform);
-            var bounds = projection.CardBounds;
-            var visible = projection.VisibleBounds;
+            var frameX = (int)Math.Round(x);
+            var frameY = (int)Math.Round(y);
+            var viewport = new SpotifyOverlayBounds(hostTop.X, hostTop.Y, hostBottom.X - hostTop.X, hostBottom.Y - hostTop.Y);
+            // Clip full video scene, not Spotify card-shaped bounds. This is
+            // what allows camera/keyboard to exist when Spotify is hidden.
+            var visibleLeft = Math.Max(frameX, viewport.X);
+            var visibleTop = Math.Max(frameY, viewport.Y);
+            var visibleRight = Math.Min(frameX + width, viewport.X + Math.Max(0, viewport.Width));
+            var visibleBottom = Math.Min(frameY + height, viewport.Y + Math.Max(0, viewport.Height));
+            var visible = new SpotifyOverlayBounds(visibleLeft, visibleTop,
+                Math.Max(0, visibleRight - visibleLeft), Math.Max(0, visibleBottom - visibleTop));
             if (visible.Width <= 0 || visible.Height <= 0)
             {
                 if (_spotifyGesture is null) HideSpotifyPreview();
@@ -97,9 +110,10 @@ public sealed partial class MainWindow
             }
             if (_spotifyWindow is null)
             {
+                _capturedOverlayScene = new() { IsHitTestVisible = false };
                 _spotifyPreview = new() { IsHitTestVisible = false };
                 _spotifyAdorner = new() { IsHitTestVisible = false };
-                _spotifySurface = new Grid { Background = Brushes.Transparent, Children = { _spotifyPreview, _spotifyAdorner } };
+                _spotifySurface = new Canvas { Background = Brushes.Transparent, Children = { _capturedOverlayScene, _spotifyPreview, _spotifyAdorner } };
                 _spotifyViewport = new Canvas { Background = Brushes.Transparent, ClipToBounds = true, Children = { _spotifySurface } };
                 _spotifySurface.PointerPressed += SpotifySurface_OnPointerPressed;
                 _spotifySurface.PointerMoved += SpotifySurface_OnPointerMoved;
@@ -125,23 +139,37 @@ public sealed partial class MainWindow
             var dpi = _spotifyWindow.RenderScaling;
             _spotifyWindow.Width = visible.Width / dpi;
             _spotifyWindow.Height = visible.Height / dpi;
-            _spotifySurface!.Width = bounds.Width / dpi;
-            _spotifySurface.Height = bounds.Height / dpi;
-            Canvas.SetLeft(_spotifySurface, (bounds.X - visible.X) / dpi);
-            Canvas.SetTop(_spotifySurface, (bounds.Y - visible.Y) / dpi);
-            var displayCard = SpotifyOverlayLayout.Resolve(width, height, spec.Position, spec.Transform);
-            var displayRaster = SpotifyOverlayLayout.ResolveRenderBounds(width, height, spec.Position, spec.Transform);
-            _spotifyAdorner!.CardBounds = new Rect((displayCard.X - displayRaster.X) / dpi, (displayCard.Y - displayRaster.Y) / dpi,
-                displayCard.Width / dpi, displayCard.Height / dpi);
-            _spotifyAdorner.RotationDegrees = spec.Transform is null ? 0 : SpotifyOverlayLayout.Normalize(width, height, spec.Transform).RotationDegrees;
-            _spotifyAdorner.InvalidateVisual();
-            _spotifyAdorner!.IsVisible = model.IsSpotifyOverlaySelected && model.HasEditableSpotifyOverlay;
+            _spotifySurface!.Width = width / dpi;
+            _spotifySurface.Height = height / dpi;
+            Canvas.SetLeft(_spotifySurface, (x - visible.X) / dpi);
+            Canvas.SetTop(_spotifySurface, (y - visible.Y) / dpi);
+            _spotifySurface.IsHitTestVisible = showSpotify;
+            UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), visible, dpi);
+            _capturedOverlayScene!.Width = width / dpi;
+            _capturedOverlayScene.Height = height / dpi;
+            if (showSpotify)
+            {
+                var displayCard = SpotifyOverlayLayout.Resolve(width, height, spec!.Position, spec.Transform);
+                var displayRaster = SpotifyOverlayLayout.ResolveRenderBounds(width, height, spec.Position, spec.Transform);
+                _spotifyPreview!.Width = displayRaster.Width / dpi;
+                _spotifyPreview.Height = displayRaster.Height / dpi;
+                Canvas.SetLeft(_spotifyPreview, displayRaster.X / dpi);
+                Canvas.SetTop(_spotifyPreview, displayRaster.Y / dpi);
+                _spotifyAdorner!.Width = width / dpi;
+                _spotifyAdorner.Height = height / dpi;
+                _spotifyAdorner.CardBounds = new Rect(displayCard.X / dpi, displayCard.Y / dpi,
+                    displayCard.Width / dpi, displayCard.Height / dpi);
+                _spotifyAdorner.RotationDegrees = spec.Transform is null ? 0 : SpotifyOverlayLayout.Normalize(width, height, spec.Transform).RotationDegrees;
+                _spotifyAdorner.InvalidateVisual();
+                _spotifyAdorner.IsVisible = model.IsSpotifyOverlaySelected && model.HasEditableSpotifyOverlay;
+            }
+            else { _spotifyPreview!.Clear(); _spotifyAdorner!.IsVisible = false; }
             // A four-times zoom must not allocate a monitor-sized offscreen
             // bitmap four times over. This caps preview raster size only.
-            var rasterScale = Math.Min(1, 4096.0 / bounds.Width);
-            _spotifyPreview!.Update(spec, model.CurrentTime.TotalSeconds,
+            var rasterScale = Math.Min(1, 4096.0 / width);
+            if (showSpotify) _spotifyPreview!.Update(spec!, model.CurrentTime.TotalSeconds,
                 Math.Max(1, (int)Math.Round(width * rasterScale)), Math.Max(1, (int)Math.Round(height * rasterScale)));
-            if (!_spotifyPreview.HasCard && !_spotifyAdorner.IsVisible) { HideSpotifyPreview(); return; }
+            if (showSpotify && !_spotifyPreview!.HasCard && !_spotifyAdorner!.IsVisible && !showCamera && !showPeripherals) { HideSpotifyPreview(); return; }
             var handle = NativeHandleOf(_spotifyWindow);
             if (!_spotifyWindow.IsVisible || (handle != IntPtr.Zero && !IsWindowVisible(handle))) _spotifyWindow.Show(this);
             // LibVLC can create or reattach its child HWND after the owned card
@@ -150,7 +178,6 @@ public sealed partial class MainWindow
             handle = NativeHandleOf(_spotifyWindow);
             if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
             _spotifyPerPixel?.ShowAndRefresh();
-            UpdateCapturedOverlayPreview(model);
             // Captured camera is refreshed after Spotify so it receives the
             // current source time, then restore Spotify as top visual layer.
             handle = NativeHandleOf(_spotifyWindow);
@@ -168,47 +195,47 @@ public sealed partial class MainWindow
         EndSpotifyGesture();
     }
 
-    private void UpdateCapturedOverlayPreview(MainWindowViewModel model)
+    private void UpdateCapturedOverlayPreview(MainWindowViewModel model, Rect videoBounds, SpotifyOverlayBounds visible, double dpi)
     {
         var showCamera = model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible && model.CameraOverlayTransform is not null;
         const string peripherals = "QWERTY Compact";
         var showPeripherals = model.HasPeripheralOverlayLayer && model.PeripheralOverlayLayerVisible && model.PeripheralOverlayTransform is not null;
         if (!showCamera && !showPeripherals)
         { HideCapturedOverlayPreview(); return; }
-        var host = model.IsVideoFullscreen ? FullscreenVideoHost : EditorVideoHost;
-        var fullWidth = Math.Max(1, host.Bounds.Width);
-        var fullHeight = Math.Max(1, host.Bounds.Height);
-        var ratio = Math.Min((double)fullWidth / model.SelectedSourceWidth, (double)fullHeight / model.SelectedSourceHeight);
-        var width = (int)Math.Max(1, Math.Round(model.SelectedSourceWidth * ratio));
-        var height = (int)Math.Max(1, Math.Round(model.SelectedSourceHeight * ratio));
-        double x = (fullWidth - width) / 2;
-        double y = (fullHeight - height) / 2;
-        if (model.ActiveCropRect is { } crop) { x += crop.X * ratio; y += crop.Y * ratio; width = (int)(crop.Width * ratio); height = (int)(crop.Height * ratio); }
+        if (_capturedOverlayScene is null) return;
+        var width = Math.Max(1, videoBounds.Width);
+        var height = Math.Max(1, videoBounds.Height);
         if (showCamera)
         {
             var normalized = VideoOverlayLayout.Normalize(model.CameraOverlayTransform!, VideoOverlayLayout.CameraAspectRatio);
             var layerWidth = Math.Max(1, (int)Math.Round(width * normalized.Width));
             var layerHeight = Math.Max(1, (int)Math.Round(layerWidth / VideoOverlayLayout.CameraAspectRatio));
-            _capturedCameraBounds = new Rect(x + width * normalized.X, y + height * normalized.Y, layerWidth, layerHeight);
+            _capturedCameraBounds = new Rect((videoBounds.X + width * normalized.X - visible.X) / dpi,
+                (videoBounds.Y + height * normalized.Y - visible.Y) / dpi, layerWidth / dpi, layerHeight / dpi);
             if (_capturedPlayback is null)
             {
                 _capturedPlayback = new CapturedOverlayPlayback();
-                _capturedPlayback.FrameReady += image => CapturedOverlayScene.SetCamera(image, _capturedCameraBounds);
+                _capturedPlayback.FrameReady += image => _capturedOverlayScene?.SetCamera(image, _capturedCameraBounds);
             }
             _capturedPlayback.Request(model.Settings.LibraryFolder, model.SelectedOverlayManifestCamera(), model.CurrentTime.TotalSeconds);
         }
         if (showPeripherals)
         {
-            var aspect = KeyboardOverlayCatalog.Get(peripherals).AspectRatio;
+            var layout = model.SelectedOverlayManifestPeripherals()?.Source ?? peripherals;
+            var aspect = KeyboardOverlayCatalog.Get(layout).AspectRatio;
             var normalized = VideoOverlayLayout.Normalize(model.PeripheralOverlayTransform!, aspect);
             var layerWidth = Math.Max(1, width * normalized.Width);
-            CapturedOverlayScene.SetPeripherals(peripherals, new Rect(x + width * normalized.X, y + height * normalized.Y, layerWidth, layerWidth / aspect));
+            _capturedOverlayScene.SetPeripherals(layout, new Rect((videoBounds.X + width * normalized.X - visible.X) / dpi,
+                (videoBounds.Y + height * normalized.Y - visible.Y) / dpi, layerWidth / dpi, layerWidth / aspect / dpi));
         }
-        CapturedOverlayScene.IsVisible = true;
+        _capturedOverlayScene.IsVisible = true;
     }
 
     private Rect _capturedCameraBounds;
-    private void HideCapturedOverlayPreview() => CapturedOverlayScene.IsVisible = false;
+    private void HideCapturedOverlayPreview()
+    {
+        if (_capturedOverlayScene is not null) _capturedOverlayScene.IsVisible = false;
+    }
 
     private void SpotifySurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
