@@ -5,12 +5,15 @@ namespace ClypDat.App.Services;
 
 internal interface ICameraPreviewService : IDisposable
 {
-    event Action<byte[]>? FrameReady;
+    event Action<CameraPreviewFrame>? FrameReady;
     event Action<string>? Failed;
     bool IsRunning { get; }
+    int Session { get; }
     void Start(string deviceMoniker);
     void Stop();
 }
+
+internal sealed record CameraPreviewFrame(int Session, byte[] Pixels);
 
 // This is deliberately independent from replay capture. FFmpeg owns only a video
 // DirectShow stream and is killed when this short-lived settings preview ends.
@@ -24,9 +27,10 @@ internal sealed class CameraPreviewService : ICameraPreviewService
     private CancellationTokenSource? _cancellation;
     private int _generation;
 
-    public event Action<byte[]>? FrameReady;
+    public event Action<CameraPreviewFrame>? FrameReady;
     public event Action<string>? Failed;
     public bool IsRunning { get { lock (_gate) return _process is not null; } }
+    public int Session { get { lock (_gate) return _generation; } }
 
     public void Start(string deviceMoniker)
     {
@@ -59,6 +63,7 @@ internal sealed class CameraPreviewService : ICameraPreviewService
     private async Task ReadFramesAsync(Process process, int generation, CancellationToken cancellationToken)
     {
         var frame = new byte[FrameBytes]; var offset = 0; var received = false;
+        var cadence = Stopwatch.StartNew(); long receivedFrames = 0, deliveredFrames = 0;
         try {
             while (!cancellationToken.IsCancellationRequested) {
                 var readTask = process.StandardOutput.BaseStream.ReadAsync(frame.AsMemory(offset, FrameBytes - offset), cancellationToken).AsTask();
@@ -67,9 +72,12 @@ internal sealed class CameraPreviewService : ICameraPreviewService
                 if (read == 0) throw new InvalidOperationException("Camera preview stopped before a frame arrived.");
                 offset += read;
                 if (offset != FrameBytes) continue;
-                received = true; offset = 0;
+                received = true; offset = 0; receivedFrames++;
                 lock (_gate) { if (generation != _generation || _process != process) return; }
-                FrameReady?.Invoke(frame); frame = new byte[FrameBytes];
+                FrameReady?.Invoke(new CameraPreviewFrame(generation, frame)); deliveredFrames++; frame = new byte[FrameBytes];
+                if (cadence.Elapsed < TimeSpan.FromSeconds(5)) continue;
+                AppLog.Debug($"Camera preview cadence: received={receivedFrames}, delivered={deliveredFrames}, seconds={cadence.Elapsed.TotalSeconds:0.0}.");
+                receivedFrames = 0; deliveredFrames = 0; cadence.Restart();
             }
         }
         catch (OperationCanceledException) { }

@@ -24,7 +24,14 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     private WriteableBitmap? _cameraPreviewImage;
     private string? _cameraPreviewError;
     private bool _cameraPreviewLoading;
-    private int _pendingPreviewFrame;
+    private readonly object _previewFrameGate = new();
+    private CameraPreviewFrame? _latestPreviewFrame;
+    private int _previewSession;
+    private bool _previewFrameQueued;
+    private readonly Stopwatch _previewCadence = Stopwatch.StartNew();
+    private long _appliedPreviewFrames;
+
+    public event Action? CameraPreviewFrameUpdated;
 
     public VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply = null)
         : this(settings, save, apply, new CameraPreviewService()) { }
@@ -98,14 +105,20 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     public void StartCameraPreview()
     {
         if (_settings.Camera is not { } camera) return;
-        StopCameraPreview(); CameraPreviewError = string.Empty; CameraPreviewLoading = true; NotifyPreview();
+        StopCameraPreview();
+        var previous = CapturePreviewState();
+        CameraPreviewError = string.Empty; CameraPreviewLoading = true; NotifyPreviewState(previous);
         _cameraPreview.Start(camera.DeviceMoniker);
+        Volatile.Write(ref _previewSession, _cameraPreview.Session);
     }
     public void StopCameraPreview()
     {
+        var previous = CapturePreviewState();
+        Volatile.Write(ref _previewSession, 0);
+        lock (_previewFrameGate) { _latestPreviewFrame = null; _previewFrameQueued = false; }
         _cameraPreview.Stop(); CameraPreviewLoading = false;
         if (_cameraPreviewImage is not null) { _cameraPreviewImage.Dispose(); _cameraPreviewImage = null; }
-        NotifyPreview();
+        NotifyPreviewState(previous);
     }
     public void Manipulate(string layer, VideoOverlayManipulationMode mode, double deltaX, double deltaY)
     {
@@ -222,23 +235,56 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     private double NormalizedAspect(string layer) => SourceAspect(layer) / (_previewWidth / _previewHeight);
     private static bool AtAnchor(VideoOverlayTransform transform, string? corner, double aspect) { if (corner is null) return false; var anchor = VideoOverlayLayout.Corner(corner, transform.Width, aspect); return Math.Abs(transform.X - anchor.X) < .002 && Math.Abs(transform.Y - anchor.Y) < .002; }
     private void Save() { _save(); _apply?.Invoke(); }
-    private void CameraPreview_Failed(string error) => Dispatcher.UIThread.Post(() => { CameraPreviewLoading = false; CameraPreviewError = error; NotifyPreview(); });
-    private void CameraPreview_FrameReady(byte[] frame)
+    private void CameraPreview_Failed(string error) => Dispatcher.UIThread.Post(() => { var previous = CapturePreviewState(); CameraPreviewLoading = false; CameraPreviewError = error; NotifyPreviewState(previous); });
+    private void CameraPreview_FrameReady(CameraPreviewFrame frame)
     {
-        if (Interlocked.Exchange(ref _pendingPreviewFrame, 1) != 0) return;
-        Dispatcher.UIThread.Post(() => {
-            try {
-                if (!_cameraPreview.IsRunning) return;
-                _cameraPreviewImage ??= new WriteableBitmap(new PixelSize(CameraPreviewService.Width, CameraPreviewService.Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul);
-                using var locked = _cameraPreviewImage.Lock();
-                unsafe { fixed (byte* source = frame) Buffer.MemoryCopy(source, (void*)locked.Address, CameraPreviewService.FrameBytes, CameraPreviewService.FrameBytes); }
-                CameraPreviewLoading = false; CameraPreviewError = string.Empty; NotifyPreview();
-            } finally { Interlocked.Exchange(ref _pendingPreviewFrame, 0); }
-        });
+        if (frame.Session != Volatile.Read(ref _previewSession)) return;
+        lock (_previewFrameGate)
+        {
+            _latestPreviewFrame = frame;
+            if (_previewFrameQueued) return;
+            _previewFrameQueued = true;
+        }
+        Dispatcher.UIThread.Post(() => ApplyLatestPreviewFrame(frame.Session), DispatcherPriority.Render);
     }
-    private void NotifyPreview()
+    private void ApplyLatestPreviewFrame(int session)
     {
-        OnPropertyChanged(nameof(CameraPreviewImage)); OnPropertyChanged(nameof(CameraPreviewLoading)); OnPropertyChanged(nameof(CameraPreviewActive)); OnPropertyChanged(nameof(CameraPreviewIdle)); OnPropertyChanged(nameof(CameraPreviewFailed)); OnPropertyChanged(nameof(CameraPreviewError));
+        CameraPreviewFrame? frame;
+        lock (_previewFrameGate)
+        {
+            if (session != Volatile.Read(ref _previewSession)) { _previewFrameQueued = false; return; }
+            frame = _latestPreviewFrame;
+            _latestPreviewFrame = null;
+            _previewFrameQueued = false;
+        }
+        if (frame is null || !_cameraPreview.IsRunning) return;
+        var previous = CapturePreviewState();
+        _cameraPreviewImage ??= new WriteableBitmap(new PixelSize(CameraPreviewService.Width, CameraPreviewService.Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul);
+        using (var locked = _cameraPreviewImage.Lock())
+        {
+            unsafe { fixed (byte* source = frame.Pixels) Buffer.MemoryCopy(source, (void*)locked.Address, CameraPreviewService.FrameBytes, CameraPreviewService.FrameBytes); }
+        }
+        CameraPreviewLoading = false;
+        CameraPreviewError = string.Empty;
+        NotifyPreviewState(previous);
+        CameraPreviewFrameUpdated?.Invoke();
+        _appliedPreviewFrames++;
+        if (_previewCadence.Elapsed >= TimeSpan.FromSeconds(5))
+        {
+            AppLog.Debug($"Camera preview cadence: applied={_appliedPreviewFrames}, seconds={_previewCadence.Elapsed.TotalSeconds:0.0}.");
+            _appliedPreviewFrames = 0;
+            _previewCadence.Restart();
+        }
+    }
+    private readonly record struct PreviewState(Bitmap? Image, bool Loading, bool Active, bool Idle, bool Failed, string Error);
+    private PreviewState CapturePreviewState() => new(CameraPreviewImage, CameraPreviewLoading, CameraPreviewActive, CameraPreviewIdle, CameraPreviewFailed, CameraPreviewError);
+    private void NotifyPreviewState(PreviewState previous)
+    {
+        var current = CapturePreviewState();
+        if (!ReferenceEquals(previous.Image, current.Image)) OnPropertyChanged(nameof(CameraPreviewImage));
+        if (previous.Active != current.Active) OnPropertyChanged(nameof(CameraPreviewActive));
+        if (previous.Idle != current.Idle) OnPropertyChanged(nameof(CameraPreviewIdle));
+        if (previous.Failed != current.Failed) OnPropertyChanged(nameof(CameraPreviewFailed));
     }
     private void NotifyLayout()
     {

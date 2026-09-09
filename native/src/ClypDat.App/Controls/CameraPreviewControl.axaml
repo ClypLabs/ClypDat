@@ -4,7 +4,7 @@
              x:Class="ClypDat.App.Controls.CameraPreviewControl"
              x:DataType="vm:VideoOverlayViewModel">
   <Grid Background="#FF233746">
-    <Image Source="{Binding CameraPreviewImage}" IsVisible="{Binding CameraPreviewActive}" Stretch="Uniform" />
+    <Image x:Name="PreviewImage" Source="{Binding CameraPreviewImage}" IsVisible="{Binding CameraPreviewActive}" Stretch="Uniform" />
     <StackPanel IsVisible="{Binding CameraPreviewIdle}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
       <Button Content="Show Preview" Click="ShowPreview_OnClick" />
       <TextBlock Text="Camera" HorizontalAlignment="Center" Opacity=".72" />
