@@ -110,6 +110,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // Updated on the worker pipe thread, consumed at frame boundaries by the
     // capture loop. A complete JSON value prevents partially-mutated settings.
     private string _videoOverlaySettingsJson = "{}";
+    private readonly OverlayCaptureSession _overlayCapture;
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
     private readonly object _bufferLock = new();
@@ -269,12 +270,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         _configProvider = configProvider;
         _bufferFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "native-replay-buffer");
         _audio = new AudioCapturePipeline(_bufferFolder);
+        _overlayCapture = new OverlayCaptureSession(_bufferFolder);
     }
 
     public bool IsRecording => _sessionActive;
 
-    public void SetVideoOverlaySettings(string settingsJson) =>
-        Interlocked.Exchange(ref _videoOverlaySettingsJson, string.IsNullOrWhiteSpace(settingsJson) ? "{}" : settingsJson);
+    public void SetVideoOverlaySettings(string settingsJson)
+    {
+        var json = string.IsNullOrWhiteSpace(settingsJson) ? "{}" : settingsJson;
+        Interlocked.Exchange(ref _videoOverlaySettingsJson, json);
+        _overlayCapture.Apply(JsonSerializer.Deserialize<VideoOverlaySettings>(json) ?? new VideoOverlaySettings());
+    }
 
     public void RequestFrameRate(int frameRate)
     {
@@ -435,6 +441,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // again in a second." instead of the actual start failure.
         _packetPayloads.Activate();
         _sessionActive = true;
+        _overlayCapture.Start();
         SetHealth(new ReplayCaptureHealth("Native", "Native capture", ReplayCaptureState.Starting,
             config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow));
         _captureTask = Task.Factory.StartNew(
@@ -523,6 +530,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // capture set and deletes the WAVs itself once the session file is
         // complete - deleting them here would yank them out from under it.
         _audio.Stop(deleteCaptureFiles: _backgroundFinalize is null || _backgroundFinalize.IsCompleted);
+        _overlayCapture.Stop();
         lock (_bufferLock)
         {
             ReturnPooledPackets(0, _packets.Count);
@@ -780,9 +788,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var overlays = JsonSerializer.Deserialize<VideoOverlaySettings>(Volatile.Read(ref _videoOverlaySettingsJson));
         if (overlays is not null)
         {
-            var camera = overlays.Camera is null ? null : new ClipOverlayLayer(
-                overlays.Camera.FriendlyName, false, InitialTransform: overlays.CameraTransform,
-                Error: "Camera capture asset was unavailable.");
+            // requestedStartUtc is adjusted for recovery before the replay
+            // window is borrowed.  It remains available after muxing, unlike
+            // the local remux timing variables above.
+            var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, requestedStartUtc, requestedEndUtc);
             var peripherals = string.Equals(overlays.KeyboardLayout, "None", StringComparison.OrdinalIgnoreCase) ? null : new ClipOverlayLayer(
                 overlays.KeyboardLayout, false, InitialTransform: overlays.KeyboardTransform,
                 Error: "Keyboard and mouse capture asset was unavailable.");
@@ -822,6 +831,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         _captureCts?.Cancel();
         _captureCts?.Dispose();
         _packetPayloads.Deactivate();
+        _overlayCapture.Dispose();
     }
 
     private unsafe void CaptureLoop(CancellationToken token, TaskCompletionSource ready)

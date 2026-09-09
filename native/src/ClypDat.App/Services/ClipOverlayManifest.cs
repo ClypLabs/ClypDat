@@ -28,8 +28,13 @@ public sealed record ClipOverlayManifest(
         catch (Exception) { return null; }
     }
 
-    public static bool IsUsable(string libraryRoot, ClipOverlayLayer? layer) =>
-        layer is { Available: true } && (string.IsNullOrWhiteSpace(layer.AssetPath) || File.Exists(ResolveAssetPath(libraryRoot, layer.AssetPath)));
+    public static bool IsUsable(string libraryRoot, ClipOverlayLayer? layer)
+    {
+        if (layer is not { Available: true }) return false;
+        var assets = layer.Assets;
+        if (assets is { Count: > 0 }) return assets.All(asset => File.Exists(ResolveAssetPath(libraryRoot, asset.AssetPath)));
+        return string.IsNullOrWhiteSpace(layer.AssetPath) || File.Exists(ResolveAssetPath(libraryRoot, layer.AssetPath));
+    }
 
     /// <summary>Returns only references which are safe to delete from this library.</summary>
     public static IEnumerable<string> ExistingAssetPaths(string libraryRoot, ClipOverlayManifest? manifest)
@@ -38,6 +43,12 @@ public sealed record ClipOverlayManifest(
         {
             var path = ResolveAssetPath(libraryRoot, layer?.AssetPath);
             if (path is not null && File.Exists(path)) yield return path;
+            if (layer?.Assets is not { Count: > 0 }) continue;
+            foreach (var asset in layer.Assets)
+            {
+                path = ResolveAssetPath(libraryRoot, asset.AssetPath);
+                if (path is not null && File.Exists(path)) yield return path;
+            }
         }
     }
 }
@@ -49,6 +60,8 @@ public sealed record ClipOverlayLayer(
     string? AssetPath = null,
     VideoOverlayTransform? InitialTransform = null,
     string? Error = null,
-    bool Flattened = false);
+    bool Flattened = false,
+    IReadOnlyList<ClipOverlayAsset>? Assets = null);
 
 public sealed record ClipOverlayInterval(double StartSeconds, double EndSeconds);
+public sealed record ClipOverlayAsset(string AssetPath, double StartSeconds, double EndSeconds);
