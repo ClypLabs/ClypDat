@@ -105,7 +105,9 @@ public sealed class VideoOverlayViewModel : ViewModelBase
         Cameras.Clear(); Cameras.Add(CameraOption.None); foreach (var camera in cameras) Cameras.Add(camera);
         // Device disappearance is transient. Keep selection and transform so it
         // returns in same place when USB camera reconnects.
-        if (_settings.Camera is { } selected && !Cameras.Any(camera => camera.Moniker == selected.DeviceMoniker))
+        if (_settings.Camera is { } selected &&
+            DirectShowCameraParser.IsSavedCameraSelection(selected) &&
+            !Cameras.Any(camera => camera.Moniker == selected.DeviceMoniker))
             Cameras.Add(new CameraOption($"{selected.FriendlyName} (unavailable)", selected.DeviceMoniker));
         RebuildSources(); UpdateStatus(); NotifyLayout();
     }
@@ -179,7 +181,35 @@ internal static class DirectShowCameraProbe
     public static IReadOnlyList<CameraOption> List(bool includeVirtual, CancellationToken cancellationToken)
     {
         var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffmpeg.exe"); if (!File.Exists(ffmpeg)) return Array.Empty<CameraOption>();
-        try { using var process = Process.Start(new ProcessStartInfo(ffmpeg, "-hide_banner -list_devices true -f dshow -i dummy") { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true }); if (process is null) return Array.Empty<CameraOption>(); var read = process.StandardError.ReadToEndAsync(cancellationToken); if (!process.WaitForExit(5000)) { try { process.Kill(true); } catch { } return Array.Empty<CameraOption>(); } var text = read.GetAwaiter().GetResult(); cancellationToken.ThrowIfCancellationRequested(); var video = text.Split("DirectShow audio devices", StringSplitOptions.None)[0]; return System.Text.RegularExpressions.Regex.Matches(video, "\\\"(?<name>[^\\\"]+)\\\"", System.Text.RegularExpressions.RegexOptions.CultureInvariant).Select(match => match.Groups["name"].Value).Distinct(StringComparer.OrdinalIgnoreCase).Where(name => !name.StartsWith("Alternative name", StringComparison.OrdinalIgnoreCase)).Where(name => includeVirtual || !IsVirtual(name)).Select(name => new CameraOption(name, name, IsVirtual(name))).ToArray(); } catch (OperationCanceledException) { throw; } catch { return Array.Empty<CameraOption>(); }
+        try { using var process = Process.Start(new ProcessStartInfo(ffmpeg, "-hide_banner -list_devices true -f dshow -i dummy") { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true }); if (process is null) return Array.Empty<CameraOption>(); var read = process.StandardError.ReadToEndAsync(cancellationToken); if (!process.WaitForExit(5000)) { try { process.Kill(true); } catch { } return Array.Empty<CameraOption>(); } var text = read.GetAwaiter().GetResult(); cancellationToken.ThrowIfCancellationRequested(); return DirectShowCameraParser.Parse(text, includeVirtual); } catch (OperationCanceledException) { throw; } catch { return Array.Empty<CameraOption>(); }
     }
+}
+
+internal static class DirectShowCameraParser
+{
+    private static readonly System.Text.RegularExpressions.Regex VideoDevice = new(
+        "^\\s*\\[[^\\]]*\\]\\s+\"(?<name>[^\"]+)\"\\s+\\(video\\)\\s*$",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    public static IReadOnlyList<CameraOption> Parse(string output, bool includeVirtual)
+    {
+        return output.Split(["\r\n", "\n"], StringSplitOptions.None)
+            .Select(line => VideoDevice.Match(line))
+            .Where(match => match.Success)
+            .Select(match => match.Groups["name"].Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(name => !IsExcludedDevice(name))
+            .Where(name => includeVirtual || !IsVirtual(name))
+            .Select(name => new CameraOption(name, name, IsVirtual(name)))
+            .ToArray();
+    }
+
+    public static bool IsSavedCameraSelection(VideoOverlayCameraSelection selection) =>
+        !IsRawDeviceIdentifier(selection.DeviceMoniker) &&
+        !IsRawDeviceIdentifier(selection.FriendlyName) &&
+        !IsExcludedDevice(selection.FriendlyName);
+
     private static bool IsVirtual(string name) => name.Contains("virtual", StringComparison.OrdinalIgnoreCase) || name.Contains("obs", StringComparison.OrdinalIgnoreCase) || name.Contains("snap camera", StringComparison.OrdinalIgnoreCase) || name.Contains("manycam", StringComparison.OrdinalIgnoreCase) || name.Contains("ndi", StringComparison.OrdinalIgnoreCase);
+    private static bool IsRawDeviceIdentifier(string value) => value.StartsWith("@device_", StringComparison.OrdinalIgnoreCase) || value.StartsWith("Alternative name", StringComparison.OrdinalIgnoreCase);
+    private static bool IsExcludedDevice(string name) => name.Contains("audio", StringComparison.OrdinalIgnoreCase) || name.Contains("microphone", StringComparison.OrdinalIgnoreCase) || name.Contains("mic", StringComparison.OrdinalIgnoreCase) || name.Contains("voicemeeter", StringComparison.OrdinalIgnoreCase) || name.Contains("speaker", StringComparison.OrdinalIgnoreCase) || name.Contains("headphone", StringComparison.OrdinalIgnoreCase) || name.Contains("headset", StringComparison.OrdinalIgnoreCase) || name.Contains("stereo mix", StringComparison.OrdinalIgnoreCase) || name.Contains("line in", StringComparison.OrdinalIgnoreCase);
 }

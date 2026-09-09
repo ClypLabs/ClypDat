@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ClypDat.App.ViewModels;
 using ClypDat.Core.Settings;
 using Xunit;
 
@@ -62,5 +63,48 @@ public sealed class VideoOverlaySettingsTests
         Assert.Equal(camera, settings.VideoOverlays.CameraTransform);
         Assert.Equal("Top Right", settings.VideoOverlays.CameraAnchor);
         Assert.Equal("Bottom Left", settings.VideoOverlays.KeyboardAnchor);
+    }
+
+    [Fact]
+    public void DirectShowParser_ReturnsOnlyExplicitVideoDevices()
+    {
+        const string output = """
+            [dshow @ 000001] "Elgato 4K X" (video)
+            [dshow @ 000001]   Alternative name "@device_pnp_\\?\\usb#elgato"
+            [dshow @ 000001] "Elgato Virtual Camera" (video)
+            [dshow @ 000001] "Voicemeeter Virtual Camera" (video)
+            [dshow @ 000001] "Microphone (USB Audio Device)" (audio)
+            [dshow @ 000001] "Voicemeeter Output" (audio)
+            [dshow @ 000001] "Elgato 4K X" (video)
+            [dshow @ 000001] "none" (none)
+            [dshow @ 000001] Could not enumerate "diagnostic text"
+            """;
+
+        var cameras = DirectShowCameraParser.Parse(output, includeVirtual: false);
+
+        Assert.Collection(cameras, camera => Assert.Equal("Elgato 4K X", camera.Name));
+    }
+
+    [Fact]
+    public void DirectShowParser_RespectsVirtualCameraToggle()
+    {
+        const string output = """
+            [dshow @ 000001] "Elgato 4K X" (video)
+            [dshow @ 000001] "Elgato Virtual Camera" (video)
+            """;
+
+        var cameras = DirectShowCameraParser.Parse(output, includeVirtual: true);
+
+        Assert.Equal(["Elgato 4K X", "Elgato Virtual Camera"], cameras.Select(camera => camera.Name));
+    }
+
+    [Theory]
+    [InlineData("Elgato 4K X", "Elgato 4K X", true)]
+    [InlineData("@device_pnp_\\?\\usb#elgato", "@device_pnp_\\?\\usb#elgato", false)]
+    [InlineData("Microphone (USB Audio Device)", "Microphone (USB Audio Device)", false)]
+    [InlineData("Voicemeeter Output", "Voicemeeter Output", false)]
+    public void SavedCameraFallback_OnlyKeepsPotentialCameraSelections(string moniker, string name, bool expected)
+    {
+        Assert.Equal(expected, DirectShowCameraParser.IsSavedCameraSelection(new(moniker, name)));
     }
 }
