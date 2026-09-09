@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Buffers;
 using Avalonia;
 using Avalonia.Threading;
 using ClypDat.App.Services;
@@ -34,9 +35,9 @@ public sealed class CameraPreviewCadenceTests
 
                 viewModel.StartCameraPreview();
                 previewProperties = 0;
-                var frame = new byte[CameraPreviewService.FrameBytes];
                 for (var index = 1; index <= 75; index++)
                 {
+                    var frame = ArrayPool<byte>.Shared.Rent(CameraPreviewService.FrameBytes);
                     frame[0] = (byte)index;
                     service.Emit(frame);
                 }
@@ -50,7 +51,7 @@ public sealed class CameraPreviewCadenceTests
                 }
 
                 viewModel.StopCameraPreview();
-                service.Emit(frame);
+                service.Emit(ArrayPool<byte>.Shared.Rent(CameraPreviewService.FrameBytes));
                 Dispatcher.UIThread.RunJobs();
                 Assert.Equal(1, notifications);
             }
@@ -65,7 +66,7 @@ public sealed class CameraPreviewCadenceTests
     private sealed class FakeCameraPreviewService : ICameraPreviewService
     {
         public event Action<CameraPreviewFrame>? FrameReady;
-        public event Action<string>? Failed { add { } remove { } }
+        public event Action<CameraPreviewFailure>? Failed { add { } remove { } }
         public bool IsRunning { get; private set; }
         public int Session { get; private set; }
         public void Start(string deviceMoniker) { Session++; IsRunning = true; }

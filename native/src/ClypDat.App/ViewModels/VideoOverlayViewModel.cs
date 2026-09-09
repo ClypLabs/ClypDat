@@ -122,7 +122,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     {
         var previous = CapturePreviewState();
         Volatile.Write(ref _previewSession, 0);
-        lock (_previewFrameGate) { _latestPreviewFrame = null; _previewFrameQueued = false; }
+        lock (_previewFrameGate) { _latestPreviewFrame?.Dispose(); _latestPreviewFrame = null; _previewFrameQueued = false; }
         _cameraPreview.Stop(); CameraPreviewLoading = false;
         if (_cameraPreviewImage is not null) { _cameraPreviewImage.Dispose(); _cameraPreviewImage = null; }
         NotifyPreviewState(previous);
@@ -241,12 +241,17 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     private double NormalizedAspect(string layer) => SourceAspect(layer) / (_previewWidth / _previewHeight);
     private static bool AtAnchor(VideoOverlayTransform transform, string? corner, double aspect) { if (corner is null) return false; var anchor = VideoOverlayLayout.Corner(corner, transform.Width, aspect); return Math.Abs(transform.X - anchor.X) < .002 && Math.Abs(transform.Y - anchor.Y) < .002; }
     private void Save() { _save(); _apply?.Invoke(); }
-    private void CameraPreview_Failed(string error) => Dispatcher.UIThread.Post(() => { var previous = CapturePreviewState(); CameraPreviewLoading = false; CameraPreviewError = error; NotifyPreviewState(previous); });
+    private void CameraPreview_Failed(CameraPreviewFailure failure) => Dispatcher.UIThread.Post(() =>
+    {
+        if (failure.Session != Volatile.Read(ref _previewSession)) return;
+        var previous = CapturePreviewState(); CameraPreviewLoading = false; CameraPreviewError = failure.Message; NotifyPreviewState(previous);
+    });
     private void CameraPreview_FrameReady(CameraPreviewFrame frame)
     {
-        if (frame.Session != Volatile.Read(ref _previewSession)) return;
+        if (frame.Session != Volatile.Read(ref _previewSession)) { frame.Dispose(); return; }
         lock (_previewFrameGate)
         {
+            _latestPreviewFrame?.Dispose();
             _latestPreviewFrame = frame;
             if (_previewFrameQueued) return;
             _previewFrameQueued = true;
@@ -258,18 +263,22 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         CameraPreviewFrame? frame;
         lock (_previewFrameGate)
         {
-            if (session != Volatile.Read(ref _previewSession)) { _previewFrameQueued = false; return; }
+            if (session != Volatile.Read(ref _previewSession)) { _latestPreviewFrame?.Dispose(); _latestPreviewFrame = null; _previewFrameQueued = false; return; }
             frame = _latestPreviewFrame;
             _latestPreviewFrame = null;
             _previewFrameQueued = false;
         }
-        if (frame is null || !_cameraPreview.IsRunning) return;
+        if (frame is null || !_cameraPreview.IsRunning) { frame?.Dispose(); return; }
         var previous = CapturePreviewState();
-        _cameraPreviewImage ??= new WriteableBitmap(new PixelSize(CameraPreviewService.Width, CameraPreviewService.Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul);
-        using (var locked = _cameraPreviewImage.Lock())
+        try
         {
-            unsafe { fixed (byte* source = frame.Pixels) Buffer.MemoryCopy(source, (void*)locked.Address, CameraPreviewService.FrameBytes, CameraPreviewService.FrameBytes); }
+            _cameraPreviewImage ??= new WriteableBitmap(new PixelSize(CameraPreviewService.Width, CameraPreviewService.Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul);
+            using (var locked = _cameraPreviewImage.Lock())
+            {
+                unsafe { fixed (byte* source = frame.Pixels) Buffer.MemoryCopy(source, (void*)locked.Address, CameraPreviewService.FrameBytes, CameraPreviewService.FrameBytes); }
+            }
         }
+        finally { frame.Dispose(); }
         CameraPreviewLoading = false;
         CameraPreviewError = string.Empty;
         NotifyPreviewState(previous);
