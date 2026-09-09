@@ -30,69 +30,108 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     private static readonly Guid AudioCaptureClientGuid = new("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
     private readonly uint _processId;
     private readonly ProcessLoopbackCaptureMode _mode;
-    private readonly IAudioClient _audioClient;
-    private readonly IAudioCaptureClientNative _captureClient;
+    private readonly IProcessLoopbackClient _client;
+    private readonly object _lifetime = new();
+    private readonly TimeSpan _stopTimeout;
     private CancellationTokenSource? _cts;
     private Thread? _captureThread;
+    private bool _disposed;
+    private bool _released;
     private bool _loggedFirstPacket;
 
     public ProcessLoopbackWaveIn(int processId, ProcessLoopbackCaptureMode mode)
+        : this(new NativeClient(processId, mode), TimeSpan.FromSeconds(2))
     {
-        if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
         _processId = (uint)processId;
         _mode = mode;
-        _audioClient = ActivateAudioClient(_processId, _mode);
-        WaveFormat = GetSharedRenderFormat();
-
-        InitializeClient();
-
-        object service;
-        var captureClientGuid = AudioCaptureClientGuid;
-        Marshal.ThrowExceptionForHR(_audioClient.GetService(captureClientGuid, out service));
-        _captureClient = (IAudioCaptureClientNative)service;
-        AppLog.Info($"Process loopback initialized: pid={_processId}, mode={_mode}, format={WaveFormat.SampleRate}Hz/{WaveFormat.Channels}ch/{WaveFormat.BitsPerSample}bit.");
+        AppLog.Info($"Process loopback initialized: pid={_processId}, mode={_mode}, format={WaveFormat}.");
     }
 
-    // Ask WASAPI for a capture buffer big enough to survive a scheduling
-    // stall instead of taking the engine default (one device period, ~10ms in
-    // shared mode). With a 10ms buffer drained by a 10ms poll loop there was
-    // no margin at all: any hiccup longer than a single period overran the
-    // buffer and that audio was gone. Capture is written straight to a rolling
-    // RAM buffer, so a deep capture buffer costs nothing that matters here -
-    // there is no latency budget to protect.
-    private const long BufferDuration100ns = 500 * 10_000L;
-
-    private void InitializeClient()
+    internal ProcessLoopbackWaveIn(IProcessLoopbackClient client, TimeSpan stopTimeout)
     {
-        var sessionGuid = Guid.Empty;
-        Exception? lastError = null;
-        // Loopback before None (process loopback is the whole point of this
-        // class), deep buffer before the default within each - if a driver
-        // rejects the requested size, a working capture at the default size
-        // still beats no capture.
-        foreach (var flags in new[] { AudioClientStreamFlags.Loopback, AudioClientStreamFlags.None })
+        _client = client;
+        _stopTimeout = stopTimeout;
+        WaveFormat = client.WaveFormat;
+    }
+
+    private sealed class NativeClient : IProcessLoopbackClient
+    {
+        private readonly IAudioClient _audioClient;
+        private readonly IAudioCaptureClientNative _captureClient;
+        public WaveFormat WaveFormat { get; }
+
+        public NativeClient(int processId, ProcessLoopbackCaptureMode mode)
         {
-            foreach (var duration in new[] { BufferDuration100ns, 0L })
+            if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
+            _audioClient = ActivateAudioClient((uint)processId, mode);
+            try
             {
-                try
-                {
-                    Marshal.ThrowExceptionForHR(_audioClient.Initialize(
-                        AudioClientShareMode.Shared,
-                        flags,
-                        duration,
-                        0,
-                        WaveFormat,
-                        ref sessionGuid));
-                    return;
-                }
-                catch (Exception error)
-                {
-                    lastError = error;
-                }
+                WaveFormat = GetSharedRenderFormat();
+                InitializeClient();
+                Marshal.ThrowExceptionForHR(_audioClient.GetService(AudioCaptureClientGuid, out var service));
+                _captureClient = (IAudioCaptureClientNative)service;
+            }
+            catch
+            {
+                Marshal.ReleaseComObject(_audioClient);
+                throw;
             }
         }
 
-        throw lastError ?? new InvalidOperationException("Process loopback client could not be initialized.");
+        public int Start() => _audioClient.Start();
+        public int Stop() => _audioClient.Stop();
+        public int GetNextPacketSize(out int frames) => _captureClient.GetNextPacketSize(out frames);
+        public int GetBuffer(out IntPtr data, out int frames, out AudioClientBufferFlags flags, out long position, out long qpc)
+            => _captureClient.GetBuffer(out data, out frames, out flags, out position, out qpc);
+        public int ReleaseBuffer(int frames) => _captureClient.ReleaseBuffer(frames);
+        public void Dispose()
+        {
+            try { Marshal.ReleaseComObject(_captureClient); }
+            finally { Marshal.ReleaseComObject(_audioClient); }
+        }
+
+        // Ask WASAPI for a capture buffer big enough to survive a scheduling
+        // stall instead of taking the engine default (one device period, ~10ms in
+        // shared mode). With a 10ms buffer drained by a 10ms poll loop there was
+        // no margin at all: any hiccup longer than a single period overran the
+        // buffer and that audio was gone. Capture is written straight to a rolling
+        // RAM buffer, so a deep capture buffer costs nothing that matters here -
+        // there is no latency budget to protect.
+        private const long BufferDuration100ns = 500 * 10_000L;
+
+        private void InitializeClient()
+        {
+            var sessionGuid = Guid.Empty;
+            Exception? lastError = null;
+            // Loopback before None (process loopback is the whole point of this
+            // class), deep buffer before the default within each - if a driver
+            // rejects the requested size, a working capture at the default size
+            // still beats no capture.
+            foreach (var flags in new[] { AudioClientStreamFlags.Loopback, AudioClientStreamFlags.None })
+            {
+                foreach (var duration in new[] { BufferDuration100ns, 0L })
+                {
+                    try
+                    {
+                        Marshal.ThrowExceptionForHR(_audioClient.Initialize(
+                            AudioClientShareMode.Shared,
+                            flags,
+                            duration,
+                            0,
+                            WaveFormat,
+                            ref sessionGuid));
+                        return;
+                    }
+                    catch (Exception error)
+                    {
+                        lastError = error;
+                    }
+                }
+            }
+
+            throw lastError ?? new InvalidOperationException("Process loopback client could not be initialized.");
+        }
+
     }
 
     public WaveFormat WaveFormat { get; set; }
@@ -101,48 +140,79 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
 
     public void StartRecording()
     {
-        if (_cts is not null) return;
-        _cts = new CancellationTokenSource();
-        var token = _cts.Token;
-        // A dedicated thread, not the thread pool. Draining the capture buffer
-        // on time is the one thing this loop has to do, and a pool work item
-        // queues behind whatever else the app is doing (encode, save, UI) on a
-        // machine that is already out of CPU. See MmcssScope for the rest.
-        _captureThread = new Thread(() => CaptureLoop(token))
+        lock (_lifetime)
         {
-            IsBackground = true,
-            Priority = ThreadPriority.AboveNormal,
-            Name = $"ClypDat process loopback {_processId}"
-        };
-        _captureThread.Start();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            // A timed-out stop still owns the client. Never overlap capture loops.
+            if (_captureThread is not null) return;
+            _cts = new CancellationTokenSource();
+            var token = _cts.Token;
+            _captureThread = new Thread(() => RunCapture(token))
+            {
+                IsBackground = true,
+                Priority = ThreadPriority.AboveNormal,
+                Name = $"ClypDat process loopback {_processId}"
+            };
+            try { _captureThread.Start(); }
+            catch
+            {
+                _captureThread = null;
+                _cts.Dispose();
+                _cts = null;
+                throw;
+            }
+        }
     }
 
     public void StopRecording()
     {
-        var cts = _cts;
-        if (cts is null) return;
-        cts.Cancel();
-        try
+        Thread? thread;
+        lock (_lifetime)
         {
-            _captureThread?.Join(TimeSpan.FromSeconds(2));
+            _cts?.Cancel();
+            thread = _captureThread;
         }
-        catch
-        {
-            // Stop is best effort.
-        }
-        finally
-        {
-            _cts?.Dispose();
-            _cts = null;
-            _captureThread = null;
-        }
+        if (thread is not null && thread != Thread.CurrentThread && !thread.Join(_stopTimeout))
+            AppLog.Info($"Process loopback audio stop timeout: pid={_processId}; capture thread retains resources until completion.");
     }
 
     public void Dispose()
     {
+        bool release;
+        lock (_lifetime)
+        {
+            _disposed = true;
+            release = _captureThread is null && !_released;
+            if (release) _released = true;
+        }
+        if (release) _client.Dispose();
         StopRecording();
-        if (_captureClient is not null) Marshal.ReleaseComObject(_captureClient);
-        if (_audioClient is not null) Marshal.ReleaseComObject(_audioClient);
+    }
+
+    private void RunCapture(CancellationToken token)
+    {
+        try { CaptureLoop(token); }
+        catch (Exception error) { AppLog.Error("Process loopback callback failed", error); }
+        finally
+        {
+            bool release;
+            lock (_lifetime)
+            {
+                _cts?.Dispose();
+                _cts = null;
+                release = _disposed && !_released;
+                if (release) _released = true;
+                else _captureThread = null;
+            }
+            // Native release can also stall. Never hold the lifetime lock across
+            // it; concurrent StopRecording must still reach its bounded Join.
+            if (release)
+            {
+                try { _client.Dispose(); }
+                catch (Exception error) { AppLog.Error("Process loopback release failed", error); }
+                finally { lock (_lifetime) _captureThread = null; }
+            }
+        }
     }
 
     private void CaptureLoop(CancellationToken token)
@@ -160,13 +230,14 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         using var mmcss = MmcssScope.ProAudio($"process loopback pid={_processId}");
         try
         {
-            Marshal.ThrowExceptionForHR(_audioClient.Start());
+            token.ThrowIfCancellationRequested();
+            Marshal.ThrowExceptionForHR(_client.Start());
             while (!token.IsCancellationRequested)
             {
-                Marshal.ThrowExceptionForHR(_captureClient.GetNextPacketSize(out var packetFrames));
-                while (packetFrames > 0)
+                Marshal.ThrowExceptionForHR(_client.GetNextPacketSize(out var packetFrames));
+                while (packetFrames > 0 && !token.IsCancellationRequested)
                 {
-                    Marshal.ThrowExceptionForHR(_captureClient.GetBuffer(
+                    Marshal.ThrowExceptionForHR(_client.GetBuffer(
                         out var data,
                         out var frames,
                         out var flags,
@@ -180,7 +251,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                         Marshal.Copy(data, buffer, 0, bytes);
                     }
 
-                    _captureClient.ReleaseBuffer(frames);
+                    _client.ReleaseBuffer(frames);
                     if (bytes > 0)
                     {
                         if (!_loggedFirstPacket)
@@ -203,7 +274,8 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                         var packetStartUtc = utcBase + TimeSpan.FromTicks((long)(qpcPosition - qpcBase100ns));
                         QueueWithDeclick(buffer, bytes, packetStartUtc, flags.HasFlag(AudioClientBufferFlags.Silent) || data == IntPtr.Zero);
                     }
-                    Marshal.ThrowExceptionForHR(_captureClient.GetNextPacketSize(out packetFrames));
+                    if (token.IsCancellationRequested) break;
+                    Marshal.ThrowExceptionForHR(_client.GetNextPacketSize(out packetFrames));
                 }
 
                 LogSilenceDiagnostic();
@@ -219,10 +291,11 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
             // The held-back packet still belongs in the capture - without this
             // every stop (route change, roll, session end) would silently drop
             // its last packet.
-            EmitPendingPacket(nextSilent: null);
+            try { EmitPendingPacket(nextSilent: null); }
+            catch (Exception error) { stoppedError ??= error; }
             try
             {
-                _audioClient.Stop();
+                _client.Stop();
             }
             catch
             {
@@ -563,4 +636,14 @@ internal enum ProcessLoopbackCaptureMode
 {
     IncludeTargetProcessTree,
     ExcludeTargetProcessTree
+}
+
+internal interface IProcessLoopbackClient : IDisposable
+{
+    WaveFormat WaveFormat { get; }
+    int Start();
+    int Stop();
+    int GetNextPacketSize(out int frames);
+    int GetBuffer(out IntPtr data, out int frames, out AudioClientBufferFlags flags, out long position, out long qpc);
+    int ReleaseBuffer(int frames);
 }

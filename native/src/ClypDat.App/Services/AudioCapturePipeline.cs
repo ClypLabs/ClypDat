@@ -41,6 +41,7 @@ public sealed class AudioCapturePipeline : IDisposable
     private static readonly SemaphoreSlim SourceSnapshotGate = new(1, 1);
     private static readonly SemaphoreSlim FfmpegGate = new(2, 2);
     private readonly List<ReplayAudioCapture> _audioCaptures = new();
+    private readonly AudioRouteLifetime _routes = new();
     private readonly SemaphoreSlim _routeRefreshGate = new(1, 1);
     private readonly DefaultMicrophoneWatcher _defaultMicrophoneWatcher;
     private Timer? _audioRouteTimer;
@@ -54,13 +55,13 @@ public sealed class AudioCapturePipeline : IDisposable
     {
         _bufferFolder = bufferFolder;
         Directory.CreateDirectory(_bufferFolder);
-        _defaultMicrophoneWatcher = new DefaultMicrophoneWatcher(RefreshAudioRoutes);
+        _defaultMicrophoneWatcher = new DefaultMicrophoneWatcher(() => RefreshAudioRoutes());
     }
 
     public void Start(ReplayBufferConfig config)
     {
-        _activeConfig = config;
-        StartAudioCaptures(config);
+        var generation = _routes.Start(() => _activeConfig = config);
+        StartAudioCaptures(config, generation);
     }
 
     // deleteCaptureFiles: false when a background full-session finalize still
@@ -68,24 +69,27 @@ public sealed class AudioCapturePipeline : IDisposable
     // CaptureSetSnapshot it was handed) and deletes them itself when done.
     public void Stop(bool deleteCaptureFiles = true)
     {
-        _activeConfig = null;
-        _audioRouteTimer?.Dispose();
-        _audioRouteTimer = null;
-        lock (_lock)
+        _routes.Stop(() =>
         {
-            // StopAudioCapture only closes the file handle (EndedAtUtc marks it
-            // stale for PruneOlderThan, which callers that keep running after a
-            // route change rely on to actually delete it later). Once the whole
-            // session is stopping, nothing will call PruneOlderThan again for
-            // these, so the raw WAV files must be deleted here or they sit in
-            // the buffer folder forever.
-            foreach (var capture in _audioCaptures.ToArray())
+            _activeConfig = null;
+            _audioRouteTimer?.Dispose();
+            _audioRouteTimer = null;
+            lock (_lock)
             {
-                StopAudioCapture(capture);
-                if (deleteCaptureFiles) TryDelete(capture.Path);
+                // StopAudioCapture only closes the file handle (EndedAtUtc marks it
+                // stale for PruneOlderThan, which callers that keep running after a
+                // route change rely on to actually delete it later). Once the whole
+                // session is stopping, nothing will call PruneOlderThan again for
+                // these, so the raw WAV files must be deleted here or they sit in
+                // the buffer folder forever.
+                foreach (var capture in _audioCaptures.ToArray())
+                {
+                    StopAudioCapture(capture);
+                    if (deleteCaptureFiles) TryDelete(capture.Path);
+                }
+                _audioCaptures.Clear();
             }
-            _audioCaptures.Clear();
-        }
+        });
     }
 
     // Opaque handle over the current capture set, for a background finalize
@@ -233,96 +237,99 @@ public sealed class AudioCapturePipeline : IDisposable
         _defaultMicrophoneWatcher.Dispose();
     }
 
-    private void StartAudioCaptures(ReplayBufferConfig config)
+    private void StartAudioCaptures(ReplayBufferConfig config, long generation)
     {
         using var scope = new RouteScope();
         var microphoneRoutes = ResolveMicrophoneRoutes(scope.Enumerator, config.MicrophoneDeviceIds);
         var routes = ResolveAudioRoutes(config, microphoneRoutes, scope);
-        _audioRouteKey = routes.RouteKey;
-        AppLog.Info(
-            $"Audio route resolved: chatApps={routes.ChatRoutes.Length}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}, mics={microphoneRoutes.Length}.");
-        StopStaleAudioCaptures(routes);
-        // StopStaleAudioCaptures keeps a microphone whose device is still
-        // selected, which is right for a device change and wrong for a filter
-        // change - the filter lives inside the capture object, so the only way
-        // to apply a new one is to build a new capture.
-        var micFilterSignature = MicrophoneFilterSignature(config);
-        if (!string.Equals(_micFilterSignature, micFilterSignature, StringComparison.Ordinal))
+        _routes.TryApply(generation, () =>
         {
-            if (_micFilterSignature.Length > 0)
+            _audioRouteKey = routes.RouteKey;
+            AppLog.Info(
+                $"Audio route resolved: chatApps={routes.ChatRoutes.Length}, exclusions='{string.Join(",", config.GameAudioExcludedProcesses)}', excludedPids={FormatIds(routes.ExcludedProcessIds)}, gamePids={FormatIds(routes.GameProcessIds)}, mics={microphoneRoutes.Length}.");
+            StopStaleAudioCaptures(routes);
+            // StopStaleAudioCaptures keeps a microphone whose device is still
+            // selected, which is right for a device change and wrong for a filter
+            // change - the filter lives inside the capture object, so the only way
+            // to apply a new one is to build a new capture.
+            var micFilterSignature = MicrophoneFilterSignature(config);
+            if (!string.Equals(_micFilterSignature, micFilterSignature, StringComparison.Ordinal))
             {
-                AppLog.Info($"Microphone filtering changed ({_micFilterSignature} -> {micFilterSignature}); restarting microphone captures.");
-                ReplayAudioCapture[] mics;
-                lock (_lock) mics = _audioCaptures.Where(capture => capture.Kind == AudioCaptureKind.Microphone && capture.EndedAtUtc is null).ToArray();
-                foreach (var capture in mics) StopAudioCapture(capture);
+                if (_micFilterSignature.Length > 0)
+                {
+                    AppLog.Info($"Microphone filtering changed ({_micFilterSignature} -> {micFilterSignature}); restarting microphone captures.");
+                    ReplayAudioCapture[] mics;
+                    lock (_lock) mics = _audioCaptures.Where(capture => capture.Kind == AudioCaptureKind.Microphone && capture.EndedAtUtc is null).ToArray();
+                    foreach (var capture in mics) StopAudioCapture(capture);
+                }
+
+                _micFilterSignature = micFilterSignature;
             }
 
-            _micFilterSignature = micFilterSignature;
-        }
-
-        if (routes.UseProcessRouting)
-        {
-            foreach (var pid in routes.GameProcessIds)
+            if (routes.UseProcessRouting)
             {
-                if (HasLiveCapture(AudioCaptureKind.Game, pid.ToString(CultureInfo.InvariantCulture))) continue;
+                foreach (var pid in routes.GameProcessIds)
+                {
+                    if (HasLiveCapture(AudioCaptureKind.Game, pid.ToString(CultureInfo.InvariantCulture))) continue;
+                    try
+                    {
+                        StartProcessLoopbackCapture(AudioCaptureKind.Game, pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Game Audio", pid.ToString(CultureInfo.InvariantCulture));
+                    }
+                    catch (Exception error)
+                    {
+                        AppLog.Error($"Game app audio capture failed: pid={pid}", error);
+                    }
+                }
+
+                if (routes.GameProcessIds.Length == 0)
+                {
+                    AppLog.Info("Game audio process routing active but no allowed audio apps found; Game Audio track will be silent.");
+                }
+            }
+            else
+            {
                 try
                 {
-                    StartProcessLoopbackCapture(AudioCaptureKind.Game, pid, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, "Game Audio", pid.ToString(CultureInfo.InvariantCulture));
+                    if (!HasLiveCapture(AudioCaptureKind.Game, "default"))
+                    {
+                        StartLoopbackCapture(scope.Enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), AudioCaptureKind.Game, "Game Audio", "default");
+                    }
                 }
                 catch (Exception error)
                 {
-                    AppLog.Error($"Game app audio capture failed: pid={pid}", error);
+                    AppLog.Error("Game audio capture failed", error);
                 }
             }
 
-            if (routes.GameProcessIds.Length == 0)
+            foreach (var route in routes.ChatRoutes)
             {
-                AppLog.Info("Game audio process routing active but no allowed audio apps found; Game Audio track will be silent.");
-            }
-        }
-        else
-        {
-            try
-            {
-                if (!HasLiveCapture(AudioCaptureKind.Game, "default"))
+                if (HasLiveCapture(AudioCaptureKind.Chat, route.AppName)) continue;
+                try
                 {
-                    StartLoopbackCapture(scope.Enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia), AudioCaptureKind.Game, "Game Audio", "default");
+                    StartProcessLoopbackCapture(AudioCaptureKind.Chat, route.ProcessId, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, route.AppName, route.AppName);
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Chat app audio capture failed: app={route.AppName}, pid={route.ProcessId}", error);
                 }
             }
-            catch (Exception error)
-            {
-                AppLog.Error("Game audio capture failed", error);
-            }
-        }
 
-        foreach (var route in routes.ChatRoutes)
-        {
-            if (HasLiveCapture(AudioCaptureKind.Chat, route.AppName)) continue;
-            try
+            foreach (var route in routes.MicrophoneRoutes)
             {
-                StartProcessLoopbackCapture(AudioCaptureKind.Chat, route.ProcessId, ProcessLoopbackCaptureMode.IncludeTargetProcessTree, route.AppName, route.AppName);
+                if (string.IsNullOrEmpty(route.DeviceId) || HasLiveCapture(AudioCaptureKind.Microphone, route.SourceKey)) continue;
+                try
+                {
+                    var micDevice = scope.Enumerator.GetDevice(route.DeviceId);
+                    StartMicrophoneCapture(micDevice, $"Microphone - {micDevice.FriendlyName}", route.SourceKey, config);
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error($"Microphone capture failed: device={route.DeviceId}", error);
+                }
             }
-            catch (Exception error)
-            {
-                AppLog.Error($"Chat app audio capture failed: app={route.AppName}, pid={route.ProcessId}", error);
-            }
-        }
 
-        foreach (var route in routes.MicrophoneRoutes)
-        {
-            if (string.IsNullOrEmpty(route.DeviceId) || HasLiveCapture(AudioCaptureKind.Microphone, route.SourceKey)) continue;
-            try
-            {
-                var micDevice = scope.Enumerator.GetDevice(route.DeviceId);
-                StartMicrophoneCapture(micDevice, $"Microphone - {micDevice.FriendlyName}", route.SourceKey, config);
-            }
-            catch (Exception error)
-            {
-                AppLog.Error($"Microphone capture failed: device={route.DeviceId}", error);
-            }
-        }
-
-        StartAudioRouteTimer();
+            StartAudioRouteTimer(generation);
+        });
     }
 
     private void StartLoopbackCapture(MMDevice device, AudioCaptureKind kind, string title, string sourceKey)
@@ -510,35 +517,31 @@ public sealed class AudioCapturePipeline : IDisposable
         AppLog.Debug($"Audio capture stopped: {capture.Title}, pid={capture.ProcessId?.ToString() ?? "none"}, start={capture.StartedAtUtc:o}, end={capture.EndedAtUtc:o}, bytes={capture.Session.BytesWritten}.");
     }
 
-    private void RefreshAudioRoutes()
+    private void RefreshAudioRoutes(long? timerGeneration = null)
     {
         if (!_routeRefreshGate.Wait(0)) return;
         try
         {
-            var config = _activeConfig;
+            var generation = timerGeneration ?? _routes.Generation;
+            ReplayBufferConfig? config = null;
+            _routes.TryApply(generation, () => config = _activeConfig);
             if (config is null) return;
-            var rolledOver = RollOversizedCaptures();
-            TrimMemoryCaptures();
             using var scope = new RouteScope();
             var microphoneRoutes = ResolveMicrophoneRoutes(scope.Enumerator, config.MicrophoneDeviceIds);
             var routes = ResolveAudioRoutes(config, microphoneRoutes, scope);
-            var unchanged = string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal);
-            ApplyRouteInterval(unchanged);
-            if (!rolledOver && unchanged) return;
-            try
+            var refresh = false;
+            _routes.TryApply(generation, () =>
             {
-                AppLog.Info("Audio route changed; refreshing replay audio captures.");
-                StartAudioCaptures(config);
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("Audio route refresh failed", error);
-            }
+                var rolledOver = RollOversizedCaptures();
+                TrimMemoryCaptures();
+                var unchanged = string.Equals(routes.RouteKey, _audioRouteKey, StringComparison.Ordinal);
+                ApplyRouteInterval(unchanged);
+                refresh = rolledOver || !unchanged;
+            });
+            if (refresh) StartAudioCaptures(config, generation);
         }
-        finally
-        {
-            _routeRefreshGate.Release();
-        }
+        catch (Exception error) { AppLog.Error("Audio route refresh failed", error); }
+        finally { _routeRefreshGate.Release(); }
     }
 
     // NAudio's WaveFileWriter hard-fails ("WAV file too large") the moment a
@@ -636,12 +639,12 @@ public sealed class AudioCapturePipeline : IDisposable
     // game still spawning its audio helper processes.
     private const int StableRoutePassesBeforeBackoff = 5;
 
-    private void StartAudioRouteTimer()
+    private void StartAudioRouteTimer(long generation)
     {
         _audioRouteTimer?.Dispose();
         _stableRoutePasses = 0;
         _routeInterval = FastRouteInterval;
-        _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(), null, FastRouteInterval, FastRouteInterval);
+        _audioRouteTimer = new Timer(_ => RefreshAudioRoutes(generation), null, FastRouteInterval, FastRouteInterval);
     }
 
     private void ApplyRouteInterval(bool unchanged)

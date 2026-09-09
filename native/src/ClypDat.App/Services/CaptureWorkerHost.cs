@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Reflection;
 using System.Text.Json;
 using ClypDat.Capture.Abstractions;
 
@@ -36,8 +37,15 @@ internal static class CaptureWorkerHost
     private static bool _autoClipDetectionEnabled;
     private static string? _autoClipGameId;
     private static DisplayAvailabilityMonitor? _displayAvailability;
-    private static bool _captureRequested;
-    private static bool _desktopAvailable = true;
+    private static readonly CaptureLifecycleCoordinator Lifecycle = new(
+        CaptureLifecycleGate, SaveGate, () => _buffer?.IsRecording == true,
+        async token => { await EnsureBufferAsync(); await _buffer!.StartAsync(token).ConfigureAwait(false); },
+        token => _buffer?.StopAsync(token) ?? Task.CompletedTask,
+        (recording, suspended) =>
+        {
+            CaptureWorkerLog.Info($"Capture transition completed: recording={recording}, suspended={suspended}.");
+            _ = SendEventAsync("recording-state", new { recording, suspended });
+        });
     private static OverlayCaptureSettings _videoOverlays = OverlayCaptureSettings.None;
 
     public static int Run()
@@ -47,6 +55,8 @@ internal static class CaptureWorkerHost
         using var mutex = new Mutex(true, CaptureWorkerProtocol.MutexName, out var created);
         if (!created) return 0;
 
+        var revision = typeof(CaptureWorkerHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        CaptureWorkerLog.Info($"Worker revision: {revision}.");
         ApplyWorkerPriority();
         _displayAvailability = new DisplayAvailabilityMonitor();
         _displayAvailability.AvailabilityChanged += (_, available) => _ = SetDesktopAvailabilityAsync(available);
@@ -65,7 +75,11 @@ internal static class CaptureWorkerHost
         {
             _hotkey?.Dispose();
             _fullSessionHotkey?.Dispose();
+            Shutdown.Cancel();
             _displayAvailability?.Dispose();
+            Lifecycle.Request(false);
+            try { Lifecycle.ReconcileAsync(CancellationToken.None).GetAwaiter().GetResult(); }
+            catch (Exception error) { CaptureWorkerLog.Error("Final capture teardown failed.", error); }
             _buffer?.Dispose();
             _detectorHost?.DisposeAsync().AsTask().GetAwaiter().GetResult();
             Storage.Dispose();
@@ -109,12 +123,12 @@ internal static class CaptureWorkerHost
                     await AttachAsync(client, message, cancellationToken);
                     break;
                 case "start":
-                    _captureRequested = true;
+                    Lifecycle.Request(true);
                     await StartCaptureIfAvailableAsync(cancellationToken);
                     await ReplyAsync(client, message, new CaptureWorkerStartAck(true, _buffer?.IsRecording == true), cancellationToken);
                     break;
                 case "stop":
-                    _captureRequested = false;
+                    Lifecycle.Request(false);
                     await StopCaptureAfterSavesAsync(cancellationToken);
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
@@ -165,7 +179,7 @@ internal static class CaptureWorkerHost
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "shutdown":
-                    _captureRequested = false;
+                    Lifecycle.Request(false);
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     Shutdown.Cancel();
                     await StopCaptureAfterSavesAsync(CancellationToken.None);
@@ -184,55 +198,65 @@ internal static class CaptureWorkerHost
 
     private static async Task AttachAsync(Stream client, CaptureWorkerEnvelope message, CancellationToken cancellationToken)
     {
-        var request = message.Payload.Deserialize<CaptureWorkerAttachRequest>(JsonOptions)
-            ?? throw new InvalidDataException("Invalid capture attach request.");
-        var config = request.Configuration ?? throw new InvalidDataException("Invalid replay configuration.");
-        // Apply before creating/starting a recorder. A reconnect therefore
-        // cannot create a camera-less interval while its UI restores state.
-        if (request.Overlays is not null) _videoOverlays = request.Overlays;
-        var configChanged = !string.Equals(ConfigIdentity(_config), ConfigIdentity(config), StringComparison.Ordinal);
-        if (_buffer is not null && configChanged && !_buffer.IsRecording)
+        await CaptureLifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _buffer.Dispose();
-            _buffer = null;
-        }
+            await SaveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var request = message.Payload.Deserialize<CaptureWorkerAttachRequest>(JsonOptions)
+                    ?? throw new InvalidDataException("Invalid capture attach request.");
+                var config = request.Configuration ?? throw new InvalidDataException("Invalid replay configuration.");
+                // Apply before creating/starting a recorder. A reconnect therefore
+                // cannot create a camera-less interval while its UI restores state.
+                if (request.Overlays is not null) _videoOverlays = request.Overlays;
+                var configChanged = !string.Equals(ConfigIdentity(_config), ConfigIdentity(config), StringComparison.Ordinal);
+                if (_buffer is not null && configChanged && !_buffer.IsRecording)
+                {
+                    _buffer.Dispose();
+                    _buffer = null;
+                }
 
-        if (_buffer is null)
-        {
-            _config = config;
-            _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
-            if (_buffer is IVideoOverlaySettingsReceiver overlays)
-                overlays.SetVideoOverlaySettings(_videoOverlays);
-            _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
-            if (_buffer is IFullSessionFinalizeReporter finalizes)
-                finalizes.FullSessionFinalizeChanged += (_, active) => _ = SendEventAsync("full-session-finalize", active);
-            AttachDetectorFrameSource(_buffer);
-            if (_buffer is IReplayCaptureDiagnostics diagnostics)
-                diagnostics.HealthChanged += (_, health) => _ = SendEventAsync("health", health with { Storage = Storage.Health });
-        }
-        else if (!configChanged)
-        {
-            _config = config;
-        }
+                if (_buffer is null)
+                {
+                    _config = config;
+                    _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
+                    if (_buffer is IVideoOverlaySettingsReceiver overlays)
+                        overlays.SetVideoOverlaySettings(_videoOverlays);
+                    _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
+                    if (_buffer is IFullSessionFinalizeReporter finalizes)
+                        finalizes.FullSessionFinalizeChanged += (_, active) => _ = SendEventAsync("full-session-finalize", active);
+                    AttachDetectorFrameSource(_buffer);
+                    if (_buffer is IReplayCaptureDiagnostics diagnostics)
+                        diagnostics.HealthChanged += (_, health) => _ = SendEventAsync("health", health with { Storage = Storage.Health });
+                }
+                else if (!configChanged)
+                {
+                    _config = config;
+                }
 
-        _captureRequested |= _buffer?.IsRecording == true;
+                if (_buffer?.IsRecording == true) Lifecycle.Request(true);
 
-        ApplyWorkerPriority();
-        Storage.Start(new[]
-        {
-            (config.LibraryFolder, "library"),
-            (Path.GetTempPath(), "system-temp"),
-            (config.FullSessionRecordingFolder, "full-session")
-        });
-        SetHotkey(config.SaveReplayHotkey);
-        SetFullSessionHotkey(config.FullSessionHotkey);
-        var response = new CaptureWorkerAttachResponse(
-            _buffer?.IsRecording == true,
-            ConfigIdentity(_config),
-            GetHealth(),
-            DrainUnacknowledgedSaves(UnacknowledgedSaves),
-            NativeReplayBuffer.ActiveFinalizeSnapshot());
-        await ReplyAsync(client, message, response, cancellationToken);
+                ApplyWorkerPriority();
+                Storage.Start(new[]
+                {
+                    (config.LibraryFolder, "library"),
+                    (Path.GetTempPath(), "system-temp"),
+                    (config.FullSessionRecordingFolder, "full-session")
+                });
+                SetHotkey(config.SaveReplayHotkey);
+                SetFullSessionHotkey(config.FullSessionHotkey);
+                var response = new CaptureWorkerAttachResponse(
+                    _buffer?.IsRecording == true,
+                    ConfigIdentity(_config),
+                    GetHealth(),
+                    DrainUnacknowledgedSaves(UnacknowledgedSaves),
+                    NativeReplayBuffer.ActiveFinalizeSnapshot());
+                await ReplyAsync(client, message, response, cancellationToken);
+            }
+            finally { SaveGate.Release(); }
+        }
+        finally { CaptureLifecycleGate.Release(); }
     }
 
     private static async Task EnsureBufferAsync()
@@ -245,63 +269,22 @@ internal static class CaptureWorkerHost
         }
     }
 
-    private static async Task StartCaptureIfAvailableAsync(CancellationToken cancellationToken)
-    {
-        if (!_captureRequested || !_desktopAvailable) return;
-        await CaptureLifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await EnsureBufferAsync();
-            if (_buffer!.IsRecording) return;
-            await _buffer.StartAsync(cancellationToken).ConfigureAwait(false);
-            CaptureWorkerLog.Info("Capture resumed after desktop became available.");
-            await SendEventAsync("recording-state", new { recording = true, suspended = false }).ConfigureAwait(false);
-        }
-        finally { CaptureLifecycleGate.Release(); }
-    }
+    private static Task StartCaptureIfAvailableAsync(CancellationToken cancellationToken)
+        => Lifecycle.ReconcileAsync(cancellationToken);
 
-    private static async Task StopCaptureAsync(CancellationToken cancellationToken)
-    {
-        await CaptureLifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_buffer?.IsRecording == true) await _buffer.StopAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally { CaptureLifecycleGate.Release(); }
-    }
+    private static Task StopCaptureAfterSavesAsync(CancellationToken cancellationToken)
+        => Lifecycle.ReconcileAsync(cancellationToken);
 
-    private static async Task StopCaptureAfterSavesAsync(CancellationToken cancellationToken)
+    private static Task SetDesktopAvailabilityAsync(bool available)
     {
-        await SaveGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { await StopCaptureAsync(cancellationToken).ConfigureAwait(false); }
-        finally { SaveGate.Release(); }
-    }
-
-    private static async Task SetDesktopAvailabilityAsync(bool available)
-    {
-        _desktopAvailable = available;
-        if (!available)
+        Lifecycle.SetAvailability(available);
+        // Never run synchronous audio teardown on the Win32 notification thread.
+        return Task.Run(async () =>
         {
-            if (!_captureRequested) return;
-            CaptureWorkerLog.Info("Capture suspended because the session desktop is unavailable.");
-            try
-            {
-                // A completed save owns its own remux. Waiting for SaveGate keeps
-                // the source files alive until that save accepts or fails.
-                await SaveGate.WaitAsync(Shutdown.Token).ConfigureAwait(false);
-                try { await StopCaptureAsync(Shutdown.Token).ConfigureAwait(false); }
-                finally { SaveGate.Release(); }
-                await SendEventAsync("recording-state", new { recording = false, suspended = true }).ConfigureAwait(false);
-            }
+            try { await Lifecycle.ReconcileAsync(Shutdown.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (Shutdown.IsCancellationRequested) { }
-            catch (Exception error) { CaptureWorkerLog.Error("Capture suspension failed.", error); }
-            return;
-        }
-
-        if (!_captureRequested || Shutdown.IsCancellationRequested) return;
-        try { await StartCaptureIfAvailableAsync(Shutdown.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (Shutdown.IsCancellationRequested) { }
-        catch (Exception error) { CaptureWorkerLog.Error("Capture resume after desktop availability failed.", error); }
+            catch (Exception error) { CaptureWorkerLog.Error("Capture availability transition failed.", error); }
+        });
     }
 
     internal static int RemoveAcknowledgedSaves(List<CaptureWorkerSaveResult> backlog, Guid saveId, string? path)
@@ -529,16 +512,15 @@ internal static class CaptureWorkerHost
     {
         if (_buffer?.IsRecording != true || _config is null) return;
         await FullSessionToggleGate.WaitAsync().ConfigureAwait(false);
-        await SaveGate.WaitAsync().ConfigureAwait(false);
         await CaptureLifecycleGate.WaitAsync().ConfigureAwait(false);
+        await SaveGate.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_buffer?.IsRecording != true || _config is null) return;
             var enabled = !_config.FullSessionRecordingEnabled;
             await _buffer.StopAsync(CancellationToken.None).ConfigureAwait(false);
             _config = _config with { FullSessionRecordingEnabled = enabled };
-            if (_desktopAvailable && _captureRequested)
-                await _buffer.StartAsync(CancellationToken.None).ConfigureAwait(false);
+
             CaptureWorkerLog.Info($"Full session recording toggled {(enabled ? "on" : "off")} by hotkey.");
             await SendEventAsync("full-session-toggled", new { enabled }).ConfigureAwait(false);
         }
@@ -552,6 +534,9 @@ internal static class CaptureWorkerHost
             CaptureLifecycleGate.Release();
             FullSessionToggleGate.Release();
         }
+        try { await Lifecycle.ReconcileAsync(Shutdown.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (Shutdown.IsCancellationRequested) { }
+        catch (Exception error) { CaptureWorkerLog.Error("Capture restart after full session toggle failed.", error); }
     }
 
     private static void HotkeyPressed(object? sender, ReplayHotkeyPressedEventArgs args)
