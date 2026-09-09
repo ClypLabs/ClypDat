@@ -28,8 +28,12 @@ internal sealed class CapturedOverlayPlayback : IDisposable
         }
         var path = ClipOverlayManifest.ResolveAssetPath(libraryRoot, asset.AssetPath);
         if (path is null || !File.Exists(path)) { Publish(null, Interlocked.Increment(ref _generation)); return; }
-        var offset = Math.Max(0, sourceSeconds - asset.StartSeconds);
-        var key = $"{path}|{offset:0.00}";
+        // Camera is encoded at 15fps but spawning ffmpeg for every editor
+        // paint takes longer than a 30fps paint interval. Coalesce requests to
+        // a stable preview cadence: one decode may complete before its result
+        // becomes obsolete, while playback remains visibly live.
+        var offset = Math.Floor(Math.Max(0, sourceSeconds - asset.StartSeconds) * 10) / 10;
+        var key = $"{path}|{offset:0.0}";
         lock (_gate)
         {
             if (_disposed || key == _lastKey) return;

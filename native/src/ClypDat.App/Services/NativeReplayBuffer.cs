@@ -607,6 +607,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
         var tempVideoPath = Path.Combine(Path.GetTempPath(), $"clypdat-native-video-{Guid.NewGuid():N}.mp4");
         var snapshots = new List<string>();
+        // Needed after remux cleanup, when capture provenance is persisted.
+        var mediaStartUtc = DateTime.MinValue;
+        var mediaDurationSeconds = 0d;
         try
         {
             // Thousands of packet copies and disk writes back to back. Dropping
@@ -695,6 +698,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 windowStartUtc = window[^1].WallClockUtc - TimeSpan.FromSeconds(videoDurationSeconds);
                 windowDurationSeconds = videoDurationSeconds;
             }
+            mediaStartUtc = windowStartUtc;
+            mediaDurationSeconds = windowDurationSeconds;
 
             // One giant segment spanning the whole saved window let audio/video
             // clock drift (real hardware sample clocks are never exactly
@@ -789,10 +794,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var overlays = Volatile.Read(ref _videoOverlaySettings);
         if (overlays != OverlayCaptureSettings.None)
         {
-            // requestedStartUtc is adjusted for recovery before the replay
-            // window is borrowed.  It remains available after muxing, unlike
-            // the local remux timing variables above.
-            var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, requestedStartUtc, requestedEndUtc);
+            // Camera offsets must share final media timeline. Replay request
+            // can outlast retained packets; audio can be shortened to video.
+            var cameraEndUtc = mediaStartUtc + TimeSpan.FromSeconds(mediaDurationSeconds);
+            var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, mediaStartUtc, cameraEndUtc);
             var peripherals = string.Equals(overlays.KeyboardLayout, "None", StringComparison.OrdinalIgnoreCase) ? null : new ClipOverlayLayer(
                 overlays.KeyboardLayout, false, InitialTransform: overlays.KeyboardTransform.ToPresentationTransform(),
                 Error: "Keyboard and mouse capture asset was unavailable.");

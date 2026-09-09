@@ -71,4 +71,30 @@ public sealed class ClipOverlayManifestTests
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
+
+    [Fact]
+    public void LegacyAssetsOutsideShortVideo_AreRecoveredApproximately()
+    {
+        var legacy = new ClipOverlayManifest(2, new ClipOverlayLayer("Facecam", true, Assets: [
+            new ClipOverlayAsset(".clipinfo/overlays/0.mp4", 32.53, 34.53),
+            new ClipOverlayAsset(".clipinfo/overlays/1.mp4", 58, 60)]));
+
+        var recovered = ClipOverlayManifest.ForPlayback(legacy, 27.65);
+
+        Assert.True(recovered.Camera!.SynchronizationApproximate);
+        Assert.Equal(.18, recovered.Camera.Assets![0].StartSeconds, 3);
+        Assert.Equal(27.65, recovered.Camera.Assets![^1].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void LegacyAssetsAlreadyInVideo_AreNotShifted()
+    {
+        var legacy = new ClipOverlayManifest(2, new ClipOverlayLayer("Facecam", true, Assets: [
+            new ClipOverlayAsset(".clipinfo/overlays/0.mp4", 36.84, 47.23)]));
+
+        var loaded = ClipOverlayManifest.ForPlayback(legacy, 60);
+
+        Assert.False(loaded.Camera!.SynchronizationApproximate);
+        Assert.Equal(36.84, loaded.Camera.Assets![0].StartSeconds, 3);
+    }
 }

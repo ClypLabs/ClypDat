@@ -57,7 +57,6 @@ public sealed partial class MainWindow
         }
         if (_spotifyPreviewSpec is not { } original || !model.Settings.SpotifyOverlayEnabled || !model.SpotifyOverlayLayerVisible || model.SelectedSourceWidth <= 0)
         { HideSpotifyPreview(); UpdateCapturedOverlayPreview(model); return; }
-        HideCapturedOverlayPreview();
         try
         {
             var spec = original with { Position = model.Settings.SpotifyOverlayPosition, Font = SpotifyOverlayCardRenderer.ResolveFont(),
@@ -157,6 +156,10 @@ public sealed partial class MainWindow
             if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
             _spotifyPerPixel?.ShowAndRefresh();
             UpdateCapturedOverlayPreview(model);
+            // Captured camera is refreshed after Spotify so it receives the
+            // current source time, then restore Spotify as top visual layer.
+            handle = NativeHandleOf(_spotifyWindow);
+            if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
         }
         catch (InvalidOperationException) { HideSpotifyPreview(); }
     }

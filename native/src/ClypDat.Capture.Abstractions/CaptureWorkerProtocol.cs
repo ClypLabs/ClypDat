@@ -6,12 +6,15 @@ namespace ClypDat.Capture.Abstractions;
 
 public static class CaptureWorkerProtocol
 {
+    // 6 makes overlay capture timing use the retained media window, rather
+    // than the requested replay duration. App and worker must agree because
+    // an older worker could otherwise persist unusable offsets.
     // 5 replaces nested JSON overlay settings with a typed, atomic attach snapshot.
     // 4 adds CaptureWorkerStartAck so an unavailable desktop can acknowledge the
     // start intent without claiming that recording is active. A worker left over from an
     // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
     // the proxy's read loop already routes into recovery.
-    public const int Version = 5;
+    public const int Version = 6;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 

@@ -8587,7 +8587,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedSpotifyArtPath = clipInfo?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
         _selectedSpotifyOverlayBurned = media.SpotifyOverlayBurned || clipInfo?.SpotifyOverlayBurned == true;
         _selectedOverlayManifestRecorded = clipInfo?.OverlayManifest is not null;
-        _selectedOverlayManifest = clipInfo?.OverlayManifest ?? ClipOverlayManifest.Empty;
+        _selectedOverlayManifest = ClipOverlayManifest.ForPlayback(clipInfo?.OverlayManifest ?? ClipOverlayManifest.Empty, media.Duration.TotalSeconds);
         _cameraOverlayLayerVisible = true;
         _peripheralOverlayLayerVisible = true;
         _cameraOverlayTransform = _selectedOverlayManifest.Camera?.InitialTransform;
