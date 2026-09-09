@@ -51,6 +51,66 @@ public sealed class CapturedOverlayPlaybackTests
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
+    // The three segment shapes a clip produces. Camera playback used to divide a
+    // source-time offset by the segment's clip-visible span and scale it by the
+    // whole file's frame count, so only fully contained segments landed near the
+    // right frame: a partially included first segment pinned to its opening
+    // frames and a truncated final one ran proportionally fast.
+    [Fact]
+    public void PartiallyIncludedFirstSegment_ReadsFromWhereTheClipActuallyStarts()
+    {
+        // The clip starts 1.6s into a 2s segment, so it shows only its last 0.4s.
+        var asset = new ClipOverlayAsset("0.mp4", StartSeconds: 0, EndSeconds: .4, SourceOffsetSeconds: 1.6);
+
+        Assert.Equal(1.6, CapturedOverlayPlayback.SourceSeconds(asset, 0), 6);
+        Assert.Equal(1.8, CapturedOverlayPlayback.SourceSeconds(asset, .2), 6);
+        // Not clamped to the 0.4s visible span, which is what pinned it before.
+        Assert.Equal(48, CapturedOverlayPlayback.FrameIndex(CapturedOverlayPlayback.SourceSeconds(asset, 0), 60));
+        Assert.Equal(54, CapturedOverlayPlayback.FrameIndex(CapturedOverlayPlayback.SourceSeconds(asset, .2), 60));
+    }
+
+    [Fact]
+    public void FullyContainedSegment_MapsClipTimeStraightThrough()
+    {
+        var asset = new ClipOverlayAsset("1.mp4", StartSeconds: .4, EndSeconds: 2.4);
+
+        Assert.Equal(0, CapturedOverlayPlayback.SourceSeconds(asset, .4), 6);
+        Assert.Equal(1, CapturedOverlayPlayback.SourceSeconds(asset, 1.4), 6);
+        Assert.Equal(0, CapturedOverlayPlayback.FrameIndex(CapturedOverlayPlayback.SourceSeconds(asset, .4), 60));
+        Assert.Equal(30, CapturedOverlayPlayback.FrameIndex(CapturedOverlayPlayback.SourceSeconds(asset, 1.4), 60));
+    }
+
+    [Fact]
+    public void TruncatedFinalSegment_RunsAtRealTimeRatherThanStretchingToTheClipEnd()
+    {
+        // The clip ends 0.5s into this segment; the file still holds a full 2s.
+        var asset = new ClipOverlayAsset("2.mp4", StartSeconds: 2.4, EndSeconds: 2.9);
+
+        Assert.Equal(.25, CapturedOverlayPlayback.SourceSeconds(asset, 2.65), 6);
+        Assert.Equal(8, CapturedOverlayPlayback.FrameIndex(CapturedOverlayPlayback.SourceSeconds(asset, 2.65), 60));
+        // Half a second in is frame 15, not the file's last frame.
+        Assert.Equal(15, CapturedOverlayPlayback.FrameIndex(CapturedOverlayPlayback.SourceSeconds(asset, 2.9), 60));
+    }
+
+    [Fact]
+    public void FrameIndex_StaysInsideWhatWasDecoded()
+    {
+        Assert.Equal(0, CapturedOverlayPlayback.FrameIndex(-5, 60));
+        Assert.Equal(59, CapturedOverlayPlayback.FrameIndex(600, 60));
+        Assert.Equal(0, CapturedOverlayPlayback.FrameIndex(1, 0));
+    }
+
+    [Fact]
+    public void PlaybackRate_ScalesSourceTime()
+    {
+        var asset = new ClipOverlayAsset("0.mp4", StartSeconds: 0, EndSeconds: 2, PlaybackRate: 2);
+
+        Assert.Equal(2, CapturedOverlayPlayback.SourceSeconds(asset, 1), 6);
+        // A rate that cannot be honoured must not produce NaN offsets.
+        Assert.Equal(1, CapturedOverlayPlayback.SourceSeconds(asset with { PlaybackRate = 0 }, 1), 6);
+        Assert.Equal(1, CapturedOverlayPlayback.SourceSeconds(asset with { PlaybackRate = double.NaN }, 1), 6);
+    }
+
     private static void PumpUntil(Func<bool> completed, TimeSpan timeout)
     {
         var elapsed = Stopwatch.StartNew();

@@ -17,7 +17,6 @@ internal sealed class OverlayCaptureSession : IDisposable
     private readonly string _workRoot;
     private OverlayCaptureSettings _settings = OverlayCaptureSettings.None;
     private Process? _camera;
-    private DateTime _cameraStartedUtc;
     private string? _cameraError;
     private bool _cameraReceivedFrames;
     private readonly Dictionary<string, CameraSegment> _cameraSegments = new(StringComparer.OrdinalIgnoreCase);
@@ -74,6 +73,9 @@ internal sealed class OverlayCaptureSession : IDisposable
                     Math.Max(0, (clipStart - startUtc).TotalSeconds), Math.Min((endUtc - startUtc).TotalSeconds, (clipEnd - startUtc).TotalSeconds),
                     Math.Max(0, (clipStart - segment.StartUtc).TotalSeconds), 1));
             }
+            // Sorted by clip time: the %d filenames sort lexicographically, so
+            // segment 10 would otherwise precede segment 2 in the manifest.
+            assets.Sort((left, right) => left.StartSeconds.CompareTo(right.StartSeconds));
             return assets.Count == 0
                 ? new ClipOverlayLayer(camera.FriendlyName, false, InitialTransform: _settings.CameraTransform.ToPresentationTransform(),
                     Error: "Camera frames have not reached a completed capture segment yet.")
@@ -120,13 +122,22 @@ internal sealed class OverlayCaptureSession : IDisposable
         {
             lock (_gate)
             {
-                // FFmpeg creates the next segment when it closes the previous
-                // one. Its filename index gives stable capture boundaries;
-                // Created event time is only a fallback for malformed names.
-                var index = int.TryParse(Path.GetFileNameWithoutExtension(args.FullPath), out var value) ? value : _cameraSegments.Count;
-                var start = _cameraStartedUtc + TimeSpan.FromSeconds(index * SegmentSeconds);
-                foreach (var pending in _cameraSegments.Values.Where(item => !item.Completed)) pending.Completed = true;
-                _cameraSegments[args.FullPath] = new CameraSegment(start, start + TimeSpan.FromSeconds(SegmentSeconds));
+                // FFmpeg's segment muxer creates file N at the instant segment N
+                // begins, so this event time measures that boundary directly.
+                // Deriving it from a timestamp taken before Process.Start
+                // instead charged the camera timeline with FFmpeg's spawn plus
+                // the DirectShow device-open cost - hundreds of milliseconds,
+                // and seconds on a virtual camera - which shifted every overlay
+                // frame early against gameplay for the whole recording.
+                var observed = MonotonicClock.UtcNow;
+                // Closing the previous segment here also gives it its real
+                // duration rather than an assumed exactly-2.000s cadence.
+                foreach (var pending in _cameraSegments.Values.Where(item => !item.Completed))
+                {
+                    pending.EndUtc = observed;
+                    pending.Completed = true;
+                }
+                _cameraSegments[args.FullPath] = new CameraSegment(observed, observed + TimeSpan.FromSeconds(SegmentSeconds));
             }
         };
         var pattern = Path.Combine(_workRoot, "%d.mp4");
@@ -136,7 +147,6 @@ internal sealed class OverlayCaptureSession : IDisposable
         foreach (var argument in new[] { "-hide_banner", "-f", "dshow", "-framerate", "60", "-i", $"video={_settings.Camera!.DeviceMoniker}", "-an", "-vf", "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2", "-vsync", "0", "-c:v", "libx264", "-preset", "ultrafast", "-g", "120", "-bf", "0", "-sc_threshold", "0", "-f", "segment", "-segment_time", SegmentSeconds.ToString(), "-reset_timestamps", "1", "-segment_format_options", "movflags=+frag_keyframe+empty_moov+default_base_moof", pattern }) info.ArgumentList.Add(argument);
         try
         {
-            _cameraStartedUtc = MonotonicClock.UtcNow;
             _camera = Process.Start(info);
             if (_camera is null) { _cameraError = "Camera capture could not start."; return; }
             _ = ObserveCameraAsync(_camera);
@@ -168,5 +178,5 @@ internal sealed class OverlayCaptureSession : IDisposable
     }
 
     public void Dispose() { Stop(); _input.Dispose(); _cameraWatcher?.Dispose(); try { if (Directory.Exists(_workRoot)) Directory.Delete(_workRoot, true); } catch { } }
-    private sealed class CameraSegment(DateTime startUtc, DateTime endUtc) { public DateTime StartUtc { get; } = startUtc; public DateTime EndUtc { get; } = endUtc; public bool Completed { get; set; } }
+    private sealed class CameraSegment(DateTime startUtc, DateTime endUtc) { public DateTime StartUtc { get; } = startUtc; public DateTime EndUtc { get; set; } = endUtc; public bool Completed { get; set; } }
 }

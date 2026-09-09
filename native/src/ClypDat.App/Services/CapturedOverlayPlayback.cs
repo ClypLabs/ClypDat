@@ -12,6 +12,13 @@ namespace ClypDat.App.Services;
 internal sealed class CapturedOverlayPlayback : IDisposable
 {
     private const int Width = 640, Height = 360, FrameBytes = Width * Height * 4;
+    // Decode resamples to a fixed cadence, so frame i is exactly source second
+    // i/DecodeFps. Capture runs -vsync 0 passthrough, whose spacing is neither
+    // uniform nor known here; inferring a rate from the frame count is what
+    // made playback drift. It also halves decode time and memory.
+    private const double DecodeFps = 30;
+    // Enough lead to decode the next segment before playback arrives in it.
+    private const double PrefetchSeconds = .75;
     private readonly object _gate = new();
     private readonly Dictionary<string, Segment> _segments = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
@@ -20,30 +27,50 @@ internal sealed class CapturedOverlayPlayback : IDisposable
 
     public void Request(string libraryRoot, ClipOverlayLayer? layer, double sourceSeconds)
     {
-        var asset = layer?.Assets?.FirstOrDefault(item => sourceSeconds >= item.StartSeconds && sourceSeconds < item.EndSeconds);
-        if (asset is null || layer?.Flattened == true) { Publish(null); return; }
+        var assets = layer?.Assets;
+        if (assets is null || layer?.Flattened == true) { Publish(null); return; }
+        var asset = assets.FirstOrDefault(item => sourceSeconds >= item.StartSeconds && sourceSeconds < item.EndSeconds);
+        if (asset is null) { Publish(null); return; }
         var path = ClipOverlayManifest.ResolveAssetPath(libraryRoot, asset.AssetPath);
         if (path is null || !File.Exists(path)) { Publish(null); return; }
-        Segment segment;
-        lock (_gate)
-        {
-            if (_disposed) return;
-            if (!_segments.TryGetValue(path, out segment!))
-            {
-                // Keep only current and next completed segment. Requests never
-                // kill useful decode work or launch another FFmpeg process.
-                foreach (var stale in _segments.Where(pair => pair.Value.Completed && pair.Key != path).Select(pair => pair.Key).ToArray()) _segments.Remove(stale);
-                segment = new Segment(path, Math.Max(.001, asset.EndSeconds - asset.StartSeconds));
-                _segments[path] = segment;
-                _ = Task.Run(() => Decode(segment));
-            }
-        }
-        var playbackRate = double.IsFinite(asset.PlaybackRate) && asset.PlaybackRate > 0 ? asset.PlaybackRate : 1;
-        var requested = asset.SourceOffsetSeconds + (sourceSeconds - asset.StartSeconds) * playbackRate;
-        segment.RequestedOffset = Math.Clamp(requested, 0, segment.Duration);
+
+        // Start the next segment before playback reaches it. Decoding only on
+        // arrival froze the image on its last frame for a whole decode every
+        // two seconds of playback, and again after every seek.
+        var following = sourceSeconds >= asset.EndSeconds - PrefetchSeconds
+            ? assets.Where(item => item.StartSeconds > asset.StartSeconds).OrderBy(item => item.StartSeconds).FirstOrDefault()
+            : null;
+        var followingPath = following is null ? null : ClipOverlayManifest.ResolveAssetPath(libraryRoot, following.AssetPath);
+        if (followingPath is not null && !File.Exists(followingPath)) followingPath = null;
+
+        var segment = Acquire(path, followingPath);
+        if (segment is null) return;
+        if (followingPath is not null) Acquire(followingPath, path);
+
+        segment.RequestedOffset = SourceSeconds(asset, sourceSeconds);
         if (!segment.Completed) return;
         if (segment.Error || segment.Frames.Count == 0) { Publish(null); return; }
         PublishFrame(segment, segment.RequestedOffset);
+    }
+
+    /// <summary>Returns the segment for <paramref name="path"/>, decoding it if new.
+    /// Segments other than this one and <paramref name="keep"/> are evicted, so a
+    /// request never kills useful decode work or launches a second FFmpeg.</summary>
+    private Segment? Acquire(string path, string? keep)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return null;
+            if (_segments.TryGetValue(path, out var existing)) return existing;
+            foreach (var stale in _segments
+                         .Where(pair => pair.Value.Completed && pair.Key != path && !string.Equals(pair.Key, keep, StringComparison.OrdinalIgnoreCase))
+                         .Select(pair => pair.Key).ToArray())
+                _segments.Remove(stale);
+            var segment = new Segment(path);
+            _segments[path] = segment;
+            _ = Task.Run(() => Decode(segment));
+            return segment;
+        }
     }
 
     private async Task Decode(Segment segment)
@@ -53,7 +80,7 @@ internal sealed class CapturedOverlayPlayback : IDisposable
             var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffmpeg.exe");
             if (!File.Exists(ffmpeg)) { Complete(segment, true); return; }
             using var process = new Process { StartInfo = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true } };
-            foreach (var argument in new[] { "-v", "error", "-i", segment.Path, "-map", "0:v:0", "-vsync", "0", "-f", "rawvideo", "-pix_fmt", "bgra", "-" }) process.StartInfo.ArgumentList.Add(argument);
+            foreach (var argument in new[] { "-v", "error", "-i", segment.Path, "-map", "0:v:0", "-vf", $"fps={DecodeFps:0.###}", "-vsync", "0", "-f", "rawvideo", "-pix_fmt", "bgra", "-" }) process.StartInfo.ArgumentList.Add(argument);
             process.Start();
             var stream = process.StandardOutput.BaseStream;
             while (true)
@@ -76,11 +103,26 @@ internal sealed class CapturedOverlayPlayback : IDisposable
         if (error || segment.Frames.Count == 0) Publish(null);
         else PublishFrame(segment, segment.RequestedOffset);
     }
-    private void PublishFrame(Segment segment, double offset)
+    /// <summary>
+    /// Seconds into the segment file for a clip time. This is not the same
+    /// quantity as the segment's clip-visible span, which is shorter whenever
+    /// the clip starts or ends mid-segment; clamping source time against that
+    /// span pinned a partially included first segment to its opening frames.
+    /// </summary>
+    internal static double SourceSeconds(ClipOverlayAsset asset, double clipSeconds)
     {
-        var index = Math.Min(segment.Frames.Count - 1, (int)Math.Floor(offset / segment.Duration * segment.Frames.Count));
-        Publish(ToBitmap(segment.Frames[index]));
+        var rate = double.IsFinite(asset.PlaybackRate) && asset.PlaybackRate > 0 ? asset.PlaybackRate : 1;
+        return Math.Max(0, asset.SourceOffsetSeconds + (clipSeconds - asset.StartSeconds) * rate);
     }
+
+    /// <summary>Frames are resampled to <see cref="DecodeFps"/> at decode, so frame
+    /// i is exactly source second i/DecodeFps and the index is a pure function of
+    /// source time - never of how many frames the file happens to hold.</summary>
+    internal static int FrameIndex(double sourceSeconds, int frameCount) =>
+        frameCount <= 0 ? 0 : Math.Clamp((int)Math.Round(sourceSeconds * DecodeFps), 0, frameCount - 1);
+
+    private void PublishFrame(Segment segment, double sourceSeconds) =>
+        Publish(ToBitmap(segment.Frames[FrameIndex(sourceSeconds, segment.Frames.Count)]));
     private Bitmap ToBitmap(byte[] pixels)
     {
         var bitmap = new WriteableBitmap(new PixelSize(Width, Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul);
@@ -88,5 +130,5 @@ internal sealed class CapturedOverlayPlayback : IDisposable
     }
     private void Publish(Bitmap? bitmap) => Dispatcher.UIThread.Post(() => { if (_disposed) { bitmap?.Dispose(); return; } FrameReady?.Invoke(bitmap); });
     public void Dispose() { lock (_gate) { _disposed = true; _segments.Clear(); } }
-    private sealed class Segment(string path, double duration) { public string Path { get; } = path; public double Duration { get; } = duration; public List<byte[]> Frames { get; } = []; public double RequestedOffset { get; set; } public bool Completed { get; set; } public bool Error { get; set; } }
+    private sealed class Segment(string path) { public string Path { get; } = path; public List<byte[]> Frames { get; } = []; public double RequestedOffset { get; set; } public bool Completed { get; set; } public bool Error { get; set; } }
 }
