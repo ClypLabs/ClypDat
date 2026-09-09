@@ -4338,6 +4338,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _selectedHasSpotifyTimeline;
     private bool _spotifyOverlayLayerVisible = true;
     private bool _isSpotifyOverlaySelected;
+    private bool _isCameraOverlaySelected, _isPeripheralOverlaySelected;
     private SpotifyOverlayTransform? _spotifyOverlayTransform;
 
     public bool HasSpotifyOverlayLayer => HasSpotifyAudioTrack(TimelineTracks) &&
@@ -4495,6 +4496,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // overlay timeline lane because it carries its own metadata timeline.
     public bool HasCameraOverlayLayer => ClipOverlayManifest.IsUsable(Settings.LibraryFolder, _selectedOverlayManifest.Camera);
     public bool HasPeripheralOverlayLayer => ClipOverlayManifest.IsUsable(Settings.LibraryFolder, _selectedOverlayManifest.Peripherals);
+    // Only one overlay is ever selected: the handles and the drag both belong
+    // to whichever layer the pointer last landed on.
+    public bool IsCameraOverlaySelected
+    {
+        get => _isCameraOverlaySelected;
+        set
+        {
+            if (!SetProperty(ref _isCameraOverlaySelected, value && HasCameraOverlayLayer)) return;
+            if (_isCameraOverlaySelected) { IsPeripheralOverlaySelected = false; IsSpotifyOverlaySelected = false; }
+        }
+    }
+
+    public bool IsPeripheralOverlaySelected
+    {
+        get => _isPeripheralOverlaySelected;
+        set
+        {
+            if (!SetProperty(ref _isPeripheralOverlaySelected, value && HasPeripheralOverlayLayer)) return;
+            if (_isPeripheralOverlaySelected) { IsCameraOverlaySelected = false; IsSpotifyOverlaySelected = false; }
+        }
+    }
+
     public string CameraOverlayStatus => OverlayStatus(_selectedOverlayManifest.Camera, "Camera");
     public string PeripheralOverlayStatus => OverlayStatus(_selectedOverlayManifest.Peripherals, "Keyboard and mouse");
     public bool CameraOverlayLayerVisible { get => _cameraOverlayLayerVisible; set { if (SetProperty(ref _cameraOverlayLayerVisible, value) && !_suppressClipEditSave) SaveSelectedClipEditState(); } }
@@ -4533,7 +4556,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CameraOverlayTransform)); OnPropertyChanged(nameof(PeripheralOverlayTransform));
         OnPropertyChanged(nameof(CameraOverlaySizePercent)); OnPropertyChanged(nameof(PeripheralOverlaySizePercent));
         OnPropertyChanged(nameof(CameraOverlaySizeLabel)); OnPropertyChanged(nameof(PeripheralOverlaySizeLabel));
+        // A layer that stopped being usable cannot stay selected, or its handles
+        // outlive the thing they were drawn around.
+        if (!HasCameraOverlayLayer) IsCameraOverlaySelected = false;
+        if (!HasPeripheralOverlayLayer) IsPeripheralOverlaySelected = false;
     }
+
+    /// <summary>Saves a captured overlay layout once a drag has finished. Moves
+    /// run with persist:false so a drag writes the sidecar once, not per frame.</summary>
+    public void CommitCapturedOverlayTransform()
+    {
+        if (!_suppressClipEditSave) SaveSelectedClipEditState();
+    }
+
+    /// <summary>Drops selection from every captured overlay layer.</summary>
+    public void DeselectCapturedOverlays() { IsCameraOverlaySelected = false; IsPeripheralOverlaySelected = false; }
 
     /// <summary>
     /// Raised when the editor's copy of the overlay needs redrawing - a

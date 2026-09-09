@@ -28,6 +28,9 @@ public sealed partial class MainWindow
     private bool _spotifyPreviewDirty = true;
     private Rect _spotifyVideoBounds;
     private SpotifyOverlayGesture? _spotifyGesture;
+    private CapturedOverlayGesture? _capturedGesture;
+    private SpotifyOverlayAdorner? _capturedAdorner;
+    private Rect _capturedPeripheralBounds;
     private IPointer? _spotifyPointer;
     private bool _spotifyGestureChanged;
     private static readonly Cursor SpotifyMoveCursor = new(StandardCursorType.SizeAll);
@@ -35,6 +38,9 @@ public sealed partial class MainWindow
     private static readonly Cursor SpotifyNorthEastCursor = new(StandardCursorType.TopRightCorner);
     private sealed record SpotifyOverlayGesture(string ClipPath, PixelPoint PointerStart, SpotifyOverlayTransform Start,
         SpotifyOverlayDragMode Mode, int FrameWidth, int FrameHeight);
+    // "Camera" or "Peripherals", matching the view model's layer names.
+    private sealed record CapturedOverlayGesture(string ClipPath, string Layer, PixelPoint PointerStart,
+        VideoOverlayTransform Start, VideoOverlayManipulationMode Mode, double FrameWidth, double FrameHeight);
     private void InitializeSpotifyPreview()
     {
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 30) };
@@ -113,12 +119,13 @@ public sealed partial class MainWindow
                 _capturedOverlayScene = new() { IsHitTestVisible = false };
                 _spotifyPreview = new() { IsHitTestVisible = false };
                 _spotifyAdorner = new() { IsHitTestVisible = false };
-                _spotifySurface = new Canvas { Background = Brushes.Transparent, Children = { _capturedOverlayScene, _spotifyPreview, _spotifyAdorner } };
+                _capturedAdorner = new() { IsHitTestVisible = false, ShowRotationHandle = false };
+                _spotifySurface = new Canvas { Background = Brushes.Transparent, Children = { _capturedOverlayScene, _capturedAdorner, _spotifyPreview, _spotifyAdorner } };
                 _spotifyViewport = new Canvas { Background = Brushes.Transparent, ClipToBounds = true, Children = { _spotifySurface } };
                 _spotifySurface.PointerPressed += SpotifySurface_OnPointerPressed;
                 _spotifySurface.PointerMoved += SpotifySurface_OnPointerMoved;
                 _spotifySurface.PointerReleased += SpotifySurface_OnPointerReleased;
-                _spotifySurface.PointerCaptureLost += (_, _) => EndSpotifyGesture();
+                _spotifySurface.PointerCaptureLost += (_, _) => { EndCapturedOverlayGesture(); EndSpotifyGesture(); };
                 _spotifyWindow = new Window { WindowDecorations = WindowDecorations.None, ShowInTaskbar = false, CanResize = false,
                     ShowActivated = false, Topmost = false, Background = Brushes.Transparent,
                     TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent }, Content = _spotifyViewport };
@@ -143,8 +150,12 @@ public sealed partial class MainWindow
             _spotifySurface.Height = height / dpi;
             Canvas.SetLeft(_spotifySurface, (x - visible.X) / dpi);
             Canvas.SetTop(_spotifySurface, (y - visible.Y) / dpi);
-            _spotifySurface.IsHitTestVisible = showSpotify;
-            UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), visible, dpi);
+            // Any editable layer keeps the surface live. Gating on Spotify alone
+            // meant a clip with only a camera overlay received no pointer events
+            // at all, so its overlay could never be moved.
+            _spotifySurface.IsHitTestVisible = showSpotify || model.HasCameraOverlayLayer || model.HasPeripheralOverlayLayer;
+            UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), dpi);
+            UpdateCapturedOverlayAdorner(model, dpi, width, height);
             _capturedOverlayScene!.Width = width / dpi;
             _capturedOverlayScene.Height = height / dpi;
             if (showSpotify)
@@ -195,10 +206,9 @@ public sealed partial class MainWindow
         EndSpotifyGesture();
     }
 
-    private void UpdateCapturedOverlayPreview(MainWindowViewModel model, Rect videoBounds, SpotifyOverlayBounds visible, double dpi)
+    private void UpdateCapturedOverlayPreview(MainWindowViewModel model, Rect videoBounds, double dpi)
     {
         var showCamera = model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible && model.CameraOverlayTransform is not null;
-        const string peripherals = "QWERTY Compact";
         var showPeripherals = model.HasPeripheralOverlayLayer && model.PeripheralOverlayLayerVisible && model.PeripheralOverlayTransform is not null;
         if (!showCamera && !showPeripherals)
         { HideCapturedOverlayPreview(); return; }
@@ -210,8 +220,8 @@ public sealed partial class MainWindow
             var normalized = VideoOverlayLayout.Normalize(model.CameraOverlayTransform!, VideoOverlayLayout.CameraAspectRatio);
             var layerWidth = Math.Max(1, (int)Math.Round(width * normalized.Width));
             var layerHeight = Math.Max(1, (int)Math.Round(layerWidth / VideoOverlayLayout.CameraAspectRatio));
-            _capturedCameraBounds = new Rect((videoBounds.X + width * normalized.X - visible.X) / dpi,
-                (videoBounds.Y + height * normalized.Y - visible.Y) / dpi, layerWidth / dpi, layerHeight / dpi);
+            _capturedCameraBounds = new Rect(width * normalized.X / dpi, height * normalized.Y / dpi,
+                layerWidth / dpi, layerHeight / dpi);
             if (_capturedPlayback is null)
             {
                 _capturedPlayback = new CapturedOverlayPlayback();
@@ -219,21 +229,57 @@ public sealed partial class MainWindow
             }
             _capturedPlayback.Request(model.Settings.LibraryFolder, model.SelectedOverlayManifestCamera(), model.CurrentTime.TotalSeconds);
         }
-        else _capturedOverlayScene.ClearCamera();
+        else { _capturedOverlayScene.ClearCamera(); _capturedCameraBounds = default; }
         if (showPeripherals)
         {
-            var layout = model.SelectedOverlayManifestPeripherals()?.Source ?? peripherals;
+            var layout = model.SelectedOverlayManifestPeripherals()?.Source ?? KeyboardOverlayCatalog.QwertyCompact;
             var aspect = KeyboardOverlayCatalog.Get(layout).AspectRatio;
             var normalized = VideoOverlayLayout.Normalize(model.PeripheralOverlayTransform!, aspect);
             var layerWidth = Math.Max(1, width * normalized.Width);
-            _capturedOverlayScene.SetPeripherals(layout, new Rect((videoBounds.X + width * normalized.X - visible.X) / dpi,
-                (videoBounds.Y + height * normalized.Y - visible.Y) / dpi, layerWidth / dpi, layerWidth / aspect / dpi));
+            _capturedPeripheralBounds = new Rect(width * normalized.X / dpi, height * normalized.Y / dpi,
+                layerWidth / dpi, layerWidth / aspect / dpi);
+            _capturedOverlayScene.SetPeripherals(layout, _capturedPeripheralBounds);
         }
-        else _capturedOverlayScene.ClearPeripherals();
+        else { _capturedOverlayScene.ClearPeripherals(); _capturedPeripheralBounds = default; }
         _capturedOverlayScene.IsVisible = true;
     }
 
     private Rect _capturedCameraBounds;
+
+    private void UpdateCapturedOverlayAdorner(MainWindowViewModel model, double dpi, double width, double height)
+    {
+        if (_capturedAdorner is null) return;
+        var bounds = model.IsCameraOverlaySelected ? _capturedCameraBounds
+            : model.IsPeripheralOverlaySelected ? _capturedPeripheralBounds
+            : default;
+        _capturedAdorner.IsVisible = bounds.Width > 0 && bounds.Height > 0;
+        if (!_capturedAdorner.IsVisible) return;
+        _capturedAdorner.Width = width / dpi;
+        _capturedAdorner.Height = height / dpi;
+        _capturedAdorner.CardBounds = bounds;
+        _capturedAdorner.InvalidateVisual();
+    }
+
+    /// <summary>Topmost-first: the keyboard draws over the camera, so it wins a
+    /// pointer they both contain.</summary>
+    private bool TryHitCapturedOverlay(MainWindowViewModel model, Point point, out string layer, out VideoOverlayManipulationMode mode)
+    {
+        foreach (var (name, bounds, present) in new[]
+                 {
+                     ("Peripherals", _capturedPeripheralBounds, model.HasPeripheralOverlayLayer && model.PeripheralOverlayLayerVisible),
+                     ("Camera", _capturedCameraBounds, model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible)
+                 })
+        {
+            if (!present || bounds.Width <= 0 || bounds.Height <= 0) continue;
+            if (!Services.CapturedOverlayHitTest.TryHit(bounds, point, out mode)) continue;
+            layer = name;
+            return true;
+        }
+        layer = string.Empty;
+        mode = VideoOverlayManipulationMode.Move;
+        return false;
+    }
+
     private void HideCapturedOverlayPreview()
     {
         if (_capturedOverlayScene is not null)
@@ -246,11 +292,20 @@ public sealed partial class MainWindow
 
     private void SpotifySurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (_spotifySurface is null || ViewModel is not { HasEditableSpotifyOverlay: true } model ||
+        if (_spotifySurface is null || ViewModel is not { } surfaceModel ||
             !e.GetCurrentPoint(_spotifySurface).Properties.IsLeftButtonPressed) return;
-        var point = e.GetPosition(_spotifySurface);
+        // The Spotify card sits above the captured layers, so it is offered the
+        // pointer first - but only where it actually is, which is what
+        // TryHitTest distinguishes from empty canvas.
+        var surfacePoint = e.GetPosition(_spotifySurface);
+        var overCard = surfaceModel.HasEditableSpotifyOverlay && _spotifyAdorner is not null &&
+                       _spotifyAdorner.TryHitTest(surfacePoint, out _);
+        if (!overCard && BeginCapturedOverlayGesture(surfaceModel, surfacePoint, e)) return;
+        if (surfaceModel is not { HasEditableSpotifyOverlay: true } model) { DeselectCapturedOverlaysFromSurface(surfaceModel); return; }
+        var point = surfacePoint;
         var mode = model.IsSpotifyOverlaySelected && _spotifyAdorner is not null ? _spotifyAdorner.HitTest(point) : SpotifyOverlayDragMode.Move;
         model.IsSpotifyOverlaySelected = true;
+        model.DeselectCapturedOverlays();
         model.OpenEditorSidebar(EditorSidebarSection.Overlays);
         var width = Math.Max(1, (int)_spotifyVideoBounds.Width);
         var height = Math.Max(1, (int)_spotifyVideoBounds.Height);
@@ -269,10 +324,50 @@ public sealed partial class MainWindow
         UpdateSpotifyPreview();
     }
 
+    /// <summary>Starts a camera or keyboard drag. Mirrors the Spotify gesture:
+    /// the start transform is snapshotted, the drag runs unpersisted, and the
+    /// layout is written once on release.</summary>
+    private bool BeginCapturedOverlayGesture(MainWindowViewModel model, Point point, PointerPressedEventArgs e)
+    {
+        if (_spotifySurface is null || !TryHitCapturedOverlay(model, point, out var layer, out var mode)) return false;
+        var start = layer == "Camera" ? model.CameraOverlayTransform : model.PeripheralOverlayTransform;
+        if (start is null) return false;
+        if (layer == "Camera") model.IsCameraOverlaySelected = true; else model.IsPeripheralOverlaySelected = true;
+        model.OpenEditorSidebar(EditorSidebarSection.Overlays);
+        _capturedGesture = new(model.SelectedVideoPath, layer, _spotifySurface.PointToScreen(point), start, mode,
+            Math.Max(1, _spotifyVideoBounds.Width), Math.Max(1, _spotifyVideoBounds.Height));
+        _spotifyGestureChanged = false;
+        _spotifyPointer = e.Pointer;
+        e.Pointer.Capture(_spotifySurface);
+        e.Handled = true;
+        return true;
+    }
+
+    private void DeselectCapturedOverlaysFromSurface(MainWindowViewModel model)
+    {
+        if (_capturedGesture is not null) return;
+        model.DeselectCapturedOverlays();
+    }
+
     private void SpotifySurface_OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (_spotifySurface is null) return;
+        if (MoveCapturedOverlayGesture(e)) return;
         var point = e.GetPosition(_spotifySurface);
+        // Hovering a captured layer shows its own grab cursor; without this the
+        // camera and keyboard read as scenery rather than as draggable objects.
+        if (_spotifyGesture is null && ViewModel is { } hoverModel &&
+            !(hoverModel.HasEditableSpotifyOverlay && _spotifyAdorner is not null && _spotifyAdorner.TryHitTest(point, out _)) &&
+            TryHitCapturedOverlay(hoverModel, point, out _, out var capturedMode))
+        {
+            _spotifySurface.Cursor = capturedMode switch
+            {
+                VideoOverlayManipulationMode.TopLeft or VideoOverlayManipulationMode.BottomRight => SpotifyNorthWestCursor,
+                VideoOverlayManipulationMode.TopRight or VideoOverlayManipulationMode.BottomLeft => SpotifyNorthEastCursor,
+                _ => SpotifyMoveCursor
+            };
+            return;
+        }
         var mode = _spotifyGesture?.Mode ?? (ViewModel?.IsSpotifyOverlaySelected == true
             && _spotifyAdorner is not null ? _spotifyAdorner.HitTest(point) : SpotifyOverlayDragMode.Move);
         _spotifySurface.Cursor = mode switch
@@ -298,8 +393,52 @@ public sealed partial class MainWindow
         // The shared 30fps timer updates position and imagery together.
     }
 
+    private bool MoveCapturedOverlayGesture(PointerEventArgs e)
+    {
+        if (_capturedGesture is not { } gesture || _spotifySurface is null) return false;
+        if (ViewModel is not { } model || model.SelectedVideoPath != gesture.ClipPath) { EndCapturedOverlayGesture(); return true; }
+        var screen = _spotifySurface.PointToScreen(e.GetPosition(_spotifySurface));
+        // Same 2px dead zone as the Spotify drag, so a click that selects does
+        // not also nudge the layout.
+        if (!_spotifyGestureChanged && Math.Abs(screen.X - gesture.PointerStart.X) < 2 && Math.Abs(screen.Y - gesture.PointerStart.Y) < 2) return true;
+        _spotifyGestureChanged = true;
+        // VideoOverlayManipulation takes normalized deltas, unlike the Spotify
+        // manipulation which takes screen pixels plus frame dimensions.
+        var aspect = gesture.Layer == "Camera"
+            ? VideoOverlayLayout.CameraAspectRatio
+            : KeyboardOverlayCatalog.Get(model.SelectedOverlayManifestPeripherals()?.Source ?? KeyboardOverlayCatalog.QwertyCompact).AspectRatio;
+        var transform = VideoOverlayManipulation.Apply(gesture.Start, gesture.Mode,
+            (screen.X - gesture.PointerStart.X) / gesture.FrameWidth,
+            (screen.Y - gesture.PointerStart.Y) / gesture.FrameHeight,
+            gesture.FrameWidth / gesture.FrameHeight, aspect);
+        if (gesture.Layer == "Camera") model.SetCameraOverlayTransform(transform, persist: false);
+        else model.SetPeripheralOverlayTransform(transform, persist: false);
+        e.Handled = true;
+        return true;
+    }
+
+    private void EndCapturedOverlayGesture()
+    {
+        var gesture = _capturedGesture;
+        var changed = _spotifyGestureChanged;
+        _capturedGesture = null;
+        _spotifyGestureChanged = false;
+        var pointer = _spotifyPointer;
+        _spotifyPointer = null;
+        pointer?.Capture(null);
+        if (changed && gesture is not null && ViewModel?.SelectedVideoPath == gesture.ClipPath)
+            ViewModel.CommitCapturedOverlayTransform();
+    }
+
     private void SpotifySurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        if (_capturedGesture is not null)
+        {
+            MoveCapturedOverlayGesture(e);
+            EndCapturedOverlayGesture();
+            e.Handled = true;
+            return;
+        }
         if (_spotifyGesture is null) return;
         SpotifySurface_OnPointerMoved(sender, e);
         EndSpotifyGesture();

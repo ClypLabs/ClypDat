@@ -13,6 +13,10 @@ internal sealed class SpotifyOverlayAdorner : Control
 
     public Rect CardBounds { get; set; }
     public double RotationDegrees { get; set; }
+    /// <summary>Captured camera and keyboard layers store no rotation
+    /// (VideoOverlayTransform is x/y/width only), so they draw and hit-test
+    /// without the rotation handle.</summary>
+    public bool ShowRotationHandle { get; set; } = true;
     public const double HandleSize = 10;
     public const double RotationHandleOffset = 24;
 
@@ -27,6 +31,7 @@ internal sealed class SpotifyOverlayAdorner : Control
             foreach (var x in new[] { bounds.Left, bounds.Right })
             foreach (var y in new[] { bounds.Top, bounds.Bottom })
                 context.DrawRectangle(Brushes.White, HandleOutline, new Rect(x - HandleSize / 2, y - HandleSize / 2, HandleSize, HandleSize), 2, 2);
+            if (!ShowRotationHandle) return;
             var handle = RotationHandle(bounds);
             context.DrawLine(Selection, new Point(center.X, handle.Y < center.Y ? bounds.Top : bounds.Bottom), handle);
             context.DrawEllipse(Brushes.White, HandleOutline, handle, HandleSize / 2, HandleSize / 2);
@@ -47,7 +52,7 @@ internal sealed class SpotifyOverlayAdorner : Control
         var rotation = RotationHandle(CardBounds);
         var rotationDx = local.X - rotation.X;
         var rotationDy = local.Y - rotation.Y;
-        if (rotationDx * rotationDx + rotationDy * rotationDy <= (HandleSize + 3) * (HandleSize + 3))
+        if (ShowRotationHandle && rotationDx * rotationDx + rotationDy * rotationDy <= (HandleSize + 3) * (HandleSize + 3))
         {
             mode = SpotifyOverlayDragMode.Rotate;
             return true;

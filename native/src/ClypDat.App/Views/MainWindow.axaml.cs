@@ -9943,18 +9943,20 @@ public sealed partial class MainWindow : Window
 
     private void EditorVideoView_OnVideoClicked(object? sender, EventArgs e)
     {
-        if (ViewModel is not null) ViewModel.IsSpotifyOverlaySelected = false;
+        if (ViewModel is not null) { ViewModel.IsSpotifyOverlaySelected = false; ViewModel.DeselectCapturedOverlays(); }
         PlayPauseButton_OnClick(this, new RoutedEventArgs());
     }
 
     private void SpotifyOverlayDeselect_OnAnyPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (ViewModel?.IsSpotifyOverlaySelected != true || _spotifyGesture is not null) return;
+        if (ViewModel is not { } deselect || _spotifyGesture is not null || _capturedGesture is not null) return;
+        if (!deselect.IsSpotifyOverlaySelected && !deselect.IsCameraOverlaySelected && !deselect.IsPeripheralOverlaySelected) return;
         var visual = e.Source as Visual;
         if (visual?.FindAncestorOfType<Border>() == SpotifyOverlayEffectsCard ||
             visual?.GetVisualAncestors().OfType<Border>().Any(border => border == SpotifyOverlayEffectsCard) == true ||
             (e.Source as Control)?.DataContext is TrackLaneViewModel { IsOverlay: true }) return;
         ViewModel.IsSpotifyOverlaySelected = false;
+        ViewModel.DeselectCapturedOverlays();
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
