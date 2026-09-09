@@ -38,7 +38,9 @@ internal sealed class CapturedOverlayPlayback : IDisposable
                 _ = Task.Run(() => Decode(segment));
             }
         }
-        segment.RequestedOffset = Math.Clamp(sourceSeconds - asset.StartSeconds, 0, segment.Duration);
+        var playbackRate = double.IsFinite(asset.PlaybackRate) && asset.PlaybackRate > 0 ? asset.PlaybackRate : 1;
+        var requested = asset.SourceOffsetSeconds + (sourceSeconds - asset.StartSeconds) * playbackRate;
+        segment.RequestedOffset = Math.Clamp(requested, 0, segment.Duration);
         if (!segment.Completed) return;
         if (segment.Error || segment.Frames.Count == 0) { Publish(null); return; }
         PublishFrame(segment, segment.RequestedOffset);

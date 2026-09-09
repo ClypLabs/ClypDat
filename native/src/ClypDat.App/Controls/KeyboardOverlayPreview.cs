@@ -13,8 +13,16 @@ public sealed class KeyboardOverlayPreview : Control
         AvaloniaProperty.Register<KeyboardOverlayPreview, string>(nameof(Layout), KeyboardOverlayCatalog.QwertyCompact);
 
     public string Layout { get => GetValue(LayoutProperty); set => SetValue(LayoutProperty, value); }
+    public static readonly StyledProperty<bool> UseSamplePressedProperty =
+        AvaloniaProperty.Register<KeyboardOverlayPreview, bool>(nameof(UseSamplePressed));
+    public static readonly StyledProperty<IReadOnlySet<string>?> PressedKeysProperty =
+        AvaloniaProperty.Register<KeyboardOverlayPreview, IReadOnlySet<string>?>(nameof(PressedKeys));
 
-    static KeyboardOverlayPreview() => AffectsRender<KeyboardOverlayPreview>(LayoutProperty);
+    /// <summary>Settings preview only. Recorded overlays must set physical state.</summary>
+    public bool UseSamplePressed { get => GetValue(UseSamplePressedProperty); set => SetValue(UseSamplePressedProperty, value); }
+    public IReadOnlySet<string>? PressedKeys { get => GetValue(PressedKeysProperty); set => SetValue(PressedKeysProperty, value); }
+
+    static KeyboardOverlayPreview() => AffectsRender<KeyboardOverlayPreview>(LayoutProperty, UseSamplePressedProperty, PressedKeysProperty);
 
     // Every distance below is a multiple of one key, so a layout describes
     // itself in keys and the canvas decides how big a key is. The old code
@@ -55,7 +63,9 @@ public sealed class KeyboardOverlayPreview : Control
 
         var left = (definition.NativeWidth - totalWidth * key) / 2;
         var top = (definition.NativeHeight - boardHeight * key) / 2;
-        var pressed = definition.SamplePressed.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pressed = UseSamplePressed
+            ? definition.SamplePressed.ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : PressedKeys is null ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : new HashSet<string>(PressedKeys, StringComparer.OrdinalIgnoreCase);
 
         using (context.PushTransform(Matrix.CreateScale(canvasScale, canvasScale) * Matrix.CreateTranslation(canvasOrigin.X, canvasOrigin.Y)))
         {

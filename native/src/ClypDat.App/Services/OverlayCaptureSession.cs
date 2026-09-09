@@ -20,7 +20,7 @@ internal sealed class OverlayCaptureSession : IDisposable
     private DateTime _cameraStartedUtc;
     private string? _cameraError;
     private bool _cameraReceivedFrames;
-    private readonly Dictionary<string, (DateTime StartUtc, DateTime EndUtc)> _cameraSegments = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, CameraSegment> _cameraSegments = new(StringComparer.OrdinalIgnoreCase);
     private FileSystemWatcher? _cameraWatcher;
     private readonly RawInputRecorder _input = new();
 
@@ -32,7 +32,9 @@ internal sealed class OverlayCaptureSession : IDisposable
         {
             var changed = !Equals(_settings.Camera, settings.Camera);
             _settings = settings;
-            if (changed) { StopCameraUnderLock(); _input.Reset(); }
+            // Camera replacement must not erase keyboard history captured by
+            // the worker. Input has its own lifetime and clip-start checkpoint.
+            if (changed) StopCameraUnderLock();
             if (_settings.Camera is not null && _camera is null) StartCameraUnderLock();
         }
     }
@@ -63,11 +65,14 @@ internal sealed class OverlayCaptureSession : IDisposable
             var assets = new List<ClipOverlayAsset>();
             foreach (var file in files)
             {
-                if (!TrySegmentWindow(file, out var segmentStart, out var segmentEnd) || segmentEnd <= startUtc || segmentStart >= endUtc) continue;
+                if (!TrySegmentWindow(file, out var segment) || !segment.Completed || segment.EndUtc <= startUtc || segment.StartUtc >= endUtc) continue;
                 var target = Path.Combine(destination, Path.GetFileName(file));
                 File.Copy(file, target, true);
+                var clipStart = startUtc > segment.StartUtc ? startUtc : segment.StartUtc;
+                var clipEnd = endUtc < segment.EndUtc ? endUtc : segment.EndUtc;
                 assets.Add(new ClipOverlayAsset(Path.GetRelativePath(libraryRoot, target),
-                    Math.Max(0, (segmentStart - startUtc).TotalSeconds), Math.Min((endUtc - startUtc).TotalSeconds, (segmentEnd - startUtc).TotalSeconds)));
+                    Math.Max(0, (clipStart - startUtc).TotalSeconds), Math.Min((endUtc - startUtc).TotalSeconds, (clipEnd - startUtc).TotalSeconds),
+                    Math.Max(0, (clipStart - segment.StartUtc).TotalSeconds), 1));
             }
             return assets.Count == 0
                 ? new ClipOverlayLayer(camera.FriendlyName, false, InitialTransform: _settings.CameraTransform.ToPresentationTransform(),
@@ -95,10 +100,10 @@ internal sealed class OverlayCaptureSession : IDisposable
         }
     }
 
-    private bool TrySegmentWindow(string path, out DateTime start, out DateTime end)
+    private bool TrySegmentWindow(string path, out CameraSegment segment)
     {
-        start = end = DateTime.MinValue;
-        if (_cameraSegments.TryGetValue(path, out var interval)) { start = interval.StartUtc; end = interval.EndUtc; return true; }
+        if (_cameraSegments.TryGetValue(path, out segment!)) return true;
+        segment = default!;
         return false;
     }
 
@@ -113,9 +118,16 @@ internal sealed class OverlayCaptureSession : IDisposable
         _cameraWatcher = new FileSystemWatcher(_workRoot, "*.mp4") { EnableRaisingEvents = true, IncludeSubdirectories = false };
         _cameraWatcher.Created += (_, args) =>
         {
-            // Event time is capture ownership time, not filesystem metadata.
-            // It remains stable if a library copy changes creation timestamps.
-            lock (_gate) _cameraSegments[args.FullPath] = (MonotonicClock.UtcNow, MonotonicClock.UtcNow + TimeSpan.FromSeconds(SegmentSeconds));
+            lock (_gate)
+            {
+                // FFmpeg creates the next segment when it closes the previous
+                // one. Its filename index gives stable capture boundaries;
+                // Created event time is only a fallback for malformed names.
+                var index = int.TryParse(Path.GetFileNameWithoutExtension(args.FullPath), out var value) ? value : _cameraSegments.Count;
+                var start = _cameraStartedUtc + TimeSpan.FromSeconds(index * SegmentSeconds);
+                foreach (var pending in _cameraSegments.Values.Where(item => !item.Completed)) pending.Completed = true;
+                _cameraSegments[args.FullPath] = new CameraSegment(start, start + TimeSpan.FromSeconds(SegmentSeconds));
+            }
         };
         var pattern = Path.Combine(_workRoot, "%d.mp4");
         var info = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true };
@@ -156,4 +168,5 @@ internal sealed class OverlayCaptureSession : IDisposable
     }
 
     public void Dispose() { Stop(); _input.Dispose(); _cameraWatcher?.Dispose(); try { if (Directory.Exists(_workRoot)) Directory.Delete(_workRoot, true); } catch { } }
+    private sealed class CameraSegment(DateTime startUtc, DateTime endUtc) { public DateTime StartUtc { get; } = startUtc; public DateTime EndUtc { get; } = endUtc; public bool Completed { get; set; } }
 }

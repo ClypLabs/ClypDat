@@ -116,10 +116,10 @@ public sealed class AutoClipCatalogTests
     [Fact]
     public void ProtocolVersionsAndDetectorTransportLimitsArePinned()
     {
-        // 8 records negotiated camera cadence and rejects stale workers.
+        // 9 records clip-relative input and camera source mappings.
         // replay duration rather than retained media timing.
         // older install is rejected rather than answering without it.
-        Assert.Equal(8, CaptureWorkerProtocol.Version);
+        Assert.Equal(9, CaptureWorkerProtocol.Version);
         Assert.Equal(1, DetectorHostProtocol.Version);
         Assert.Equal(3, DetectorHostProtocol.FrameSlotCount);
         Assert.Equal(10, DetectorHostProtocol.MaximumFramesPerSecond);

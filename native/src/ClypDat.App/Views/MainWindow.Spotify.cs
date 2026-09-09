@@ -219,6 +219,7 @@ public sealed partial class MainWindow
             }
             _capturedPlayback.Request(model.Settings.LibraryFolder, model.SelectedOverlayManifestCamera(), model.CurrentTime.TotalSeconds);
         }
+        else _capturedOverlayScene.ClearCamera();
         if (showPeripherals)
         {
             var layout = model.SelectedOverlayManifestPeripherals()?.Source ?? peripherals;
@@ -228,13 +229,19 @@ public sealed partial class MainWindow
             _capturedOverlayScene.SetPeripherals(layout, new Rect((videoBounds.X + width * normalized.X - visible.X) / dpi,
                 (videoBounds.Y + height * normalized.Y - visible.Y) / dpi, layerWidth / dpi, layerWidth / aspect / dpi));
         }
+        else _capturedOverlayScene.ClearPeripherals();
         _capturedOverlayScene.IsVisible = true;
     }
 
     private Rect _capturedCameraBounds;
     private void HideCapturedOverlayPreview()
     {
-        if (_capturedOverlayScene is not null) _capturedOverlayScene.IsVisible = false;
+        if (_capturedOverlayScene is not null)
+        {
+            _capturedOverlayScene.ClearCamera();
+            _capturedOverlayScene.ClearPeripherals();
+            _capturedOverlayScene.IsVisible = false;
+        }
     }
 
     private void SpotifySurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)

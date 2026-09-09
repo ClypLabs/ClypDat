@@ -6,6 +6,9 @@ namespace ClypDat.Capture.Abstractions;
 
 public static class CaptureWorkerProtocol
 {
+    // 9 writes clip-relative input v2 and camera source mappings.  This must
+    // reject a worker from an older install: it could otherwise write UTC
+    // input timestamps and nominal two-second camera ranges into a v5 clip.
     // 8 records camera at its negotiated cadence and requires raw input history.
     // 7 adds timestamped input-history indexes and camera segment acquisition
     // timing.  6 already shipped, so this must reject mixed worker installs.
@@ -17,7 +20,7 @@ public static class CaptureWorkerProtocol
     // start intent without claiming that recording is active. A worker left over from an
     // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
     // the proxy's read loop already routes into recovery.
-    public const int Version = 8;
+    public const int Version = 9;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 

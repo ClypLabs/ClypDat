@@ -15,8 +15,8 @@ internal sealed class RawInputRecorder : IDisposable
         WmMButtonDown = 0x0207, WmMButtonUp = 0x0208, WmXButtonDown = 0x020B, WmXButtonUp = 0x020C;
     private const uint LlkhfExtended = 0x01, LlkhfInjected = 0x10, LlkhfExtended1 = 0x02;
     private readonly object _gate = new();
-    private readonly List<InputTransition> _transitions = [];
-    private readonly List<InputCheckpoint> _checkpoints = [];
+    private readonly List<TimedInputTransition> _transitions = [];
+    private readonly List<TimedInputCheckpoint> _checkpoints = [];
     private readonly HashSet<InputPhysicalKey> _down = [];
     private Thread? _thread;
     private IntPtr _keyboardHook, _mouseHook;
@@ -50,15 +50,17 @@ internal sealed class RawInputRecorder : IDisposable
             // A worker can save before its input thread has attached.  An empty
             // list is not evidence of an idle keyboard in that case.
             if (!_started)
-                return new InputCaptureIndex(1, "Keyboard input was not recorded.", [], []);
+                return new InputCaptureIndex(2, "Keyboard input was not recorded.", [], []);
             CheckpointUnderLock(endUtc);
-            var transitions = _transitions.Where(x => x.Utc >= startUtc && x.Utc <= endUtc).ToArray();
-            var checkpoints = _checkpoints.Where(x => x.Utc >= startUtc && x.Utc <= endUtc).ToArray();
+            var transitions = _transitions.Where(x => x.Utc >= startUtc && x.Utc <= endUtc)
+                .Select(x => new InputTransition(Math.Max(0, (x.Utc - startUtc).TotalSeconds), x.Key, x.Down, x.Kind)).ToArray();
+            var checkpoints = _checkpoints.Where(x => x.Utc >= startUtc && x.Utc <= endUtc)
+                .Select(x => new InputCheckpoint(Math.Max(0, (x.Utc - startUtc).TotalSeconds), x.Down)).ToArray();
             // A checkpoint at clip start makes reconstruction independent from
             // recorder history which may have aged out before this save.
             var initial = _checkpoints.LastOrDefault(x => x.Utc <= startUtc);
-            if (initial is not null) checkpoints = [initial with { Utc = startUtc }, .. checkpoints];
-            return new InputCaptureIndex(1, _missing ? "Input history overflowed or capture reset." : null,
+            if (initial is not null) checkpoints = [new InputCheckpoint(0, initial.Down), .. checkpoints];
+            return new InputCaptureIndex(2, _missing ? "Input history overflowed or capture reset." : null,
                 transitions, checkpoints);
         }
     }
@@ -116,7 +118,7 @@ internal sealed class RawInputRecorder : IDisposable
             if (!changed) return;
             var utc = MonotonicClock.UtcNow;
             if (_transitions.Count >= MaximumTransitions) { _missing = true; _transitions.Clear(); _checkpoints.Clear(); _down.Clear(); return; }
-            _transitions.Add(new InputTransition(utc, key, down, kind));
+            _transitions.Add(new TimedInputTransition(utc, key, down, kind));
             CheckpointUnderLock(utc);
         }
     }
@@ -124,7 +126,7 @@ internal sealed class RawInputRecorder : IDisposable
     private void CheckpointUnderLock(DateTime utc)
     {
         if (_lastCheckpointUtc != DateTime.MinValue && utc - _lastCheckpointUtc < TimeSpan.FromSeconds(2)) return;
-        _checkpoints.Add(new InputCheckpoint(utc, _down.ToArray()));
+        _checkpoints.Add(new TimedInputCheckpoint(utc, _down.ToArray()));
         _lastCheckpointUtc = utc;
     }
 
@@ -135,10 +137,14 @@ internal sealed class RawInputRecorder : IDisposable
         if (_thread is { IsAlive: true }) _thread.Join(TimeSpan.FromSeconds(2));
     }
 
+    // v2 intentionally uses clip-relative seconds. UTC values are not stable
+    // after a clip is moved, copied, trimmed, or opened on another machine.
     internal sealed record InputCaptureIndex(int Version, string? MissingHistory, IReadOnlyList<InputTransition> Transitions, IReadOnlyList<InputCheckpoint> Checkpoints);
-    internal sealed record InputTransition(DateTime Utc, InputPhysicalKey Key, bool Down, string Kind);
-    internal sealed record InputCheckpoint(DateTime Utc, IReadOnlyList<InputPhysicalKey> Down);
+    internal sealed record InputTransition(double Seconds, InputPhysicalKey Key, bool Down, string Kind);
+    internal sealed record InputCheckpoint(double Seconds, IReadOnlyList<InputPhysicalKey> Down);
     internal sealed record InputPhysicalKey(ushort ScanCode, bool E0, bool E1, string? MouseButton = null);
+    private sealed record TimedInputTransition(DateTime Utc, InputPhysicalKey Key, bool Down, string Kind);
+    private sealed record TimedInputCheckpoint(DateTime Utc, IReadOnlyList<InputPhysicalKey> Down);
     [StructLayout(LayoutKind.Sequential)] private struct KbdLlHookStruct { public uint VirtualKey, ScanCode, Flags, Time; public IntPtr ExtraInfo; }
     [StructLayout(LayoutKind.Sequential)] private struct Msg { public IntPtr Hwnd; public uint Message; public IntPtr WParam, LParam; public uint Time; public Point Point; }
     [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }

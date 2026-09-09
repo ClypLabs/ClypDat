@@ -12,5 +12,6 @@ public sealed class RawInputRecorderTests
         var start = new DateTime(2026, 9, 10, 0, 0, 0, DateTimeKind.Utc);
         var index = recorder.Snapshot(start, start.AddSeconds(2));
         Assert.NotNull(index.MissingHistory);
+        Assert.Equal(2, index.Version);
     }
 }

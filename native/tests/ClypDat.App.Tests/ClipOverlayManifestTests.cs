@@ -6,6 +6,16 @@ namespace ClypDat.App.Tests;
 public sealed class ClipOverlayManifestTests
 {
     [Fact]
+    public void CameraAssetCarriesTrimSourceMapping()
+    {
+        var asset = new ClipOverlayAsset(".clipinfo/overlays/0.mp4", 0, 1.25, .75, 1);
+
+        Assert.Equal(.75, asset.SourceOffsetSeconds, 3);
+        Assert.Equal(1, asset.PlaybackRate);
+        Assert.Equal(5, ClipOverlayManifest.CurrentVersion);
+    }
+
+    [Fact]
     public void RelativeAsset_ResolvesInsideLibrary()
     {
         var root = Path.Combine(Path.GetTempPath(), "clypdat-overlay-test", Guid.NewGuid().ToString("N"));

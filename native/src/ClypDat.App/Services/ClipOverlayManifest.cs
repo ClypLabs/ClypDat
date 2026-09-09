@@ -9,10 +9,11 @@ public sealed record ClipOverlayManifest(
     ClipOverlayLayer? Camera = null,
     ClipOverlayLayer? Peripherals = null)
 {
-    // v4 adds an owned input-history index.  Keep v2/v3 readable: optional
+    // v5 adds source offsets and playback rate to camera assets, plus input
+    // v2. Keep v2-v4 readable: optional
     // record fields deserialize as null and are deliberately treated as
     // history that was never captured, not as an empty keyboard.
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
     public static ClipOverlayManifest Empty { get; } = new(CurrentVersion);
 
     /// <summary>
@@ -100,4 +101,9 @@ public sealed record ClipOverlayLayer(
     string? InputIndexPath = null);
 
 public sealed record ClipOverlayInterval(double StartSeconds, double EndSeconds);
-public sealed record ClipOverlayAsset(string AssetPath, double StartSeconds, double EndSeconds);
+/// <summary>
+/// A source range is explicit because clip trimming can start in the middle of
+/// a camera segment. Legacy assets have offset zero and rate one.
+/// </summary>
+public sealed record ClipOverlayAsset(string AssetPath, double StartSeconds, double EndSeconds,
+    double SourceOffsetSeconds = 0, double PlaybackRate = 1);
