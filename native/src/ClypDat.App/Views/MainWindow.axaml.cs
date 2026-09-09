@@ -7157,8 +7157,14 @@ public sealed partial class MainWindow : Window
     private void ApplyEditorSpeedPreview()
     {
         if (_playback is not { } playback || ViewModel is not { } viewModel) return;
-        var rateChanged = playback.SetPlaybackRate(viewModel.ClipSpeed);
-        if (viewModel.IsPlaying && rateChanged) RebasePlayheadClock(viewModel.CurrentTime);
+        var outcome = playback.SetPlaybackRate(viewModel.ClipSpeed);
+        if (outcome == PlaybackRateChangeOutcome.Rejected)
+        {
+            viewModel.ClipSpeed = playback.PlaybackRate;
+            return;
+        }
+        if (viewModel.IsPlaying && outcome == PlaybackRateChangeOutcome.Applied)
+            RebasePlayheadClock(viewModel.CurrentTime);
     }
 
     // Shows what a crop will KEEP by dimming what it will cut, rather than

@@ -22,6 +22,13 @@ public readonly record struct PlaybackSeekResult(PlaybackSeekOutcome Outcome, bo
     public static PlaybackSeekResult Failed => new(PlaybackSeekOutcome.Failed, false);
 }
 
+public enum PlaybackRateChangeOutcome
+{
+    Unchanged,
+    Applied,
+    Rejected
+}
+
 public sealed class PlaybackSession : IDisposable
 {
     private readonly LibVLC _libVlc;
@@ -65,10 +72,6 @@ public sealed class PlaybackSession : IDisposable
     private bool _shouldPlay;
     private long _seekVersion;
     private long _playVersion;
-    // Invalidates a queued slow-rate recovery when the user changes speed again.
-    // This is separate from play/seek versions: rate changes do not otherwise
-    // alter either transport intent or media position.
-    private long _rateVersion;
     // Frozen-picture detection for slow rates - see MonitorSlowRateStall.
     private static readonly TimeSpan SlowRateSampleInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan SlowRateStallThreshold = TimeSpan.FromMilliseconds(350);
@@ -139,6 +142,7 @@ public sealed class PlaybackSession : IDisposable
         }
     }
     public bool IsPlaying => VideoPlayer.IsPlaying;
+    public double PlaybackRate => _playbackRate;
 
     /// <summary>
     /// Shows the editor's crop guide by handing libvlc a PNG to composite into
@@ -258,7 +262,7 @@ public sealed class PlaybackSession : IDisposable
     {
         using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);
         using var processingRead = SpotifyProcessingPaths.TryRead(path);
-        if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlay…");
+        if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlayï¿½");
         cancellationToken.ThrowIfCancellationRequested();
         // Split timings, because the three things this body does have wildly
         // different costs and only the total was ever visible: Stop() is
@@ -376,7 +380,7 @@ public sealed class PlaybackSession : IDisposable
     {
         using var load = _loadGate.Enter(cancellationToken);
         using var processingRead = SpotifyProcessingPaths.TryRead(path);
-        if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlay…");
+        if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlayï¿½");
         cancellationToken.ThrowIfCancellationRequested();
         DisposeAudioOutput();
         _audioStreamIndexes.Clear();
@@ -882,112 +886,46 @@ public sealed class PlaybackSession : IDisposable
     /// is pitch-preserving either way - ffmpeg's atempo, see
     /// ClipRenderFilters.BuildAudioSpeedFilter.
     ///
-    /// SLOWING DOWN also has to flush the picture, and that is the whole reported
-    /// bug. libvlc's rate change re-anchors the input clock but does not re-date
-    /// the pictures the decoder already converted, and libvlc exposes no call
-    /// that does. About :file-caching worth of media (300ms, see LoadVideo) is
-    /// therefore sitting in the vout dated under the OLD rate: it plays out at the
-    /// old speed, and the first picture dated under the new one is not due until
-    /// caching*(1/new - 1/old) later - ~900ms at 1x->0.25x, ~300ms at 1x->0.5x.
-    /// Speeding up is the mirror image, but there the stale pictures come out
-    /// LATE rather than early and --no-drop-late-frames presents them as fast as
-    /// it can, so 1.5x/2x/4x already land instantly and are deliberately left
-    /// alone.
-    ///
-    /// A bare Time write clears it: libvlc turns that into ES_OUT_RESET_PCR ->
-    /// input_DecoderFlush -> vout_Flush, which drops the stale queue and makes the
-    /// clock re-derive from a known position. Deliberately NOT SeekAsync - that
-    /// was tried and reverted. EditorSeekCoordinator confirms a roll by waiting
-    /// for VideoPlayer.Time to advance on a fixed 500ms budget, but Time is
-    /// published on libvlc's demux loop, whose wake-ups are media-clocked, so it
-    /// arrives in ~250ms MEDIA steps - one per second of wall at 0.25x. The budget
-    /// cannot be met, and the coordinator's safe-failure stops audio and pauses
-    /// video, which is what made 0.5x unusable. With no confirmation to time out
-    /// here, the worst case degrades to the lag we already had.
-    ///
-    /// For anyone re-reading the old logs: the "Editor slow-rate picture stall"
-    /// lines that steered three rounds of this were false positives.
-    /// Media.Statistics is refreshed on that same media-clocked loop, so at 0.25x
-    /// the identical snapshot is read three or four times running. Measured on a
-    /// 60fps clip at 0.25x, DisplayedPictures advances exactly 15/s with lost=0 -
-    /// every frame, on schedule. See MonitorSlowRateStall.
+    /// Do not seek, flush, pause or restart audio during a rate transition.
+    /// Those operations discard decoded output and create a frozen-picture gap.
+    /// LibVLC applies its rate in place; keeping video and audio clocks running
+    /// preserves continuous slow and fast transitions.
     /// </remarks>
-    public bool SetPlaybackRate(double rate)
+    public PlaybackRateChangeOutcome SetPlaybackRate(double rate)
     {
         var normalized = ClipRenderFilters.NormalizeSpeed(rate);
         var previous = _playbackRate;
-        if (Math.Abs(previous - normalized) < 0.0001) return false;
-        // Read before changing rate: libvlc's clock can jump while it settles.
-        var resumeAt = Position;
-        var wasRolling = _shouldPlay && VideoPlayer.IsPlaying && !_isSeeking;
-        _playbackRate = normalized;
-        var generation = Interlocked.Increment(ref _rateVersion);
+        if (Math.Abs(previous - normalized) < 0.0001) return PlaybackRateChangeOutcome.Unchanged;
+        int result;
         try
         {
             lock (_transportLock)
             {
-                VideoPlayer.SetRate((float)normalized);
+                result = VideoPlayer.SetRate((float)normalized);
             }
         }
         catch (Exception error)
         {
             AppLog.Error($"Editor playback rate failed: {normalized:0.###}x", error);
+            return PlaybackRateChangeOutcome.Rejected;
         }
+
+        if (result != 0)
+        {
+            AppLog.Error($"Editor playback rate rejected: requested={normalized:0.###}x, result={result}.");
+            return PlaybackRateChangeOutcome.Rejected;
+        }
+
+        _playbackRate = normalized;
 
         // Discard interpolation from the previous ratio before the audio thread
         // reads again; otherwise it blends frames from two playback speeds.
         _rateStage?.SetRate(normalized);
 
-        // Only a slow-down leaves a gap the user can see - see the remarks. A
-        // transport that is not rolling has nothing queued to go stale, and
-        // speeding up resolves itself.
-        var flushed = wasRolling && normalized < previous && FlushStalePictures(resumeAt, generation);
-        AppLog.Debug($"Editor playback rate: requested={normalized:0.###}x, previous={previous:0.###}x, resumeAt={resumeAt.TotalSeconds:0.###}s, rolling={wasRolling}, flushed={flushed}, generation={generation}.");
+        AppLog.Debug($"Editor playback rate: requested={normalized:0.###}x, previous={previous:0.###}x.");
         ResetSlowRateMonitor();
-        // The flush restarts the audio at the landed position itself, so
-        // re-anchoring after it would only move the reference point again.
-        if (!flushed) ReanchorAudioClock();
-        return true;
-    }
-
-    /// <summary>
-    /// Drops the pictures libvlc dated under the previous rate and restarts the
-    /// audio at the same position. False if a newer rate change superseded this
-    /// one, or if libvlc rejected the write.
-    /// </summary>
-    /// <remarks>
-    /// Nothing here waits for a confirmation, which is the point: a rate change
-    /// must not be able to leave the transport stopped. If the write does not
-    /// take, playback carries on exactly as it does without this call.
-    /// </remarks>
-    private bool FlushStalePictures(TimeSpan resumeAt, long generation)
-    {
-        if (generation != Interlocked.Read(ref _rateVersion)) return false;
-        try
-        {
-            lock (_transportLock)
-            {
-                // Re-checked inside the lock: rapid pill clicking queues these
-                // behind each other, and only the newest position is still true.
-                if (generation != Interlocked.Read(ref _rateVersion)) return false;
-                StopAudioClockMonitoring();
-                _audioOutput?.Stop();
-                ForceVideoSilent();
-                VideoPlayer.Time = (long)Math.Max(0, resumeAt.TotalMilliseconds);
-                // SeekAudio also resets the rate stage's carried frame, which is
-                // from the previous ratio and would otherwise be interpolated
-                // into the first block read at the new one.
-                SeekAudio(resumeAt);
-                StartAudioAt(resumeAt, Interlocked.Read(ref _seekVersion));
-            }
-
-            return true;
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Editor rate flush failed at {resumeAt.TotalSeconds:0.###}s", error);
-            return false;
-        }
+        ReanchorAudioClock();
+        return PlaybackRateChangeOutcome.Applied;
     }
 
     /// <summary>

@@ -24,9 +24,7 @@ public static class ClipRenderFilters
     // clip's sidecar, so they are stable strings, not an enum ordinal.
     public static readonly IReadOnlyList<string> CropModes = new[] { NoCrop, "16:9", "9:16", "1:1", "4:5" };
 
-    // Slow exports remain valid for existing clips, but are intentionally not
-    // offered as editor controls: their preview is impractically sluggish.
-    public static readonly IReadOnlyList<double> SpeedPresets = new[] { 1.0, 1.5, 2.0, 4.0 };
+    public static readonly IReadOnlyList<double> SpeedPresets = new[] { 0.25, 0.5, 1.0, 1.5, 2.0, 4.0 };
 
     public static double NormalizeSpeed(double speed)
     {
