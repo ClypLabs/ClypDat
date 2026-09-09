@@ -2738,26 +2738,6 @@
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ClipToBounds" Value="True" />
   </Style>
-  <!-- The four corner pickers that float over the overlay preview. They used to
-       live inside the preview's Viewbox, so a 13px label rendered at whatever
-       the canvas happened to be scaled to, and a fixed card height cut the
-       ComboBox off below the card's own border. They are chrome now: fixed
-       pixel size, sized by their content, laid over the scaled canvas. -->
-  <Style Selector="Border.videoOverlayPicker">
-    <Setter Property="Background" Value="#F2161F29" />
-    <Setter Property="BorderBrush" Value="#33FFFFFF" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
-    <Setter Property="Padding" Value="12" />
-    <Setter Property="Width" Value="248" />
-    <Setter Property="BoxShadow" Value="0 8 22 0 #73000000" />
-  </Style>
-  <Style Selector="TextBlock.videoOverlayPickerLabel">
-    <Setter Property="Foreground" Value="{DynamicResource LabelBrush}" />
-    <Setter Property="FontSize" Value="11" />
-    <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="LetterSpacing" Value="0.7" />
-  </Style>
   <Style Selector="ComboBox.overlaySourcePicker ComboBoxItem" x:DataType="vm:OverlaySourceOption">
     <Setter Property="IsEnabled" Value="{Binding IsSelectable}" />
   </Style>
@@ -2766,65 +2746,43 @@
     <Setter Property="FontSize" Value="11" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
-  <Style Selector="Border.videoOverlayPickerPreview">
-    <Setter Property="Height" Value="68" />
-    <Setter Property="Background" Value="#FF0D141C" />
-    <Setter Property="BorderBrush" Value="#26FFFFFF" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="6" />
+  <!-- One corner window in the overlay preview. Its rectangle is the area the
+       overlay burns into, so the outline is the window's own border. The
+       selection ring used to be a second Border nested a pixel inside the layer
+       at the same corner radius, and two rounded rectangles an inset apart do
+       not share an arc - which is why the selected corners came out doubled and
+       kinked. The border thickness never changes, so selecting a window cannot
+       nudge what is inside it. -->
+  <Style Selector="Border.videoOverlayWindow">
+    <Setter Property="Background" Value="#FF17222D" />
+    <Setter Property="BorderBrush" Value="#59FFFFFF" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="CornerRadius" Value="10" />
     <Setter Property="ClipToBounds" Value="True" />
-    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Cursor" Value="SizeAll" />
+    <Setter Property="BoxShadow" Value="0 6 18 0 #59000000" />
   </Style>
-  <Style Selector="Border.videoOverlayPickerPreview:pointerover">
+  <Style Selector="Border.videoOverlayWindow.empty">
+    <Setter Property="Background" Value="#B30D141C" />
+    <Setter Property="BorderBrush" Value="#2EFFFFFF" />
+    <Setter Property="Cursor" Value="Arrow" />
+    <Setter Property="BoxShadow" Value="none" />
+  </Style>
+  <Style Selector="Border.videoOverlayWindow:pointerover">
+    <Setter Property="BorderBrush" Value="#8CFFFFFF" />
+  </Style>
+  <Style Selector="Border.videoOverlayWindow.selected">
     <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
   </Style>
-  <!-- The mock keycaps. The old ones were #FF243746 fills outlined in near
-       white, which read as a grid of lit buttons rather than a keyboard at
-       thumbnail size. Fill only, one shade off the tile. -->
-  <Style Selector="Border.videoOverlayKeyMock">
-    <Setter Property="Background" Value="#FF2E3E4D" />
-    <Setter Property="Margin" Value="1.5" />
-    <Setter Property="CornerRadius" Value="1.5" />
-  </Style>
-  <Style Selector="Border.videoOverlayMouseMock">
-    <Setter Property="Width" Value="16" />
-    <Setter Property="Background" Value="#FF2E3E4D" />
-    <Setter Property="CornerRadius" Value="8,8,6,6" />
-    <Setter Property="Margin" Value="1.5" />
-  </Style>
-  <Style Selector="Border.videoOverlayMouseWheelMock">
-    <Setter Property="Width" Value="1.5" />
-    <Setter Property="Height" Value="5" />
-    <Setter Property="Margin" Value="0,4,0,0" />
-    <Setter Property="Background" Value="#FF57697C" />
-    <Setter Property="CornerRadius" Value="1" />
-    <Setter Property="HorizontalAlignment" Value="Center" />
+  <Style Selector="TextBlock.videoOverlayWindowLabel">
+    <Setter Property="Foreground" Value="#B3FFFFFF" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="0.7" />
+    <Setter Property="Margin" Value="9,7" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
     <Setter Property="VerticalAlignment" Value="Top" />
-  </Style>
-  <Style Selector="Border.videoOverlayCameraMock">
-    <Setter Property="Width" Value="66" />
-    <Setter Property="Background" Value="#FF243746" />
-    <Setter Property="BorderBrush" Value="#40FFFFFF" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="5" />
-    <Setter Property="Margin" Value="0,9" />
-    <Setter Property="HorizontalAlignment" Value="Center" />
-  </Style>
-  <Style Selector="Ellipse.videoOverlayLensMock">
-    <Setter Property="Width" Value="20" />
-    <Setter Property="Height" Value="20" />
-    <Setter Property="Fill" Value="#FF0D141C" />
-    <Setter Property="Stroke" Value="#59FFFFFF" />
-    <Setter Property="StrokeThickness" Value="1.5" />
-    <Setter Property="HorizontalAlignment" Value="Center" />
-    <Setter Property="VerticalAlignment" Value="Center" />
-  </Style>
-  <Style Selector="Rectangle.videoOverlayEmptyMock">
-    <Setter Property="Stroke" Value="#30FFFFFF" />
-    <Setter Property="StrokeThickness" Value="1" />
-    <Setter Property="StrokeDashArray" Value="4,3" />
-    <Setter Property="RadiusX" Value="4" />
-    <Setter Property="RadiusY" Value="4" />
+    <Setter Property="IsHitTestVisible" Value="False" />
   </Style>
   <Style Selector="TextBlock.videoOverlayEmptyLabel">
     <Setter Property="Foreground" Value="{DynamicResource LabelBrush}" />

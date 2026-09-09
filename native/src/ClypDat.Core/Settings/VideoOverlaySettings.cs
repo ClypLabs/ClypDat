@@ -25,6 +25,9 @@ public static class VideoOverlayLayout
     public const double MinimumWidth = .05;
     public const double CameraAspectRatio = 16d / 9d;
 
+    /// <summary>The corners a source can be assigned to, in reading order.</summary>
+    public static readonly IReadOnlyList<string> Corners = ["Top Left", "Top Right", "Bottom Left", "Bottom Right"];
+
     public static VideoOverlayTransform Normalize(VideoOverlayTransform? transform, double aspectRatio)
     {
         var width = double.IsFinite(transform?.Width ?? double.NaN)
