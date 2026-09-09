@@ -86,8 +86,8 @@ public sealed class DetectorHostTests
     public void HostResolverUsesDedicatedSiblingWhenPresent()
     {
         var app = Path.Combine("C:\\ClypDat", "ClypDatRecorder.exe");
-        var result = DetectorHostExecutable.Resolve(app, path => path.EndsWith(DetectorHostExecutable.FileName));
-        Assert.Equal(Path.Combine("C:\\ClypDat", DetectorHostExecutable.FileName), result);
+        var result = DetectorHostExecutable.Resolve(app);
+        Assert.Equal(app, result);
     }
 
     [Fact]

@@ -7,7 +7,7 @@
     <AssemblyTitle>ClypDat Detector Host</AssemblyTitle>
     <Description>ClypDat isolated auto-clip detector</Description>
     <Company>ClypLabs</Company>
-    <Product>ClypDat</Product>
+    <Product>ClypDat Detector Host</Product>
     <ApplicationIcon>..\..\..\assets\clypdat-icon.ico</ApplicationIcon>
     <ApplicationManifest>..\ClypDat.App\app.manifest</ApplicationManifest>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>

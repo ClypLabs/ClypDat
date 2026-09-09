@@ -374,12 +374,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
 internal static class CaptureWorkerExecutable
 {
-    internal const string FileName = "ClypDatRecorder.exe";
-
-    internal static string Resolve(string appPath, Func<string, bool>? fileExists = null)
-    {
-        fileExists ??= File.Exists;
-        var workerPath = Path.Combine(Path.GetDirectoryName(appPath) ?? string.Empty, FileName);
-        return fileExists(workerPath) ? workerPath : appPath;
-    }
+    // The worker enters ClypDat.App.Program with --capture-worker, so it can
+    // retain an isolated process while sharing the desktop executable's Task
+    // Manager group. ClypDatRecorder.exe remains packaged for compatibility
+    // with existing installs and standalone verification.
+    internal static string Resolve(string appPath) => appPath;
 }

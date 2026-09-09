@@ -346,13 +346,11 @@ internal static class DetectorHostRuntime
 
 internal static class DetectorHostExecutable
 {
-    internal const string FileName = "ClypDatDetectorHost.exe";
-    public static string Resolve(string appPath, Func<string, bool>? exists = null)
-    {
-        exists ??= File.Exists;
-        var sibling = Path.Combine(Path.GetDirectoryName(appPath) ?? AppContext.BaseDirectory, FileName);
-        return exists(sibling) ? sibling : appPath;
-    }
+    // ClypDat.App.Program dispatches --detector-host before UI startup. Launch
+    // the main executable so Task Manager keeps this isolated host with ClypDat.
+    // ClypDatDetectorHost.exe remains in the package for existing installs and
+    // standalone verification.
+    public static string Resolve(string appPath) => appPath;
 }
 
 internal sealed class DetectorProcessJob : IDisposable

@@ -26,7 +26,7 @@ namespace ClypDat.App.Services;
 //     internally, so no per-device call we make can reach it. FFmpeg is linked
 //     in-process here (FFmpeg.AutoGen calls avcodec_send_frame directly), so a
 //     process-wide class does reach it. The recorder lives in a dedicated
-//     ClypDatRecorder.exe process, so this cannot elevate Avalonia's renderer.
+//     ClypDat capture-worker process, so this cannot elevate Avalonia's renderer.
 //
 //   - Per-device GPU thread priority (IDXGIDevice::SetGPUThreadPriority) covers
 //     the capture device specifically - the crop copy and the scale Blt. This
