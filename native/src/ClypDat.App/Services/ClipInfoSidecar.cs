@@ -79,7 +79,8 @@ public sealed record ClipInfo(
     string? SpotifyArtPath = null,
     // Burn state is output provenance, never inferred from current settings.
     // A permanently drawn card must not be drawn again by editor/export.
-    bool SpotifyOverlayBurned = false);
+    bool SpotifyOverlayBurned = false,
+    ClipOverlayManifest? OverlayManifest = null);
 
 public static class ClipInfoSidecar
 {

@@ -131,7 +131,11 @@ public static class ClipEditSidecar
             TrackVolumes = previous.TrackVolumes,
             MutedTrackIndexes = previous.MutedTrackIndexes,
             SpotifyOverlayVisible = previous.SpotifyOverlayVisible,
-            SpotifyOverlayTransform = previous.SpotifyOverlayTransform
+            SpotifyOverlayTransform = previous.SpotifyOverlayTransform,
+            CameraOverlayVisible = previous.CameraOverlayVisible,
+            CameraOverlayTransform = previous.CameraOverlayTransform,
+            PeripheralOverlayVisible = previous.PeripheralOverlayVisible,
+            PeripheralOverlayTransform = previous.PeripheralOverlayTransform
         });
     }
 

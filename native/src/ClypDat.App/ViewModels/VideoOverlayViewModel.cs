@@ -53,7 +53,6 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     public ObservableCollection<OverlaySourceOption> Sources { get; }
     /// <summary>The four corner windows drawn over the preview canvas.</summary>
     public ObservableCollection<VideoOverlaySlotViewModel> Slots { get; }
-    public bool Enabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; Save(); } }
     public bool IncludeVirtualCameras { get => _settings.IncludeVirtualCameras; set { if (_settings.IncludeVirtualCameras == value) return; _settings.IncludeVirtualCameras = value; _ = RefreshCamerasAsync(); Save(); } }
     public string SourceStatus { get => _sourceStatus; private set => SetProperty(ref _sourceStatus, value); }
     public bool HasCamera => _settings.Camera is not null;

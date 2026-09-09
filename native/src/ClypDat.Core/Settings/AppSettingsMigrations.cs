@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
 
     public static bool Apply(AppSettings settings)
     {
@@ -75,6 +75,13 @@ public static class AppSettingsMigrations
             // only restore which corner picker owns each legacy source.
             settings.VideoOverlays.CameraAnchor ??= "Top Right";
             settings.VideoOverlays.KeyboardAnchor ??= "Bottom Left";
+        }
+
+        if (settings.SettingsSchemaVersion < 10)
+        {
+            // Enabled used to mean "burn into gameplay". Source selection and
+            // layout remain meaningful, so never clear either on upgrade.
+            settings.VideoOverlays ??= new VideoOverlaySettings();
         }
 
         settings.CustomThemes ??= new();

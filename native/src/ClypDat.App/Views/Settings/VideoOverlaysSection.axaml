@@ -16,17 +16,12 @@
   <StackPanel Spacing="18" Tag="Video Overlays">
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Video Overlays" />
-      <TextBlock Classes="settingsSectionDesc" Text="Add camera and input layers to recordings. Changes apply without restarting replay capture." />
+      <TextBlock Classes="settingsSectionDesc" Text="Selected sources are captured as editable layers until export. Camera audio is never recorded." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
     <Border Classes="settingsCard">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="VIDEO OVERLAYS" />
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-          <StackPanel Spacing="2" VerticalAlignment="Center"><TextBlock Classes="settingsRowTitle" Text="Burn camera and input into recordings" /><TextBlock Classes="settingsRowDescSm" Text="Camera audio is never recorded." /></StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding Enabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
-        <Border Classes="settingsDivider" />
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
           <StackPanel Spacing="2" VerticalAlignment="Center"><TextBlock Classes="settingsRowTitle" Text="Include virtual cameras" /><TextBlock Classes="settingsRowDescSm" Text="Refresh after connecting or changing a camera." /></StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludeVirtualCameras}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
@@ -35,7 +30,7 @@
         <Border Classes="settingsDivider" />
         <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" TextWrapping="Wrap" />
         <TextBlock Classes="settingsCardLabel" Margin="0,6,0,0" Text="VIDEO OVERLAY PREVIEW" />
-        <!-- One window per corner, drawn where the overlay will actually burn
+        <!-- One window per corner, seeded into editable clips. A corner used to be drawn twice - a fixed picker card over the
              in. A corner used to be drawn twice - a fixed picker card over the
              canvas plus a free-floating layer inside it - so the same camera
              showed up twice at two different sizes. The window is the layer
@@ -93,7 +88,7 @@
         <Grid x:Name="NarrowPickers" IsVisible="False" IsEnabled="{Binding ShowPickers}" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
           <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopLeftSource}" /></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopRightSource}" /></StackPanel><StackPanel Grid.Row="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel><StackPanel Grid.Row="1" Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
         </Grid>
-        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10"><TextBlock Classes="settingsRowDescSm" Text="Drag a window to move its overlay. White corners resize it. Each window carries the source it burns in." TextWrapping="Wrap" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Reset camera" IsVisible="{Binding CameraCustomPosition}" Click="ResetCamera_OnClick" /><Button Grid.Column="2" Content="Reset input" IsVisible="{Binding KeyboardCustomPosition}" Click="ResetKeyboard_OnClick" /></Grid>
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10"><TextBlock Classes="settingsRowDescSm" Text="Drag a window to seed placement for new clips. Existing clips keep their own layout. White corners resize it." TextWrapping="Wrap" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Reset camera" IsVisible="{Binding CameraCustomPosition}" Click="ResetCamera_OnClick" /><Button Grid.Column="2" Content="Reset input" IsVisible="{Binding KeyboardCustomPosition}" Click="ResetKeyboard_OnClick" /></Grid>
       </StackPanel>
     </Border>
   </StackPanel>

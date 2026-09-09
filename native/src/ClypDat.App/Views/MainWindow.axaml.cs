@@ -7136,6 +7136,9 @@ public sealed partial class MainWindow : Window
     private void EditorEffectsSidebarButton_OnClick(object? sender, RoutedEventArgs e) =>
         ViewModel?.OpenEditorSidebar(EditorSidebarSection.Effects);
 
+    private void EditorOverlaysSidebarButton_OnClick(object? sender, RoutedEventArgs e) =>
+        ViewModel?.OpenEditorSidebar(EditorSidebarSection.Overlays);
+
     private void EditorExportSidebarButton_OnClick(object? sender, RoutedEventArgs e) =>
         ViewModel?.OpenEditorSidebar(EditorSidebarSection.Export);
 

@@ -354,6 +354,12 @@ public sealed class ClipEditSettings
     public double CropOffsetY { get; set; } = 0.5;
     public bool SpotifyOverlayVisible { get; set; } = true;
     public SpotifyOverlayTransform? SpotifyOverlayTransform { get; set; }
+    // Overlay visibility and placement belong to this clip. Settings only seed
+    // captures made after a user changes their preferred layout.
+    public bool CameraOverlayVisible { get; set; } = true;
+    public VideoOverlayTransform? CameraOverlayTransform { get; set; }
+    public bool PeripheralOverlayVisible { get; set; } = true;
+    public VideoOverlayTransform? PeripheralOverlayTransform { get; set; }
 }
 
 // One game's overrides. Values are seeded from the user's current global

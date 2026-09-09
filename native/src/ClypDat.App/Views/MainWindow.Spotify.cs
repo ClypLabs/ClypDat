@@ -169,7 +169,7 @@ public sealed partial class MainWindow
         var point = e.GetPosition(_spotifySurface);
         var mode = model.IsSpotifyOverlaySelected && _spotifyAdorner is not null ? _spotifyAdorner.HitTest(point) : SpotifyOverlayDragMode.Move;
         model.IsSpotifyOverlaySelected = true;
-        model.OpenEditorSidebar(EditorSidebarSection.Effects);
+        model.OpenEditorSidebar(EditorSidebarSection.Overlays);
         var width = Math.Max(1, (int)_spotifyVideoBounds.Width);
         var height = Math.Max(1, (int)_spotifyVideoBounds.Height);
         var sourceWidth = Math.Max(1, model.ActiveCropRect?.Width ?? model.SelectedSourceWidth);
@@ -242,7 +242,7 @@ public sealed partial class MainWindow
         if (sender is not Control { DataContext: TrackLaneViewModel { IsOverlay: true } } control ||
             !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed || ViewModel is null) return;
         ViewModel.IsSpotifyOverlaySelected = true;
-        ViewModel.OpenEditorSidebar(EditorSidebarSection.Effects);
+        ViewModel.OpenEditorSidebar(EditorSidebarSection.Overlays);
         e.Handled = true;
         UpdateSpotifyPreview();
     }

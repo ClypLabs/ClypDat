@@ -18,6 +18,7 @@ public enum EditorSidebarSection
 {
     Info,
     Effects,
+    Overlays,
     Export
 }
 
@@ -1447,12 +1448,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _activeEditorSidebarSection, value)) return;
             OnPropertyChanged(nameof(IsEditorInfoSidebarActive));
             OnPropertyChanged(nameof(IsEditorEffectsSidebarActive));
+            OnPropertyChanged(nameof(IsEditorOverlaysSidebarActive));
             OnPropertyChanged(nameof(IsEditorExportSidebarActive));
         }
     }
 
     public bool IsEditorInfoSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Info;
     public bool IsEditorEffectsSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Effects;
+    public bool IsEditorOverlaysSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Overlays;
     public bool IsEditorExportSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Export;
 
     public void OpenEditorSidebar(EditorSidebarSection section) => ActiveEditorSidebarSection = section;
