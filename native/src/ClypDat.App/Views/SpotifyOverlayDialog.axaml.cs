@@ -67,7 +67,14 @@ public partial class SpotifyOverlayDialog : Window
             preview.Update(spec, clock.Elapsed.TotalSeconds, PreviewWidth, PreviewHeight);
         };
         Opened += (_, _) => timer.Start();
-        Closed += (_, _) => { timer.Stop(); preview.Dispose(); artwork.Dispose(); };
+        Closed += (_, _) =>
+        {
+            SaveCompletedPreviewDrag();
+            EndPreviewDrag(null);
+            timer.Stop();
+            preview.Dispose();
+            artwork.Dispose();
+        };
     }
 
     // The window has no system chrome, so the title bar drags it.
@@ -100,7 +107,8 @@ public partial class SpotifyOverlayDialog : Window
         if (DataContext is not MainWindowViewModel model || !e.GetCurrentPoint(SpotifyPreviewCanvas).Properties.IsLeftButtonPressed || _adorner is null) return;
         _dragStart = e.GetPosition(SpotifyPreviewCanvas);
         var local = _dragStart - new Point(Canvas.GetLeft(_adorner), Canvas.GetTop(_adorner));
-        _dragMode = _adorner.HitTest(local);
+        if (!_adorner.TryHitTest(local, out var mode)) return;
+        _dragMode = mode;
         _dragTransform = _transform ?? ResolveTransform(model);
         e.Pointer.Capture(SpotifyPreviewCanvas);
         e.Handled = true;
@@ -109,27 +117,43 @@ public partial class SpotifyOverlayDialog : Window
     private void Preview_OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (_dragMode is not { } mode || _dragTransform is not { } start || DataContext is not MainWindowViewModel model) return;
-        var point = e.GetPosition(SpotifyPreviewCanvas);
-        _transform = mode == SpotifyOverlayDragMode.Rotate
-            ? SpotifyOverlayManipulation.Rotate(start, _dragStart, point, PreviewWidth, PreviewHeight)
-            : SpotifyOverlayManipulation.Apply(start, mode, point.X - _dragStart.X, point.Y - _dragStart.Y, PreviewWidth, PreviewHeight);
-        model.Settings.SpotifyOverlayDefaultTransform = _transform;
-        model.RaiseSpotifyOverlayPreviewChanged();
+        ApplyPreviewDrag(e.GetPosition(SpotifyPreviewCanvas), start, mode, model);
         e.Handled = true;
     }
 
     private void Preview_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (_dragMode is null) return;
-        if (DataContext is MainWindowViewModel model) model.SaveSettings();
+        if (_dragMode is not { } mode || _dragTransform is not { } start || DataContext is not MainWindowViewModel model) return;
+        ApplyPreviewDrag(e.GetPosition(SpotifyPreviewCanvas), start, mode, model);
+        SaveCompletedPreviewDrag();
         EndPreviewDrag(e.Pointer);
         e.Handled = true;
     }
 
     private void Preview_OnPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
-        if (_dragMode is not null && DataContext is MainWindowViewModel model) model.SaveSettings();
+        SaveCompletedPreviewDrag();
         EndPreviewDrag(e.Pointer);
     }
-    private void EndPreviewDrag(IPointer pointer) { _dragMode = null; _dragTransform = null; pointer.Capture(null); }
+
+    private void ApplyPreviewDrag(Point point, SpotifyOverlayTransform start, SpotifyOverlayDragMode mode, MainWindowViewModel model)
+    {
+        _transform = mode == SpotifyOverlayDragMode.Rotate
+            ? SpotifyOverlayManipulation.Rotate(start, _dragStart, point, PreviewWidth, PreviewHeight)
+            : SpotifyOverlayManipulation.Apply(start, mode, point.X - _dragStart.X, point.Y - _dragStart.Y, PreviewWidth, PreviewHeight);
+        model.Settings.SpotifyOverlayDefaultTransform = _transform;
+        model.RaiseSpotifyOverlayPreviewChanged();
+    }
+
+    private void SaveCompletedPreviewDrag()
+    {
+        if (_dragMode is not null && DataContext is MainWindowViewModel model) model.SaveSettings();
+    }
+
+    private void EndPreviewDrag(IPointer? pointer)
+    {
+        _dragMode = null;
+        _dragTransform = null;
+        pointer?.Capture(null);
+    }
 }

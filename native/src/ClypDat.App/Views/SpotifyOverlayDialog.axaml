@@ -70,7 +70,7 @@
               <Border Background="{StaticResource SpotifyDialogBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75"
                       HorizontalAlignment="Center" VerticalAlignment="Center" />
 
-              <Canvas Name="SpotifyPreviewCanvas" PointerPressed="Preview_OnPointerPressed"
+              <Canvas Name="SpotifyPreviewCanvas" Background="Transparent" PointerPressed="Preview_OnPointerPressed"
                       PointerMoved="Preview_OnPointerMoved" PointerReleased="Preview_OnPointerReleased"
                       PointerCaptureLost="Preview_OnPointerCaptureLost" />
             </Panel>

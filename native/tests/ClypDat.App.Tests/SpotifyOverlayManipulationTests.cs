@@ -1,11 +1,28 @@
 using ClypDat.App.Services;
+using ClypDat.App.Controls;
 using ClypDat.Core.Settings;
+using Avalonia.Controls;
+using Avalonia.Media;
 using Xunit;
 
 namespace ClypDat.App.Tests;
 
 public sealed class SpotifyOverlayManipulationTests
 {
+    [Fact]
+    public void TransparentPreviewSurfaceReceivesPointersButOnlyCardTargetsStartGestures()
+    {
+        var surface = new Canvas { Width = 518, Height = 291, Background = Brushes.Transparent };
+        Assert.Same(Brushes.Transparent, surface.Background);
+
+        var adorner = new SpotifyOverlayAdorner { CardBounds = new Avalonia.Rect(100, 80, 200, 69) };
+        Assert.False(adorner.TryHitTest(new Avalonia.Point(10, 10), out _));
+        Assert.True(adorner.TryHitTest(new Avalonia.Point(200, 110), out var move));
+        Assert.Equal(SpotifyOverlayDragMode.Move, move);
+        Assert.True(adorner.TryHitTest(new Avalonia.Point(100, 80), out var corner));
+        Assert.Equal(SpotifyOverlayDragMode.TopLeft, corner);
+    }
+
     [Fact]
     public void MovingUsesOutputCoordinatesAndStaysInsideVideo()
     {
