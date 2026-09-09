@@ -2734,6 +2734,21 @@
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="Padding" Value="12" />
   </Style>
+  <Style Selector="Border.videoOverlayPickerPreview">
+    <Setter Property="Height" Value="54" />
+    <Setter Property="Background" Value="#FF101923" />
+    <Setter Property="BorderBrush" Value="#FF536575" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <Style Selector="Border.videoOverlayPickerPreview UniformGrid Border">
+    <Setter Property="Background" Value="#FF243746" />
+    <Setter Property="BorderBrush" Value="#FFE6EEF5" />
+    <Setter Property="BorderThickness" Value=".5" />
+    <Setter Property="Margin" Value="1" />
+    <Setter Property="CornerRadius" Value="1" />
+  </Style>
   <Style Selector="Border.videoOverlaySelection">
     <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     <Setter Property="BorderThickness" Value="2" />

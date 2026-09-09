@@ -12,6 +12,8 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     private string _sourceStatus = "No sources selected.";
     private string? _selectedLayer;
     private double _previewWidth = 640, _previewHeight = 360;
+    private CancellationTokenSource? _refreshCancellation;
+    private int _refreshGeneration;
 
     public VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply = null)
     {
@@ -29,6 +31,8 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     public bool HasKeyboard => _settings.KeyboardLayout != "None";
     public bool CameraSelected => _selectedLayer == "Camera";
     public bool KeyboardSelected => _selectedLayer == "Keyboard";
+    public bool IsPositioning => _selectedLayer is not null;
+    public bool ShowPickers => !IsPositioning;
     public bool CameraCustomPosition => HasCamera && !AtAnchor(_settings.CameraTransform, _settings.CameraAnchor, NormalizedAspect("Camera"));
     public bool KeyboardCustomPosition => HasKeyboard && !AtAnchor(_settings.KeyboardTransform, _settings.KeyboardAnchor, NormalizedAspect("Keyboard"));
     public string CameraPositionHint => CameraCustomPosition ? "Custom position" : _settings.CameraAnchor ?? string.Empty;
@@ -46,7 +50,8 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     public OverlaySourceOption? BottomLeftSource { get => SourceAt("Bottom Left"); set => SetSource("Bottom Left", value); }
     public OverlaySourceOption? BottomRightSource { get => SourceAt("Bottom Right"); set => SetSource("Bottom Right", value); }
 
-    public void ClosePreview() { _selectedLayer = null; NotifyLayout(); }
+    public void ClosePreview() => DeselectLayer();
+    public void DeselectLayer() { _selectedLayer = null; NotifyLayout(); }
     public void SetPreviewSize(double width, double height) { if (width <= 0 || height <= 0) return; _previewWidth = width; _previewHeight = height; NotifyLayout(); }
     public void SelectLayer(string layer) { _selectedLayer = layer; NotifyLayout(); }
     public void Manipulate(string layer, VideoOverlayManipulationMode mode, double deltaX, double deltaY)
@@ -54,25 +59,44 @@ public sealed class VideoOverlayViewModel : ViewModelBase
         var current = layer == "Camera" ? _settings.CameraTransform : _settings.KeyboardTransform;
         var next = VideoOverlayManipulation.Apply(current, mode, deltaX, deltaY, _previewWidth / _previewHeight, SourceAspect(layer));
         if (layer == "Camera") _settings.CameraTransform = next; else _settings.KeyboardTransform = next;
+        _apply?.Invoke();
         NotifyLayout();
     }
     public void CommitManipulation() { Save(); UpdateStatus(); }
     public void ResetToCorner(string layer)
     {
         if (layer == "Camera" && HasCamera && _settings.CameraAnchor is { } cameraCorner)
-            _settings.CameraTransform = VideoOverlayLayout.Corner(cameraCorner, .25, NormalizedAspect(layer));
+            _settings.CameraTransform = VideoOverlayLayout.Corner(cameraCorner, _settings.CameraTransform.Width, NormalizedAspect(layer));
         else if (layer == "Keyboard" && HasKeyboard && _settings.KeyboardAnchor is { } keyboardCorner)
-            _settings.KeyboardTransform = VideoOverlayLayout.Corner(keyboardCorner, .25, NormalizedAspect(layer));
+            _settings.KeyboardTransform = VideoOverlayLayout.Corner(keyboardCorner, _settings.KeyboardTransform.Width, NormalizedAspect(layer));
         else return;
         Save(); UpdateStatus(); NotifyLayout();
     }
     public async Task RefreshCamerasAsync()
     {
-        var cameras = await Task.Run(() => DirectShowCameraProbe.List(_settings.IncludeVirtualCameras));
+        var generation = Interlocked.Increment(ref _refreshGeneration);
+        var previous = Interlocked.Exchange(ref _refreshCancellation, new CancellationTokenSource());
+        previous?.Cancel(); previous?.Dispose();
+        var cancellation = _refreshCancellation!;
+        IReadOnlyList<CameraOption> cameras;
+        try
+        {
+            cameras = await Task.Run(() => DirectShowCameraProbe.List(_settings.IncludeVirtualCameras, cancellation.Token), cancellation.Token);
+        }
+        catch (OperationCanceledException) { return; }
+        if (generation != _refreshGeneration || cancellation.IsCancellationRequested) return;
         Cameras.Clear(); Cameras.Add(CameraOption.None); foreach (var camera in cameras) Cameras.Add(camera);
-        var removedCamera = _settings.Camera is not null && !Cameras.Any(camera => camera.Moniker == _settings.Camera.DeviceMoniker);
-        if (removedCamera) { _settings.Camera = null; _settings.CameraAnchor = null; Save(); }
+        // Device disappearance is transient. Keep selection and transform so it
+        // returns in same place when USB camera reconnects.
+        if (_settings.Camera is { } selected && !Cameras.Any(camera => camera.Moniker == selected.DeviceMoniker))
+            Cameras.Add(new CameraOption($"{selected.FriendlyName} (unavailable)", selected.DeviceMoniker));
         RebuildSources(); UpdateStatus(); NotifyLayout();
+    }
+    public void SelectSourceAt(string corner)
+    {
+        var source = SourceAt(corner);
+        if (source?.Kind == OverlaySourceKind.Camera) SelectLayer("Camera");
+        else if (source?.Kind == OverlaySourceKind.Keyboard) SelectLayer("Keyboard");
     }
     private OverlaySourceOption? SourceAt(string corner)
     {
@@ -111,7 +135,12 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     {
         Sources.Clear(); Sources.Add(OverlaySourceOption.None);
         foreach (var camera in Cameras.Where(camera => !camera.IsNone)) Sources.Add(new(camera.Name, camera.Moniker, OverlaySourceKind.Camera));
-        foreach (var layout in new[] { "QWERTY Compact", "QWERTY Full", "Arrows", "AZERTY Compact" }) Sources.Add(new(layout, layout, OverlaySourceKind.Keyboard));
+        foreach (var (name, value) in new[] {
+            ("QWERTY Keyboard + Mouse (Full)", "QWERTY Full"),
+            ("QWERTY Keyboard + Mouse (Compact)", "QWERTY Compact"),
+            ("Arrow Keys + Mouse", "Arrows"),
+            ("AZERTY Keyboard + Mouse (Compact)", "AZERTY Compact") })
+            Sources.Add(new(name, value, OverlaySourceKind.Keyboard));
         OnPropertyChanged(nameof(TopLeftSource)); OnPropertyChanged(nameof(TopRightSource)); OnPropertyChanged(nameof(BottomLeftSource)); OnPropertyChanged(nameof(BottomRightSource));
     }
     private double SourceAspect(string layer) => layer == "Camera" ? VideoOverlayLayout.CameraAspectRatio : 2.4;
@@ -120,7 +149,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     private void Save() { _save(); _apply?.Invoke(); }
     private void NotifyLayout()
     {
-        foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(CameraSelected), nameof(KeyboardSelected), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource) }) OnPropertyChanged(name);
+        foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(CameraSelected), nameof(KeyboardSelected), nameof(IsPositioning), nameof(ShowPickers), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource) }) OnPropertyChanged(name);
     }
     private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}."; }
 }
@@ -129,10 +158,10 @@ public sealed record OverlaySourceOption(string Name, string Value, OverlaySourc
 public sealed record CameraOption(string Name, string Moniker, bool IsVirtual = false) { public static CameraOption None { get; } = new("None", string.Empty); public bool IsNone => string.IsNullOrEmpty(Moniker); }
 internal static class DirectShowCameraProbe
 {
-    public static IReadOnlyList<CameraOption> List(bool includeVirtual)
+    public static IReadOnlyList<CameraOption> List(bool includeVirtual, CancellationToken cancellationToken)
     {
         var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffmpeg.exe"); if (!File.Exists(ffmpeg)) return Array.Empty<CameraOption>();
-        try { using var process = Process.Start(new ProcessStartInfo(ffmpeg, "-hide_banner -list_devices true -f dshow -i dummy") { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true }); if (process is null) return Array.Empty<CameraOption>(); var text = process.StandardError.ReadToEnd(); process.WaitForExit(5000); return System.Text.RegularExpressions.Regex.Matches(text, "\\\"(?<name>[^\\\"]+)\\\"", System.Text.RegularExpressions.RegexOptions.CultureInvariant).Select(match => match.Groups["name"].Value).Distinct(StringComparer.OrdinalIgnoreCase).Where(name => !name.StartsWith("Alternative name", StringComparison.OrdinalIgnoreCase)).Where(name => includeVirtual || !IsVirtual(name)).Select(name => new CameraOption(name, name, IsVirtual(name))).ToArray(); } catch { return Array.Empty<CameraOption>(); }
+        try { using var process = Process.Start(new ProcessStartInfo(ffmpeg, "-hide_banner -list_devices true -f dshow -i dummy") { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true }); if (process is null) return Array.Empty<CameraOption>(); var read = process.StandardError.ReadToEndAsync(cancellationToken); if (!process.WaitForExit(5000)) { try { process.Kill(true); } catch { } return Array.Empty<CameraOption>(); } var text = read.GetAwaiter().GetResult(); cancellationToken.ThrowIfCancellationRequested(); var video = text.Split("DirectShow audio devices", StringSplitOptions.None)[0]; return System.Text.RegularExpressions.Regex.Matches(video, "\\\"(?<name>[^\\\"]+)\\\"", System.Text.RegularExpressions.RegexOptions.CultureInvariant).Select(match => match.Groups["name"].Value).Distinct(StringComparer.OrdinalIgnoreCase).Where(name => !name.StartsWith("Alternative name", StringComparison.OrdinalIgnoreCase)).Where(name => includeVirtual || !IsVirtual(name)).Select(name => new CameraOption(name, name, IsVirtual(name))).ToArray(); } catch (OperationCanceledException) { throw; } catch { return Array.Empty<CameraOption>(); }
     }
     private static bool IsVirtual(string name) => name.Contains("virtual", StringComparison.OrdinalIgnoreCase) || name.Contains("obs", StringComparison.OrdinalIgnoreCase) || name.Contains("snap camera", StringComparison.OrdinalIgnoreCase) || name.Contains("manycam", StringComparison.OrdinalIgnoreCase) || name.Contains("ndi", StringComparison.OrdinalIgnoreCase);
 }

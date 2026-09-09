@@ -61,6 +61,33 @@ public sealed partial class VideoOverlaysSection : UserControl
         e.Handled = true;
     }
 
+    private void PickerPreview_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is Border { Tag: string corner } && DataContext is VideoOverlayViewModel model &&
+            e.GetCurrentPoint(sender as Visual).Properties.IsLeftButtonPressed)
+        {
+            model.SelectSourceAt(corner);
+            Focus();
+            e.Handled = true;
+        }
+    }
+
+    private void PreviewCanvas_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_dragLayer is null && DataContext is VideoOverlayViewModel model)
+        {
+            model.DeselectLayer();
+            Focus();
+        }
+    }
+
+    private void Section_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape) return;
+        (DataContext as VideoOverlayViewModel)?.DeselectLayer();
+        e.Handled = true;
+    }
+
     private void PreviewCanvas_OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (_dragLayer is null || DataContext is not VideoOverlayViewModel model) return;
