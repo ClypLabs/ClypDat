@@ -2727,6 +2727,13 @@
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ClipToBounds" Value="True" />
   </Style>
+  <Style Selector="Border.videoOverlayPicker">
+    <Setter Property="Background" Value="#E61A2631" />
+    <Setter Property="BorderBrush" Value="{DynamicResource EdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="Padding" Value="12" />
+  </Style>
   <Style Selector="Border.videoOverlaySelection">
     <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
     <Setter Property="BorderThickness" Value="2" />

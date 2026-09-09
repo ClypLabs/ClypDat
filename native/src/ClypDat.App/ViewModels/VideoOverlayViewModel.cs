@@ -10,7 +10,6 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     private readonly Action _save;
     private readonly Action? _apply;
     private string _sourceStatus = "No sources selected.";
-    private bool _previewVisible;
     private string? _selectedLayer;
     private double _previewWidth = 640, _previewHeight = 360;
 
@@ -25,8 +24,6 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     public ObservableCollection<OverlaySourceOption> Sources { get; }
     public bool Enabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; Save(); } }
     public bool IncludeVirtualCameras { get => _settings.IncludeVirtualCameras; set { if (_settings.IncludeVirtualCameras == value) return; _settings.IncludeVirtualCameras = value; _ = RefreshCamerasAsync(); Save(); } }
-    public bool PreviewVisible { get => _previewVisible; set { if (!SetProperty(ref _previewVisible, value)) return; OnPropertyChanged(nameof(PreviewButtonText)); UpdateStatus(); } }
-    public string PreviewButtonText => PreviewVisible ? "Hide Preview" : "Show Preview";
     public string SourceStatus { get => _sourceStatus; private set => SetProperty(ref _sourceStatus, value); }
     public bool HasCamera => _settings.Camera is not null;
     public bool HasKeyboard => _settings.KeyboardLayout != "None";
@@ -49,8 +46,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     public OverlaySourceOption? BottomLeftSource { get => SourceAt("Bottom Left"); set => SetSource("Bottom Left", value); }
     public OverlaySourceOption? BottomRightSource { get => SourceAt("Bottom Right"); set => SetSource("Bottom Right", value); }
 
-    public void TogglePreview() => PreviewVisible = !PreviewVisible;
-    public void ClosePreview() { if (PreviewVisible) PreviewVisible = false; _selectedLayer = null; NotifyLayout(); }
+    public void ClosePreview() { _selectedLayer = null; NotifyLayout(); }
     public void SetPreviewSize(double width, double height) { if (width <= 0 || height <= 0) return; _previewWidth = width; _previewHeight = height; NotifyLayout(); }
     public void SelectLayer(string layer) { _selectedLayer = layer; NotifyLayout(); }
     public void Manipulate(string layer, VideoOverlayManipulationMode mode, double deltaX, double deltaY)
@@ -61,6 +57,15 @@ public sealed class VideoOverlayViewModel : ViewModelBase
         NotifyLayout();
     }
     public void CommitManipulation() { Save(); UpdateStatus(); }
+    public void ResetToCorner(string layer)
+    {
+        if (layer == "Camera" && HasCamera && _settings.CameraAnchor is { } cameraCorner)
+            _settings.CameraTransform = VideoOverlayLayout.Corner(cameraCorner, .25, NormalizedAspect(layer));
+        else if (layer == "Keyboard" && HasKeyboard && _settings.KeyboardAnchor is { } keyboardCorner)
+            _settings.KeyboardTransform = VideoOverlayLayout.Corner(keyboardCorner, .25, NormalizedAspect(layer));
+        else return;
+        Save(); UpdateStatus(); NotifyLayout();
+    }
     public async Task RefreshCamerasAsync()
     {
         var cameras = await Task.Run(() => DirectShowCameraProbe.List(_settings.IncludeVirtualCameras));
@@ -117,7 +122,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     {
         foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(CameraSelected), nameof(KeyboardSelected), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource) }) OnPropertyChanged(name);
     }
-    private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}." + (PreviewVisible ? " Preview active." : string.Empty); }
+    private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}."; }
 }
 public enum OverlaySourceKind { None, Camera, Keyboard }
 public sealed record OverlaySourceOption(string Name, string Value, OverlaySourceKind Kind) { public static OverlaySourceOption None { get; } = new("None", string.Empty, OverlaySourceKind.None); public override string ToString() => Name; }

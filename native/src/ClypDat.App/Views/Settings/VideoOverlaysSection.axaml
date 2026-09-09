@@ -7,24 +7,54 @@
   <StackPanel Spacing="18" Tag="Video Overlays">
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Video Overlays" />
-      <TextBlock Classes="settingsSectionDesc" Text="Add camera and input layers to new recordings. Source settings apply live without restarting replay capture." />
+      <TextBlock Classes="settingsSectionDesc" Text="Add camera and input layers to recordings. Changes apply without restarting replay capture." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
     <Border Classes="settingsCard">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="VIDEO OVERLAYS" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Burn camera and input into recordings" />
-            <TextBlock Classes="settingsRowDescSm" Text="Configure sources, position, and size. Camera audio is not recorded." />
-          </StackPanel>
+          <StackPanel Spacing="2" VerticalAlignment="Center"><TextBlock Classes="settingsRowTitle" Text="Burn camera and input into recordings" /><TextBlock Classes="settingsRowDescSm" Text="Camera audio is never recorded." /></StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding Enabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
         <Border Classes="settingsDivider" />
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-          <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" VerticalAlignment="Center" TextWrapping="Wrap" />
-          <Button Grid.Column="1" Classes="primaryButton" Content="Configure" Click="Configure_OnClick" VerticalAlignment="Center" />
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+          <StackPanel Spacing="2" VerticalAlignment="Center"><TextBlock Classes="settingsRowTitle" Text="Include virtual cameras" /><TextBlock Classes="settingsRowDescSm" Text="Refresh after connecting or changing a camera." /></StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludeVirtualCameras}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+          <Button Grid.Column="2" Content="Refresh" Click="Refresh_OnClick" VerticalAlignment="Center" />
         </Grid>
+        <Border Classes="settingsDivider" />
+        <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" TextWrapping="Wrap" />
+        <TextBlock Classes="settingsCardLabel" Margin="0,6,0,0" Text="VIDEO OVERLAY PREVIEW" />
+        <Viewbox Stretch="Uniform" HorizontalAlignment="Stretch">
+          <Border Classes="videoOverlayCanvas" Width="960" Height="540">
+            <Grid ClipToBounds="True">
+              <Border Background="#FF101923" />
+              <Border Background="#FF182633" Height="170" VerticalAlignment="Bottom" Opacity=".55" />
+              <Border Background="{DynamicResource AccentBrush}" Width="300" Height="300" CornerRadius="150" Opacity=".07" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <Canvas Name="PreviewCanvas" Background="Transparent" PointerMoved="PreviewCanvas_OnPointerMoved" PointerReleased="PreviewCanvas_OnPointerReleased" PointerCaptureLost="PreviewCanvas_OnPointerCaptureLost">
+                <Border Classes="videoOverlayLayer" Canvas.Left="{Binding CameraLeft}" Canvas.Top="{Binding CameraTop}" Width="{Binding CameraWidth}" Height="{Binding CameraHeight}" IsVisible="{Binding HasCamera}" PointerPressed="Layer_OnPointerPressed" Tag="Camera">
+                  <Grid><Border Background="#FF233746" /><Border Background="{DynamicResource AccentBrush}" Opacity=".12" /><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6"><TextBlock Text="CAMERA" FontWeight="Bold" HorizontalAlignment="Center" /><TextBlock Text="Live source" Opacity=".72" HorizontalAlignment="Center" /></StackPanel><Border Classes="videoOverlaySelection" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding CameraSelected}" /></Grid>
+                </Border>
+                <Border Classes="videoOverlayLayer" Canvas.Left="{Binding KeyboardLeft}" Canvas.Top="{Binding KeyboardTop}" Width="{Binding KeyboardWidth}" Height="{Binding KeyboardHeight}" IsVisible="{Binding HasKeyboard}" PointerPressed="Layer_OnPointerPressed" Tag="Keyboard">
+                  <Grid><Border Background="#FF18212B" /><UniformGrid Rows="2" Columns="9" Margin="14" IsHitTestVisible="False"><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /></UniformGrid><Border Classes="videoOverlaySelection" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding KeyboardSelected}" /></Grid>
+                </Border>
+              </Canvas>
+              <Grid x:Name="WidePickers" Margin="18">
+                <Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto">
+                  <Border Classes="videoOverlayPicker" Width="220" Height="124" VerticalAlignment="Top"><StackPanel><TextBlock Text="Top left" Classes="settingsRowTitleSm" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopLeftSource}" /></StackPanel></Border>
+                  <Border Grid.Column="2" Classes="videoOverlayPicker" Width="220" Height="124" VerticalAlignment="Top"><StackPanel><TextBlock Text="Top right" Classes="settingsRowTitleSm" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopRightSource}" /></StackPanel></Border>
+                  <Border Grid.Row="2" Classes="videoOverlayPicker" Width="220" Height="124" VerticalAlignment="Bottom"><StackPanel><TextBlock Text="Bottom left" Classes="settingsRowTitleSm" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel></Border>
+                  <Border Grid.Row="2" Grid.Column="2" Classes="videoOverlayPicker" Width="220" Height="124" VerticalAlignment="Bottom"><StackPanel><TextBlock Text="Bottom right" Classes="settingsRowTitleSm" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomRightSource}" /></StackPanel></Border>
+                </Grid>
+              </Grid>
+            </Grid>
+          </Border>
+        </Viewbox>
+        <Grid x:Name="NarrowPickers" IsVisible="False" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
+          <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopLeftSource}" /></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopRightSource}" /></StackPanel><StackPanel Grid.Row="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel><StackPanel Grid.Row="1" Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10"><TextBlock Classes="settingsRowDescSm" Text="Drag layers. White corners resize. Pickers stay at assigned corners." TextWrapping="Wrap" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Reset camera" IsVisible="{Binding CameraCustomPosition}" Click="ResetCamera_OnClick" /><Button Grid.Column="2" Content="Reset input" IsVisible="{Binding KeyboardCustomPosition}" Click="ResetKeyboard_OnClick" /></Grid>
       </StackPanel>
     </Border>
   </StackPanel>
