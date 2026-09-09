@@ -142,6 +142,8 @@ internal static class CaptureWorkerHost
                 case "video-overlays":
                     var overlayJson = message.Payload.GetProperty("settingsJson").GetString();
                     _videoOverlays = JsonSerializer.Deserialize<VideoOverlaySettings>(overlayJson ?? string.Empty, JsonOptions) ?? new VideoOverlaySettings();
+                    if (_buffer is IVideoOverlaySettingsReceiver overlays)
+                        overlays.SetVideoOverlaySettings(JsonSerializer.Serialize(_videoOverlays, JsonOptions));
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "health":
@@ -192,6 +194,8 @@ internal static class CaptureWorkerHost
         {
             _config = config;
             _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
+            if (_buffer is IVideoOverlaySettingsReceiver overlays)
+                overlays.SetVideoOverlaySettings(JsonSerializer.Serialize(_videoOverlays, JsonOptions));
             _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
             if (_buffer is IFullSessionFinalizeReporter finalizes)
                 finalizes.FullSessionFinalizeChanged += (_, active) => _ = SendEventAsync("full-session-finalize", active);

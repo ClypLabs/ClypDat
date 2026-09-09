@@ -86,10 +86,11 @@ public static class AppSettingsMigrations
             .Select(color => color.ToUpperInvariant()).Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(CustomThemeLibrary.RecentColorLimit).ToList();
         settings.VideoOverlays ??= new VideoOverlaySettings();
-        settings.VideoOverlays.KeyboardLayout = settings.VideoOverlays.KeyboardLayout is "None" or "QWERTY Compact" or "QWERTY Full" or "Arrows" or "AZERTY Compact"
+        settings.VideoOverlays.KeyboardLayout = KeyboardOverlayCatalog.IsKnown(settings.VideoOverlays.KeyboardLayout)
             ? settings.VideoOverlays.KeyboardLayout : "None";
         settings.VideoOverlays.CameraTransform = VideoOverlayLayout.Normalize(settings.VideoOverlays.CameraTransform, VideoOverlayLayout.CameraAspectRatio);
-        settings.VideoOverlays.KeyboardTransform = VideoOverlayLayout.Normalize(settings.VideoOverlays.KeyboardTransform, 2.4);
+        settings.VideoOverlays.KeyboardTransform = VideoOverlayLayout.Normalize(settings.VideoOverlays.KeyboardTransform,
+            KeyboardOverlayCatalog.Get(settings.VideoOverlays.KeyboardLayout).AspectRatio);
 
         settings.SettingsSchemaVersion = CurrentSchemaVersion;
         return true;

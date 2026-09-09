@@ -60,7 +60,7 @@ namespace ClypDat.App.Services;
 // AudioCapturePipeline - the same Game/Chat/Microphone routing, WASAPI capture, and mux
 // logic WindowsReplayBuffer uses, via its own independent instance.
 [SupportedOSPlatform("windows10.0.17763.0")]
-public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource, IFullSessionFinalizeReporter
+public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource, IFullSessionFinalizeReporter, IVideoOverlaySettingsReceiver
 {
     internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing) =>
         directBltAvailable && !requiresCopyBeforeProcessing;
@@ -106,6 +106,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
 
     private readonly Func<ReplayBufferConfig> _configProvider;
+    // Updated on the worker pipe thread, consumed at frame boundaries by the
+    // capture loop. A complete JSON value prevents partially-mutated settings.
+    private string _videoOverlaySettingsJson = "{}";
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
     private readonly object _bufferLock = new();
@@ -268,6 +271,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     }
 
     public bool IsRecording => _sessionActive;
+
+    public void SetVideoOverlaySettings(string settingsJson) =>
+        Interlocked.Exchange(ref _videoOverlaySettingsJson, string.IsNullOrWhiteSpace(settingsJson) ? "{}" : settingsJson);
 
     public void RequestFrameRate(int frameRate)
     {

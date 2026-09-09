@@ -30,6 +30,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     public string SourceStatus { get => _sourceStatus; private set => SetProperty(ref _sourceStatus, value); }
     public bool HasCamera => _settings.Camera is not null;
     public bool HasKeyboard => _settings.KeyboardLayout != "None";
+    public string KeyboardLayout => _settings.KeyboardLayout;
     public bool CameraSelected => _selectedLayer == "Camera";
     public bool KeyboardSelected => _selectedLayer == "Keyboard";
     public bool IsPositioning => _selectedLayer is not null;
@@ -167,13 +168,13 @@ public sealed class VideoOverlayViewModel : ViewModelBase
         Save();
     }
     private OverlaySourceKind KindAt(string corner) => SourceAt(corner)?.Kind ?? OverlaySourceKind.None;
-    private double SourceAspect(string layer) => layer == "Camera" ? VideoOverlayLayout.CameraAspectRatio : 2.4;
+    private double SourceAspect(string layer) => layer == "Camera" ? VideoOverlayLayout.CameraAspectRatio : KeyboardOverlayCatalog.Get(_settings.KeyboardLayout).AspectRatio;
     private double NormalizedAspect(string layer) => SourceAspect(layer) / (_previewWidth / _previewHeight);
     private static bool AtAnchor(VideoOverlayTransform transform, string? corner, double aspect) { if (corner is null) return false; var anchor = VideoOverlayLayout.Corner(corner, transform.Width, aspect); return Math.Abs(transform.X - anchor.X) < .002 && Math.Abs(transform.Y - anchor.Y) < .002; }
     private void Save() { _save(); _apply?.Invoke(); }
     private void NotifyLayout()
     {
-        foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(CameraSelected), nameof(KeyboardSelected), nameof(IsPositioning), nameof(ShowPickers), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource), nameof(TopLeftIsCamera), nameof(TopLeftIsKeyboard), nameof(TopLeftIsEmpty), nameof(TopRightIsCamera), nameof(TopRightIsKeyboard), nameof(TopRightIsEmpty), nameof(BottomLeftIsCamera), nameof(BottomLeftIsKeyboard), nameof(BottomLeftIsEmpty), nameof(BottomRightIsCamera), nameof(BottomRightIsKeyboard), nameof(BottomRightIsEmpty) }) OnPropertyChanged(name);
+        foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(KeyboardLayout), nameof(CameraSelected), nameof(KeyboardSelected), nameof(IsPositioning), nameof(ShowPickers), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource), nameof(TopLeftIsCamera), nameof(TopLeftIsKeyboard), nameof(TopLeftIsEmpty), nameof(TopRightIsCamera), nameof(TopRightIsKeyboard), nameof(TopRightIsEmpty), nameof(BottomLeftIsCamera), nameof(BottomLeftIsKeyboard), nameof(BottomLeftIsEmpty), nameof(BottomRightIsCamera), nameof(BottomRightIsKeyboard), nameof(BottomRightIsEmpty) }) OnPropertyChanged(name);
     }
     private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}."; }
 }

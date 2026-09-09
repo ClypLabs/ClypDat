@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:controls="using:ClypDat.App.Controls"
              x:Class="ClypDat.App.Views.Settings.VideoOverlaysSection"
              x:DataType="vm:VideoOverlayViewModel"
              IsVisible="False" Focusable="True" KeyDown="Section_OnKeyDown">
@@ -20,38 +21,8 @@
         <Ellipse Classes="videoOverlayLensMock" />
       </Border>
     </DataTemplate>
-    <DataTemplate x:Key="VideoOverlayKeyboardMock">
-      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="11,9">
-        <UniformGrid Rows="3" Columns="8">
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-          <Border Classes="videoOverlayKeyMock" />
-        </UniformGrid>
-        <Border Grid.Column="1" Classes="videoOverlayMouseMock">
-          <Border Classes="videoOverlayMouseWheelMock" />
-        </Border>
-      </Grid>
+    <DataTemplate x:Key="VideoOverlayKeyboardMock" DataType="vm:VideoOverlayViewModel">
+      <controls:KeyboardOverlayPreview Margin="12" Layout="{Binding KeyboardLayout}" />
     </DataTemplate>
     <DataTemplate x:Key="OverlaySourceOptionTemplate" DataType="vm:OverlaySourceOption">
       <Grid>
@@ -98,7 +69,7 @@
                   <Grid><Border Background="#FF233746" /><Border Background="{DynamicResource AccentBrush}" Opacity=".12" /><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6"><TextBlock Text="CAMERA" FontWeight="Bold" HorizontalAlignment="Center" /><TextBlock Text="Live source" Opacity=".72" HorizontalAlignment="Center" /></StackPanel><Border Classes="videoOverlaySelection" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding CameraSelected}" /></Grid>
                 </Border>
                 <Border Classes="videoOverlayLayer" Canvas.Left="{Binding KeyboardLeft}" Canvas.Top="{Binding KeyboardTop}" Width="{Binding KeyboardWidth}" Height="{Binding KeyboardHeight}" IsVisible="{Binding KeyboardSelected}" PointerPressed="Layer_OnPointerPressed" Tag="Keyboard">
-                  <Grid><Border Background="#FF18212B" /><UniformGrid Rows="2" Columns="9" Margin="14" IsHitTestVisible="False"><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /></UniformGrid><Border Classes="videoOverlaySelection" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding KeyboardSelected}" /></Grid>
+                  <Grid><controls:KeyboardOverlayPreview Layout="{Binding KeyboardLayout}" IsHitTestVisible="False" /><Border Classes="videoOverlaySelection" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding KeyboardSelected}" /></Grid>
                 </Border>
               </Canvas>
             </Grid>
