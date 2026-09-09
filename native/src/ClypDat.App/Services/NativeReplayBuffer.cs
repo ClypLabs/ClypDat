@@ -610,6 +610,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // Needed after remux cleanup, when capture provenance is persisted.
         var mediaStartUtc = DateTime.MinValue;
         var mediaDurationSeconds = 0d;
+        // Overlay time owns video packet acquisition time.  Audio correction
+        // may choose a different source window, but must never move camera or
+        // input history on the rebased output timeline.
+        var overlayMediaMapping = default(CaptureMediaMapping);
         try
         {
             // Thousands of packet copies and disk writes back to back. Dropping
@@ -660,6 +664,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     ? Math.Max(1, window[^1].PtsMs - window[^2].PtsMs)
                     : Math.Max(1, 1_000_000L / Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate));
             var videoDurationSeconds = (window[^1].PtsMs - window[0].PtsMs + finalPacketDurationMicroseconds) / 1_000_000.0;
+            overlayMediaMapping = new CaptureMediaMapping(window[0].WallClockUtc, videoDurationSeconds, finalPacketDurationMicroseconds);
             AppLog.Debug($"Native replay audio/video duration check: videoDurationSeconds={videoDurationSeconds:0.000}, audioWindowDurationSeconds={windowDurationSeconds:0.000}, deltaMs={(windowDurationSeconds - videoDurationSeconds) * 1000:0.0}, packetCount={window.Length}.");
 
             // A capture stall (the loop goes an extended stretch without
@@ -794,13 +799,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var overlays = Volatile.Read(ref _videoOverlaySettings);
         if (overlays != OverlayCaptureSettings.None)
         {
-            // Camera offsets must share final media timeline. Replay request
-            // can outlast retained packets; audio can be shortened to video.
-            var cameraEndUtc = mediaStartUtc + TimeSpan.FromSeconds(mediaDurationSeconds);
-            var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, mediaStartUtc, cameraEndUtc);
-            var peripherals = string.Equals(overlays.KeyboardLayout, "None", StringComparison.OrdinalIgnoreCase) ? null : new ClipOverlayLayer(
-                overlays.KeyboardLayout, false, InitialTransform: overlays.KeyboardTransform.ToPresentationTransform(),
-                Error: "Keyboard and mouse capture asset was unavailable.");
+            var captureEndUtc = overlayMediaMapping.AcquisitionStartUtc + TimeSpan.FromSeconds(overlayMediaMapping.MediaDurationSeconds);
+            var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc);
+            var peripherals = _overlayCapture.FinalizeInput(config.LibraryFolder, outputPath, overlays.KeyboardLayout,
+                overlays.KeyboardTransform, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc);
             ClipInfoSidecar.Save(config.LibraryFolder, outputPath, new ClipInfo(gameDisplayName, null, clipName,
                 File.GetCreationTimeUtc(outputPath), CaptureSource: config.CaptureSource,
                 OverlayManifest: new ClipOverlayManifest(ClipOverlayManifest.CurrentVersion, camera, peripherals)));
@@ -6303,6 +6305,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // it holds - Length, not Data.Length, is the packet. Every consumer must
     // respect that.
     private readonly record struct RingPacket(byte[] Data, int Length, long PtsMs, bool IsKeyframe, DateTime WallClockUtc, int Generation);
+
+    private readonly record struct CaptureMediaMapping(DateTime AcquisitionStartUtc, double MediaDurationSeconds, long FinalFrameDurationMicroseconds);
 
     // The SPS/PPS and codec id of one encoder generation, plus the time base its
     // packet timestamps are expressed in. A clip is muxed entirely from one of

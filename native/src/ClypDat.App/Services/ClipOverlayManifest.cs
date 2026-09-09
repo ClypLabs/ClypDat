@@ -9,7 +9,10 @@ public sealed record ClipOverlayManifest(
     ClipOverlayLayer? Camera = null,
     ClipOverlayLayer? Peripherals = null)
 {
-    public const int CurrentVersion = 3;
+    // v4 adds an owned input-history index.  Keep v2/v3 readable: optional
+    // record fields deserialize as null and are deliberately treated as
+    // history that was never captured, not as an empty keyboard.
+    public const int CurrentVersion = 4;
     public static ClipOverlayManifest Empty { get; } = new(CurrentVersion);
 
     /// <summary>
@@ -93,7 +96,8 @@ public sealed record ClipOverlayLayer(
     string? Error = null,
     bool Flattened = false,
     IReadOnlyList<ClipOverlayAsset>? Assets = null,
-    bool SynchronizationApproximate = false);
+    bool SynchronizationApproximate = false,
+    string? InputIndexPath = null);
 
 public sealed record ClipOverlayInterval(double StartSeconds, double EndSeconds);
 public sealed record ClipOverlayAsset(string AssetPath, double StartSeconds, double EndSeconds);
