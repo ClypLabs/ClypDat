@@ -4329,6 +4329,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int? _selectedSpotifyProgressMs;
     private string? _selectedSpotifyArtPath;
     private bool _selectedSpotifyOverlayBurned;
+    private ClipOverlayManifest _selectedOverlayManifest = ClipOverlayManifest.Empty;
+    private bool _cameraOverlayLayerVisible = true;
+    private bool _peripheralOverlayLayerVisible = true;
+    private VideoOverlayTransform? _cameraOverlayTransform;
+    private VideoOverlayTransform? _peripheralOverlayTransform;
     private bool _selectedHasSpotifyTimeline;
     private bool _spotifyOverlayLayerVisible = true;
     private bool _isSpotifyOverlaySelected;
@@ -4484,6 +4489,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : $"{_selectedSpotifyTrack} - {_selectedSpotifyArtist}";
 
     public bool SelectedHasSpotifyTrack => !string.IsNullOrWhiteSpace(_selectedSpotifyTrack);
+
+    // Camera/input remain visual layers, not timeline lanes. Spotify is sole
+    // overlay timeline lane because it carries its own metadata timeline.
+    public bool HasCameraOverlayLayer => ClipOverlayManifest.IsUsable(Settings.LibraryFolder, _selectedOverlayManifest.Camera);
+    public bool HasPeripheralOverlayLayer => ClipOverlayManifest.IsUsable(Settings.LibraryFolder, _selectedOverlayManifest.Peripherals);
+    public string CameraOverlayStatus => OverlayStatus(_selectedOverlayManifest.Camera, "Camera");
+    public string PeripheralOverlayStatus => OverlayStatus(_selectedOverlayManifest.Peripherals, "Keyboard and mouse");
+    public bool CameraOverlayLayerVisible { get => _cameraOverlayLayerVisible; set { if (SetProperty(ref _cameraOverlayLayerVisible, value) && !_suppressClipEditSave) SaveSelectedClipEditState(); } }
+    public bool PeripheralOverlayLayerVisible { get => _peripheralOverlayLayerVisible; set { if (SetProperty(ref _peripheralOverlayLayerVisible, value) && !_suppressClipEditSave) SaveSelectedClipEditState(); } }
+    public VideoOverlayTransform? CameraOverlayTransform => _cameraOverlayTransform;
+    public VideoOverlayTransform? PeripheralOverlayTransform => _peripheralOverlayTransform;
+
+    private string OverlayStatus(ClipOverlayLayer? layer, string name)
+    {
+        if (layer is null) return $"{name} was not selected for this clip.";
+        if (!layer.Available) return string.IsNullOrWhiteSpace(layer.Error) ? $"{name} was unavailable while this clip recorded." : layer.Error;
+        return ClipOverlayManifest.IsUsable(Settings.LibraryFolder, layer) ? $"{name} captured with this clip." : $"{name} capture asset is missing.";
+    }
+
+    private void RefreshCapturedOverlayLayerState()
+    {
+        OnPropertyChanged(nameof(HasCameraOverlayLayer)); OnPropertyChanged(nameof(HasPeripheralOverlayLayer));
+        OnPropertyChanged(nameof(CameraOverlayStatus)); OnPropertyChanged(nameof(PeripheralOverlayStatus));
+        OnPropertyChanged(nameof(CameraOverlayLayerVisible)); OnPropertyChanged(nameof(PeripheralOverlayLayerVisible));
+        OnPropertyChanged(nameof(CameraOverlayTransform)); OnPropertyChanged(nameof(PeripheralOverlayTransform));
+    }
 
     /// <summary>
     /// Raised when the editor's copy of the overlay needs redrawing - a
@@ -5144,7 +5175,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             CropOffsetX = ClipCropOffsetX,
             CropOffsetY = ClipCropOffsetY,
             SpotifyOverlayVisible = SpotifyOverlayLayerVisible,
-            SpotifyOverlayTransform = SpotifyOverlayTransform
+            SpotifyOverlayTransform = SpotifyOverlayTransform,
+            CameraOverlayVisible = CameraOverlayLayerVisible,
+            CameraOverlayTransform = CameraOverlayTransform,
+            PeripheralOverlayVisible = PeripheralOverlayLayerVisible,
+            PeripheralOverlayTransform = PeripheralOverlayTransform
         };
         ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, edit);
 
@@ -8533,6 +8568,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedSpotifyProgressMs = clipInfo?.SpotifyProgressMs;
         _selectedSpotifyArtPath = clipInfo?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
         _selectedSpotifyOverlayBurned = media.SpotifyOverlayBurned || clipInfo?.SpotifyOverlayBurned == true;
+        _selectedOverlayManifest = clipInfo?.OverlayManifest ?? ClipOverlayManifest.Empty;
+        _cameraOverlayLayerVisible = true;
+        _peripheralOverlayLayerVisible = true;
+        _cameraOverlayTransform = _selectedOverlayManifest.Camera?.InitialTransform;
+        _peripheralOverlayTransform = _selectedOverlayManifest.Peripherals?.InitialTransform;
         _selectedHasSpotifyTimeline = SpotifyTimelineSidecar.Load(Settings.LibraryFolder, media.Path)?.Samples.Any(sample => sample.Available) == true;
         _spotifyOverlayLayerVisible = true;
         _spotifyOverlayTransform = null;
@@ -8659,6 +8699,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(EditorTimelineHeight));
 
         ApplyClipEditState(media.Path, restoreDescription: !preserveEditorText);
+        RefreshCapturedOverlayLayerState();
         RefreshSpotifyOverlayLayerState();
         RaiseSpotifyOverlayPreviewChanged();
         IsEditorVisible = showEditor;
@@ -8703,6 +8744,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
         _spotifyOverlayLayerVisible = edit.SpotifyOverlayVisible;
         _spotifyOverlayTransform = edit.SpotifyOverlayTransform;
+        _cameraOverlayLayerVisible = edit.CameraOverlayVisible;
+        _peripheralOverlayLayerVisible = edit.PeripheralOverlayVisible;
+        _cameraOverlayTransform = edit.CameraOverlayTransform ?? _selectedOverlayManifest.Camera?.InitialTransform;
+        _peripheralOverlayTransform = edit.PeripheralOverlayTransform ?? _selectedOverlayManifest.Peripherals?.InitialTransform;
         if (Duration > TimeSpan.Zero)
         {
             var start = TimeSpan.FromSeconds(Math.Clamp(edit.TrimStartSeconds, 0, Duration.TotalSeconds));

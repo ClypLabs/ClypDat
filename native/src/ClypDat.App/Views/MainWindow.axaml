@@ -1758,15 +1758,23 @@
               <Border Classes="editorInspectorCard" IsVisible="{Binding IsEditorOverlaysSidebarActive}">
                 <StackPanel Spacing="6">
                   <TextBlock Text="CAMERA" Classes="editorCardLabel" />
-                  <TextBlock Text="Camera unavailable for this clip. Clips recorded before editable camera capture cannot reconstruct this layer."
-                             Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="Show overlay" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" VerticalAlignment="Center" />
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding CameraOverlayLayerVisible, Mode=TwoWay}"
+                                  IsEnabled="{Binding HasCameraOverlayLayer}" OnContent="{x:Null}" OffContent="{x:Null}" />
+                  </Grid>
+                  <TextBlock Text="{Binding CameraOverlayStatus}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>
               <Border Classes="editorInspectorCard" IsVisible="{Binding IsEditorOverlaysSidebarActive}">
                 <StackPanel Spacing="6">
                   <TextBlock Text="PERIPHERALS" Classes="editorCardLabel" />
-                  <TextBlock Text="Keyboard and mouse unavailable for this clip. Clips recorded before editable input capture cannot reconstruct this layer."
-                             Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="Show overlay" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" VerticalAlignment="Center" />
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding PeripheralOverlayLayerVisible, Mode=TwoWay}"
+                                  IsEnabled="{Binding HasPeripheralOverlayLayer}" OnContent="{x:Null}" OffContent="{x:Null}" />
+                  </Grid>
+                  <TextBlock Text="{Binding PeripheralOverlayStatus}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
                 </StackPanel>
               </Border>
               <Grid>
