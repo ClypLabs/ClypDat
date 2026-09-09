@@ -53,6 +53,12 @@
         </Border>
       </Grid>
     </DataTemplate>
+    <DataTemplate x:Key="OverlaySourceOptionTemplate" DataType="vm:OverlaySourceOption">
+      <Grid>
+        <TextBlock Text="{Binding Name}" IsVisible="{Binding IsSelectable}" />
+        <TextBlock Text="{Binding Name}" IsVisible="{Binding IsHeading}" Classes="overlaySourceHeading" />
+      </Grid>
+    </DataTemplate>
   </UserControl.Resources>
   <StackPanel Spacing="18" Tag="Video Overlays">
     <StackPanel Spacing="4">
@@ -109,7 +115,7 @@
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayKeyboardMock}" IsVisible="{Binding TopLeftIsKeyboard}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
                   </Panel>
                 </Border>
-                <ComboBox Classes="settingsInput compact" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopLeftSource}" ToolTip.Tip="{Binding TopLeftSource}" />
+                <ComboBox Classes="settingsInput compact overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopLeftSource}" ToolTip.Tip="{Binding TopLeftSource}" />
               </StackPanel>
             </Border>
             <Border Grid.Column="2" Classes="videoOverlayPicker" VerticalAlignment="Top">
@@ -122,7 +128,7 @@
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayKeyboardMock}" IsVisible="{Binding TopRightIsKeyboard}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
                   </Panel>
                 </Border>
-                <ComboBox Classes="settingsInput compact" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopRightSource}" ToolTip.Tip="{Binding TopRightSource}" />
+                <ComboBox Classes="settingsInput compact overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopRightSource}" ToolTip.Tip="{Binding TopRightSource}" />
               </StackPanel>
             </Border>
             <Border Grid.Row="2" Classes="videoOverlayPicker" VerticalAlignment="Bottom">
@@ -135,7 +141,7 @@
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayKeyboardMock}" IsVisible="{Binding BottomLeftIsKeyboard}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
                   </Panel>
                 </Border>
-                <ComboBox Classes="settingsInput compact" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomLeftSource}" ToolTip.Tip="{Binding BottomLeftSource}" />
+                <ComboBox Classes="settingsInput compact overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomLeftSource}" ToolTip.Tip="{Binding BottomLeftSource}" />
               </StackPanel>
             </Border>
             <Border Grid.Row="2" Grid.Column="2" Classes="videoOverlayPicker" VerticalAlignment="Bottom">
@@ -148,13 +154,13 @@
                     <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayKeyboardMock}" IsVisible="{Binding BottomRightIsKeyboard}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
                   </Panel>
                 </Border>
-                <ComboBox Classes="settingsInput compact" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomRightSource}" ToolTip.Tip="{Binding BottomRightSource}" />
+                <ComboBox Classes="settingsInput compact overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomRightSource}" ToolTip.Tip="{Binding BottomRightSource}" />
               </StackPanel>
             </Border>
           </Grid>
         </Grid>
         <Grid x:Name="NarrowPickers" IsVisible="False" IsEnabled="{Binding ShowPickers}" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
-          <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopLeftSource}" /></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopRightSource}" /></StackPanel><StackPanel Grid.Row="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel><StackPanel Grid.Row="1" Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
+          <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopLeftSource}" /></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopRightSource}" /></StackPanel><StackPanel Grid.Row="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel><StackPanel Grid.Row="1" Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
         </Grid>
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10"><TextBlock Classes="settingsRowDescSm" Text="Drag layers. White corners resize. Pickers stay at assigned corners." TextWrapping="Wrap" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Reset camera" IsVisible="{Binding CameraCustomPosition}" Click="ResetCamera_OnClick" /><Button Grid.Column="2" Content="Reset input" IsVisible="{Binding KeyboardCustomPosition}" Click="ResetKeyboard_OnClick" /></Grid>
       </StackPanel>

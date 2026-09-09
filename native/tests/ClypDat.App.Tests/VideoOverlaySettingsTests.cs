@@ -98,6 +98,46 @@ public sealed class VideoOverlaySettingsTests
         Assert.Equal(["Elgato 4K X", "Elgato Virtual Camera"], cameras.Select(camera => camera.Name));
     }
 
+    [Fact]
+    public void DirectShowParser_AliasesUtf8ElgatoVirtualCameraButKeepsCaptureName()
+    {
+        const string output = "[dshow @ 000001] \"EƖgato Virtual Camera\" (video)";
+
+        var camera = Assert.Single(DirectShowCameraParser.Parse(output, includeVirtual: true));
+
+        Assert.Equal("Elgato Virtual Camera", camera.Name);
+        Assert.Equal("EƖgato Virtual Camera", camera.Moniker);
+    }
+
+    [Fact]
+    public void SavedGarbledElgatoVirtualCamera_IsRepairedWithoutLayoutChanges()
+    {
+        var saved = new VideoOverlayCameraSelection("EÆ–gato Virtual Camera", "EÆ–gato Virtual Camera");
+        var detected = new CameraOption("Elgato Virtual Camera", "EƖgato Virtual Camera", true);
+
+        var repaired = DirectShowCameraParser.RepairSavedElgatoVirtualCamera(saved, [detected]);
+
+        Assert.Equal(new VideoOverlayCameraSelection("EƖgato Virtual Camera", "Elgato Virtual Camera"), repaired);
+    }
+
+    [Fact]
+    public void Sources_AreGroupedAndHeadingsCannotBeSelected()
+    {
+        var sources = OverlaySourceOptions.Create([]);
+
+        Assert.Equal(["None", "Peripheral Overlays", "QWERTY Keyboard + Mouse", "QWERTY Keyboard + Mouse (Full)", "Arrow Keys + Mouse", "AZERTY Keyboard + Mouse"], sources.Select(source => source.Name));
+        Assert.False(sources[1].IsSelectable);
+        Assert.DoesNotContain(sources, source => source.Name.Contains("Controller", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Sources_PutDetectedCamerasBeforePeripheralOverlays()
+    {
+        var sources = OverlaySourceOptions.Create([new CameraOption("Elgato 4K X", "Elgato 4K X")]);
+
+        Assert.Equal(["None", "Cameras", "Elgato 4K X", "Peripheral Overlays"], sources.Take(4).Select(source => source.Name));
+    }
+
     [Theory]
     [InlineData("Elgato 4K X", "Elgato 4K X", true)]
     [InlineData("@device_pnp_\\?\\usb#elgato", "@device_pnp_\\?\\usb#elgato", false)]

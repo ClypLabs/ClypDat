@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Text;
 using ClypDat.Core.Settings;
 
 namespace ClypDat.App.ViewModels;
@@ -103,6 +104,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
         catch (OperationCanceledException) { return; }
         if (generation != _refreshGeneration || cancellation.IsCancellationRequested) return;
         Cameras.Clear(); Cameras.Add(CameraOption.None); foreach (var camera in cameras) Cameras.Add(camera);
+        RepairSavedElgatoVirtualCamera(cameras);
         // Device disappearance is transient. Keep selection and transform so it
         // returns in same place when USB camera reconnects.
         if (_settings.Camera is { } selected &&
@@ -126,7 +128,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     }
     private void SetSource(string corner, OverlaySourceOption? source)
     {
-        if (source is null) return;
+        if (source is null || !source.IsSelectable) return;
         if (source.Kind == OverlaySourceKind.None)
         {
             if (_settings.CameraAnchor == corner) { _settings.Camera = null; _settings.CameraAnchor = null; }
@@ -152,15 +154,17 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     }
     private void RebuildSources()
     {
-        Sources.Clear(); Sources.Add(OverlaySourceOption.None);
-        foreach (var camera in Cameras.Where(camera => !camera.IsNone)) Sources.Add(new(camera.Name, camera.Moniker, OverlaySourceKind.Camera));
-        foreach (var (name, value) in new[] {
-            ("QWERTY Keyboard + Mouse (Full)", "QWERTY Full"),
-            ("QWERTY Keyboard + Mouse (Compact)", "QWERTY Compact"),
-            ("Arrow Keys + Mouse", "Arrows"),
-            ("AZERTY Keyboard + Mouse (Compact)", "AZERTY Compact") })
-            Sources.Add(new(name, value, OverlaySourceKind.Keyboard));
+        Sources.Clear();
+        foreach (var source in OverlaySourceOptions.Create(Cameras)) Sources.Add(source);
         NotifyLayout();
+    }
+    private void RepairSavedElgatoVirtualCamera(IReadOnlyList<CameraOption> cameras)
+    {
+        if (_settings.Camera is not { } saved) return;
+        var repaired = DirectShowCameraParser.RepairSavedElgatoVirtualCamera(saved, cameras);
+        if (repaired is null) return;
+        _settings.Camera = repaired;
+        Save();
     }
     private OverlaySourceKind KindAt(string corner) => SourceAt(corner)?.Kind ?? OverlaySourceKind.None;
     private double SourceAspect(string layer) => layer == "Camera" ? VideoOverlayLayout.CameraAspectRatio : 2.4;
@@ -173,15 +177,42 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     }
     private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}."; }
 }
-public enum OverlaySourceKind { None, Camera, Keyboard }
-public sealed record OverlaySourceOption(string Name, string Value, OverlaySourceKind Kind) { public static OverlaySourceOption None { get; } = new("None", string.Empty, OverlaySourceKind.None); public override string ToString() => Name; }
+public enum OverlaySourceKind { None, Camera, Keyboard, Heading }
+public sealed record OverlaySourceOption(string Name, string Value, OverlaySourceKind Kind)
+{
+    public static OverlaySourceOption None { get; } = new("None", string.Empty, OverlaySourceKind.None);
+    public static OverlaySourceOption Heading(string name) => new(name, string.Empty, OverlaySourceKind.Heading);
+    public bool IsSelectable => Kind != OverlaySourceKind.Heading;
+    public bool IsHeading => Kind == OverlaySourceKind.Heading;
+    public override string ToString() => Name;
+}
+internal static class OverlaySourceOptions
+{
+    public static IReadOnlyList<OverlaySourceOption> Create(IEnumerable<CameraOption> cameraOptions)
+    {
+        var sources = new List<OverlaySourceOption> { OverlaySourceOption.None };
+        var cameras = cameraOptions.Where(camera => !camera.IsNone).ToArray();
+        if (cameras.Length > 0)
+        {
+            sources.Add(OverlaySourceOption.Heading("Cameras"));
+            sources.AddRange(cameras.Select(camera => new OverlaySourceOption(camera.Name, camera.Moniker, OverlaySourceKind.Camera)));
+        }
+        sources.Add(OverlaySourceOption.Heading("Peripheral Overlays"));
+        sources.AddRange(new[] {
+            new OverlaySourceOption("QWERTY Keyboard + Mouse", "QWERTY Compact", OverlaySourceKind.Keyboard),
+            new OverlaySourceOption("QWERTY Keyboard + Mouse (Full)", "QWERTY Full", OverlaySourceKind.Keyboard),
+            new OverlaySourceOption("Arrow Keys + Mouse", "Arrows", OverlaySourceKind.Keyboard),
+            new OverlaySourceOption("AZERTY Keyboard + Mouse", "AZERTY Compact", OverlaySourceKind.Keyboard) });
+        return sources;
+    }
+}
 public sealed record CameraOption(string Name, string Moniker, bool IsVirtual = false) { public static CameraOption None { get; } = new("None", string.Empty); public bool IsNone => string.IsNullOrEmpty(Moniker); }
 internal static class DirectShowCameraProbe
 {
     public static IReadOnlyList<CameraOption> List(bool includeVirtual, CancellationToken cancellationToken)
     {
         var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffmpeg.exe"); if (!File.Exists(ffmpeg)) return Array.Empty<CameraOption>();
-        try { using var process = Process.Start(new ProcessStartInfo(ffmpeg, "-hide_banner -list_devices true -f dshow -i dummy") { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true }); if (process is null) return Array.Empty<CameraOption>(); var read = process.StandardError.ReadToEndAsync(cancellationToken); if (!process.WaitForExit(5000)) { try { process.Kill(true); } catch { } return Array.Empty<CameraOption>(); } var text = read.GetAwaiter().GetResult(); cancellationToken.ThrowIfCancellationRequested(); return DirectShowCameraParser.Parse(text, includeVirtual); } catch (OperationCanceledException) { throw; } catch { return Array.Empty<CameraOption>(); }
+        try { using var process = Process.Start(new ProcessStartInfo(ffmpeg, "-hide_banner -list_devices true -f dshow -i dummy") { UseShellExecute = false, RedirectStandardError = true, StandardErrorEncoding = Encoding.UTF8, CreateNoWindow = true }); if (process is null) return Array.Empty<CameraOption>(); var read = process.StandardError.ReadToEndAsync(cancellationToken); if (!process.WaitForExit(5000)) { try { process.Kill(true); } catch { } return Array.Empty<CameraOption>(); } var text = read.GetAwaiter().GetResult(); cancellationToken.ThrowIfCancellationRequested(); return DirectShowCameraParser.Parse(text, includeVirtual); } catch (OperationCanceledException) { throw; } catch { return Array.Empty<CameraOption>(); }
     }
 }
 
@@ -200,14 +231,33 @@ internal static class DirectShowCameraParser
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(name => !IsExcludedDevice(name))
             .Where(name => includeVirtual || !IsVirtual(name))
-            .Select(name => new CameraOption(name, name, IsVirtual(name)))
+            .Select(name => new CameraOption(DisplayName(name), name, IsVirtual(name)))
             .ToArray();
     }
+
+    public static bool IsElgatoVirtualCamera(string name) =>
+        name.Equals("EƖgato Virtual Camera", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("Elgato Virtual Camera", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("EÆ–gato Virtual Camera", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("EÆ\u0096gato Virtual Camera", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("E�gato Virtual Camera", StringComparison.OrdinalIgnoreCase);
+
+    private static string DisplayName(string name) => IsElgatoVirtualCamera(name) ? "Elgato Virtual Camera" : name;
 
     public static bool IsSavedCameraSelection(VideoOverlayCameraSelection selection) =>
         !IsRawDeviceIdentifier(selection.DeviceMoniker) &&
         !IsRawDeviceIdentifier(selection.FriendlyName) &&
         !IsExcludedDevice(selection.FriendlyName);
+
+    public static VideoOverlayCameraSelection? RepairSavedElgatoVirtualCamera(
+        VideoOverlayCameraSelection saved, IReadOnlyList<CameraOption> cameras)
+    {
+        if (!IsElgatoVirtualCamera(saved.DeviceMoniker) && !IsElgatoVirtualCamera(saved.FriendlyName)) return null;
+        var detected = cameras.FirstOrDefault(camera => IsElgatoVirtualCamera(camera.Moniker));
+        if (detected is null) return null;
+        var repaired = new VideoOverlayCameraSelection(detected.Moniker, detected.Name);
+        return saved == repaired ? null : repaired;
+    }
 
     private static bool IsVirtual(string name) => name.Contains("virtual", StringComparison.OrdinalIgnoreCase) || name.Contains("obs", StringComparison.OrdinalIgnoreCase) || name.Contains("snap camera", StringComparison.OrdinalIgnoreCase) || name.Contains("manycam", StringComparison.OrdinalIgnoreCase) || name.Contains("ndi", StringComparison.OrdinalIgnoreCase);
     private static bool IsRawDeviceIdentifier(string value) => value.StartsWith("@device_", StringComparison.OrdinalIgnoreCase) || value.StartsWith("Alternative name", StringComparison.OrdinalIgnoreCase);

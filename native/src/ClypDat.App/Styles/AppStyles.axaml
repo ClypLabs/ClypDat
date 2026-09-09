@@ -1,6 +1,7 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="using:ClypDat.App.Controls"
+        xmlns:vm="using:ClypDat.App.ViewModels"
         xmlns:sys="using:System">
   <Styles.Resources>
     <!--
@@ -2756,6 +2757,14 @@
     <Setter Property="FontSize" Value="11" />
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="LetterSpacing" Value="0.7" />
+  </Style>
+  <Style Selector="ComboBox.overlaySourcePicker ComboBoxItem" x:DataType="vm:OverlaySourceOption">
+    <Setter Property="IsEnabled" Value="{Binding IsSelectable}" />
+  </Style>
+  <Style Selector="TextBlock.overlaySourceHeading">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="Border.videoOverlayPickerPreview">
     <Setter Property="Height" Value="68" />

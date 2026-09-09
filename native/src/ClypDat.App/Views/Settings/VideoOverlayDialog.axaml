@@ -13,6 +13,14 @@
         Background="Transparent"
         TransparencyLevelHint="Transparent"
         KeyDown="Dialog_OnKeyDown">
+  <Window.Resources>
+    <DataTemplate x:Key="OverlaySourceOptionTemplate" DataType="vm:OverlaySourceOption">
+      <Grid>
+        <TextBlock Text="{Binding Name}" IsVisible="{Binding IsSelectable}" />
+        <TextBlock Text="{Binding Name}" IsVisible="{Binding IsHeading}" Classes="overlaySourceHeading" />
+      </Grid>
+    </DataTemplate>
+  </Window.Resources>
   <Border CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True">
     <DockPanel LastChildFill="True">
       <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0" PointerPressed="TitleBar_OnPointerPressed">
@@ -33,8 +41,8 @@
           </Grid>
           <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" TextWrapping="Wrap" />
           <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-            <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopLeftSource}" /></StackPanel>
-            <StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopRightSource}" /></StackPanel>
+            <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopLeftSource}" /></StackPanel>
+            <StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopRightSource}" /></StackPanel>
           </Grid>
           <Border CornerRadius="8" ClipToBounds="True" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" Width="518" Height="291" HorizontalAlignment="Left">
             <Panel>
@@ -52,8 +60,8 @@
             </Panel>
           </Border>
           <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-            <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel>
-            <StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
+            <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel>
+            <StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
           </Grid>
           <TextBlock Classes="settingsRowDescSm" Text="Drag a layer to move it. White corners resize it. Re-select a source to reset it to its assigned corner." TextWrapping="Wrap" />
           <Border Classes="settingsDivider" />
