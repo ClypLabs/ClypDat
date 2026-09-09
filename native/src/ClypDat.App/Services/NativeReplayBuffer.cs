@@ -109,7 +109,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private readonly Func<ReplayBufferConfig> _configProvider;
     // Updated on the worker pipe thread, consumed at frame boundaries by the
     // capture loop. A complete JSON value prevents partially-mutated settings.
-    private string _videoOverlaySettingsJson = "{}";
+    private string _videoOverlaySettingsSnapshot = "{}";
     private readonly OverlayCaptureSession _overlayCapture;
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
@@ -275,10 +275,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     public bool IsRecording => _sessionActive;
 
-    public void SetVideoOverlaySettings(VideoOverlayCaptureSettings settings)
+    public void SetVideoOverlaySettings(OverlayCaptureSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        Interlocked.Exchange(ref _videoOverlaySettingsJson, JsonSerializer.Serialize(settings));
+        Interlocked.Exchange(ref _videoOverlaySettingsSnapshot, JsonSerializer.Serialize(settings));
         _overlayCapture.Apply(settings);
     }
 
@@ -785,7 +785,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // Assets are attached by the worker capture service when available;
         // retaining unavailable selections lets the editor distinguish that
         // result from old clips which predate overlay capture entirely.
-        var overlays = JsonSerializer.Deserialize<VideoOverlayCaptureSettings>(Volatile.Read(ref _videoOverlaySettingsJson));
+        var overlays = JsonSerializer.Deserialize<OverlayCaptureSettings>(Volatile.Read(ref _videoOverlaySettingsSnapshot));
         if (overlays is not null)
         {
             // requestedStartUtc is adjusted for recovery before the replay
@@ -793,7 +793,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // the local remux timing variables above.
             var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, requestedStartUtc, requestedEndUtc);
             var peripherals = string.Equals(overlays.KeyboardLayout, "None", StringComparison.OrdinalIgnoreCase) ? null : new ClipOverlayLayer(
-                overlays.KeyboardLayout, false, InitialTransform: overlays.KeyboardTransform,
+                overlays.KeyboardLayout, false, InitialTransform: overlays.KeyboardTransform.ToPresentationTransform(),
                 Error: "Keyboard and mouse capture asset was unavailable.");
             ClipInfoSidecar.Save(config.LibraryFolder, outputPath, new ClipInfo(gameDisplayName, null, clipName,
                 File.GetCreationTimeUtc(outputPath), CaptureSource: config.CaptureSource,

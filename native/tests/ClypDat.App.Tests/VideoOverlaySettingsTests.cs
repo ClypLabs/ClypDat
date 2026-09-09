@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ClypDat.App.ViewModels;
+using ClypDat.App.Services;
 using ClypDat.Core.Settings;
 using Xunit;
 
@@ -47,16 +48,16 @@ public sealed class VideoOverlaySettingsTests
         var json = JsonSerializer.Serialize(selected, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
         var workerSettings = JsonSerializer.Deserialize<VideoOverlaySettings>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        var snapshot = VideoOverlayCaptureSettings.From(workerSettings);
+        var snapshot = workerSettings.ToCaptureSettings();
 
-        Assert.Equal(selected.Camera, snapshot.Camera);
+        Assert.Equal(new ClypDat.Capture.Abstractions.OverlayCameraSelection(selected.Camera!.DeviceMoniker, selected.Camera.FriendlyName), snapshot.Camera);
         Assert.Equal(KeyboardOverlayCatalog.QwertyFull, snapshot.KeyboardLayout);
     }
 
     [Fact]
     public void WorkerSnapshot_UsesNoneForUnknownKeyboardInsteadOfCompactDefault()
     {
-        var snapshot = VideoOverlayCaptureSettings.From(new VideoOverlaySettings { KeyboardLayout = "Unknown layout" });
+        var snapshot = new VideoOverlaySettings { KeyboardLayout = "Unknown layout" }.ToCaptureSettings();
 
         Assert.Equal("None", snapshot.KeyboardLayout);
     }

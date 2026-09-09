@@ -7178,8 +7178,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
         try
         {
-            var settingsJson = System.Text.Json.JsonSerializer.Serialize(ViewModel.Settings.VideoOverlays);
-            await worker.UpdateVideoOverlaySettingsAsync(settingsJson);
+            await worker.UpdateVideoOverlaySettingsAsync(ViewModel.Settings.VideoOverlays.ToCaptureSettings());
         }
         catch (Exception error)
         {

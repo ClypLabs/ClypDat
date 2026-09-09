@@ -8,6 +8,21 @@ namespace ClypDat.App.Tests;
 public sealed class CaptureWorkerSaveProtocolTests
 {
     [Fact]
+    public void OverlaySettingsUseTypedProtocolPayload()
+    {
+        var payload = new OverlayCaptureSettings(
+            new OverlayCameraSelection("camera-1", "Facecam"), "QWERTY Full",
+            new OverlayTransform(.7, .05, .25), new OverlayTransform(.05, .70, .35));
+
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.DoesNotContain("settingsJson", json, StringComparison.Ordinal);
+        Assert.Contains("camera-1", json, StringComparison.Ordinal);
+        Assert.Equal(payload, JsonSerializer.Deserialize<OverlayCaptureSettings>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        Assert.Equal(5, CaptureWorkerProtocol.Version);
+    }
+
+    [Fact]
     public void AcknowledgementUsesExactLowerCamelNames()
     {
         var id = Guid.NewGuid();

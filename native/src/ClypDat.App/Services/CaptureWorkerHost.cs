@@ -2,9 +2,11 @@ using System.Diagnostics;
 using System.IO.Pipes;
 using System.Text.Json;
 using ClypDat.Capture.Abstractions;
-using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
+
+/// <summary>Attach applies this immutable selection before recorder creation.</summary>
+internal sealed record CaptureWorkerAttachRequest(ReplayBufferConfig Configuration, OverlayCaptureSettings? Overlays = null);
 
 internal static class CaptureWorkerHost
 {
@@ -36,7 +38,7 @@ internal static class CaptureWorkerHost
     private static DisplayAvailabilityMonitor? _displayAvailability;
     private static bool _captureRequested;
     private static bool _desktopAvailable = true;
-    private static VideoOverlayCaptureSettings _videoOverlays = VideoOverlayCaptureSettings.From(null);
+    private static OverlayCaptureSettings _videoOverlays = OverlayCaptureSettings.None;
 
     public static int Run()
     {
@@ -140,9 +142,8 @@ internal static class CaptureWorkerHost
                     await ReplyAsync(client, message, await ApplyAutoClipPolicyAsync(message.Payload, cancellationToken), cancellationToken);
                     break;
                 case "video-overlays":
-                    var overlayJson = message.Payload.GetProperty("settingsJson").GetString();
-                    _videoOverlays = VideoOverlayCaptureSettings.From(
-                        JsonSerializer.Deserialize<VideoOverlaySettings>(overlayJson ?? string.Empty, JsonOptions));
+                    _videoOverlays = message.Payload.Deserialize<OverlayCaptureSettings>(JsonOptions)
+                        ?? throw new InvalidDataException("Invalid overlay settings.");
                     if (_buffer is IVideoOverlaySettingsReceiver overlays)
                         overlays.SetVideoOverlaySettings(_videoOverlays);
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
@@ -183,7 +184,12 @@ internal static class CaptureWorkerHost
 
     private static async Task AttachAsync(Stream client, CaptureWorkerEnvelope message, CancellationToken cancellationToken)
     {
-        var config = message.Payload.Deserialize<ReplayBufferConfig>(JsonOptions) ?? throw new InvalidDataException("Invalid replay configuration.");
+        var request = message.Payload.Deserialize<CaptureWorkerAttachRequest>(JsonOptions)
+            ?? throw new InvalidDataException("Invalid capture attach request.");
+        var config = request.Configuration ?? throw new InvalidDataException("Invalid replay configuration.");
+        // Apply before creating/starting a recorder. A reconnect therefore
+        // cannot create a camera-less interval while its UI restores state.
+        if (request.Overlays is not null) _videoOverlays = request.Overlays;
         var configChanged = !string.Equals(ConfigIdentity(_config), ConfigIdentity(config), StringComparison.Ordinal);
         if (_buffer is not null && configChanged && !_buffer.IsRecording)
         {

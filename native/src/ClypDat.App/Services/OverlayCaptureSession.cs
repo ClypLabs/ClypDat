@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using ClypDat.Capture.Abstractions;
 using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
@@ -13,7 +14,7 @@ internal sealed class OverlayCaptureSession : IDisposable
     private const int SegmentSeconds = 2;
     private readonly object _gate = new();
     private readonly string _workRoot;
-    private VideoOverlayCaptureSettings _settings = VideoOverlayCaptureSettings.From(null);
+    private OverlayCaptureSettings _settings = OverlayCaptureSettings.None;
     private Process? _camera;
     private DateTime _cameraStartedUtc;
     private string? _cameraError;
@@ -21,7 +22,7 @@ internal sealed class OverlayCaptureSession : IDisposable
 
     public OverlayCaptureSession(string workRoot) => _workRoot = Path.Combine(workRoot, "overlays");
 
-    public void Apply(VideoOverlayCaptureSettings settings)
+    public void Apply(OverlayCaptureSettings settings)
     {
         lock (_gate)
         {
@@ -46,7 +47,7 @@ internal sealed class OverlayCaptureSession : IDisposable
         {
             if (_settings.Camera is not { } camera) return null;
             if (!_cameraReceivedFrames)
-                return new ClipOverlayLayer(camera.FriendlyName, false, InitialTransform: _settings.CameraTransform,
+                return new ClipOverlayLayer(camera.FriendlyName, false, InitialTransform: _settings.CameraTransform.ToPresentationTransform(),
                     Error: _cameraError ?? "Camera did not deliver frames while this clip recorded.");
 
             var files = Directory.Exists(_workRoot)
@@ -64,9 +65,9 @@ internal sealed class OverlayCaptureSession : IDisposable
                     Math.Max(0, (segmentStart - startUtc).TotalSeconds), Math.Min((endUtc - startUtc).TotalSeconds, (segmentEnd - startUtc).TotalSeconds)));
             }
             return assets.Count == 0
-                ? new ClipOverlayLayer(camera.FriendlyName, false, InitialTransform: _settings.CameraTransform,
+                ? new ClipOverlayLayer(camera.FriendlyName, false, InitialTransform: _settings.CameraTransform.ToPresentationTransform(),
                     Error: "Camera frames have not reached a completed capture segment yet.")
-                : new ClipOverlayLayer(camera.FriendlyName, true, Assets: assets, InitialTransform: _settings.CameraTransform);
+                : new ClipOverlayLayer(camera.FriendlyName, true, Assets: assets, InitialTransform: _settings.CameraTransform.ToPresentationTransform());
         }
     }
 
