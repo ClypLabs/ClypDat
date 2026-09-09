@@ -110,6 +110,34 @@ public sealed class SpotifyTimelineTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task CoverArchiveDeduplicatesAndMigratesLegacyReferences()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "spotify-cover-archive-" + Guid.NewGuid());
+        try
+        {
+            var first = await SpotifyCoverArtStore.ImportBytesAsync(root, new byte[] { 1, 2, 3 });
+            var second = await SpotifyCoverArtStore.ImportBytesAsync(root, new byte[] { 1, 2, 3 });
+            Assert.Equal(first, second);
+            Assert.Single(Directory.EnumerateFiles(SpotifyCoverArtStore.ArchiveRoot(root), "*.jpg"));
+
+            var clip = Path.Combine(root, "Clips", "Game", "clip.mp4");
+            var legacy = SpotifyCoverArtStore.PathFor(root, clip);
+            Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+            File.WriteAllBytes(legacy, new byte[] { 4, 5, 6 });
+            ClipInfoSidecar.Save(root, clip, new ClipInfo("game", null, SpotifyArtPath: legacy));
+            SpotifyTimelineSidecar.Save(root, clip, new[] { new SpotifyTimelineSample(0, "a", "A", null, null, null, null, true, legacy, true) });
+
+            SpotifyCoverArtStore.MigrateLibrary(root);
+            var migrated = ClipInfoSidecar.Load(root, clip)!;
+            Assert.NotEqual(legacy, migrated.SpotifyArtPath);
+            Assert.True(File.Exists(migrated.SpotifyArtPath));
+            Assert.Equal(migrated.SpotifyArtPath, SpotifyTimelineSidecar.Load(root, clip)!.Samples[0].ArtPath);
+            Assert.True(File.Exists(legacy));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData(0, 100, 0)]
     [InlineData(48, 0, 0)]

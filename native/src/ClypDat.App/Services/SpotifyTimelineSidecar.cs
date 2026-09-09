@@ -103,6 +103,8 @@ internal static class SpotifyTimelineSidecar
         foreach (var sample in timeline.Samples)
         {
             if (sample.ArtPath is not { } old || !File.Exists(old) || paths.ContainsKey(old)) continue;
+            if (old.StartsWith(SpotifyCoverArtStore.ArchiveRoot(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            { paths[old] = old; continue; }
             var target = Path.Combine(folder, Path.GetFileName(old));
             Directory.CreateDirectory(folder);
             if (!string.Equals(old, target, StringComparison.OrdinalIgnoreCase)) File.Copy(old, target, true);

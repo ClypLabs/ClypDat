@@ -65,6 +65,7 @@ public static class LibraryLayout
         Directory.CreateDirectory(VodsRoot(libraryRoot));
         EnsureClipInfoRoot(libraryRoot);
         ClipEditSidecar.MigrateLegacySidecars(libraryRoot);
+        SpotifyCoverArtStore.MigrateLibrary(libraryRoot);
     }
 
     public static void EnsureClipInfoRoot(string libraryRoot)
