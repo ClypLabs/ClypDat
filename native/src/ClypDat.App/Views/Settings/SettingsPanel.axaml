@@ -36,8 +36,9 @@
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Import Clips}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Import Clips}" Tag="Import Clips" Content="Import Clips" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Connected Accounts}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Connected Accounts}" Tag="Connected Accounts" Content="Connected Accounts" Click="SettingsNavButton_OnClick" />
 
-          <TextBlock Classes="settingsSectionLabel" Text="CAPTURE" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Replay Buffer|Custom Game Settings|Auto-Clip|Audio|Game Audio Exclusions'}" />
+          <TextBlock Classes="settingsSectionLabel" Text="CAPTURE" Margin="22,20,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Replay Buffer|Video Overlays|Custom Game Settings|Auto-Clip|Audio|Game Audio Exclusions'}" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Replay Buffer}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Replay Buffer}" Tag="Replay Buffer" Content="Replay Buffer" Click="SettingsNavButton_OnClick" />
+          <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Video Overlays}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='Video Overlays|Camera|Keyboard|Input'}" Tag="Video Overlays" Content="Video Overlays" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Custom Game Settings}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Custom Game Settings}" Tag="Custom Game Settings" Content="Custom Game Settings" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Auto-Clip}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Auto-Clip}" Tag="Auto-Clip" Content="Auto-Clipping" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Audio}" Tag="Audio" Content="Audio" Click="SettingsNavButton_OnClick" />
@@ -103,6 +104,7 @@
         <StackPanel Margin="36,28,36,40" Spacing="22">
 
           <settings:ReplayBufferSection />
+          <settings:VideoOverlaysSection />
           <settings:OverlaysSection />
           <settings:ThemesSection />
           <settings:DiscordRichPresenceSection />

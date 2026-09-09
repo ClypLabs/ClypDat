@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             x:Class="ClypDat.App.Views.Settings.VideoOverlaysSection"
+             x:DataType="vm:VideoOverlayViewModel"
+             IsVisible="False">
+  <StackPanel Spacing="18" Tag="Video Overlays">
+    <StackPanel Spacing="4">
+      <TextBlock Classes="settingsSectionTitle" Text="Video Overlays" />
+      <TextBlock Classes="settingsSectionDesc" Text="Add camera and input layers to new recordings. Source settings apply live without restarting replay capture." />
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
+    </StackPanel>
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="settingsCardLabel" Text="SOURCES" />
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="2"><TextBlock Classes="settingsRowTitle" Text="Video Overlays" /><TextBlock Classes="settingsRowDescSm" Text="Burn selected camera and input into replay clips and full-session recordings." /></StackPanel>
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding Enabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto"><TextBlock Classes="settingsRowTitleSm" Text="Include virtual cameras" /><ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludeVirtualCameras}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><StackPanel><TextBlock Classes="settingsRowTitleSm" Text="Camera" /><TextBlock Classes="settingsRowDescSm" Text="No camera audio is recorded." /></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><ComboBox Classes="settingsInput" Width="220" ItemsSource="{Binding Cameras}" SelectedItem="{Binding SelectedCamera}" /><Button Content="Refresh" Click="Refresh_OnClick" /></StackPanel></Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10"><TextBlock Classes="settingsRowTitleSm" Text="Keyboard / input" VerticalAlignment="Center" /><ComboBox Grid.Column="1" Classes="settingsInput" Width="220" ItemsSource="{Binding KeyboardLayouts}" SelectedItem="{Binding SelectedKeyboardLayout}" /></Grid>
+        <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto"><StackPanel><TextBlock Classes="settingsCardLabel" Text="PREVIEW LAYOUT" /><TextBlock Classes="settingsRowDescSm" Text="Preview uses recording aspect ratio (16:9 until capture dimensions are known)." /></StackPanel><Button Grid.Column="1" Content="{Binding PreviewButtonText}" Click="Preview_OnClick" /></Grid>
+        <Border Height="260" Background="#FF20252C" CornerRadius="6" IsVisible="{Binding PreviewVisible}">
+          <Grid><TextBlock Text="Live source preview opens when camera capture is available." HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource TextSubtleBrush}" /><Border Width="150" Height="84" Background="#99000000" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="14" /><Border Width="170" Height="70" Background="#99000000" BorderBrush="{StaticResource AccentBrush}" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="14" /></Grid>
+        </Border>
+        <WrapPanel><Button Margin="0,0,8,0" Tag="Top Left" Content="Top left" Click="CameraCorner_OnClick" /><Button Margin="0,0,8,0" Tag="Top Right" Content="Top right" Click="CameraCorner_OnClick" /><Button Margin="0,0,8,0" Tag="Bottom Left" Content="Bottom left" Click="CameraCorner_OnClick" /><Button Tag="Bottom Right" Content="Bottom right" Click="CameraCorner_OnClick" /></WrapPanel>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>
