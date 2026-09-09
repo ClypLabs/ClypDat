@@ -6,9 +6,9 @@ namespace ClypDat.App.Tests;
 public sealed class ClipRenderFiltersTests
 {
     [Fact]
-    public void EditorOffersSlowAndFastSpeedPresets()
+    public void EditorOffersSupportedSpeedPresets()
     {
-        Assert.Equal(new[] { 0.25, 0.5, 1.0, 1.5, 2.0, 4.0 }, ClipRenderFilters.SpeedPresets);
+        Assert.Equal(new[] { 1.0, 1.5, 2.0, 4.0 }, ClipRenderFilters.SpeedPresets);
     }
 
     [Theory]
