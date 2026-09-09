@@ -50,6 +50,23 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     public OverlaySourceOption? BottomLeftSource { get => SourceAt("Bottom Left"); set => SetSource("Bottom Left", value); }
     public OverlaySourceOption? BottomRightSource { get => SourceAt("Bottom Right"); set => SetSource("Bottom Right", value); }
 
+    // Each corner card draws a mock of what that corner will actually burn in -
+    // a camera tile, a keyboard and mouse, or an empty slot - so the card is
+    // readable without reading its dropdown. The kind is the whole answer, and
+    // a corner with no source at all reads as empty rather than as nothing.
+    public bool TopLeftIsCamera => KindAt("Top Left") == OverlaySourceKind.Camera;
+    public bool TopLeftIsKeyboard => KindAt("Top Left") == OverlaySourceKind.Keyboard;
+    public bool TopLeftIsEmpty => KindAt("Top Left") == OverlaySourceKind.None;
+    public bool TopRightIsCamera => KindAt("Top Right") == OverlaySourceKind.Camera;
+    public bool TopRightIsKeyboard => KindAt("Top Right") == OverlaySourceKind.Keyboard;
+    public bool TopRightIsEmpty => KindAt("Top Right") == OverlaySourceKind.None;
+    public bool BottomLeftIsCamera => KindAt("Bottom Left") == OverlaySourceKind.Camera;
+    public bool BottomLeftIsKeyboard => KindAt("Bottom Left") == OverlaySourceKind.Keyboard;
+    public bool BottomLeftIsEmpty => KindAt("Bottom Left") == OverlaySourceKind.None;
+    public bool BottomRightIsCamera => KindAt("Bottom Right") == OverlaySourceKind.Camera;
+    public bool BottomRightIsKeyboard => KindAt("Bottom Right") == OverlaySourceKind.Keyboard;
+    public bool BottomRightIsEmpty => KindAt("Bottom Right") == OverlaySourceKind.None;
+
     public void ClosePreview() => DeselectLayer();
     public void DeselectLayer() { _selectedLayer = null; NotifyLayout(); }
     public void SetPreviewSize(double width, double height) { if (width <= 0 || height <= 0) return; _previewWidth = width; _previewHeight = height; NotifyLayout(); }
@@ -141,15 +158,16 @@ public sealed class VideoOverlayViewModel : ViewModelBase
             ("Arrow Keys + Mouse", "Arrows"),
             ("AZERTY Keyboard + Mouse (Compact)", "AZERTY Compact") })
             Sources.Add(new(name, value, OverlaySourceKind.Keyboard));
-        OnPropertyChanged(nameof(TopLeftSource)); OnPropertyChanged(nameof(TopRightSource)); OnPropertyChanged(nameof(BottomLeftSource)); OnPropertyChanged(nameof(BottomRightSource));
+        NotifyLayout();
     }
+    private OverlaySourceKind KindAt(string corner) => SourceAt(corner)?.Kind ?? OverlaySourceKind.None;
     private double SourceAspect(string layer) => layer == "Camera" ? VideoOverlayLayout.CameraAspectRatio : 2.4;
     private double NormalizedAspect(string layer) => SourceAspect(layer) / (_previewWidth / _previewHeight);
     private static bool AtAnchor(VideoOverlayTransform transform, string? corner, double aspect) { if (corner is null) return false; var anchor = VideoOverlayLayout.Corner(corner, transform.Width, aspect); return Math.Abs(transform.X - anchor.X) < .002 && Math.Abs(transform.Y - anchor.Y) < .002; }
     private void Save() { _save(); _apply?.Invoke(); }
     private void NotifyLayout()
     {
-        foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(CameraSelected), nameof(KeyboardSelected), nameof(IsPositioning), nameof(ShowPickers), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource) }) OnPropertyChanged(name);
+        foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(CameraSelected), nameof(KeyboardSelected), nameof(IsPositioning), nameof(ShowPickers), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource), nameof(TopLeftIsCamera), nameof(TopLeftIsKeyboard), nameof(TopLeftIsEmpty), nameof(TopRightIsCamera), nameof(TopRightIsKeyboard), nameof(TopRightIsEmpty), nameof(BottomLeftIsCamera), nameof(BottomLeftIsKeyboard), nameof(BottomLeftIsEmpty), nameof(BottomRightIsCamera), nameof(BottomRightIsKeyboard), nameof(BottomRightIsEmpty) }) OnPropertyChanged(name);
     }
     private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}."; }
 }

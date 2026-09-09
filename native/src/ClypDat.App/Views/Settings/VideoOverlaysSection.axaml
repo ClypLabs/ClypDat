@@ -4,6 +4,56 @@
              x:Class="ClypDat.App.Views.Settings.VideoOverlaysSection"
              x:DataType="vm:VideoOverlayViewModel"
              IsVisible="False" Focusable="True" KeyDown="Section_OnKeyDown">
+  <UserControl.Resources>
+    <!-- What a corner will actually burn in, drawn once and shared by the four
+         corner cards. Every corner used to draw the same generic key grid with
+         the source name printed across it, so an empty corner looked like a
+         keyboard and the name was unreadable over the keycaps. -->
+    <DataTemplate x:Key="VideoOverlayEmptyMock">
+      <Grid Margin="9,8">
+        <Rectangle Classes="videoOverlayEmptyMock" />
+        <TextBlock Classes="videoOverlayEmptyLabel" Text="Empty" HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Grid>
+    </DataTemplate>
+    <DataTemplate x:Key="VideoOverlayCameraMock">
+      <Border Classes="videoOverlayCameraMock">
+        <Ellipse Classes="videoOverlayLensMock" />
+      </Border>
+    </DataTemplate>
+    <DataTemplate x:Key="VideoOverlayKeyboardMock">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="5" Margin="9,8">
+        <UniformGrid Rows="3" Columns="8">
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+          <Border Classes="videoOverlayKeyMock" />
+        </UniformGrid>
+        <Border Grid.Column="1" Classes="videoOverlayMouseMock">
+          <Border Classes="videoOverlayMouseWheelMock" />
+        </Border>
+      </Grid>
+    </DataTemplate>
+  </UserControl.Resources>
   <StackPanel Spacing="18" Tag="Video Overlays">
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Video Overlays" />
@@ -26,8 +76,15 @@
         <Border Classes="settingsDivider" />
         <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" TextWrapping="Wrap" />
         <TextBlock Classes="settingsCardLabel" Margin="0,6,0,0" Text="VIDEO OVERLAY PREVIEW" />
-        <Viewbox Stretch="Uniform" HorizontalAlignment="Stretch">
-          <Border Classes="videoOverlayCanvas" Width="960" Height="540">
+        <!-- The canvas is scaled art; the corner cards are chrome. They used to
+             share one Viewbox, so a 13px label and a 38px dropdown were blown up
+             with the canvas, and the canvas itself grew to whatever width the
+             settings page had - 880px of empty preview on a wide window. The
+             canvas is capped and centred, and the cards are laid over it at
+             their own pixel size. -->
+        <Grid HorizontalAlignment="Center" MaxWidth="720">
+          <Viewbox Stretch="Uniform">
+            <Border Classes="videoOverlayCanvas" Width="960" Height="540">
             <Grid ClipToBounds="True">
               <Border Background="#FF101923" />
               <Canvas Name="PreviewCanvas" Background="Transparent" PointerPressed="PreviewCanvas_OnPointerPressed" PointerMoved="PreviewCanvas_OnPointerMoved" PointerReleased="PreviewCanvas_OnPointerReleased" PointerCaptureLost="PreviewCanvas_OnPointerCaptureLost">
@@ -38,17 +95,64 @@
                   <Grid><Border Background="#FF18212B" /><UniformGrid Rows="2" Columns="9" Margin="14" IsHitTestVisible="False"><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /><Border Background="#FF354454" Margin="3" /></UniformGrid><Border Classes="videoOverlaySelection" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding KeyboardSelected}" /></Grid>
                 </Border>
               </Canvas>
-              <Grid x:Name="WidePickers" Margin="18" IsVisible="{Binding ShowPickers}">
-                <Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto">
-                  <Border Classes="videoOverlayPicker" Width="220" Height="124" VerticalAlignment="Top"><StackPanel Spacing="5"><TextBlock Text="Top left" Classes="settingsRowTitleSm" /><Border Classes="videoOverlayPickerPreview" Tag="Top Left" PointerPressed="PickerPreview_OnPointerPressed"><Grid><UniformGrid Rows="2" Columns="8" Margin="8" IsHitTestVisible="False"><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/></UniformGrid><TextBlock Text="{Binding TopLeftSource}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10"/></Grid></Border><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopLeftSource}" /></StackPanel></Border>
-                  <Border Grid.Column="2" Classes="videoOverlayPicker" Width="220" Height="124" VerticalAlignment="Top"><StackPanel Spacing="5"><TextBlock Text="Top right" Classes="settingsRowTitleSm" /><Border Classes="videoOverlayPickerPreview" Tag="Top Right" PointerPressed="PickerPreview_OnPointerPressed"><Grid><UniformGrid Rows="2" Columns="8" Margin="8" IsHitTestVisible="False"><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/></UniformGrid><TextBlock Text="{Binding TopRightSource}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10"/></Grid></Border><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopRightSource}" /></StackPanel></Border>
-                  <Border Grid.Row="2" Classes="videoOverlayPicker" Width="220" Height="124" VerticalAlignment="Bottom"><StackPanel Spacing="5"><TextBlock Text="Bottom left" Classes="settingsRowTitleSm" /><Border Classes="videoOverlayPickerPreview" Tag="Bottom Left" PointerPressed="PickerPreview_OnPointerPressed"><Grid><UniformGrid Rows="2" Columns="8" Margin="8" IsHitTestVisible="False"><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/></UniformGrid><TextBlock Text="{Binding BottomLeftSource}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10"/></Grid></Border><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel></Border>
-                  <Border Grid.Row="2" Grid.Column="2" Classes="videoOverlayPicker" Width="220" Height="124" VerticalAlignment="Bottom"><StackPanel Spacing="5"><TextBlock Text="Bottom right" Classes="settingsRowTitleSm" /><Border Classes="videoOverlayPickerPreview" Tag="Bottom Right" PointerPressed="PickerPreview_OnPointerPressed"><Grid><UniformGrid Rows="2" Columns="8" Margin="8" IsHitTestVisible="False"><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/><Border/></UniformGrid><TextBlock Text="{Binding BottomRightSource}" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10"/></Grid></Border><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomRightSource}" /></StackPanel></Border>
-                </Grid>
-              </Grid>
             </Grid>
-          </Border>
-        </Viewbox>
+            </Border>
+          </Viewbox>
+          <Grid x:Name="WidePickers" Margin="14" IsVisible="{Binding ShowPickers}" RowDefinitions="Auto,*,Auto" ColumnDefinitions="Auto,*,Auto">
+            <Border Classes="videoOverlayPicker" VerticalAlignment="Top">
+              <StackPanel Spacing="7">
+                <TextBlock Classes="videoOverlayPickerLabel" Text="TOP LEFT" />
+                <Border Classes="videoOverlayPickerPreview" Tag="Top Left" PointerPressed="PickerPreview_OnPointerPressed">
+                  <Panel>
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayEmptyMock}" IsVisible="{Binding TopLeftIsEmpty}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayCameraMock}" IsVisible="{Binding TopLeftIsCamera}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayKeyboardMock}" IsVisible="{Binding TopLeftIsKeyboard}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                  </Panel>
+                </Border>
+                <ComboBox Classes="settingsInput compact" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopLeftSource}" ToolTip.Tip="{Binding TopLeftSource}" />
+              </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Classes="videoOverlayPicker" VerticalAlignment="Top">
+              <StackPanel Spacing="7">
+                <TextBlock Classes="videoOverlayPickerLabel" Text="TOP RIGHT" />
+                <Border Classes="videoOverlayPickerPreview" Tag="Top Right" PointerPressed="PickerPreview_OnPointerPressed">
+                  <Panel>
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayEmptyMock}" IsVisible="{Binding TopRightIsEmpty}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayCameraMock}" IsVisible="{Binding TopRightIsCamera}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayKeyboardMock}" IsVisible="{Binding TopRightIsKeyboard}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                  </Panel>
+                </Border>
+                <ComboBox Classes="settingsInput compact" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopRightSource}" ToolTip.Tip="{Binding TopRightSource}" />
+              </StackPanel>
+            </Border>
+            <Border Grid.Row="2" Classes="videoOverlayPicker" VerticalAlignment="Bottom">
+              <StackPanel Spacing="7">
+                <TextBlock Classes="videoOverlayPickerLabel" Text="BOTTOM LEFT" />
+                <Border Classes="videoOverlayPickerPreview" Tag="Bottom Left" PointerPressed="PickerPreview_OnPointerPressed">
+                  <Panel>
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayEmptyMock}" IsVisible="{Binding BottomLeftIsEmpty}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayCameraMock}" IsVisible="{Binding BottomLeftIsCamera}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayKeyboardMock}" IsVisible="{Binding BottomLeftIsKeyboard}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                  </Panel>
+                </Border>
+                <ComboBox Classes="settingsInput compact" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomLeftSource}" ToolTip.Tip="{Binding BottomLeftSource}" />
+              </StackPanel>
+            </Border>
+            <Border Grid.Row="2" Grid.Column="2" Classes="videoOverlayPicker" VerticalAlignment="Bottom">
+              <StackPanel Spacing="7">
+                <TextBlock Classes="videoOverlayPickerLabel" Text="BOTTOM RIGHT" />
+                <Border Classes="videoOverlayPickerPreview" Tag="Bottom Right" PointerPressed="PickerPreview_OnPointerPressed">
+                  <Panel>
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayEmptyMock}" IsVisible="{Binding BottomRightIsEmpty}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayCameraMock}" IsVisible="{Binding BottomRightIsCamera}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                    <ContentControl Content="{Binding}" ContentTemplate="{StaticResource VideoOverlayKeyboardMock}" IsVisible="{Binding BottomRightIsKeyboard}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                  </Panel>
+                </Border>
+                <ComboBox Classes="settingsInput compact" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomRightSource}" ToolTip.Tip="{Binding BottomRightSource}" />
+              </StackPanel>
+            </Border>
+          </Grid>
+        </Grid>
         <Grid x:Name="NarrowPickers" IsVisible="False" IsEnabled="{Binding ShowPickers}" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
           <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopLeftSource}" /></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding TopRightSource}" /></StackPanel><StackPanel Grid.Row="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel><StackPanel Grid.Row="1" Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput" ItemsSource="{Binding Sources}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
         </Grid>

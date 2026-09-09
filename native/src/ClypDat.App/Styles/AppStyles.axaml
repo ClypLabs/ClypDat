@@ -1227,6 +1227,16 @@
   <Style Selector="ComboBox.settingsInput">
     <Setter Property="VerticalContentAlignment" Value="Center" />
   </Style>
+  <!-- The video overlay corner pickers carry a source dropdown inside a 196px
+       card floating over the preview, where the full 38px settings field
+       swallowed the card. Same field, one step down. -->
+  <Style Selector="ComboBox.settingsInput.compact">
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+  </Style>
   <!-- The app's search boxes borrow settingsInput's behaviour but not its
        proportions. A settings field is a 42px form control on a page of form
        controls; the same thing used as a search box reads as a form pasted over
@@ -2727,27 +2737,89 @@
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ClipToBounds" Value="True" />
   </Style>
+  <!-- The four corner pickers that float over the overlay preview. They used to
+       live inside the preview's Viewbox, so a 13px label rendered at whatever
+       the canvas happened to be scaled to, and a fixed card height cut the
+       ComboBox off below the card's own border. They are chrome now: fixed
+       pixel size, sized by their content, laid over the scaled canvas. -->
   <Style Selector="Border.videoOverlayPicker">
-    <Setter Property="Background" Value="#E61A2631" />
-    <Setter Property="BorderBrush" Value="{DynamicResource EdgeBrush}" />
+    <Setter Property="Background" Value="#F2161F29" />
+    <Setter Property="BorderBrush" Value="#33FFFFFF" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="9" />
-    <Setter Property="Padding" Value="12" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="10" />
+    <Setter Property="Width" Value="196" />
+    <Setter Property="BoxShadow" Value="0 8 22 0 #73000000" />
+  </Style>
+  <Style Selector="TextBlock.videoOverlayPickerLabel">
+    <Setter Property="Foreground" Value="{DynamicResource LabelBrush}" />
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="0.7" />
   </Style>
   <Style Selector="Border.videoOverlayPickerPreview">
     <Setter Property="Height" Value="54" />
-    <Setter Property="Background" Value="#FF101923" />
-    <Setter Property="BorderBrush" Value="#FF536575" />
+    <Setter Property="Background" Value="#FF0D141C" />
+    <Setter Property="BorderBrush" Value="#26FFFFFF" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="Cursor" Value="Hand" />
   </Style>
-  <Style Selector="Border.videoOverlayPickerPreview UniformGrid Border">
-    <Setter Property="Background" Value="#FF243746" />
-    <Setter Property="BorderBrush" Value="#FFE6EEF5" />
-    <Setter Property="BorderThickness" Value=".5" />
-    <Setter Property="Margin" Value="1" />
+  <Style Selector="Border.videoOverlayPickerPreview:pointerover">
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+  </Style>
+  <!-- The mock keycaps. The old ones were #FF243746 fills outlined in near
+       white, which read as a grid of lit buttons rather than a keyboard at
+       thumbnail size. Fill only, one shade off the tile. -->
+  <Style Selector="Border.videoOverlayKeyMock">
+    <Setter Property="Background" Value="#FF2E3E4D" />
+    <Setter Property="Margin" Value="1.5" />
+    <Setter Property="CornerRadius" Value="1.5" />
+  </Style>
+  <Style Selector="Border.videoOverlayMouseMock">
+    <Setter Property="Width" Value="13" />
+    <Setter Property="Background" Value="#FF2E3E4D" />
+    <Setter Property="CornerRadius" Value="6,6,5,5" />
+    <Setter Property="Margin" Value="1.5" />
+  </Style>
+  <Style Selector="Border.videoOverlayMouseWheelMock">
+    <Setter Property="Width" Value="1.5" />
+    <Setter Property="Height" Value="5" />
+    <Setter Property="Margin" Value="0,4,0,0" />
+    <Setter Property="Background" Value="#FF57697C" />
     <Setter Property="CornerRadius" Value="1" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+  </Style>
+  <Style Selector="Border.videoOverlayCameraMock">
+    <Setter Property="Width" Value="52" />
+    <Setter Property="Background" Value="#FF243746" />
+    <Setter Property="BorderBrush" Value="#40FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Margin" Value="0,7" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Ellipse.videoOverlayLensMock">
+    <Setter Property="Width" Value="16" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="Fill" Value="#FF0D141C" />
+    <Setter Property="Stroke" Value="#59FFFFFF" />
+    <Setter Property="StrokeThickness" Value="1.5" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Rectangle.videoOverlayEmptyMock">
+    <Setter Property="Stroke" Value="#30FFFFFF" />
+    <Setter Property="StrokeThickness" Value="1" />
+    <Setter Property="StrokeDashArray" Value="4,3" />
+    <Setter Property="RadiusX" Value="4" />
+    <Setter Property="RadiusY" Value="4" />
+  </Style>
+  <Style Selector="TextBlock.videoOverlayEmptyLabel">
+    <Setter Property="Foreground" Value="{DynamicResource LabelBrush}" />
+    <Setter Property="FontSize" Value="11" />
   </Style>
   <Style Selector="Border.videoOverlaySelection">
     <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
