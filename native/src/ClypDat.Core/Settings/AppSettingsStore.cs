@@ -126,6 +126,7 @@ public static class AppSettingsStore
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
             settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();
+            settings.VideoOverlays ??= new VideoOverlaySettings();
             foreach (var game in settings.GameCaptureOverrides)
             {
                 // Older settings had no origin. A display name meant user

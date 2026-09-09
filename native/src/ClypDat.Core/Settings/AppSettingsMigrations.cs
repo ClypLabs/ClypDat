@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
 
     public static bool Apply(AppSettings settings)
     {
@@ -60,6 +60,14 @@ public static class AppSettingsMigrations
             settings.MicrophoneDeviceId = "default";
         }
 
+        if (settings.SettingsSchemaVersion < 8)
+        {
+            // New source is deliberately opt-in. Existing recordings stay
+            // byte-for-byte unchanged until a user enables it.
+            settings.VideoOverlays ??= new VideoOverlaySettings();
+            settings.VideoOverlays.Enabled = false;
+        }
+
         settings.CustomThemes ??= new();
         settings.RecentThemeColors ??= new();
         settings.CustomThemes.RemoveAll(theme => string.IsNullOrWhiteSpace(theme.Id) ||
@@ -68,6 +76,11 @@ public static class AppSettingsMigrations
         settings.RecentThemeColors = settings.RecentThemeColors.Where(CustomThemeLibrary.IsColor)
             .Select(color => color.ToUpperInvariant()).Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(CustomThemeLibrary.RecentColorLimit).ToList();
+        settings.VideoOverlays ??= new VideoOverlaySettings();
+        settings.VideoOverlays.KeyboardLayout = settings.VideoOverlays.KeyboardLayout is "QWERTY Compact" or "QWERTY Full" or "Arrows" or "AZERTY Compact"
+            ? settings.VideoOverlays.KeyboardLayout : "QWERTY Compact";
+        settings.VideoOverlays.CameraTransform = VideoOverlayLayout.Normalize(settings.VideoOverlays.CameraTransform, VideoOverlayLayout.CameraAspectRatio);
+        settings.VideoOverlays.KeyboardTransform = VideoOverlayLayout.Normalize(settings.VideoOverlays.KeyboardTransform, 2.4);
 
         settings.SettingsSchemaVersion = CurrentSchemaVersion;
         return true;

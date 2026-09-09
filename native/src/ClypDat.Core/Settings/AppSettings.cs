@@ -246,6 +246,9 @@ public sealed class AppSettings
     /// overlay layer; Export and Share composite it into their output.
     /// </summary>
     public bool SpotifyOverlayBurnIn { get; set; }
+    // Video overlays are burnt into replay and full-session video by the
+    // recorder. Disabled default preserves old capture behaviour.
+    public VideoOverlaySettings VideoOverlays { get; set; } = new();
     // Separate from EnableClipOverlay - "clipping started" is a distinct
     // notification kind (fires when the buffer actually starts recording a
     // detected game) from the clip-saved family, and a user may want one
