@@ -6,6 +6,7 @@ namespace ClypDat.Capture.Abstractions;
 
 public static class CaptureWorkerProtocol
 {
+    // 8 records camera at its negotiated cadence and requires raw input history.
     // 7 adds timestamped input-history indexes and camera segment acquisition
     // timing.  6 already shipped, so this must reject mixed worker installs.
     // 6 makes overlay capture timing use the retained media window, rather
@@ -16,7 +17,7 @@ public static class CaptureWorkerProtocol
     // start intent without claiming that recording is active. A worker left over from an
     // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
     // the proxy's read loop already routes into recovery.
-    public const int Version = 7;
+    public const int Version = 8;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 

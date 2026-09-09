@@ -47,6 +47,10 @@ internal sealed class RawInputRecorder : IDisposable
     {
         lock (_gate)
         {
+            // A worker can save before its input thread has attached.  An empty
+            // list is not evidence of an idle keyboard in that case.
+            if (!_started)
+                return new InputCaptureIndex(1, "Keyboard input was not recorded.", [], []);
             CheckpointUnderLock(endUtc);
             var transitions = _transitions.Where(x => x.Utc >= startUtc && x.Utc <= endUtc).ToArray();
             var checkpoints = _checkpoints.Where(x => x.Utc >= startUtc && x.Utc <= endUtc).ToArray();
