@@ -46,6 +46,8 @@ public sealed class GpuSchedulingTests
     public void RecorderUsesDistinctAppHostWhenPackaged()
     {
         const string app = @"C:\ClypDat\ClypDat.exe";
-        Assert.Equal(app, CaptureWorkerExecutable.Resolve(app));
+        Assert.Equal(@"C:\ClypDat\ClypDatRecorder.exe",
+            CaptureWorkerExecutable.Resolve(app, path => path.EndsWith(CaptureWorkerExecutable.FileName, StringComparison.Ordinal)));
+        Assert.Equal(app, CaptureWorkerExecutable.Resolve(app, _ => false));
     }
 }
