@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:ClypDat.App.ViewModels"
+        xmlns:controls="using:ClypDat.App.Controls"
         x:Class="ClypDat.App.Views.Settings.VideoOverlayDialog"
         x:DataType="vm:VideoOverlayViewModel"
         Title="Video overlays"
@@ -51,7 +52,7 @@
               <Border Background="{StaticResource AccentBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75" HorizontalAlignment="Center" VerticalAlignment="Center" />
               <Canvas Name="PreviewCanvas" Background="Transparent" PointerMoved="PreviewCanvas_OnPointerMoved" PointerReleased="PreviewCanvas_OnPointerReleased" PointerCaptureLost="PreviewCanvas_OnPointerCaptureLost">
                 <Border Name="CameraLayer" Classes="videoOverlayLayer" Canvas.Left="{Binding CameraLeft}" Canvas.Top="{Binding CameraTop}" Width="{Binding CameraWidth}" Height="{Binding CameraHeight}" IsVisible="{Binding HasCamera}" PointerPressed="Layer_OnPointerPressed" Tag="Camera">
-                  <Grid><Border Background="#55000000" /><TextBlock Text="CAMERA" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /><Border Classes="videoOverlaySelection" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding CameraSelected}" /></Grid>
+                  <Grid><controls:CameraPreviewControl /><Border Classes="videoOverlaySelection" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /></Grid>
                 </Border>
                 <Border Name="KeyboardLayer" Classes="videoOverlayLayer" Canvas.Left="{Binding KeyboardLeft}" Canvas.Top="{Binding KeyboardTop}" Width="{Binding KeyboardWidth}" Height="{Binding KeyboardHeight}" IsVisible="{Binding HasKeyboard}" PointerPressed="Layer_OnPointerPressed" Tag="Keyboard">
                   <Grid><Border Background="#55141822" /><TextBlock Text="KEYBOARD / INPUT" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" /><Border Classes="videoOverlaySelection" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding KeyboardSelected}" /></Grid>

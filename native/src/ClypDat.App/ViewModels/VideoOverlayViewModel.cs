@@ -1,11 +1,16 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Text;
+using Avalonia;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
+using Avalonia.Threading;
+using ClypDat.App.Services;
 using ClypDat.Core.Settings;
 
 namespace ClypDat.App.ViewModels;
 
-public sealed class VideoOverlayViewModel : ViewModelBase
+public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
 {
     private readonly VideoOverlaySettings _settings;
     private readonly Action _save;
@@ -15,10 +20,21 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     private double _previewWidth = 640, _previewHeight = 360;
     private CancellationTokenSource? _refreshCancellation;
     private int _refreshGeneration;
+    private readonly ICameraPreviewService _cameraPreview;
+    private WriteableBitmap? _cameraPreviewImage;
+    private string? _cameraPreviewError;
+    private bool _cameraPreviewLoading;
+    private int _pendingPreviewFrame;
 
     public VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply = null)
+        : this(settings, save, apply, new CameraPreviewService()) { }
+
+    internal VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply, ICameraPreviewService cameraPreview)
     {
         _settings = settings; _save = save; _apply = apply;
+        _cameraPreview = cameraPreview;
+        _cameraPreview.FrameReady += CameraPreview_FrameReady;
+        _cameraPreview.Failed += CameraPreview_Failed;
         Cameras = new() { CameraOption.None }; Sources = new(); RebuildSources();
         _ = RefreshCamerasAsync(); UpdateStatus();
     }
@@ -34,7 +50,13 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     public bool CameraSelected => _selectedLayer == "Camera";
     public bool KeyboardSelected => _selectedLayer == "Keyboard";
     public bool IsPositioning => _selectedLayer is not null;
-    public bool ShowPickers => !IsPositioning;
+    public bool ShowPickers => true;
+    public Bitmap? CameraPreviewImage => _cameraPreviewImage;
+    public string CameraPreviewError { get => _cameraPreviewError ?? string.Empty; private set => SetProperty(ref _cameraPreviewError, value); }
+    public bool CameraPreviewLoading { get => _cameraPreviewLoading; private set => SetProperty(ref _cameraPreviewLoading, value); }
+    public bool CameraPreviewActive => _cameraPreviewImage is not null && _cameraPreview.IsRunning;
+    public bool CameraPreviewIdle => !CameraPreviewLoading && !CameraPreviewActive && string.IsNullOrEmpty(CameraPreviewError);
+    public bool CameraPreviewFailed => !string.IsNullOrEmpty(CameraPreviewError);
     public bool CameraCustomPosition => HasCamera && !AtAnchor(_settings.CameraTransform, _settings.CameraAnchor, NormalizedAspect("Camera"));
     public bool KeyboardCustomPosition => HasKeyboard && !AtAnchor(_settings.KeyboardTransform, _settings.KeyboardAnchor, NormalizedAspect("Keyboard"));
     public string CameraPositionHint => CameraCustomPosition ? "Custom position" : _settings.CameraAnchor ?? string.Empty;
@@ -69,10 +91,22 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     public bool BottomRightIsKeyboard => KindAt("Bottom Right") == OverlaySourceKind.Keyboard;
     public bool BottomRightIsEmpty => KindAt("Bottom Right") == OverlaySourceKind.None;
 
-    public void ClosePreview() => DeselectLayer();
+    public void ClosePreview() { StopCameraPreview(); DeselectLayer(); }
     public void DeselectLayer() { _selectedLayer = null; NotifyLayout(); }
     public void SetPreviewSize(double width, double height) { if (width <= 0 || height <= 0) return; _previewWidth = width; _previewHeight = height; NotifyLayout(); }
     public void SelectLayer(string layer) { _selectedLayer = layer; NotifyLayout(); }
+    public void StartCameraPreview()
+    {
+        if (_settings.Camera is not { } camera) return;
+        StopCameraPreview(); CameraPreviewError = string.Empty; CameraPreviewLoading = true; NotifyPreview();
+        _cameraPreview.Start(camera.DeviceMoniker);
+    }
+    public void StopCameraPreview()
+    {
+        _cameraPreview.Stop(); CameraPreviewLoading = false;
+        if (_cameraPreviewImage is not null) { _cameraPreviewImage.Dispose(); _cameraPreviewImage = null; }
+        NotifyPreview();
+    }
     public void Manipulate(string layer, VideoOverlayManipulationMode mode, double deltaX, double deltaY)
     {
         var current = layer == "Camera" ? _settings.CameraTransform : _settings.KeyboardTransform;
@@ -104,7 +138,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
         }
         catch (OperationCanceledException) { return; }
         if (generation != _refreshGeneration || cancellation.IsCancellationRequested) return;
-        Cameras.Clear(); Cameras.Add(CameraOption.None); foreach (var camera in cameras) Cameras.Add(camera);
+        ReconcileCameras(cameras);
         RepairSavedElgatoVirtualCamera(cameras);
         // Device disappearance is transient. Keep selection and transform so it
         // returns in same place when USB camera reconnects.
@@ -132,11 +166,12 @@ public sealed class VideoOverlayViewModel : ViewModelBase
         if (source is null || !source.IsSelectable) return;
         if (source.Kind == OverlaySourceKind.None)
         {
-            if (_settings.CameraAnchor == corner) { _settings.Camera = null; _settings.CameraAnchor = null; }
+            if (_settings.CameraAnchor == corner) { StopCameraPreview(); _settings.Camera = null; _settings.CameraAnchor = null; }
             if (_settings.KeyboardAnchor == corner) { _settings.KeyboardLayout = "None"; _settings.KeyboardAnchor = null; }
         }
         else if (source.Kind == OverlaySourceKind.Camera)
         {
+            if (_settings.Camera?.DeviceMoniker != source.Value) StopCameraPreview();
             if (_settings.KeyboardAnchor == corner) { _settings.KeyboardLayout = "None"; _settings.KeyboardAnchor = null; }
             _settings.Camera = new(source.Value, source.Name);
             _settings.CameraAnchor = corner;
@@ -145,7 +180,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase
         }
         else
         {
-            if (_settings.CameraAnchor == corner) { _settings.Camera = null; _settings.CameraAnchor = null; }
+            if (_settings.CameraAnchor == corner) { StopCameraPreview(); _settings.Camera = null; _settings.CameraAnchor = null; }
             _settings.KeyboardLayout = source.Value;
             _settings.KeyboardAnchor = corner;
             _settings.KeyboardTransform = VideoOverlayLayout.Corner(corner, .25, NormalizedAspect("Keyboard"));
@@ -155,9 +190,24 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     }
     private void RebuildSources()
     {
-        Sources.Clear();
-        foreach (var source in OverlaySourceOptions.Create(Cameras)) Sources.Add(source);
+        var next = OverlaySourceOptions.Create(Cameras).ToArray();
+        for (var index = Sources.Count - 1; index >= 0; index--) if (!next.Contains(Sources[index])) Sources.RemoveAt(index);
+        for (var index = 0; index < next.Length; index++) {
+            if (index < Sources.Count && Sources[index] == next[index]) continue;
+            var existing = Sources.IndexOf(next[index]);
+            if (existing >= 0) Sources.Move(existing, index); else Sources.Insert(index, next[index]);
+        }
         NotifyLayout();
+    }
+    private void ReconcileCameras(IReadOnlyList<CameraOption> cameras)
+    {
+        var next = new[] { CameraOption.None }.Concat(cameras).ToArray();
+        for (var index = Cameras.Count - 1; index >= 0; index--) if (!next.Contains(Cameras[index])) Cameras.RemoveAt(index);
+        for (var index = 0; index < next.Length; index++) {
+            if (index < Cameras.Count && Cameras[index] == next[index]) continue;
+            var existing = Cameras.IndexOf(next[index]);
+            if (existing >= 0) Cameras.Move(existing, index); else Cameras.Insert(index, next[index]);
+        }
     }
     private void RepairSavedElgatoVirtualCamera(IReadOnlyList<CameraOption> cameras)
     {
@@ -172,11 +222,30 @@ public sealed class VideoOverlayViewModel : ViewModelBase
     private double NormalizedAspect(string layer) => SourceAspect(layer) / (_previewWidth / _previewHeight);
     private static bool AtAnchor(VideoOverlayTransform transform, string? corner, double aspect) { if (corner is null) return false; var anchor = VideoOverlayLayout.Corner(corner, transform.Width, aspect); return Math.Abs(transform.X - anchor.X) < .002 && Math.Abs(transform.Y - anchor.Y) < .002; }
     private void Save() { _save(); _apply?.Invoke(); }
+    private void CameraPreview_Failed(string error) => Dispatcher.UIThread.Post(() => { CameraPreviewLoading = false; CameraPreviewError = error; NotifyPreview(); });
+    private void CameraPreview_FrameReady(byte[] frame)
+    {
+        if (Interlocked.Exchange(ref _pendingPreviewFrame, 1) != 0) return;
+        Dispatcher.UIThread.Post(() => {
+            try {
+                if (!_cameraPreview.IsRunning) return;
+                _cameraPreviewImage ??= new WriteableBitmap(new PixelSize(CameraPreviewService.Width, CameraPreviewService.Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul);
+                using var locked = _cameraPreviewImage.Lock();
+                unsafe { fixed (byte* source = frame) Buffer.MemoryCopy(source, (void*)locked.Address, CameraPreviewService.FrameBytes, CameraPreviewService.FrameBytes); }
+                CameraPreviewLoading = false; CameraPreviewError = string.Empty; NotifyPreview();
+            } finally { Interlocked.Exchange(ref _pendingPreviewFrame, 0); }
+        });
+    }
+    private void NotifyPreview()
+    {
+        OnPropertyChanged(nameof(CameraPreviewImage)); OnPropertyChanged(nameof(CameraPreviewLoading)); OnPropertyChanged(nameof(CameraPreviewActive)); OnPropertyChanged(nameof(CameraPreviewIdle)); OnPropertyChanged(nameof(CameraPreviewFailed)); OnPropertyChanged(nameof(CameraPreviewError));
+    }
     private void NotifyLayout()
     {
         foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(KeyboardLayout), nameof(CameraSelected), nameof(KeyboardSelected), nameof(IsPositioning), nameof(ShowPickers), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource), nameof(TopLeftIsCamera), nameof(TopLeftIsKeyboard), nameof(TopLeftIsEmpty), nameof(TopRightIsCamera), nameof(TopRightIsKeyboard), nameof(TopRightIsEmpty), nameof(BottomLeftIsCamera), nameof(BottomLeftIsKeyboard), nameof(BottomLeftIsEmpty), nameof(BottomRightIsCamera), nameof(BottomRightIsKeyboard), nameof(BottomRightIsEmpty) }) OnPropertyChanged(name);
     }
     private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}."; }
+    public void Dispose() { _refreshCancellation?.Cancel(); _refreshCancellation?.Dispose(); StopCameraPreview(); _cameraPreview.FrameReady -= CameraPreview_FrameReady; _cameraPreview.Failed -= CameraPreview_Failed; _cameraPreview.Dispose(); }
 }
 public enum OverlaySourceKind { None, Camera, Keyboard, Heading }
 public sealed record OverlaySourceOption(string Name, string Value, OverlaySourceKind Kind)

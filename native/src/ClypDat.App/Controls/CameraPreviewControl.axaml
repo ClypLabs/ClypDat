@@ -1,0 +1,22 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             x:Class="ClypDat.App.Controls.CameraPreviewControl"
+             x:DataType="vm:VideoOverlayViewModel">
+  <Grid Background="#FF233746">
+    <Image Source="{Binding CameraPreviewImage}" IsVisible="{Binding CameraPreviewActive}" Stretch="Uniform" />
+    <StackPanel IsVisible="{Binding CameraPreviewIdle}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+      <Button Content="Show Preview" Click="ShowPreview_OnClick" />
+      <TextBlock Text="Camera" HorizontalAlignment="Center" Opacity=".72" />
+    </StackPanel>
+    <StackPanel IsVisible="{Binding CameraPreviewLoading}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
+      <ProgressBar IsIndeterminate="True" Width="110" />
+      <TextBlock Text="Starting camera..." HorizontalAlignment="Center" />
+    </StackPanel>
+    <StackPanel IsVisible="{Binding CameraPreviewFailed}" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6" Margin="10">
+      <TextBlock Text="{Binding CameraPreviewError}" TextWrapping="Wrap" TextAlignment="Center" />
+      <Button Content="Retry" Click="ShowPreview_OnClick" HorizontalAlignment="Center" />
+    </StackPanel>
+    <Button Content="Hide Preview" IsVisible="{Binding CameraPreviewActive}" Click="HidePreview_OnClick" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="6" />
+  </Grid>
+</UserControl>

@@ -39,6 +39,7 @@ public sealed partial class VideoOverlayDialog : Window
 
     private void Layer_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (e.Source is Button) return;
         if (sender is not Border { Tag: string layer } border || DataContext is not VideoOverlayViewModel model || !e.GetCurrentPoint(border).Properties.IsLeftButtonPressed) return;
         var point = e.GetPosition(border);
         const double handle = 14;

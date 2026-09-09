@@ -31,6 +31,8 @@ public sealed partial class VideoOverlaysSection : UserControl
     private void Detached(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
     {
         EndDrag();
+        (DataContext as IDisposable)?.Dispose();
+        DataContext = null;
         if (_owner is not null) _owner.PropertyChanged -= OwnerChanged;
         _owner = null;
     }
@@ -46,6 +48,7 @@ public sealed partial class VideoOverlaysSection : UserControl
 
     private void Layer_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
+        if (e.Source is Button) return;
         if (sender is not Border { Tag: string layer } border || DataContext is not VideoOverlayViewModel model || !e.GetCurrentPoint(border).Properties.IsLeftButtonPressed) return;
         var point = e.GetPosition(border);
         const double handle = 18;

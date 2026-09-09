@@ -17,9 +17,7 @@
       </Grid>
     </DataTemplate>
     <DataTemplate x:Key="VideoOverlayCameraMock">
-      <Border Classes="videoOverlayCameraMock">
-        <Ellipse Classes="videoOverlayLensMock" />
-      </Border>
+      <controls:CameraPreviewControl />
     </DataTemplate>
     <DataTemplate x:Key="VideoOverlayKeyboardMock" DataType="vm:VideoOverlayViewModel">
       <controls:KeyboardOverlayPreview Margin="12" Layout="{Binding KeyboardLayout}" />
@@ -65,8 +63,8 @@
             <Grid ClipToBounds="True">
               <Border Background="#FF101923" />
               <Canvas Name="PreviewCanvas" Background="Transparent" PointerPressed="PreviewCanvas_OnPointerPressed" PointerMoved="PreviewCanvas_OnPointerMoved" PointerReleased="PreviewCanvas_OnPointerReleased" PointerCaptureLost="PreviewCanvas_OnPointerCaptureLost">
-                <Border Classes="videoOverlayLayer" Canvas.Left="{Binding CameraLeft}" Canvas.Top="{Binding CameraTop}" Width="{Binding CameraWidth}" Height="{Binding CameraHeight}" IsVisible="{Binding CameraSelected}" PointerPressed="Layer_OnPointerPressed" Tag="Camera">
-                  <Grid><Border Background="#FF233746" /><Border Background="{DynamicResource AccentBrush}" Opacity=".12" /><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6"><TextBlock Text="CAMERA" FontWeight="Bold" HorizontalAlignment="Center" /><TextBlock Text="Live source" Opacity=".72" HorizontalAlignment="Center" /></StackPanel><Border Classes="videoOverlaySelection" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding CameraSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding CameraSelected}" /></Grid>
+                <Border Classes="videoOverlayLayer" Canvas.Left="{Binding CameraLeft}" Canvas.Top="{Binding CameraTop}" Width="{Binding CameraWidth}" Height="{Binding CameraHeight}" IsVisible="{Binding HasCamera}" PointerPressed="Layer_OnPointerPressed" Tag="Camera">
+                  <Grid><controls:CameraPreviewControl /><Border Classes="videoOverlaySelection" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding CameraSelected}" IsHitTestVisible="False" /></Grid>
                 </Border>
                 <Border Classes="videoOverlayLayer" Canvas.Left="{Binding KeyboardLeft}" Canvas.Top="{Binding KeyboardTop}" Width="{Binding KeyboardWidth}" Height="{Binding KeyboardHeight}" IsVisible="{Binding KeyboardSelected}" PointerPressed="Layer_OnPointerPressed" Tag="Keyboard">
                   <Grid><controls:KeyboardOverlayPreview Layout="{Binding KeyboardLayout}" IsHitTestVisible="False" /><Border Classes="videoOverlaySelection" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle topRight" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding KeyboardSelected}" /><Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding KeyboardSelected}" /></Grid>
