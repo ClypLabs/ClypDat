@@ -11,14 +11,9 @@ public static class ClipEditSidecar
 {
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = false };
 
-    // ".eve.json" kept as-is post-rebrand (not ".clypdat.json") - every existing
-    // clip already has one of these on disk, and this suffix is purely an
-    // internal, hidden (.clipinfo folder) implementation detail never shown to
-    // a user. Renaming it would silently orphan every existing clip's saved
-    // trim/edit state for zero visible benefit.
     public static string SidecarPath(string libraryRoot, string clipPath)
     {
-        return LibraryLayout.SidecarPath(libraryRoot, clipPath, ".eve.json");
+        return LibraryLayout.SidecarPath(libraryRoot, clipPath, ".json");
     }
 
     public static void Save(string libraryRoot, string clipPath, ClipEditSettings edit)
@@ -38,7 +33,7 @@ public static class ClipEditSidecar
     public static ClipEditSettings? Load(string libraryRoot, string clipPath)
     {
         var path = SidecarPath(libraryRoot, clipPath);
-        if (!File.Exists(path)) path = LibraryLayout.LegacySidecarPath(clipPath, ".eve.json");
+        if (!File.Exists(path)) path = MigrateLegacySidecar(libraryRoot, clipPath);
         if (!File.Exists(path)) return null;
         try
         {
@@ -56,13 +51,72 @@ public static class ClipEditSidecar
     {
         try
         {
-            var paths = new[] { SidecarPath(libraryRoot, clipPath), LibraryLayout.LegacySidecarPath(clipPath, ".eve.json") };
+            var paths = new[] { SidecarPath(libraryRoot, clipPath), LegacySidecarPath(libraryRoot, clipPath), LibraryLayout.LegacySidecarPath(clipPath, ".eve.json") };
             foreach (var path in paths.Where(File.Exists)) File.Delete(path);
         }
         catch (Exception error)
         {
             AppLog.Error($"Clip edit sidecar delete failed: {clipPath}", error);
         }
+    }
+
+    /// <summary>Renames all current-library legacy edit sidecars to clip.mp4.json.</summary>
+    public static void MigrateLegacySidecars(string libraryRoot)
+    {
+        var sidecarRoot = LibraryLayout.ClipInfoRoot(libraryRoot);
+        if (!Directory.Exists(libraryRoot)) return;
+        try
+        {
+            foreach (var legacyPath in Directory.EnumerateFiles(libraryRoot, "*.eve.json", SearchOption.AllDirectories))
+                MigrateFile(legacyPath, MigrationTarget(libraryRoot, sidecarRoot, legacyPath));
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Legacy clip edit sidecar migration failed.", error);
+        }
+    }
+
+    private static string MigrateLegacySidecar(string libraryRoot, string clipPath)
+    {
+        var target = SidecarPath(libraryRoot, clipPath);
+        if (File.Exists(target)) return target;
+        var legacy = LegacySidecarPath(libraryRoot, clipPath);
+        if (!File.Exists(legacy)) legacy = LibraryLayout.LegacySidecarPath(clipPath, ".eve.json");
+        if (!File.Exists(legacy)) return target;
+        try
+        {
+            MigrateFile(legacy, target);
+            return File.Exists(target) ? target : legacy;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Clip edit sidecar migration failed: {clipPath}", error);
+            return legacy;
+        }
+    }
+
+    private static string LegacySidecarPath(string libraryRoot, string clipPath) =>
+        LibraryLayout.SidecarPath(libraryRoot, clipPath, ".eve.json");
+
+    private static string MigrationTarget(string libraryRoot, string sidecarRoot, string legacyPath)
+    {
+        var directory = Path.GetDirectoryName(legacyPath)!;
+        if (string.Equals(directory, sidecarRoot, StringComparison.OrdinalIgnoreCase) ||
+            directory.StartsWith(sidecarRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return legacyPath[..^".eve.json".Length] + ".json";
+
+        // Early ClypDat builds put .clipinfo beside each game's clips. Move
+        // those records into the current library-wide metadata tree too.
+        var clipDirectory = Directory.GetParent(directory)?.FullName ?? libraryRoot;
+        var clipName = Path.GetFileName(legacyPath[..^".eve.json".Length]);
+        return SidecarPath(libraryRoot, Path.Combine(clipDirectory, clipName));
+    }
+
+    private static void MigrateFile(string legacyPath, string targetPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+        if (File.Exists(targetPath)) File.Delete(legacyPath);
+        else File.Move(legacyPath, targetPath);
     }
 
     public static void ResetAfterSavedTrim(string libraryRoot, string clipPath)

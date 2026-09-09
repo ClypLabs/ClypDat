@@ -9,6 +9,51 @@ namespace ClypDat.App.Tests;
 public sealed class SpotifyOverlayLayerStateTests
 {
     [Fact]
+    public void LegacyEveEditSidecarMigratesToMp4Json()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "spotify-sidecar-" + Guid.NewGuid());
+        try
+        {
+            var clipPath = Path.Combine(root, "Clips", "Track.mp4");
+            var legacyPath = LibraryLayout.SidecarPath(root, clipPath, ".eve.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
+            File.WriteAllText(legacyPath, "{\"SpotifyOverlayVisible\":false}");
+
+            var edit = ClipEditSidecar.Load(root, clipPath)!;
+            var migratedPath = ClipEditSidecar.SidecarPath(root, clipPath);
+            Assert.EndsWith("Track.mp4.json", migratedPath, StringComparison.Ordinal);
+            Assert.False(File.Exists(legacyPath));
+            Assert.True(File.Exists(migratedPath));
+            Assert.False(edit.SpotifyOverlayVisible);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void NestedLegacySidecarMigratesIntoLibraryMetadata()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "spotify-sidecar-" + Guid.NewGuid());
+        try
+        {
+            var clipPath = Path.Combine(root, "Clips", "Game", "Track.mp4");
+            var legacyPath = Path.Combine(Path.GetDirectoryName(clipPath)!, ".clipinfo", "Track.mp4.eve.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(legacyPath)!);
+            File.WriteAllText(legacyPath, "{\"SpotifyOverlayVisible\":false}");
+
+            ClipEditSidecar.MigrateLegacySidecars(root);
+            Assert.False(File.Exists(legacyPath));
+            Assert.True(File.Exists(ClipEditSidecar.SidecarPath(root, clipPath)));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void ExistingEditsKeepVisibleOverlayAtConfiguredPlacement()
     {
         var edit = JsonSerializer.Deserialize<ClipEditSettings>("{\"TrimStartSeconds\":3,\"SpeedMultiplier\":2}")!;

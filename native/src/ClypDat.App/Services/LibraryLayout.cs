@@ -64,6 +64,7 @@ public static class LibraryLayout
         Directory.CreateDirectory(ClipsRoot(libraryRoot));
         Directory.CreateDirectory(VodsRoot(libraryRoot));
         EnsureClipInfoRoot(libraryRoot);
+        ClipEditSidecar.MigrateLegacySidecars(libraryRoot);
     }
 
     public static void EnsureClipInfoRoot(string libraryRoot)
@@ -86,7 +87,7 @@ public static class LibraryLayout
     public static void MoveSidecars(string libraryRoot, string oldVideoPath, string newVideoPath)
     {
         SpotifyTimelineSidecar.Copy(libraryRoot, oldVideoPath, newVideoPath);
-        foreach (var suffix in new[] { ".info.json", ".eve.json", ".paused.json", ".cover.jpg", ".source.json" })
+        foreach (var suffix in new[] { ".info.json", ".json", ".paused.json", ".cover.jpg", ".source.json" })
         {
             var newPath = SidecarPath(libraryRoot, newVideoPath, suffix);
             var candidates = new[]
