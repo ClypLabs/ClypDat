@@ -207,7 +207,27 @@ public sealed class KeyboardOverlayPreview : Control
         var wheelHeight = buttonHeight * .52;
         context.DrawRectangle(pressed.Contains("MouseMiddle") ? Blue : Dark, outline,
             new RoundedRect(new Rect(bounds.Center.X - wheelWidth / 2, bounds.Y + inset + buttonHeight * .18, wheelWidth, wheelHeight), wheelWidth / 2));
+
+        // Side buttons on the left flank, where a right hand's thumb sits:
+        // forward toward the front of the mouse, back behind it. They hug the
+        // shell's straight edge below the left button, clear of its curve.
+        var sideWidth = bounds.Width * .15;
+        var sideHeight = bounds.Height * .11;
+        var sideGap = bounds.Height * .03;
+        var sideX = bounds.X + inset * .75;
+        // Ends near 78% of the height, above where the bottom corner starts to curve.
+        var sideTop = bounds.Y + inset + buttonHeight + bounds.Height * .05;
+        var sideRadius = bounds.Width * .045;
+        context.DrawRectangle(IsSidePressed(pressed, "MouseForward") ? Blue : Dark, outline,
+            new RoundedRect(new Rect(sideX, sideTop, sideWidth, sideHeight), sideRadius));
+        context.DrawRectangle(IsSidePressed(pressed, "MouseBack") ? Blue : Dark, outline,
+            new RoundedRect(new Rect(sideX, sideTop + sideHeight + sideGap, sideWidth, sideHeight), sideRadius));
     }
+
+    // Clips recorded before the side buttons were told apart only know "MouseX";
+    // lighting both is the honest rendering of not knowing which.
+    private static bool IsSidePressed(HashSet<string> pressed, string button) =>
+        pressed.Contains(button) || pressed.Contains("MouseX");
 
     private static void DrawKey(DrawingContext context, Rect bounds, string text, bool isPressed)
     {

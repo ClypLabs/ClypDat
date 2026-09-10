@@ -139,7 +139,10 @@ internal sealed class PhysicalInputMonitor : IDisposable
     private static readonly (ushort Down, ushort Up, string Button)[] MouseButtons =
     [
         (0x0001, 0x0002, "MouseLeft"), (0x0004, 0x0008, "MouseRight"), (0x0010, 0x0020, "MouseMiddle"),
-        (0x0040, 0x0080, "MouseX"), (0x0100, 0x0200, "MouseX"),
+        // Button 4 is XBUTTON1, the back button; button 5 is XBUTTON2, forward.
+        // Both used to report as one "MouseX", so the overlay could not tell
+        // them apart and holding both then releasing one read as both released.
+        (0x0040, 0x0080, "MouseBack"), (0x0100, 0x0200, "MouseForward"),
     ];
 
     private void Report(InputPhysicalKey key, bool down, string kind) => Transition?.Invoke(key, down, kind);
@@ -176,7 +179,9 @@ internal sealed class PhysicalInputMonitor : IDisposable
                 WmLButtonDown or WmLButtonUp => "MouseLeft",
                 WmRButtonDown or WmRButtonUp => "MouseRight",
                 WmMButtonDown or WmMButtonUp => "MouseMiddle",
-                WmXButtonDown or WmXButtonUp => "MouseX",
+                // The high word of mouseData says which X button: 1 back, 2 forward.
+                WmXButtonDown or WmXButtonUp => (Marshal.PtrToStructure<MsLlHookStruct>(data).MouseData >> 16) == 2
+                    ? "MouseForward" : "MouseBack",
                 _ => null,
             };
             if (button is not null)
@@ -231,6 +236,9 @@ internal sealed class PhysicalInputMonitor : IDisposable
         [FieldOffset(16)] public int LastY;
         [FieldOffset(20)] public uint ExtraInformation;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MsLlHookStruct { public MsgPoint Point; public uint MouseData, Flags, Time; public IntPtr ExtraInfo; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KbdLlHookStruct { public uint VirtualKey, ScanCode, Flags, Time; public IntPtr ExtraInfo; }
