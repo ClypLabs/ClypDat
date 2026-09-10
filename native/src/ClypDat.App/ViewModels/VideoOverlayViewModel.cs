@@ -21,6 +21,11 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _refreshCancellation;
     private int _refreshGeneration;
     private readonly ICameraPreviewService _cameraPreview;
+    private PhysicalInputMonitor? _inputMonitor;
+    private readonly object _liveInputGate = new();
+    private readonly HashSet<string> _liveInput = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlySet<string>? _livePressedKeys;
+    private bool _showSamplePressed = true;
     private WriteableBitmap? _cameraPreviewImage;
     private string? _cameraPreviewError;
     private bool _cameraPreviewLoading;
@@ -105,7 +110,51 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         return new Rect(transform.X * _previewWidth, transform.Y * _previewHeight, width, width / aspect);
     }
 
-    public void ClosePreview() { StopCameraPreview(); DeselectLayer(); }
+    public void ClosePreview() { StopCameraPreview(); StopInputPreview(); DeselectLayer(); }
+
+    // Lighting the keys as they are actually pressed is the only way to see,
+    // while configuring, that capture works at all - which matters more than
+    // usual here, because an anti-cheat driver can silently starve it.
+    public IReadOnlySet<string>? LivePressedKeys { get => _livePressedKeys; private set => SetProperty(ref _livePressedKeys, value); }
+    /// <summary>True until a real key arrives, so the preview shows the layout's
+    /// sample rather than a dead board.</summary>
+    public bool ShowSamplePressed { get => _showSamplePressed; private set => SetProperty(ref _showSamplePressed, value); }
+
+    public void StartInputPreview()
+    {
+        if (_inputMonitor is not null) return;
+        _inputMonitor = new PhysicalInputMonitor();
+        _inputMonitor.Transition += InputPreview_Transition;
+        _inputMonitor.Start();
+    }
+
+    public void StopInputPreview()
+    {
+        var monitor = _inputMonitor;
+        _inputMonitor = null;
+        if (monitor is null) return;
+        monitor.Transition -= InputPreview_Transition;
+        monitor.Dispose();
+        lock (_liveInputGate) _liveInput.Clear();
+        Dispatcher.UIThread.Post(() => { LivePressedKeys = null; ShowSamplePressed = true; });
+    }
+
+    private void InputPreview_Transition(InputPhysicalKey key, bool down, string kind)
+    {
+        var code = key.MouseButton ?? InputKeyMap.Code(key.ScanCode, key.E0);
+        if (code is null) return;
+        string[] held;
+        lock (_liveInputGate)
+        {
+            if (down ? !_liveInput.Add(code) : !_liveInput.Remove(code)) return;
+            held = _liveInput.ToArray();
+        }
+        Dispatcher.UIThread.Post(() =>
+        {
+            ShowSamplePressed = false;
+            LivePressedKeys = new HashSet<string>(held, StringComparer.OrdinalIgnoreCase);
+        });
+    }
     public void DeselectLayer() { _selectedLayer = null; NotifyLayout(); }
     public void SetPreviewSize(double width, double height) { if (width <= 0 || height <= 0) return; _previewWidth = width; _previewHeight = height; NotifyLayout(); }
     public void SelectLayer(string layer) { _selectedLayer = layer; NotifyLayout(); }
@@ -307,7 +356,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         foreach (var slot in Slots) slot.Refresh();
     }
     private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}."; }
-    public void Dispose() { _refreshCancellation?.Cancel(); _refreshCancellation?.Dispose(); StopCameraPreview(); _cameraPreview.FrameReady -= CameraPreview_FrameReady; _cameraPreview.Failed -= CameraPreview_Failed; _cameraPreview.Dispose(); }
+    public void Dispose() { _refreshCancellation?.Cancel(); _refreshCancellation?.Dispose(); StopCameraPreview(); StopInputPreview(); _cameraPreview.FrameReady -= CameraPreview_FrameReady; _cameraPreview.Failed -= CameraPreview_Failed; _cameraPreview.Dispose(); }
 }
 public enum OverlaySourceKind { None, Camera, Keyboard, Heading }
 public sealed record OverlaySourceOption(string Name, string Value, OverlaySourceKind Kind)

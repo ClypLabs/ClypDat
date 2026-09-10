@@ -42,7 +42,15 @@ public sealed partial class VideoOverlaysSection : UserControl
         if (e.PropertyName is nameof(MainWindowViewModel.SelectedSettingsSection) or nameof(MainWindowViewModel.SettingsSearchText)) UpdateVisibility();
     }
 
-    private void UpdateVisibility() => IsVisible = _owner?.SelectedSettingsSection == "Video Overlays" || !string.IsNullOrWhiteSpace(_owner?.SettingsSearchText);
+    // This section stays attached to the visual tree while hidden, so Detached
+    // is not the signal for "the user left" - visibility is. The input hook
+    // must not outlive the preview that needs it.
+    private void UpdateVisibility()
+    {
+        IsVisible = _owner?.SelectedSettingsSection == "Video Overlays" || !string.IsNullOrWhiteSpace(_owner?.SettingsSearchText);
+        if (DataContext is not VideoOverlayViewModel model) return;
+        if (IsVisible) model.StartInputPreview(); else model.StopInputPreview();
+    }
 
     private void Refresh_OnClick(object? sender, RoutedEventArgs e) => _ = (DataContext as VideoOverlayViewModel)?.RefreshCamerasAsync();
 

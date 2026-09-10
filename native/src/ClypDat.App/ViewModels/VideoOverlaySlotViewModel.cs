@@ -22,6 +22,8 @@ public sealed class VideoOverlaySlotViewModel(VideoOverlayViewModel overlay, str
     public string Label { get; } = corner.ToUpperInvariant();
     public ObservableCollection<OverlaySourceOption> Sources => Overlay.Sources;
     public string KeyboardLayout => Overlay.KeyboardLayout;
+    public IReadOnlySet<string>? LivePressedKeys => Overlay.LivePressedKeys;
+    public bool ShowSamplePressed => Overlay.ShowSamplePressed;
 
     public OverlaySourceOption? Source { get => Overlay.SourceAt(Corner); set => Overlay.SetSource(Corner, value); }
     public OverlaySourceKind Kind => Source?.Kind ?? OverlaySourceKind.None;
@@ -51,6 +53,7 @@ public sealed class VideoOverlaySlotViewModel(VideoOverlayViewModel overlay, str
                  {
                      nameof(Source), nameof(Kind), nameof(IsCamera), nameof(IsKeyboard), nameof(IsEmpty),
                      nameof(Layer), nameof(IsMovable), nameof(IsSelected), nameof(KeyboardLayout),
+                     nameof(LivePressedKeys), nameof(ShowSamplePressed),
                      nameof(Left), nameof(Top), nameof(Width), nameof(Height),
                      nameof(ChromeAlignment), nameof(ChromeMargin)
                  })

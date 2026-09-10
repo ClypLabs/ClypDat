@@ -65,7 +65,7 @@
                             <Panel IsVisible="{Binding IsCamera}">
                               <controls:CameraPreviewControl DataContext="{Binding Overlay}" />
                             </Panel>
-                            <controls:KeyboardOverlayPreview Layout="{Binding KeyboardLayout}" UseSamplePressed="True" IsVisible="{Binding IsKeyboard}" IsHitTestVisible="False" />
+                            <controls:KeyboardOverlayPreview Layout="{Binding KeyboardLayout}" UseSamplePressed="{Binding ShowSamplePressed}" PressedKeys="{Binding LivePressedKeys}" IsVisible="{Binding IsKeyboard}" IsHitTestVisible="False" />
                             <TextBlock Classes="videoOverlayWindowLabel" Text="{Binding Label}" />
                           </Panel>
                         </Border>
