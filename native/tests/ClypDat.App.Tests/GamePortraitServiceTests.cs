@@ -13,6 +13,12 @@ public sealed class GamePortraitServiceTests
     }
 
     [Fact]
+    public void MissingStandaloneExecutableHasNoIcon()
+    {
+        Assert.Null(GamePortraitService.TryLoadStandaloneIcon(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".exe")));
+    }
+
+    [Fact]
     public void ReadsPathFromLegacyStandaloneKey()
     {
         var entry = new GameCaptureOverride { ExecutableName = "standalone:D:\\Games\\osu!\\osu!.exe" };

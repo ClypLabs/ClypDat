@@ -81,6 +81,36 @@ public static class GamePortraitService
         }
     }
 
+    // Tab badges need compact, game-specific artwork. Psych/FNF mods expose
+    // their cast as health icons, unlike their generic engine executable.
+    public static Bitmap? TryLoadStandaloneIcon(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath)) return null;
+        try
+        {
+            var root = Path.GetDirectoryName(executablePath)!;
+            var icons = new[]
+            {
+                Path.Combine(root, "assets", "images", "icons"),
+                Path.Combine(root, "assets", "shared", "images", "icons")
+            };
+            foreach (var folder in icons.Where(Directory.Exists))
+            {
+                var source = Directory.EnumerateFiles(folder, "icon-*.png", SearchOption.TopDirectoryOnly)
+                    .OrderBy(path => Path.GetFileName(path).Contains("bf", StringComparison.OrdinalIgnoreCase))
+                    .ThenBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault();
+                if (source is not null) return new Bitmap(source);
+            }
+            return GameIconService.TryLoadExecutableIcon(executablePath);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Standalone game icon load failed for '{executablePath}'", error);
+            return null;
+        }
+    }
+
     /// <summary>
     /// Downloads the portrait if it is not cached yet. Returns true only when
     /// a new file was written, so callers can refresh exactly once instead of

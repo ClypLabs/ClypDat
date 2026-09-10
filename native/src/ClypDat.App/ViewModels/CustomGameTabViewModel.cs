@@ -27,7 +27,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         _save = save;
         _settingChanged = settingChanged;
         _executablePath = executablePath;
-        Icon = GameIconService.TryLoad(profile.DisplayName);
+        Icon = GamePortraitService.TryLoadStandaloneIcon(_executablePath) ?? GameIconService.TryLoad(profile.DisplayName);
         // Nothing about the portrait touches the UI thread. This constructor
         // runs once per tab while the settings page is being built, and a
         // cached portrait is a 600x900 JPEG - decoding several of those inline
