@@ -337,6 +337,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ActiveAudioProcesses = new ObservableCollection<AudioTrackProcessViewModel>();
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
         GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
+        foreach (var folder in Settings.GameDiscoveryFolders.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase)) GameDiscoveryFolders.Add(folder);
         EnsureAutoClipSettings();
         AutoClipGames = new ObservableCollection<AutoClipGameViewModel>(AutoClipCatalog.Active
             .OrderBy(definition => definition.Name, StringComparer.OrdinalIgnoreCase)
@@ -790,6 +791,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<string> ChatAudioApps { get; }
     public ObservableCollection<AudioDeviceOption> SelectedMicrophones { get; }
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
+    public ObservableCollection<string> GameDiscoveryFolders { get; } = new();
+    public ObservableCollection<DiscoveredGameRowViewModel> DiscoveredGameReviews { get; } = new();
+    public bool HasDiscoveredGameReviews => DiscoveredGameReviews.Count > 0;
+    private CancellationTokenSource? _gameDiscoveryCts;
+    private string _gameDiscoveryStatus = string.Empty;
+    public string GameDiscoveryStatus { get => _gameDiscoveryStatus; private set => SetProperty(ref _gameDiscoveryStatus, value); }
+    public bool IsScanningGameFolders => _gameDiscoveryCts is not null;
     public ObservableCollection<AutoClipGameViewModel> AutoClipGames { get; }
     public ObservableCollection<string> ComingSoonAutoClipGames { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
@@ -6962,7 +6970,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool RejectSoftware(string? path = null, string? executable = null, string? key = null)
     {
-        var rejected = _steamGames.IsSoftware(path, executable, key);
+        var rejected = StandaloneGameClassifier.IsExcluded(path, executable) || _steamGames.IsSoftware(path, executable, key);
         GameAdditionError = rejected ? "This application is software, not a game. It cannot be added to game detection." : string.Empty;
         return rejected;
     }
@@ -6987,12 +6995,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (!exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) exe += ".exe";
         if (!Path.IsPathFullyQualified(NewCustomGameExecutable) && RejectSoftware(executable: exe)) return;
         if (string.IsNullOrWhiteSpace(NewCustomGameDisplayName)) return;
-        Settings.GameCaptureOverrides.RemoveAll(g => string.Equals(g.ExecutableName, exe, StringComparison.OrdinalIgnoreCase));
+        var fullPath = Path.IsPathFullyQualified(NewCustomGameExecutable) ? Path.GetFullPath(NewCustomGameExecutable) : null;
+        var key = fullPath is null ? exe : "standalone:" + Guid.NewGuid().ToString("N");
+        Settings.GameCaptureOverrides.RemoveAll(g => fullPath is not null
+            ? string.Equals(g.ExecutablePath, fullPath, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(g.ExecutableName, exe, StringComparison.OrdinalIgnoreCase));
         Settings.GameCaptureOverrides.Add(new GameCaptureOverride
         {
-            ExecutableName = exe,
+            ExecutableName = key,
             DisplayName = NewCustomGameDisplayName.Trim(),
             ProcessName = exe,
+            ExecutablePath = fullPath,
+            InstallationId = fullPath is null ? null : key,
             CaptureBackend = "Auto",
             Origin = "UserCustom"
         });
@@ -7001,6 +7015,71 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
         RebuildGameCaptureRows();
         GameCatalogChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void AddGameDiscoveryFolder(string folder)
+    {
+        if (!Directory.Exists(folder)) return;
+        var full = Path.GetFullPath(folder);
+        if (Settings.GameDiscoveryFolders.Contains(full, StringComparer.OrdinalIgnoreCase)) return;
+        Settings.GameDiscoveryFolders.Add(full); GameDiscoveryFolders.Add(full); SaveSettings();
+        _ = ScanGameFoldersAsync();
+    }
+
+    public void RemoveGameDiscoveryFolder(string folder)
+    {
+        Settings.GameDiscoveryFolders.RemoveAll(x => string.Equals(x, folder, StringComparison.OrdinalIgnoreCase));
+        GameDiscoveryFolders.Remove(folder); SaveSettings();
+    }
+
+    public async Task ScanGameFoldersAsync()
+    {
+        if (_gameDiscoveryCts is not null) return;
+        _gameDiscoveryCts = new CancellationTokenSource(); OnPropertyChanged(nameof(IsScanningGameFolders));
+        try
+        {
+            GameDiscoveryStatus = "Scanning game folders...";
+            var rows = await new StandaloneGameDiscovery().ScanAsync(Settings.GameDiscoveryFolders, _gameDiscoveryCts.Token);
+            foreach (var (path, classification) in rows)
+            {
+                if (Settings.IgnoredStandaloneGamePaths.Contains(path, StringComparer.OrdinalIgnoreCase)) continue;
+                if (Settings.GameCaptureOverrides.Any(x => string.Equals(x.ExecutablePath, path, StringComparison.OrdinalIgnoreCase))) continue;
+                if (classification.Kind == StandaloneClassificationKind.RecognizedGame) AddDiscoveredGame(path, classification.DisplayName, classification.Reason);
+                else if (!DiscoveredGameReviews.Any(x => string.Equals(x.ExecutablePath, path, StringComparison.OrdinalIgnoreCase)))
+                    DiscoveredGameReviews.Add(new DiscoveredGameRowViewModel(path, classification.DisplayName, classification.Reason));
+            }
+            GameDiscoveryStatus = $"Scan complete. {rows.Count} game candidate(s).";
+            OnPropertyChanged(nameof(HasDiscoveredGameReviews));
+        }
+        catch (OperationCanceledException) { GameDiscoveryStatus = "Scan cancelled."; }
+        finally { _gameDiscoveryCts.Dispose(); _gameDiscoveryCts = null; OnPropertyChanged(nameof(IsScanningGameFolders)); }
+    }
+
+    public void CancelGameFolderScan() => _gameDiscoveryCts?.Cancel();
+
+    public void AddDiscoveredGame(DiscoveredGameRowViewModel row)
+    {
+        AddDiscoveredGame(row.ExecutablePath, row.DisplayName, row.Reason); DiscoveredGameReviews.Remove(row); OnPropertyChanged(nameof(HasDiscoveredGameReviews));
+    }
+
+    public void IgnoreDiscoveredGame(DiscoveredGameRowViewModel row)
+    {
+        if (!Settings.IgnoredStandaloneGamePaths.Contains(row.ExecutablePath, StringComparer.OrdinalIgnoreCase)) Settings.IgnoredStandaloneGamePaths.Add(row.ExecutablePath);
+        DiscoveredGameReviews.Remove(row); SaveSettings(); OnPropertyChanged(nameof(HasDiscoveredGameReviews));
+    }
+
+    private void AddDiscoveredGame(string path, string name, string reason)
+    {
+        var sameName = Settings.GameCaptureOverrides.Where(x => string.Equals(x.DisplayName, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (sameName.Length > 0)
+        {
+            var parent = Directory.GetParent(Path.GetDirectoryName(path) ?? string.Empty)?.Name;
+            if (!string.IsNullOrWhiteSpace(parent)) name += " (" + parent + ")";
+            if (Settings.GameCaptureOverrides.Any(x => string.Equals(x.DisplayName, name, StringComparison.OrdinalIgnoreCase))) name += " " + Guid.NewGuid().ToString("N")[..6];
+        }
+        var id = "standalone:" + Guid.NewGuid().ToString("N");
+        Settings.GameCaptureOverrides.Add(new GameCaptureOverride { ExecutableName = id, DisplayName = name, ProcessName = Path.GetFileName(path), ExecutablePath = path, InstallationId = id, DetectionReason = reason, CaptureBackend = "Auto", Origin = "Standalone" });
+        SaveSettings(); RebuildGameCaptureRows(); GameCatalogChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void AddGameFromProcess()

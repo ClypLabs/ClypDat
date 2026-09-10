@@ -5,7 +5,7 @@ using System.Text;
 
 namespace ClypDat.App.Services;
 
-public enum GameMatchSource { None, UserCustom, Catalog, Steam, Epic, BattleNet, Riot }
+public enum GameMatchSource { None, UserCustom, Standalone, Catalog, Steam, Epic, BattleNet, Riot }
 
 public sealed record GameDetection(
     string DisplayName,
@@ -32,6 +32,7 @@ public sealed class ForegroundGameDetector
     private readonly ConcurrentDictionary<nint, CachedWindow> _windowCache = new();
     private volatile HashSet<string> _userIgnoredExecutables = new(StringComparer.OrdinalIgnoreCase);
     private volatile Dictionary<string, string> _customGames = new(StringComparer.OrdinalIgnoreCase);
+    private volatile Dictionary<string, (string Name, string Key)> _standaloneGames = new(StringComparer.OrdinalIgnoreCase);
     private volatile CatalogState _catalog;
     private int _catalogGeneration;
     private GameDetection _lastGame = GameDetection.None;
@@ -63,10 +64,15 @@ public sealed class ForegroundGameDetector
     {
         // Existing settings entries with a display name predate Origin. They are
         // intentional user additions and stay recognized after strict matching lands.
-        _customGames = overrides
+        var entries = overrides.ToArray();
+        _customGames = entries
             .Where(entry => !string.IsNullOrWhiteSpace(entry.ExecutableName) && !string.IsNullOrWhiteSpace(entry.DisplayName) && entry.Origin != "Catalog")
             .GroupBy(entry => entry.ExecutableName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Last().DisplayName, StringComparer.OrdinalIgnoreCase);
+        _standaloneGames = entries
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.ExecutablePath) && !string.IsNullOrWhiteSpace(entry.DisplayName))
+            .GroupBy(entry => NormalizePath(entry.ExecutablePath!), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => (group.Last().DisplayName, group.Last().ExecutableName), StringComparer.OrdinalIgnoreCase);
         Interlocked.Increment(ref _catalogGeneration);
         _windowCache.Clear();
         _loggedUnmatched.Clear();
@@ -175,7 +181,7 @@ public sealed class ForegroundGameDetector
     }
 
     internal bool IsSoftware(string? path, string? executable = null, string? key = null) =>
-        _steamGames.IsSoftware(path, executable, key);
+        StandaloneGameClassifier.IsExcluded(path, executable) || _steamGames.IsSoftware(path, executable, key);
 
     private GameDetection BuildDetection(nint handle)
     {
@@ -262,9 +268,21 @@ public sealed class ForegroundGameDetector
     {
         var isAntiCheat = InstalledGameLocator.IsAntiCheatExecutable(exeName);
         GameDetection detection;
-        if (_customGames.TryGetValue(exeName, out var customName))
+        if (_standaloneGames.TryGetValue(NormalizePath(executablePath), out var standalone))
+        {
+            detection = Create(standalone.Name, exeName, title, className, handle, processId, GameMatchSource.Standalone, standalone.Key);
+        }
+        else if (_customGames.TryGetValue(exeName, out var customName))
         {
             detection = Create(customName, exeName, title, className, handle, (int)processId, GameMatchSource.UserCustom, exeName);
+        }
+        else if (StandaloneGameClassifier.Classify(executablePath) is { Kind: StandaloneClassificationKind.RecognizedGame } classified)
+        {
+            // Running standalone games can live outside configured scan roots.
+            // The classifier only accepts game-specific evidence, so unknown
+            // applications never enter capture from window characteristics.
+            detection = Create(classified.DisplayName, exeName, title, className, handle, processId,
+                GameMatchSource.Standalone, "standalone:" + NormalizePath(executablePath));
         }
         else if (TryCatalogMatch(exeName, title, className, width, height, out var rule))
         {
@@ -331,6 +349,12 @@ public sealed class ForegroundGameDetector
 
     private static GameDetection Create(string displayName, string executable, string title, string className, nint handle, int processId, GameMatchSource source, string detectionKey) =>
         new(displayName, executable, title, className, handle, processId, true, false, source, detectionKey);
+
+    private static string NormalizePath(string path)
+    {
+        try { return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+        catch { return path; }
+    }
 
     private static string Normalize(string name) =>
         new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());

@@ -25,6 +25,12 @@ public sealed partial class GameDetectionSection : UserControl
 
     private void BrowseCustomGameButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.BrowseCustomGameButton_OnClick(sender, e);
+    private void AddGameFolderButton_OnClick(object? sender, RoutedEventArgs e) => Owner?.AddGameFolderButton_OnClick(sender, e);
+    private void RemoveGameFolderButton_OnClick(object? sender, RoutedEventArgs e) => Owner?.RemoveGameFolderButton_OnClick(sender, e);
+    private void ScanGameFoldersButton_OnClick(object? sender, RoutedEventArgs e) => Owner?.ScanGameFoldersButton_OnClick(sender, e);
+    private void CancelGameFolderScanButton_OnClick(object? sender, RoutedEventArgs e) => Owner?.CancelGameFolderScanButton_OnClick(sender, e);
+    private void AddDiscoveredGameButton_OnClick(object? sender, RoutedEventArgs e) => Owner?.AddDiscoveredGameButton_OnClick(sender, e);
+    private void IgnoreDiscoveredGameButton_OnClick(object? sender, RoutedEventArgs e) => Owner?.IgnoreDiscoveredGameButton_OnClick(sender, e);
 
     private void RefreshGameIconsButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.RefreshGameIconsButton_OnClick(sender, e);

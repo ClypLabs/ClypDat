@@ -400,6 +400,7 @@ public sealed partial class MainWindow : Window
             _gameDetectionTimer.Start();
             _updateCheckTimer.Start();
             _ = EnsureLibraryFolderAsync();
+            if (ViewModel is not null && ViewModel.Settings.GameDiscoveryFolders.Count > 0) _ = ViewModel.ScanGameFoldersAsync();
             // Four independent HTTPS calls used to fire in the same instant here.
             // At logon the network stack is often not up yet, so each one can
             // sit in its own DNS/TLS timeout concurrently - staggering them
@@ -5674,6 +5675,18 @@ public sealed partial class MainWindow : Window
         ViewModel.NewCustomGameDisplayName = Path.GetFileNameWithoutExtension(path);
         ViewModel.AddCustomGame();
     }
+
+    internal async void AddGameFolderButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "Select game folder", AllowMultiple = false });
+        if (folders.FirstOrDefault()?.Path.LocalPath is { Length: > 0 } path) ViewModel.AddGameDiscoveryFolder(path);
+    }
+    internal void RemoveGameFolderButton_OnClick(object? sender, RoutedEventArgs e) { if (sender is Button { DataContext: string path }) ViewModel?.RemoveGameDiscoveryFolder(path); }
+    internal async void ScanGameFoldersButton_OnClick(object? sender, RoutedEventArgs e) { if (ViewModel is not null) await ViewModel.ScanGameFoldersAsync(); }
+    internal void CancelGameFolderScanButton_OnClick(object? sender, RoutedEventArgs e) => ViewModel?.CancelGameFolderScan();
+    internal void AddDiscoveredGameButton_OnClick(object? sender, RoutedEventArgs e) { if (sender is Button { DataContext: DiscoveredGameRowViewModel row }) ViewModel?.AddDiscoveredGame(row); }
+    internal void IgnoreDiscoveredGameButton_OnClick(object? sender, RoutedEventArgs e) { if (sender is Button { DataContext: DiscoveredGameRowViewModel row }) ViewModel?.IgnoreDiscoveredGame(row); }
 
     internal void AddGameFromProcessButton_OnClick(object? sender, RoutedEventArgs e)
     {

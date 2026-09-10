@@ -126,6 +126,8 @@ public static class AppSettingsStore
             settings.MicrophoneDeviceIds ??= new List<string>();
             settings.IgnoredGameExecutables ??= new List<string>();
             settings.GameCaptureOverrides ??= new List<GameCaptureOverride>();
+            settings.GameDiscoveryFolders ??= new List<string>();
+            settings.IgnoredStandaloneGamePaths ??= new List<string>();
             settings.VideoOverlays ??= new VideoOverlaySettings();
             foreach (var game in settings.GameCaptureOverrides)
             {

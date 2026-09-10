@@ -269,6 +269,11 @@ public sealed class AppSettings
     // confirmations off, or vice versa.
     public bool EnableAutoClipFailedOverlay { get; set; } = true;
     public List<GameCaptureOverride> GameCaptureOverrides { get; set; } = new();
+
+    // User-selected roots for standalone-game discovery. Empty means discovery
+    // is off; no machine-specific default folder is assumed.
+    public List<string> GameDiscoveryFolders { get; set; } = new();
+    public List<string> IgnoredStandaloneGamePaths { get; set; } = new();
     // Per-game overrides of the global recording settings, keyed by the same
     // detection key GameCaptureOverrides uses (see GameCaptureOverride
     // .ExecutableName) so a game identified through Steam/Epic/exe resolves to
@@ -449,6 +454,11 @@ public sealed class GameCaptureOverride
     // by the shared catalog or Steam manifest. They must not turn into a
     // process-only detection rule on later launches.
     public string? Origin { get; set; }
+    // Standalone installations use a full path as identity. This lets two
+    // PsychEngine.exe copies remain independent games.
+    public string? ExecutablePath { get; set; }
+    public string? InstallationId { get; set; }
+    public string? DetectionReason { get; set; }
 }
 
 public sealed class GameRailFolder

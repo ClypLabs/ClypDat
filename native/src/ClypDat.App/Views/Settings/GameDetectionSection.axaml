@@ -46,6 +46,28 @@
       </StackPanel>
     </Border>
 
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="8">
+        <TextBlock Classes="settingsCardLabel" Text="GAME FOLDERS" />
+        <TextBlock Classes="settingsRowDescSm" Text="Scan folders you choose. Known standalone games are added automatically; uncertain engine applications need review." />
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8">
+          <Button Content="Add folder" Click="AddGameFolderButton_OnClick" />
+          <Button Grid.Column="1" Content="Scan now" Click="ScanGameFoldersButton_OnClick" IsEnabled="{Binding !IsScanningGameFolders}" />
+          <Button Grid.Column="2" Content="Cancel" Click="CancelGameFolderScanButton_OnClick" IsEnabled="{Binding IsScanningGameFolders}" />
+          <TextBlock Grid.Column="3" Text="{Binding GameDiscoveryStatus}" VerticalAlignment="Center" Foreground="{StaticResource TextSubtleBrush}" />
+        </Grid>
+        <ItemsControl ItemsSource="{Binding GameDiscoveryFolders}">
+          <ItemsControl.ItemTemplate><DataTemplate><Grid ColumnDefinitions="*,Auto"><TextBlock Text="{Binding}" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Remove" Click="RemoveGameFolderButton_OnClick" /></Grid></DataTemplate></ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <StackPanel Spacing="5" IsVisible="{Binding HasDiscoveredGameReviews}">
+          <TextBlock Classes="settingsRowTitle" Text="Review discovered games" />
+          <ItemsControl ItemsSource="{Binding DiscoveredGameReviews}">
+            <ItemsControl.ItemTemplate><DataTemplate><Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8"><StackPanel><TextBox Text="{Binding DisplayName}" /><TextBlock Text="{Binding ExecutablePath}" FontSize="11" /><TextBlock Text="{Binding Reason}" FontSize="11" /></StackPanel><Button Grid.Column="1" Content="Add" Click="AddDiscoveredGameButton_OnClick" /><Button Grid.Column="2" Content="Ignore" Click="IgnoreDiscoveredGameButton_OnClick" /></Grid></DataTemplate></ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Game icons|Game Icons}">
       <StackPanel Spacing="10">
         <TextBlock Classes="settingsCardLabel" Text="GAME ICONS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
