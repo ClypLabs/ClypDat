@@ -187,6 +187,21 @@ public sealed class KeyboardOverlayPreview : Control
         // drawn across both of them.
         var outline = new Pen(Brushes.White, Math.Max(3, bounds.Width * .028));
         var shellRadius = bounds.Width * .48;
+
+        // Side buttons are tabs standing proud of the left flank, where a right
+        // hand's thumb sits: forward above, back below. Drawn before the shell so
+        // the shell covers their inner half and only the part that sticks out
+        // shows - which is what a side button looks like from above.
+        var sideWidth = bounds.Width * .19;
+        var sideHeight = bounds.Height * .145;
+        var sideX = bounds.X - bounds.Width * .11;
+        var sideTop = bounds.Y + bounds.Height * .46;
+        var sideRadius = sideWidth * .38;
+        context.DrawRectangle(IsSidePressed(pressed, "MouseForward") ? Blue : Dark, outline,
+            new RoundedRect(new Rect(sideX, sideTop, sideWidth, sideHeight), sideRadius));
+        context.DrawRectangle(IsSidePressed(pressed, "MouseBack") ? Blue : Dark, outline,
+            new RoundedRect(new Rect(sideX, sideTop + sideHeight + bounds.Height * .03, sideWidth, sideHeight), sideRadius));
+
         context.DrawRectangle(Dark, outline, new RoundedRect(bounds,
             new CornerRadius(shellRadius, shellRadius, bounds.Width * .36, bounds.Width * .36)));
 
@@ -207,21 +222,6 @@ public sealed class KeyboardOverlayPreview : Control
         var wheelHeight = buttonHeight * .52;
         context.DrawRectangle(pressed.Contains("MouseMiddle") ? Blue : Dark, outline,
             new RoundedRect(new Rect(bounds.Center.X - wheelWidth / 2, bounds.Y + inset + buttonHeight * .18, wheelWidth, wheelHeight), wheelWidth / 2));
-
-        // Side buttons on the left flank, where a right hand's thumb sits:
-        // forward toward the front of the mouse, back behind it. They hug the
-        // shell's straight edge below the left button, clear of its curve.
-        var sideWidth = bounds.Width * .15;
-        var sideHeight = bounds.Height * .11;
-        var sideGap = bounds.Height * .03;
-        var sideX = bounds.X + inset * .75;
-        // Ends near 78% of the height, above where the bottom corner starts to curve.
-        var sideTop = bounds.Y + inset + buttonHeight + bounds.Height * .05;
-        var sideRadius = bounds.Width * .045;
-        context.DrawRectangle(IsSidePressed(pressed, "MouseForward") ? Blue : Dark, outline,
-            new RoundedRect(new Rect(sideX, sideTop, sideWidth, sideHeight), sideRadius));
-        context.DrawRectangle(IsSidePressed(pressed, "MouseBack") ? Blue : Dark, outline,
-            new RoundedRect(new Rect(sideX, sideTop + sideHeight + sideGap, sideWidth, sideHeight), sideRadius));
     }
 
     // Clips recorded before the side buttons were told apart only know "MouseX";
