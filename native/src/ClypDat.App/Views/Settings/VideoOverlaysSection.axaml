@@ -59,7 +59,7 @@
                   <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="vm:VideoOverlaySlotViewModel">
                       <Panel Width="{Binding Width}" Height="{Binding Height}">
-                        <Border Classes="videoOverlayWindow" Classes.selected="{Binding IsSelected}" Classes.empty="{Binding IsEmpty}"
+                        <Border Classes="videoOverlayWindow" Classes.selected="{Binding IsSelected}" Classes.empty="{Binding IsEmpty}" Classes.keyboard="{Binding IsKeyboard}"
                                 PointerPressed="Window_OnPointerPressed">
                           <Panel>
                             <TextBlock Classes="videoOverlayEmptyLabel" Text="Empty" IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" />

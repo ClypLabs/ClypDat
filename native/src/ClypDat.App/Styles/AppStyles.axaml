@@ -2768,6 +2768,9 @@
     <Setter Property="Cursor" Value="Arrow" />
     <Setter Property="BoxShadow" Value="none" />
   </Style>
+  <Style Selector="Border.videoOverlayWindow.keyboard">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
   <Style Selector="Border.videoOverlayWindow:pointerover">
     <Setter Property="BorderBrush" Value="#8CFFFFFF" />
   </Style>
