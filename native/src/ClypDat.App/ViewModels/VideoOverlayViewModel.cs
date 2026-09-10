@@ -83,9 +83,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(RecordingModeDescription));
         }
     }
-    public string RecordingModeDescription => VideoOverlayRecordingMode.IsBurned(_settings.RecordingMode)
-        ? "Saves overlays directly into recorded video. Sources and placement apply live; recording format applies next capture session."
-        : "Saves camera and keyboard/mouse as editable layers. Sources and placement apply live; recording format applies next capture session.";
+    public string RecordingModeDescription => "Sources and placement apply live. Recording mode applies next session.";
     /// <summary>The four corner windows drawn over the preview canvas.</summary>
     public ObservableCollection<VideoOverlaySlotViewModel> Slots { get; }
     public bool IncludeVirtualCameras { get => _globalSettings.IncludeVirtualCameras; set { if (_globalSettings.IncludeVirtualCameras == value) return; _globalSettings.IncludeVirtualCameras = value; _ = RefreshCamerasAsync(); Save(); } }

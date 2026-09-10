@@ -55,7 +55,6 @@
           <controls:AspectRatioBox AspectRatio="1.7777777777777777">
             <Border Classes="videoOverlayCanvas">
               <Grid>
-                <Image Source="avares://ClypDat/Assets/video-overlay-preview.jpg" Stretch="UniformToFill" IsHitTestVisible="False" />
                 <!-- Corner layers may sit exactly on an encoded-frame edge. Keep
                      their resize handles inside this preview's rounded outline:
                      each handle extends five pixels beyond its layer bounds. -->
