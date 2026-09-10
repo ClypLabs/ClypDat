@@ -42,7 +42,7 @@
           <controls:AspectRatioBox AspectRatio="1.7777777777777777">
             <Border Classes="videoOverlayCanvas">
               <Grid>
-                <Border Background="#FF101923" />
+                <Image Source="avares://ClypDat.App/Assets/video-overlay-preview.jpg" Stretch="UniformToFill" IsHitTestVisible="False" />
                 <ItemsControl x:Name="PreviewCanvas" Background="Transparent" ItemsSource="{Binding Slots}" ClipToBounds="False"
                               PointerPressed="PreviewCanvas_OnPointerPressed" PointerMoved="PreviewCanvas_OnPointerMoved"
                               PointerReleased="PreviewCanvas_OnPointerReleased" PointerCaptureLost="PreviewCanvas_OnPointerCaptureLost"
