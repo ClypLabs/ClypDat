@@ -156,7 +156,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
 
     public void NewLayout()
     {
-        _editing = new CustomKeyboardLayout { Name = CustomKeyboardLibrary.UniqueName("Custom keys", _customLayouts) };
+        _editing = new CustomKeyboardLayout { Name = CustomKeyboardLibrary.UniqueName("Custom keys", _customLayouts), IncludeMouse = false };
         LoadDraft();
     }
 
