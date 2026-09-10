@@ -16,6 +16,7 @@ internal sealed class OverlayCaptureSession : IDisposable
     private readonly object _gate = new();
     private readonly string _workRoot;
     private OverlayCaptureSettings _settings = OverlayCaptureSettings.None;
+    private bool _running;
     private Process? _camera;
     private string? _cameraError;
     private bool _cameraReceivedFrames;
@@ -34,18 +35,20 @@ internal sealed class OverlayCaptureSession : IDisposable
             // Camera replacement must not erase keyboard history captured by
             // the worker. Input has its own lifetime and clip-start checkpoint.
             if (changed) StopCameraUnderLock();
-            if (_settings.Camera is not null && _camera is null) StartCameraUnderLock();
+            if (_running && !OverlayRecordingMode.IsBurned(_settings.RecordingMode) && _settings.Camera is not null && _camera is null) StartCameraUnderLock();
         }
     }
 
     public void Start()
     {
+        _running = true;
+        if (OverlayRecordingMode.IsBurned(_settings.RecordingMode)) return;
         _input.Start();
         lock (_gate)
             if (_settings.Camera is not null && _camera is null) StartCameraUnderLock();
     }
 
-    public void Stop() { lock (_gate) StopCameraUnderLock(); _input.Reset(); }
+    public void Stop() { lock (_gate) { _running = false; StopCameraUnderLock(); } _input.Reset(); }
 
     /// <param name="mediaScale">Media seconds per wall-clock second, so segments
     /// land where the clip's own timeline puts them rather than where wall-clock

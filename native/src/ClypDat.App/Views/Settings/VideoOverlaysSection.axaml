@@ -33,6 +33,14 @@
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludeVirtualCameras}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
           <Button Grid.Column="2" Content="Refresh" Click="Refresh_OnClick" VerticalAlignment="Center" />
         </Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Overlay recording mode" />
+            <TextBlock Classes="settingsRowDescSm" Text="{Binding RecordingModeDescription}" TextWrapping="Wrap" MaxWidth="600" />
+          </StackPanel>
+          <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" ItemsSource="{Binding RecordingModes}"
+                    SelectedItem="{Binding RecordingMode, Mode=TwoWay}" />
+        </Grid>
         <Border Classes="settingsDivider" />
         <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" TextWrapping="Wrap" />
         <TextBlock Classes="settingsCardLabel" Margin="0,6,0,0" Text="VIDEO OVERLAY PREVIEW" />

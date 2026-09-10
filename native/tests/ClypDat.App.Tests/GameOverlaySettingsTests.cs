@@ -54,6 +54,7 @@ public sealed class GameOverlaySettingsTests
         Assert.NotSame(settings.VideoOverlays, profile.VideoOverlays);
         Assert.Equal(settings.VideoOverlays.CameraTransform, profile.VideoOverlays!.CameraTransform);
         Assert.Equal("Bottom Right", profile.VideoOverlays.CameraAnchor);
+        profile.VideoOverlays.RecordingMode = VideoOverlayRecordingMode.BurnIntoVideo;
         profile.VideoOverlays.Camera = null;
         profile.VideoOverlays.KeyboardLayout = "None";
         profile.VideoOverlays.IncludeVirtualCameras = false;
@@ -61,6 +62,7 @@ public sealed class GameOverlaySettingsTests
         Assert.Null(resolved.Camera);
         Assert.Equal("None", resolved.KeyboardLayout);
         Assert.True(resolved.IncludeVirtualCameras);
+        Assert.Equal(VideoOverlayRecordingMode.BurnIntoVideo, resolved.RecordingMode);
         Assert.NotNull(settings.VideoOverlays.Camera);
         profile.Groups.Clear();
         Assert.Equal(settings.VideoOverlays.Camera, CustomGameSettingsResolver.ResolveOverlays(settings, "game.exe").Camera);

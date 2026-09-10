@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 11;
+public const int CurrentSchemaVersion = 12;
 
     public static bool Apply(AppSettings settings)
     {
@@ -84,6 +84,12 @@ public static class AppSettingsMigrations
             settings.VideoOverlays ??= new VideoOverlaySettings();
         }
 
+        if (settings.SettingsSchemaVersion < 12)
+        {
+            settings.VideoOverlays ??= new VideoOverlaySettings();
+            settings.VideoOverlays.RecordingMode = VideoOverlayRecordingMode.EditableLayers;
+        }
+
         settings.CustomThemes ??= new();
         settings.RecentThemeColors ??= new();
         settings.CustomThemes.RemoveAll(theme => string.IsNullOrWhiteSpace(theme.Id) ||
@@ -119,6 +125,7 @@ public static class AppSettingsMigrations
 
     private static void NormalizeOverlays(VideoOverlaySettings overlays, IReadOnlyList<CustomKeyboardLayout> layouts)
     {
+        overlays.RecordingMode = VideoOverlayRecordingMode.Normalize(overlays.RecordingMode);
         var keyboardLayout = overlays.KeyboardLayout;
         var customSelection = CustomKeyboardLibrary.IsCustomSelection(keyboardLayout);
         overlays.KeyboardLayout =

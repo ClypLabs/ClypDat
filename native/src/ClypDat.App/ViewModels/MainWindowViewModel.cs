@@ -4631,6 +4631,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (layer is null) return _selectedOverlayManifestRecorded
             ? $"{name} was not selected for this clip."
             : "No overlay capture data in this clip.";
+        if (layer.Flattened) return $"{name} is burned into this video. Its layout is fixed.";
         if (!layer.Available) return string.IsNullOrWhiteSpace(layer.Error) ? $"{name} was unavailable while this clip recorded." : layer.Error;
         return ClipOverlayManifest.IsUsable(Settings.LibraryFolder, layer) ? $"{name} captured with this clip." : $"{name} capture asset is missing.";
     }

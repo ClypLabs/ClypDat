@@ -32,6 +32,7 @@ public sealed class VideoOverlaySettingsTests
         Assert.Equal("QWERTY Compact", settings.VideoOverlays.KeyboardLayout);
         Assert.Equal(new VideoOverlayTransform(.70, .05, .25), settings.VideoOverlays.CameraTransform);
         Assert.Equal(new VideoOverlayTransform(.05, .70, .35), settings.VideoOverlays.KeyboardTransform);
+        Assert.Equal(VideoOverlayRecordingMode.EditableLayers, settings.VideoOverlays.RecordingMode);
     }
 
     [Theory]
@@ -60,6 +61,27 @@ public sealed class VideoOverlaySettingsTests
         var snapshot = new VideoOverlaySettings { KeyboardLayout = "Unknown layout" }.ToCaptureSettings();
 
         Assert.Equal("None", snapshot.KeyboardLayout);
+    }
+
+    [Fact]
+    public void BurnMode_CopiesAndCrossesWorkerJson()
+    {
+        var settings = new VideoOverlaySettings { RecordingMode = VideoOverlayRecordingMode.BurnIntoVideo };
+
+        var copy = settings.Copy();
+        var snapshot = JsonSerializer.Deserialize<ClypDat.Capture.Abstractions.OverlayCaptureSettings>(JsonSerializer.Serialize(settings.ToCaptureSettings()))!;
+
+        Assert.Equal(VideoOverlayRecordingMode.BurnIntoVideo, copy.RecordingMode);
+        Assert.Equal(ClypDat.Capture.Abstractions.OverlayRecordingMode.BurnIntoVideo, snapshot.RecordingMode);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("unknown")]
+    public void RecordingMode_MissingOrInvalidMeansEditable(string? value)
+    {
+        Assert.Equal(VideoOverlayRecordingMode.EditableLayers, VideoOverlayRecordingMode.Normalize(value));
     }
 
     [Theory]

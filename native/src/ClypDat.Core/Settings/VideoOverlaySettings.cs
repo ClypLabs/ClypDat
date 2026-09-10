@@ -6,7 +6,7 @@ public sealed class VideoOverlaySettings
 {
     public VideoOverlaySettings Copy() => new()
     {
-        Enabled = Enabled, IncludeVirtualCameras = IncludeVirtualCameras,
+        Enabled = Enabled, RecordingMode = RecordingMode, IncludeVirtualCameras = IncludeVirtualCameras,
         Camera = Camera is null ? null : Camera with { }, KeyboardLayout = KeyboardLayout,
         CameraTransform = CameraTransform with { }, KeyboardTransform = KeyboardTransform with { },
         CameraAnchor = CameraAnchor, KeyboardAnchor = KeyboardAnchor
@@ -14,6 +14,10 @@ public sealed class VideoOverlaySettings
     // Compatibility-only. Older settings persisted this burn-in switch. It is
     // deliberately ignored: selecting a source now captures an editable layer.
     public bool Enabled { get; set; }
+    /// <summary>How camera and peripheral overlays are stored for new captures.
+    /// Missing values deserialize as editable for settings written before this
+    /// choice existed.</summary>
+    public string RecordingMode { get; set; } = VideoOverlayRecordingMode.EditableLayers;
     public bool IncludeVirtualCameras { get; set; }
     public VideoOverlayCameraSelection? Camera { get; set; }
     public string KeyboardLayout { get; set; } = "QWERTY Compact";
@@ -23,6 +27,16 @@ public sealed class VideoOverlaySettings
     // assigned picker corner after being freely moved around the frame.
     public string? CameraAnchor { get; set; } = "Top Right";
     public string? KeyboardAnchor { get; set; } = "Bottom Left";
+}
+
+public static class VideoOverlayRecordingMode
+{
+    public const string EditableLayers = "EditableLayers";
+    public const string BurnIntoVideo = "BurnIntoVideo";
+
+    public static string Normalize(string? value) => string.Equals(value, BurnIntoVideo, StringComparison.OrdinalIgnoreCase)
+        ? BurnIntoVideo : EditableLayers;
+    public static bool IsBurned(string? value) => Normalize(value) == BurnIntoVideo;
 }
 
 public sealed record VideoOverlayCameraSelection(string DeviceMoniker, string FriendlyName);

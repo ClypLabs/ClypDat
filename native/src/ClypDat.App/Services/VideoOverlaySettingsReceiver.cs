@@ -31,7 +31,8 @@ internal static class VideoOverlaySettingsMapper
             new(settings.KeyboardTransform.X, settings.KeyboardTransform.Y, settings.KeyboardTransform.Width),
             custom is null ? null : PackSnapshot(custom),
             custom?.Name,
-            custom?.IncludeMouse ?? true);
+            custom?.IncludeMouse ?? true,
+            ClypDat.Core.Settings.VideoOverlayRecordingMode.Normalize(settings.RecordingMode));
     }
 
     private static IReadOnlyList<OverlayKeyCapSnapshot> PackSnapshot(ClypDat.Core.Settings.CustomKeyboardLayout layout)

@@ -64,6 +64,23 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
 
     public ObservableCollection<CameraOption> Cameras { get; }
     public ObservableCollection<OverlaySourceOption> Sources { get; }
+    public IReadOnlyList<OverlayRecordingModeOption> RecordingModes { get; } =
+        [new("Editable layers", VideoOverlayRecordingMode.EditableLayers), new("Burn into video", VideoOverlayRecordingMode.BurnIntoVideo)];
+    public OverlayRecordingModeOption? RecordingMode
+    {
+        get => RecordingModes.FirstOrDefault(option => option.Value == VideoOverlayRecordingMode.Normalize(_settings.RecordingMode));
+        set
+        {
+            if (value is null || string.Equals(_settings.RecordingMode, value.Value, StringComparison.Ordinal)) return;
+            _settings.RecordingMode = value.Value;
+            Save();
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(RecordingModeDescription));
+        }
+    }
+    public string RecordingModeDescription => VideoOverlayRecordingMode.IsBurned(_settings.RecordingMode)
+        ? "Saves overlays directly into recorded video, avoiding separate overlay files. Recorded overlays cannot be moved, resized, hidden, or removed in Editor. Changes apply next capture session."
+        : "Saves camera and keyboard/mouse as editable layers. Changes apply next capture session.";
     /// <summary>The four corner windows drawn over the preview canvas.</summary>
     public ObservableCollection<VideoOverlaySlotViewModel> Slots { get; }
     public bool IncludeVirtualCameras { get => _globalSettings.IncludeVirtualCameras; set { if (_globalSettings.IncludeVirtualCameras == value) return; _globalSettings.IncludeVirtualCameras = value; _ = RefreshCamerasAsync(); Save(); } }
@@ -548,6 +565,7 @@ internal static class OverlaySourceOptions
     }
 }
 public sealed record CameraOption(string Name, string Moniker, bool IsVirtual = false) { public static CameraOption None { get; } = new("None", string.Empty); public bool IsNone => string.IsNullOrEmpty(Moniker); }
+public sealed record OverlayRecordingModeOption(string Name, string Value) { public override string ToString() => Name; }
 internal static class DirectShowCameraProbe
 {
     public static IReadOnlyList<CameraOption> List(bool includeVirtual, CancellationToken cancellationToken)

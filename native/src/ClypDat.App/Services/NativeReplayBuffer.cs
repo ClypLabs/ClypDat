@@ -111,6 +111,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // OverlayCaptureSettings is immutable, so swapping its reference cannot
     // expose a partially-updated camera selection or transform.
     private OverlayCaptureSettings _videoOverlaySettings = OverlayCaptureSettings.None;
+    // Preference updates may arrive while replay history is live. Save uses
+    // this start-time snapshot, never a later preference value.
+    private OverlayCaptureSettings _activeVideoOverlaySettings = OverlayCaptureSettings.None;
     private readonly OverlayCaptureSession _overlayCapture;
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
@@ -280,7 +283,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     {
         ArgumentNullException.ThrowIfNull(settings);
         Interlocked.Exchange(ref _videoOverlaySettings, settings);
-        _overlayCapture.Apply(settings);
+        // Active replay keeps its start snapshot. Reconfiguring this in place
+        // would make one history window produce both editable assets and
+        // flattened metadata.
+        if (!_sessionActive) _overlayCapture.Apply(settings);
     }
 
     public void RequestFrameRate(int frameRate)
@@ -442,6 +448,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // again in a second." instead of the actual start failure.
         _packetPayloads.Activate();
         _sessionActive = true;
+        _activeVideoOverlaySettings = Volatile.Read(ref _videoOverlaySettings);
+        _overlayCapture.Apply(_activeVideoOverlaySettings);
         _overlayCapture.Start();
         SetHealth(new ReplayCaptureHealth("Native", "Native capture", ReplayCaptureState.Starting,
             config.FrameRate, 0, 0, 0, 0, 0, 0, string.Empty, string.Empty, string.Empty, DateTime.UtcNow));
@@ -804,7 +812,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // Assets are attached by the worker capture service when available;
         // retaining unavailable selections lets the editor distinguish that
         // result from old clips which predate overlay capture entirely.
-        var overlays = Volatile.Read(ref _videoOverlaySettings);
+        var overlays = _activeVideoOverlaySettings;
         if (overlays != OverlayCaptureSettings.None)
         {
             // The window to collect is real elapsed time, which is longer than
@@ -812,11 +820,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var mediaScale = overlayMediaMapping.MediaScale > 0 ? overlayMediaMapping.MediaScale : 1;
             var captureEndUtc = overlayMediaMapping.AcquisitionStartUtc
                 + TimeSpan.FromSeconds(overlayMediaMapping.MediaDurationSeconds / mediaScale);
-            var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
+            var burned = OverlayRecordingMode.IsBurned(overlays.RecordingMode);
+            var camera = burned ? FlattenedCamera(overlays) : _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
             var peripheralKeys = overlays.KeyboardKeys is not null
                 ? overlays.KeyboardKeys.Select(cap => new ClipOverlayKeyCap(cap.Code, cap.Label, cap.Row, cap.Units)).ToArray()
                 : null;
-            var peripherals = _overlayCapture.FinalizeInput(config.LibraryFolder, outputPath, overlays.KeyboardLayout,
+            var peripherals = burned ? FlattenedPeripherals(overlays, peripheralKeys) : _overlayCapture.FinalizeInput(config.LibraryFolder, outputPath, overlays.KeyboardLayout,
                 peripheralKeys, overlays.KeyboardName, overlays.KeyboardShowMouse,
                 overlays.KeyboardTransform, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
             ClipInfoSidecar.Save(config.LibraryFolder, outputPath, new ClipInfo(gameDisplayName, null, clipName,
@@ -846,6 +855,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             }
         }
     }
+
+    private static ClipOverlayLayer? FlattenedCamera(OverlayCaptureSettings settings) => settings.Camera is not { } camera ? null
+        : new ClipOverlayLayer(camera.FriendlyName, true, InitialTransform: settings.CameraTransform.ToPresentationTransform(), Flattened: true);
+
+    private static ClipOverlayLayer? FlattenedPeripherals(OverlayCaptureSettings settings, IReadOnlyList<ClipOverlayKeyCap>? keys) =>
+        string.Equals(settings.KeyboardLayout, "None", StringComparison.OrdinalIgnoreCase) ? null
+        : new ClipOverlayLayer(settings.KeyboardLayout, true, InitialTransform: settings.KeyboardTransform.ToPresentationTransform(),
+            Flattened: true, Keys: keys, SourceName: settings.KeyboardName, ShowMouse: settings.KeyboardShowMouse);
 
     private int _capturePaused;
     public void SetCapturePaused(bool paused) => Volatile.Write(ref _capturePaused, paused ? 1 : 0);

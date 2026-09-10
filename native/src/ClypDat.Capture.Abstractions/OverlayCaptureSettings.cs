@@ -14,9 +14,17 @@ public sealed record OverlayCaptureSettings(
     // would arrive meaningless - it has to travel already packed.
     IReadOnlyList<OverlayKeyCapSnapshot>? KeyboardKeys = null,
     string? KeyboardName = null,
-    bool KeyboardShowMouse = true)
+    bool KeyboardShowMouse = true,
+    string RecordingMode = OverlayRecordingMode.EditableLayers)
 {
     public static OverlayCaptureSettings None { get; } = new(null, "None", new(.70, .05, .25), new(.05, .70, .35));
+}
+
+public static class OverlayRecordingMode
+{
+    public const string EditableLayers = "EditableLayers";
+    public const string BurnIntoVideo = "BurnIntoVideo";
+    public static bool IsBurned(string? value) => string.Equals(value, BurnIntoVideo, StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record OverlayKeyCapSnapshot(string Code, string Label, int Row, double Units = 1);
