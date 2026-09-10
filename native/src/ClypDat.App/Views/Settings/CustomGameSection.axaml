@@ -109,7 +109,7 @@
     <StackPanel Spacing="18" DataContext="{Binding SelectedCustomGameTab}">
       <StackPanel Spacing="12" IsVisible="{Binding HasOverlays}">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="settingsRowTitle" Text="Overlays" />
+          <TextBlock Classes="settingsRowTitle" Text="Video Overlays" />
           <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Overlays" Click="RemoveCustomGameGroupButton_OnClick" />
         </Grid>
         <sections:VideoOverlaysSection IsGameScoped="True"
@@ -379,6 +379,7 @@
             <MenuItem Header="Recording Quality" Tag="Quality" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasQuality}" />
             <MenuItem Header="Replay Length and Hotkey" Tag="Replay" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasReplay}" />
             <MenuItem Header="Audio" Tag="Audio" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasAudio}" />
+            <MenuItem Header="Video Overlays" Tag="Overlays" Click="AddCustomGameGroupMenuItem_OnClick" IsVisible="{Binding !HasOverlays}" />
           </MenuFlyout>
         </Button.Flyout>
       </Button>

@@ -45,7 +45,7 @@ internal static class CustomGameSettingsResolver
         QualityGroup => "Recording Quality",
         ReplayGroup => "Replay Length",
         AudioGroup => "Audio",
-        OverlaysGroup => "Overlays",
+        OverlaysGroup => "Video Overlays",
         _ => group
     };
 

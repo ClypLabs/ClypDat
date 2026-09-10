@@ -138,7 +138,11 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         if (Has(group) == enabled) return;
         if (enabled)
         {
-            CustomGameSettingsResolver.SeedGroupFromGlobal(_settings, Profile, group);
+            // Video overlays retain their inactive override. Unlike a missing
+            // profile value, it was deliberately configured before the user
+            // returned this game to global defaults.
+            if (group != CustomGameSettingsResolver.OverlaysGroup || Profile.VideoOverlays is null)
+                CustomGameSettingsResolver.SeedGroupFromGlobal(_settings, Profile, group);
             Profile.Groups.Add(group);
         }
         else

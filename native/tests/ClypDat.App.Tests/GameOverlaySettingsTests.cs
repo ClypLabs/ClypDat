@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ClypDat.App.Services;
+using ClypDat.App.ViewModels;
 using ClypDat.Core.Settings;
 using Xunit;
 
@@ -7,6 +8,29 @@ namespace ClypDat.App.Tests;
 
 public sealed class GameOverlaySettingsTests
 {
+    [Fact]
+    public void ReaddingOverlayGroupRestoresSavedOverrideWhileFirstAddSeedsGlobal()
+    {
+        var settings = new AppSettings();
+        settings.VideoOverlays.KeyboardLayout = "QWERTY Compact";
+
+        var saved = new CustomGameProfile { VideoOverlays = new() { KeyboardLayout = "None" } };
+        var savedTab = new CustomGameTabViewModel("saved.exe", saved, settings, () => { });
+        savedTab.HasOverlays = true;
+        Assert.Equal("None", saved.VideoOverlays!.KeyboardLayout);
+
+        savedTab.HasOverlays = false;
+        settings.VideoOverlays.KeyboardLayout = "Arrow Keys + Mouse";
+        savedTab.HasOverlays = true;
+        Assert.Equal("None", saved.VideoOverlays.KeyboardLayout);
+
+        var fresh = new CustomGameProfile();
+        var freshTab = new CustomGameTabViewModel("fresh.exe", fresh, settings, () => { });
+        freshTab.HasOverlays = true;
+        Assert.NotSame(settings.VideoOverlays, fresh.VideoOverlays);
+        Assert.Equal("Arrow Keys + Mouse", fresh.VideoOverlays!.KeyboardLayout);
+    }
+
     [Fact]
     public void TallCustomBoardFitsOutputAndKeepsItsPackedAspect()
     {
