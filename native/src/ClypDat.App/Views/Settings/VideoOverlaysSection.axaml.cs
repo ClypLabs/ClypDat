@@ -60,7 +60,12 @@ public sealed partial class VideoOverlaysSection : UserControl
     {
         EndDrag();
         (DataContext as VideoOverlayViewModel)?.Dispose();
-        if (_owner is null || (IsGameScoped && GameTab?.HasOverlays != true)) { DataContext = null; return; }
+        if (_owner is null || (IsGameScoped && GameTab?.HasOverlays != true))
+        {
+            DataContext = null;
+            UpdateVisibility();
+            return;
+        }
         var settings = IsGameScoped
             ? GameTab!.Profile.VideoOverlays ??= _owner.Settings.VideoOverlays.Copy()
             : _owner.Settings.VideoOverlays;
