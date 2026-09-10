@@ -4584,8 +4584,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public string CameraOverlayStatus => OverlayStatus(_selectedOverlayManifest.Camera, "Camera");
     public string PeripheralOverlayStatus => OverlayStatus(_selectedOverlayManifest.Peripherals, "Keyboard and mouse");
-    public bool CameraOverlayLayerVisible { get => _cameraOverlayLayerVisible; set { if (SetProperty(ref _cameraOverlayLayerVisible, value) && !_suppressClipEditSave) SaveSelectedClipEditState(); } }
-    public bool PeripheralOverlayLayerVisible { get => _peripheralOverlayLayerVisible; set { if (SetProperty(ref _peripheralOverlayLayerVisible, value) && !_suppressClipEditSave) SaveSelectedClipEditState(); } }
+    public bool CameraOverlayLayerVisible { get => _cameraOverlayLayerVisible; set { if (SetProperty(ref _cameraOverlayLayerVisible, value)) { if (!_suppressClipEditSave) SaveSelectedClipEditState(); RaiseSpotifyOverlayPreviewChanged(); } } }
+    public bool PeripheralOverlayLayerVisible { get => _peripheralOverlayLayerVisible; set { if (SetProperty(ref _peripheralOverlayLayerVisible, value)) { if (!_suppressClipEditSave) SaveSelectedClipEditState(); RaiseSpotifyOverlayPreviewChanged(); } } }
     public VideoOverlayTransform? CameraOverlayTransform => _cameraOverlayTransform;
     public VideoOverlayTransform? PeripheralOverlayTransform => _peripheralOverlayTransform;
     public ClipOverlayLayer? SelectedOverlayManifestCamera() => _selectedOverlayManifest.Camera;

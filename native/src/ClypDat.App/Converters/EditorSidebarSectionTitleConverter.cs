@@ -11,6 +11,7 @@ public sealed class EditorSidebarSectionTitleConverter : IValueConverter
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => value switch
     {
         EditorSidebarSection.Info => "Info",
+        EditorSidebarSection.Overlays => "Overlays",
         EditorSidebarSection.Effects => "Effects",
         EditorSidebarSection.Export => "Export",
         _ => string.Empty

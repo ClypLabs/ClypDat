@@ -211,6 +211,7 @@ internal sealed class SpotifyCardFrames : IDisposable
             for (var c = 0; c < 3; c++) Pixels[i + c] = (byte)Math.Min(255, (Pixels[i + c] * 255 + alpha / 2) / alpha);
         }
     }
+    public void ClearPixels() => Array.Clear(Pixels);
     public void Dispose()
     {
         foreach (var text in _text.Values) text.Dispose();

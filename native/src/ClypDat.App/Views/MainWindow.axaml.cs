@@ -429,7 +429,10 @@ public sealed partial class MainWindow : Window
                 // changes it, so the choice is visible against the clip that is
                 // already open behind the dialog.
                 ViewModel.SpotifyOverlayPreviewChanged += (_, _) =>
+                {
                     _spotifyPreviewDirty = true;
+                    Dispatcher.UIThread.Post(UpdateSpotifyPreview);
+                };
                 ViewModel.RecordingOverlayPreviewRequested += (_, _) =>
                     ShowGameDetectedNotification(ViewModel.ActiveGameDetection.IsDetected
                         ? ViewModel.ActiveGameDetection.DisplayName : "Your game", preview: true);

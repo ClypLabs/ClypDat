@@ -47,6 +47,9 @@ internal static class SpotifyFrameChecks
             Assert.Contains(position.EndsWith("Right") ? "overlay=main_w-overlay_w:" : "overlay=0:", graph);
             renderer.Render(null, 0); renderer.CopyStraightPixels();
             Assert.All(renderer.Pixels, pixel => Assert.Equal(0, pixel));
+            renderer.Render(card, 0); renderer.CopyStraightPixels();
+            renderer.ClearPixels();
+            Assert.All(renderer.Pixels, pixel => Assert.Equal(0, pixel));
         }
         using (var narrow = new SpotifyCardFrames(60, 100, "Bottom Right", font))
         { Assert.True(narrow.Width <= 60); Assert.True(narrow.Height <= 100); }

@@ -57,6 +57,14 @@ public sealed class CapturedOverlayHitTestTests
     }
 
     [Fact]
+    public void UnselectedLayersExposeOnlyTheirBody()
+    {
+        Assert.False(CapturedOverlayHitTest.TryHit(Layer, new Point(Layer.Left - 4, Layer.Top - 4), includeHandles: false, out _));
+        Assert.True(CapturedOverlayHitTest.TryHit(Layer, Layer.Center, includeHandles: false, out var mode));
+        Assert.Equal(VideoOverlayManipulationMode.Move, mode);
+    }
+
+    [Fact]
     public void CapturedAdornerDrawsAndHitTestsWithoutRotation()
     {
         // VideoOverlayTransform carries no rotation, so offering a rotate handle
@@ -71,6 +79,10 @@ public sealed class CapturedOverlayHitTestTests
         adorner.ShowRotationHandle = true;
         Assert.True(adorner.TryHitTest(handle, out var rotate));
         Assert.Equal(SpotifyOverlayDragMode.Rotate, rotate);
+
+        Assert.False(adorner.TryHitTest(handle, includeHandles: false, out _));
+        Assert.True(adorner.TryHitTest(Layer.Center, includeHandles: false, out var body));
+        Assert.Equal(SpotifyOverlayDragMode.Move, body);
     }
 
     [Fact]

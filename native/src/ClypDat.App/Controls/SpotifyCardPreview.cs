@@ -14,6 +14,7 @@ internal sealed class SpotifyCardPreview : Control, IDisposable
     public void Clear()
     {
         _state = null;
+        _frames?.ClearPixels();
         InvalidateVisual();
     }
     public void Update(SpotifyRenderSpec spec, double seconds, int width, int height)
@@ -38,7 +39,8 @@ internal sealed class SpotifyCardPreview : Control, IDisposable
     }
     public override void Render(DrawingContext context)
     {
-        if (_frames is not null) context.DrawImage(_frames.Bitmap, new Rect(_frames.Bitmap.Size), new Rect(Bounds.Size));
+        if (_state?.Card is not null && _frames is not null)
+            context.DrawImage(_frames.Bitmap, new Rect(_frames.Bitmap.Size), new Rect(Bounds.Size));
     }
     public void Dispose() { _frames?.Dispose(); _frames = null; _key = null; _state = null; }
 }

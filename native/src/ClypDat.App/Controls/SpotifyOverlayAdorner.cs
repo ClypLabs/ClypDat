@@ -43,6 +43,10 @@ internal sealed class SpotifyOverlayAdorner : Control
 
     /// <summary>Finds a card gesture target without treating empty canvas as a move.</summary>
     public bool TryHitTest(Point point, out SpotifyOverlayDragMode mode)
+        => TryHitTest(point, includeHandles: true, out mode);
+
+    /// <summary>Tests the rotated card body, optionally including manipulation handles.</summary>
+    public bool TryHitTest(Point point, bool includeHandles, out SpotifyOverlayDragMode mode)
     {
         var center = CardBounds.Center;
         var radians = -RotationDegrees * Math.PI / 180;
@@ -52,16 +56,16 @@ internal sealed class SpotifyOverlayAdorner : Control
         var rotation = RotationHandle(CardBounds);
         var rotationDx = local.X - rotation.X;
         var rotationDy = local.Y - rotation.Y;
-        if (ShowRotationHandle && rotationDx * rotationDx + rotationDy * rotationDy <= (HandleSize + 3) * (HandleSize + 3))
+        if (includeHandles && ShowRotationHandle && rotationDx * rotationDx + rotationDy * rotationDy <= (HandleSize + 3) * (HandleSize + 3))
         {
             mode = SpotifyOverlayDragMode.Rotate;
             return true;
         }
         var reach = HandleSize + 4;
-        if (Math.Abs(local.X - CardBounds.Left) <= reach && Math.Abs(local.Y - CardBounds.Top) <= reach) mode = SpotifyOverlayDragMode.TopLeft;
-        else if (Math.Abs(local.X - CardBounds.Right) <= reach && Math.Abs(local.Y - CardBounds.Top) <= reach) mode = SpotifyOverlayDragMode.TopRight;
-        else if (Math.Abs(local.X - CardBounds.Left) <= reach && Math.Abs(local.Y - CardBounds.Bottom) <= reach) mode = SpotifyOverlayDragMode.BottomLeft;
-        else if (Math.Abs(local.X - CardBounds.Right) <= reach && Math.Abs(local.Y - CardBounds.Bottom) <= reach) mode = SpotifyOverlayDragMode.BottomRight;
+        if (includeHandles && Math.Abs(local.X - CardBounds.Left) <= reach && Math.Abs(local.Y - CardBounds.Top) <= reach) mode = SpotifyOverlayDragMode.TopLeft;
+        else if (includeHandles && Math.Abs(local.X - CardBounds.Right) <= reach && Math.Abs(local.Y - CardBounds.Top) <= reach) mode = SpotifyOverlayDragMode.TopRight;
+        else if (includeHandles && Math.Abs(local.X - CardBounds.Left) <= reach && Math.Abs(local.Y - CardBounds.Bottom) <= reach) mode = SpotifyOverlayDragMode.BottomLeft;
+        else if (includeHandles && Math.Abs(local.X - CardBounds.Right) <= reach && Math.Abs(local.Y - CardBounds.Bottom) <= reach) mode = SpotifyOverlayDragMode.BottomRight;
         else if (CardBounds.Contains(local)) mode = SpotifyOverlayDragMode.Move;
         else
         {

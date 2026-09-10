@@ -14,6 +14,9 @@ internal static class CapturedOverlayHitTest
     public const double HandleReach = 14;
 
     public static bool TryHit(Rect bounds, Point point, out VideoOverlayManipulationMode mode)
+        => TryHit(bounds, point, includeHandles: true, out mode);
+
+    public static bool TryHit(Rect bounds, Point point, bool includeHandles, out VideoOverlayManipulationMode mode)
     {
         mode = VideoOverlayManipulationMode.Move;
         if (bounds.Width <= 0 || bounds.Height <= 0) return false;
@@ -25,7 +28,7 @@ internal static class CapturedOverlayHitTest
         var bottom = Math.Abs(point.Y - bounds.Bottom) <= HandleReach;
         var withinX = point.X >= bounds.Left - HandleReach && point.X <= bounds.Right + HandleReach;
         var withinY = point.Y >= bounds.Top - HandleReach && point.Y <= bounds.Bottom + HandleReach;
-        if (withinX && withinY)
+        if (includeHandles && withinX && withinY)
         {
             if (left && top) { mode = VideoOverlayManipulationMode.TopLeft; return true; }
             if (right && top) { mode = VideoOverlayManipulationMode.TopRight; return true; }
