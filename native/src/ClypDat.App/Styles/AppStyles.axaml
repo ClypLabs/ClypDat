@@ -2768,6 +2768,9 @@
     <Setter Property="Cursor" Value="Arrow" />
     <Setter Property="BoxShadow" Value="none" />
   </Style>
+  <Style Selector="Border.videoOverlayPreviewCanvas">
+    <Setter Property="Background" Value="#FF0B1218" />
+  </Style>
   <Style Selector="Border.videoOverlayWindow.keyboard">
     <Setter Property="Background" Value="Transparent" />
   </Style>

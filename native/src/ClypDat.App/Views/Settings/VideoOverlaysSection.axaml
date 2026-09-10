@@ -53,7 +53,7 @@
              so the rectangle stays an honest preview of the burned-in area. -->
         <Grid x:Name="WidePreview" HorizontalAlignment="Center" MaxWidth="1200">
           <controls:AspectRatioBox AspectRatio="1.7777777777777777">
-            <Border Classes="videoOverlayCanvas">
+            <Border Classes="videoOverlayCanvas videoOverlayPreviewCanvas">
               <Grid>
                 <!-- Corner layers may sit exactly on an encoded-frame edge. Keep
                      their resize handles inside this preview's rounded outline:
