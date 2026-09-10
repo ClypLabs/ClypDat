@@ -147,6 +147,24 @@ public sealed partial class VideoOverlaysSection : UserControl
             : point.X > border.Bounds.Width - handle
                 ? point.Y < handle ? VideoOverlayManipulationMode.TopRight : point.Y > border.Bounds.Height - handle ? VideoOverlayManipulationMode.BottomRight : VideoOverlayManipulationMode.Move
                 : VideoOverlayManipulationMode.Move;
+        BeginOverlayGesture(model, layer, _dragMode, e);
+    }
+
+    private void Handle_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Border { DataContext: VideoOverlaySlotViewModel { Layer: { } layer } } border ||
+            DataContext is not VideoOverlayViewModel model ||
+            !e.GetCurrentPoint(border).Properties.IsLeftButtonPressed) return;
+        var mode = border.Classes.Contains("topLeft") ? VideoOverlayManipulationMode.TopLeft
+            : border.Classes.Contains("topRight") ? VideoOverlayManipulationMode.TopRight
+            : border.Classes.Contains("bottomLeft") ? VideoOverlayManipulationMode.BottomLeft
+            : VideoOverlayManipulationMode.BottomRight;
+        BeginOverlayGesture(model, layer, mode, e);
+    }
+
+    private void BeginOverlayGesture(VideoOverlayViewModel model, string layer, VideoOverlayManipulationMode mode, PointerPressedEventArgs e)
+    {
+        _dragMode = mode;
         _dragLayer = layer;
         _lastPointer = e.GetPosition(PreviewCanvas);
         model.SelectLayer(layer);
