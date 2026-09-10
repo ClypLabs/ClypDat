@@ -70,10 +70,10 @@
                             <TextBlock Classes="videoOverlayWindowLabel" Text="{Binding Label}" />
                           </Panel>
                         </Border>
-                        <Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding IsSelected}" PointerPressed="Handle_OnPointerPressed" Cursor="TopLeftCorner" />
-                        <Border Classes="videoOverlayHandle topRight" IsVisible="{Binding IsSelected}" PointerPressed="Handle_OnPointerPressed" Cursor="TopRightCorner" />
-                        <Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding IsSelected}" PointerPressed="Handle_OnPointerPressed" Cursor="BottomLeftCorner" />
-                        <Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding IsSelected}" PointerPressed="Handle_OnPointerPressed" Cursor="BottomRightCorner" />
+                        <Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="TopLeftCorner" />
+                        <Border Classes="videoOverlayHandle topRight" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="TopRightCorner" />
+                        <Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="BottomLeftCorner" />
+                        <Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="BottomRightCorner" />
                         <ComboBox Classes="settingsInput compact overlaySourcePicker" HorizontalAlignment="Stretch"
                                   VerticalAlignment="{Binding ChromeAlignment}" Margin="{Binding ChromeMargin}"
                                   ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}"
