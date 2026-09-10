@@ -141,12 +141,7 @@ internal sealed class RawInputRecorder : IDisposable
         if (_thread is { IsAlive: true }) _thread.Join(TimeSpan.FromSeconds(2));
     }
 
-    // v2 intentionally uses clip-relative seconds. UTC values are not stable
-    // after a clip is moved, copied, trimmed, or opened on another machine.
-    internal sealed record InputCaptureIndex(int Version, string? MissingHistory, IReadOnlyList<InputTransition> Transitions, IReadOnlyList<InputCheckpoint> Checkpoints);
-    internal sealed record InputTransition(double Seconds, InputPhysicalKey Key, bool Down, string Kind);
-    internal sealed record InputCheckpoint(double Seconds, IReadOnlyList<InputPhysicalKey> Down);
-    internal sealed record InputPhysicalKey(ushort ScanCode, bool E0, bool E1, string? MouseButton = null);
+    // The recorded shape lives in ClipInputIndex.cs, shared with the reader.
     private sealed record TimedInputTransition(DateTime Utc, InputPhysicalKey Key, bool Down, string Kind);
     private sealed record TimedInputCheckpoint(DateTime Utc, IReadOnlyList<InputPhysicalKey> Down);
     [StructLayout(LayoutKind.Sequential)] private struct KbdLlHookStruct { public uint VirtualKey, ScanCode, Flags, Time; public IntPtr ExtraInfo; }

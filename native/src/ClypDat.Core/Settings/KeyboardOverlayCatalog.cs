@@ -10,10 +10,14 @@ public static class KeyboardOverlayCatalog
 
     public static KeyboardOverlayDefinition Get(string? layout) => layout switch
     {
-        QwertyFull => new(QwertyFull, "qwerty_full", 1989, 540, ["E", "A", "D", "L", "MouseLeft"]),
-        Arrows => new(Arrows, "arrow_keys", 679, 434, ["Up", "MouseLeft"]),
-        AzertyCompact => new(AzertyCompact, "azerty_truncated", 1124, 540, ["Z", "MouseLeft"]),
-        _ => new(QwertyCompact, "qwerty_truncated", 1124, 540, ["W", "MouseLeft"])
+        // Physical positions, not printed letters - the same thing recorded
+        // input is matched against. AZERTY's "Z" cap sits at KeyW, and the
+        // Arrows sample used to name "Up" for a cap the board draws as an
+        // arrow glyph, so it could never match anything.
+        QwertyFull => new(QwertyFull, "qwerty_full", 1989, 540, ["KeyE", "KeyA", "KeyD", "KeyL", "MouseLeft"]),
+        Arrows => new(Arrows, "arrow_keys", 679, 434, ["ArrowUp", "MouseLeft"]),
+        AzertyCompact => new(AzertyCompact, "azerty_truncated", 1124, 540, ["KeyW", "MouseLeft"]),
+        _ => new(QwertyCompact, "qwerty_truncated", 1124, 540, ["KeyW", "MouseLeft"])
     };
 
     public static bool IsKnown(string? layout) => layout is "None" or QwertyFull or QwertyCompact or Arrows or AzertyCompact;

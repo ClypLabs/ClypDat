@@ -9,10 +9,10 @@ namespace ClypDat.App.Tests;
 public sealed class VideoOverlaySettingsTests
 {
     [Theory]
-    [InlineData("QWERTY Full", 1989, 540, "E")]
-    [InlineData("QWERTY Compact", 1124, 540, "W")]
-    [InlineData("Arrows", 679, 434, "Up")]
-    [InlineData("AZERTY Compact", 1124, 540, "Z")]
+    [InlineData("QWERTY Full", 1989, 540, "KeyE")]
+    [InlineData("QWERTY Compact", 1124, 540, "KeyW")]
+    [InlineData("Arrows", 679, 434, "ArrowUp")]
+    [InlineData("AZERTY Compact", 1124, 540, "KeyW")]
     public void KeyboardCatalog_UsesMedalCanvasAndDeterministicSample(string layout, int width, int height, string sample)
     {
         var definition = KeyboardOverlayCatalog.Get(layout);

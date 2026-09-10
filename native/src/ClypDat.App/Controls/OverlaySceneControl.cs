@@ -23,9 +23,9 @@ public sealed class OverlaySceneControl : Canvas
         SetLeft(_camera, bounds.X); SetTop(_camera, bounds.Y); _camera.Width = bounds.Width; _camera.Height = bounds.Height;
     }
     public void ClearCamera() => SetCamera(null, default);
-    public void SetPeripherals(string layout, Rect bounds)
+    public void SetPeripherals(string layout, Rect bounds, IReadOnlySet<string>? pressed = null)
     {
-        _keyboard.Layout = layout; _keyboard.IsVisible = true;
+        _keyboard.Layout = layout; _keyboard.PressedKeys = pressed; _keyboard.IsVisible = true;
         SetLeft(_keyboard, bounds.X); SetTop(_keyboard, bounds.Y); _keyboard.Width = bounds.Width; _keyboard.Height = bounds.Height;
     }
     public void ClearPeripherals() => _keyboard.IsVisible = false;

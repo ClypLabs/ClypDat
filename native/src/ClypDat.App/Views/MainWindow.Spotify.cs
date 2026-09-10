@@ -39,6 +39,10 @@ public sealed partial class MainWindow
     private CapturedOverlayGesture? _capturedGesture;
     private SpotifyOverlayAdorner? _capturedAdorner;
     private Rect _capturedPeripheralBounds;
+    // Loaded once per clip: the recorded input is a whole-clip document and
+    // re-reading it on every tick would be absurd.
+    private InputCaptureIndex? _capturedInput;
+    private string? _capturedInputPath;
     private IPointer? _spotifyPointer;
     private bool _spotifyGestureChanged;
     private static readonly Cursor SpotifyMoveCursor = new(StandardCursorType.SizeAll);
@@ -260,13 +264,20 @@ public sealed partial class MainWindow
         else { _capturedOverlayScene.ClearCamera(); _capturedCameraBounds = default; }
         if (showPeripherals)
         {
-            var layout = model.SelectedOverlayManifestPeripherals()?.Source ?? KeyboardOverlayCatalog.QwertyCompact;
+            var peripheralLayer = model.SelectedOverlayManifestPeripherals();
+            var layout = peripheralLayer?.Source ?? KeyboardOverlayCatalog.QwertyCompact;
+            if (_capturedInputPath != model.SelectedVideoPath)
+            {
+                _capturedInput = ClipInputIndex.Load(model.Settings.LibraryFolder, peripheralLayer);
+                _capturedInputPath = model.SelectedVideoPath;
+            }
             var aspect = KeyboardOverlayCatalog.Get(layout).AspectRatio;
             var normalized = VideoOverlayLayout.Normalize(model.PeripheralOverlayTransform!, aspect);
             var layerWidth = Math.Max(1, width * normalized.Width);
             _capturedPeripheralBounds = new Rect(width * normalized.X / dpi, height * normalized.Y / dpi,
                 layerWidth / dpi, layerWidth / aspect / dpi);
-            _capturedOverlayScene.SetPeripherals(layout, _capturedPeripheralBounds);
+            _capturedOverlayScene.SetPeripherals(layout, _capturedPeripheralBounds,
+                ClipInputIndex.PressedAt(_capturedInput, model.CurrentTime.TotalSeconds));
         }
         else { _capturedOverlayScene.ClearPeripherals(); _capturedPeripheralBounds = default; }
         _capturedOverlayScene.IsVisible = true;
