@@ -70,9 +70,10 @@ public sealed class ForegroundGameDetector
             .GroupBy(entry => entry.ExecutableName, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Last().DisplayName, StringComparer.OrdinalIgnoreCase);
         _standaloneGames = entries
-            .Where(entry => !string.IsNullOrWhiteSpace(entry.ExecutablePath) && !string.IsNullOrWhiteSpace(entry.DisplayName))
-            .GroupBy(entry => NormalizePath(entry.ExecutablePath!), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => (group.Last().DisplayName, group.Last().ExecutableName), StringComparer.OrdinalIgnoreCase);
+            .Select(entry => (Entry: entry, Path: StandaloneGameIdentity.ExecutablePath(entry)))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Path) && !string.IsNullOrWhiteSpace(item.Entry.DisplayName))
+            .GroupBy(item => NormalizePath(item.Path!), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => (group.Last().Entry.DisplayName, group.Last().Entry.ExecutableName), StringComparer.OrdinalIgnoreCase);
         Interlocked.Increment(ref _catalogGeneration);
         _windowCache.Clear();
         _loggedUnmatched.Clear();

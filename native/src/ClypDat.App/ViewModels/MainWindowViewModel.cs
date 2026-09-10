@@ -7818,8 +7818,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (_steamGames.IsSoftware(detectionKey: entry.Key) ||
                 Settings.GameCaptureOverrides.Any(g => string.Equals(g.ExecutableName, entry.Key, StringComparison.OrdinalIgnoreCase) && IsSoftwareSetting(g))) continue;
-            var executablePath = Settings.GameCaptureOverrides.FirstOrDefault(game =>
-                string.Equals(game.ExecutableName, entry.Key, StringComparison.OrdinalIgnoreCase))?.ExecutablePath;
+            var installation = Settings.GameCaptureOverrides.FirstOrDefault(game =>
+                string.Equals(game.ExecutableName, entry.Key, StringComparison.OrdinalIgnoreCase));
+            var executablePath = installation is null ? null : StandaloneGameIdentity.ExecutablePath(installation);
             var tab = new CustomGameTabViewModel(entry.Key, entry.Value, Settings, SaveSettings,
                 change => NotifyCustomGameSettingChanged(entry.Key, change), executablePath);
             tab.SyncAudioProcesses(ActiveAudioProcesses);

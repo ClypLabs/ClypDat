@@ -1,10 +1,25 @@
 using System.Diagnostics;
+using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
 
 public enum StandaloneClassificationKind { RecognizedGame, NeedsReview, ExcludedSoftware, Unknown }
 
 public sealed record StandaloneGameClassification(StandaloneClassificationKind Kind, string DisplayName, string Reason);
+
+public static class StandaloneGameIdentity
+{
+    // Early standalone detection stored the full path in its key. Keep those
+    // profiles useful after ExecutablePath became persisted separately.
+    public static string? ExecutablePath(GameCaptureOverride entry)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.ExecutablePath)) return entry.ExecutablePath;
+        const string prefix = "standalone:";
+        if (!entry.ExecutableName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+        var candidate = entry.ExecutableName[prefix.Length..];
+        return Path.IsPathFullyQualified(candidate) && candidate.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? candidate : null;
+    }
+}
 
 // Deliberately narrow. A false positive starts capture; an unknown executable
 // must therefore stay unknown until the user explicitly adds it.
