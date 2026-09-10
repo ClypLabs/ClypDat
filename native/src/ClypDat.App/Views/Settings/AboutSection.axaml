@@ -8,7 +8,7 @@
              x:DataType="vm:MainWindowViewModel">
   <UserControl.Styles>
     <Style Selector="Button.creditCard">
-      <Setter Property="Width" Value="260" />
+      <Setter Property="MinWidth" Value="200" />
       <Setter Property="Height" Value="82" />
       <Setter Property="Padding" Value="14" />
       <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
@@ -149,7 +149,7 @@
       <StackPanel Spacing="10">
         <TextBlock Classes="settingsCardLabel" Text="CREDIT" Margin="0,0,0,4" />
         <TextBlock Classes="settingsRowDesc" Text="People who contributed to ClypDat." />
-        <WrapPanel Orientation="Horizontal" ItemWidth="272" ItemHeight="94">
+        <controls:ResponsiveUniformGrid MinimumItemWidth="212" MaximumColumns="4">
           <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Stormanzanii" ToolTip.Tip="Open Arashii's GitHub profile" Click="CreditCard_OnClick">
             <StackPanel Orientation="Horizontal" Spacing="12">
               <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
@@ -194,7 +194,7 @@
               </StackPanel>
             </StackPanel>
           </Button>
-        </WrapPanel>
+        </controls:ResponsiveUniformGrid>
       </StackPanel>
     </Border>
 
