@@ -35,6 +35,8 @@ public sealed record ClipOverlayManifest(
     public static bool IsUsable(string libraryRoot, ClipOverlayLayer? layer)
     {
         if (layer is not { Available: true }) return false;
+        // Already part of the picture: nothing left to draw, move or burn.
+        if (layer.Flattened) return false;
         var assets = layer.Assets;
         if (assets is { Count: > 0 }) return assets.All(asset => File.Exists(ResolveAssetPath(libraryRoot, asset.AssetPath)));
         return string.IsNullOrWhiteSpace(layer.AssetPath) || File.Exists(ResolveAssetPath(libraryRoot, layer.AssetPath));
@@ -70,6 +72,27 @@ public sealed record ClipOverlayManifest(
             Error = "Camera timing recovered approximately from legacy capture metadata."
         };
     }
+
+    /// <summary>
+    /// Marks burned layers as flattened and strips their assets. Both halves
+    /// matter: Flattened stops playback drawing an editable copy over pixels
+    /// that are already in the video, and clearing Assets keeps
+    /// <see cref="ExistingAssetPaths"/> from handing a deleting caller the
+    /// SOURCE clip's camera segments.
+    /// </summary>
+    public static ClipOverlayManifest? Flatten(ClipOverlayManifest? manifest, bool camera, bool peripherals)
+    {
+        if (manifest is null || (!camera && !peripherals)) return manifest;
+        return manifest with
+        {
+            Camera = camera ? Flatten(manifest.Camera) : manifest.Camera,
+            Peripherals = peripherals ? Flatten(manifest.Peripherals) : manifest.Peripherals,
+        };
+    }
+
+    private static ClipOverlayLayer? Flatten(ClipOverlayLayer? layer) => layer is null
+        ? null
+        : layer with { Flattened = true, Assets = null, AssetPath = null, InputIndexPath = null };
 
     /// <summary>Returns only references which are safe to delete from this library.</summary>
     public static IEnumerable<string> ExistingAssetPaths(string libraryRoot, ClipOverlayManifest? manifest)

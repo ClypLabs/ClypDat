@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 
 namespace ClypDat.App.Services;
 
@@ -106,6 +107,36 @@ public static class ClipRenderFilters
         if (IsSpeedActive(speed)) stages.Add($"setpts=PTS/{Format(NormalizeSpeed(speed))}");
         if (!string.IsNullOrWhiteSpace(tail)) stages.Add(tail!);
         return stages.Count == 0 ? null : string.Join(",", stages);
+    }
+
+    /// <summary>One overlay input in the graph: which FFmpeg input it is, where
+    /// it goes, and when it is visible.</summary>
+    public readonly record struct OverlayComposite(SpotifyOverlayBounds Bounds, string? Enable, bool StraightAlpha, string InputLabel);
+
+    /// <summary>
+    /// Chains any number of overlay inputs over the effects chain. The input
+    /// label is threaded in rather than assumed: the Spotify path could hardcode
+    /// [1:v:0] because it was the only overlay there could be.
+    /// </summary>
+    public static string ComposeWithOverlays(string? effects, IReadOnlyList<OverlayComposite> layers, string inputLabel, string? outputLabel)
+    {
+        if (layers.Count == 0) return string.IsNullOrWhiteSpace(effects) ? string.Empty : effects!;
+        var graph = new StringBuilder();
+        graph.Append($"{inputLabel}{(string.IsNullOrWhiteSpace(effects) ? "null" : effects)}[ovbase]");
+        var current = "[ovbase]";
+        for (var i = 0; i < layers.Count; i++)
+        {
+            var layer = layers[i];
+            var next = i == layers.Count - 1 ? outputLabel ?? string.Empty : $"[ovs{i}]";
+            graph.Append($";{layer.InputLabel}scale={layer.Bounds.Width}:{layer.Bounds.Height}:flags=lanczos[ovl{i}]");
+            graph.Append($";{current}[ovl{i}]overlay={layer.Bounds.X}:{layer.Bounds.Y}");
+            if (!string.IsNullOrWhiteSpace(layer.Enable)) graph.Append($":enable='{layer.Enable}'");
+            graph.Append(":eof_action=pass:repeatlast=0");
+            if (layer.StraightAlpha) graph.Append(":alpha=straight");
+            graph.Append(next);
+            current = next;
+        }
+        return graph.ToString();
     }
 
     public static string ComposeWithAnimation(string? effects, string? position, string inputLabel, string? outputLabel, SpotifyOverlayBounds? bounds = null)

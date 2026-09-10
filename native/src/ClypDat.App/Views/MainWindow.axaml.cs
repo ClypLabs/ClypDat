@@ -313,6 +313,9 @@ public sealed partial class MainWindow : Window
         Background = Brushes.Black;
         InitializeComponent();
         InitializeSpotifyPreview();
+        // A hard-killed export leaves its half-written overlay tracks behind,
+        // and a camera track is far larger than a Spotify card.
+        Task.Run(ClipOverlayBurn.SweepWorkFiles);
         UpdateEditorSurfaceVisibility();
         _startupWindowCloaked = StartupWindowPresentation.TryCloak(this);
         if (!_startupWindowCloaked) Opacity = 0;
@@ -7046,8 +7049,14 @@ public sealed partial class MainWindow : Window
                     etaText.IsVisible = true;
                 }
             });
-            using var spotifyAnimation = await ViewModel.PrepareSpotifyAnimationAsync(progressCts.Token);
-            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, animation: spotifyAnimation), exportDuration, progress, progressCts.Token);
+            // Rendering the overlays runs before the encode starts, and a
+            // camera track is a frame-by-frame job - long enough that the bar
+            // sitting unexplained would read as a hang.
+            statusText.Text = "Preparing overlays...";
+            var exportFrame = ViewModel.ExportFrameSize();
+            using var overlayRender = await ViewModel.PrepareOverlayRenderAsync(exportFrame.Width, exportFrame.Height, progressCts.Token);
+            statusText.Text = "Exporting clip...";
+            var result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, overlays: overlayRender), exportDuration, progress, progressCts.Token);
             if (result.ExitCode != 0 && !progressCts.IsCancellationRequested)
             {
                 // The detected hardware encoder still failed on this particular
@@ -7059,7 +7068,7 @@ public sealed partial class MainWindow : Window
                 percentText.Text = string.Empty;
                 etaText.IsVisible = false;
                 encodeClock.Restart();
-                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, useHardwareEncoder: false, animation: spotifyAnimation), exportDuration, progress, progressCts.Token);
+                result = await RunProcessWithProgressAsync("ffmpeg", ViewModel.BuildExportArguments(outputPath, useHardwareEncoder: false, overlays: overlayRender), exportDuration, progress, progressCts.Token);
             }
             progressWindow.Close();
             if (progressCts.IsCancellationRequested)
@@ -7092,7 +7101,15 @@ public sealed partial class MainWindow : Window
                 var outputInfo = ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, outputPath);
                 if (sourceInfo is not null && outputInfo is not null) ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, outputPath, outputInfo with {
                     SpotifyTrack = sourceInfo.SpotifyTrack, SpotifyArtist = sourceInfo.SpotifyArtist, SpotifyAlbum = sourceInfo.SpotifyAlbum,
-                    SpotifyDurationMs = sourceInfo.SpotifyDurationMs, SpotifyOverlayBurned = sourceInfo.SpotifyOverlayBurned || spotifyAnimation is not null,
+                    SpotifyDurationMs = sourceInfo.SpotifyDurationMs, SpotifyOverlayBurned = sourceInfo.SpotifyOverlayBurned || overlayRender?.Spotify is not null,
+                    // Burned overlays are part of the picture now. Marking them
+                    // flattened stops the editor drawing a second, movable copy
+                    // over pixels that cannot move - and the manifest is left
+                    // without assets, because those paths point at the SOURCE
+                    // clip's segments and deleting this export must never take
+                    // them with it.
+                    OverlayManifest = ClipOverlayManifest.Flatten(outputInfo.OverlayManifest,
+                        overlayRender?.Camera is not null, overlayRender?.Keyboard is not null),
                     SpotifyArtPath = SpotifyTimelineSidecar.Load(ViewModel.Settings.LibraryFolder, outputPath)?.Samples.FirstOrDefault(item => item.ArtPath is not null)?.ArtPath ?? SpotifyCoverArtStore.Existing(libraryRoot, outputPath) });
                 if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 ExplorerService.Open(outputPath, selectFile: true);

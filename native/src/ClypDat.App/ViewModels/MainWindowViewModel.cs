@@ -4255,18 +4255,45 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // multi-track path labels it as [0:v:0], and a filter_complex label for a
     // stream that does not exist fails the whole encode (unlike "-map 0:v:0?",
     // there is no optional form of a filter input).
-    private string? BuildRenderVideoFilter(string? tail = null, string inputLabel = "[in]", string? outputLabel = null, SpotifyOverlayAnimation? animation = null)
+    private string? BuildRenderVideoFilter(string? tail = null, string inputLabel = "[in]", string? outputLabel = null,
+        IReadOnlyList<ClipRenderFilters.OverlayComposite>? overlays = null)
     {
         var effects = SelectedSourceWidth > 0 && SelectedSourceHeight > 0
             ? ClipRenderFilters.BuildVideoFilter(ActiveCropRect, ClipSpeed, tail)
             : tail;
 
-        if (animation is null) return effects;
+        if (overlays is not { Count: > 0 }) return effects;
 
-        // The card joins the graph last, so it is drawn at the size the file is
-        // actually written at - ahead of Share's downscale it would be scaled
-        // down with the picture.
-        return ClipRenderFilters.ComposeWithAnimation(effects, animation.Position, inputLabel, outputLabel, animation.Bounds);
+        // Overlays join the graph last, so they are drawn at the size the file
+        // is actually written at - ahead of Share's downscale they would be
+        // scaled down with the picture.
+        return ClipRenderFilters.ComposeWithOverlays(effects, overlays, inputLabel, outputLabel);
+    }
+
+    /// <summary>
+    /// Assigns each prepared layer its FFmpeg input index and appends the -i for
+    /// it. Order is the contract: the labels in the filter graph have to match
+    /// the order the inputs were appended, which is the one thing a hardcoded
+    /// [1:v:0] used to get for free. Camera first, then the keyboard, then the
+    /// Spotify card on top - the card is chrome and should never be occluded.
+    /// </summary>
+    private static List<ClipRenderFilters.OverlayComposite> AppendOverlayInputs(List<string> args, ClipOverlayRender? overlays)
+    {
+        var composites = new List<ClipRenderFilters.OverlayComposite>();
+        if (overlays is null) return composites;
+        var index = 1;
+        foreach (var layer in new[] { overlays.Camera, overlays.Keyboard })
+        {
+            if (layer is null) continue;
+            args.Add("-i"); args.Add(layer.Path);
+            composites.Add(new(layer.Bounds, layer.Enable, layer.StraightAlpha, $"[{index++}:v:0]"));
+        }
+        if (overlays.Spotify is { } card)
+        {
+            args.Add("-i"); args.Add(card.Path);
+            composites.Add(new(card.Bounds, null, true, $"[{index}:v:0]"));
+        }
+        return composites;
     }
 
     /// <summary>
@@ -4296,6 +4323,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var spec = CaptureSpotifyRenderSpec();
         return spec is null ? null : await SpotifyOverlayAnimation.PrepareAsync(spec, token);
     }
+
+    /// <summary>What the captured overlays would burn as, or null when neither
+    /// is showing. Reads the corrected manifest, never the sidecar directly.</summary>
+    internal ClipOverlayBurnSpec? CaptureOverlayBurnSpec()
+    {
+        var camera = HasCameraOverlayLayer && CameraOverlayLayerVisible ? _selectedOverlayManifest.Camera : null;
+        var peripherals = HasPeripheralOverlayLayer && PeripheralOverlayLayerVisible ? _selectedOverlayManifest.Peripherals : null;
+        if (camera is null && peripherals is null) return null;
+        var end = TrimEnd > TrimStart ? TrimEnd : Duration;
+        return new(Settings.LibraryFolder, camera, CameraOverlayTransform, peripherals, PeripheralOverlayTransform,
+            peripherals is null ? null : ClipInputIndex.Load(Settings.LibraryFolder, peripherals),
+            TrimStart.TotalSeconds, end.TotalSeconds, ClipSpeed);
+    }
+
+    /// <summary>
+    /// Prepares every overlay that should be baked into an export of this clip.
+    /// Sizes are the OUTPUT frame's, because overlays join the filter graph
+    /// after the crop and after Share's downscale.
+    /// </summary>
+    public async Task<ClipOverlayRender?> PrepareOverlayRenderAsync(int width, int height, CancellationToken token)
+    {
+        var spotify = await PrepareSpotifyAnimationAsync(token).ConfigureAwait(false);
+        var spec = CaptureOverlayBurnSpec();
+        var captured = spec is null
+            ? (Camera: null, Keyboard: (ClipOverlayBurnLayer?)null)
+            : await ClipOverlayBurn.PrepareAsync(spec, width, height, token).ConfigureAwait(false);
+        var render = new ClipOverlayRender { Spotify = spotify, Camera = captured.Camera, Keyboard = captured.Keyboard };
+        return render.IsEmpty ? null : render;
+    }
+
+    /// <summary>The output frame an Export writes, which is the cropped source.</summary>
+    public (int Width, int Height) ExportFrameSize() =>
+        (Math.Max(1, ActiveCropRect?.Width ?? SelectedSourceWidth), Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight));
 
     internal SpotifyNowPlaying SpotifyDialogNowPlaying => _spotify.Snapshot;
 
@@ -8098,7 +8158,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return args;
     }
 
-    public IReadOnlyList<string> BuildExportArguments(string outputPath, bool useHardwareEncoder = true, SpotifyOverlayAnimation? animation = null)
+    public IReadOnlyList<string> BuildExportArguments(string outputPath, bool useHardwareEncoder = true, ClipOverlayRender? overlays = null)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
@@ -8128,7 +8188,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // contained them. Mix every audio track down to one, applying each
         // track's current volume, the same way editor playback already sounds.
         var audioTracks = TimelineTracks.Where(track => track.Type == "audio").ToArray();
-        AppendRenderMapsAndFilters(args, audioTracks, animation: animation);
+        AppendRenderMapsAndFilters(args, audioTracks, overlays: overlays);
 
         args.AddRange(BuildExportCodecArguments(useHardwareEncoder));
         if (audioTracks.Length > 0)
@@ -8139,9 +8199,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         args.Add("-movflags");
         args.Add("+faststart+use_metadata_tags");
         args.AddRange(new[] { "-map_metadata", "0" });
-        if (animation is not null) args.AddRange(new[] { "-metadata", SpotifyOverlayBurner.BurnMarker + "=1" });
+        AppendOverlayBurnMarkers(args, overlays);
         args.Add(outputPath);
         return args;
+    }
+
+    /// <summary>Marks which overlays are baked into the file, so a re-export
+    /// cannot burn a second copy over the first and the editor knows to stop
+    /// offering handles for pixels that are now part of the picture.</summary>
+    private static void AppendOverlayBurnMarkers(List<string> args, ClipOverlayRender? overlays)
+    {
+        if (overlays?.Spotify is not null) args.AddRange(["-metadata", SpotifyOverlayBurner.BurnMarker + "=1"]);
+        if (overlays?.Camera is not null) args.AddRange(["-metadata", ClipOverlayBurn.CameraMarker + "=1"]);
+        if (overlays?.Keyboard is not null) args.AddRange(["-metadata", ClipOverlayBurn.PeripheralMarker + "=1"]);
     }
 
     // Stream maps plus every filter that applies to them, for Export and Share.
@@ -8154,17 +8224,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // mixdown owns a filter_complex, so a video filter has to join that graph as
     // a labelled chain rather than ride on -vf. With one track or none, -vf is
     // fine and simpler.
-    private void AppendRenderMapsAndFilters(List<string> args, IReadOnlyList<TrackLaneViewModel> audioTracks, string? videoFilterTail = null, SpotifyOverlayAnimation? animation = null)
+    private void AppendRenderMapsAndFilters(List<string> args, IReadOnlyList<TrackLaneViewModel> audioTracks, string? videoFilterTail = null, ClipOverlayRender? overlays = null)
     {
         var audioSpeed = ClipRenderFilters.BuildAudioSpeedFilter(ClipSpeed);
         args.Add("-sn");
 
-        if (animation is not null) args.AddRange(new[] { "-i", animation.Path });
+        var composites = AppendOverlayInputs(args, overlays);
+        var hasOverlays = composites.Count > 0;
         if (audioTracks.Count > 1)
         {
             // Inside a filter_complex the video chain has to name its own input
             // and output; a -vf graph gets both for free.
-            var videoFilter = BuildRenderVideoFilter(videoFilterTail, "[0:v:0]", "[vout]", animation);
+            var videoFilter = BuildRenderVideoFilter(videoFilterTail, "[0:v:0]", "[vout]", composites);
             if (videoFilter is not null && !videoFilter.Contains("[vout]", StringComparison.Ordinal))
                 videoFilter = $"[0:v:0]{videoFilter}[vout]";
             var filter = new System.Text.StringBuilder();
@@ -8198,12 +8269,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // One boolean drives both, because -map is emitted before the filter is
+        // built and the two disagreeing fails the encode.
         args.Add("-map");
-        args.Add(animation is null ? "0:v:0?" : "[vout]");
-        var simpleVideoFilter = BuildRenderVideoFilter(videoFilterTail, "[0:v:0]", "[vout]", animation);
+        args.Add(hasOverlays ? "[vout]" : "0:v:0?");
+        var simpleVideoFilter = BuildRenderVideoFilter(videoFilterTail, "[0:v:0]", "[vout]", composites);
         if (simpleVideoFilter is not null)
         {
-            args.Add(animation is null ? "-vf" : "-filter_complex");
+            args.Add(hasOverlays ? "-filter_complex" : "-vf");
             args.Add(simpleVideoFilter);
         }
 
@@ -8228,7 +8301,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // bitrateScale exists for the "must not exceed the cap" retry: if an
     // encode lands over target, the caller re-runs with a proportionally
     // smaller budget rather than hoping a fixed safety margin was enough.
-    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, ShareEncoderTier tier = ShareEncoderTier.Nvenc, bool useAv1 = true, double bitrateScale = 1.0, bool useAdvancedNvenc = true, SpotifyOverlayAnimation? animation = null)
+    public IReadOnlyList<string> BuildShareArguments(string outputPath, long targetBytes, ShareEncoderTier tier = ShareEncoderTier.Nvenc, bool useAv1 = true, double bitrateScale = 1.0, bool useAdvancedNvenc = true, ClipOverlayRender? overlays = null)
     {
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
@@ -8278,7 +8351,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var downscaleTail = spec.Downscaled
             ? $"scale={spec.Width}:{spec.Height}:flags=lanczos,fps={spec.Fps.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}"
             : null;
-        AppendRenderMapsAndFilters(args, audioTracks, downscaleTail, animation);
+        AppendRenderMapsAndFilters(args, audioTracks, downscaleTail, overlays);
 
         // Quality-first encoder settings. The old ones (veryfast, no B-frames,
         // no AQ, single-pass) threw away a large chunk of the bitrate budget
@@ -8413,7 +8486,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         args.Add("-movflags");
         args.Add("+faststart+use_metadata_tags");
         args.AddRange(new[] { "-map_metadata", "0" });
-        if (animation is not null) args.AddRange(new[] { "-metadata", SpotifyOverlayBurner.BurnMarker + "=1" });
+        AppendOverlayBurnMarkers(args, overlays);
         args.Add(outputPath);
         return args;
     }

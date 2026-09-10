@@ -425,7 +425,7 @@ public partial class ShareDialog : Window
 
         try
         {
-            using var spotifyAnimations = new SpotifyAnimationCache(_viewModel.CaptureSpotifyRenderSpec());
+            using var overlayRenders = new ClipOverlayRenderCache(_viewModel.PrepareOverlayRenderAsync);
             var exportDuration = _viewModel.ExportDuration;
             // Restarted per attempt (CPU fallback, size retry) - each one is a
             // fresh encode at a different speed, so carrying the previous
@@ -460,8 +460,8 @@ public partial class ShareDialog : Window
                 var output = _viewModel.ComputeShareEncodeSpec(exportDuration.TotalSeconds,
                     crop?.Width ?? _viewModel.SelectedSourceWidth, crop?.Height ?? _viewModel.SelectedSourceHeight,
                     _viewModel.SelectedSourceFps, targetBytes, useAv1);
-                var animation = await spotifyAnimations.GetAsync(output.Width, output.Height, cts.Token);
-                return await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, tier, useAv1, bitrateScale, useAdvancedNvenc, animation), exportDuration, progress, cts.Token, background: true);
+                var overlays = await overlayRenders.GetAsync(output.Width, output.Height, cts.Token);
+                return await MainWindow.RunProcessWithProgressAsync("ffmpeg", _viewModel.BuildShareArguments(tempPath, targetBytes, tier, useAv1, bitrateScale, useAdvancedNvenc, overlays), exportDuration, progress, cts.Token, background: true);
             }
 
             // Walks NVENC -> AMD AMF -> Intel QSV -> CPU from wherever `tier`
