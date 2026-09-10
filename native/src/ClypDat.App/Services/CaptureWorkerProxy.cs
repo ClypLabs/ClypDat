@@ -34,6 +34,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private bool _autoClipEnabled;
     private IReadOnlyList<string> _autoClipEventIds = Array.Empty<string>();
     private OverlayCaptureSettings _videoOverlaySettings = OverlayCaptureSettings.None;
+    private long _videoOverlayRevision;
     private volatile bool _disposed;
 
     public CaptureWorkerProxy(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
@@ -134,9 +135,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public async Task UpdateVideoOverlaySettingsAsync(OverlayCaptureSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        _videoOverlaySettings = settings;
+        _videoOverlaySettings = settings with { Revision = Interlocked.Increment(ref _videoOverlayRevision), AppliedAtUtc = MonotonicClock.UtcNow };
         await EnsureAttachedAsync(cancellationToken);
-        Accept(await SendAsync<CaptureWorkerAck>("video-overlays", settings, cancellationToken), "apply video overlays");
+        Accept(await SendAsync<CaptureWorkerAck>("video-overlays", _videoOverlaySettings, cancellationToken), "apply video overlays");
     }
 
     public void Dispose() { _disposed = true; _desiredRecording = false; CancelRecovery(false); Disconnect(); }

@@ -7,7 +7,8 @@ namespace ClypDat.App.Services;
 public sealed record ClipOverlayManifest(
     int Version,
     ClipOverlayLayer? Camera = null,
-    ClipOverlayLayer? Peripherals = null)
+    ClipOverlayLayer? Peripherals = null,
+    IReadOnlyList<ClipOverlayState>? States = null)
 {
     // v6 bakes a custom keyboard's caps into the layer so a clip keeps drawing
     // the keys it was recorded with after the user edits or deletes that set.
@@ -15,7 +16,7 @@ public sealed record ClipOverlayManifest(
     // v2. Keep v2-v4 readable: optional
     // record fields deserialize as null and are deliberately treated as
     // history that was never captured, not as an empty keyboard.
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
     /// <summary>The version that fixed camera asset timing. The legacy correction
     /// below stays pinned to it: writing it as "older than current" would silently
     /// re-admit every already-correct clip on the next version bump.</summary>
@@ -145,6 +146,17 @@ public sealed record ClipOverlayManifest(
             }
         }
     }
+}
+
+/// <summary>Recorded layer appearance at media time. Null means absent. Older
+/// manifests have no states and retain their static layers.</summary>
+public sealed record ClipOverlayState(double StartSeconds, ClipOverlayLayer? Camera, ClipOverlayLayer? Peripherals);
+
+internal static class ClipOverlayStateResolver
+{
+    public static ClipOverlayState Resolve(ClipOverlayManifest manifest, double seconds) =>
+        manifest.States?.Where(state => state.StartSeconds <= seconds).OrderBy(state => state.StartSeconds).LastOrDefault()
+        ?? new ClipOverlayState(0, manifest.Camera, manifest.Peripherals);
 }
 
 public sealed record ClipOverlayLayer(

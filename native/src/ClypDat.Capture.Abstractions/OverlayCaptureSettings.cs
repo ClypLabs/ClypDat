@@ -15,7 +15,11 @@ public sealed record OverlayCaptureSettings(
     IReadOnlyList<OverlayKeyCapSnapshot>? KeyboardKeys = null,
     string? KeyboardName = null,
     bool KeyboardShowMouse = true,
-    string RecordingMode = OverlayRecordingMode.EditableLayers)
+    string RecordingMode = OverlayRecordingMode.EditableLayers,
+    // Ordered by the UI process. Pipe writes are async, so a late drag packet
+    // must never put an older transform back over a newer one.
+    long Revision = 0,
+    DateTime? AppliedAtUtc = null)
 {
     public static OverlayCaptureSettings None { get; } = new(null, "None", new(.70, .05, .25), new(.05, .70, .35));
 }

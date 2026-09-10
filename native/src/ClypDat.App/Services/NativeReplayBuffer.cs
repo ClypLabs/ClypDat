@@ -114,6 +114,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // Preference updates may arrive while replay history is live. Save uses
     // this start-time snapshot, never a later preference value.
     private OverlayCaptureSettings _activeVideoOverlaySettings = OverlayCaptureSettings.None;
+    private long _lastVideoOverlayRevision;
     private readonly OverlayCaptureSession _overlayCapture;
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
@@ -282,11 +283,17 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public void SetVideoOverlaySettings(OverlayCaptureSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        if (settings.Revision > 0 && settings.Revision < Volatile.Read(ref _lastVideoOverlayRevision)) return;
+        if (settings.Revision > 0) Volatile.Write(ref _lastVideoOverlayRevision, settings.Revision);
         Interlocked.Exchange(ref _videoOverlaySettings, settings);
-        // Active replay keeps its start snapshot. Reconfiguring this in place
-        // would make one history window produce both editable assets and
-        // flattened metadata.
-        if (!_sessionActive) _overlayCapture.Apply(settings);
+        // Recording mode is session format. Sources and transforms stay live.
+        if (_sessionActive)
+        {
+            var active = settings with { RecordingMode = _activeVideoOverlaySettings.RecordingMode };
+            Interlocked.Exchange(ref _activeVideoOverlaySettings, active);
+            _overlayCapture.Apply(active);
+        }
+        else _overlayCapture.Apply(settings);
     }
 
     public void RequestFrameRate(int frameRate)
@@ -828,9 +835,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var peripherals = burned ? FlattenedPeripherals(overlays, peripheralKeys) : _overlayCapture.FinalizeInput(config.LibraryFolder, outputPath, overlays.KeyboardLayout,
                 peripheralKeys, overlays.KeyboardName, overlays.KeyboardShowMouse,
                 overlays.KeyboardTransform, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
+            var states = _overlayCapture.States(overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale, camera, peripherals);
             ClipInfoSidecar.Save(config.LibraryFolder, outputPath, new ClipInfo(gameDisplayName, null, clipName,
                 File.GetCreationTimeUtc(outputPath), CaptureSource: config.CaptureSource,
-                OverlayManifest: new ClipOverlayManifest(ClipOverlayManifest.CurrentVersion, camera, peripherals)));
+                OverlayManifest: new ClipOverlayManifest(ClipOverlayManifest.CurrentVersion, camera, peripherals, states)));
         }
         return outputPath;
         }

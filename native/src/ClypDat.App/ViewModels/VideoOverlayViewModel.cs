@@ -38,6 +38,10 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     private bool _previewFrameQueued;
     private readonly Stopwatch _previewCadence = Stopwatch.StartNew();
     private long _appliedPreviewFrames;
+    // Dragging can produce hundreds of pointer events per second. The preview
+    // remains immediate, while worker updates are capped at capture-frame rate.
+    private readonly Stopwatch _liveApplyCadence = Stopwatch.StartNew();
+    private readonly DispatcherTimer _liveApplyTimer = new() { Interval = TimeSpan.FromSeconds(1d / 30) };
 
     public event Action? CameraPreviewFrameUpdated;
 
@@ -53,6 +57,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         _customLayouts = customLayouts ?? [];
         CustomLayouts = new(_customLayouts);
         _cameraPreview = cameraPreview;
+        _liveApplyTimer.Tick += (_, _) => { _liveApplyTimer.Stop(); _liveApplyCadence.Restart(); _apply?.Invoke(); };
         _cameraPreview.FrameReady += CameraPreview_FrameReady;
         _cameraPreview.Failed += CameraPreview_Failed;
         Cameras = new() { CameraOption.None }; Sources = new();
@@ -79,8 +84,8 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         }
     }
     public string RecordingModeDescription => VideoOverlayRecordingMode.IsBurned(_settings.RecordingMode)
-        ? "Saves overlays directly into recorded video, avoiding separate overlay files. Recorded overlays cannot be moved, resized, hidden, or removed in Editor. Changes apply next capture session."
-        : "Saves camera and keyboard/mouse as editable layers. Changes apply next capture session.";
+        ? "Saves overlays directly into recorded video. Sources and placement apply live; recording format applies next capture session."
+        : "Saves camera and keyboard/mouse as editable layers. Sources and placement apply live; recording format applies next capture session.";
     /// <summary>The four corner windows drawn over the preview canvas.</summary>
     public ObservableCollection<VideoOverlaySlotViewModel> Slots { get; }
     public bool IncludeVirtualCameras { get => _globalSettings.IncludeVirtualCameras; set { if (_globalSettings.IncludeVirtualCameras == value) return; _globalSettings.IncludeVirtualCameras = value; _ = RefreshCamerasAsync(); Save(); } }
@@ -344,10 +349,15 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         var current = layer == "Camera" ? _settings.CameraTransform : _settings.KeyboardTransform;
         var next = VideoOverlayManipulation.Apply(current, mode, deltaX, deltaY, _previewWidth / _previewHeight, SourceAspect(layer));
         if (layer == "Camera") _settings.CameraTransform = next; else _settings.KeyboardTransform = next;
-        _apply?.Invoke();
+        QueueLiveApply();
         NotifyLayout();
     }
-    public void CommitManipulation() { Save(); UpdateStatus(); }
+    public void CommitManipulation() { _liveApplyTimer.Stop(); Save(); UpdateStatus(); }
+    private void QueueLiveApply()
+    {
+        if (_liveApplyCadence.Elapsed >= TimeSpan.FromSeconds(1d / 30)) { _liveApplyCadence.Restart(); _apply?.Invoke(); }
+        else if (!_liveApplyTimer.IsEnabled) _liveApplyTimer.Start();
+    }
     public void ResetToCorner(string layer)
     {
         if (layer == "Camera" && HasCamera && _settings.CameraAnchor is { } cameraCorner)
@@ -525,7 +535,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         var keyboard = HasKeyboard ? $"Input: {name}" : "Input: none";
         SourceStatus = $"{camera}. {keyboard}.";
     }
-    public void Dispose() { _refreshCancellation?.Cancel(); _refreshCancellation?.Dispose(); StopCameraPreview(); StopInputPreview(); _cameraPreview.FrameReady -= CameraPreview_FrameReady; _cameraPreview.Failed -= CameraPreview_Failed; _cameraPreview.Dispose(); }
+    public void Dispose() { _liveApplyTimer.Stop(); _refreshCancellation?.Cancel(); _refreshCancellation?.Dispose(); StopCameraPreview(); StopInputPreview(); _cameraPreview.FrameReady -= CameraPreview_FrameReady; _cameraPreview.Failed -= CameraPreview_Failed; _cameraPreview.Dispose(); }
 }
 public enum OverlaySourceKind { None, Camera, Keyboard, Heading }
 public sealed record OverlaySourceOption(string Name, string Value, OverlaySourceKind Kind)

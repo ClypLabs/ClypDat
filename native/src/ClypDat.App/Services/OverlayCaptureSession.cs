@@ -23,6 +23,8 @@ internal sealed class OverlayCaptureSession : IDisposable
     private readonly Dictionary<string, CameraSegment> _cameraSegments = new(StringComparer.OrdinalIgnoreCase);
     private FileSystemWatcher? _cameraWatcher;
     private readonly RawInputRecorder _input = new();
+    private readonly List<(DateTime AtUtc, OverlayCaptureSettings Settings)> _states = new();
+    private int _cameraGeneration;
 
     public OverlayCaptureSession(string workRoot) => _workRoot = Path.Combine(workRoot, "overlays");
 
@@ -32,6 +34,8 @@ internal sealed class OverlayCaptureSession : IDisposable
         {
             var changed = !Equals(_settings.Camera, settings.Camera);
             _settings = settings;
+            var at = settings.AppliedAtUtc ?? MonotonicClock.UtcNow;
+            if (_states.Count == 0 || !Equals(_states[^1].Settings, settings)) _states.Add((at, settings));
             // Camera replacement must not erase keyboard history captured by
             // the worker. Input has its own lifetime and clip-start checkpoint.
             if (changed) StopCameraUnderLock();
@@ -42,6 +46,16 @@ internal sealed class OverlayCaptureSession : IDisposable
     public void Start()
     {
         _running = true;
+        lock (_gate)
+        {
+            // New recorder lifetime starts fresh. Device replacement deliberately
+            // does not take this path, so its earlier generation remains saved.
+            if (Directory.Exists(_workRoot)) foreach (var file in Directory.EnumerateFiles(_workRoot, "*.mp4")) AudioCapturePipeline.TryDelete(file);
+            _cameraSegments.Clear();
+            _states.Clear();
+            _states.Add((MonotonicClock.UtcNow, _settings));
+            _cameraGeneration = 0;
+        }
         if (OverlayRecordingMode.IsBurned(_settings.RecordingMode)) return;
         _input.Start();
         lock (_gate)
@@ -49,6 +63,25 @@ internal sealed class OverlayCaptureSession : IDisposable
     }
 
     public void Stop() { lock (_gate) { _running = false; StopCameraUnderLock(); } _input.Reset(); }
+
+    public IReadOnlyList<ClipOverlayState> States(DateTime startUtc, DateTime endUtc, double mediaScale,
+        ClipOverlayLayer? camera, ClipOverlayLayer? peripherals)
+    {
+        lock (_gate)
+        {
+            var scale = double.IsFinite(mediaScale) && mediaScale > 0 ? mediaScale : 1;
+            return _states.Where(state => state.AtUtc <= endUtc).Select(state => new ClipOverlayState(
+                Math.Max(0, (state.AtUtc < startUtc ? TimeSpan.Zero : state.AtUtc - startUtc).TotalSeconds * scale),
+                StateCamera(state.Settings, camera), StatePeripherals(state.Settings, peripherals))).ToArray();
+        }
+    }
+
+    private static ClipOverlayLayer? StateCamera(OverlayCaptureSettings settings, ClipOverlayLayer? captured) => settings.Camera is not { } camera ? null :
+        new ClipOverlayLayer(camera.FriendlyName, captured?.Available ?? false, InitialTransform: settings.CameraTransform.ToPresentationTransform(), Error: captured?.Error);
+    private static ClipOverlayLayer? StatePeripherals(OverlayCaptureSettings settings, ClipOverlayLayer? captured) =>
+        string.Equals(settings.KeyboardLayout, "None", StringComparison.OrdinalIgnoreCase) ? null :
+        new ClipOverlayLayer(settings.KeyboardLayout, captured?.Available ?? false, InitialTransform: settings.KeyboardTransform.ToPresentationTransform(), Error: captured?.Error,
+            Keys: settings.KeyboardKeys?.Select(cap => new ClipOverlayKeyCap(cap.Code, cap.Label, cap.Row, cap.Units)).ToArray(), SourceName: settings.KeyboardName, ShowMouse: settings.KeyboardShowMouse);
 
     /// <param name="mediaScale">Media seconds per wall-clock second, so segments
     /// land where the clip's own timeline puts them rather than where wall-clock
@@ -58,7 +91,11 @@ internal sealed class OverlayCaptureSession : IDisposable
     {
         lock (_gate)
         {
-            if (_settings.Camera is not { } camera) return null;
+            // A camera can be disabled or replaced after its footage entered
+            // this replay window. Keep its completed segments for states that
+            // still reference it rather than deciding from the latest setting.
+            var camera = _settings.Camera ?? _states.LastOrDefault(state => state.Settings.Camera is not null).Settings?.Camera;
+            if (camera is null) return null;
             if (!_cameraReceivedFrames)
                 return new ClipOverlayLayer(camera.FriendlyName, false, InitialTransform: _settings.CameraTransform.ToPresentationTransform(),
                     Error: _cameraError ?? "Camera did not deliver frames while this clip recorded.");
@@ -128,8 +165,7 @@ internal sealed class OverlayCaptureSession : IDisposable
         var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffmpeg.exe");
         if (!File.Exists(ffmpeg)) { _cameraError = "FFmpeg is unavailable."; return; }
         Directory.CreateDirectory(_workRoot);
-        foreach (var file in Directory.EnumerateFiles(_workRoot, "*.mp4")) AudioCapturePipeline.TryDelete(file);
-        _cameraSegments.Clear();
+        // Previous generations remain available to replay saves spanning device replacement.
         _cameraWatcher?.Dispose();
         _cameraWatcher = new FileSystemWatcher(_workRoot, "*.mp4") { EnableRaisingEvents = true, IncludeSubdirectories = false };
         _cameraWatcher.Created += (_, args) =>
@@ -154,7 +190,7 @@ internal sealed class OverlayCaptureSession : IDisposable
                 _cameraSegments[args.FullPath] = new CameraSegment(observed, observed + TimeSpan.FromSeconds(SegmentSeconds));
             }
         };
-        var pattern = Path.Combine(_workRoot, "%d.mp4");
+        var pattern = Path.Combine(_workRoot, $"{++_cameraGeneration}-%d.mp4");
         var info = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true };
         // Ask DirectShow for 60fps but never force an output cadence.  Forcing
         // `-r` duplicated slow cameras and hid dropped-frame gaps from replay.
@@ -194,6 +230,12 @@ internal sealed class OverlayCaptureSession : IDisposable
     private void StopCameraUnderLock()
     {
         var process = _camera; _camera = null;
+        var ended = MonotonicClock.UtcNow;
+        foreach (var segment in _cameraSegments.Values.Where(segment => !segment.Completed))
+        {
+            segment.EndUtc = ended;
+            segment.Completed = true;
+        }
         if (process is null) return;
         try { if (!process.HasExited) process.Kill(true); } catch { }
         process.Dispose();
