@@ -7,6 +7,13 @@ namespace ClypDat.App.Tests;
 public sealed class AppSettingsTests
 {
     [Fact]
+    public void FrameRateProtection_MissingJsonValue_DefaultsFalse()
+    {
+        var settings = JsonSerializer.Deserialize<AppSettings>("{}")!;
+        Assert.False(settings.ReplayAdaptiveFrameRateEnabled);
+    }
+
+    [Fact]
     public void SpotifyBackground_OlderSettingsUseDynamicAndStaticChoiceSurvivesReload()
     {
         var settings = JsonSerializer.Deserialize<AppSettings>("{}")!;
