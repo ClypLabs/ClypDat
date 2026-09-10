@@ -153,8 +153,11 @@
         <controls:ResponsiveUniformGrid MinimumItemWidth="212" MaximumColumns="4">
           <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Stormanzanii" ToolTip.Tip="Open Arashii's GitHub profile" Click="CreditCard_OnClick">
             <StackPanel Orientation="Horizontal" Spacing="12">
-              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
-                <Image Source="avares://ClypDat/Assets/contributors/arashii.png" Stretch="UniformToFill" />
+              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True" Background="{StaticResource SurfaceRaisedBrush}">
+                <Grid>
+                  <Image x:Name="ArashiiAvatar" Stretch="UniformToFill" />
+                  <TextBlock x:Name="ArashiiInitials" Text="A" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{StaticResource TextSubtleBrush}" />
+                </Grid>
               </Border>
               <StackPanel Spacing="3" VerticalAlignment="Center">
                 <TextBlock Text="Arashii" Classes="settingsRowTitle" />
@@ -164,8 +167,11 @@
           </Button>
           <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/iPixelGalaxy" ToolTip.Tip="Open iPixelGalaxy's GitHub profile" Click="CreditCard_OnClick">
             <StackPanel Orientation="Horizontal" Spacing="12">
-              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
-                <Image Source="avares://ClypDat/Assets/contributors/ipixelgalaxy.png" Stretch="UniformToFill" />
+              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True" Background="{StaticResource SurfaceRaisedBrush}">
+                <Grid>
+                  <Image x:Name="IPixelGalaxyAvatar" Stretch="UniformToFill" />
+                  <TextBlock x:Name="IPixelGalaxyInitials" Text="IP" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{StaticResource TextSubtleBrush}" />
+                </Grid>
               </Border>
               <StackPanel Spacing="3" VerticalAlignment="Center">
                 <TextBlock Text="iPixelGalaxy" Classes="settingsRowTitle" />
@@ -175,8 +181,11 @@
           </Button>
           <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Spikerko" ToolTip.Tip="Open Spikerko's GitHub profile" Click="CreditCard_OnClick">
             <StackPanel Orientation="Horizontal" Spacing="12">
-              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
-                <Image Source="avares://ClypDat/Assets/contributors/spikerko.png" Stretch="UniformToFill" />
+              <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True" Background="{StaticResource SurfaceRaisedBrush}">
+                <Grid>
+                  <Image x:Name="SpikerkoAvatar" Stretch="UniformToFill" />
+                  <TextBlock x:Name="SpikerkoInitials" Text="S" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="Bold" Foreground="{StaticResource TextSubtleBrush}" />
+                </Grid>
               </Border>
               <StackPanel Spacing="3" VerticalAlignment="Center">
                 <TextBlock Text="Spikerko" Classes="settingsRowTitle" />
