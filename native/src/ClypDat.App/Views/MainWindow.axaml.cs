@@ -408,6 +408,8 @@ public sealed partial class MainWindow : Window
             // wait onto the exact moment everything else is also starting up.
             _ = Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ => RefreshRemoteGameIconsAsync(), TaskScheduler.Default);
             _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ => RefreshRemoteGameCatalogAsync(), TaskScheduler.Default);
+            // Sends any saves counted while offline or on a previous run.
+            _ = Task.Delay(TimeSpan.FromSeconds(15)).ContinueWith(_ => ClipStatsReporter.FlushAsync(), TaskScheduler.Default);
             if (ViewModel is not null)
             {
                 _gameDetector.ApplyCustomGameNames(ViewModel.Settings.GameCaptureOverrides);
@@ -1075,6 +1077,10 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(async () =>
         {
             RememberSessionClip(completed.Path);
+            // Saves reaching this path are the worker's own hotkey saves: every
+            // UI-started save, auto-clips included, is UI-owned and returned
+            // above, and is counted where SaveReplayClipAsync finishes instead.
+            ClipStatsReporter.Record(ClipStatKind.Clip);
             if (ViewModel is not null)
             {
                 ViewModel.RecordDiscordClipSaved();
@@ -3168,6 +3174,7 @@ public sealed partial class MainWindow : Window
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 RememberSessionClip(outputPath);
                 ViewModel.RecordDiscordClipSaved();
+                ClipStatsReporter.Record(isAutoClip ? ClipStatKind.AutoClip : ClipStatKind.Clip);
                 // The save itself succeeded, but if the capture source had
                 // stopped delivering frames the video is a single frozen frame -
                 // say so now rather than let it be discovered on playback later.

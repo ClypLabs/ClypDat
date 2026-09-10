@@ -5200,6 +5200,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
         finally
         {
+            // Counted here because both finalize modes end here, and only when
+            // a session file actually ended up in the library - a failed mux
+            // in background mode still leaves its video-only file.
+            if (File.Exists(finalOutputPath)) ClipStatsReporter.Record(ClipStatKind.FullSession);
             // The one place every exit route passes through, so a card can
             // never be left locked - success, failed mux and thrown alike.
             ClearFinalize(finalOutputPath);
