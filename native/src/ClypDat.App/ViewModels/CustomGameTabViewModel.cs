@@ -14,17 +14,19 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     private readonly AppSettings _settings;
     private readonly Action _save;
     private readonly Action<CustomGameSettingChange>? _settingChanged;
+    private readonly string? _executablePath;
     private bool _isSelected;
     private bool _qualityWarningAcknowledged;
 
     public CustomGameTabViewModel(string detectionKey, CustomGameProfile profile, AppSettings settings, Action save,
-        Action<CustomGameSettingChange>? settingChanged = null)
+        Action<CustomGameSettingChange>? settingChanged = null, string? executablePath = null)
     {
         DetectionKey = detectionKey;
         Profile = profile;
         _settings = settings;
         _save = save;
         _settingChanged = settingChanged;
+        _executablePath = executablePath;
         Icon = GameIconService.TryLoad(profile.DisplayName);
         // Nothing about the portrait touches the UI thread. This constructor
         // runs once per tab while the settings page is being built, and a
@@ -39,7 +41,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         {
             // Decode first: a portrait already on disk should appear on the
             // next frame, not after a round trip that will find nothing new.
-            var portrait = await Task.Run(() => GamePortraitService.TryLoad(DisplayName)).ConfigureAwait(false);
+            var portrait = await Task.Run(() => GamePortraitService.TryLoadStandalone(_executablePath) ?? GamePortraitService.TryLoad(DisplayName)).ConfigureAwait(false);
             if (portrait is null)
             {
                 if (!await GamePortraitService.EnsureCachedAsync(DetectionKey, DisplayName).ConfigureAwait(false)) return;

@@ -60,6 +60,11 @@ public static class GameIconService
     private static string SafeFileName(string displayName) =>
         string.Join("_", displayName.Split(Path.GetInvalidFileNameChars()));
 
+    // Standalone game settings can exist before a game has been launched, so
+    // they need the same executable-icon extraction without a process ID.
+    public static Bitmap? TryLoadExecutableIcon(string executablePath) =>
+        File.Exists(executablePath) ? ExtractIconBitmap(executablePath) : null;
+
     // The marker's own last-write time is the timestamp - no content to parse,
     // and a manual delete of the file is a valid way to force a retry.
     private static bool IsNegativeCacheFresh(string displayName)

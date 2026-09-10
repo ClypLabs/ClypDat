@@ -50,6 +50,37 @@ public static class GamePortraitService
         }
     }
 
+    // Mods commonly ship their own title/logo art. Use it before any store
+    // lookup: a name search cannot identify a renamed Psych Engine build and
+    // can otherwise put unrelated game art on its settings card.
+    public static Bitmap? TryLoadStandalone(string? executablePath)
+    {
+        if (string.IsNullOrWhiteSpace(executablePath) || !File.Exists(executablePath)) return null;
+        try
+        {
+            var root = Path.GetDirectoryName(executablePath)!;
+            var exe = Path.GetFileName(executablePath);
+            if (exe.Equals("osu!.exe", StringComparison.OrdinalIgnoreCase) || exe.Equals("osu!.lazer.exe", StringComparison.OrdinalIgnoreCase))
+                return GameIconService.TryLoadExecutableIcon(executablePath);
+
+            var candidates = new[]
+            {
+                Path.Combine(root, "assets", "images", "titlelogo.png"),
+                Path.Combine(root, "assets", "images", "logo.png"),
+                Path.Combine(root, "assets", "images", "logoBumpin.png"),
+                Path.Combine(root, "assets", "shared", "images", "loading_screen", "logo.png"),
+                Path.Combine(root, "assets", "shared", "images", "logoBumpin.png")
+            };
+            var source = candidates.FirstOrDefault(File.Exists);
+            return source is null ? null : new Bitmap(source);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Standalone game portrait load failed for '{executablePath}'", error);
+            return null;
+        }
+    }
+
     /// <summary>
     /// Downloads the portrait if it is not cached yet. Returns true only when
     /// a new file was written, so callers can refresh exactly once instead of
