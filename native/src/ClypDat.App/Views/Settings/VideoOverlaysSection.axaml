@@ -36,7 +36,8 @@
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
           <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Overlay recording mode" />
-            <TextBlock Classes="settingsRowDescSm" Text="{Binding RecordingModeDescription}" TextWrapping="Wrap" MaxWidth="600" />
+            <TextBlock Classes="settingsRowDescSm" Text="{Binding RecordingModeDescription}" TextWrapping="Wrap"
+                       MaxWidth="600" HorizontalAlignment="Left" TextAlignment="Left" />
           </StackPanel>
           <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" ItemsSource="{Binding RecordingModes}"
                     SelectedItem="{Binding RecordingMode, Mode=TwoWay}" />
