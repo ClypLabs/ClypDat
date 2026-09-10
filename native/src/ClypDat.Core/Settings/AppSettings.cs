@@ -28,6 +28,10 @@ public sealed class AppSettings
     // Built-in choices keep their existing names. User themes use a stable
     // custom:<guid> selection so renaming does not break the active choice.
     public List<CustomThemeSettings> CustomThemes { get; set; } = new();
+    // Same shape as CustomThemes and for the same reason: the overlay's chosen
+    // layout is a single string that holds either a built-in name or a stable
+    // custom:<guid>, so renaming a set cannot break the active selection.
+    public List<CustomKeyboardLayout> CustomKeyboardLayouts { get; set; } = new();
     public List<string> RecentThemeColors { get; set; } = new();
     // Inter is bundled with ClypDat, so the default remains available even
     // when the user has no matching system font installed.
@@ -374,7 +378,7 @@ public sealed class CustomGameProfile
 {
     public static readonly IReadOnlySet<string> SupportedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        "RecordingMode", "Quality", "Replay", "Audio"
+        "RecordingMode", "Quality", "Replay", "Audio", "Overlays"
     };
 
     // Snapshot of the game's name when the profile was created, so the settings
@@ -382,6 +386,7 @@ public sealed class CustomGameProfile
     // reinstall, a launcher change) instead of showing a bare "steam-1172470".
     public string DisplayName { get; set; } = string.Empty;
     public List<string> Groups { get; set; } = new();
+    public VideoOverlaySettings? VideoOverlays { get; set; }
 
     public void PruneUnknownGroups()
     {

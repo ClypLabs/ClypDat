@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:settings="using:ClypDat.Core.Settings"
              xmlns:controls="using:ClypDat.App.Controls"
              x:Class="ClypDat.App.Views.Settings.VideoOverlaysSection"
              x:DataType="vm:VideoOverlayViewModel"
@@ -65,7 +66,7 @@
                             <Panel IsVisible="{Binding IsCamera}">
                               <controls:CameraPreviewControl DataContext="{Binding Overlay}" />
                             </Panel>
-                            <controls:KeyboardOverlayPreview Layout="{Binding KeyboardLayout}" UseSamplePressed="{Binding ShowSamplePressed}" PressedKeys="{Binding LivePressedKeys}" IsVisible="{Binding IsKeyboard}" IsHitTestVisible="False" />
+                            <controls:KeyboardOverlayPreview Layout="{Binding KeyboardLayout}" CustomBoard="{Binding KeyboardBoard}" UseSamplePressed="{Binding ShowSamplePressed}" PressedKeys="{Binding LivePressedKeys}" IsVisible="{Binding IsKeyboard}" IsHitTestVisible="False" />
                             <TextBlock Classes="videoOverlayWindowLabel" Text="{Binding Label}" />
                           </Panel>
                         </Border>
@@ -89,6 +90,75 @@
           <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopLeftSource}" /></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopRightSource}" /></StackPanel><StackPanel Grid.Row="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel><StackPanel Grid.Row="1" Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
         </Grid>
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10"><TextBlock Classes="settingsRowDescSm" Text="Drag a window to seed placement for new clips. Existing clips keep their own layout. White corners resize it." TextWrapping="Wrap" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Reset camera" IsVisible="{Binding CameraCustomPosition}" Click="ResetCamera_OnClick" /><Button Grid.Column="2" Content="Reset input" IsVisible="{Binding KeyboardCustomPosition}" Click="ResetKeyboard_OnClick" /></Grid>
+      </StackPanel>
+    </Border>
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="12">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsCardLabel" Text="CUSTOM KEYS" />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                       Text="Show only the keys you care about. Chosen keys are drawn packed together, not spread across a full board." />
+          </StackPanel>
+          <Button Grid.Column="1" Classes="primaryButton" Content="New key set" VerticalAlignment="Center" Click="NewKeySet_OnClick" />
+        </Grid>
+        <TextBlock Classes="settingsRowDescSm" IsVisible="{Binding HasNoCustomLayouts}"
+                   Text="No custom sets yet. Create one and it appears in every corner's source list." />
+        <ItemsControl ItemsSource="{Binding CustomLayouts}" IsVisible="{Binding !HasNoCustomLayouts}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="settings:CustomKeyboardLayout">
+              <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,6">
+                <StackPanel Spacing="1" VerticalAlignment="Center">
+                  <TextBlock Classes="settingsRowTitleSm" Text="{Binding Name}" />
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding Keys.Count, StringFormat=\{0\} keys}" />
+                </StackPanel>
+                <Button Grid.Column="1" Classes="linkButton" Content="Edit" Tag="{Binding}" Click="EditKeySet_OnClick" />
+                <Button Grid.Column="2" Classes="linkButton" Content="Duplicate" Tag="{Binding}" Click="DuplicateKeySet_OnClick" />
+                <Button Grid.Column="3" Classes="linkButton" Content="Delete" Tag="{Binding}" Click="DeleteKeySet_OnClick" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border Classes="settingsDivider" IsVisible="{Binding IsLayoutEditorOpen}" />
+        <StackPanel Spacing="10" IsVisible="{Binding IsLayoutEditorOpen}">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="settingsRowTitleSm" Text="Name" />
+            <TextBox Classes="settingsInput" Text="{Binding DraftName, Mode=TwoWay}" />
+          </StackPanel>
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+            <Button Classes="primaryButton" Content="{Binding ListenButtonText}" Click="ListenKeys_OnClick" />
+            <TextBlock Grid.Column="1" Classes="settingsRowDescSm" VerticalAlignment="Center" TextWrapping="Wrap"
+                       Text="Press a key to add it. Release and press again to remove it. Click Stop when finished." />
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+            <StackPanel Spacing="2" VerticalAlignment="Center">
+              <TextBlock Classes="settingsRowTitle" Text="Show mouse" />
+              <TextBlock Classes="settingsRowDescSm" Text="Mouse buttons cannot be added by clicking - that is how you work this page." />
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding DraftShowMouse, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+          </Grid>
+          <ItemsControl ItemsSource="{Binding DraftKeys}">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate DataType="settings:CustomKeyCap">
+                <Button Classes="keyChip" Tag="{Binding}" Click="RemoveKeySetKey_OnClick"
+                        Content="{Binding Label}" ToolTip.Tip="Remove" Margin="0,0,6,6" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Classes="videoOverlayCanvas" Padding="10" HorizontalAlignment="Left">
+            <controls:AspectRatioBox AspectRatio="{Binding DraftAspect}" Width="360">
+              <controls:KeyboardOverlayPreview CustomBoard="{Binding DraftBoard}" PressedKeys="{Binding LivePressedKeys}" IsHitTestVisible="False" />
+            </controls:AspectRatioBox>
+          </Border>
+          <TextBlock Classes="settingsRowDescSm" Foreground="{DynamicResource DangerBrush}" Text="{Binding DraftError}"
+                     IsVisible="{Binding DraftError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
+          <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <Button Grid.Column="1" Content="Close" Click="CloseKeySet_OnClick" />
+            <Button Grid.Column="2" Classes="primaryButton" Content="Save" Click="ApplyKeySet_OnClick" />
+          </Grid>
+        </StackPanel>
       </StackPanel>
     </Border>
   </StackPanel>

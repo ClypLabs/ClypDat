@@ -24,9 +24,10 @@ internal static class CustomGameSettingsResolver
     public const string QualityGroup = "Quality";
     public const string ReplayGroup = "Replay";
     public const string AudioGroup = "Audio";
+    public const string OverlaysGroup = "Overlays";
     public static readonly IReadOnlyList<string> AllGroups = new[]
     {
-        RecordingModeGroup, QualityGroup, ReplayGroup, AudioGroup
+        RecordingModeGroup, QualityGroup, ReplayGroup, AudioGroup, OverlaysGroup
     };
 
     // The one group a newly added game starts with. Adding a game is almost
@@ -44,6 +45,7 @@ internal static class CustomGameSettingsResolver
         QualityGroup => "Recording Quality",
         ReplayGroup => "Replay Length",
         AudioGroup => "Audio",
+        OverlaysGroup => "Overlays",
         _ => group
     };
 
@@ -53,6 +55,7 @@ internal static class CustomGameSettingsResolver
         QualityGroup => "Codec, encoder, bitrate, frame rate and resolution cap for this game.",
         ReplayGroup => "How much of this game the replay buffer keeps.",
         AudioGroup => "Game and microphone levels, and microphone noise suppression.",
+        OverlaysGroup => "Camera, keyboard layout and overlay placement for this game.",
         _ => string.Empty
     };
 
@@ -109,6 +112,9 @@ internal static class CustomGameSettingsResolver
     {
         switch (group)
         {
+            case OverlaysGroup:
+                profile.VideoOverlays = settings.VideoOverlays.Copy();
+                break;
             case RecordingModeGroup:
                 // Derived, because there is no single global setting that says
                 // "recording mode" - it is the combination of the buffer being
@@ -189,6 +195,43 @@ internal static class CustomGameSettingsResolver
             FullSessionVideoCodec: settings.FullSessionVideoCodec,
             FullSessionQuotaGb: settings.FullSessionQuotaGb,
             AppliedGroups: DescribeAppliedGroups(mode, quality, replay, audio));
+    }
+
+    public static VideoOverlaySettings ResolveOverlays(AppSettings settings, string? detectionKey)
+    {
+        var result = (FindActive(settings, detectionKey, OverlaysGroup)?.VideoOverlays ?? settings.VideoOverlays).Copy();
+        result.IncludeVirtualCameras = settings.VideoOverlays.IncludeVirtualCameras;
+        result.Enabled = settings.VideoOverlays.Enabled;
+        return result;
+    }
+
+    public static string? DetectionKeyForDisplayName(AppSettings settings, string? displayName)
+    {
+        if (string.IsNullOrWhiteSpace(displayName)) return null;
+        var keys = settings.GameCaptureOverrides
+            .Where(game => string.Equals(game.DisplayName, displayName, StringComparison.OrdinalIgnoreCase))
+            .Select(game => game.ExecutableName).Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return keys.FirstOrDefault(settings.CustomGameSettings.ContainsKey)
+            ?? settings.CustomGameSettings.FirstOrDefault(pair => string.Equals(pair.Value.DisplayName, displayName, StringComparison.OrdinalIgnoreCase)).Key
+            ?? keys.FirstOrDefault();
+    }
+
+    public static string? UpdateOverlayPlacement(AppSettings settings, string? displayName, string layer, VideoOverlayTransform transform)
+    {
+        var key = DetectionKeyForDisplayName(settings, displayName);
+        if (key is null) return null;
+        if (!settings.CustomGameSettings.TryGetValue(key, out var profile))
+            settings.CustomGameSettings[key] = profile = new CustomGameProfile { DisplayName = displayName! };
+        if (!HasGroup(profile, OverlaysGroup))
+        {
+            SeedGroupFromGlobal(settings, profile, OverlaysGroup);
+            profile.Groups.Add(OverlaysGroup);
+        }
+        profile.VideoOverlays ??= settings.VideoOverlays.Copy();
+        if (layer == "Camera") profile.VideoOverlays.CameraTransform = transform;
+        else profile.VideoOverlays.KeyboardTransform = transform;
+        return key;
     }
 
     // Purely for the log line at the start of a recording - "which of these

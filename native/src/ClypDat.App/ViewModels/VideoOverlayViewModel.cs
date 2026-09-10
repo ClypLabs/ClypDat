@@ -13,6 +13,7 @@ namespace ClypDat.App.ViewModels;
 public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
 {
     private readonly VideoOverlaySettings _settings;
+    private readonly VideoOverlaySettings _globalSettings;
     private readonly Action _save;
     private readonly Action? _apply;
     private string _sourceStatus = "No sources selected.";
@@ -21,7 +22,9 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? _refreshCancellation;
     private int _refreshGeneration;
     private readonly ICameraPreviewService _cameraPreview;
+    private readonly List<CustomKeyboardLayout> _customLayouts;
     private PhysicalInputMonitor? _inputMonitor;
+    private static VideoOverlayViewModel? _inputPreviewOwner;
     private readonly object _liveInputGate = new();
     private readonly HashSet<string> _liveInput = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlySet<string>? _livePressedKeys;
@@ -38,12 +41,17 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
 
     public event Action? CameraPreviewFrameUpdated;
 
-    public VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply = null)
-        : this(settings, save, apply, new CameraPreviewService()) { }
+    public VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply = null,
+        List<CustomKeyboardLayout>? customLayouts = null, VideoOverlaySettings? globalSettings = null)
+        : this(settings, save, apply, new CameraPreviewService(), customLayouts, globalSettings) { }
 
-    internal VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply, ICameraPreviewService cameraPreview)
+    internal VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply, ICameraPreviewService cameraPreview,
+        List<CustomKeyboardLayout>? customLayouts = null, VideoOverlaySettings? globalSettings = null)
     {
         _settings = settings; _save = save; _apply = apply;
+        _globalSettings = globalSettings ?? settings;
+        _customLayouts = customLayouts ?? [];
+        CustomLayouts = new(_customLayouts);
         _cameraPreview = cameraPreview;
         _cameraPreview.FrameReady += CameraPreview_FrameReady;
         _cameraPreview.Failed += CameraPreview_Failed;
@@ -58,11 +66,16 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     public ObservableCollection<OverlaySourceOption> Sources { get; }
     /// <summary>The four corner windows drawn over the preview canvas.</summary>
     public ObservableCollection<VideoOverlaySlotViewModel> Slots { get; }
-    public bool IncludeVirtualCameras { get => _settings.IncludeVirtualCameras; set { if (_settings.IncludeVirtualCameras == value) return; _settings.IncludeVirtualCameras = value; _ = RefreshCamerasAsync(); Save(); } }
+    public bool IncludeVirtualCameras { get => _globalSettings.IncludeVirtualCameras; set { if (_globalSettings.IncludeVirtualCameras == value) return; _globalSettings.IncludeVirtualCameras = value; _ = RefreshCamerasAsync(); Save(); } }
     public string SourceStatus { get => _sourceStatus; private set => SetProperty(ref _sourceStatus, value); }
     public bool HasCamera => _settings.Camera is not null;
     public bool HasKeyboard => _settings.KeyboardLayout != "None";
     public string KeyboardLayout => _settings.KeyboardLayout;
+    /// <summary>The packed board when the selection is a custom set, so the corner
+    /// previews draw the chosen keys rather than falling back to a preset.</summary>
+    public CustomKeyboardBoardShape? KeyboardBoard =>
+        CustomKeyboardLibrary.Find(_customLayouts, _settings.KeyboardLayout) is { } layout
+            ? CustomKeyboardBoard.Pack(layout.Keys, layout.IncludeMouse) : null;
     public bool CameraSelected => _selectedLayer == "Camera";
     public bool KeyboardSelected => _selectedLayer == "Keyboard";
     public bool IsPositioning => _selectedLayer is not null;
@@ -120,9 +133,134 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     /// sample rather than a dead board.</summary>
     public bool ShowSamplePressed { get => _showSamplePressed; private set => SetProperty(ref _showSamplePressed, value); }
 
+    /// <summary>The saved key sets, as the settings list sees them.</summary>
+    public ObservableCollection<CustomKeyboardLayout> CustomLayouts { get; private set; } = new();
+    public bool HasNoCustomLayouts => CustomLayouts.Count == 0;
+
+    // The editor works on a draft rather than the saved set, so Close discards
+    // and nothing half-built ever reaches a recording.
+    private CustomKeyboardLayout? _editing;
+    private readonly List<string> _draftKeys = [];
+    private string _draftName = string.Empty, _draftError = string.Empty;
+    private bool _draftShowMouse = true, _listening;
+
+    public bool IsLayoutEditorOpen => _editing is not null;
+    public string DraftName { get => _draftName; set { if (SetProperty(ref _draftName, value)) DraftError = string.Empty; } }
+    public string DraftError { get => _draftError; private set => SetProperty(ref _draftError, value); }
+    public bool DraftShowMouse { get => _draftShowMouse; set { if (SetProperty(ref _draftShowMouse, value)) RefreshDraft(); } }
+    public ObservableCollection<CustomKeyCap> DraftKeys { get; } = new();
+    public CustomKeyboardBoardShape DraftBoard => CustomKeyboardBoard.Pack(_draftKeys, DraftShowMouse);
+    public double DraftAspect => CustomKeyboardBoard.AspectRatio(DraftBoard);
+    public bool IsListening { get => _listening; private set { if (SetProperty(ref _listening, value)) OnPropertyChanged(nameof(ListenButtonText)); } }
+    public string ListenButtonText => IsListening ? "Stop" : "Press keys to add";
+
+    public void NewLayout()
+    {
+        _editing = new CustomKeyboardLayout { Name = CustomKeyboardLibrary.UniqueName("Custom keys", _customLayouts) };
+        LoadDraft();
+    }
+
+    public void EditLayout(CustomKeyboardLayout layout) { _editing = layout; LoadDraft(); }
+
+    public void DuplicateLayout(CustomKeyboardLayout layout)
+    {
+        _editing = new CustomKeyboardLayout
+        {
+            Name = CustomKeyboardLibrary.UniqueName(layout.Name, _customLayouts),
+            Keys = [.. layout.Keys],
+            IncludeMouse = layout.IncludeMouse,
+        };
+        LoadDraft();
+    }
+
+    public void DeleteLayout(CustomKeyboardLayout layout)
+    {
+        if (!_customLayouts.Remove(layout)) return;
+        CustomLayouts.Remove(layout);
+        // A selection pointing at a set that no longer exists is not a layout, so
+        // the corner it occupied is released rather than left showing nothing.
+        if (string.Equals(_settings.KeyboardLayout, CustomKeyboardLibrary.Selection(layout), StringComparison.OrdinalIgnoreCase))
+        { _settings.KeyboardLayout = "None"; _settings.KeyboardAnchor = null; }
+        if (ReferenceEquals(_editing, layout)) CloseLayoutEditor();
+        OnPropertyChanged(nameof(HasNoCustomLayouts));
+        Save(); RebuildSources(); UpdateStatus(); NotifyLayout();
+    }
+
+    /// <summary>Saves the draft, or reports why it cannot be saved.</summary>
+    public bool ApplyLayout()
+    {
+        if (_editing is not { } layout) return false;
+        if (_draftKeys.Count == 0 && !DraftShowMouse) { DraftError = "Add at least one key or enable the mouse."; return false; }
+        if (!CustomKeyboardLibrary.TryNormalizeName(DraftName, _customLayouts, layout.Id, out var name, out var error))
+        { DraftError = error!; return false; }
+        layout.Name = name;
+        layout.Keys = [.. _draftKeys];
+        layout.IncludeMouse = DraftShowMouse;
+        if (!_customLayouts.Contains(layout)) _customLayouts.Add(layout);
+        CustomLayouts.Clear();
+        foreach (var saved in _customLayouts) CustomLayouts.Add(saved);
+        OnPropertyChanged(nameof(HasNoCustomLayouts));
+        DraftError = string.Empty;
+        Save(); RebuildSources(); UpdateStatus(); NotifyLayout();
+        return true;
+    }
+
+    public void CloseLayoutEditor()
+    {
+        StopListening();
+        _editing = null;
+        OnPropertyChanged(nameof(IsLayoutEditorOpen));
+    }
+
+    public void StartListening() { if (_editing is not null) IsListening = true; }
+    public void StopListening() => IsListening = false;
+    public void ToggleListening() { if (IsListening) StopListening(); else StartListening(); }
+
+    public void RemoveDraftKey(CustomKeyCap cap)
+    {
+        if (_draftKeys.RemoveAll(key => string.Equals(key, cap.Code, StringComparison.OrdinalIgnoreCase)) > 0) RefreshDraft();
+    }
+
+    private void LoadDraft()
+    {
+        _draftKeys.Clear();
+        _draftKeys.AddRange(_editing!.Keys);
+        _draftName = _editing.Name;
+        _draftShowMouse = _editing.IncludeMouse;
+        DraftError = string.Empty;
+        OnPropertyChanged(nameof(DraftName)); OnPropertyChanged(nameof(DraftShowMouse));
+        OnPropertyChanged(nameof(IsLayoutEditorOpen));
+        RefreshDraft();
+    }
+
+    private void RefreshDraft()
+    {
+        DraftKeys.Clear();
+        foreach (var row in DraftBoard.Rows.Concat(DraftBoard.Cluster))
+            foreach (var cap in row) DraftKeys.Add(cap);
+        OnPropertyChanged(nameof(DraftBoard)); OnPropertyChanged(nameof(DraftAspect));
+    }
+
+    /// <summary>Adds or removes a pressed key while listening. Pressing a key that
+    /// is already in the set removes it, so a set can be built and corrected
+    /// without ever reaching for the mouse.</summary>
+    private void ToggleListenedKey(string code)
+    {
+        if (_editing is null) return;
+        var index = _draftKeys.FindIndex(key => string.Equals(key, code, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0) _draftKeys.RemoveAt(index);
+        else if (_draftKeys.Count >= CustomKeyboardLibrary.MaximumKeys)
+        { DraftError = $"A set holds at most {CustomKeyboardLibrary.MaximumKeys} keys."; return; }
+        else _draftKeys.Add(code);
+        DraftError = string.Empty;
+        RefreshDraft();
+    }
+
     public void StartInputPreview()
     {
         if (_inputMonitor is not null) return;
+        _inputPreviewOwner?.StopInputPreview();
+        _inputPreviewOwner = this;
         _inputMonitor = new PhysicalInputMonitor();
         _inputMonitor.Transition += InputPreview_Transition;
         _inputMonitor.Start();
@@ -132,9 +270,12 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     {
         var monitor = _inputMonitor;
         _inputMonitor = null;
+        if (ReferenceEquals(_inputPreviewOwner, this)) _inputPreviewOwner = null;
         if (monitor is null) return;
         monitor.Transition -= InputPreview_Transition;
         monitor.Dispose();
+        // A live flag on a dead monitor would swallow the next session's keys.
+        IsListening = false;
         lock (_liveInputGate) _liveInput.Clear();
         Dispatcher.UIThread.Post(() => { LivePressedKeys = null; ShowSamplePressed = true; });
     }
@@ -143,6 +284,9 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     {
         var code = key.MouseButton ?? InputKeyMap.Code(key.ScanCode, key.E0);
         if (code is null) return;
+        // Mouse buttons are excluded from listening on purpose: clicking Stop
+        // would otherwise add the left button to the set being built. The mouse
+        // is a switch on the editor instead.
         string[] held;
         lock (_liveInputGate)
         {
@@ -151,6 +295,8 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         }
         Dispatcher.UIThread.Post(() =>
         {
+            if (_inputMonitor is null) return;
+            if (down && IsListening && key.MouseButton is null && CustomKeyboardBoard.IsKnownPosition(code)) ToggleListenedKey(code);
             ShowSamplePressed = false;
             LivePressedKeys = new HashSet<string>(held, StringComparer.OrdinalIgnoreCase);
         });
@@ -203,7 +349,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         IReadOnlyList<CameraOption> cameras;
         try
         {
-            cameras = await Task.Run(() => DirectShowCameraProbe.List(_settings.IncludeVirtualCameras, cancellation.Token), cancellation.Token);
+            cameras = await Task.Run(() => DirectShowCameraProbe.List(IncludeVirtualCameras, cancellation.Token), cancellation.Token);
         }
         catch (OperationCanceledException) { return; }
         if (generation != _refreshGeneration || cancellation.IsCancellationRequested) return;
@@ -259,7 +405,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     }
     private void RebuildSources()
     {
-        var next = OverlaySourceOptions.Create(Cameras).ToArray();
+        var next = OverlaySourceOptions.Create(Cameras, _customLayouts).ToArray();
         for (var index = Sources.Count - 1; index >= 0; index--) if (!next.Contains(Sources[index])) Sources.RemoveAt(index);
         for (var index = 0; index < next.Length; index++) {
             if (index < Sources.Count && Sources[index] == next[index]) continue;
@@ -286,7 +432,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         _settings.Camera = repaired;
         Save();
     }
-    private double SourceAspect(string layer) => layer == "Camera" ? VideoOverlayLayout.CameraAspectRatio : KeyboardOverlayCatalog.Get(_settings.KeyboardLayout).AspectRatio;
+    private double SourceAspect(string layer) => layer == "Camera" ? VideoOverlayLayout.CameraAspectRatio : KeyboardOverlayCatalog.Resolve(_settings.KeyboardLayout, _customLayouts).AspectRatio;
     private double NormalizedAspect(string layer) => SourceAspect(layer) / (_previewWidth / _previewHeight);
     private static bool AtAnchor(VideoOverlayTransform transform, string? corner, double aspect) { if (corner is null) return false; var anchor = VideoOverlayLayout.Corner(corner, transform.Width, aspect); return Math.Abs(transform.X - anchor.X) < .002 && Math.Abs(transform.Y - anchor.Y) < .002; }
     private void Save() { _save(); _apply?.Invoke(); }
@@ -352,10 +498,16 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
     }
     private void NotifyLayout()
     {
-        foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(KeyboardLayout), nameof(CameraSelected), nameof(KeyboardSelected), nameof(IsPositioning), nameof(ShowPickers), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource) }) OnPropertyChanged(name);
+        foreach (var name in new[] { nameof(HasCamera), nameof(HasKeyboard), nameof(KeyboardLayout), nameof(KeyboardBoard), nameof(CameraSelected), nameof(KeyboardSelected), nameof(IsPositioning), nameof(ShowPickers), nameof(CameraCustomPosition), nameof(KeyboardCustomPosition), nameof(CameraPositionHint), nameof(KeyboardPositionHint), nameof(CameraLeft), nameof(CameraTop), nameof(CameraWidth), nameof(CameraHeight), nameof(KeyboardLeft), nameof(KeyboardTop), nameof(KeyboardWidth), nameof(KeyboardHeight), nameof(TopLeftSource), nameof(TopRightSource), nameof(BottomLeftSource), nameof(BottomRightSource) }) OnPropertyChanged(name);
         foreach (var slot in Slots) slot.Refresh();
     }
-    private void UpdateStatus() { var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none"; var keyboard = HasKeyboard ? $"Input: {_settings.KeyboardLayout}" : "Input: none"; SourceStatus = $"{camera}. {keyboard}."; }
+    private void UpdateStatus()
+    {
+        var camera = HasCamera ? $"Camera: {_settings.Camera!.FriendlyName}" : "Camera: none";
+        var name = CustomKeyboardLibrary.Find(_customLayouts, _settings.KeyboardLayout)?.Name ?? _settings.KeyboardLayout;
+        var keyboard = HasKeyboard ? $"Input: {name}" : "Input: none";
+        SourceStatus = $"{camera}. {keyboard}.";
+    }
     public void Dispose() { _refreshCancellation?.Cancel(); _refreshCancellation?.Dispose(); StopCameraPreview(); StopInputPreview(); _cameraPreview.FrameReady -= CameraPreview_FrameReady; _cameraPreview.Failed -= CameraPreview_Failed; _cameraPreview.Dispose(); }
 }
 public enum OverlaySourceKind { None, Camera, Keyboard, Heading }
@@ -369,7 +521,8 @@ public sealed record OverlaySourceOption(string Name, string Value, OverlaySourc
 }
 internal static class OverlaySourceOptions
 {
-    public static IReadOnlyList<OverlaySourceOption> Create(IEnumerable<CameraOption> cameraOptions)
+    public static IReadOnlyList<OverlaySourceOption> Create(IEnumerable<CameraOption> cameraOptions,
+        IEnumerable<CustomKeyboardLayout>? customLayouts = null)
     {
         var sources = new List<OverlaySourceOption> { OverlaySourceOption.None };
         var cameras = cameraOptions.Where(camera => !camera.IsNone).ToArray();
@@ -384,6 +537,13 @@ internal static class OverlaySourceOptions
             new OverlaySourceOption("QWERTY Keyboard + Mouse (Full)", "QWERTY Full", OverlaySourceKind.Keyboard),
             new OverlaySourceOption("Arrow Keys + Mouse", "Arrows", OverlaySourceKind.Keyboard),
             new OverlaySourceOption("AZERTY Keyboard + Mouse", "AZERTY Compact", OverlaySourceKind.Keyboard) });
+        var custom = customLayouts?.ToArray() ?? [];
+        if (custom.Length > 0)
+        {
+            sources.Add(OverlaySourceOption.Heading("Custom Keys"));
+            sources.AddRange(custom.Select(layout =>
+                new OverlaySourceOption(layout.Name, CustomKeyboardLibrary.Selection(layout), OverlaySourceKind.Keyboard)));
+        }
         return sources;
     }
 }

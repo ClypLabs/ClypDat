@@ -116,6 +116,12 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         set => SetGroup(CustomGameSettingsResolver.AudioGroup, value);
     }
 
+    public bool HasOverlays
+    {
+        get => Has(CustomGameSettingsResolver.OverlaysGroup);
+        set => SetGroup(CustomGameSettingsResolver.OverlaysGroup, value);
+    }
+
     public bool HasAnyGroup => Profile.Groups.Count > 0;
 
     /// <summary>
@@ -144,6 +150,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasQuality));
         OnPropertyChanged(nameof(HasReplay));
         OnPropertyChanged(nameof(HasAudio));
+        OnPropertyChanged(nameof(HasOverlays));
         OnPropertyChanged(nameof(HasAnyGroup));
         OnPropertyChanged(nameof(CanAddGroup));
         NotifyQualityWarning();

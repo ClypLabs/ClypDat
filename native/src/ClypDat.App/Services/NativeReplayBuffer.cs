@@ -813,7 +813,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var captureEndUtc = overlayMediaMapping.AcquisitionStartUtc
                 + TimeSpan.FromSeconds(overlayMediaMapping.MediaDurationSeconds / mediaScale);
             var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
+            var peripheralKeys = overlays.KeyboardKeys is not null
+                ? overlays.KeyboardKeys.Select(cap => new ClipOverlayKeyCap(cap.Code, cap.Label, cap.Row, cap.Units)).ToArray()
+                : null;
             var peripherals = _overlayCapture.FinalizeInput(config.LibraryFolder, outputPath, overlays.KeyboardLayout,
+                peripheralKeys, overlays.KeyboardName, overlays.KeyboardShowMouse,
                 overlays.KeyboardTransform, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
             ClipInfoSidecar.Save(config.LibraryFolder, outputPath, new ClipInfo(gameDisplayName, null, clipName,
                 File.GetCreationTimeUtc(outputPath), CaptureSource: config.CaptureSource,

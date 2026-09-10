@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-    public const int CurrentSchemaVersion = 10;
+    public const int CurrentSchemaVersion = 11;
 
     public static bool Apply(AppSettings settings)
     {
@@ -92,14 +92,41 @@ public static class AppSettingsMigrations
         settings.RecentThemeColors = settings.RecentThemeColors.Where(CustomThemeLibrary.IsColor)
             .Select(color => color.ToUpperInvariant()).Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(CustomThemeLibrary.RecentColorLimit).ToList();
+        // Prune malformed sets, then resolve the selection against what is left:
+        // IsKnown can only check a custom reference's shape, so a reference to a
+        // set that was deleted is caught here, where the list is in scope.
+        settings.CustomKeyboardLayouts ??= new();
+        settings.CustomKeyboardLayouts.RemoveAll(layout => layout is null || !Guid.TryParse(layout.Id, out _));
+        var validLayouts = new List<CustomKeyboardLayout>();
+        foreach (var layout in settings.CustomKeyboardLayouts)
+        {
+            if (!CustomKeyboardLibrary.TryNormalizeName(layout.Name, validLayouts, null, out var name, out _)) continue;
+            layout.Name = name;
+            validLayouts.Add(layout);
+        }
+        settings.CustomKeyboardLayouts = validLayouts;
+        settings.CustomKeyboardLayouts = settings.CustomKeyboardLayouts.DistinctBy(layout => layout.Id, StringComparer.OrdinalIgnoreCase).ToList();
+        foreach (var layout in settings.CustomKeyboardLayouts) layout.Keys = CustomKeyboardLibrary.Sanitize(layout.Keys);
+
         settings.VideoOverlays ??= new VideoOverlaySettings();
-        settings.VideoOverlays.KeyboardLayout = KeyboardOverlayCatalog.IsKnown(settings.VideoOverlays.KeyboardLayout)
-            ? settings.VideoOverlays.KeyboardLayout : "None";
-        settings.VideoOverlays.CameraTransform = VideoOverlayLayout.Normalize(settings.VideoOverlays.CameraTransform, VideoOverlayLayout.CameraAspectRatio);
-        settings.VideoOverlays.KeyboardTransform = VideoOverlayLayout.Normalize(settings.VideoOverlays.KeyboardTransform,
-            KeyboardOverlayCatalog.Get(settings.VideoOverlays.KeyboardLayout).AspectRatio);
+        settings.CustomGameSettings ??= new(StringComparer.OrdinalIgnoreCase);
+        foreach (var overlays in settings.CustomGameSettings.Values.Select(profile => profile.VideoOverlays)
+                     .Append(settings.VideoOverlays).OfType<VideoOverlaySettings>()) NormalizeOverlays(overlays, settings.CustomKeyboardLayouts);
 
         settings.SettingsSchemaVersion = CurrentSchemaVersion;
         return true;
+    }
+
+    private static void NormalizeOverlays(VideoOverlaySettings overlays, IReadOnlyList<CustomKeyboardLayout> layouts)
+    {
+        var keyboardLayout = overlays.KeyboardLayout;
+        var customSelection = CustomKeyboardLibrary.IsCustomSelection(keyboardLayout);
+        overlays.KeyboardLayout =
+            KeyboardOverlayCatalog.IsKnown(keyboardLayout) &&
+            (!customSelection || CustomKeyboardLibrary.Find(layouts, keyboardLayout) is not null)
+                ? keyboardLayout : "None";
+        overlays.CameraTransform = VideoOverlayLayout.Normalize(overlays.CameraTransform, VideoOverlayLayout.CameraAspectRatio);
+        overlays.KeyboardTransform = VideoOverlayLayout.Normalize(overlays.KeyboardTransform,
+            KeyboardOverlayCatalog.Resolve(overlays.KeyboardLayout, layouts).AspectRatio);
     }
 }

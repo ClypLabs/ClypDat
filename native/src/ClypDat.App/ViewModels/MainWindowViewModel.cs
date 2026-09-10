@@ -3988,7 +3988,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string SelectedVideoPath
     {
         get => _selectedVideoPath;
-        private set => SetProperty(ref _selectedVideoPath, value);
+        private set
+        {
+            if (!string.Equals(_selectedVideoPath, value, StringComparison.OrdinalIgnoreCase)) _pendingGameOverlayLayers.Clear();
+            SetProperty(ref _selectedVideoPath, value);
+        }
     }
 
     public IReadOnlyList<ClipEventMarker> SelectedAutoClipMarkers { get; private set; } = Array.Empty<ClipEventMarker>();
@@ -4596,7 +4600,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public void ResetPeripheralOverlayTransform() => ResetCapturedOverlayTransform("Peripherals");
     private double OverlaySizePercent(VideoOverlayTransform? transform, ClipOverlayLayer? layer) => transform is null || layer is null ? 0 : transform.Width * 100;
     private void ResizeCapturedOverlay(string name, double percent) { if (!double.IsFinite(percent)) return; var transform = name == "Camera" ? _cameraOverlayTransform : _peripheralOverlayTransform; if (transform is not null) SetCapturedOverlayTransform(name, transform with { Width = Math.Clamp(percent, 5, 100) / 100 }, true); }
-    private void SetCapturedOverlayTransform(string name, VideoOverlayTransform transform, bool persist) { var layer = name == "Camera" ? _selectedOverlayManifest.Camera : _selectedOverlayManifest.Peripherals; if (!ClipOverlayManifest.IsUsable(Settings.LibraryFolder, layer)) return; var aspect = name == "Camera" ? VideoOverlayLayout.CameraAspectRatio : KeyboardOverlayCatalog.Get(layer?.Source ?? "QWERTY Compact").AspectRatio; var normalized = VideoOverlayLayout.Normalize(transform, aspect); if (name == "Camera") _cameraOverlayTransform = normalized; else _peripheralOverlayTransform = normalized; RefreshCapturedOverlayLayerState(); if (persist && !_suppressClipEditSave) SaveSelectedClipEditState(); }
+    private readonly HashSet<string> _pendingGameOverlayLayers = [];
+    private void SetCapturedOverlayTransform(string name, VideoOverlayTransform transform, bool persist)
+    {
+        var layer = name == "Camera" ? _selectedOverlayManifest.Camera : _selectedOverlayManifest.Peripherals;
+        if (!ClipOverlayManifest.IsUsable(Settings.LibraryFolder, layer)) return;
+        var aspect = name == "Camera" ? VideoOverlayLayout.CameraAspectRatio : ClipOverlayManifest.AspectOf(layer);
+        var frameWidth = Math.Max(1, ActiveCropRect?.Width ?? SelectedSourceWidth);
+        var frameHeight = Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight);
+        var normalized = VideoOverlayLayout.Normalize(transform, aspect / ((double)frameWidth / frameHeight));
+        if (name == "Camera") _cameraOverlayTransform = normalized; else _peripheralOverlayTransform = normalized;
+        RefreshCapturedOverlayLayerState();
+        if (_suppressClipEditSave) return;
+        _pendingGameOverlayLayers.Add(name);
+        if (persist) CommitCapturedOverlayTransform();
+    }
     private void ResetCapturedOverlayTransform(string name) { var layer = name == "Camera" ? _selectedOverlayManifest.Camera : _selectedOverlayManifest.Peripherals; if (name == "Camera") _cameraOverlayTransform = layer?.InitialTransform; else _peripheralOverlayTransform = layer?.InitialTransform; RefreshCapturedOverlayLayerState(); if (!_suppressClipEditSave) SaveSelectedClipEditState(); }
 
     private string OverlayStatus(ClipOverlayLayer? layer, string name)
@@ -4626,7 +4644,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// run with persist:false so a drag writes the sidecar once, not per frame.</summary>
     public void CommitCapturedOverlayTransform()
     {
-        if (!_suppressClipEditSave) SaveSelectedClipEditState();
+        if (_suppressClipEditSave) { _pendingGameOverlayLayers.Clear(); return; }
+        SaveSelectedClipEditState();
+        var info = string.IsNullOrWhiteSpace(SelectedVideoPath) ? null : ClipInfoSidecar.Load(Settings.LibraryFolder, SelectedVideoPath);
+        string? key = null;
+        if (!string.Equals(info?.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase))
+            foreach (var layer in _pendingGameOverlayLayers)
+            {
+                var transform = layer == "Camera" ? _cameraOverlayTransform : _peripheralOverlayTransform;
+                if (transform is not null) key = CustomGameSettingsResolver.UpdateOverlayPlacement(Settings, info?.GameDisplayName, layer, transform) ?? key;
+            }
+        _pendingGameOverlayLayers.Clear();
+        if (key is not null)
+        {
+            SaveSettings();
+            RebuildCustomGameTabs();
+            NotifyCustomGameSettingChanged(key, CustomGameSettingChange.Group);
+        }
     }
 
     /// <summary>Drops selection from every captured overlay layer.</summary>
@@ -6144,7 +6178,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // A full session's video lands in the library before its audio is
             // muxed in, so "not hydrated" and "still encoding" are different
             // waits and deserve different sentences.
-            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…" : clip.IsFinalizing
+            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlayâ€¦" : clip.IsFinalizing
                 ? SessionFinalizeWaitMessage(clip.Path)
                 : "Still loading this clip's info - try again in a moment.";
             _clipNotReadyMessageTimer.Stop();
@@ -6179,7 +6213,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // A full session's video lands in the library before its audio is
             // muxed in, so "not hydrated" and "still encoding" are different
             // waits and deserve different sentences.
-            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…" : clip.IsFinalizing
+            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlayâ€¦" : clip.IsFinalizing
                 ? SessionFinalizeWaitMessage(clip.Path)
                 : "Still loading this clip's info - try again in a moment.";
             _clipNotReadyMessageTimer.Stop();

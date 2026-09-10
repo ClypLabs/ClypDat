@@ -10,20 +10,61 @@ namespace ClypDat.App.Views.Settings;
 
 public sealed partial class VideoOverlaysSection : UserControl
 {
+    public static readonly StyledProperty<CustomGameTabViewModel?> GameTabProperty =
+        AvaloniaProperty.Register<VideoOverlaysSection, CustomGameTabViewModel?>(nameof(GameTab));
+    public CustomGameTabViewModel? GameTab { get => GetValue(GameTabProperty); set => SetValue(GameTabProperty, value); }
+    public bool IsGameScoped { get; set; }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == GameTabProperty)
+        {
+            if (change.OldValue is CustomGameTabViewModel oldTab) oldTab.PropertyChanged -= GameTabChanged;
+            if (change.NewValue is CustomGameTabViewModel newTab) newTab.PropertyChanged += GameTabChanged;
+            if (_owner is not null) CreateModel();
+        }
+    }
+    private void GameTabChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(CustomGameTabViewModel.HasOverlays)) CreateModel();
+    }
     private MainWindowViewModel? _owner;
     private string? _dragLayer;
     private VideoOverlayManipulationMode _dragMode;
     private Point _lastPointer;
 
-    public VideoOverlaysSection() { InitializeComponent(); AttachedToVisualTree += Attached; DetachedFromVisualTree += Detached; SizeChanged += (_, _) => UpdateNarrowLayout(); }
+    public VideoOverlaysSection()
+    {
+        InitializeComponent();
+        AttachedToVisualTree += Attached; DetachedFromVisualTree += Detached;
+        SizeChanged += (_, _) => UpdateNarrowLayout();
+        // Physical input still arrives through the shared monitor. Keep Space,
+        // Enter and Tab from activating controls while building a key set.
+        AddHandler(KeyDownEvent, (_, e) => { if (Model?.IsListening == true) e.Handled = true; }, RoutingStrategies.Tunnel);
+    }
 
     private void Attached(object? sender, Avalonia.VisualTreeAttachmentEventArgs e)
     {
         _owner = (TopLevel.GetTopLevel(this) as MainWindow)?.DataContext as MainWindowViewModel;
         if (_owner is null) return;
-        DataContext = new VideoOverlayViewModel(_owner.Settings.VideoOverlays, _owner.SaveSettings,
-            () => _ = (TopLevel.GetTopLevel(this) as MainWindow)?.UpdateVideoOverlaySettingsAsync());
+        CreateModel();
         _owner.PropertyChanged += OwnerChanged;
+        UpdateVisibility();
+        UpdateNarrowLayout();
+    }
+
+    private void CreateModel()
+    {
+        EndDrag();
+        (DataContext as VideoOverlayViewModel)?.Dispose();
+        if (_owner is null || (IsGameScoped && GameTab?.HasOverlays != true)) { DataContext = null; return; }
+        var settings = IsGameScoped
+            ? GameTab!.Profile.VideoOverlays ??= _owner.Settings.VideoOverlays.Copy()
+            : _owner.Settings.VideoOverlays;
+        DataContext = new VideoOverlayViewModel(settings, SaveOverlaySettings,
+            () => _ = (TopLevel.GetTopLevel(this) as MainWindow)?.UpdateVideoOverlaySettingsAsync(),
+            _owner.Settings.CustomKeyboardLayouts, _owner.Settings.VideoOverlays);
         UpdateVisibility();
         UpdateNarrowLayout();
     }
@@ -39,7 +80,25 @@ public sealed partial class VideoOverlaysSection : UserControl
 
     private void OwnerChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(MainWindowViewModel.SelectedSettingsSection) or nameof(MainWindowViewModel.SettingsSearchText)) UpdateVisibility();
+        if (e.PropertyName == nameof(MainWindowViewModel.SelectedSettingsSection)) { CreateModel(); return; }
+        if (e.PropertyName is nameof(MainWindowViewModel.SelectedSettingsSection) or nameof(MainWindowViewModel.SettingsSearchText)
+            or nameof(MainWindowViewModel.IsSettingsVisible)) UpdateVisibility();
+    }
+
+    private void SaveOverlaySettings()
+    {
+        if (_owner is null) return;
+        foreach (var settings in _owner.Settings.CustomGameSettings.Values.Select(profile => profile.VideoOverlays)
+                     .Append(_owner.Settings.VideoOverlays).OfType<VideoOverlaySettings>())
+        {
+            if (CustomKeyboardLibrary.IsCustomSelection(settings.KeyboardLayout) &&
+                CustomKeyboardLibrary.Find(_owner.Settings.CustomKeyboardLayouts, settings.KeyboardLayout) is null)
+            {
+                settings.KeyboardLayout = "None";
+                settings.KeyboardAnchor = null;
+            }
+        }
+        _owner.SaveSettings();
     }
 
     // This section stays attached to the visual tree while hidden, so Detached
@@ -47,12 +106,31 @@ public sealed partial class VideoOverlaysSection : UserControl
     // must not outlive the preview that needs it.
     private void UpdateVisibility()
     {
-        IsVisible = _owner?.SelectedSettingsSection == "Video Overlays" || !string.IsNullOrWhiteSpace(_owner?.SettingsSearchText);
+        IsVisible = IsGameScoped ? GameTab?.HasOverlays == true :
+            _owner?.SelectedSettingsSection == "Video Overlays" || !string.IsNullOrWhiteSpace(_owner?.SettingsSearchText);
         if (DataContext is not VideoOverlayViewModel model) return;
-        if (IsVisible) model.StartInputPreview(); else model.StopInputPreview();
+        var sectionVisible = !string.IsNullOrWhiteSpace(_owner?.SettingsSearchText) ||
+            _owner?.SelectedSettingsSection == (IsGameScoped ? "Custom Game Settings" : "Video Overlays");
+        if (IsVisible && sectionVisible && _owner?.IsSettingsVisible == true) model.StartInputPreview(); else model.ClosePreview();
     }
 
     private void Refresh_OnClick(object? sender, RoutedEventArgs e) => _ = (DataContext as VideoOverlayViewModel)?.RefreshCamerasAsync();
+
+    private VideoOverlayViewModel? Model => DataContext as VideoOverlayViewModel;
+    private static T? TagOf<T>(object? sender) where T : class => (sender as Control)?.Tag as T;
+
+    private void NewKeySet_OnClick(object? sender, RoutedEventArgs e) => Model?.NewLayout();
+    private void EditKeySet_OnClick(object? sender, RoutedEventArgs e)
+    { if (TagOf<CustomKeyboardLayout>(sender) is { } layout) Model?.EditLayout(layout); }
+    private void DuplicateKeySet_OnClick(object? sender, RoutedEventArgs e)
+    { if (TagOf<CustomKeyboardLayout>(sender) is { } layout) Model?.DuplicateLayout(layout); }
+    private void DeleteKeySet_OnClick(object? sender, RoutedEventArgs e)
+    { if (TagOf<CustomKeyboardLayout>(sender) is { } layout) Model?.DeleteLayout(layout); }
+    private void RemoveKeySetKey_OnClick(object? sender, RoutedEventArgs e)
+    { if (TagOf<CustomKeyCap>(sender) is { } cap) Model?.RemoveDraftKey(cap); }
+    private void ListenKeys_OnClick(object? sender, RoutedEventArgs e) => Model?.ToggleListening();
+    private void CloseKeySet_OnClick(object? sender, RoutedEventArgs e) => Model?.CloseLayoutEditor();
+    private void ApplyKeySet_OnClick(object? sender, RoutedEventArgs e) => Model?.ApplyLayout();
 
     // A window is the layer, so pressing one both selects it and starts the
     // drag. The corners resize; anything else moves.
@@ -88,7 +166,10 @@ public sealed partial class VideoOverlaysSection : UserControl
     private void Section_OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Escape) return;
-        (DataContext as VideoOverlayViewModel)?.DeselectLayer();
+        // Escape is itself a legal overlay key, so while listening it must be the
+        // way out of a mode that is swallowing every key rather than adding itself.
+        if (Model is { IsListening: true } listening) listening.StopListening();
+        else (DataContext as VideoOverlayViewModel)?.DeselectLayer();
         e.Handled = true;
     }
 

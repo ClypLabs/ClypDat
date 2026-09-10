@@ -249,7 +249,7 @@ public sealed partial class MainWindow
         var height = Math.Max(1, videoBounds.Height);
         if (showCamera)
         {
-            var normalized = VideoOverlayLayout.Normalize(model.CameraOverlayTransform!, VideoOverlayLayout.CameraAspectRatio);
+            var normalized = VideoOverlayLayout.Normalize(model.CameraOverlayTransform!, VideoOverlayLayout.CameraAspectRatio / (width / height));
             var layerWidth = Math.Max(1, (int)Math.Round(width * normalized.Width));
             var layerHeight = Math.Max(1, (int)Math.Round(layerWidth / VideoOverlayLayout.CameraAspectRatio));
             _capturedCameraBounds = new Rect(width * normalized.X / dpi, height * normalized.Y / dpi,
@@ -271,13 +271,14 @@ public sealed partial class MainWindow
                 _capturedInput = ClipInputIndex.Load(model.Settings.LibraryFolder, peripheralLayer);
                 _capturedInputPath = model.SelectedVideoPath;
             }
-            var aspect = KeyboardOverlayCatalog.Get(layout).AspectRatio;
-            var normalized = VideoOverlayLayout.Normalize(model.PeripheralOverlayTransform!, aspect);
+            var aspect = ClipOverlayManifest.AspectOf(peripheralLayer);
+            var normalized = VideoOverlayLayout.Normalize(model.PeripheralOverlayTransform!, aspect / (width / height));
             var layerWidth = Math.Max(1, width * normalized.Width);
             _capturedPeripheralBounds = new Rect(width * normalized.X / dpi, height * normalized.Y / dpi,
                 layerWidth / dpi, layerWidth / aspect / dpi);
             _capturedOverlayScene.SetPeripherals(layout, _capturedPeripheralBounds,
-                ClipInputIndex.PressedAt(_capturedInput, model.CurrentTime.TotalSeconds));
+                ClipInputIndex.PressedAt(_capturedInput, model.CurrentTime.TotalSeconds),
+                ClipOverlayManifest.BoardOf(peripheralLayer));
         }
         else { _capturedOverlayScene.ClearPeripherals(); _capturedPeripheralBounds = default; }
         _capturedOverlayScene.IsVisible = true;
@@ -445,7 +446,7 @@ public sealed partial class MainWindow
         // manipulation which takes screen pixels plus frame dimensions.
         var aspect = gesture.Layer == "Camera"
             ? VideoOverlayLayout.CameraAspectRatio
-            : KeyboardOverlayCatalog.Get(model.SelectedOverlayManifestPeripherals()?.Source ?? KeyboardOverlayCatalog.QwertyCompact).AspectRatio;
+            : ClipOverlayManifest.AspectOf(model.SelectedOverlayManifestPeripherals());
         var transform = VideoOverlayManipulation.Apply(gesture.Start, gesture.Mode,
             (screen.X - gesture.PointerStart.X) / gesture.FrameWidth,
             (screen.Y - gesture.PointerStart.Y) / gesture.FrameHeight,

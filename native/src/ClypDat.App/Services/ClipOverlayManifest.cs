@@ -9,11 +9,17 @@ public sealed record ClipOverlayManifest(
     ClipOverlayLayer? Camera = null,
     ClipOverlayLayer? Peripherals = null)
 {
+    // v6 bakes a custom keyboard's caps into the layer so a clip keeps drawing
+    // the keys it was recorded with after the user edits or deletes that set.
     // v5 adds source offsets and playback rate to camera assets, plus input
     // v2. Keep v2-v4 readable: optional
     // record fields deserialize as null and are deliberately treated as
     // history that was never captured, not as an empty keyboard.
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
+    /// <summary>The version that fixed camera asset timing. The legacy correction
+    /// below stays pinned to it: writing it as "older than current" would silently
+    /// re-admit every already-correct clip on the next version bump.</summary>
+    private const int TimingCorrectedVersion = 5;
     public static ClipOverlayManifest Empty { get; } = new(CurrentVersion);
 
     /// <summary>
@@ -49,7 +55,7 @@ public sealed record ClipOverlayManifest(
     /// </summary>
     public static ClipOverlayManifest ForPlayback(ClipOverlayManifest manifest, double gameplayDurationSeconds)
     {
-        if (gameplayDurationSeconds <= 0 || manifest.Version >= CurrentVersion) return manifest;
+        if (gameplayDurationSeconds <= 0 || manifest.Version >= TimingCorrectedVersion) return manifest;
         return manifest with { Camera = CorrectLegacyTiming(manifest.Camera, gameplayDurationSeconds) };
     }
 
@@ -94,6 +100,34 @@ public sealed record ClipOverlayManifest(
         ? null
         : layer with { Flattened = true, Assets = null, AssetPath = null, InputIndexPath = null };
 
+    /// <summary>
+    /// The board a layer draws, rebuilt from the caps baked into it, or null when
+    /// it uses one of the built-in layouts that its name already describes.
+    /// Clips recorded before v6 have no caps and take the null path.
+    /// </summary>
+    public static CustomKeyboardBoardShape? BoardOf(ClipOverlayLayer? layer)
+    {
+        if (layer?.Keys is not { } keys) return null;
+        return new(Group(keys.Where(cap => cap.Row >= 0), ascending: true),
+            Group(keys.Where(cap => cap.Row < 0), ascending: false), layer.ShowMouse);
+    }
+
+    /// <summary>The aspect a layer is placed at: its own when it carries a board,
+    /// otherwise the catalog's for its named layout.</summary>
+    public static double AspectOf(ClipOverlayLayer? layer) =>
+        BoardOf(layer) is { } board
+            ? CustomKeyboardBoard.AspectRatio(board)
+            : KeyboardOverlayCatalog.Get(layer?.Source ?? KeyboardOverlayCatalog.QwertyCompact).AspectRatio;
+
+    // Cluster rows ride on negative indices, so -1 is the row above -2.
+    private static IReadOnlyList<IReadOnlyList<CustomKeyCap>> Group(IEnumerable<ClipOverlayKeyCap> caps, bool ascending)
+    {
+        var rows = caps.GroupBy(cap => cap.Row);
+        rows = ascending ? rows.OrderBy(row => row.Key) : rows.OrderByDescending(row => row.Key);
+        return rows.Select(row => (IReadOnlyList<CustomKeyCap>)row
+            .Select(cap => new CustomKeyCap(cap.Code, cap.Label, cap.Units)).ToArray()).ToArray();
+    }
+
     /// <summary>Returns only references which are safe to delete from this library.</summary>
     public static IEnumerable<string> ExistingAssetPaths(string libraryRoot, ClipOverlayManifest? manifest)
     {
@@ -121,7 +155,18 @@ public sealed record ClipOverlayLayer(
     bool Flattened = false,
     IReadOnlyList<ClipOverlayAsset>? Assets = null,
     bool SynchronizationApproximate = false,
-    string? InputIndexPath = null);
+    string? InputIndexPath = null,
+    IReadOnlyList<ClipOverlayKeyCap>? Keys = null,
+    string? SourceName = null,
+    bool ShowMouse = true);
+
+/// <summary>
+/// One key of a custom board, already packed: its row, its order within that row,
+/// its final width and the label it draws. Baked rather than referenced, so a clip
+/// is independent of a key set the user may later edit or delete - and independent
+/// of the packing algorithm itself, which may change.
+/// </summary>
+public sealed record ClipOverlayKeyCap(string Code, string Label, int Row, double Units = 1);
 
 public sealed record ClipOverlayInterval(double StartSeconds, double EndSeconds);
 /// <summary>

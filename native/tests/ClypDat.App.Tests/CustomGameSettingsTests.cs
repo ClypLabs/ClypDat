@@ -14,7 +14,8 @@ public sealed class CustomGameSettingsTests
                 CustomGameSettingsResolver.RecordingModeGroup,
                 CustomGameSettingsResolver.QualityGroup,
                 CustomGameSettingsResolver.ReplayGroup,
-                CustomGameSettingsResolver.AudioGroup
+                CustomGameSettingsResolver.AudioGroup,
+                CustomGameSettingsResolver.OverlaysGroup
             ],
             CustomGameSettingsResolver.AllGroups);
     }

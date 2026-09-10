@@ -12,7 +12,7 @@ public sealed class ClipOverlayManifestTests
 
         Assert.Equal(.75, asset.SourceOffsetSeconds, 3);
         Assert.Equal(1, asset.PlaybackRate);
-        Assert.Equal(5, ClipOverlayManifest.CurrentVersion);
+        Assert.Equal(6, ClipOverlayManifest.CurrentVersion);
     }
 
     [Fact]

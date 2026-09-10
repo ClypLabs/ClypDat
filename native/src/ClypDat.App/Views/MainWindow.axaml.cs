@@ -435,6 +435,7 @@ public sealed partial class MainWindow : Window
                         ? ViewModel.ActiveGameDetection.DisplayName : "Your game", preview: true);
                 ViewModel.PropertyChanged += (_, e) =>
                 {
+                    if (e.PropertyName == nameof(MainWindowViewModel.ActiveGameDetection)) _ = UpdateVideoOverlaySettingsAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
                         UpdateEditorSurfaceVisibility();
                     if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
@@ -2888,6 +2889,7 @@ public sealed partial class MainWindow : Window
 
     private async Task ApplyCustomGameSettingChangeAsync(string detectionKey, CustomGameSettingChange change)
     {
+        await UpdateVideoOverlaySettingsAsync();
         if (ViewModel is null || ViewModel.IsEffectiveDesktopCapture) return;
         var activeKey = string.IsNullOrWhiteSpace(ViewModel.ActiveGameDetection.DetectionKey)
             ? ViewModel.ActiveGameDetection.ExeName : ViewModel.ActiveGameDetection.DetectionKey;
@@ -6172,6 +6174,7 @@ public sealed partial class MainWindow : Window
             case "Quality": tab.HasQuality = enabled; break;
             case "Replay": tab.HasReplay = enabled; break;
             case "Audio": tab.HasAudio = enabled; break;
+            case "Overlays": tab.HasOverlays = enabled; break;
         }
     }
 
@@ -7195,7 +7198,15 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
         try
         {
-            await worker.UpdateVideoOverlaySettingsAsync(ViewModel.Settings.VideoOverlays.ToCaptureSettings());
+            // The key sets go with it: the worker is a separate process with no
+            // view of app settings, so a custom selection has to arrive already
+            // resolved to caps or it reaches the worker as nothing at all.
+            await worker.UpdateVideoOverlaySettingsAsync(
+                CustomGameSettingsResolver.ResolveOverlays(ViewModel.Settings,
+                    ViewModel.IsEffectiveDesktopCapture ? null :
+                    string.IsNullOrWhiteSpace(ViewModel.ActiveGameDetection.DetectionKey)
+                        ? ViewModel.ActiveGameDetection.ExeName : ViewModel.ActiveGameDetection.DetectionKey)
+                    .ToCaptureSettings(ViewModel.Settings.CustomKeyboardLayouts));
         }
         catch (Exception error)
         {

@@ -8,10 +8,18 @@ public sealed record OverlayCaptureSettings(
     OverlayCameraSelection? Camera,
     string KeyboardLayout,
     OverlayTransform CameraTransform,
-    OverlayTransform KeyboardTransform)
+    OverlayTransform KeyboardTransform,
+    // A custom key set is resolved to finished caps on the app side. The worker
+    // is a separate process with no view of app settings, so the set's id alone
+    // would arrive meaningless - it has to travel already packed.
+    IReadOnlyList<OverlayKeyCapSnapshot>? KeyboardKeys = null,
+    string? KeyboardName = null,
+    bool KeyboardShowMouse = true)
 {
     public static OverlayCaptureSettings None { get; } = new(null, "None", new(.70, .05, .25), new(.05, .70, .35));
 }
+
+public sealed record OverlayKeyCapSnapshot(string Code, string Label, int Row, double Units = 1);
 
 public sealed record OverlayCameraSelection(string DeviceMoniker, string FriendlyName);
 public sealed record OverlayTransform(double X, double Y, double Width);

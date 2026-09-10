@@ -2784,6 +2784,24 @@
     <Setter Property="VerticalAlignment" Value="Top" />
     <Setter Property="IsHitTestVisible" Value="False" />
   </Style>
+  <!-- One chosen key in the Custom Keys editor. Reads as the cap it will draw,
+       and clicking it takes the key back out of the set. -->
+  <Style Selector="Button.keyChip">
+    <Setter Property="Background" Value="#FF202A35" />
+    <Setter Property="BorderBrush" Value="#33FFFFFF" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="10,5" />
+    <Setter Property="MinWidth" Value="38" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextStrongBrush}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.keyChip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="#FF3A2731" />
+    <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+  </Style>
   <Style Selector="TextBlock.videoOverlayEmptyLabel">
     <Setter Property="Foreground" Value="{DynamicResource LabelBrush}" />
     <Setter Property="FontSize" Value="12" />

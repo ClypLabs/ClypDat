@@ -4,6 +4,13 @@ namespace ClypDat.Core.Settings;
 // across capture resolutions and makes preview and recorder use same contract.
 public sealed class VideoOverlaySettings
 {
+    public VideoOverlaySettings Copy() => new()
+    {
+        Enabled = Enabled, IncludeVirtualCameras = IncludeVirtualCameras,
+        Camera = Camera is null ? null : Camera with { }, KeyboardLayout = KeyboardLayout,
+        CameraTransform = CameraTransform with { }, KeyboardTransform = KeyboardTransform with { },
+        CameraAnchor = CameraAnchor, KeyboardAnchor = KeyboardAnchor
+    };
     // Compatibility-only. Older settings persisted this burn-in switch. It is
     // deliberately ignored: selecting a source now captures an editable layer.
     public bool Enabled { get; set; }

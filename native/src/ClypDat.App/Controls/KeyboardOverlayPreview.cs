@@ -17,12 +17,17 @@ public sealed class KeyboardOverlayPreview : Control
         AvaloniaProperty.Register<KeyboardOverlayPreview, bool>(nameof(UseSamplePressed));
     public static readonly StyledProperty<IReadOnlySet<string>?> PressedKeysProperty =
         AvaloniaProperty.Register<KeyboardOverlayPreview, IReadOnlySet<string>?>(nameof(PressedKeys));
+    /// <summary>A user-built set of physical positions, packed into a board. When
+    /// set it wins over <see cref="Layout"/>, whose name cannot describe one.</summary>
+    public static readonly StyledProperty<CustomKeyboardBoardShape?> CustomBoardProperty =
+        AvaloniaProperty.Register<KeyboardOverlayPreview, CustomKeyboardBoardShape?>(nameof(CustomBoard));
 
     /// <summary>Settings preview only. Recorded overlays must set physical state.</summary>
     public bool UseSamplePressed { get => GetValue(UseSamplePressedProperty); set => SetValue(UseSamplePressedProperty, value); }
     public IReadOnlySet<string>? PressedKeys { get => GetValue(PressedKeysProperty); set => SetValue(PressedKeysProperty, value); }
+    public CustomKeyboardBoardShape? CustomBoard { get => GetValue(CustomBoardProperty); set => SetValue(CustomBoardProperty, value); }
 
-    static KeyboardOverlayPreview() => AffectsRender<KeyboardOverlayPreview>(LayoutProperty, UseSamplePressedProperty, PressedKeysProperty);
+    static KeyboardOverlayPreview() => AffectsRender<KeyboardOverlayPreview>(LayoutProperty, UseSamplePressedProperty, PressedKeysProperty, CustomBoardProperty);
 
     // Every distance below is a multiple of one key, so a layout describes
     // itself in keys and the canvas decides how big a key is. The old code
@@ -33,6 +38,9 @@ public sealed class KeyboardOverlayPreview : Control
     private const double MouseGap = .45;    // between the board and the mouse
     private const double ClusterGap = .3;   // between the board and the arrow cluster
     private const double MouseAspect = .53; // mouse width, relative to its height
+    // A custom set can be mouse-only. Without a floor the board measures zero and
+    // the mouse, which is sized off the board, would come out invisible.
+    private const double MouseOnlyHeight = 3;
     private const double CanvasPadding = 18;       // canvas edge, in canvas pixels
 
     /// <summary>A cap. <paramref name="Code"/> is the physical position it
@@ -40,24 +48,40 @@ public sealed class KeyboardOverlayPreview : Control
     /// to Tab reports the same scan code whether the board draws it "Q" or "A".</summary>
     private sealed record Key(string Label, double Units = 1, string? Code = null);
     private sealed record Row(double Offset, IReadOnlyList<Key> Keys);
-    private sealed record Board(IReadOnlyList<Row> Rows, IReadOnlyList<Row>? Cluster = null);
+    private sealed record Board(IReadOnlyList<Row> Rows, IReadOnlyList<Row>? Cluster = null, bool IncludeMouse = true);
+
+    private static Board FromCustom(CustomKeyboardBoardShape shape) => new(
+        shape.Rows.Select(ToRow).ToArray(),
+        shape.Cluster.Count == 0 ? null : shape.Cluster.Select(ToRow).ToArray(),
+        shape.IncludeMouse);
+
+    private static Row ToRow(IReadOnlyList<CustomKeyCap> caps) =>
+        new(0, caps.Select(cap => new Key(cap.Label, cap.Units, cap.Code)).ToArray());
 
     public override void Render(DrawingContext context)
     {
         base.Render(context);
-        var definition = KeyboardOverlayCatalog.Get(Layout);
+        var custom = CustomBoard;
+        // A packed board has no declared canvas; its proportions come from its own
+        // shape, so the canvas is derived to match rather than borrowed.
+        var definition = custom is not null
+            ? new KeyboardOverlayDefinition(KeyboardOverlayCatalog.Custom, "custom",
+                Math.Max(1, (int)Math.Round(540 * CustomKeyboardBoard.AspectRatio(custom))), 540, [])
+            : KeyboardOverlayCatalog.Get(Layout);
         var canvasScale = Math.Min(Bounds.Width / definition.NativeWidth, Bounds.Height / definition.NativeHeight);
         if (canvasScale <= 0) return;
         var canvasOrigin = new Point(
             (Bounds.Width - definition.NativeWidth * canvasScale) / 2,
             (Bounds.Height - definition.NativeHeight * canvasScale) / 2);
 
-        var board = Describe(definition.DisplayName);
+        var board = custom is not null ? FromCustom(custom) : Describe(definition.DisplayName);
         var boardWidth = UnitWidth(board.Rows);
-        var boardHeight = UnitHeight(board.Rows);
+        var boardHeight = Math.Max(UnitHeight(board.Rows), board.IncludeMouse ? MouseOnlyHeight : 0);
+        if (board.Cluster is not null) boardHeight = Math.Max(boardHeight, UnitHeight(board.Cluster));
         var clusterWidth = board.Cluster is null ? 0 : ClusterGap + UnitWidth(board.Cluster);
-        var mouseWidth = MouseAspect * boardHeight;
-        var totalWidth = boardWidth + clusterWidth + MouseGap + mouseWidth;
+        var mouseWidth = board.IncludeMouse ? MouseAspect * boardHeight : 0;
+        var totalWidth = boardWidth + clusterWidth + (board.IncludeMouse ? MouseGap + mouseWidth : 0);
+        if (totalWidth <= 0 || boardHeight <= 0) return;
 
         var key = Math.Min(
             (definition.NativeWidth - CanvasPadding * 2) / totalWidth,
@@ -76,9 +100,10 @@ public sealed class KeyboardOverlayPreview : Control
             if (board.Cluster is not null)
                 DrawRows(context, board.Cluster, left + (boardWidth + ClusterGap) * key,
                     top + (boardHeight - UnitHeight(board.Cluster)) * key, key, pressed);
-            DrawMouse(context, new Rect(
-                left + (boardWidth + clusterWidth + MouseGap) * key, top,
-                mouseWidth * key, boardHeight * key), pressed);
+            if (board.IncludeMouse)
+                DrawMouse(context, new Rect(
+                    left + (boardWidth + clusterWidth + MouseGap) * key, top,
+                    mouseWidth * key, boardHeight * key), pressed);
         }
     }
 
@@ -136,9 +161,9 @@ public sealed class KeyboardOverlayPreview : Control
         letters.Select((letter, index) => new Key(letter.ToString(), 1, index < codes.Count ? codes[index] : null)).ToArray();
 
     private static double Span(double units) => units + (units - 1) * Gap;
-    private static double UnitWidth(IReadOnlyList<Row> rows) => rows.Max(row =>
-        row.Offset + row.Keys.Sum(key => Span(key.Units)) + Gap * (row.Keys.Count - 1));
-    private static double UnitHeight(IReadOnlyList<Row> rows) => rows.Count + Gap * (rows.Count - 1);
+    private static double UnitWidth(IReadOnlyList<Row> rows) => rows.Select(row =>
+        row.Offset + row.Keys.Sum(key => Span(key.Units)) + Gap * (row.Keys.Count - 1)).DefaultIfEmpty(0).Max();
+    private static double UnitHeight(IReadOnlyList<Row> rows) => rows.Count == 0 ? 0 : rows.Count + Gap * (rows.Count - 1);
 
     private static void DrawRows(DrawingContext context, IReadOnlyList<Row> rows, double left, double top, double key, HashSet<string> pressed)
     {

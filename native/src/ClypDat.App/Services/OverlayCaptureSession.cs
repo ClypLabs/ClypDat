@@ -89,22 +89,27 @@ internal sealed class OverlayCaptureSession : IDisposable
         }
     }
 
-    public ClipOverlayLayer? FinalizeInput(string libraryRoot, string clipPath, string layout, OverlayTransform transform, DateTime startUtc, DateTime endUtc, double mediaScale = 1)
+    /// <param name="keys">A custom board's finished caps, baked into the clip so it
+    /// keeps drawing the keys it was recorded with however the set changes later.
+    /// Null for the built-in layouts, which the name alone fully describes.</param>
+    public ClipOverlayLayer? FinalizeInput(string libraryRoot, string clipPath, string layout,
+        IReadOnlyList<ClipOverlayKeyCap>? keys, string? sourceName, bool showMouse,
+        OverlayTransform transform, DateTime startUtc, DateTime endUtc, double mediaScale = 1)
     {
         if (string.Equals(layout, "None", StringComparison.OrdinalIgnoreCase)) return null;
         var index = _input.Snapshot(startUtc, endUtc, mediaScale);
         if (index.MissingHistory is not null)
-            return new ClipOverlayLayer(layout, false, InitialTransform: transform.ToPresentationTransform(), Error: "Keyboard input was not recorded.");
+            return new ClipOverlayLayer(layout, false, InitialTransform: transform.ToPresentationTransform(), Error: "Keyboard input was not recorded.", Keys: keys, SourceName: sourceName, ShowMouse: showMouse);
         try
         {
             var path = LibraryLayout.SidecarPath(libraryRoot, clipPath, ".input.json");
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, JsonSerializer.Serialize(index));
-            return new ClipOverlayLayer(layout, true, InitialTransform: transform.ToPresentationTransform(), AssetPath: Path.GetRelativePath(libraryRoot, path), InputIndexPath: Path.GetRelativePath(libraryRoot, path));
+            return new ClipOverlayLayer(layout, true, InitialTransform: transform.ToPresentationTransform(), AssetPath: Path.GetRelativePath(libraryRoot, path), InputIndexPath: Path.GetRelativePath(libraryRoot, path), Keys: keys, SourceName: sourceName, ShowMouse: showMouse);
         }
         catch (Exception error)
         {
-            return new ClipOverlayLayer(layout, false, InitialTransform: transform.ToPresentationTransform(), Error: $"Keyboard input could not be saved: {error.Message}");
+            return new ClipOverlayLayer(layout, false, InitialTransform: transform.ToPresentationTransform(), Error: $"Keyboard input could not be saved: {error.Message}", Keys: keys, SourceName: sourceName, ShowMouse: showMouse);
         }
     }
 

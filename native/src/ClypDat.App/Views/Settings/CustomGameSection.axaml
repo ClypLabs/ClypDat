@@ -2,9 +2,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ClypDat.App.ViewModels"
              xmlns:controls="using:ClypDat.App.Controls"
+             xmlns:sections="using:ClypDat.App.Views.Settings"
              xmlns:conv="using:Avalonia.Data.Converters"
              xmlns:opconv="using:ClypDat.App.Converters"
              x:Class="ClypDat.App.Views.Settings.CustomGameSection"
+             x:Name="CustomGameRoot"
              x:DataType="vm:MainWindowViewModel">
   <UserControl.IsVisible>
     <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Custom Game Settings">
@@ -105,6 +107,14 @@
          against the window's view model. -->
     <ContentControl IsVisible="{Binding HasSelectedCustomGame}" HorizontalAlignment="Stretch">
     <StackPanel Spacing="18" DataContext="{Binding SelectedCustomGameTab}">
+      <StackPanel Spacing="12" IsVisible="{Binding HasOverlays}">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="settingsRowTitle" Text="Overlays" />
+          <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Overlays" Click="RemoveCustomGameGroupButton_OnClick" />
+        </Grid>
+        <sections:VideoOverlaysSection IsGameScoped="True"
+            GameTab="{ReflectionBinding #CustomGameRoot.DataContext.SelectedCustomGameTab}" />
+      </StackPanel>
 
       <!-- Recording Mode. The one group a newly added game starts
            with, and the only three-way choice here - it is not a

@@ -179,7 +179,7 @@ internal static class ClipOverlayBurn
     {
         if (spec.Peripherals is not { Available: true, Flattened: false } layer || spec.PeripheralTransform is null) return null;
         if (spec.Input is null || !ClipOverlayManifest.IsUsable(spec.LibraryRoot, layer)) return null;
-        var aspect = KeyboardOverlayCatalog.Get(layer.Source).AspectRatio;
+        var aspect = ClipOverlayManifest.AspectOf(layer);
         var bounds = ClipOverlayBurnLayout.Resolve(spec.PeripheralTransform, aspect, frameWidth, frameHeight);
         var duration = Math.Max(0, (spec.TrimEndSeconds - spec.TrimStartSeconds) / Math.Max(.01, spec.Speed));
         if (duration <= 0 || bounds.Width < 2 || bounds.Height < 2) return null;
@@ -191,7 +191,7 @@ internal static class ClipOverlayBurn
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardError = true } };
         try
         {
-            renderer = await Dispatcher.UIThread.InvokeAsync(() => new KeyboardOverlayFrames(layer.Source, bounds.Width, bounds.Height));
+            renderer = await Dispatcher.UIThread.InvokeAsync(() => new KeyboardOverlayFrames(layer.Source, ClipOverlayManifest.BoardOf(layer), bounds.Width, bounds.Height));
             foreach (var argument in new[] { "-v", "error", "-y", "-f", "rawvideo", "-pixel_format", "bgra",
                 "-video_size", $"{bounds.Width}x{bounds.Height}", "-framerate", FrameRate.ToString("0"), "-i", "pipe:0",
                 "-an", "-c:v", "ffv1", "-level", "3", "-pix_fmt", "bgra", path })
@@ -303,13 +303,13 @@ internal sealed class KeyboardOverlayFrames : IDisposable
     public int Width { get; }
     public int Height { get; }
 
-    public KeyboardOverlayFrames(string layout, int width, int height)
+    public KeyboardOverlayFrames(string layout, CustomKeyboardBoardShape? board, int width, int height)
     {
         Dispatcher.UIThread.VerifyAccess();
         Width = width; Height = height;
         // Render() measures against Bounds, which stays empty on a control that
         // was never laid out - it would draw nothing at all.
-        _control = new KeyboardOverlayPreview { Layout = layout };
+        _control = new KeyboardOverlayPreview { Layout = layout, CustomBoard = board };
         _control.Measure(new Size(width, height));
         _control.Arrange(new Rect(0, 0, width, height));
         Bitmap = new RenderTargetBitmap(new PixelSize(width, height), new Vector(96, 96));

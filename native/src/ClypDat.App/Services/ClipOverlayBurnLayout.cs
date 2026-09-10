@@ -22,7 +22,8 @@ internal static class ClipOverlayBurnLayout
     public static SpotifyOverlayBounds Resolve(VideoOverlayTransform transform, double aspectRatio, int frameWidth, int frameHeight)
     {
         var safeAspect = double.IsFinite(aspectRatio) && aspectRatio > .01 ? aspectRatio : 1;
-        var normalized = VideoOverlayLayout.Normalize(transform, safeAspect);
+        var outputAspect = (double)Math.Max(1, frameWidth) / Math.Max(1, frameHeight);
+        var normalized = VideoOverlayLayout.Normalize(transform, safeAspect / outputAspect);
         var width = Even(Math.Max(2, (int)Math.Round(frameWidth * normalized.Width)));
         var height = Even(Math.Max(2, (int)Math.Round(width / safeAspect)));
         var x = Math.Clamp((int)Math.Round(frameWidth * normalized.X), 0, Math.Max(0, frameWidth - width));
