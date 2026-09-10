@@ -107,15 +107,6 @@
          against the window's view model. -->
     <ContentControl IsVisible="{Binding HasSelectedCustomGame}" HorizontalAlignment="Stretch">
     <StackPanel Spacing="18" DataContext="{Binding SelectedCustomGameTab}">
-      <StackPanel Spacing="12" IsVisible="{Binding HasOverlays}">
-        <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Classes="settingsRowTitle" Text="Video Overlays" />
-          <Button Grid.Column="1" Classes="linkButton" Content="Remove" Tag="Overlays" Click="RemoveCustomGameGroupButton_OnClick" />
-        </Grid>
-        <sections:VideoOverlaysSection IsGameScoped="True"
-            GameTab="{ReflectionBinding #CustomGameRoot.DataContext.SelectedCustomGameTab}" />
-      </StackPanel>
-
       <!-- Recording Mode. The one group a newly added game starts
            with, and the only three-way choice here - it is not a
            toggle because "record clips by hotkey", "record the whole
@@ -348,6 +339,9 @@
 
         </StackPanel>
       </Border>
+
+      <sections:VideoOverlaysSection IsGameScoped="True"
+          GameTab="{ReflectionBinding #CustomGameRoot.DataContext.SelectedCustomGameTab}" />
 
       <!-- Add Setting. Sits BELOW whatever is already enabled, so the
            card list grows downward toward it. Hidden once all four

@@ -4,6 +4,7 @@
              xmlns:settings="using:ClypDat.Core.Settings"
              xmlns:controls="using:ClypDat.App.Controls"
              x:Class="ClypDat.App.Views.Settings.VideoOverlaysSection"
+             x:Name="VideoOverlaysRoot"
              x:DataType="vm:VideoOverlayViewModel"
              IsVisible="False" Focusable="True" KeyDown="Section_OnKeyDown">
   <UserControl.Resources>
@@ -15,14 +16,18 @@
     </DataTemplate>
   </UserControl.Resources>
   <StackPanel Spacing="18" Tag="Video Overlays">
-    <StackPanel Spacing="4">
+    <StackPanel Spacing="4" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}">
       <TextBlock Classes="settingsSectionTitle" Text="Video Overlays" />
       <TextBlock Classes="settingsSectionDesc" Text="Selected sources are captured as editable layers until export. Camera audio is never recorded." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
     <Border Classes="settingsCard">
       <StackPanel Spacing="14">
-        <TextBlock Classes="settingsCardLabel" Text="VIDEO OVERLAYS" />
+        <TextBlock Classes="settingsCardLabel" Text="VIDEO OVERLAYS" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}" />
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsGameScoped, ElementName=VideoOverlaysRoot}">
+          <TextBlock Classes="settingsRowTitle" Text="Video Overlays" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Classes="linkButton" Content="Remove" Click="RemoveGameOverlays_OnClick" />
+        </Grid>
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
           <StackPanel Spacing="2" VerticalAlignment="Center"><TextBlock Classes="settingsRowTitle" Text="Include virtual cameras" /><TextBlock Classes="settingsRowDescSm" Text="Refresh after connecting or changing a camera." /></StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludeVirtualCameras}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
@@ -90,10 +95,8 @@
           <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopLeftSource}" /></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopRightSource}" /></StackPanel><StackPanel Grid.Row="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel><StackPanel Grid.Row="1" Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
         </Grid>
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10"><TextBlock Classes="settingsRowDescSm" Text="Drag a window to seed placement for new clips. Existing clips keep their own layout. White corners resize it." TextWrapping="Wrap" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Reset camera" IsVisible="{Binding CameraCustomPosition}" Click="ResetCamera_OnClick" /><Button Grid.Column="2" Content="Reset input" IsVisible="{Binding KeyboardCustomPosition}" Click="ResetKeyboard_OnClick" /></Grid>
-      </StackPanel>
-    </Border>
-    <Border Classes="settingsCard">
-      <StackPanel Spacing="12">
+        <Border Classes="settingsDivider" />
+        <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsCardLabel" Text="CUSTOM KEYS" />
@@ -158,6 +161,7 @@
             <Button Grid.Column="1" Content="Close" Click="CloseKeySet_OnClick" />
             <Button Grid.Column="2" Classes="primaryButton" Content="Save" Click="ApplyKeySet_OnClick" />
           </Grid>
+        </StackPanel>
         </StackPanel>
       </StackPanel>
     </Border>

@@ -13,7 +13,9 @@ public sealed partial class VideoOverlaysSection : UserControl
     public static readonly StyledProperty<CustomGameTabViewModel?> GameTabProperty =
         AvaloniaProperty.Register<VideoOverlaysSection, CustomGameTabViewModel?>(nameof(GameTab));
     public CustomGameTabViewModel? GameTab { get => GetValue(GameTabProperty); set => SetValue(GameTabProperty, value); }
-    public bool IsGameScoped { get; set; }
+    public static readonly StyledProperty<bool> IsGameScopedProperty =
+        AvaloniaProperty.Register<VideoOverlaysSection, bool>(nameof(IsGameScoped));
+    public bool IsGameScoped { get => GetValue(IsGameScopedProperty); set => SetValue(IsGameScopedProperty, value); }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
@@ -115,6 +117,10 @@ public sealed partial class VideoOverlaysSection : UserControl
     }
 
     private void Refresh_OnClick(object? sender, RoutedEventArgs e) => _ = (DataContext as VideoOverlayViewModel)?.RefreshCamerasAsync();
+    private void RemoveGameOverlays_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (IsGameScoped && GameTab is not null) GameTab.HasOverlays = false;
+    }
 
     private VideoOverlayViewModel? Model => DataContext as VideoOverlayViewModel;
     private static T? TagOf<T>(object? sender) where T : class => (sender as Control)?.Tag as T;
