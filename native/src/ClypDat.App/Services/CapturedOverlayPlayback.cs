@@ -21,6 +21,15 @@ internal sealed class CapturedOverlayPlayback : IDisposable
     private const double PrefetchSeconds = .75;
     private readonly object _gate = new();
     private readonly Dictionary<string, Segment> _segments = new(StringComparer.OrdinalIgnoreCase);
+    // Which segment the playhead is actually inside. A prefetched segment must
+    // never paint: it finishes decoding while the previous one is still on
+    // screen, and publishing from there threw a frame up to two seconds into
+    // the future onto the display for a tick, every couple of seconds.
+    private string? _currentPath;
+    // One surface for the life of the object. Allocating a WriteableBitmap per
+    // published frame was ~28MB/s at playback rate, and the gen2 collections
+    // that bought landed as stalls on the UI thread.
+    private WriteableBitmap? _surface;
     private bool _disposed;
 
     public event Action<Bitmap?>? FrameReady;
@@ -43,6 +52,7 @@ internal sealed class CapturedOverlayPlayback : IDisposable
         var followingPath = following is null ? null : ClipOverlayManifest.ResolveAssetPath(libraryRoot, following.AssetPath);
         if (followingPath is not null && !File.Exists(followingPath)) followingPath = null;
 
+        lock (_gate) _currentPath = path;
         var segment = Acquire(path, followingPath);
         if (segment is null) return;
         if (followingPath is not null) Acquire(followingPath, path);
@@ -99,7 +109,14 @@ internal sealed class CapturedOverlayPlayback : IDisposable
 
     private void Complete(Segment segment, bool error)
     {
-        lock (_gate) { segment.Error = error; segment.Completed = true; }
+        bool current;
+        lock (_gate)
+        {
+            segment.Error = error; segment.Completed = true;
+            current = string.Equals(segment.Path, _currentPath, StringComparison.OrdinalIgnoreCase);
+        }
+        // A prefetch finishing is not a reason to repaint anything.
+        if (!current) return;
         if (error || segment.Frames.Count == 0) Publish(null);
         else PublishFrame(segment, segment.RequestedOffset);
     }
@@ -122,13 +139,35 @@ internal sealed class CapturedOverlayPlayback : IDisposable
         frameCount <= 0 ? 0 : Math.Clamp((int)Math.Round(sourceSeconds * DecodeFps), 0, frameCount - 1);
 
     private void PublishFrame(Segment segment, double sourceSeconds) =>
-        Publish(ToBitmap(segment.Frames[FrameIndex(sourceSeconds, segment.Frames.Count)]));
-    private Bitmap ToBitmap(byte[] pixels)
+        Paint(segment.Frames[FrameIndex(sourceSeconds, segment.Frames.Count)]);
+
+    // Painting on the calling thread when it is already the UI thread saves a
+    // whole tick of lag: a frame chosen during tick n used to reach the screen
+    // during tick n+1.
+    private void Paint(byte[] pixels)
     {
-        var bitmap = new WriteableBitmap(new PixelSize(Width, Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul);
-        using var target = bitmap.Lock(); System.Runtime.InteropServices.Marshal.Copy(pixels, 0, target.Address, pixels.Length); return bitmap;
+        if (!Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(() => Paint(pixels)); return; }
+        if (_disposed) return;
+        _surface ??= new WriteableBitmap(new PixelSize(Width, Height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Unpremul);
+        using (var target = _surface.Lock())
+            System.Runtime.InteropServices.Marshal.Copy(pixels, 0, target.Address, pixels.Length);
+        FrameReady?.Invoke(_surface);
     }
-    private void Publish(Bitmap? bitmap) => Dispatcher.UIThread.Post(() => { if (_disposed) { bitmap?.Dispose(); return; } FrameReady?.Invoke(bitmap); });
-    public void Dispose() { lock (_gate) { _disposed = true; _segments.Clear(); } }
+
+    private void Publish(Bitmap? bitmap)
+    {
+        if (!Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(() => Publish(bitmap)); return; }
+        if (!_disposed) FrameReady?.Invoke(bitmap);
+    }
+
+    public void Dispose()
+    {
+        lock (_gate) { _disposed = true; _segments.Clear(); _currentPath = null; }
+        var surface = _surface;
+        _surface = null;
+        if (surface is null) return;
+        if (Dispatcher.UIThread.CheckAccess()) surface.Dispose();
+        else Dispatcher.UIThread.Post(surface.Dispose);
+    }
     private sealed class Segment(string path) { public string Path { get; } = path; public List<byte[]> Frames { get; } = []; public double RequestedOffset { get; set; } public bool Completed { get; set; } public bool Error { get; set; } }
 }

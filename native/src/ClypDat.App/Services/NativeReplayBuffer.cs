@@ -664,7 +664,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     ? Math.Max(1, window[^1].PtsMs - window[^2].PtsMs)
                     : Math.Max(1, 1_000_000L / Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate));
             var videoDurationSeconds = (window[^1].PtsMs - window[0].PtsMs + finalPacketDurationMicroseconds) / 1_000_000.0;
-            overlayMediaMapping = new CaptureMediaMapping(window[0].WallClockUtc, videoDurationSeconds, finalPacketDurationMicroseconds);
+            var overlayWallclockSpanSeconds = (window[^1].WallClockUtc - window[0].WallClockUtc).TotalSeconds
+                + finalPacketDurationMicroseconds / 1_000_000.0;
+            // Clamped: a nonsense ratio from a pathological window must not be
+            // able to stretch the overlays into a worse place than no
+            // correction would have left them.
+            var overlayMediaScale = overlayWallclockSpanSeconds > .001
+                ? Math.Clamp(videoDurationSeconds / overlayWallclockSpanSeconds, .5, 2)
+                : 1;
+            overlayMediaMapping = new CaptureMediaMapping(window[0].WallClockUtc, videoDurationSeconds, finalPacketDurationMicroseconds, overlayMediaScale);
             AppLog.Debug($"Native replay audio/video duration check: videoDurationSeconds={videoDurationSeconds:0.000}, audioWindowDurationSeconds={windowDurationSeconds:0.000}, deltaMs={(windowDurationSeconds - videoDurationSeconds) * 1000:0.0}, packetCount={window.Length}.");
 
             // A capture stall (the loop goes an extended stretch without
@@ -799,10 +807,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         var overlays = Volatile.Read(ref _videoOverlaySettings);
         if (overlays != OverlayCaptureSettings.None)
         {
-            var captureEndUtc = overlayMediaMapping.AcquisitionStartUtc + TimeSpan.FromSeconds(overlayMediaMapping.MediaDurationSeconds);
-            var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc);
+            // The window to collect is real elapsed time, which is longer than
+            // the media duration whenever capture dropped frames.
+            var mediaScale = overlayMediaMapping.MediaScale > 0 ? overlayMediaMapping.MediaScale : 1;
+            var captureEndUtc = overlayMediaMapping.AcquisitionStartUtc
+                + TimeSpan.FromSeconds(overlayMediaMapping.MediaDurationSeconds / mediaScale);
+            var camera = _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
             var peripherals = _overlayCapture.FinalizeInput(config.LibraryFolder, outputPath, overlays.KeyboardLayout,
-                overlays.KeyboardTransform, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc);
+                overlays.KeyboardTransform, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
             ClipInfoSidecar.Save(config.LibraryFolder, outputPath, new ClipInfo(gameDisplayName, null, clipName,
                 File.GetCreationTimeUtc(outputPath), CaptureSource: config.CaptureSource,
                 OverlayManifest: new ClipOverlayManifest(ClipOverlayManifest.CurrentVersion, camera, peripherals)));
@@ -6306,7 +6318,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // respect that.
     private readonly record struct RingPacket(byte[] Data, int Length, long PtsMs, bool IsKeyframe, DateTime WallClockUtc, int Generation);
 
-    private readonly record struct CaptureMediaMapping(DateTime AcquisitionStartUtc, double MediaDurationSeconds, long FinalFrameDurationMicroseconds);
+    /// <param name="MediaScale">Media seconds per wall-clock second. Video PTS are
+    /// assigned an ideal constant rate rather than real elapsed time, so a clip
+    /// whose capture dropped frames covers more wall-clock time than its media
+    /// duration. Overlays are placed by wall-clock, so without this they drift
+    /// steadily later across the clip - the same divergence the audio window is
+    /// already corrected for, measured at 323ms and 486ms on a ~60s clip.</param>
+    private readonly record struct CaptureMediaMapping(DateTime AcquisitionStartUtc, double MediaDurationSeconds, long FinalFrameDurationMicroseconds, double MediaScale = 1);
 
     // The SPS/PPS and codec id of one encoder generation, plus the time base its
     // packet timestamps are expressed in. A clip is muxed entirely from one of

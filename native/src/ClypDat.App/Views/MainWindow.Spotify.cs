@@ -26,6 +26,14 @@ public sealed partial class MainWindow
     private SpotifyRenderSpec? _spotifyPreviewSpec;
     private string? _spotifyPreviewPath;
     private bool _spotifyPreviewDirty = true;
+    // The overlay window only needs to claim the top of the z-band when
+    // something below it could have jumped above: its first show, LibVLC
+    // reattaching its child HWND on a clip change, or the video rectangle
+    // moving. Re-asserting it on every tick is what buried the hover bar - and
+    // re-raising the bar on every tick in response is what the paused-badge
+    // path already documents as making it flicker.
+    private bool _spotifyRaiseNeeded = true;
+    private Rect _spotifyRaisedBounds;
     private Rect _spotifyVideoBounds;
     private SpotifyOverlayGesture? _spotifyGesture;
     private CapturedOverlayGesture? _capturedGesture;
@@ -43,7 +51,10 @@ public sealed partial class MainWindow
         VideoOverlayTransform Start, VideoOverlayManipulationMode Mode, double FrameWidth, double FrameHeight);
     private void InitializeSpotifyPreview()
     {
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 30) };
+        // 60Hz, matching the playback timer. A 30Hz sampler against a 30fps
+        // decode has no margin: an irregular tick lands two frames apart, then
+        // zero, which reads as judder.
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 60) };
         timer.Tick += (_, _) => UpdateSpotifyPreview();
         Opened += (_, _) => timer.Start();
         Closed += (_, _) => { timer.Stop(); EndSpotifyGesture(); _spotifyPerPixel?.Dispose(); _spotifyWindow?.Close(); _spotifyPreview?.Dispose(); _capturedPlayback?.Dispose(); };
@@ -58,6 +69,7 @@ public sealed partial class MainWindow
             _spotifyPreviewSpec = model.SpotifyPreviewSpec();
             _spotifyPreviewPath = model.SelectedVideoPath;
             _spotifyPreviewDirty = false;
+            _spotifyRaiseNeeded = true;
         }
         if (model.SelectedSourceWidth <= 0) { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
         try
@@ -89,6 +101,7 @@ public sealed partial class MainWindow
             var height = Math.Max(1, (int)videoHeight);
             if (_spotifyGesture is { } active && (active.FrameWidth != width || active.FrameHeight != height)) EndSpotifyGesture();
             _spotifyVideoBounds = new Rect(x, y, width, height);
+            if (_spotifyVideoBounds != _spotifyRaisedBounds) { _spotifyRaiseNeeded = true; _spotifyRaisedBounds = _spotifyVideoBounds; }
             // Geometry belongs to the full projected video, including zoom/pan.
             // Only the visible card pixels are clipped to the editor viewport.
             var frameX = (int)Math.Round(x);
@@ -182,25 +195,40 @@ public sealed partial class MainWindow
                 Math.Max(1, (int)Math.Round(width * rasterScale)), Math.Max(1, (int)Math.Round(height * rasterScale)));
             if (showSpotify && !_spotifyPreview!.HasCard && !_spotifyAdorner!.IsVisible && !showCamera && !showPeripherals) { HideSpotifyPreview(); return; }
             var handle = NativeHandleOf(_spotifyWindow);
-            if (!_spotifyWindow.IsVisible || (handle != IntPtr.Zero && !IsWindowVisible(handle))) _spotifyWindow.Show(this);
+            if (!_spotifyWindow.IsVisible || (handle != IntPtr.Zero && !IsWindowVisible(handle)))
+            { _spotifyWindow.Show(this); _spotifyRaiseNeeded = true; }
             // LibVLC can create or reattach its child HWND after the owned card
             // window. Raise without activation so opening a clip does not wait
             // for unrelated hover controls to repair the stacking order.
             handle = NativeHandleOf(_spotifyWindow);
-            if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+            var raised = _spotifyRaiseNeeded && handle != IntPtr.Zero;
+            if (raised)
+            {
+                SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+                _spotifyRaiseNeeded = false;
+            }
             _spotifyPerPixel?.ShowAndRefresh();
-            // Captured camera is refreshed after Spotify so it receives the
-            // current source time, then restore Spotify as top visual layer.
-            handle = NativeHandleOf(_spotifyWindow);
-            if (handle != IntPtr.Zero) SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+            // Anything that must sit above the video also has to sit above this
+            // window, and only a raise can have disturbed them.
+            if (raised) RestoreOverlayChrome();
         }
         catch (InvalidOperationException) { HideSpotifyPreview(); }
+    }
+
+    /// <summary>Puts the editor chrome back on top after the overlay window has
+    /// claimed the top of the owner's z-band. Mirrors what the paused badge
+    /// already does for the hover bar.</summary>
+    private void RestoreOverlayChrome()
+    {
+        if (_recordingPausedOverlay is { IsVisible: true } badge) RepositionPausedOverlay(badge);
+        RepositionEditorHoverControlsSafe(force: true);
     }
 
     private void HideSpotifyPreview()
     {
         _spotifyPerPixel?.Hide();
         _spotifyWindow?.Hide();
+        _spotifyRaiseNeeded = true;
         // Hide both native surfaces before releasing pointer capture. Capture
         // loss can finish a drag and save its layout synchronously.
         EndSpotifyGesture();

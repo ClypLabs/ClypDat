@@ -43,7 +43,10 @@ internal sealed class RawInputRecorder : IDisposable
         lock (_gate) ResetUnderLock();
     }
 
-    public InputCaptureIndex Snapshot(DateTime startUtc, DateTime endUtc)
+    /// <param name="mediaScale">Media seconds per wall-clock second. Input is
+    /// stamped on the wall clock but replayed against the clip's own timeline,
+    /// which runs slower whenever capture dropped frames.</param>
+    public InputCaptureIndex Snapshot(DateTime startUtc, DateTime endUtc, double mediaScale = 1)
     {
         lock (_gate)
         {
@@ -52,10 +55,11 @@ internal sealed class RawInputRecorder : IDisposable
             if (!_started)
                 return new InputCaptureIndex(2, "Keyboard input was not recorded.", [], []);
             CheckpointUnderLock(endUtc);
+            var scale = double.IsFinite(mediaScale) && mediaScale > 0 ? mediaScale : 1;
             var transitions = _transitions.Where(x => x.Utc >= startUtc && x.Utc <= endUtc)
-                .Select(x => new InputTransition(Math.Max(0, (x.Utc - startUtc).TotalSeconds), x.Key, x.Down, x.Kind)).ToArray();
+                .Select(x => new InputTransition(Math.Max(0, (x.Utc - startUtc).TotalSeconds) * scale, x.Key, x.Down, x.Kind)).ToArray();
             var checkpoints = _checkpoints.Where(x => x.Utc >= startUtc && x.Utc <= endUtc)
-                .Select(x => new InputCheckpoint(Math.Max(0, (x.Utc - startUtc).TotalSeconds), x.Down)).ToArray();
+                .Select(x => new InputCheckpoint(Math.Max(0, (x.Utc - startUtc).TotalSeconds) * scale, x.Down)).ToArray();
             // A checkpoint at clip start makes reconstruction independent from
             // recorder history which may have aged out before this save.
             var initial = _checkpoints.LastOrDefault(x => x.Utc <= startUtc);

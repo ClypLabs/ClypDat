@@ -47,7 +47,11 @@ internal sealed class OverlayCaptureSession : IDisposable
 
     public void Stop() { lock (_gate) StopCameraUnderLock(); _input.Reset(); }
 
-    public ClipOverlayLayer? FinalizeCamera(string libraryRoot, string clipPath, DateTime startUtc, DateTime endUtc)
+    /// <param name="mediaScale">Media seconds per wall-clock second, so segments
+    /// land where the clip's own timeline puts them rather than where wall-clock
+    /// would. PlaybackRate carries the inverse, because the segment file itself
+    /// still runs in real time.</param>
+    public ClipOverlayLayer? FinalizeCamera(string libraryRoot, string clipPath, DateTime startUtc, DateTime endUtc, double mediaScale = 1)
     {
         lock (_gate)
         {
@@ -69,9 +73,11 @@ internal sealed class OverlayCaptureSession : IDisposable
                 File.Copy(file, target, true);
                 var clipStart = startUtc > segment.StartUtc ? startUtc : segment.StartUtc;
                 var clipEnd = endUtc < segment.EndUtc ? endUtc : segment.EndUtc;
+                var scale = double.IsFinite(mediaScale) && mediaScale > 0 ? mediaScale : 1;
                 assets.Add(new ClipOverlayAsset(Path.GetRelativePath(libraryRoot, target),
-                    Math.Max(0, (clipStart - startUtc).TotalSeconds), Math.Min((endUtc - startUtc).TotalSeconds, (clipEnd - startUtc).TotalSeconds),
-                    Math.Max(0, (clipStart - segment.StartUtc).TotalSeconds), 1));
+                    Math.Max(0, (clipStart - startUtc).TotalSeconds) * scale,
+                    Math.Min((endUtc - startUtc).TotalSeconds, (clipEnd - startUtc).TotalSeconds) * scale,
+                    Math.Max(0, (clipStart - segment.StartUtc).TotalSeconds), 1 / scale));
             }
             // Sorted by clip time: the %d filenames sort lexicographically, so
             // segment 10 would otherwise precede segment 2 in the manifest.
@@ -83,10 +89,10 @@ internal sealed class OverlayCaptureSession : IDisposable
         }
     }
 
-    public ClipOverlayLayer? FinalizeInput(string libraryRoot, string clipPath, string layout, OverlayTransform transform, DateTime startUtc, DateTime endUtc)
+    public ClipOverlayLayer? FinalizeInput(string libraryRoot, string clipPath, string layout, OverlayTransform transform, DateTime startUtc, DateTime endUtc, double mediaScale = 1)
     {
         if (string.Equals(layout, "None", StringComparison.OrdinalIgnoreCase)) return null;
-        var index = _input.Snapshot(startUtc, endUtc);
+        var index = _input.Snapshot(startUtc, endUtc, mediaScale);
         if (index.MissingHistory is not null)
             return new ClipOverlayLayer(layout, false, InitialTransform: transform.ToPresentationTransform(), Error: "Keyboard input was not recorded.");
         try
@@ -144,7 +150,15 @@ internal sealed class OverlayCaptureSession : IDisposable
         var info = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true };
         // Ask DirectShow for 60fps but never force an output cadence.  Forcing
         // `-r` duplicated slow cameras and hid dropped-frame gaps from replay.
-        foreach (var argument in new[] { "-hide_banner", "-f", "dshow", "-framerate", "60", "-i", $"video={_settings.Camera!.DeviceMoniker}", "-an", "-vf", "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2", "-vsync", "0", "-c:v", "libx264", "-preset", "ultrafast", "-g", "120", "-bf", "0", "-sc_threshold", "0", "-f", "segment", "-segment_time", SegmentSeconds.ToString(), "-reset_timestamps", "1", "-segment_format_options", "movflags=+frag_keyframe+empty_moov+default_base_moof", pattern }) info.ArgumentList.Add(argument);
+        //
+        // zerolatency, because a segment's start time is observed from the
+        // moment FFmpeg creates its file, which is when the segment's first
+        // packet reaches the muxer. x264 defaults to frame-level threading and
+        // holds roughly `threads` frames before emitting the first packet - on
+        // a 12-16 thread machine at 60fps that is 200-270ms of the camera
+        // being placed later in the clip than it happened. Sliced threads emit
+        // on the frame they were fed.
+        foreach (var argument in new[] { "-hide_banner", "-f", "dshow", "-framerate", "60", "-i", $"video={_settings.Camera!.DeviceMoniker}", "-an", "-vf", "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2", "-vsync", "0", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "120", "-bf", "0", "-sc_threshold", "0", "-f", "segment", "-segment_time", SegmentSeconds.ToString(), "-reset_timestamps", "1", "-segment_format_options", "movflags=+frag_keyframe+empty_moov+default_base_moof", pattern }) info.ArgumentList.Add(argument);
         try
         {
             _camera = Process.Start(info);

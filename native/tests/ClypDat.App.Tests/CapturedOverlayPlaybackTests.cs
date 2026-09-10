@@ -111,6 +111,25 @@ public sealed class CapturedOverlayPlaybackTests
         Assert.Equal(1, CapturedOverlayPlayback.SourceSeconds(asset with { PlaybackRate = double.NaN }, 1), 6);
     }
 
+    [Fact]
+    public void DroppedCaptureFramesCompressTheClipTimelineAndSpeedTheSourceToMatch()
+    {
+        // Video PTS are assigned an ideal constant rate, so a clip that dropped
+        // frames covers more wall-clock time than its media duration. Camera
+        // segments are placed by wall-clock, so they carry the clip-time scale
+        // and the inverse as PlaybackRate - the file itself still runs in real
+        // time. Without this the camera slides steadily later across the clip.
+        const double scale = 0.99;  // 600ms lost over a 60s capture
+        var asset = new ClipOverlayAsset("30.mp4", StartSeconds: 60 * scale, EndSeconds: 62 * scale,
+            SourceOffsetSeconds: 0, PlaybackRate: 1 / scale);
+
+        // One second of clip time into the segment is 1/scale seconds of camera.
+        var source = CapturedOverlayPlayback.SourceSeconds(asset, 60 * scale + 1);
+
+        Assert.Equal(1 / scale, source, 6);
+        Assert.Equal(CapturedOverlayPlayback.FrameIndex(1 / scale, 60), CapturedOverlayPlayback.FrameIndex(source, 60));
+    }
+
     private static void PumpUntil(Func<bool> completed, TimeSpan timeout)
     {
         var elapsed = Stopwatch.StartNew();
