@@ -18,6 +18,8 @@ internal sealed class OverlayCaptureSession : IDisposable
     private OverlayCaptureSettings _settings = OverlayCaptureSettings.None;
     private bool _running;
     private Process? _camera;
+    private byte[]? _burnCameraFrame;
+    private Task? _burnCameraReader;
     private string? _cameraError;
     private bool _cameraReceivedFrames;
     private readonly Dictionary<string, CameraSegment> _cameraSegments = new(StringComparer.OrdinalIgnoreCase);
@@ -39,7 +41,7 @@ internal sealed class OverlayCaptureSession : IDisposable
             // Camera replacement must not erase keyboard history captured by
             // the worker. Input has its own lifetime and clip-start checkpoint.
             if (changed) StopCameraUnderLock();
-            if (_running && !OverlayRecordingMode.IsBurned(_settings.RecordingMode) && _settings.Camera is not null && _camera is null) StartCameraUnderLock();
+            if (_running && _settings.Camera is not null && _camera is null) StartCameraUnderLock();
         }
     }
 
@@ -56,13 +58,23 @@ internal sealed class OverlayCaptureSession : IDisposable
             _states.Add((MonotonicClock.UtcNow, _settings));
             _cameraGeneration = 0;
         }
-        if (OverlayRecordingMode.IsBurned(_settings.RecordingMode)) return;
         _input.Start();
         lock (_gate)
             if (_settings.Camera is not null && _camera is null) StartCameraUnderLock();
     }
 
     public void Stop() { lock (_gate) { _running = false; StopCameraUnderLock(); } _input.Reset(); }
+
+    /// <summary>Atomic-enough snapshot for one output frame. A camera is absent
+    /// until FFmpeg delivered its first complete replacement frame.</summary>
+    public OverlayBurnSnapshot BurnSnapshot()
+    {
+        lock (_gate)
+        {
+            var camera = _burnCameraFrame;
+            return new OverlayBurnSnapshot(_settings, camera is null ? null : (byte[])camera.Clone(), _input.Pressed(), _cameraError);
+        }
+    }
 
     public IReadOnlyList<ClipOverlayState> States(DateTime startUtc, DateTime endUtc, double mediaScale,
         ClipOverlayLayer? camera, ClipOverlayLayer? peripherals)
@@ -165,6 +177,21 @@ internal sealed class OverlayCaptureSession : IDisposable
         var ffmpeg = Path.Combine(AppContext.BaseDirectory, "ffmpeg", "ffmpeg.exe");
         if (!File.Exists(ffmpeg)) { _cameraError = "FFmpeg is unavailable."; return; }
         Directory.CreateDirectory(_workRoot);
+        if (OverlayRecordingMode.IsBurned(_settings.RecordingMode))
+        {
+            var burnInfo = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true };
+            foreach (var argument in new[] { "-hide_banner", "-f", "dshow", "-framerate", "60", "-i", $"video={_settings.Camera!.DeviceMoniker}", "-an", "-vf", "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2", "-vsync", "0", "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1" }) burnInfo.ArgumentList.Add(argument);
+            try
+            {
+                _burnCameraFrame = null;
+                _camera = Process.Start(burnInfo);
+                if (_camera is null) { _cameraError = "Camera capture could not start."; return; }
+                _burnCameraReader = ReadBurnCameraAsync(_camera);
+                _ = ObserveCameraAsync(_camera);
+            }
+            catch (Exception error) { _cameraError = $"Camera capture could not start: {error.Message}"; }
+            return;
+        }
         // Previous generations remain available to replay saves spanning device replacement.
         _cameraWatcher?.Dispose();
         _cameraWatcher = new FileSystemWatcher(_workRoot, "*.mp4") { EnableRaisingEvents = true, IncludeSubdirectories = false };
@@ -227,9 +254,31 @@ internal sealed class OverlayCaptureSession : IDisposable
         catch (Exception error) { _cameraError = $"Camera capture failed: {error.Message}"; }
     }
 
+    private async Task ReadBurnCameraAsync(Process process)
+    {
+        const int bytes = 640 * 360 * 4;
+        try
+        {
+            while (!process.HasExited)
+            {
+                var frame = new byte[bytes];
+                var offset = 0;
+                while (offset < frame.Length)
+                {
+                    var read = await process.StandardOutput.BaseStream.ReadAsync(frame.AsMemory(offset)).ConfigureAwait(false);
+                    if (read == 0) return;
+                    offset += read;
+                }
+                lock (_gate) { if (ReferenceEquals(process, _camera)) { _burnCameraFrame = frame; _cameraReceivedFrames = true; } }
+            }
+        }
+        catch (Exception error) { lock (_gate) _cameraError = $"Camera capture failed: {error.Message}"; }
+    }
+
     private void StopCameraUnderLock()
     {
         var process = _camera; _camera = null;
+        _burnCameraFrame = null;
         var ended = MonotonicClock.UtcNow;
         foreach (var segment in _cameraSegments.Values.Where(segment => !segment.Completed))
         {

@@ -37,6 +37,23 @@ internal sealed class RawInputRecorder : IDisposable
         lock (_gate) ResetUnderLock();
     }
 
+    /// <summary>Current physical state for the recorder-side burn compositor.
+    /// A copy is returned: input hooks run on a different thread.</summary>
+    public IReadOnlySet<string> Pressed()
+    {
+        lock (_gate)
+        {
+            if (!_started || _missing || _down.Count == 0) return ClipInputIndex.Nothing;
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in _down)
+            {
+                var code = key.MouseButton ?? InputKeyMap.Code(key.ScanCode, key.E0);
+                if (code is not null) result.Add(code);
+            }
+            return result;
+        }
+    }
+
     /// <param name="mediaScale">Media seconds per wall-clock second. Input is
     /// stamped on the wall clock but replayed against the clip's own timeline,
     /// which runs slower whenever capture dropped frames.</param>

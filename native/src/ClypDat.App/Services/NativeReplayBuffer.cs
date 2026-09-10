@@ -116,6 +116,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private OverlayCaptureSettings _activeVideoOverlaySettings = OverlayCaptureSettings.None;
     private long _lastVideoOverlayRevision;
     private readonly OverlayCaptureSession _overlayCapture;
+    private long _burnedCameraFrames, _burnedKeyboardFrames;
     private readonly string _bufferFolder;
     private readonly AudioCapturePipeline _audio;
     private readonly object _bufferLock = new();
@@ -434,6 +435,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             _encoderGeneration = 0;
         }
         Interlocked.Exchange(ref _totalDroppedFrames, 0);
+        Interlocked.Exchange(ref _burnedCameraFrames, 0);
+        Interlocked.Exchange(ref _burnedKeyboardFrames, 0);
         Volatile.Write(ref _peakQueueDepth, 0);
         Volatile.Write(ref _pendingEncoderFrames, 0);
         Volatile.Write(ref _peakPendingEncoderFrames, 0);
@@ -828,11 +831,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var captureEndUtc = overlayMediaMapping.AcquisitionStartUtc
                 + TimeSpan.FromSeconds(overlayMediaMapping.MediaDurationSeconds / mediaScale);
             var burned = OverlayRecordingMode.IsBurned(overlays.RecordingMode);
-            var camera = burned ? FlattenedCamera(overlays) : _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
+            var camera = burned ? FlattenedCamera(overlays, Interlocked.Read(ref _burnedCameraFrames) > 0) : _overlayCapture.FinalizeCamera(config.LibraryFolder, outputPath, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
             var peripheralKeys = overlays.KeyboardKeys is not null
                 ? overlays.KeyboardKeys.Select(cap => new ClipOverlayKeyCap(cap.Code, cap.Label, cap.Row, cap.Units)).ToArray()
                 : null;
-            var peripherals = burned ? FlattenedPeripherals(overlays, peripheralKeys) : _overlayCapture.FinalizeInput(config.LibraryFolder, outputPath, overlays.KeyboardLayout,
+            var peripherals = burned ? FlattenedPeripherals(overlays, peripheralKeys, Interlocked.Read(ref _burnedKeyboardFrames) > 0) : _overlayCapture.FinalizeInput(config.LibraryFolder, outputPath, overlays.KeyboardLayout,
                 peripheralKeys, overlays.KeyboardName, overlays.KeyboardShowMouse,
                 overlays.KeyboardTransform, overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale);
             var states = _overlayCapture.States(overlayMediaMapping.AcquisitionStartUtc, captureEndUtc, mediaScale, camera, peripherals);
@@ -864,13 +867,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private static ClipOverlayLayer? FlattenedCamera(OverlayCaptureSettings settings) => settings.Camera is not { } camera ? null
-        : new ClipOverlayLayer(camera.FriendlyName, true, InitialTransform: settings.CameraTransform.ToPresentationTransform(), Flattened: true);
+    private static ClipOverlayLayer? FlattenedCamera(OverlayCaptureSettings settings, bool rendered) => settings.Camera is not { } camera ? null
+        : new ClipOverlayLayer(camera.FriendlyName, rendered, InitialTransform: settings.CameraTransform.ToPresentationTransform(),
+            Error: rendered ? null : "Camera was not rendered into this saved interval.", Flattened: rendered);
 
-    private static ClipOverlayLayer? FlattenedPeripherals(OverlayCaptureSettings settings, IReadOnlyList<ClipOverlayKeyCap>? keys) =>
+    private static ClipOverlayLayer? FlattenedPeripherals(OverlayCaptureSettings settings, IReadOnlyList<ClipOverlayKeyCap>? keys, bool rendered) =>
         string.Equals(settings.KeyboardLayout, "None", StringComparison.OrdinalIgnoreCase) ? null
-        : new ClipOverlayLayer(settings.KeyboardLayout, true, InitialTransform: settings.KeyboardTransform.ToPresentationTransform(),
-            Flattened: true, Keys: keys, SourceName: settings.KeyboardName, ShowMouse: settings.KeyboardShowMouse);
+        : new ClipOverlayLayer(settings.KeyboardLayout, rendered, InitialTransform: settings.KeyboardTransform.ToPresentationTransform(),
+            Error: rendered ? null : "Keyboard and mouse were not rendered into this saved interval.",
+            Flattened: rendered, Keys: keys, SourceName: settings.KeyboardName, ShowMouse: settings.KeyboardShowMouse);
 
     private int _capturePaused;
     public void SetCapturePaused(bool paused) => Volatile.Write(ref _capturePaused, paused ? 1 : 0);
@@ -998,6 +1003,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         AVCodecContext* codecContext = null;
         SwsContext* swsContext = null;
         AVFrame* frame = null;
+        AVFrame* cleanFrame = null;
         AVPacket* packet = null;
         AVFormatContext* fullSessionFormatContext = null;
         AVStream* fullSessionStream = null;
@@ -1186,7 +1192,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             // Keep the scaler and FFmpeg encoder input on the same D3D11 device
             // so NVIDIA can consume the capture surfaces without a readback.
-            if (useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
+            // Burn composition owns a writable NV12 frame. Keep the GPU scaler,
+            // but do not hand its immutable encoder pool texture straight to the
+            // encoder; readback remains before the one encoder queue.
+            var burnOverlays = OverlayRecordingMode.IsBurned(_activeVideoOverlaySettings.RecordingMode);
+            if (!burnOverlays && useGpuScale && (!config.CaptureCursor || gpuCursorAvailable))
             {
                 (hwDeviceRef, hwFramesRef) = TryCreateD3D11EncodeFrames(
                     device, outputWidth, outputHeight, ReplayEncoderProfilePolicy.D3D11FixedPoolSize(config.FrameRate, HardwareFramePoolHeadroom));
@@ -1215,6 +1225,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var frameBufferResult = ffmpeg.av_frame_get_buffer(frame, 32);
             if (frameBufferResult < 0 || frame->data[0] is null)
                 throw new InvalidOperationException($"av_frame_get_buffer failed ({frameBufferResult}).");
+            if (burnOverlays)
+            {
+                cleanFrame = ffmpeg.av_frame_alloc();
+                if (cleanFrame is null) throw new InvalidOperationException("av_frame_alloc failed for clean burn frame.");
+                cleanFrame->format = (int)AVPixelFormat.AV_PIX_FMT_NV12;
+                cleanFrame->width = outputWidth;
+                cleanFrame->height = outputHeight;
+                if (ffmpeg.av_frame_get_buffer(cleanFrame, 32) < 0) throw new InvalidOperationException("av_frame_get_buffer failed for clean burn frame.");
+            }
+            using var overlayComposer = new RecorderOverlayBurnComposer();
             // av_frame_get_buffer leaves the buffer uninitialized - if the
             // target window starts occluded (recording begins before the game
             // has focus, common when starting the buffer from ClypDat's own
@@ -2698,6 +2718,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         swsSrcStride[0] = (int)mapped.RowPitch;
                                         ffmpeg.sws_scale(swsContext, swsSrcData, swsSrcStride, 0, captureHeight, frame->data, frame->linesize);
                                         TryOfferDetectorSoftwareFrame(frame->data[0], frame->linesize[0]);
+                                        if (cleanFrame is not null) ffmpeg.av_frame_copy(cleanFrame, frame);
                                     }
                                     finally
                                     {
@@ -3514,6 +3535,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             {
                                 DrawDesktopCursorNv12(frame, outputWidth, outputHeight, cursorOutputX, cursorOutputY);
                             }
+                            if (cleanFrame is not null) ffmpeg.av_frame_copy(cleanFrame, frame);
                         }
                         finally
                         {
@@ -3529,6 +3551,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                     nv12StagingIndex = (currentRingIndex + 1) % ringLength;
                     croppedDirty = false;
+                }
+
+                // Start every output tick from clean gameplay. This prevents a
+                // moved, resized, or disabled overlay from leaving pixels in a
+                // padded frame that was already submitted once.
+                if (cleanFrame is not null)
+                {
+                    PrepareSoftwareFrameForWrite();
+                    if (ffmpeg.av_frame_copy(frame, cleanFrame) >= 0)
+                    {
+                        var burned = overlayComposer.Compose(frame, outputWidth, outputHeight, _overlayCapture.BurnSnapshot());
+                        if (burned.Camera) Interlocked.Increment(ref _burnedCameraFrames);
+                        if (burned.Keyboard) Interlocked.Increment(ref _burnedKeyboardFrames);
+                    }
                 }
 
                 // Force a keyframe periodically so the ring buffer always has a nearby
@@ -3952,6 +3988,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 if (amfSoftwareFrameGuard is not null) { var staleGuard = amfSoftwareFrameGuard; ffmpeg.av_frame_free(&staleGuard); amfSoftwareFrameGuard = null; }
                 if (frame is not null) { var f = frame; ffmpeg.av_frame_free(&f); }
+                if (cleanFrame is not null) { var f = cleanFrame; ffmpeg.av_frame_free(&f); }
                 if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
                 if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);
             }
