@@ -3188,7 +3188,7 @@ public sealed partial class MainWindow : Window
                         ? ClipEventMarkerMapping.FromEvents(autoClipEvents, window.StartUtc, window.EndUtc)
                         : null);
                 // Another plain file write with no UI affinity.
-                await Task.Run(() => ClipInfoSidecar.Save(libraryFolder, outputPath, clipInfo));
+                await Task.Run(() => ClipInfoSidecar.SaveCaptureDetails(libraryFolder, outputPath, clipInfo));
                 await ProcessSavedClipAsync(outputPath, saveId.ToString());
                 // Saving a clip muxes the whole window and decodes a thumbnail
                 // for it - a burst with a definite end, so hand the memory back

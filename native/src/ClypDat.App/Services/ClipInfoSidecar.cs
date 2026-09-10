@@ -105,6 +105,23 @@ public static class ClipInfoSidecar
         }
     }
 
+    public static void SaveCaptureDetails(string libraryRoot, string clipPath, ClipInfo details)
+    {
+        // The recorder has already saved its asset mappings before returning
+        // the clip path. UI completion owns the event labels, not provenance.
+        // Load here, after encoding, rather than snapshotting before the save.
+        var existing = Load(libraryRoot, clipPath);
+        Save(libraryRoot, clipPath, existing is null ? details : existing with
+        {
+            GameDisplayName = details.GameDisplayName,
+            AutoClipEventType = details.AutoClipEventType,
+            FileTitle = details.FileTitle,
+            CapturedAt = existing.CapturedAt ?? details.CapturedAt,
+            CaptureSource = details.CaptureSource,
+            AutoClipMarkers = details.AutoClipMarkers
+        });
+    }
+
     public static ClipInfo? Load(string libraryRoot, string clipPath)
     {
         var path = SidecarPath(libraryRoot, clipPath);
