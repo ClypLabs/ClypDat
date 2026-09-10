@@ -3366,7 +3366,7 @@ public sealed partial class MainWindow : Window
             (_, 1) => $"{clipCount} clips and VOD saved",
             _ => $"{clipCount} clips and {vodCount} VODs saved"
         };
-        var summarySubtitle = $"{FormatFileSize(entries.Sum(entry => entry.Clip.SizeBytes))} • Ready in your library";
+        var summarySubtitle = $"{FormatFileSize(entries.Sum(entry => entry.Clip.TotalSizeBytes))} • Ready in your library";
 
         // Both presentations render the same NewClipsPanel; everything below
         // targets whichever one this show is using. EnsureEditorNewClipsDialog
@@ -6842,6 +6842,12 @@ public sealed partial class MainWindow : Window
         if (!await ShowModalDialogAsync<bool>(dialog)) return;
 
         var tempPath = Path.Combine(Path.GetTempPath(), $"clypdat-save-trim-{Guid.NewGuid():N}{Path.GetExtension(sourcePath)}");
+        // Stage input before video replacement. This is intentionally before
+        // ffmpeg: bad/corrupt existing history must leave every original file
+        // alone, and a cancelled encode has nothing to install.
+        using var stagedInput = ClipOverlayTrim.StageInput(ViewModel.Settings.LibraryFolder,
+            ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, sourcePath)?.OverlayManifest,
+            ViewModel.TrimStart.TotalSeconds, trimEnd.TotalSeconds, ViewModel.ClipSpeed, CancellationToken.None);
 
         ViewModel.IsExporting = true;
         var progressCts = new CancellationTokenSource();
@@ -6907,6 +6913,7 @@ public sealed partial class MainWindow : Window
             }
             File.SetCreationTimeUtc(sourcePath, createdUtc);
             AudioCapturePipeline.TryDelete(backupPath);
+            stagedInput?.Install();
 
             SpotifyTimelineSidecar.Copy(ViewModel.Settings.LibraryFolder, sourcePath, sourcePath, ViewModel.TrimStart.TotalSeconds, ViewModel.TrimEnd.TotalSeconds, ViewModel.ClipSpeed);
 

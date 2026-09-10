@@ -187,4 +187,4 @@ internal sealed class LibraryCacheStore
         Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }
 
-internal sealed record CachedClipState(MediaFileInfo Media, ClipInfo? ClipInfo, ClipEditSettings? ClipEdit);
+internal sealed record CachedClipState(MediaFileInfo Media, ClipInfo? ClipInfo, ClipEditSettings? ClipEdit, long TotalSizeBytes = 0);

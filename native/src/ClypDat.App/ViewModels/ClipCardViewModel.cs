@@ -21,6 +21,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private string _busyOverlayText = string.Empty;
     private CancellationTokenSource? _previewLoadCts;
     private int _previewLoadVersion;
+    private long _totalSizeBytes;
     private static readonly SemaphoreSlim PreviewDecodeSlots = new(2, 2);
 
     public event EventHandler? PersistentStateChanged;
@@ -42,6 +43,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         _previewImagePath = media.ThumbnailPath;
         _clipInfo = hasCachedSidecars ? clipInfo : ClipInfoSidecar.Load(_libraryRoot, media.Path);
         _clipEdit = hasCachedSidecars ? clipEdit : ClipEditSidecar.Load(_libraryRoot, media.Path);
+        _totalSizeBytes = ClipStorageCalculator.Calculate(_libraryRoot, media.Path, _clipInfo);
         _isVod = ComputeIsVod(media, libraryRoot);
         // Thumbnail Bitmap is NOT decoded here - a library can have hundreds
         // of cards and only a screenful are ever actually on screen at once.
@@ -122,6 +124,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     public DateTimeOffset CreatedAt => IsSteelSeriesImport && _clipInfo?.CapturedAt is { } capturedAt ? capturedAt : Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
     public long SizeBytes => Media.SizeBytes;
+    // Cached deliberately: library bindings must never touch disk while layout
+    // asks for a property value.
+    public long TotalSizeBytes => _totalSizeBytes;
     public DateTime LastWriteTimeUtc => Media.LastWriteTimeUtc;
 
     // False while HydrateLibraryClipsAsync hasn't reached this card yet (or
@@ -580,7 +585,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     public IBrush SelectionBorderBrush => IsSelected ? AppThemeService.Brush("AccentBrush", "#5864E8") : IsHovered ? AppThemeService.Brush("AccentBrushHover", "#6D77F0") : AppThemeService.Brush("Surface_24303A", "#24303A");
     public Avalonia.Thickness SelectionBorderThickness => IsSelected || IsHovered ? new Avalonia.Thickness(2) : new Avalonia.Thickness(0);
 
-    internal CachedClipState ToCachedState() => new(_media, _clipInfo, _clipEdit);
+    internal CachedClipState ToCachedState() => new(_media, _clipInfo, _clipEdit, _totalSizeBytes);
 
     public void UpdateMedia(MediaFileInfo media, bool reloadSidecars = true)
     {
@@ -591,6 +596,7 @@ public sealed class ClipCardViewModel : ViewModelBase
             _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
         }
         _isVod = ComputeIsVod(media, _libraryRoot);
+        _totalSizeBytes = ClipStorageCalculator.Calculate(_libraryRoot, media.Path, _clipInfo);
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
         // Path and GameFilterKey both move when a clip is renamed into another
@@ -610,6 +616,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsHydrated));
         OnPropertyChanged(nameof(IsOpenable));
         OnPropertyChanged(nameof(SizeBytes));
+        OnPropertyChanged(nameof(TotalSizeBytes));
         OnPropertyChanged(nameof(LastWriteTimeUtc));
         OnPropertyChanged(nameof(DateLabel));
         OnPropertyChanged(nameof(DateHeaderLabel));

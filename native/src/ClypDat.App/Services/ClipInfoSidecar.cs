@@ -147,8 +147,15 @@ public static class ClipInfoSidecar
             // Overlay captures are owned by this clip, unlike Spotify artwork
             // which lives in a content-addressed archive. Remove them before
             // dropping the only manifest that can identify them.
-            foreach (var asset in ClipOverlayManifest.ExistingAssetPaths(libraryRoot, Load(libraryRoot, clipPath)?.OverlayManifest))
-                File.Delete(asset);
+            // One corrupt/locked asset must not prevent attempts for other
+            // owned assets. Distinct also covers an input index shared through
+            // AssetPath and InputIndexPath in older captures.
+            foreach (var asset in ClipOverlayManifest.ExistingAssetPaths(libraryRoot, Load(libraryRoot, clipPath)?.OverlayManifest)
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try { File.Delete(asset); }
+                catch (Exception error) { AppLog.Error($"Overlay asset delete failed: {asset}", error); }
+            }
             var paths = new[] { SidecarPath(libraryRoot, clipPath), LibraryLayout.LegacySidecarPath(clipPath, ".info.json") };
             foreach (var path in paths.Where(File.Exists)) File.Delete(path);
         }

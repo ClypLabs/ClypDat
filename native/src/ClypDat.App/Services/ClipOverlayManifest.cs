@@ -135,6 +135,8 @@ public sealed record ClipOverlayManifest(
         {
             var path = ResolveAssetPath(libraryRoot, layer?.AssetPath);
             if (path is not null && File.Exists(path)) yield return path;
+            path = ResolveAssetPath(libraryRoot, layer?.InputIndexPath);
+            if (path is not null && File.Exists(path)) yield return path;
             if (layer?.Assets is not { Count: > 0 }) continue;
             foreach (var asset in layer.Assets)
             {

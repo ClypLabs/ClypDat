@@ -195,6 +195,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _selectedQuality = "Video Quality: Unknown";
     private string _selectedSize = "Size: 0 B";
     private long _selectedSizeBytes;
+    private long _selectedSourceSizeBytes;
     private string _selectedCaptureBackend = string.Empty;
     private string _editorTitle = string.Empty;
     private string _editorDescription = string.Empty;
@@ -868,7 +869,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         : Settings.LibraryFolder;
 
     public string LibraryLocationText => $"Location: {LibraryFolderDisplay}";
-    private long LibraryUsedBytes => AllClips.Sum(clip => clip.SizeBytes);
+    private long LibraryUsedBytes => AllClips.Sum(clip => clip.TotalSizeBytes);
     public string LibrarySizeDisplay => FormatBytes(LibraryUsedBytes);
 
     // Must be a plain field read: bindings can evaluate repeatedly during
@@ -1190,7 +1191,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             var selectedSize = AllClips
                 .Where(clip => clip.IsSelected)
-                .Sum(clip => clip.SizeBytes);
+                .Sum(clip => clip.TotalSizeBytes);
             return $"{SelectedCount} selected - {FormatBytes(selectedSize)}";
         }
     }
@@ -4072,6 +4073,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedSizeBytes, value)) return;
             OnTrimSizeEstimateChanged();
         }
+    }
+
+    /// <summary>Raw video bytes only. Encoding decisions must not treat input
+    /// history or camera files as video bitrate.</summary>
+    public long SelectedSourceSizeBytes
+    {
+        get => _selectedSourceSizeBytes;
+        private set => SetProperty(ref _selectedSourceSizeBytes, value);
     }
 
     // Not bound to any UI element - only Share's bitrate/downscale ladder
@@ -8494,7 +8503,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // the source's own per-second rate would starve it.
             if (SelectedSizeBytes > 0 && Duration > TimeSpan.Zero && outputSeconds > 0)
             {
-                var sourceBps = SelectedSizeBytes * 8.0 / Duration.TotalSeconds;
+                var sourceBps = SelectedSourceSizeBytes * 8.0 / Duration.TotalSeconds;
                 var speedRatio = Math.Max(1, durationSeconds / outputSeconds);
                 var capKbps = Math.Max(500, (int)(sourceBps * speedRatio / 1000));
                 args.AddRange(new[] { "-maxrate", $"{capKbps}k", "-bufsize", $"{capKbps * 2}k" });
@@ -8719,9 +8728,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedQuality = media.Height > 0
             ? $"Video Quality: {ResolutionLabel(media.Height)}{FpsSuffix(media.Fps)}"
             : "Video Quality: Unknown";
-        SelectedSize = $"Size: {FormatBytes(media.SizeBytes)}";
-        SelectedSizeBytes = media.SizeBytes;
         var clipInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path);
+        var totalSizeBytes = ClipStorageCalculator.Calculate(Settings.LibraryFolder, media.Path, clipInfo);
+        SelectedSize = $"Size: {FormatBytes(totalSizeBytes)}";
+        SelectedSizeBytes = totalSizeBytes;
+        SelectedSourceSizeBytes = media.SizeBytes;
         SelectedAutoClipMarkers = clipInfo?.AutoClipMarkers ?? Array.Empty<ClipEventMarker>();
         OnPropertyChanged(nameof(SelectedAutoClipMarkers));
         _selectedSpotifyTrack = clipInfo?.SpotifyTrack;
