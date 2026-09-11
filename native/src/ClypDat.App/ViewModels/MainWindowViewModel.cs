@@ -8,6 +8,7 @@ using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using ClypDat.App.Controls;
 using ClypDat.App.Converters;
 using ClypDat.App.Services;
 using ClypDat.Capture.Abstractions;
@@ -7433,13 +7434,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string ClypDatAccountTitle => ClypDatAccountIsConnected && !string.IsNullOrWhiteSpace(_clypDatSnapshot.ProfileName)
         ? _clypDatSnapshot.ProfileName!
         : "ClypDat";
-    private Bitmap? _clypDatAvatar;
+    private AnimatedAvatar? _clypDatAvatar;
     private string? _clypDatAvatarUrl;
-    public Bitmap? ClypDatAvatar => ClypDatAccountIsConnected ? _clypDatAvatar : null;
+    public AnimatedAvatar? ClypDatAvatar => ClypDatAccountIsConnected ? _clypDatAvatar : null;
     public bool ClypDatHasAvatar => ClypDatAvatar is not null;
-    // The profile only ever comes from Discord, so it doubles as the Discord
-    // row's account name in Connected.
-    public string? ClypDatDiscordName => _clypDatSnapshot.DiscordConnected ? _clypDatSnapshot.ProfileName : null;
     // Unlinking can fail for a reason only the site knows - removing the last
     // sign-in method is refused there, not here - so the message it returns
     // needs somewhere on the page to appear.
@@ -7596,7 +7594,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         NotifyClypDatXboxActivityNeed();
         UpdateClypDatAvatar(snapshot.ProfileImage);
         OnPropertyChanged(nameof(ClypDatAccountTitle));
-        OnPropertyChanged(nameof(ClypDatDiscordName));
         OnPropertyChanged(nameof(ClypDatAvatar));
         OnPropertyChanged(nameof(ClypDatHasAvatar));
         OnPropertyChanged(nameof(ClypDatAccountStatus));
@@ -7641,23 +7638,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async Task LoadClypDatAvatarAsync(string url)
     {
-        Bitmap? bitmap = null;
+        AnimatedAvatar? avatar = null;
         try
         {
-            var name = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(url)))[..16] + ".png";
+            // Keyed by the URL actually downloaded, so a still copy saved by an
+            // older build is not mistaken for the animated one.
+            var downloadUrl = DiscordAvatarDownloadUrl(url);
+            var name = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(downloadUrl)))[..16] + ".img";
             var path = Path.Combine(AvatarCacheDirectory, name);
             if (!File.Exists(path))
             {
-                var bytes = await AvatarHttp.GetByteArrayAsync(DiscordAvatarDownloadUrl(url)).ConfigureAwait(false);
+                var bytes = await AvatarHttp.GetByteArrayAsync(downloadUrl).ConfigureAwait(false);
                 Directory.CreateDirectory(AvatarCacheDirectory);
                 foreach (var old in Directory.EnumerateFiles(AvatarCacheDirectory)) TryDeleteFile(old);
                 await File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false);
             }
-            bitmap = await Task.Run(() =>
-            {
-                using var stream = File.OpenRead(path);
-                return Bitmap.DecodeToWidth(stream, 96);
-            }).ConfigureAwait(false);
+            // 80px: the card draws it at 40, so this stays sharp at 200% scaling.
+            avatar = await Task.Run(() => AnimatedAvatar.Decode(File.ReadAllBytes(path), 80)).ConfigureAwait(false);
         }
         catch (Exception error)
         {
@@ -7666,17 +7663,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             // Superseded by a newer picture, or by signing out, while this ran.
-            if (_clypDatAvatarUrl != url) { bitmap?.Dispose(); return; }
-            SetClypDatAvatar(bitmap);
+            if (_clypDatAvatarUrl != url) { avatar?.Dispose(); return; }
+            SetClypDatAvatar(avatar);
         });
     }
 
-    // Discord serves every avatar as PNG at any power-of-two size; an animated
-    // one arrives as .gif, which the card would show as a still frame anyway.
+    // Discord serves avatars at any power-of-two size. An animated one (its
+    // hash starts "a_") comes as .gif and plays on the card; a still one as .png.
     private static string DiscordAvatarDownloadUrl(string url)
     {
         var withoutQuery = url.Split('?')[0];
-        if (withoutQuery.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) withoutQuery = withoutQuery[..^4] + ".png";
+        var dot = withoutQuery.LastIndexOf('.');
+        var slash = withoutQuery.LastIndexOf('/');
+        if (dot > slash)
+        {
+            var hash = withoutQuery[(slash + 1)..dot];
+            withoutQuery = withoutQuery[..dot] + (hash.StartsWith("a_", StringComparison.Ordinal) ? ".gif" : ".png");
+        }
         return withoutQuery + "?size=128";
     }
 
@@ -7685,13 +7688,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try { File.Delete(path); } catch { }
     }
 
-    private void SetClypDatAvatar(Bitmap? bitmap)
+    private void SetClypDatAvatar(AnimatedAvatar? avatar)
     {
         var previous = _clypDatAvatar;
-        _clypDatAvatar = bitmap;
+        _clypDatAvatar = avatar;
         OnPropertyChanged(nameof(ClypDatAvatar));
         OnPropertyChanged(nameof(ClypDatHasAvatar));
-        if (!ReferenceEquals(previous, bitmap)) previous?.Dispose();
+        // After the compositor has drawn a frame without it; see DeferredBitmapDisposal.
+        if (!ReferenceEquals(previous, avatar)) DeferredBitmapDisposal.Release(previous);
     }
 
     public void ApplyDiscordSettings()

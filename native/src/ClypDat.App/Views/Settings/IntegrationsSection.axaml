@@ -54,11 +54,12 @@
               <Image Source="{DynamicResource AppLogoLarge}" Width="22" Height="22" RenderOptions.BitmapInterpolationMode="HighQuality"
                      HorizontalAlignment="Center" VerticalAlignment="Center" />
             </Border>
-            <Border Width="40" Height="40" CornerRadius="20" ClipToBounds="True"
-                    BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
-                    IsVisible="{Binding ClypDatHasAvatar}">
-              <Image Source="{Binding ClypDatAvatar}" Stretch="UniformToFill" RenderOptions.BitmapInterpolationMode="HighQuality" />
-            </Border>
+            <!-- Picture and ring are the same 40x40 square, so the picture is
+                 centred and sits wholly inside the circle. GIF and WebP play. -->
+            <Panel Width="40" Height="40" IsVisible="{Binding ClypDatHasAvatar}">
+              <controls:AnimatedAvatarImage Source="{Binding ClypDatAvatar}" RenderOptions.BitmapInterpolationMode="HighQuality" />
+              <Ellipse Stroke="{StaticResource EdgeStrongBrush}" StrokeThickness="1" />
+            </Panel>
           </Panel>
           <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="{Binding ClypDatAccountTitle}" TextTrimming="CharacterEllipsis" />
@@ -187,36 +188,17 @@
             </Border>
             <Border Classes="providerRow" IsVisible="{Binding DiscordAccountIsConnected}">
               <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <!-- The linked Discord account's own picture, with the Discord
-                     mark pinned to its corner so the row still says which
-                     provider it is. The plain mark until the picture loads. -->
-                <Panel VerticalAlignment="Center">
-                  <Border Classes="providerBadge" Background="{StaticResource DiscordBadgeBrush}" IsVisible="{Binding !ClypDatHasAvatar}">
-                    <PathIcon Data="{StaticResource DiscordMark}" Foreground="{StaticResource DiscordBrandBrush}" />
-                  </Border>
-                  <Panel Width="36" Height="36" IsVisible="{Binding ClypDatHasAvatar}">
-                    <Border CornerRadius="18" ClipToBounds="True">
-                      <Image Source="{Binding ClypDatAvatar}" Stretch="UniformToFill" RenderOptions.BitmapInterpolationMode="HighQuality" />
-                    </Border>
-                    <Border Width="16" Height="16" CornerRadius="8" Background="{StaticResource DiscordBrandBrush}"
-                            BorderBrush="{StaticResource SurfaceRaisedBrush}" BorderThickness="2"
-                            HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-3,-3">
-                      <PathIcon Data="{StaticResource DiscordMark}" Foreground="White" Width="8" Height="8" />
-                    </Border>
-                  </Panel>
-                </Panel>
+                <Border Classes="providerBadge" Background="{StaticResource DiscordBadgeBrush}">
+                  <PathIcon Data="{StaticResource DiscordMark}" Foreground="{StaticResource DiscordBrandBrush}" />
+                </Border>
                 <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
                   <TextBlock Classes="settingsRowTitle" Text="Discord" />
-                  <StackPanel Orientation="Horizontal" Spacing="10">
-                    <Border Classes="statusPill ok">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Ellipse />
-                        <TextBlock Text="Connected" />
-                      </StackPanel>
-                    </Border>
-                    <TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatDiscordName}" VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" IsVisible="{Binding ClypDatDiscordName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
-                  </StackPanel>
+                  <Border Classes="statusPill ok">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Ellipse />
+                      <TextBlock Text="Connected" />
+                    </StackPanel>
+                  </Border>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <Button Tag="discord" Click="UnlinkSocialAccountButton_OnClick" IsEnabled="{Binding !DiscordUnlinkBusy}">
