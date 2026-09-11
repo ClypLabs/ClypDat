@@ -12,7 +12,11 @@ public sealed class NativeClipOverlaySurfaceTests
     public void OneNoActivateHwndAtomicallyReplacesAndDisposes()
     {
         if (!OperatingSystem.IsWindows()) return;
-        var foreground = GetForegroundWindow();
+        // No-activate means the overlay never becomes the foreground window. This
+        // used to assert the foreground window stayed exactly what it was before
+        // the test, which reads the live desktop: in a full run another test's
+        // window, or anything the user clicks, changed it and failed this at
+        // random. Checking the overlay itself never takes focus is the real rule.
         using var game = new BorderlessTopmostWindow();
         using var surface = new NativeClipOverlaySurface(_ => new ClipOverlayFrame(300, 66, new byte[300 * 66 * 4]));
         var handle = surface.WindowHandle;
@@ -24,7 +28,7 @@ public sealed class NativeClipOverlaySurfaceTests
         Assert.NotEqual(0, style & 0x00000020);
         Assert.NotEqual(0, style & 0x00200000);
         Assert.Equal(0, style & 0x00080000);
-        Assert.Equal(foreground, GetForegroundWindow());
+        Assert.NotEqual(handle, GetForegroundWindow());
 
         surface.Publish(Presentation(1, true), _ => { });
         Assert.True(SpinWait.SpinUntil(() => surface.PublishCount == 1, 1000));
@@ -38,7 +42,7 @@ public sealed class NativeClipOverlaySurfaceTests
         Assert.True(IsAbove(handle, game.Handle));
         Assert.True(SpinWait.SpinUntil(() => game.RaiseAbove(handle), 1000));
         Assert.True(SpinWait.SpinUntil(() => IsAbove(handle, game.Handle), 1000));
-        Assert.Equal(foreground, GetForegroundWindow());
+        Assert.NotEqual(handle, GetForegroundWindow());
         Assert.Equal(0u, Cloaked(handle));
         Assert.True(GetWindowDisplayAffinity(handle, out var affinity));
         Assert.Equal(0x11u, affinity);
@@ -47,11 +51,11 @@ public sealed class NativeClipOverlaySurfaceTests
         Assert.Equal(handle, surface.WindowHandle);
         Assert.True(GetWindowDisplayAffinity(handle, out affinity));
         Assert.Equal(0u, affinity);
-        Assert.Equal(foreground, GetForegroundWindow());
+        Assert.NotEqual(handle, GetForegroundWindow());
 
         surface.Dispose();
         Assert.Equal(IntPtr.Zero, surface.WindowHandle);
-        Assert.Equal(foreground, GetForegroundWindow());
+        Assert.NotEqual(handle, GetForegroundWindow());
     }
 
     [Fact]

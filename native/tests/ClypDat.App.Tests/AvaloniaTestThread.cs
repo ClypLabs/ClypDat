@@ -3,6 +3,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Avalonia;
 using Xunit;
+using Xunit.Abstractions;
+using Xunit.Sdk;
 
 namespace ClypDat.App.Tests;
 
@@ -29,16 +31,26 @@ internal static class AvaloniaTestThread
     // app code under test (view models, services posting to the UI thread)
     // touches it too. In a full run where one of those tests went first, the
     // dispatcher became that test's thread and setup here failed with "a
-    // different thread owns it" - intermittently, by test order. Starting the
-    // UI thread as the test assembly loads claims it before any test runs.
+    // different thread owns it" - intermittently, by test order.
     //
-    // Start only; never wait here. The thread runs code from this assembly,
-    // which cannot proceed until the module initializer returns - waiting for
-    // setup inside it deadlocked the whole run.
+    // Two earlier attempts did not hold. Starting the thread from a module
+    // initializer was not enough on its own: setup takes a moment, and the
+    // first test could touch the dispatcher before it finished. Waiting for
+    // setup inside the module initializer deadlocked, because the thread runs
+    // code from this assembly, which cannot proceed until the initializer
+    // returns. AvaloniaFirstTestFramework waits instead - after the module is
+    // initialized, before the first test.
 #pragma warning disable CA2255 // Module initializers are for exactly this kind of process-wide setup in a test assembly.
     [ModuleInitializer]
 #pragma warning restore CA2255
     internal static void ClaimDispatcherFirst() => EnsureStarted();
+
+    /// <summary>Blocks until Avalonia is set up on this thread (or failed to be).</summary>
+    internal static void WaitUntilReady()
+    {
+        EnsureStarted();
+        Ready.Wait(TimeSpan.FromMinutes(2));
+    }
 
     private static void EnsureStarted()
     {
@@ -89,5 +101,18 @@ internal static class AvaloniaTestThread
         Assert.True(started.Wait(TimeSpan.FromMinutes(5)), "The Avalonia test thread never reached this test.");
         Assert.True(done.Wait(timeout), timeoutMessage);
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+}
+
+/// <summary>
+/// xUnit's own framework, plus one step: it holds the run until Avalonia is set
+/// up on <see cref="AvaloniaTestThread"/>, so no test can touch the dispatcher
+/// first. Registered in AssemblyInfo.cs.
+/// </summary>
+public sealed class AvaloniaFirstTestFramework : XunitTestFramework
+{
+    public AvaloniaFirstTestFramework(IMessageSink messageSink) : base(messageSink)
+    {
+        AvaloniaTestThread.WaitUntilReady();
     }
 }
