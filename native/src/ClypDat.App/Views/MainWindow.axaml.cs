@@ -1080,9 +1080,9 @@ public sealed partial class MainWindow : Window
             // Saves reaching this path are the worker's own hotkey saves: every
             // UI-started save, auto-clips included, is UI-owned and returned
             // above, and is counted where SaveReplayClipAsync finishes instead.
-            ClipStatsReporter.Record(ClipStatKind.Clip);
             if (ViewModel is not null)
             {
+                _ = ClipStatsReporter.RecordFileAsync(ClipStatKind.Clip, completed.Path, ViewModel.MediaProbe);
                 ViewModel.RecordDiscordClipSaved();
                 await ProcessSavedClipAsync(completed.Path, completed.SaveId.ToString());
             }
@@ -3174,7 +3174,7 @@ public sealed partial class MainWindow : Window
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 RememberSessionClip(outputPath);
                 ViewModel.RecordDiscordClipSaved();
-                ClipStatsReporter.Record(isAutoClip ? ClipStatKind.AutoClip : ClipStatKind.Clip);
+                _ = ClipStatsReporter.RecordFileAsync(isAutoClip ? ClipStatKind.AutoClip : ClipStatKind.Clip, outputPath, ViewModel.MediaProbe);
                 // The save itself succeeded, but if the capture source had
                 // stopped delivering frames the video is a single frozen frame -
                 // say so now rather than let it be discovered on playback later.

@@ -5,10 +5,11 @@ namespace ClypDat.App.Services;
 
 public enum ClipStatKind { Clip, AutoClip, FullSession }
 
-// Feeds the public "clips saved" counter on clypdat.xyz. What leaves the PC is
-// a number per kind - {"clip":1} - and nothing else: no clip, file name, game,
-// account or install ID. The site shows the total of all three; the kinds are
-// kept apart there only so a split stays available.
+// Feeds the public counters on clypdat.xyz: clips saved, and seconds of
+// gameplay saved. What leaves the PC is a count and a length per kind -
+// {"clip":1,"clip_seconds":60} - and nothing else: no clip, file name, game,
+// account or install ID. The site shows totals; the kinds are kept apart
+// there only so a split stays available.
 //
 // Saves are recorded to a small pending file first and sent from there, so a
 // clip saved offline, or while the site is down, is still counted the next
@@ -33,11 +34,16 @@ public static class ClipStatsReporter
     private static readonly SemaphoreSlim FlushGate = new(1, 1);
     private static readonly HttpClient Client = CreateClient();
 
+    // Seconds are whole numbers, as the site expects. Files written before
+    // length tracking have no seconds fields and read back as zero.
     private sealed class Pending
     {
         public int Clip { get; set; }
         public int AutoClip { get; set; }
         public int FullSession { get; set; }
+        public long ClipSeconds { get; set; }
+        public long AutoClipSeconds { get; set; }
+        public long FullSessionSeconds { get; set; }
         public bool IsEmpty => Clip <= 0 && AutoClip <= 0 && FullSession <= 0;
     }
 
@@ -48,20 +54,28 @@ public static class ClipStatsReporter
         return client;
     }
 
-    /// <summary>Counts one saved clip, auto-clip or full session and sends it in the background.</summary>
-    public static void Record(ClipStatKind kind)
+    /// <summary>
+    /// Counts one saved clip, auto-clip or full session, with the gameplay it
+    /// holds, and sends it in the background. Seconds of 0 still count the save.
+    /// </summary>
+    public static void Record(ClipStatKind kind, double seconds)
     {
         // The UI preview build has no recorder; its "saves" are empty stubs.
         if (UiPreviewMode.Enabled) return;
+        var whole = double.IsFinite(seconds) && seconds > 0 ? (long)Math.Round(seconds) : 0;
+        // Held to the site's per-save caps (MAX_SECONDS_PER_SAVE in the site's
+        // clip-stats.ts): one outlier over the cap would get its whole batch
+        // rejected and dropped, taking the saves around it with it.
+        whole = Math.Min(whole, kind == ClipStatKind.FullSession ? 24 * 60 * 60 : 10 * 60);
         try
         {
             Update(pending =>
             {
                 switch (kind)
                 {
-                    case ClipStatKind.Clip: pending.Clip++; break;
-                    case ClipStatKind.AutoClip: pending.AutoClip++; break;
-                    case ClipStatKind.FullSession: pending.FullSession++; break;
+                    case ClipStatKind.Clip: pending.Clip++; pending.ClipSeconds += whole; break;
+                    case ClipStatKind.AutoClip: pending.AutoClip++; pending.AutoClipSeconds += whole; break;
+                    case ClipStatKind.FullSession: pending.FullSession++; pending.FullSessionSeconds += whole; break;
                 }
             });
         }
@@ -72,6 +86,21 @@ public static class ClipStatsReporter
             return;
         }
         _ = FlushAsync();
+    }
+
+    /// <summary>Records a saved file, reading its length with ffprobe first. Never throws.</summary>
+    public static async Task RecordFileAsync(ClipStatKind kind, string path, MediaProbeService probe)
+    {
+        double seconds = 0;
+        try
+        {
+            seconds = (await probe.ProbeDurationAsync(path).ConfigureAwait(false)).Duration.TotalSeconds;
+        }
+        catch (Exception error)
+        {
+            AppLog.Debug($"Clip stats: could not read clip length: {error.Message}");
+        }
+        Record(kind, seconds);
     }
 
     /// <summary>Sends whatever is pending. Safe to call at any time; a failed send is kept for the next one.</summary>
@@ -92,11 +121,21 @@ public static class ClipStatsReporter
                     AutoClip = Math.Min(pending.AutoClip, MaxPerRequest),
                     FullSession = Math.Min(pending.FullSession, MaxPerRequest),
                 };
-                using var response = await Client.PostAsJsonAsync(Endpoint, new Dictionary<string, int>
+                // A backlog over the cap goes out in parts; each part carries
+                // its share of the seconds, so no part claims more gameplay
+                // per save than the site allows.
+                batch.ClipSeconds = Share(pending.ClipSeconds, batch.Clip, pending.Clip);
+                batch.AutoClipSeconds = Share(pending.AutoClipSeconds, batch.AutoClip, pending.AutoClip);
+                batch.FullSessionSeconds = Share(pending.FullSessionSeconds, batch.FullSession, pending.FullSession);
+
+                using var response = await Client.PostAsJsonAsync(Endpoint, new Dictionary<string, long>
                 {
                     ["clip"] = batch.Clip,
+                    ["clip_seconds"] = batch.ClipSeconds,
                     ["auto_clip"] = batch.AutoClip,
+                    ["auto_clip_seconds"] = batch.AutoClipSeconds,
                     ["full_session"] = batch.FullSession,
+                    ["full_session_seconds"] = batch.FullSessionSeconds,
                 }).ConfigureAwait(false);
 
                 // A 400 means the site will never accept this batch (a contract
@@ -113,6 +152,9 @@ public static class ClipStatsReporter
                     current.Clip = Math.Max(0, current.Clip - batch.Clip);
                     current.AutoClip = Math.Max(0, current.AutoClip - batch.AutoClip);
                     current.FullSession = Math.Max(0, current.FullSession - batch.FullSession);
+                    current.ClipSeconds = current.Clip == 0 ? 0 : Math.Max(0, current.ClipSeconds - batch.ClipSeconds);
+                    current.AutoClipSeconds = current.AutoClip == 0 ? 0 : Math.Max(0, current.AutoClipSeconds - batch.AutoClipSeconds);
+                    current.FullSessionSeconds = current.FullSession == 0 ? 0 : Math.Max(0, current.FullSessionSeconds - batch.FullSessionSeconds);
                 });
             }
         }
@@ -125,6 +167,9 @@ public static class ClipStatsReporter
             FlushGate.Release();
         }
     }
+
+    private static long Share(long seconds, int part, int whole) =>
+        whole <= 0 || part <= 0 ? 0 : part >= whole ? seconds : seconds * part / whole;
 
     private static Pending Read()
     {

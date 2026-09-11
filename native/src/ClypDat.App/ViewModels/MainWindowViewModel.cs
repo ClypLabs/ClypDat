@@ -31,6 +31,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private const int CurrentThumbnailStartFrameVersion = 1;
     private const int CurrentThumbnailCacheCleanupVersion = 1;
     private readonly MediaProbeService _mediaProbe = new();
+    // Shared rather than a second instance: constructing one starts a cache prune.
+    internal MediaProbeService MediaProbe => _mediaProbe;
     private readonly LibraryCacheStore _libraryCache = new();
     private readonly HashSet<string> _selectedPaths = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _libraryHydrationCts;

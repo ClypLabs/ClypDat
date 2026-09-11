@@ -5053,10 +5053,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // ClipRepairSweep deletes those with no age check and would delete a
         // live mux out from under ffmpeg.
         var workFolder = Path.Combine(Path.GetDirectoryName(finalOutputPath) ?? string.Empty, $".clypdat-mux-{Guid.NewGuid():N}");
+        // Read by the clip counter in the finally below.
+        var sessionSeconds = 0d;
         try
         {
             var sessionEndUtc = MonotonicClock.UtcNow;
             var durationSeconds = Math.Max(1, (sessionEndUtc - sessionStartUtc).TotalSeconds);
+            sessionSeconds = durationSeconds;
             WritePausedRangesSidecar(config.LibraryFolder, finalOutputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), sessionStartUtc, sessionEndUtc));
             // One giant segment spanning the whole session let audio/video clock
             // drift (real hardware sample clocks are never exactly 48000.000000Hz)
@@ -5203,7 +5206,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Counted here because both finalize modes end here, and only when
             // a session file actually ended up in the library - a failed mux
             // in background mode still leaves its video-only file.
-            if (File.Exists(finalOutputPath)) ClipStatsReporter.Record(ClipStatKind.FullSession);
+            if (File.Exists(finalOutputPath)) ClipStatsReporter.Record(ClipStatKind.FullSession, sessionSeconds);
             // The one place every exit route passes through, so a card can
             // never be left locked - success, failed mux and thrown alike.
             ClearFinalize(finalOutputPath);
