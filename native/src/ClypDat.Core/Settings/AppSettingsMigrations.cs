@@ -2,7 +2,10 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-public const int CurrentSchemaVersion = 12;
+public const int CurrentSchemaVersion = 13;
+
+    private static bool IsLegacyDefaultSaveHotkey(string? hotkey) =>
+        string.Equals(hotkey?.Replace(" ", string.Empty), "Ctrl+Shift+F9", StringComparison.OrdinalIgnoreCase);
 
     public static bool Apply(AppSettings settings)
     {
@@ -88,6 +91,18 @@ public const int CurrentSchemaVersion = 12;
         {
             settings.VideoOverlays ??= new VideoOverlaySettings();
             settings.VideoOverlays.RecordingMode = VideoOverlayRecordingMode.EditableLayers;
+        }
+
+        if (settings.SettingsSchemaVersion < 13 && IsLegacyDefaultSaveHotkey(settings.SaveReplayHotkey))
+        {
+            // Every setting is serialized, so an untouched install stored the old
+            // default verbatim. Only that exact value moves to the new default;
+            // any key the user picked stays. Profiles that inherited the old
+            // default follow the global key, customized profile keys stay too.
+            settings.SaveReplayHotkey = AppSettings.DefaultSaveReplayHotkey;
+            foreach (var profile in settings.CustomGameSettings?.Values ?? Enumerable.Empty<CustomGameProfile>())
+                if (profile is not null && IsLegacyDefaultSaveHotkey(profile.SaveReplayHotkey))
+                    profile.SaveReplayHotkey = AppSettings.DefaultSaveReplayHotkey;
         }
 
         settings.CustomThemes ??= new();

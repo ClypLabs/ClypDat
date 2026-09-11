@@ -820,7 +820,7 @@ public sealed record ReplayBufferConfig(
     string CaptureMonitorDeviceName = "",
     bool CaptureCursor = false,
     string ProcessPriority = "Normal",
-    string SaveReplayHotkey = "Ctrl+Shift+F9",
+    string SaveReplayHotkey = ClypDat.Core.Settings.AppSettings.DefaultSaveReplayHotkey,
     string FramePacingMode = "CFR",
     IReadOnlyDictionary<string, int>? AdditionalAudioProcesses = null,
     int GameAudioVolumePercent = 100,

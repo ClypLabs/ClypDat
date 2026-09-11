@@ -102,4 +102,45 @@ public sealed class CustomGameSettingsTests
         Assert.Equal(AppSettingsMigrations.CurrentSchemaVersion, settings.SettingsSchemaVersion);
         Assert.Equal("Ctrl+Alt+F9", settings.CustomGameSettings["game.exe"].SaveReplayHotkey);
     }
+
+    [Fact]
+    public void NewSettings_DefaultSaveHotkeyIsInsert()
+    {
+        Assert.Equal("Insert", new AppSettings().SaveReplayHotkey);
+        Assert.Equal("Insert", new CustomGameProfile().SaveReplayHotkey);
+    }
+
+    [Fact]
+    public void V12Migration_MovesUntouchedSaveHotkeyToInsert()
+    {
+        var settings = new AppSettings { SettingsSchemaVersion = 12, SaveReplayHotkey = "Ctrl+Shift+F9" };
+        settings.CustomGameSettings["inherited.exe"] = new CustomGameProfile { SaveReplayHotkey = "Ctrl+Shift+F9" };
+        settings.CustomGameSettings["custom.exe"] = new CustomGameProfile { SaveReplayHotkey = "Alt+F9" };
+
+        Assert.True(AppSettingsMigrations.Apply(settings));
+        Assert.Equal("Insert", settings.SaveReplayHotkey);
+        Assert.Equal("Insert", settings.CustomGameSettings["inherited.exe"].SaveReplayHotkey);
+        Assert.Equal("Alt+F9", settings.CustomGameSettings["custom.exe"].SaveReplayHotkey);
+    }
+
+    [Fact]
+    public void V12Migration_KeepsCustomizedSaveHotkey()
+    {
+        var settings = new AppSettings { SettingsSchemaVersion = 12, SaveReplayHotkey = "Alt+F10" };
+        settings.CustomGameSettings["game.exe"] = new CustomGameProfile { SaveReplayHotkey = "Ctrl+Shift+F9" };
+
+        Assert.True(AppSettingsMigrations.Apply(settings));
+        Assert.Equal("Alt+F10", settings.SaveReplayHotkey);
+        Assert.Equal("Ctrl+Shift+F9", settings.CustomGameSettings["game.exe"].SaveReplayHotkey);
+    }
+
+    [Fact]
+    public void CurrentSchema_KeepsDeliberateOldDefaultChoice()
+    {
+        // Picked after upgrading, so it is a user choice, not a leftover default.
+        var settings = new AppSettings { SettingsSchemaVersion = AppSettingsMigrations.CurrentSchemaVersion, SaveReplayHotkey = "Ctrl+Shift+F9" };
+
+        Assert.False(AppSettingsMigrations.Apply(settings));
+        Assert.Equal("Ctrl+Shift+F9", settings.SaveReplayHotkey);
+    }
 }

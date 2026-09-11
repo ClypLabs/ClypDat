@@ -92,7 +92,9 @@ public sealed class AppSettings
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayBackend { get; set; } = "Native";
     public string ExportVideoCodec { get; set; } = "H.264";
-    public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
+    // Was "Ctrl+Shift+F9" before schema 13; AppSettingsMigrations moves untouched installs over.
+    public const string DefaultSaveReplayHotkey = "Insert";
+    public string SaveReplayHotkey { get; set; } = DefaultSaveReplayHotkey;
     public string FullSessionHotkey { get; set; } = "F8";
     public bool StartReplayOnLaunch { get; set; }
     public bool LaunchOnWindowsStartup { get; set; }
@@ -420,7 +422,7 @@ public sealed class CustomGameProfile
 
     // Replay length and recording hotkeys
     public int ReplayDurationSeconds { get; set; } = 60;
-    public string SaveReplayHotkey { get; set; } = "Ctrl+Shift+F9";
+    public string SaveReplayHotkey { get; set; } = AppSettings.DefaultSaveReplayHotkey;
     public string FullSessionHotkey { get; set; } = "F8";
 
     // Audio. Mirrors the global AdditionalAudioProcesses: which apps get their
