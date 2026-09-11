@@ -53,6 +53,23 @@ jobs:
           $actualSha256 = (Get-FileHash wingetcreate.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actualSha256 -ne $expectedSha256) { throw "WingetCreate checksum mismatch: expected $expectedSha256, got $actualSha256." }
 
+      # WingetCreate submits from its owner's fork. Its internal fork sync can fail
+      # after upstream moves; synchronise the fork explicitly before generation so
+      # submission starts from the current winget-pkgs default branch.
+      - name: Sync WinGet fork with upstream
+        if: ${{ env.WINGET_CREATE_GITHUB_TOKEN != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+        run: |
+          $owner = gh api user --jq '.login'
+          if ([string]::IsNullOrWhiteSpace($owner)) { throw 'Could not resolve the WinGet token owner.' }
+          $fork = gh api "repos/$owner/winget-pkgs" | ConvertFrom-Json
+          if ($fork.fork -ne $true -or $fork.parent.full_name -ne 'microsoft/winget-pkgs') {
+            throw "Expected $owner/winget-pkgs to be a fork of microsoft/winget-pkgs."
+          }
+          gh api --method POST "repos/$owner/winget-pkgs/merge-upstream" -f "branch=$($fork.default_branch)" | Out-Null
+
       - name: Generate, validate, and submit manifest
         if: ${{ env.WINGET_CREATE_GITHUB_TOKEN != '' }}
         shell: pwsh
