@@ -25,6 +25,10 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private static readonly TimeSpan LinkWatchEagerInterval = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan LinkWatchTailInterval = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan RefreshDebounce = TimeSpan.FromSeconds(5);
+    // Returning to the window while nothing needs live Xbox activity. Each
+    // refresh wakes the site's database, which then stays up for five minutes
+    // - someone flicking between windows all day would keep it awake for free.
+    private static readonly TimeSpan IdleRefreshDebounce = TimeSpan.FromMinutes(10);
     private CancellationTokenSource? _pollCts;
     private readonly SemaphoreSlim _pollWake = new(0, 1);
     private DateTimeOffset _linkWatchUntil = DateTimeOffset.MinValue;
@@ -35,6 +39,24 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private XboxActivitySnapshot _snapshot = XboxActivitySnapshot.Disconnected;
 
     public XboxActivitySnapshot Snapshot => _snapshot;
+
+    /// <summary>
+    /// Whether anything is using live Xbox activity right now. While false the
+    /// poll does not run at all: every refresh costs the site several database
+    /// queries, and a poll every minute from any one open app kept that
+    /// database awake around the clock - on Neon's free plan, roughly twice the
+    /// monthly compute allowance, spent on activity nothing was reading.
+    /// Unset means always needed, which is the old behaviour.
+    /// </summary>
+    public Func<bool>? LiveActivityNeeded { get; set; }
+
+    /// <summary>Call when <see cref="LiveActivityNeeded"/> may have changed.</summary>
+    public void LiveActivityNeedChanged()
+    {
+        if (IsAuthenticated) WakePoll();
+    }
+
+    private bool IsLiveActivityNeeded => LiveActivityNeeded?.Invoke() ?? true;
     private (bool Xbox, bool Google, bool Discord) LinkSignature => (_snapshot.IsConnected, _snapshot.GoogleConnected, _snapshot.DiscordConnected);
     public bool IsAuthenticated => _token is { ExpiresAt: var expiresAt } && expiresAt > DateTimeOffset.UtcNow;
     public event EventHandler<XboxActivitySnapshot>? Changed;
@@ -179,7 +201,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     public void RefreshSoon()
     {
         if (!IsAuthenticated) return;
-        if (DateTimeOffset.UtcNow - _lastRefresh < RefreshDebounce) return;
+        var debounce = IsLiveActivityNeeded ? RefreshDebounce : IdleRefreshDebounce;
+        if (DateTimeOffset.UtcNow - _lastRefresh < debounce) return;
         WakePoll();
     }
 
@@ -197,8 +220,12 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private TimeSpan NextPollDelay()
     {
         var now = DateTimeOffset.UtcNow;
-        if (now >= _linkWatchUntil) return TimeSpan.FromSeconds(_snapshot.CurrentTitle is null ? 60 : 15);
-        return now - _linkWatchStarted < LinkWatchEager ? LinkWatchEagerInterval : LinkWatchTailInterval;
+        if (now < _linkWatchUntil)
+            return now - _linkWatchStarted < LinkWatchEager ? LinkWatchEagerInterval : LinkWatchTailInterval;
+        // Nothing to watch for: park until woken (a link, the window coming
+        // back, or LiveActivityNeedChanged) instead of refreshing on a timer.
+        if (!IsLiveActivityNeeded) return Timeout.InfiniteTimeSpan;
+        return TimeSpan.FromSeconds(_snapshot.CurrentTitle is null ? 60 : 15);
     }
 
     private void StartPolling()

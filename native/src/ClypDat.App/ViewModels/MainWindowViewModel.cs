@@ -229,6 +229,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _spotify.Sampled += _spotifyHistory.Sample;
         SpotifyProcessingPaths.Changed += SpotifyProcessingChanged;
         _clypDatAccount.Changed += ClypDatAccountChanged;
+        _clypDatAccount.LiveActivityNeeded = () => ClypDatXboxActivityNeeded;
         if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
         if (Settings.SpotifyEnabled) _ = _spotify.TryRestoreAsync();
         _ = _clypDatAccount.TryRestoreAsync();
@@ -1719,6 +1720,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (string.IsNullOrWhiteSpace(value) || !SetProperty(ref _selectedReplayCaptureSource, value)) return;
             Settings.ReplayCaptureSource = string.Equals(value, "Desktop Capture", StringComparison.OrdinalIgnoreCase) ? "Desktop" : "Game";
+            NotifyClypDatXboxActivityNeed();
             OnPropertyChanged(nameof(IsDesktopCapture));
             OnPropertyChanged(nameof(IsAutomaticGameCapture));
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
@@ -7442,7 +7444,27 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool XboxActivityForDesktop
     {
         get => Settings.XboxActivityEnabled;
-        set { if (Settings.XboxActivityEnabled == value) return; Settings.XboxActivityEnabled = value; SaveSettings(); UpdateDiscordPresence(); OnPropertyChanged(); }
+        set { if (Settings.XboxActivityEnabled == value) return; Settings.XboxActivityEnabled = value; SaveSettings(); UpdateDiscordPresence(); NotifyClypDatXboxActivityNeed(); OnPropertyChanged(); }
+    }
+
+    // Live Xbox activity is read in exactly one situation: Xbox is linked
+    // through the ClypDat account, "Use Xbox activity" is on, and the capture
+    // source is Desktop - EffectiveClipGameName and the Discord presence both
+    // ignore it otherwise. Outside that, the account service stops polling.
+    private bool ClypDatXboxActivityNeeded =>
+        _clypDatSnapshot.IsConnected
+        && Settings.XboxActivityEnabled
+        && string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase);
+    private bool _lastClypDatXboxActivityNeeded;
+
+    // Only on a real change: ClypDatAccountChanged runs after every refresh, and
+    // waking the poll from there on every call would refresh in a loop.
+    private void NotifyClypDatXboxActivityNeed()
+    {
+        var needed = ClypDatXboxActivityNeeded;
+        if (needed == _lastClypDatXboxActivityNeeded) return;
+        _lastClypDatXboxActivityNeeded = needed;
+        _clypDatAccount.LiveActivityNeedChanged();
     }
     public string EffectiveClipGameName(string fallback, string? captureSource = null)
     {
@@ -7556,6 +7578,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void ClypDatAccountChanged(object? sender, XboxActivitySnapshot snapshot)
     {
         _clypDatSnapshot = snapshot;
+        NotifyClypDatXboxActivityNeed();
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountIsConnected));
         OnPropertyChanged(nameof(ClypDatXboxStatus));
