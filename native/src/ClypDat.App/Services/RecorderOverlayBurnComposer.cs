@@ -52,7 +52,27 @@ internal sealed class RecorderKeyboardRasterizer : IDisposable
     private static double UnitHeight(IReadOnlyList<KeyboardOverlayGeometry.Row> rows) => rows.Count == 0 ? 0 : rows.Count + KeyboardOverlayGeometry.Gap * (rows.Count - 1);
     private static void DrawRows(SKCanvas c, IReadOnlyList<KeyboardOverlayGeometry.Row> rows, float left, float top, float k, IReadOnlySet<string> down) { for (var row = 0; row < rows.Count; row++) { var x = left + (float)(rows[row].Offset * k); var y = top + row * (1 + (float)KeyboardOverlayGeometry.Gap) * k; foreach (var cap in rows[row].Keys) { var w = (float)(Span(cap.Units) * k); DrawKey(c, new(x, y, x + w, y + k), cap.Label, cap.Code is not null && down.Contains(cap.Code)); x += w + (float)KeyboardOverlayGeometry.Gap * k; } } }
     private static void DrawKey(SKCanvas c, SKRect r, string text, bool down) { using var fill = new SKPaint { Color = SKColor.Parse(down ? "#184ED6" : "#202329"), IsAntialias = true }; using var edge = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1, r.Height * .055f), IsAntialias = true }; c.DrawRoundRect(r, r.Height * .13f, r.Height * .13f, fill); c.DrawRoundRect(r, r.Height * .13f, r.Height * .13f, edge); using var paint = new SKPaint { Color = SKColors.White, TextSize = r.Height * .38f, TextAlign = SKTextAlign.Center, IsAntialias = true }; c.DrawText(text, r.MidX, r.MidY - (paint.FontMetrics.Ascent + paint.FontMetrics.Descent) / 2, paint); }
-    private static void DrawMouse(SKCanvas c, SKRect r, IReadOnlySet<string> down) { using var fill = new SKPaint { Color = SKColor.Parse("#202329"), IsAntialias = true }; using var edge = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1, r.Width * .028f), IsAntialias = true }; c.DrawRoundRect(r, r.Width * .48f, r.Width * .48f, fill); c.DrawRoundRect(r, r.Width * .48f, r.Width * .48f, edge); Button(new(r.Left + r.Width * .08f, r.Top + r.Width * .08f, r.MidX - r.Width * .03f, r.Top + r.Height * .48f), down.Contains("MouseLeft")); Button(new(r.MidX + r.Width * .03f, r.Top + r.Width * .08f, r.Right - r.Width * .08f, r.Top + r.Height * .48f), down.Contains("MouseRight")); void Button(SKRect b, bool hit) { using var p = new SKPaint { Color = SKColor.Parse(hit ? "#184ED6" : "#202329"), IsAntialias = true }; c.DrawRoundRect(b, r.Width * .08f, r.Width * .08f, p); } }
+    // Mirrors KeyboardOverlayPreview.DrawMouse: side tabs under the shell, outlined buttons, wheel capsule.
+    private static void DrawMouse(SKCanvas c, SKRect r, IReadOnlySet<string> down)
+    {
+        using var edge = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Stroke, StrokeWidth = Math.Max(1, r.Width * .028f), IsAntialias = true };
+        float w = r.Width, h = r.Height, shell = w * .48f;
+        float sideW = w * .19f, sideH = h * .145f, sideX = r.Left - w * .11f, sideTop = r.Top + h * .46f, sideR = sideW * .38f;
+        Shape(SKRect.Create(sideX, sideTop, sideW, sideH), sideR, sideR, sideR, sideR, down.Contains("MouseForward") || down.Contains("MouseX"));
+        Shape(SKRect.Create(sideX, sideTop + sideH + h * .03f, sideW, sideH), sideR, sideR, sideR, sideR, down.Contains("MouseBack") || down.Contains("MouseX"));
+        Shape(r, shell, shell, w * .36f, w * .36f, false);
+        float inset = w * .08f, split = w * .06f, buttonH = h * .44f, buttonW = (w - inset * 2 - split) / 2, buttonR = shell - inset, inner = w * .06f;
+        Shape(SKRect.Create(r.Left + inset, r.Top + inset, buttonW, buttonH), buttonR, inner, inner, inner, down.Contains("MouseLeft"));
+        Shape(SKRect.Create(r.Right - inset - buttonW, r.Top + inset, buttonW, buttonH), inner, buttonR, inner, inner, down.Contains("MouseRight"));
+        float wheelW = w * .12f, wheelH = buttonH * .52f;
+        Shape(SKRect.Create(r.MidX - wheelW / 2, r.Top + inset + buttonH * .18f, wheelW, wheelH), wheelW / 2, wheelW / 2, wheelW / 2, wheelW / 2, down.Contains("MouseMiddle"));
+        void Shape(SKRect b, float tl, float tr, float br, float bl, bool hit)
+        {
+            using var rr = new SKRoundRect(); rr.SetRectRadii(b, [new(tl, tl), new(tr, tr), new(br, br), new(bl, bl)]);
+            using var fill = new SKPaint { Color = SKColor.Parse(hit ? "#184ED6" : "#202329"), IsAntialias = true };
+            c.DrawRoundRect(rr, fill); c.DrawRoundRect(rr, edge);
+        }
+    }
     public void Dispose() { _bitmap?.Dispose(); _bitmap = null; _pixels = null; }
 }
 internal readonly record struct OverlayBurnResult(bool Camera = false, bool Keyboard = false);
