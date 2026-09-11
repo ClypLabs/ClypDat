@@ -76,3 +76,5 @@ The output is `native\publish\win-x64-folder`. It contains `ClypDat.exe`, depend
 
 ClypDat is licensed under GPLv3. See [LICENSE](LICENSE). Distributed builds bundle LibVLC under LGPL-2.1-or-later and FFmpeg under GPL; [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) lists each bundled component and its source location.
 
+The ClypDat and ClypLabs names and visual branding are not licensed by GPLv3. See [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md) for rules for forks and modified versions.
+
