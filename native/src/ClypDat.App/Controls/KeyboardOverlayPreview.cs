@@ -111,8 +111,16 @@ public sealed class KeyboardOverlayPreview : Control
     private static readonly IBrush Blue = Brush.Parse("#184ED6");
     private static readonly Typeface Typeface = new("Inter");
 
-    private static Board Describe(string layout) => layout switch
+    private static Board Describe(string layout)
     {
+        var geometry = KeyboardOverlayGeometry.Describe(layout);
+        return new Board(geometry.Rows.Select(row => new Row(row.Offset,
+            row.Keys.Select(key => new Key(key.Label, key.Units, key.Code)).ToArray())).ToArray(),
+            geometry.Cluster?.Select(row => new Row(row.Offset,
+                row.Keys.Select(key => new Key(key.Label, key.Units, key.Code)).ToArray())).ToArray(), geometry.IncludeMouse);
+#if false // retained only as documentation for the pre-shared descriptor
+        return layout switch
+        {
         // A 60% board plus its arrow cluster. Anything narrower leaves Medal's
         // 1989-wide canvas half empty, which is what "Full" was doing.
         KeyboardOverlayCatalog.QwertyFull => new Board(
@@ -134,7 +142,9 @@ public sealed class KeyboardOverlayPreview : Control
         ]),
         KeyboardOverlayCatalog.AzertyCompact => Truncated("AZERTYUIOP", "QSDFGHJKLM", "WXCVBN"),
         _ => Truncated("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")
-    };
+        };
+#endif
+    }
 
     // The truncated boards keep the staggered rows of a real keyboard without
     // the modifier columns, so the letters stay legible at overlay size.

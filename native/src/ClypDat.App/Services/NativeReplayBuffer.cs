@@ -1478,6 +1478,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // recording behavior above, unaffected.
             var hasCapturedRealFrame = false;
             var encoderHasProducedPacket = false;
+            TimeSpan? encoderOpenedAt = null;
             var consecutiveOverloadWindows = 0;
             var consecutiveTransportShortfallWindows = 0;
             var consecutiveWgcCongestionWindows = 0;
@@ -2007,7 +2008,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // happening instead, so the UI can say so live rather than the
                     // save-time warning being the first anyone hears of it.
                     var sourceStarved = sourceRecoveryAction != CaptureSourceRecoveryAction.None;
-                    if (isStalled || transportDegraded || sourceStarved) _lastDegradedUtc = DateTime.UtcNow;
+                    // Opening an encoder proves setup only. A blocked composition/pacing
+                    // stage can leave it open forever while fresh source frames arrive.
+                    var packetlessProcessingStall = hasCapturedRealFrame && !encoderHasProducedPacket &&
+                        !capturePaused && encoderOpenedAt is { } openedAt &&
+                        stopwatch.Elapsed - openedAt >= TimeSpan.FromSeconds(5) && framesSeenSinceLog > 0;
+                    if (packetlessProcessingStall)
+                        AppLog.Error("Native replay: fresh source frames arrived for 5 seconds after encoder opening, but no packet reached replay buffer. Frame processing or pacing is stalled.");
+                    if (isStalled || transportDegraded || sourceStarved || packetlessProcessingStall) _lastDegradedUtc = DateTime.UtcNow;
                     if (overloaded)
                     {
                         _lastDegradedUtc = DateTime.UtcNow;
@@ -2022,10 +2030,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var activeCaptureMode = wgcCapture is null ? dxgiCapture?.CaptureMode ?? "Game Capture" : "Windows Graphics Capture (recovery)";
                     SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
                         pipelineAction == ReplayPipelineRecoveryAction.SwitchToWgc ? ReplayCaptureState.Recovering :
-                        overloaded || isStalled || transportDegraded || sourceStarved ? ReplayCaptureState.Degraded : ReplayCaptureState.Healthy,
+                        packetlessProcessingStall || overloaded || isStalled || transportDegraded || sourceStarved ? ReplayCaptureState.Degraded :
+                        encoderHasProducedPacket ? ReplayCaptureState.Healthy : ReplayCaptureState.Starting,
                         activeFrameRate, inputFrameCount / diagElapsed, framesProcessedSinceLog / diagElapsed,
                         outputFrameRate, Math.Max(0, packetsOutSinceLog - framesProcessedSinceLog), droppedSinceLog, encodeQueue.Count,
                         encoderName, "Default adapter",
+                        packetlessProcessingStall ? "Frame processing or pacing stalled: fresh source frames produced no replay packets." :
                         sourceStarved ? "Capture source starved; recovering DXGI acquisition." :
                         isStalled ? "Capture stalled - no new frames from the display. Recovering." :
                         overloaded ? "Capture overload. Output may fall below target FPS." :
@@ -2039,7 +2049,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // Stall wins when both are true: no frames are arriving,
                         // so whatever the encoder looks like is a consequence of
                         // that rather than the encode settings being too costly.
-                        DegradeReason = sourceStarved || isStalled ? ReplayDegradeReason.CaptureStall
+                        DegradeReason = packetlessProcessingStall || sourceStarved || isStalled ? ReplayDegradeReason.CaptureStall
                             : transportDegraded ? ReplayDegradeReason.CaptureTransport
                             : ReplayPipelineHealthClassifier.ToDegradeReason(bottleneckStage),
                         BottleneckStage = bottleneckStage,
@@ -2080,7 +2090,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         ProducerGpuDuration = dxgiProducerDuration,
                         AverageTransportLeaseDuration = dxgiLeaseDuration,
                         PointerUpdateFrameRate = dxgiPointerTransportedCount / diagElapsed,
-                        StartupPhase = ReplayCaptureStartupPhase.Ready,
+                        StartupPhase = encoderHasProducedPacket ? ReplayCaptureStartupPhase.Ready : ReplayCaptureStartupPhase.OpeningEncoder,
                         CapturePaused = capturePaused,
                         RecoveryCleanSinceUtc = _recoveryCleanSinceUtc,
                         PipelineRecoveryAction = pipelineAction,
@@ -3229,12 +3239,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     AppLog.Info($"Native replay: foreground encoder opened {qualifiedEncoderName} ({(qualifiedHardwareFrames ? "D3D11" : "system-memory")}); replay timeline starts at zero.");
                     SetHealth(_health with
                     {
-                        State = ReplayCaptureState.Healthy,
+                        State = ReplayCaptureState.Starting,
                         Encoder = qualifiedEncoderName,
                         EncodeQueueCapacity = encodeQueueCapacity,
-                        StartupPhase = ReplayCaptureStartupPhase.Ready,
+                        StartupPhase = ReplayCaptureStartupPhase.OpeningEncoder,
                         UpdatedUtc = DateTime.UtcNow
                     });
+                    encoderOpenedAt = stopwatch.Elapsed;
 
                     hasCapturedRealFrame = true;
                     // Start the stall watchdog's clock here, not at loop start -
@@ -4929,6 +4940,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 _ringBufferBytes += packet->size;
                 _ringBufferCapacityBytes += data.Length;
             }
+            // Ready means a packet is available to save, not merely that an
+            // encoder context opened. This is also the first safe point to
+            // clear the startup UI before the next periodic diagnostic tick.
+            if (_health.StartupPhase == ReplayCaptureStartupPhase.OpeningEncoder)
+                SetHealth(_health with { State = ReplayCaptureState.Healthy, StartupPhase = ReplayCaptureStartupPhase.Ready, UpdatedUtc = DateTime.UtcNow });
             Interlocked.Add(ref _ringInsertMicrosAccum, (long)(insertTimer.Elapsed.TotalMilliseconds * 1000));
             Interlocked.Increment(ref _ringInsertCountAccum);
 
