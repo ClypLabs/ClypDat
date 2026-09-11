@@ -21,6 +21,10 @@ public sealed class AppSettings
     // "System" preserves ClypDat's existing neutral dark palette and follows
     // the Windows accent. Named entries are bundled dark themes.
     public string ThemePreset { get; set; } = "System";
+    // The original hexagon mark instead of the current one - toggled by clicking
+    // the logo in Settings > About. Reaches every logo the app draws plus the
+    // window, taskbar and tray icons.
+    public bool UseClassicLogo { get; set; }
     // Windows exposes one accent colour app-wide; following it keeps ClypDat
     // consistent with the rest of the desktop. Turned off, each preset uses its
     // own accent instead ("System" falls back to ClypDat's indigo).

@@ -52,7 +52,9 @@
            infinite width, so the description below never wraps and is clipped
            by the card instead. -->
       <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16">
-        <Border Width="52" Height="52" CornerRadius="12" Background="{StaticResource SurfaceRaisedBrush}">
+        <Border Width="52" Height="52" CornerRadius="12" Background="{StaticResource SurfaceRaisedBrush}"
+                Cursor="Hand" ToolTip.Tip="Switch between the current and original ClypDat logo"
+                PointerReleased="Logo_OnPointerReleased">
           <Image Source="{DynamicResource AppLogoLarge}" Width="38" Height="38" RenderOptions.BitmapInterpolationMode="HighQuality" HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Border>
         <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">

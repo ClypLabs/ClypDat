@@ -18,6 +18,20 @@ public sealed partial class AboutSection : UserControl
     private bool _isAttached;
     private int _avatarOpening;
 
+    // The logo is a toggle between the current mark and the original hexagon one.
+    // Release rather than press, so a press that drags off the logo changes nothing.
+    private void Logo_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != MouseButton.Left || sender is not Visual logo) return;
+        var point = e.GetPosition(logo);
+        if (point.X < 0 || point.Y < 0 || point.X > logo.Bounds.Width || point.Y > logo.Bounds.Height) return;
+        if (TopLevel.GetTopLevel(this)?.DataContext is not MainWindowViewModel model) return;
+        model.Settings.UseClassicLogo = !model.Settings.UseClassicLogo;
+        model.SaveSettings();
+        (Application.Current as App)?.ApplyLogoStyle(model.Settings.UseClassicLogo);
+        e.Handled = true;
+    }
+
     public AboutSection()
     {
         InitializeComponent();

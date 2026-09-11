@@ -143,6 +143,8 @@
   <ItemGroup>
     <AvaloniaResource Include="..\..\..\assets\clypdat-icon*.png" Link="Assets\%(Filename)%(Extension)" />
     <AvaloniaResource Include="..\..\..\assets\clypdat-icon.ico" Link="Assets\clypdat-icon.ico" />
+    <AvaloniaResource Include="..\..\..\assets\clypdat-classic*.png" Link="Assets\%(Filename)%(Extension)" />
+    <AvaloniaResource Include="..\..\..\assets\clypdat-classic.ico" Link="Assets\clypdat-classic.ico" />
     <AvaloniaResource Include="..\..\..\assets\video-overlay-preview.jpg" Link="Assets\video-overlay-preview.jpg" />
     <AvaloniaResource Include="..\..\..\assets\contributors\*.png" Link="Assets\contributors\%(Filename)%(Extension)" />
   </ItemGroup>

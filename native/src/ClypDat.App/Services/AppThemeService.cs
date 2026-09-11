@@ -339,6 +339,32 @@ internal static class AppThemeService
     private static readonly Dictionary<string, Bitmap> LogoCache = new(StringComparer.Ordinal);
     private static bool _isLightTheme;
 
+    /// <summary>Whether the original hexagon mark is in use. Set before the first
+    /// theme is applied so the very first paint already carries the right mark.</summary>
+    public static bool UseClassicLogo { get; set; }
+
+    private static string LogoPrefix => UseClassicLogo ? "clypdat-classic" : "clypdat-icon";
+
+    /// <summary>The window, taskbar and tray icon for the current mark. Built fresh
+    /// for each caller: a WindowIcon becomes a native handle owned by whoever
+    /// holds it.</summary>
+    public static WindowIcon CreateWindowIcon()
+    {
+        using var asset = AssetLoader.Open(new Uri($"avares://ClypDat/Assets/{(UseClassicLogo ? "clypdat-classic.ico" : "clypdat-icon.ico")}"));
+        var copy = new MemoryStream();
+        asset.CopyTo(copy);
+        copy.Position = 0;
+        return new WindowIcon(copy);
+    }
+
+    /// <summary>Switches every in-app logo in place. The resources are dynamic,
+    /// so everything bound to them repaints without being reopened.</summary>
+    public static void SetClassicLogo(Application application, bool classic)
+    {
+        UseClassicLogo = classic;
+        ApplyLogo(application, _isLightTheme);
+    }
+
     /// <summary>The app mark for the active theme. Use for surfaces the app paints itself.</summary>
     public static Bitmap CurrentLogo(bool large) => Logo(large, _isLightTheme);
 
@@ -347,7 +373,7 @@ internal static class AppThemeService
         // Keep every in-app small mark backed by a 32px bitmap. Several compact
         // surfaces draw it at 16–30px, and the old 24px source became soft when
         // About scaled it up.
-        var name = $"clypdat-icon-{(large ? 256 : 32)}{(light ? "-light" : string.Empty)}.png";
+        var name = $"{LogoPrefix}-{(large ? 256 : 32)}{(light ? "-light" : string.Empty)}.png";
         if (LogoCache.TryGetValue(name, out var cached)) return cached;
         var bitmap = new Bitmap(AssetLoader.Open(new Uri($"avares://ClypDat/Assets/{name}")));
         LogoCache[name] = bitmap;

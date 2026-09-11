@@ -22,7 +22,6 @@ public sealed partial class App : Application
     private static string? _windowsFontsPath;
     private TrayIcon? _trayIcon;
     private MainWindow? _mainWindow;
-    private Stream? _trayIconStream;
     private ServerTrayMenuRenderer? _serverTrayMenuRenderer;
     private int _installerShutdownRequested;
     private Color _systemAccent = Color.FromRgb(0x58, 0x64, 0xE8);
@@ -67,6 +66,9 @@ public sealed partial class App : Application
             // The loader is also the startup update check. Autostart still
             // finishes in the tray, but it must not skip that work entirely.
             var useSplash = !UiPreviewMode.Enabled && LaunchPresentationPolicy.UsesStartupLoader(launchPresentation);
+            // Before the first theme apply, so the first paint already carries
+            // the chosen mark rather than flashing the other one.
+            AppThemeService.UseClassicLogo = viewModel.Settings.UseClassicLogo;
             InitializeAccentColor();
             ApplyTheme(viewModel.Settings.ThemePreset, viewModel.Settings.UseSystemAccent,
                 viewModel.Settings.CustomThemes.FirstOrDefault(theme => string.Equals(CustomThemeLibrary.Selection(theme), viewModel.Settings.ThemePreset, StringComparison.OrdinalIgnoreCase)));
@@ -81,6 +83,9 @@ public sealed partial class App : Application
                 // restart/minimized launches stay passive until tray/user input.
                 ShowActivated = false
             };
+            // The XAML icon is the build-time one; the running window follows the
+            // chosen mark so the taskbar button switches with it.
+            _mainWindow.Icon = AppThemeService.CreateWindowIcon();
             _mainWindow.ApplySavedWindowBounds();
             _mainWindow.SetStartupLoaderActive(useSplash);
             if (useSplash) _mainWindow.RaiseStartupCurtain();
@@ -154,7 +159,9 @@ public sealed partial class App : Application
         SplashWindow splash;
         try
         {
-            splash = new SplashWindow();
+            // The splash has its own taskbar button; without an icon of its own it
+            // would show the exe's baked-in mark regardless of the chosen one.
+            splash = new SplashWindow { Icon = AppThemeService.CreateWindowIcon() };
             splash.Show();
         }
         catch (Exception error)
@@ -270,6 +277,18 @@ public sealed partial class App : Application
         AppThemeService.Apply(this, _themePreset, _systemAccent, _useSystemAccent, _customTheme);
     }
 
+    /// <summary>
+    /// Switches between the current mark and the original hexagon one, everywhere
+    /// at once: every in-app logo through the theme's dynamic resources, and the
+    /// window, taskbar and tray icons directly.
+    /// </summary>
+    internal void ApplyLogoStyle(bool classic)
+    {
+        AppThemeService.SetClassicLogo(this, classic);
+        if (_mainWindow is not null) _mainWindow.Icon = AppThemeService.CreateWindowIcon();
+        if (_trayIcon is not null) _trayIcon.Icon = AppThemeService.CreateWindowIcon();
+    }
+
     internal void ApplyFontFamily(string? fontFamilyName)
     {
         var name = string.IsNullOrWhiteSpace(fontFamilyName) ? "Inter" : fontFamilyName.Trim();
@@ -351,7 +370,6 @@ public sealed partial class App : Application
         if (_mainWindow is null) return;
         try
         {
-            _trayIconStream = AssetLoader.Open(new Uri("avares://ClypDat/Assets/clypdat-icon.ico"));
             var openItem = new NativeMenuItem("Open");
             openItem.Click += (_, _) => RestoreMainWindow();
             var settingsItem = new NativeMenuItem("Settings");
@@ -369,7 +387,7 @@ public sealed partial class App : Application
             };
             _trayIcon = new TrayIcon
             {
-                Icon = new WindowIcon(_trayIconStream),
+                Icon = AppThemeService.CreateWindowIcon(),
                 ToolTipText = "ClypDat",
                 Menu = new NativeMenu { Items = { openItem, settingsItem, quitItem } }
             };
