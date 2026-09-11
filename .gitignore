@@ -32,6 +32,19 @@ pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Secrets and certificate material. Public keys or certificates required at runtime
+# must be added explicitly with `git add -f` after review.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.mobileprovision
+
 # OS/editor files
 .DS_Store
 Thumbs.db
