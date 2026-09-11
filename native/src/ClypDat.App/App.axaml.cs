@@ -96,6 +96,10 @@ public sealed partial class App : Application
                 desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
             }
             InitializeTrayIcon();
+            // Every launch, not only on toggle: updates rerun the installer, which
+            // recreates the Start menu and desktop shortcuts with the exe's icon.
+            var classicLogo = viewModel.Settings.UseClassicLogo;
+            _ = Task.Run(() => ShortcutIconService.Apply(classicLogo));
             if (useSplash) StartWithSplash(_mainWindow, launchPresentation);
             else if (!UiPreviewMode.Enabled) _ = _mainWindow.PreparePlaybackAsync();
             if (minimized)
@@ -287,6 +291,8 @@ public sealed partial class App : Application
         AppThemeService.SetClassicLogo(this, classic);
         if (_mainWindow is not null) _mainWindow.Icon = AppThemeService.CreateWindowIcon();
         if (_trayIcon is not null) _trayIcon.Icon = AppThemeService.CreateWindowIcon();
+        // A pinned taskbar button draws its shortcut's icon, not the window's.
+        _ = Task.Run(() => ShortcutIconService.Apply(classic));
     }
 
     internal void ApplyFontFamily(string? fontFamilyName)
