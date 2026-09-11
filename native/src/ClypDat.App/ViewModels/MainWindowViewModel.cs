@@ -7437,6 +7437,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string? _clypDatAvatarUrl;
     public Bitmap? ClypDatAvatar => ClypDatAccountIsConnected ? _clypDatAvatar : null;
     public bool ClypDatHasAvatar => ClypDatAvatar is not null;
+    // The profile only ever comes from Discord, so it doubles as the Discord
+    // row's account name in Connected.
+    public string? ClypDatDiscordName => _clypDatSnapshot.DiscordConnected ? _clypDatSnapshot.ProfileName : null;
     // Unlinking can fail for a reason only the site knows - removing the last
     // sign-in method is refused there, not here - so the message it returns
     // needs somewhere on the page to appear.
@@ -7593,6 +7596,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         NotifyClypDatXboxActivityNeed();
         UpdateClypDatAvatar(snapshot.ProfileImage);
         OnPropertyChanged(nameof(ClypDatAccountTitle));
+        OnPropertyChanged(nameof(ClypDatDiscordName));
         OnPropertyChanged(nameof(ClypDatAvatar));
         OnPropertyChanged(nameof(ClypDatHasAvatar));
         OnPropertyChanged(nameof(ClypDatAccountStatus));
