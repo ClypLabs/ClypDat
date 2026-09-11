@@ -22,6 +22,17 @@
         { "executable": "RainbowSix_DX11.exe" },
         { "executable": "RainbowSix_BE.exe" }
       ]
+    },
+    {
+      "id": "minecraft-java",
+      "displayName": "Minecraft",
+      "matchers": [
+        {
+          "executable": "javaw.exe",
+          "classEquals": [ "GLFW30" ],
+          "titleContains": [ "Minecraft" ]
+        }
+      ]
     }
   ]
 }

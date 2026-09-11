@@ -107,6 +107,28 @@ public sealed class SteamGameLibraryTests
     }
 
     [Fact]
+    public async Task ExternalJavaRuntimeIsOnlyMatchedByItsMinecraftWindow()
+    {
+        using var fixture = new LibraryFixture();
+        fixture.Install(108600, "javaw.exe", "Project Zomboid");
+        fixture.Metadata((108600, "Game"));
+        var library = fixture.Library();
+        await library.RefreshAsync();
+
+        var detector = new ForegroundGameDetector(library);
+        var minecraftJava = Path.Combine(fixture.Root, "Modrinth", "javaw.exe");
+
+        detector.ApplyRemoteCatalog([new()
+        {
+            Id = "minecraft-java", DisplayName = "Minecraft",
+            Matchers = [new() { Executable = "javaw.exe", ClassEquals = ["GLFW30"], TitleContains = ["Minecraft"] }]
+        }]);
+
+        Assert.Equal("Minecraft", detector.MatchWindow(minecraftJava, "javaw.exe", "Minecraft", "GLFW30", processId: 42).DisplayName);
+        Assert.False(detector.MatchWindow(minecraftJava, "javaw.exe", "Java configuration", "GLFW30", processId: 42).IsDetected);
+    }
+
+    [Fact]
     public async Task UnknownInstallsRequireMetadataButIndependentCatalogAndCustomGamesWork()
     {
         using var fixture = new LibraryFixture();

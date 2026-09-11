@@ -402,7 +402,7 @@ public sealed class ForegroundGameDetector
         // game does own that filename. Reported exactly as a path match
         // would be - same source, same steam-{AppId} key - so a game found
         // this way cannot produce a second Game Detection row for itself.
-        if (_steamGames.Snapshot.FindInstall(executablePath) is null &&
+        if (!IsSharedRuntimeExecutable(executablePath) && _steamGames.Snapshot.FindInstall(executablePath) is null &&
             _steamGames.FindByExecutableName(Path.GetFileName(executablePath)) is { } steamGameByName)
         {
             displayName = steamGameByName.DisplayName;
@@ -415,6 +415,14 @@ public sealed class ForegroundGameDetector
         source = GameMatchSource.None;
         return false;
     }
+
+    // A Steam game can bundle a runtime whose filename is also used by many
+    // unrelated applications. Filename fallback has no path evidence, so
+    // never let a Java runtime make Minecraft look like the one Steam game
+    // that happened to ship the same javaw.exe.
+    private static bool IsSharedRuntimeExecutable(string executablePath) =>
+        Path.GetFileName(executablePath).Equals("java.exe", StringComparison.OrdinalIgnoreCase) ||
+        Path.GetFileName(executablePath).Equals("javaw.exe", StringComparison.OrdinalIgnoreCase);
 
     // Riot Vanguard and BattlEye's own service run system-wide, tied to no
     // single game - resolving one to "whatever game happens to be running"
