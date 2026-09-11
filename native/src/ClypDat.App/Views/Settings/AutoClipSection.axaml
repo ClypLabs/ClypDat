@@ -145,8 +145,5 @@
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>
-    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="8" Padding="14">
-      <StackPanel Spacing="8"><TextBlock Classes="settingsSectionLabel" Text="COMING SOON" /><TextBlock Classes="settingsRowDescSm" Text="More game integrations are planned. These are not enabled until ClypDat can reliably detect their events." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" /><ItemsControl ItemsSource="{Binding ComingSoonAutoClipGames}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="5" Padding="8,4" Margin="0,0,6,6"><TextBlock Text="{Binding}" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" /></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-    </Border>
   </StackPanel>
 </UserControl>

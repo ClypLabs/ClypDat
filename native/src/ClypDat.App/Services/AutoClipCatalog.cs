@@ -122,11 +122,6 @@ public static class AutoClipCatalog
             PortraitDetectionKey: "steam-2357570", PortraitDisplayName: "Overwatch®")
     };
 
-    public static readonly IReadOnlyList<string> ComingSoon = new[]
-    {
-        "EA Sports FC Online", "GTA V", "Minecraft", "PUBG", "Rematch", "REPO", "Roblox", "Rocket League", "RuneScape: Dragonwilds", "War Thunder", "YAPYAP"
-    };
-
     public static AutoClipGameDefinition Get(string id) => Active.First(game => string.Equals(game.Id, id, StringComparison.OrdinalIgnoreCase));
 
     public static string? MatchGame(string? detectionKey, string? executable, string? displayName)

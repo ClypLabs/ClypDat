@@ -2995,11 +2995,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void ClipButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        await SaveReplayClipAsync();
-    }
-
     // isQualityRestart: true for the debounced restart that fires when a
     // resolution/frame rate/encoder setting changes mid-session (see
     // ReplayQualityRestartRequired's PropertyChanged handler) - the SAME game

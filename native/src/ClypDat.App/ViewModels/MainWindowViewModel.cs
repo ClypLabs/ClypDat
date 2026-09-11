@@ -348,7 +348,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .OrderBy(definition => definition.Name, StringComparer.OrdinalIgnoreCase)
             .Select(definition =>
             new AutoClipGameViewModel(definition, Settings.AutoClipping.Games[definition.Id], SaveSettings)));
-        ComingSoonAutoClipGames = new ObservableCollection<string>(AutoClipCatalog.ComingSoon);
         _steamGames.Changed += SteamClassificationChanged;
         _ = _steamGames.Snapshot;
         RebuildGameCaptureRows();
@@ -804,7 +803,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string GameDiscoveryStatus { get => _gameDiscoveryStatus; private set => SetProperty(ref _gameDiscoveryStatus, value); }
     public bool IsScanningGameFolders => _gameDiscoveryCts is not null;
     public ObservableCollection<AutoClipGameViewModel> AutoClipGames { get; }
-    public ObservableCollection<string> ComingSoonAutoClipGames { get; }
     public ObservableCollection<string> ClipOverlayPositions { get; }
     public ObservableCollection<string> ClipOverlayVolumes { get; }
     public ObservableCollection<ProcessPriorityOption> ProcessPriorityOptions { get; }
