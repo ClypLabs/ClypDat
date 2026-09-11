@@ -400,6 +400,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     public Task StartAsync(CancellationToken cancellationToken = default)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (_sessionActive) return Task.CompletedTask;
 
         Directory.CreateDirectory(_bufferFolder);
@@ -476,6 +477,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         catch
         {
             _sessionActive = false;
+            _captureCts?.Cancel();
+            _audio.Stop(deleteCaptureFiles: true);
+            _overlayCapture.Stop();
             throw;
         }
 
@@ -878,12 +882,37 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             Flattened: rendered, Keys: keys, SourceName: settings.KeyboardName, ShowMouse: settings.KeyboardShowMouse);
 
     private int _capturePaused;
+    private int _disposed;
     public void SetCapturePaused(bool paused) => Volatile.Write(ref _capturePaused, paused ? 1 : 0);
 
     public void Dispose()
     {
-        _captureCts?.Cancel();
-        _captureCts?.Dispose();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        try
+        {
+            // Recorder replacement normally stops first. Also cover failed
+            // startup and direct disposal: audio owns Core Audio callbacks.
+            StopAsync(CancellationToken.None).GetAwaiter().GetResult();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Native replay disposal capture shutdown failed.", error);
+        }
+        finally
+        {
+            // StartAsync can fail after launching CaptureLoop and before setting
+            // up audio. StopAsync then returns early because the session is no
+            // longer active; wait here so no loop can touch audio after disposal.
+            _captureCts?.Cancel();
+            if (_captureTask is not null)
+            {
+                try { _captureTask.GetAwaiter().GetResult(); }
+                catch (OperationCanceledException) { }
+                catch (Exception error) { AppLog.Error("Native replay disposal capture-loop join failed.", error); }
+            }
+            _audio.Dispose();
+            _captureCts?.Dispose();
+        }
         _packetPayloads.Deactivate();
         _overlayCapture.Dispose();
     }

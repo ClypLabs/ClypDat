@@ -50,6 +50,7 @@ public sealed class AudioCapturePipeline : IDisposable
     private TimeSpan _routeInterval = TimeSpan.FromSeconds(2);
     private ReplayBufferConfig? _activeConfig;
     private string _micFilterSignature = string.Empty;
+    private int _disposed;
 
     public AudioCapturePipeline(string bufferFolder)
     {
@@ -60,6 +61,7 @@ public sealed class AudioCapturePipeline : IDisposable
 
     public void Start(ReplayBufferConfig config)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var generation = _routes.Start(() => _activeConfig = config);
         StartAudioCaptures(config, generation);
     }
@@ -233,8 +235,11 @@ public sealed class AudioCapturePipeline : IDisposable
 
     public void Dispose()
     {
-        Stop();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        // Block new microphone callback work first. In-flight refreshes still
+        // require the generation check before they can create a capture.
         _defaultMicrophoneWatcher.Dispose();
+        Stop();
     }
 
     private void StartAudioCaptures(ReplayBufferConfig config, long generation)
@@ -519,6 +524,7 @@ public sealed class AudioCapturePipeline : IDisposable
 
     private void RefreshAudioRoutes(long? timerGeneration = null)
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
         if (!_routeRefreshGate.Wait(0)) return;
         try
         {
