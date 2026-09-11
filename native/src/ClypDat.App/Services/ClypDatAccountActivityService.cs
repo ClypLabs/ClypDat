@@ -29,6 +29,15 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     // refresh wakes the site's database, which then stays up for five minutes
     // - someone flicking between windows all day would keep it awake for free.
     private static readonly TimeSpan IdleRefreshDebounce = TimeSpan.FromMinutes(10);
+    // Nothing playing on Xbox: each quiet refresh waits longer than the last,
+    // up to three minutes - longer would leave a game just started on Xbox
+    // unnamed on Desktop Capture clips for that long. A title appearing, a link, or the need changing puts
+    // it straight back to the fast cadence.
+    private static readonly TimeSpan[] IdleBackoff =
+    {
+        TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(3),
+    };
+    private int _idleRefreshes;
     private CancellationTokenSource? _pollCts;
     private readonly SemaphoreSlim _pollWake = new(0, 1);
     private DateTimeOffset _linkWatchUntil = DateTimeOffset.MinValue;
@@ -53,6 +62,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// <summary>Call when <see cref="LiveActivityNeeded"/> may have changed.</summary>
     public void LiveActivityNeedChanged()
     {
+        _idleRefreshes = 0;
         if (IsAuthenticated) WakePoll();
     }
 
@@ -190,6 +200,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         _linkWatchSignature = LinkSignature;
         _linkWatchStarted = DateTimeOffset.UtcNow;
         _linkWatchUntil = _linkWatchStarted.Add(LinkWatchWindow);
+        _idleRefreshes = 0;
         WakePoll();
     }
 
@@ -225,7 +236,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         // Nothing to watch for: park until woken (a link, the window coming
         // back, or LiveActivityNeedChanged) instead of refreshing on a timer.
         if (!IsLiveActivityNeeded) return Timeout.InfiniteTimeSpan;
-        return TimeSpan.FromSeconds(_snapshot.CurrentTitle is null ? 60 : 15);
+        if (_snapshot.CurrentTitle is not null) return TimeSpan.FromSeconds(15);
+        return IdleBackoff[Math.Min(_idleRefreshes, IdleBackoff.Length - 1)];
     }
 
     private void StartPolling()
@@ -243,6 +255,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             {
                 await _pollWake.WaitAsync(NextPollDelay(), cancellationToken).ConfigureAwait(false);
                 await RefreshAsync(cancellationToken).ConfigureAwait(false);
+                _idleRefreshes = _snapshot.CurrentTitle is null ? _idleRefreshes + 1 : 0;
                 // Whatever the user went to the browser to do, they have done it.
                 if (LinkSignature != _linkWatchSignature) _linkWatchUntil = DateTimeOffset.MinValue;
             }
