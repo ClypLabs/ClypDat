@@ -21,7 +21,6 @@
     <SolidColorBrush x:Key="SpotifyBrandBrush" Color="#1ED760" />
     <SolidColorBrush x:Key="SpotifyBadgeBrush" Color="#1F1ED760" />
     <SolidColorBrush x:Key="XboxBrandBrush" Color="#4DC44D" />
-    <SolidColorBrush x:Key="GoogleBadgeBrush" Color="#14FFFFFF" />
     <SolidColorBrush x:Key="DiscordBadgeBrush" Color="#1F5865F2" />
     <SolidColorBrush x:Key="XboxBadgeBrush" Color="#1F4DC44D" />
   </UserControl.Resources>
@@ -45,14 +44,24 @@
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="CLYPDAT ACCOUNT" />
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
-          <Border Width="40" Height="40" CornerRadius="12" VerticalAlignment="Center"
-                  Background="{StaticResource SurfaceHoverBrush}"
-                  BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1">
-            <Image Source="{DynamicResource AppLogoLarge}" Width="22" Height="22" RenderOptions.BitmapInterpolationMode="HighQuality"
-                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-          </Border>
+          <!-- The Discord picture when the account has Discord linked; the
+               ClypDat mark otherwise, including while the picture downloads. -->
+          <Panel VerticalAlignment="Center">
+            <Border Width="40" Height="40" CornerRadius="12"
+                    Background="{StaticResource SurfaceHoverBrush}"
+                    BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
+                    IsVisible="{Binding !ClypDatHasAvatar}">
+              <Image Source="{DynamicResource AppLogoLarge}" Width="22" Height="22" RenderOptions.BitmapInterpolationMode="HighQuality"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <Border Width="40" Height="40" CornerRadius="20" ClipToBounds="True"
+                    BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
+                    IsVisible="{Binding ClypDatHasAvatar}">
+              <Image Source="{Binding ClypDatAvatar}" Stretch="UniformToFill" RenderOptions.BitmapInterpolationMode="HighQuality" />
+            </Border>
+          </Panel>
           <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="ClypDat" />
+            <TextBlock Classes="settingsRowTitle" Text="{Binding ClypDatAccountTitle}" TextTrimming="CharacterEllipsis" />
             <!-- Connected is a state, so it is a pill. Every other value of
                  ClypDatAccountStatus is a sentence telling you what to do next,
                  so it stays body text. -->
@@ -90,20 +99,8 @@
       <Border Classes="settingsCard" IsVisible="{Binding HasAccountsToAdd}">
         <StackPanel Spacing="14">
           <TextBlock Classes="settingsCardLabel" Text="ADD AN ACCOUNT" />
-          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Add another sign-in method, optional Xbox activity, or Spotify. The sign-in methods open clypdat.xyz in your browser; Spotify signs in with Spotify itself." />
+          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Add Discord, optional Xbox activity, or Spotify. Discord and Xbox open clypdat.xyz in your browser; Spotify signs in with Spotify itself." />
           <StackPanel Spacing="10">
-            <Border Classes="providerRow" IsVisible="{Binding GoogleAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}">
-              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <Border Classes="providerBadge" Background="{StaticResource GoogleBadgeBrush}">
-                  <controls:GoogleMark Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
-                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Classes="settingsRowTitle" Text="Google" />
-                  <TextBlock Classes="settingsRowDescSm" Text="Add Google as a sign-in method." />
-                </StackPanel>
-                <Button Grid.Column="2" VerticalAlignment="Center" Tag="google" Content="Connect" Click="OpenSocialAccountButton_OnClick" />
-              </Grid>
-            </Border>
             <Border Classes="providerRow" IsVisible="{Binding DiscordAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}">
               <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                 <Border Classes="providerBadge" Background="{StaticResource DiscordBadgeBrush}">
@@ -111,7 +108,7 @@
                 </Border>
                 <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                   <TextBlock Classes="settingsRowTitle" Text="Discord" />
-                  <TextBlock Classes="settingsRowDescSm" Text="Add Discord as a sign-in method." />
+                  <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Sign in with Discord and show your Discord name and picture here." />
                 </StackPanel>
                 <Button Grid.Column="2" VerticalAlignment="Center" Tag="discord" Content="Connect" Click="OpenSocialAccountButton_OnClick" />
               </Grid>
@@ -185,33 +182,6 @@
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                   <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" ToolTip.Tip="Choose where the track sits on your clips." />
                   <Button Content="Disconnect" Click="DisconnectSpotifyButton_OnClick" />
-                </StackPanel>
-              </Grid>
-            </Border>
-            <Border Classes="providerRow" IsVisible="{Binding GoogleAccountIsConnected}">
-              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <Border Classes="providerBadge" Background="{StaticResource GoogleBadgeBrush}">
-                  <controls:GoogleMark Width="18" Height="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
-                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
-                  <TextBlock Classes="settingsRowTitle" Text="Google" />
-                  <Border Classes="statusPill ok">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <Ellipse />
-                      <TextBlock Text="Connected" />
-                    </StackPanel>
-                  </Border>
-                </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <Button Tag="google" Click="UnlinkSocialAccountButton_OnClick" IsEnabled="{Binding !GoogleUnlinkBusy}">
-                    <Grid>
-                      <TextBlock Text="Disconnect" IsVisible="{Binding !GoogleUnlinkBusy}" VerticalAlignment="Center" />
-                      <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding GoogleUnlinkBusy}">
-                        <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Disconnecting…" VerticalAlignment="Center" />
-                      </StackPanel>
-                    </Grid>
-                  </Button>
                 </StackPanel>
               </Grid>
             </Border>

@@ -99,7 +99,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Connected Accounts"] = new[]
         {
             "Xbox", "Microsoft", "console", "Gamertag", "Xbox activity", "Desktop Capture", "PlayStation", "Nintendo",
-            "Google", "Discord", "Sign in", "Sign out", "Link account", "Linked accounts", "Social", "Provider",
+            "Discord", "Sign in", "Sign out", "Link account", "Linked accounts", "Social", "Provider",
             "Spotify", "Music", "Now playing", "Song", "Artist", "Track",
         },
         ["About"] = new[]

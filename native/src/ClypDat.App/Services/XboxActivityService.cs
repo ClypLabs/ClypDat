@@ -19,7 +19,10 @@ internal sealed record XboxActivitySnapshot(
     bool DiscordConnected = false,
     // Error came from clypdat.xyz being unreachable or failing (network, a
     // timeout, a 5xx), not from anything the user can fix in the app.
-    bool ServerUnavailable = false)
+    bool ServerUnavailable = false,
+    // The Discord name and picture URL for the account card; null without Discord.
+    string? ProfileName = null,
+    string? ProfileImage = null)
 {
     public static XboxActivitySnapshot Disconnected { get; } = new(false, null, null, null, null, null);
 }

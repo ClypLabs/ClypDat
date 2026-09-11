@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using Avalonia;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using ClypDat.App.Converters;
 using ClypDat.App.Services;
@@ -7417,16 +7418,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string ClypDatXboxStatus => _clypDatSnapshot.IsConnected ? "Linked through ClypDat" : "No Xbox account linked.";
     public bool ClypDatAccountIsConnected => _clypDatAccount.IsAuthenticated;
     public bool ClypDatXboxIsLinked => _clypDatSnapshot.IsConnected;
-    public string GoogleAccountStatus => _clypDatSnapshot.GoogleConnected ? "Connected" : "Not connected";
     public string DiscordAccountStatus => _clypDatSnapshot.DiscordConnected ? "Connected" : "Not connected";
-    public bool GoogleAccountIsConnected => _clypDatSnapshot.GoogleConnected;
     public bool DiscordAccountIsConnected => _clypDatSnapshot.DiscordConnected;
     public bool ClypDatAccountCanLink => !_clypDatAccount.IsAuthenticated && _clypDatAccountSetupStarted;
     // The "add an account" and "linked accounts" cards each render an empty
     // titled box once every provider has moved to the other one, so both ask
     // whether they still have a row to show before drawing themselves.
-    public bool HasAccountsToAdd => !_clypDatSnapshot.GoogleConnected || !_clypDatSnapshot.DiscordConnected || !_clypDatSnapshot.IsConnected || !SpotifyIsConnected;
-    public bool HasLinkedAccounts => _clypDatSnapshot.GoogleConnected || _clypDatSnapshot.DiscordConnected || _clypDatSnapshot.IsConnected || SpotifyIsConnected;
+    public bool HasAccountsToAdd => !_clypDatSnapshot.DiscordConnected || !_clypDatSnapshot.IsConnected || !SpotifyIsConnected;
+    public bool HasLinkedAccounts => _clypDatSnapshot.DiscordConnected || _clypDatSnapshot.IsConnected || SpotifyIsConnected;
+
+    // The account card shows the Discord name and picture. The site sends a
+    // profile only for accounts with Discord linked; anyone else keeps the
+    // plain ClypDat card, and so does everyone while the picture downloads.
+    public string ClypDatAccountTitle => ClypDatAccountIsConnected && !string.IsNullOrWhiteSpace(_clypDatSnapshot.ProfileName)
+        ? _clypDatSnapshot.ProfileName!
+        : "ClypDat";
+    private Bitmap? _clypDatAvatar;
+    private string? _clypDatAvatarUrl;
+    public Bitmap? ClypDatAvatar => ClypDatAccountIsConnected ? _clypDatAvatar : null;
+    public bool ClypDatHasAvatar => ClypDatAvatar is not null;
     // Unlinking can fail for a reason only the site knows - removing the last
     // sign-in method is refused there, not here - so the message it returns
     // needs somewhere on the page to appear.
@@ -7434,10 +7444,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // Unlinking is a round trip to clypdat.xyz and back, so the button that
     // started it says so. Per provider rather than one shared flag: the rows sit
     // next to each other, and a single flag would spin all of them.
-    private bool _googleUnlinkBusy;
     private bool _discordUnlinkBusy;
     private bool _xboxUnlinkBusy;
-    public bool GoogleUnlinkBusy { get => _googleUnlinkBusy; private set { if (_googleUnlinkBusy == value) return; _googleUnlinkBusy = value; OnPropertyChanged(); } }
     public bool DiscordUnlinkBusy { get => _discordUnlinkBusy; private set { if (_discordUnlinkBusy == value) return; _discordUnlinkBusy = value; OnPropertyChanged(); } }
     public bool XboxUnlinkBusy { get => _xboxUnlinkBusy; private set { if (_xboxUnlinkBusy == value) return; _xboxUnlinkBusy = value; OnPropertyChanged(); } }
     public bool ClypDatAccountHasError => ClypDatAccountIsConnected && !_clypDatSnapshot.ServerUnavailable && !string.IsNullOrWhiteSpace(_clypDatSnapshot.Error);
@@ -7521,10 +7529,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task UnlinkSocialAccountAsync(string provider)
     {
-        var isGoogle = provider.Equals("google", StringComparison.OrdinalIgnoreCase);
-        if (isGoogle) GoogleUnlinkBusy = true; else DiscordUnlinkBusy = true;
+        DiscordUnlinkBusy = true;
         try { await _clypDatAccount.UnlinkSocialAsync(provider); }
-        finally { if (isGoogle) GoogleUnlinkBusy = false; else DiscordUnlinkBusy = false; }
+        finally { DiscordUnlinkBusy = false; }
     }
 
     public async Task UnlinkClypDatXboxAsync()
@@ -7566,8 +7573,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void OpenSocialAccount(string provider)
     {
-        var connected = provider.Equals("google", StringComparison.OrdinalIgnoreCase) ? _clypDatSnapshot.GoogleConnected : _clypDatSnapshot.DiscordConnected;
-        var suffix = connected ? string.Empty : $"?link_provider={Uri.EscapeDataString(provider)}";
+        var suffix = _clypDatSnapshot.DiscordConnected ? string.Empty : $"?link_provider={Uri.EscapeDataString(provider)}";
         _clypDatAccount.ExpectLinkChange();
         Process.Start(new ProcessStartInfo($"https://www.clypdat.xyz/account{suffix}") { UseShellExecute = true });
     }
@@ -7585,13 +7591,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _clypDatSnapshot = snapshot;
         NotifyClypDatXboxActivityNeed();
+        UpdateClypDatAvatar(snapshot.ProfileImage);
+        OnPropertyChanged(nameof(ClypDatAccountTitle));
+        OnPropertyChanged(nameof(ClypDatAvatar));
+        OnPropertyChanged(nameof(ClypDatHasAvatar));
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountIsConnected));
         OnPropertyChanged(nameof(ClypDatXboxStatus));
         OnPropertyChanged(nameof(ClypDatXboxIsLinked));
-        OnPropertyChanged(nameof(GoogleAccountStatus));
         OnPropertyChanged(nameof(DiscordAccountStatus));
-        OnPropertyChanged(nameof(GoogleAccountIsConnected));
         OnPropertyChanged(nameof(DiscordAccountIsConnected));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
         OnPropertyChanged(nameof(HasAccountsToAdd));
@@ -7604,6 +7612,82 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(XboxCurrentTitle));
         OnPropertyChanged(nameof(XboxIsConnected));
         Dispatcher.UIThread.Post(UpdateDiscordPresence);
+    }
+
+    private static readonly HttpClient AvatarHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private static string AvatarCacheDirectory => Path.Combine(AppDataPaths.Root, "account-avatar");
+
+    // Downloads the Discord picture once and keeps it on disk, keyed by its
+    // URL: Discord changes the URL when the picture changes, so a new URL means
+    // a new picture and the old file can go. Starting offline shows the saved
+    // copy. A failed download leaves the ClypDat mark in place.
+    private void UpdateClypDatAvatar(string? url)
+    {
+        if (url == _clypDatAvatarUrl) return;
+        // A refresh that failed (an outage) keeps whatever picture was showing.
+        if (url is null && _clypDatSnapshot.ServerUnavailable) return;
+        _clypDatAvatarUrl = url;
+        if (url is null)
+        {
+            SetClypDatAvatar(null);
+            return;
+        }
+        _ = LoadClypDatAvatarAsync(url);
+    }
+
+    private async Task LoadClypDatAvatarAsync(string url)
+    {
+        Bitmap? bitmap = null;
+        try
+        {
+            var name = Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(url)))[..16] + ".png";
+            var path = Path.Combine(AvatarCacheDirectory, name);
+            if (!File.Exists(path))
+            {
+                var bytes = await AvatarHttp.GetByteArrayAsync(DiscordAvatarDownloadUrl(url)).ConfigureAwait(false);
+                Directory.CreateDirectory(AvatarCacheDirectory);
+                foreach (var old in Directory.EnumerateFiles(AvatarCacheDirectory)) TryDeleteFile(old);
+                await File.WriteAllBytesAsync(path, bytes).ConfigureAwait(false);
+            }
+            bitmap = await Task.Run(() =>
+            {
+                using var stream = File.OpenRead(path);
+                return Bitmap.DecodeToWidth(stream, 96);
+            }).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("ClypDat account: profile picture download failed.", error);
+        }
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            // Superseded by a newer picture, or by signing out, while this ran.
+            if (_clypDatAvatarUrl != url) { bitmap?.Dispose(); return; }
+            SetClypDatAvatar(bitmap);
+        });
+    }
+
+    // Discord serves every avatar as PNG at any power-of-two size; an animated
+    // one arrives as .gif, which the card would show as a still frame anyway.
+    private static string DiscordAvatarDownloadUrl(string url)
+    {
+        var withoutQuery = url.Split('?')[0];
+        if (withoutQuery.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) withoutQuery = withoutQuery[..^4] + ".png";
+        return withoutQuery + "?size=128";
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try { File.Delete(path); } catch { }
+    }
+
+    private void SetClypDatAvatar(Bitmap? bitmap)
+    {
+        var previous = _clypDatAvatar;
+        _clypDatAvatar = bitmap;
+        OnPropertyChanged(nameof(ClypDatAvatar));
+        OnPropertyChanged(nameof(ClypDatHasAvatar));
+        if (!ReferenceEquals(previous, bitmap)) previous?.Dispose();
     }
 
     public void ApplyDiscordSettings()

@@ -316,7 +316,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         var activity = result.Activity;
         var providers = result.Providers ?? Array.Empty<string>();
         _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null,
-            providers.Contains("google", StringComparer.OrdinalIgnoreCase), providers.Contains("discord", StringComparer.OrdinalIgnoreCase));
+            providers.Contains("google", StringComparer.OrdinalIgnoreCase), providers.Contains("discord", StringComparer.OrdinalIgnoreCase),
+            ProfileName: result.Profile?.Name, ProfileImage: result.Profile?.Image);
         Changed?.Invoke(this, _snapshot);
     }
 
@@ -422,6 +423,13 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         [JsonPropertyName("connected")] public bool Connected { get; set; }
         [JsonPropertyName("activity")] public Activity? Activity { get; set; }
         [JsonPropertyName("providers")] public string[]? Providers { get; set; }
+        // Present only when the account has Discord linked.
+        [JsonPropertyName("profile")] public Profile? Profile { get; set; }
+    }
+    private sealed class Profile
+    {
+        [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("image")] public string? Image { get; set; }
     }
     private sealed class Activity
     {
