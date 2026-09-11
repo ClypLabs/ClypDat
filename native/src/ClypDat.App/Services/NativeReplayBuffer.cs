@@ -1272,6 +1272,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // which renders as solid green (Y/U/V all near zero decodes to
             // bright green in YUV->RGB). Fill it to black up front instead.
             FillFrameBlack(frame, outputHeight);
+            // Burn mode copies cleanFrame over frame every tick, so it needs the same fill.
+            if (cleanFrame is not null) FillFrameBlack(cleanFrame, outputHeight);
 
             encodeQueue = new BlockingCollection<EncodeJob>(boundedCapacity: encodeQueueCapacity);
             var encodeQueueGate = new object();
@@ -3178,6 +3180,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 CopyNv12PlanesToFrame(mapped, outputWidth, outputHeight, frame);
                                 if (cursorOutputX != int.MinValue)
                                     DrawDesktopCursorNv12(frame, outputWidth, outputHeight, cursorOutputX, cursorOutputY);
+                                // croppedDirty is cleared below, so the tick's readback
+                                // is skipped - burn mode must still see this frame.
+                                if (cleanFrame is not null) ffmpeg.av_frame_copy(cleanFrame, frame);
                                 device.ImmediateContext.Unmap(nv12StagingRing[qualificationSlot], 0);
                                 lastFrameContentCapturedUtc = MonotonicClock.UtcNow;
                             }
