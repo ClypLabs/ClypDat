@@ -44,6 +44,11 @@ public sealed partial class IntegrationsSection : UserControl
         if (DataContext is MainWindowViewModel vm) await vm.RefreshClypDatAccountAsync();
     }
 
+    private void ServiceStatusButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) vm.OpenServiceStatus();
+    }
+
     private async void UnlinkSocialAccountButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (sender is Button { Tag: string provider } && DataContext is MainWindowViewModel vm) await vm.UnlinkSocialAccountAsync(provider);

@@ -81,6 +81,16 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             StartPolling();
             return true;
         }
+        catch (Exception error) when (IsServerProblem(error))
+        {
+            // The site being down, or the network not up yet at Windows
+            // startup, is no reason to sign the user out. Keep the token and
+            // let the poll retry.
+            AppLog.Error("ClypDat account: restore could not reach clypdat.xyz.", error);
+            ReportServerProblem();
+            StartPolling();
+            return true;
+        }
         catch
         {
             _token = null;
@@ -103,10 +113,13 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         {
             AppLog.Error("ClypDat account: connection failed.", error);
             _token = null;
-            var message = error is InvalidOperationException invalid && invalid.Message.StartsWith("ClypDat sign-in required.", StringComparison.Ordinal)
-                ? invalid.Message
-                : "ClypDat account connection failed. Sign in through the browser and try again.";
-            _snapshot = new XboxActivitySnapshot(false, null, null, null, null, message);
+            var serverProblem = IsServerProblem(error);
+            var message = serverProblem
+                ? ServerProblemMessage
+                : error is InvalidOperationException invalid && invalid.Message.StartsWith("ClypDat sign-in required.", StringComparison.Ordinal)
+                    ? invalid.Message
+                    : "ClypDat account connection failed. Sign in through the browser and try again.";
+            _snapshot = new XboxActivitySnapshot(false, null, null, null, null, message, ServerUnavailable: serverProblem);
             Changed?.Invoke(this, _snapshot);
             return false;
         }
@@ -136,14 +149,15 @@ internal sealed class ClypDatAccountActivityService : IDisposable
                 Disconnect();
                 return false;
             }
-            if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ClypDat Xbox unlink failed ({(int)response.StatusCode}).");
+            if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ClypDat Xbox unlink failed ({(int)response.StatusCode}).", null, response.StatusCode);
             await RefreshAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (Exception error)
         {
             AppLog.Error("ClypDat account: Xbox unlink failed.", error);
-            _snapshot = _snapshot with { Error = "ClypDat Xbox unlink failed. Try again." };
+            if (IsServerProblem(error)) { ReportServerProblem(); return false; }
+            _snapshot = _snapshot with { Error = "ClypDat Xbox unlink failed. Try again.", ServerUnavailable = false };
             Changed?.Invoke(this, _snapshot);
             return false;
         }
@@ -171,7 +185,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                throw new HttpRequestException(TryReadError(body) ?? $"ClypDat unlink failed ({(int)response.StatusCode}).");
+                throw new HttpRequestException(TryReadError(body) ?? $"ClypDat unlink failed ({(int)response.StatusCode}).", null, response.StatusCode);
             }
             await RefreshAsync(cancellationToken).ConfigureAwait(false);
             return true;
@@ -179,8 +193,9 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         catch (Exception error)
         {
             AppLog.Error($"ClypDat account: {provider} unlink failed.", error);
+            if (IsServerProblem(error)) { ReportServerProblem(); return false; }
             var message = error is HttpRequestException ? error.Message : $"{provider} could not be disconnected. Try again.";
-            _snapshot = _snapshot with { Error = message };
+            _snapshot = _snapshot with { Error = message, ServerUnavailable = false };
             Changed?.Invoke(this, _snapshot);
             return false;
         }
@@ -233,6 +248,9 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         var now = DateTimeOffset.UtcNow;
         if (now < _linkWatchUntil)
             return now - _linkWatchStarted < LinkWatchEager ? LinkWatchEagerInterval : LinkWatchTailInterval;
+        // The site was unreachable: keep trying until it answers, so the notice
+        // clears by itself once the outage is over.
+        if (_snapshot.ServerUnavailable) return TimeSpan.FromMinutes(1);
         // Nothing to watch for: park until woken (a link, the window coming
         // back, or LiveActivityNeedChanged) instead of refreshing on a timer.
         if (!IsLiveActivityNeeded) return Timeout.InfiniteTimeSpan;
@@ -263,8 +281,12 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             catch (Exception error)
             {
                 AppLog.Error("ClypDat account: activity refresh failed.", error);
-                _snapshot = _snapshot with { Error = "ClypDat Xbox activity is temporarily unavailable." };
-                Changed?.Invoke(this, _snapshot);
+                if (IsServerProblem(error)) ReportServerProblem();
+                else
+                {
+                    _snapshot = _snapshot with { Error = "ClypDat Xbox activity is temporarily unavailable.", ServerUnavailable = false };
+                    Changed?.Invoke(this, _snapshot);
+                }
                 try { await Task.Delay(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
             }
@@ -287,7 +309,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         if (!response.IsSuccessStatusCode)
         {
             var message = TryReadError(body) ?? $"ClypDat activity endpoint rejected the request ({(int)response.StatusCode}).";
-            throw new HttpRequestException(message);
+            throw new HttpRequestException(message, null, response.StatusCode);
         }
         _lastRefresh = DateTimeOffset.UtcNow;
         var result = JsonSerializer.Deserialize<ActivityResponse>(body) ?? throw new InvalidOperationException("ClypDat activity returned no data.");
@@ -355,6 +377,29 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         Directory.CreateDirectory(AppDataPaths.Root);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(token);
         File.WriteAllBytes(_cachePath, ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+    }
+
+    private const string ServerProblemMessage = "Couldn't reach clypdat.xyz. Check your connection, or the status page for an outage.";
+
+    /// <summary>
+    /// The request never got an answer (no network, DNS, a timeout) or the site
+    /// answered with a server error. Rejections the site means - 4xx, a refused
+    /// unlink - are not this: they carry a message the user can act on.
+    /// </summary>
+    private static bool IsServerProblem(Exception error) => error switch
+    {
+        HttpRequestException { StatusCode: null } => true,
+        HttpRequestException { StatusCode: var status } => (int)status >= 500,
+        TaskCanceledException { InnerException: TimeoutException } => true,
+        _ => false,
+    };
+
+    // Keeps whatever the last good refresh knew about linked providers, so an
+    // outage does not make every row look unlinked.
+    private void ReportServerProblem()
+    {
+        _snapshot = _snapshot with { Error = ServerProblemMessage, ServerUnavailable = true };
+        Changed?.Invoke(this, _snapshot);
     }
 
     private void TryDeleteCache() { try { if (File.Exists(_cachePath)) File.Delete(_cachePath); } catch { } }

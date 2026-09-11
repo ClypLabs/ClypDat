@@ -16,7 +16,10 @@ internal sealed record XboxActivitySnapshot(
     DateTimeOffset? UpdatedAt,
     string? Error,
     bool GoogleConnected = false,
-    bool DiscordConnected = false)
+    bool DiscordConnected = false,
+    // Error came from clypdat.xyz being unreachable or failing (network, a
+    // timeout, a 5xx), not from anything the user can fix in the app.
+    bool ServerUnavailable = false)
 {
     public static XboxActivitySnapshot Disconnected { get; } = new(false, null, null, null, null, null);
 }

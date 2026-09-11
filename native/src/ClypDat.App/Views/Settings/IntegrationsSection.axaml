@@ -76,6 +76,13 @@
             <Button Content="Sign out" Click="UnlinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" />
           </StackPanel>
         </Grid>
+        <Border Classes="settingsNotice" IsVisible="{Binding ClypDatServerUnavailable}">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatServerUnavailableText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Content="Service status" Click="ServiceStatusButton_OnClick" VerticalAlignment="Center"
+                    ToolTip.Tip="Open status.clypdat.xyz in your browser." />
+          </Grid>
+        </Border>
       </StackPanel>
     </Border>
 

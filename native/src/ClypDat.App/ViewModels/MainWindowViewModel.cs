@@ -7411,7 +7411,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool XboxIsConnected => EffectiveXboxSnapshot.IsConnected;
     public string ClypDatAccountStatus => _clypDatAccount.IsAuthenticated
         ? _clypDatSnapshot.IsConnected ? "Connected" : "Connected. No Xbox account linked."
-        : _clypDatSnapshot.Error ?? (_clypDatAccountSetupStarted
+        : (_clypDatSnapshot.ServerUnavailable ? null : _clypDatSnapshot.Error) ?? (_clypDatAccountSetupStarted
             ? "After signing in, click Link account here."
             : "Create or sign in first, then link your account here.");
     public string ClypDatXboxStatus => _clypDatSnapshot.IsConnected ? "Linked through ClypDat" : "No Xbox account linked.";
@@ -7440,7 +7440,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool GoogleUnlinkBusy { get => _googleUnlinkBusy; private set { if (_googleUnlinkBusy == value) return; _googleUnlinkBusy = value; OnPropertyChanged(); } }
     public bool DiscordUnlinkBusy { get => _discordUnlinkBusy; private set { if (_discordUnlinkBusy == value) return; _discordUnlinkBusy = value; OnPropertyChanged(); } }
     public bool XboxUnlinkBusy { get => _xboxUnlinkBusy; private set { if (_xboxUnlinkBusy == value) return; _xboxUnlinkBusy = value; OnPropertyChanged(); } }
-    public bool ClypDatAccountHasError => ClypDatAccountIsConnected && !string.IsNullOrWhiteSpace(_clypDatSnapshot.Error);
+    public bool ClypDatAccountHasError => ClypDatAccountIsConnected && !_clypDatSnapshot.ServerUnavailable && !string.IsNullOrWhiteSpace(_clypDatSnapshot.Error);
+    // clypdat.xyz itself is unreachable. Shown on the account card with a link
+    // to the status page, whether or not the user is signed in.
+    public bool ClypDatServerUnavailable => _clypDatSnapshot.ServerUnavailable;
+    public string ClypDatServerUnavailableText => _clypDatSnapshot.ServerUnavailable ? _clypDatSnapshot.Error ?? string.Empty : string.Empty;
+    public void OpenServiceStatus() =>
+        Process.Start(new ProcessStartInfo("https://status.clypdat.xyz") { UseShellExecute = true });
     public bool XboxActivityForDesktop
     {
         get => Settings.XboxActivityEnabled;
@@ -7592,6 +7598,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasLinkedAccounts));
         OnPropertyChanged(nameof(ClypDatAccountError));
         OnPropertyChanged(nameof(ClypDatAccountHasError));
+        OnPropertyChanged(nameof(ClypDatServerUnavailable));
+        OnPropertyChanged(nameof(ClypDatServerUnavailableText));
         OnPropertyChanged(nameof(XboxConnectionStatus));
         OnPropertyChanged(nameof(XboxCurrentTitle));
         OnPropertyChanged(nameof(XboxIsConnected));

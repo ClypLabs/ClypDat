@@ -7772,7 +7772,7 @@ public sealed partial class MainWindow : Window
             {
                 AppLog.Error("Update check failed", error);
                 if (presentation == UpdateCheckPresentation.Dialog)
-                    await ShowMessageAsync("Update check failed", error.Message);
+                    await ShowMessageAsync("Update check failed", $"{error.Message}\n\nIf it keeps failing, status.clypdat.xyz shows whether ClypDat's servers are down.");
                 return;
             }
         }
