@@ -37,6 +37,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     {
         TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(3),
     };
+    private static readonly TimeSpan DiscordProfileInterval = TimeSpan.FromMinutes(30);
     private int _idleRefreshes;
     private CancellationTokenSource? _pollCts;
     private readonly SemaphoreSlim _pollWake = new(0, 1);
@@ -252,8 +253,11 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         // clears by itself once the outage is over.
         if (_snapshot.ServerUnavailable) return TimeSpan.FromMinutes(1);
         // Nothing to watch for: park until woken (a link, the window coming
-        // back, or LiveActivityNeedChanged) instead of refreshing on a timer.
-        if (!IsLiveActivityNeeded) return Timeout.InfiniteTimeSpan;
+        // back, or LiveActivityNeedChanged) instead of refreshing on a timer -
+        // except that a Discord account is asked about every 30 minutes, which
+        // is when the site rechecks the Discord name and picture. The site
+        // answers that from its cache unless something changed.
+        if (!IsLiveActivityNeeded) return _snapshot.DiscordConnected ? DiscordProfileInterval : Timeout.InfiniteTimeSpan;
         if (_snapshot.CurrentTitle is not null) return TimeSpan.FromSeconds(15);
         return IdleBackoff[Math.Min(_idleRefreshes, IdleBackoff.Length - 1)];
     }
@@ -293,10 +297,15 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
     }
 
-    public async Task RefreshAsync(CancellationToken cancellationToken = default)
+    /// <param name="refreshProfile">
+    /// Ask the site to re-read the Discord name and picture now rather than at
+    /// its next 30-minute check - the Refresh button. The change is saved to the
+    /// account, so the website shows it too.
+    /// </param>
+    public async Task RefreshAsync(CancellationToken cancellationToken = default, bool refreshProfile = false)
     {
         if (_token is null) throw new InvalidOperationException("ClypDat account is not authenticated.");
-        using var request = new HttpRequestMessage(HttpMethod.Get, "api/desktop/xbox/activity");
+        using var request = new HttpRequestMessage(HttpMethod.Get, refreshProfile ? "api/desktop/xbox/activity?profile=refresh" : "api/desktop/xbox/activity");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token.AccessToken);
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.Unauthorized)

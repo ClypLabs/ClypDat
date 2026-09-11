@@ -7568,7 +7568,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task RefreshClypDatAccountAsync()
     {
         if (!_clypDatAccount.IsAuthenticated) return;
-        try { await _clypDatAccount.RefreshAsync().ConfigureAwait(false); }
+        // The Refresh button also pulls the Discord name and picture right away.
+        try { await _clypDatAccount.RefreshAsync(refreshProfile: true).ConfigureAwait(false); }
         catch (Exception error) { AppLog.Error("ClypDat account: manual refresh failed.", error); }
     }
 

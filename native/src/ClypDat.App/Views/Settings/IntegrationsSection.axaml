@@ -82,7 +82,7 @@
                     IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}"
                     IsEnabled="{Binding ClypDatAccountCanLink}" />
             <Button Content="Refresh" Click="RefreshClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}"
-                    ToolTip.Tip="Re-read your linked providers from clypdat.xyz." />
+                    ToolTip.Tip="Re-read your linked accounts and pull your current Discord name and picture. ClypDat also checks Discord every 30 minutes." />
             <Button Content="Sign out" Click="UnlinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" />
           </StackPanel>
         </Grid>
