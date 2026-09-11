@@ -672,11 +672,11 @@
                         <TextBlock Grid.Column="0" Text="{Binding LibraryDriveFreeOfTotalDisplay}" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="15" />
                         <TextBlock Grid.Column="1" Text="{Binding LibraryDriveUsedPercentDisplay}" Foreground="{StaticResource Text_93A6B8}" FontSize="12" VerticalAlignment="Center" />
                       </Grid>
-                      <Border Width="260" Height="8" CornerRadius="4" Background="{StaticResource Surface_26313C}" HorizontalAlignment="Left">
+                      <Border Width="320" Height="8" CornerRadius="4" Background="{StaticResource Surface_26313C}" HorizontalAlignment="Left">
                         <StackPanel Orientation="Horizontal">
-                          <Border Width="{Binding LibraryUsedFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=260}"
+                          <Border Width="{Binding LibraryUsedFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=320}"
                                   Height="8" CornerRadius="4" Background="{StaticResource Semantic_2FD9A8}" />
-                          <Border Width="{Binding LibraryOtherUsedFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=260}"
+                          <Border Width="{Binding LibraryOtherUsedFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=320}"
                                   Height="8" Background="{StaticResource AccentBrush}" />
                         </StackPanel>
                       </Border>
