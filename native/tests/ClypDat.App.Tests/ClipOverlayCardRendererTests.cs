@@ -19,116 +19,105 @@ public sealed class ClipOverlayCardRendererTests
     public void RasterUsesCurrentThemeFontDpiAndMeasuredWrapping()
     {
         if (!OperatingSystem.IsWindows()) return;
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        AvaloniaTestThread.Run(() =>
         {
-            try
-            {
-                AppBuilder.Configure<ClypDat.App.App>().UsePlatformDetect().WithInterFont().SetupWithoutStarting();
-                var application = Application.Current!;
-                application.Resources["AccentBrush"] = new SolidColorBrush(Colors.Blue);
-                application.Resources["ClypDatFontFamily"] = new FontFamily("fonts:Inter#Inter, $Default");
-                AssertOnboardingLayout();
-                var now = DateTime.UtcNow;
-                var presentation = new ClipOverlayPresentation(1, new ClipOverlayEvent(Guid.NewGuid(), 0, now, now,
-                    80, ClipOverlayKind.Saved, "Clip Saved", null,
-                    new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040),
-                        1, ClipOverlayTargetReason.Primary), ClipOverlayPlacement.TopRight, true));
+            var application = Application.Current!;
+            application.Resources["AccentBrush"] = new SolidColorBrush(Colors.Blue);
+            application.Resources["ClypDatFontFamily"] = new FontFamily("fonts:Inter#Inter, $Default");
+            AssertOnboardingLayout();
+            var now = DateTime.UtcNow;
+            var presentation = new ClipOverlayPresentation(1, new ClipOverlayEvent(Guid.NewGuid(), 0, now, now,
+                80, ClipOverlayKind.Saved, "Clip Saved", null,
+                new ClipOverlayTarget("DISPLAY1", new PixelRect(0, 0, 1920, 1080), new PixelRect(0, 0, 1920, 1040),
+                    1, ClipOverlayTargetReason.Primary), ClipOverlayPlacement.TopRight, true));
 
-                foreach (var theme in new[] { "Emerald", "Berry", "Light" })
+            foreach (var theme in new[] { "Emerald", "Berry", "Light" })
+            {
+                AppThemeService.Apply(application, theme, Colors.Blue, false);
+                foreach (var placement in Enum.GetValues<ClipOverlayPlacement>())
                 {
-                    AppThemeService.Apply(application, theme, Colors.Blue, false);
-                    foreach (var placement in Enum.GetValues<ClipOverlayPlacement>())
+                    foreach (var scaling in new[] { 1d, 1.5d })
                     {
-                        foreach (var scaling in new[] { 1d, 1.5d })
+                        var frame = ClipOverlayCardRenderer.Render(presentation with
                         {
-                            var frame = ClipOverlayCardRenderer.Render(presentation with
+                            Event = presentation.Event with
                             {
-                                Event = presentation.Event with
-                                {
-                                    Placement = placement,
-                                    Target = presentation.Event.Target with { Scaling = scaling }
-                                }
-                            });
-                            Assert.Equal((int)Math.Ceiling(220 * scaling), frame.Width);
-                            Assert.Equal((int)Math.Ceiling(58 * scaling), frame.Height);
-                            AssertAccentAndSilhouette(application, frame, placement, scaling);
-                            AssertTitleFits(application, frame, scaling);
-                            AssertPremultiplied(frame);
-                        }
+                                Placement = placement,
+                                Target = presentation.Event.Target with { Scaling = scaling }
+                            }
+                        });
+                        Assert.Equal((int)Math.Ceiling(220 * scaling), frame.Width);
+                        Assert.Equal((int)Math.Ceiling(58 * scaling), frame.Height);
+                        AssertAccentAndSilhouette(application, frame, placement, scaling);
+                        AssertTitleFits(application, frame, scaling);
+                        AssertPremultiplied(frame);
                     }
                 }
-
-                var original = ClipOverlayCardRenderer.Render(presentation);
-                application.Resources["ClypDatFontFamily"] = new FontFamily("Courier New");
-                var changedFont = ClipOverlayCardRenderer.Render(presentation);
-                Assert.False(original.Pixels.AsSpan().SequenceEqual(changedFont.Pixels));
-                application.Resources["ClypDatFontFamily"] = new FontFamily("fonts:Inter#Inter, $Default");
-
-                var wrapped = ClipOverlayCardRenderer.Render(presentation with
-                {
-                    Event = presentation.Event with { Detail = new string('W', 80) }
-                });
-                Assert.True(wrapped.Height > original.Height);
-                var scaled = ClipOverlayCardRenderer.Render(presentation with
-                {
-                    Event = presentation.Event with { Target = presentation.Event.Target with { Scaling = 1.5 } }
-                });
-                Assert.Equal(330, scaled.Width);
-                Assert.Equal(87, scaled.Height);
-                var failed = ClipOverlayCardRenderer.Render(presentation with
-                {
-                    Event = presentation.Event with { Kind = ClipOverlayKind.Failure }
-                });
-                Assert.Equal(BrushColor(application, "DangerBrush"), Pixel(failed, 2, 20));
-
-                AppThemeService.Apply(application, "Emerald", Colors.Blue, false);
-                var recording = presentation.Event with
-                {
-                    Kind = ClipOverlayKind.GameStarted, Title = "Recording: Doom", Detail = null
-                };
-                var bare = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(2, recording));
-                var chipped = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(3,
-                    recording with { Hotkey = "Ctrl+Shift+F9", HotkeyHint = "to save a clip" }));
-                Assert.True(chipped.Height > bare.Height, "The keycap row has to add a second line.");
-                Assert.False(bare.Pixels.AsSpan().SequenceEqual(chipped.Pixels));
-
-                // The regression this design restores: a long game name widens
-                // the card instead of wrapping onto a second title line.
-                var shortTitle = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(4,
-                    recording with { Hotkey = "Insert", HotkeyHint = "to save a clip" }));
-                var longTitle = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(5,
-                    recording with { Title = "Recording: HELLDIVERS™ 2", Hotkey = "Insert", HotkeyHint = "to save a clip" }));
-                Assert.True(longTitle.Width > shortTitle.Width, "The card has to size itself to the title.");
-                Assert.Equal(shortTitle.Height, longTitle.Height);
-
-                var richNotification = recording with
-                {
-                    Title = "Recording: HELLDIVERS™ 2",
-                    Hotkey = "Ctrl+Shift+F9",
-                    HotkeyHint = "to save a clip"
-                };
-                foreach (var placement in Enum.GetValues<ClipOverlayPlacement>())
-                foreach (var scaling in new[] { 1d, 1.5d })
-                {
-                    var frame = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(6, richNotification with
-                    {
-                        Placement = placement,
-                        Target = richNotification.Target with { Scaling = scaling }
-                    }));
-                    Assert.True(frame.Width > 220 * scaling, "Long titles must remain on one line.");
-                    Assert.True(frame.Height > 58 * scaling, "Hotkey chips must add a row.");
-                    AssertAccentAndSilhouette(application, frame, placement, scaling);
-                }
-                SpotifyFrameChecks.Run();
             }
-            catch (Exception error) { failure = error; }
-        }) { IsBackground = true };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "Offscreen rasterization timed out.");
 
-        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+            var original = ClipOverlayCardRenderer.Render(presentation);
+            application.Resources["ClypDatFontFamily"] = new FontFamily("Courier New");
+            var changedFont = ClipOverlayCardRenderer.Render(presentation);
+            Assert.False(original.Pixels.AsSpan().SequenceEqual(changedFont.Pixels));
+            application.Resources["ClypDatFontFamily"] = new FontFamily("fonts:Inter#Inter, $Default");
+
+            var wrapped = ClipOverlayCardRenderer.Render(presentation with
+            {
+                Event = presentation.Event with { Detail = new string('W', 80) }
+            });
+            Assert.True(wrapped.Height > original.Height);
+            var scaled = ClipOverlayCardRenderer.Render(presentation with
+            {
+                Event = presentation.Event with { Target = presentation.Event.Target with { Scaling = 1.5 } }
+            });
+            Assert.Equal(330, scaled.Width);
+            Assert.Equal(87, scaled.Height);
+            var failed = ClipOverlayCardRenderer.Render(presentation with
+            {
+                Event = presentation.Event with { Kind = ClipOverlayKind.Failure }
+            });
+            Assert.Equal(BrushColor(application, "DangerBrush"), Pixel(failed, 2, 20));
+
+            AppThemeService.Apply(application, "Emerald", Colors.Blue, false);
+            var recording = presentation.Event with
+            {
+                Kind = ClipOverlayKind.GameStarted, Title = "Recording: Doom", Detail = null
+            };
+            var bare = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(2, recording));
+            var chipped = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(3,
+                recording with { Hotkey = "Ctrl+Shift+F9", HotkeyHint = "to save a clip" }));
+            Assert.True(chipped.Height > bare.Height, "The keycap row has to add a second line.");
+            Assert.False(bare.Pixels.AsSpan().SequenceEqual(chipped.Pixels));
+
+            // The regression this design restores: a long game name widens
+            // the card instead of wrapping onto a second title line.
+            var shortTitle = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(4,
+                recording with { Hotkey = "Insert", HotkeyHint = "to save a clip" }));
+            var longTitle = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(5,
+                recording with { Title = "Recording: HELLDIVERS™ 2", Hotkey = "Insert", HotkeyHint = "to save a clip" }));
+            Assert.True(longTitle.Width > shortTitle.Width, "The card has to size itself to the title.");
+            Assert.Equal(shortTitle.Height, longTitle.Height);
+
+            var richNotification = recording with
+            {
+                Title = "Recording: HELLDIVERS™ 2",
+                Hotkey = "Ctrl+Shift+F9",
+                HotkeyHint = "to save a clip"
+            };
+            foreach (var placement in Enum.GetValues<ClipOverlayPlacement>())
+            foreach (var scaling in new[] { 1d, 1.5d })
+            {
+                var frame = ClipOverlayCardRenderer.Render(new ClipOverlayPresentation(6, richNotification with
+                {
+                    Placement = placement,
+                    Target = richNotification.Target with { Scaling = scaling }
+                }));
+                Assert.True(frame.Width > 220 * scaling, "Long titles must remain on one line.");
+                Assert.True(frame.Height > 58 * scaling, "Hotkey chips must add a row.");
+                AssertAccentAndSilhouette(application, frame, placement, scaling);
+            }
+            SpotifyFrameChecks.Run();
+        }, TimeSpan.FromSeconds(60), "Offscreen rasterization timed out.");
     }
 
     private static uint BrushColor(Application application, string key)

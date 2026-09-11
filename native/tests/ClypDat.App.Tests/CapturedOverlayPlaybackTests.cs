@@ -14,41 +14,31 @@ public sealed class CapturedOverlayPlaybackTests
     public void ValidCameraCoverage_ContinuesAtRecordedCadenceAcrossNormalPlaybackTicks()
     {
         using var fixture = new CameraFixture();
-        Exception? failure = null;
-        var thread = new Thread(() =>
+        AvaloniaTestThread.Run(() =>
         {
-            try
+            using var playback = new CapturedOverlayPlayback();
+            var received = 0;
+            var missing = 0;
+            var frames = new List<Avalonia.Media.Imaging.Bitmap>();
+            playback.FrameReady += bitmap =>
             {
-                AppBuilder.Configure<ClypDat.App.App>().UsePlatformDetect().WithInterFont().SetupWithoutStarting();
-                using var playback = new CapturedOverlayPlayback();
-                var received = 0;
-                var missing = 0;
-                var frames = new List<Avalonia.Media.Imaging.Bitmap>();
-                playback.FrameReady += bitmap =>
-                {
-                    if (bitmap is null) missing++;
-                    else { received++; frames.Add(bitmap); }
-                };
-                var layer = new ClipOverlayLayer("Camera", true, Assets: [new ClipOverlayAsset("camera.mp4", 0, 2)]);
-                playback.Request(fixture.Root, layer, 0);
-                PumpUntil(() => received > 0, TimeSpan.FromSeconds(8));
-                var initial = received;
-                for (var index = 1; index <= 30; index++)
-                {
-                    playback.Request(fixture.Root, layer, index / 60d);
-                    var until = Stopwatch.StartNew();
-                    while (until.ElapsedMilliseconds < 17) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(1); }
-                }
-                Assert.Equal(0, missing);
-                foreach (var frame in frames) frame.Dispose();
-                Assert.True(received - initial >= 27, $"Expected recorded 60fps cadence; received {received - initial} camera frames across 30 ticks.");
+                if (bitmap is null) missing++;
+                else { received++; frames.Add(bitmap); }
+            };
+            var layer = new ClipOverlayLayer("Camera", true, Assets: [new ClipOverlayAsset("camera.mp4", 0, 2)]);
+            playback.Request(fixture.Root, layer, 0);
+            PumpUntil(() => received > 0, TimeSpan.FromSeconds(8));
+            var initial = received;
+            for (var index = 1; index <= 30; index++)
+            {
+                playback.Request(fixture.Root, layer, index / 60d);
+                var until = Stopwatch.StartNew();
+                while (until.ElapsedMilliseconds < 17) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(1); }
             }
-            catch (Exception error) { failure = error; }
-        }) { IsBackground = true };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(20)), "Camera playback regression timed out.");
-        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+            Assert.Equal(0, missing);
+            foreach (var frame in frames) frame.Dispose();
+            Assert.True(received - initial >= 27, $"Expected recorded 60fps cadence; received {received - initial} camera frames across 30 ticks.");
+        }, TimeSpan.FromSeconds(20), "Camera playback regression timed out.");
     }
 
     // The three segment shapes a clip produces. Camera playback used to divide a

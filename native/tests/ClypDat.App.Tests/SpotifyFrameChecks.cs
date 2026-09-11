@@ -330,7 +330,11 @@ internal static class SpotifyFrameChecks
             Assert.Equal(320 * 111 * 4 * 30, movedRaw.Length);
             Assert.Equal(SpotifyOverlayOutcome.Completed, SpotifyOverlayBurner.BurnAsync(movedClip, movedAnimation).GetAwaiter().GetResult());
             var movedPixels = ReadPixels(movedClip, "-f", "rawvideo", "-pix_fmt", "rgb24");
-            var movedArtwork = (220 * 640 + 324) * 3;
+            // The card's centre (x=240) is left of the frame's middle, so its artwork
+            // sits on the left - the outer edge (SpotifyOverlayLayout.IsRight). This
+            // used to probe the right-hand side, from before placed cards chose a side
+            // by where they are rather than by their original corner.
+            var movedArtwork = (200 * 640 + 100) * 3;
             Assert.True(Math.Abs(movedPixels[movedArtwork] - movedPixels[movedArtwork + 1]) < 12);
             Assert.True(movedPixels[firstOffset + 1] > movedPixels[firstOffset] + 60);
             var movedUnavailable = 29 * 640 * 360 * 3 + movedArtwork;
@@ -348,7 +352,9 @@ internal static class SpotifyFrameChecks
                 "-i", scaledAnimation.Path, "-filter_complex", graph, "-map", "[video]", "-an", "-t", "0.5",
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", scaledClip).ContinueWith(task => { task.GetAwaiter().GetResult(); return true; }));
             var scaledPixels = ReadPixels(scaledClip, "-f", "rawvideo", "-pix_fmt", "rgb24");
-            var scaledArtwork = (110 * 320 + 162) * 3;
+            // Same card at half size in a 320x180 export: still left of centre, so
+            // its artwork is on the left too.
+            var scaledArtwork = (110 * 320 + 60) * 3;
             Assert.True(Math.Abs(scaledPixels[scaledArtwork] - scaledPixels[scaledArtwork + 1]) < 12);
             var scaledOldCorner = (12 * 320 + 306) * 3;
             Assert.True(scaledPixels[scaledOldCorner + 1] > scaledPixels[scaledOldCorner] + 60);

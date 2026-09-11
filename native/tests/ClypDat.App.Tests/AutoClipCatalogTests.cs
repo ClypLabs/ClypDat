@@ -119,7 +119,8 @@ public sealed class AutoClipCatalogTests
         // 9 records clip-relative input and camera source mappings.
         // replay duration rather than retained media timing.
         // older install is rejected rather than answering without it.
-        Assert.Equal(10, CaptureWorkerProtocol.Version);
+        // 11 carries the overlay recording mode (editable layers or burned in).
+        Assert.Equal(11, CaptureWorkerProtocol.Version);
         Assert.Equal(1, DetectorHostProtocol.Version);
         Assert.Equal(3, DetectorHostProtocol.FrameSlotCount);
         Assert.Equal(10, DetectorHostProtocol.MaximumFramesPerSecond);

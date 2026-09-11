@@ -19,7 +19,7 @@ public sealed class CaptureWorkerSaveProtocolTests
         Assert.DoesNotContain("settingsJson", json, StringComparison.Ordinal);
         Assert.Contains("camera-1", json, StringComparison.Ordinal);
         Assert.Equal(payload, JsonSerializer.Deserialize<OverlayCaptureSettings>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
-        Assert.Equal(10, CaptureWorkerProtocol.Version);
+        Assert.Equal(11, CaptureWorkerProtocol.Version);
     }
 
     [Fact]
