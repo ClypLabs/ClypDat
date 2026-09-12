@@ -1580,6 +1580,7 @@
                       PointerMoved="TimelineSurface_OnPointerMoved"
                       PointerReleased="TimelineSurface_OnPointerReleased"
                       PointerCaptureLost="TimelineSurface_OnPointerCaptureLost">
+                  <StackPanel>
                   <ItemsControl ItemsSource="{Binding TimelineTracks}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -1606,6 +1607,8 @@
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
+                    <controls:TimedEffectTimeline x:Name="TimedEffectLanes" />
+                  </StackPanel>
 
                   <Canvas x:Name="TimelineOverlay" IsHitTestVisible="False">
                     <!-- Per-lane dimming for the excluded-from-trim portion is
@@ -1907,29 +1910,9 @@
                   </StackPanel>
                 </Border>
 
-                <!-- Disabled rather than absent. The editor has advertised
-                     "crop, blur, text, speed" for a while; naming what is not
-                     here yet beats a sidebar that silently has less in it than
-                     the last screenshot the user saw. -->
-                <Border Classes="editorInspectorCard effectPending">
-                  <StackPanel Spacing="4">
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Text="TEXT" Classes="editorCardLabel" VerticalAlignment="Center" />
-                      <Border Grid.Column="1" Classes="comingSoonTag"><TextBlock Text="SOON" /></Border>
-                    </Grid>
-                    <TextBlock Text="Burned-in captions and callouts." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
-                  </StackPanel>
-                </Border>
-
-                <Border Classes="editorInspectorCard effectPending">
-                  <StackPanel Spacing="4">
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Text="BLUR" Classes="editorCardLabel" VerticalAlignment="Center" />
-                      <Border Grid.Column="1" Classes="comingSoonTag"><TextBlock Text="SOON" /></Border>
-                    </Grid>
-                    <TextBlock Text="Hide a name, a stream key, or a corner of the HUD." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
-                  </StackPanel>
-                </Border>
+                <Border Classes="editorInspectorCard"><controls:TimedEffectEditor /></Border>
+                <Border Classes="editorInspectorCard"><controls:TimedEffectEditor Blur="True" /></Border>
+                <TextBlock Text="Save Trim retains editable text and blur. Export and Share apply them permanently." TextWrapping="Wrap" FontSize="11" />
 
                 <Button Content="Reset effects" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                         Height="34" IsEnabled="{Binding HasClipEffects}" Click="ResetClipEffectsButton_OnClick" />

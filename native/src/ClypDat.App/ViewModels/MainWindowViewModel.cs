@@ -27,7 +27,7 @@ public enum EditorSidebarSection
 
 internal readonly record struct LibraryStartupDateMarker(string Text, int FirstVisibleIndex, int Count);
 
-public sealed class MainWindowViewModel : ViewModelBase, IDisposable
+public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly SteamGameLibrary _steamGames = SteamGameLibrary.Shared;
     private const int CurrentThumbnailStartFrameVersion = 1;
@@ -727,7 +727,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     // gap, a 34px ruler, then fixed lane heights plus separators. The outer
     // editor grid needs this explicit measured child because the real timeline
     // spans both rows underneath the clip-details column.
-    public double EditorTimelineHeight => 22 + 68 + 34 +
+    public double EditorTimelineHeight => 22 + 68 + 34 + 26 * (TimedEffectState.Rows(TextEffects) + TimedEffectState.Rows(BlurEffects)) +
         TimelineTracks.Sum(track => track.LaneHeight + track.LaneMargin.Bottom);
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }
@@ -4195,8 +4195,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         get => _clipCropMode;
         set
         {
+            var oldCrop = ActiveCropRect ?? new ClipRenderFilters.CropRect(0, 0, SelectedSourceWidth, SelectedSourceHeight);
             var normalized = ClipRenderFilters.NormalizeCropMode(value);
             if (!SetProperty(ref _clipCropMode, normalized)) return;
+            if (!_suppressClipEditSave && SelectedSourceWidth > 0 && SelectedSourceHeight > 0)
+            {
+                var newCrop = ActiveCropRect ?? new ClipRenderFilters.CropRect(0, 0, SelectedSourceWidth, SelectedSourceHeight);
+                foreach (var list in new[] { TextEffects, BlurEffects })
+                    for (var i = 0; i < list.Count; i++) list[i] = TimedEffectState.Reproject(list[i], oldCrop, newCrop);
+                TimedEffectsChanged?.Invoke(this, EventArgs.Empty);
+            }
             OnPropertyChanged(nameof(IsClipCropActive));
             OnEditorEffectsChanged();
             // Card thumbnails must show the selected aspect, not the original
@@ -4215,7 +4223,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsClipCropActive => !string.Equals(ClipCropMode, ClipRenderFilters.NoCrop, StringComparison.Ordinal);
     public bool IsClipSpeedActive => ClipRenderFilters.IsSpeedActive(ClipSpeed);
-    public bool HasClipEffects => IsClipCropActive || IsClipSpeedActive;
+    public bool HasClipEffects => IsClipCropActive || IsClipSpeedActive || TextEffects.Count > 0 || BlurEffects.Count > 0;
 
     public string ClipSpeedLabel => $"{ClipSpeed.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x";
 
@@ -4245,12 +4253,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var parts = new List<string>();
             if (IsClipCropActive) parts.Add(ClipCropMode);
             if (IsClipSpeedActive) parts.Add(ClipSpeedLabel);
+            if (TextEffects.Count > 0) parts.Add($"{TextEffects.Count} text");
+            if (BlurEffects.Count > 0) parts.Add($"{BlurEffects.Count} blur");
             return string.Join("  ·  ", parts);
         }
     }
 
     public void ResetClipEffects()
     {
+        TextEffects.Clear();
+        BlurEffects.Clear();
+        NotifyTimedEffectsChanged();
         ClipSpeed = 1.0;
         ClipCropMode = ClipRenderFilters.NoCrop;
     }
@@ -4316,7 +4329,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (overlays.Spotify is { } card)
         {
             args.Add("-i"); args.Add(card.Path);
-            composites.Add(new(card.Bounds, null, true, $"[{index}:v:0]"));
+            composites.Add(new(card.Bounds, null, true, $"[{index++}:v:0]"));
+        }
+        if (overlays.Effects is { } effects)
+        {
+            foreach (var blur in effects.Blur)
+                composites.Add(new(blur.Bounds, blur.Enable, false, "", blur.Sigma));
+            foreach (var text in effects.Text)
+            {
+                args.AddRange(new[] { "-loop", "1", "-i", text.Path });
+                composites.Add(new(text.Bounds, text.Enable, true, $"[{index++}:v:0]", StillImage: true));
+            }
         }
         return composites;
     }
@@ -4369,13 +4392,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     public async Task<ClipOverlayRender?> PrepareOverlayRenderAsync(int width, int height, CancellationToken token)
     {
-        var spotify = await PrepareSpotifyAnimationAsync(token).ConfigureAwait(false);
+        var texts = TextEffects.ToArray();
+        var blurs = BlurEffects.ToArray();
+        var start = TrimStart.TotalSeconds;
+        var end = (TrimEnd > TrimStart ? TrimEnd : Duration).TotalSeconds;
+        var speed = ClipSpeed;
         var spec = CaptureOverlayBurnSpec();
+        var spotifySpec = CaptureSpotifyRenderSpec();
+        var effects = await TimedEffectRender.PrepareAsync(texts, blurs, start, end, speed, width, height, token);
+        SpotifyOverlayAnimation? spotify = null;
+        try
+        {
+        spotify = spotifySpec is null ? null : await SpotifyOverlayAnimation.PrepareAsync(spotifySpec, token).ConfigureAwait(false);
         var captured = spec is null
             ? (Camera: null, Keyboard: (ClipOverlayBurnLayer?)null)
             : await ClipOverlayBurn.PrepareAsync(spec, width, height, token).ConfigureAwait(false);
-        var render = new ClipOverlayRender { Spotify = spotify, Camera = captured.Camera, Keyboard = captured.Keyboard };
+        var render = new ClipOverlayRender { Spotify = spotify, Camera = captured.Camera, Keyboard = captured.Keyboard, Effects = effects };
         return render.IsEmpty ? null : render;
+        }
+        catch { effects.Dispose(); spotify?.Dispose(); throw; }
     }
 
     /// <summary>The output frame an Export writes, which is the cropped source.</summary>
@@ -5341,6 +5376,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 .Where(track => track.IsAudio && track.IsMuted)
                 .Select(track => track.StreamIndex)
                 .ToHashSet(),
+            TextEffects = TextEffects.ToList(),
+            BlurEffects = BlurEffects.ToList(),
             Description = EditorDescription ?? string.Empty,
             SpeedMultiplier = ClipSpeed,
             CropMode = ClipCropMode,
@@ -5353,7 +5390,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             PeripheralOverlayVisible = PeripheralOverlayLayerVisible,
             PeripheralOverlayTransform = PeripheralOverlayTransform
         };
-        ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, edit);
+        ClipEditSidecar.Save(Settings.LibraryFolder, SelectedVideoPath, edit, throwOnFailure: true);
 
         // The library card caches this clip's edit state and only reloaded it
         // on construction or a full refresh, so everything derived from it went
@@ -6584,7 +6621,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // and exported would come out at 4x. Suppressed while resetting so this
         // does not restore baked effects into the reset sidecar.
         _suppressClipEditSave = true;
-        try { ResetClipEffects(); }
+        try
+        {
+            ClipSpeed = 1;
+            ClipCropMode = ClipRenderFilters.NoCrop;
+            var saved = ClipEditSidecar.Load(Settings.LibraryFolder, path);
+            TextEffects.Clear(); BlurEffects.Clear();
+            foreach (var e in saved?.TextEffects ?? []) TextEffects.Add(e);
+            foreach (var e in saved?.BlurEffects ?? []) BlurEffects.Add(e);
+            NotifyTimedEffectsChanged();
+        }
         finally { _suppressClipEditSave = false; }
         await AddOrUpdateLibraryClipAsync(path);
     }
@@ -9194,6 +9240,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _suppressClipEditSave = true;
         try
         {
+            TextEffects.Clear();
+            BlurEffects.Clear();
+            foreach (var effect in edit.TextEffects ?? []) TextEffects.Add(effect);
+            foreach (var effect in edit.BlurEffects ?? []) BlurEffects.Add(effect);
+            NotifyTimedEffectsChanged();
             ClipSpeed = ClipRenderFilters.NormalizeSpeed(edit.SpeedMultiplier);
             ClipCropMode = ClipRenderFilters.NormalizeCropMode(edit.CropMode);
             // Unconditional, not left to the setters: opening a second clip with

@@ -258,6 +258,29 @@ public sealed class PlaybackSession : IDisposable
 
     public Task LoadVideoAsync(string path, bool replayArmed = false) => LoadVideoAsync(path, string.Empty, replayArmed);
 
+    public async Task ReplaceVideoAsync(string sourcePath, string videoPath, TimeSpan position, bool playing, CancellationToken token)
+    {
+        using (var load = await _loadGate.EnterAsync(token).ConfigureAwait(false))
+        {
+            token.ThrowIfCancellationRequested();
+            if (!string.Equals(LoadedPath, sourcePath, StringComparison.OrdinalIgnoreCase)) return;
+            var rate = _playbackRate;
+            Stop();
+            DisposeMedia();
+            _videoMedia = new Media(_libVlc, new Uri(videoPath));
+            _videoMedia.AddOption(":no-audio");
+            _videoMedia.AddOption(":avcodec-hw=none");
+            VideoPlayer.Media = _videoMedia;
+            VideoPlayer.Mute = true;
+            VideoPlayer.Volume = 0;
+            _cropMaskPath = null;
+            _playbackRate = 1;
+            SetPlaybackRate(rate);
+            var seek = await SeekAsync(position, playing, token).ConfigureAwait(false);
+            if (seek.Outcome == PlaybackSeekOutcome.Failed) throw new InvalidOperationException("Cannot open effect preview video. Try editing the effect again.");
+        }
+    }
+
     internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false, CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
         using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);

@@ -16,18 +16,42 @@ public static class ClipEditSidecar
         return LibraryLayout.SidecarPath(libraryRoot, clipPath, ".json");
     }
 
-    public static void Save(string libraryRoot, string clipPath, ClipEditSettings edit)
+    public static void Save(string libraryRoot, string clipPath, ClipEditSettings edit, bool throwOnFailure = false)
     {
         try
         {
             var sidecarPath = SidecarPath(libraryRoot, clipPath);
             Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
-            File.WriteAllText(sidecarPath, JsonSerializer.Serialize(edit, SerializerOptions));
+            var bytes = SerializeValidated(edit);
+            var temp = sidecarPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try { File.WriteAllBytes(temp, bytes); File.Move(temp, sidecarPath, true); }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
         }
         catch (Exception error)
         {
             AppLog.Error($"Clip edit sidecar save failed: {clipPath}", error);
+            if (throwOnFailure) throw new IOException("Cannot save clip edits. Check free space and library permissions.", error);
         }
+    }
+
+    public static byte[] SerializeValidated(ClipEditSettings edit)
+    {
+        TimedEffectState.Validate(edit.TextEffects ?? []);
+        TimedEffectState.Validate(edit.BlurEffects ?? []);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(edit, SerializerOptions);
+        if (bytes.Length > MaximumSidecarBytes) throw new InvalidDataException("Clip edits exceed 64 KB. Shorten captions or remove effects.");
+        return bytes;
+    }
+
+    public static ClipEditSettings RebaseAfterTrim(ClipEditSettings previous)
+    {
+        var end = previous.TrimEndSeconds;
+        previous.TextEffects = TimedEffectState.Rebase(previous.TextEffects, previous.TrimStartSeconds, end, previous.SpeedMultiplier);
+        previous.BlurEffects = TimedEffectState.Rebase(previous.BlurEffects, previous.TrimStartSeconds, end, previous.SpeedMultiplier);
+        previous.TrimStartSeconds = previous.TrimEndSeconds = 0;
+        previous.SpeedMultiplier = 1;
+        previous.CropMode = ClipRenderFilters.NoCrop;
+        return previous;
     }
 
     public static ClipEditSettings? Load(string libraryRoot, string clipPath)
@@ -127,6 +151,8 @@ public static class ClipEditSidecar
         // the independent overlay and the description remain editor state.
         Save(libraryRoot, clipPath, new ClipEditSettings
         {
+            TextEffects = previous.TextEffects,
+            BlurEffects = previous.BlurEffects,
             Description = previous.Description,
             TrackVolumes = previous.TrackVolumes,
             MutedTrackIndexes = previous.MutedTrackIndexes,

@@ -111,7 +111,7 @@ public static class ClipRenderFilters
 
     /// <summary>One overlay input in the graph: which FFmpeg input it is, where
     /// it goes, and when it is visible.</summary>
-    public readonly record struct OverlayComposite(SpotifyOverlayBounds Bounds, string? Enable, bool StraightAlpha, string InputLabel);
+    public readonly record struct OverlayComposite(SpotifyOverlayBounds Bounds, string? Enable, bool StraightAlpha, string InputLabel, double BlurSigma = 0, bool StillImage = false);
 
     /// <summary>
     /// Chains any number of overlay inputs over the effects chain. The input
@@ -128,10 +128,18 @@ public static class ClipRenderFilters
         {
             var layer = layers[i];
             var next = i == layers.Count - 1 ? outputLabel ?? string.Empty : $"[ovs{i}]";
+            if (layer.BlurSigma > 0)
+            {
+                graph.Append($";{current}split[blurbase{i}][blurcut{i}];[blurcut{i}]crop={layer.Bounds.Width}:{layer.Bounds.Height}:{layer.Bounds.X}:{layer.Bounds.Y}:exact=1,gblur=sigma={Format(layer.BlurSigma)}[blurred{i}]");
+                graph.Append($";[blurbase{i}][blurred{i}]overlay={layer.Bounds.X}:{layer.Bounds.Y}:enable='{layer.Enable}'{next}");
+                current = next;
+                continue;
+            }
             graph.Append($";{layer.InputLabel}scale={layer.Bounds.Width}:{layer.Bounds.Height}:flags=lanczos[ovl{i}]");
             graph.Append($";{current}[ovl{i}]overlay={layer.Bounds.X}:{layer.Bounds.Y}");
             if (!string.IsNullOrWhiteSpace(layer.Enable)) graph.Append($":enable='{layer.Enable}'");
             graph.Append(":eof_action=pass:repeatlast=0");
+            if (layer.StillImage) graph.Append(":shortest=1");
             if (layer.StraightAlpha) graph.Append(":alpha=straight");
             graph.Append(next);
             current = next;

@@ -313,6 +313,7 @@ public sealed partial class MainWindow : Window
         Background = Brushes.Black;
         InitializeComponent();
         InitializeSpotifyPreview();
+        InitializeTimedEffectPreview();
         // A hard-killed export leaves its half-written overlay tracks behind,
         // and a camera track is far larger than a Spotify card.
         Task.Run(ClipOverlayBurn.SweepWorkFiles);
@@ -6901,6 +6902,10 @@ public sealed partial class MainWindow : Window
         var progressDialogTask = ShowModalDialogAsync<bool>(progressWindow);
         try
         {
+            ViewModel.SaveSelectedClipEditState();
+            var editPath = ClipEditSidecar.SidecarPath(ViewModel.Settings.LibraryFolder, sourcePath);
+            var savedEdit = ClipEditSidecar.Load(ViewModel.Settings.LibraryFolder, sourcePath) ?? throw new InvalidDataException("Cannot read clip edits before Save Trim.");
+            var stagedEdit = ClipEditSidecar.SerializeValidated(ClipEditSidecar.RebaseAfterTrim(savedEdit));
             var exportDuration = ViewModel.ExportDuration;
             var encodeClock = System.Diagnostics.Stopwatch.StartNew();
             var progress = new Progress<double>(fraction =>
@@ -6950,11 +6955,14 @@ public sealed partial class MainWindow : Window
             try
             {
                 File.Move(tempPath, sourcePath);
+                var stagedEditPath = editPath + ".trim.tmp";
+                try { File.WriteAllBytes(stagedEditPath, stagedEdit); File.Move(stagedEditPath, editPath, true); }
+                finally { AudioCapturePipeline.TryDelete(stagedEditPath); }
             }
             catch
             {
                 // Restore the original instead of leaving the clip missing.
-                File.Move(backupPath, sourcePath);
+                File.Move(backupPath, sourcePath, true);
                 throw;
             }
             File.SetCreationTimeUtc(sourcePath, createdUtc);
@@ -7297,11 +7305,20 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var maskWidth = viewModel.SelectedSourceWidth;
+        var maskHeight = viewModel.SelectedSourceHeight;
+        if (_effectProxySource == viewModel.SelectedVideoPath)
+        {
+            var scale = Math.Min(1, Math.Min(1280.0 / maskWidth, 720.0 / maskHeight));
+            maskWidth = Math.Max(2, (int)(maskWidth * scale) / 2 * 2);
+            maskHeight = Math.Max(2, (int)(maskHeight * scale) / 2 * 2);
+            crop = ClipRenderFilters.ComputeCrop(viewModel.ClipCropMode, .5, .5, maskWidth, maskHeight) ?? new(0, 0, maskWidth, maskHeight);
+        }
         _pendingCropPreview = new CropPreviewRequest(
             ++_cropPreviewGeneration,
             crop,
-            viewModel.SelectedSourceWidth,
-            viewModel.SelectedSourceHeight,
+            maskWidth,
+            maskHeight,
             ((Application.Current?.Resources["AccentBrush"] as ISolidColorBrush)?.Color) ?? Color.Parse("#38D996"));
         if (_cropPreviewRenderInFlight) return;
 

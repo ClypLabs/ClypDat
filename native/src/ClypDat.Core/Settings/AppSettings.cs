@@ -345,6 +345,8 @@ public sealed record SpotifyOverlayTransform(double X, double Y, double Width, d
 
 public sealed class ClipEditSettings
 {
+    public List<TimedVideoEffect> TextEffects { get; set; } = [];
+    public List<TimedVideoEffect> BlurEffects { get; set; } = [];
     public double TrimStartSeconds { get; set; }
     public double TrimEndSeconds { get; set; }
     public Dictionary<int, double> TrackVolumes { get; set; } = new();

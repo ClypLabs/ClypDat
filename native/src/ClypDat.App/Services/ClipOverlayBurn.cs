@@ -24,11 +24,12 @@ public sealed record ClipOverlayBurnLayer(string Path, SpotifyOverlayBounds Boun
 /// </summary>
 public sealed class ClipOverlayRender : IDisposable
 {
+    public TimedEffectRender? Effects { get; init; }
     public SpotifyOverlayAnimation? Spotify { get; init; }
     public ClipOverlayBurnLayer? Camera { get; init; }
     public ClipOverlayBurnLayer? Keyboard { get; init; }
-    public bool IsEmpty => Spotify is null && Camera is null && Keyboard is null;
-    public void Dispose() { Camera?.Dispose(); Keyboard?.Dispose(); Spotify?.Dispose(); }
+    public bool IsEmpty => Spotify is null && Camera is null && Keyboard is null && (Effects is null || Effects.IsEmpty);
+    public void Dispose() { Camera?.Dispose(); Keyboard?.Dispose(); Spotify?.Dispose(); Effects?.Dispose(); }
 }
 
 /// <summary>
