@@ -196,7 +196,9 @@ internal sealed class TimedEffectFrameSource : IDisposable
                 _key = key;
                 _generation++;
             }
-            foreach (var stale in _chunks.Where(pair => pair.Key != index && pair.Key != next).ToArray())
+            // The previous chunk stays for sync calibration, which may find the
+            // picture on screen a little behind the clock, across the boundary.
+            foreach (var stale in _chunks.Where(pair => pair.Key != index && pair.Key != next && pair.Key != index - 1).ToArray())
             {
                 stale.Value.Stop();
                 _chunks.Remove(stale.Key);
@@ -209,6 +211,78 @@ internal sealed class TimedEffectFrameSource : IDisposable
             if (frame >= available) return null;
             return new Frame(chunk.Frames[frame], area.Width, area.Height, ((long)_generation << 32) | ((long)index << 10) | (uint)frame, area.Area);
         }
+    }
+
+    /// <summary>Decoded frames already held for <paramref name="from"/>..<paramref name="to"/>
+    /// (source seconds), with their times, for matching against the picture on
+    /// screen. Never starts a decode.</summary>
+    public List<(double Time, byte[] Pixels)> Candidates(double from, double to)
+    {
+        var result = new List<(double, byte[])>();
+        lock (_gate)
+        {
+            foreach (var (index, chunk) in _chunks)
+                for (var i = 0; i < chunk.Frames.Count; i++)
+                {
+                    var time = index * ChunkSeconds + i / Fps;
+                    if (time >= from && time <= to) result.Add((time, chunk.Frames[i]));
+                }
+        }
+        return result;
+    }
+
+    public const int SignatureWidth = 24, SignatureHeight = 16;
+
+    /// <summary>A coarse luma thumbnail of a whole BGRA buffer: enough to tell
+    /// frames of moving footage apart, cheap enough to compare dozens.</summary>
+    public static float[] Signature(byte[] bgra, int width, int height)
+    {
+        var result = new float[SignatureWidth * SignatureHeight];
+        for (var gy = 0; gy < SignatureHeight; gy++)
+        {
+            var y0 = gy * height / SignatureHeight;
+            var y1 = Math.Max(y0 + 1, (gy + 1) * height / SignatureHeight);
+            for (var gx = 0; gx < SignatureWidth; gx++)
+            {
+                var x0 = gx * width / SignatureWidth;
+                var x1 = Math.Max(x0 + 1, (gx + 1) * width / SignatureWidth);
+                double sum = 0;
+                var count = 0;
+                // Every other pixel is plenty for a 24x16 average.
+                for (var y = y0; y < Math.Min(y1, height); y += 2)
+                for (var x = x0; x < Math.Min(x1, width); x += 2)
+                {
+                    var i = (y * width + x) * 4;
+                    sum += .114 * bgra[i] + .587 * bgra[i + 1] + .299 * bgra[i + 2];
+                    count++;
+                }
+                result[gy * SignatureWidth + gx] = count == 0 ? 0 : (float)(sum / count);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// How far the picture on screen sits from the clock: the time of the
+    /// candidate that best matches the screen, minus the clock when the screen
+    /// was sampled. Null when the match is not clearly better than the rest,
+    /// i.e. a still scene where every frame looks alike.
+    /// </summary>
+    public static double? EstimateOffset(float[] screen, IReadOnlyList<(double Time, float[] Signature)> candidates, double clock)
+    {
+        if (candidates.Count < 3) return null;
+        var scored = candidates.Select(c => (c.Time, Error: Difference(screen, c.Signature))).ToList();
+        var best = scored.MinBy(s => s.Error);
+        var median = scored.Select(s => s.Error).Order().ElementAt(scored.Count / 2);
+        if (median < 1.5 || best.Error > median * .6) return null;
+        return best.Time - clock;
+    }
+
+    private static double Difference(float[] a, float[] b)
+    {
+        double sum = 0;
+        for (var i = 0; i < a.Length; i++) sum += Math.Abs(a[i] - b[i]);
+        return sum / a.Length;
     }
 
     private Chunk Acquire(string path, DecodeArea area, int index)

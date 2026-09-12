@@ -153,6 +153,34 @@ public sealed class TimedEffectEditingTests
     }
 
     [Fact]
+    public void SyncCalibrationFindsTheFrameOnScreenAndIgnoresStillScenes()
+    {
+        // A bright bar sweeping 2px per frame across a 96x32 area.
+        const int width = 96, height = 32;
+        byte[] Frame(int bar)
+        {
+            var pixels = new byte[width * height * 4];
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                var v = (byte)(Math.Abs(x - bar) < 6 ? 255 : 20);
+                var i = (y * width + x) * 4;
+                pixels[i] = pixels[i + 1] = pixels[i + 2] = v;
+                pixels[i + 3] = 255;
+            }
+            return pixels;
+        }
+        var candidates = Enumerable.Range(0, 30)
+            .Select(i => (Time: 10 + (i - 15) / 60.0, TimedEffectFrameSource.Signature(Frame(10 + i * 2), width, height))).ToList();
+        // Screen shows frame 19 while the clock says frame 15: four frames ahead.
+        var screen = TimedEffectFrameSource.Signature(Frame(10 + 19 * 2), width, height);
+        Assert.Equal(4 / 60.0, TimedEffectFrameSource.EstimateOffset(screen, candidates, 10)!.Value, 6);
+
+        var still = Enumerable.Range(0, 30).Select(i => (10 + i / 60.0, TimedEffectFrameSource.Signature(Frame(40), width, height))).ToList();
+        Assert.Null(TimedEffectFrameSource.EstimateOffset(TimedEffectFrameSource.Signature(Frame(40), width, height), still, 10));
+    }
+
+    [Fact]
     public void BlurSnapshotsNeverPutLibVlcTextOverTheVideo()
     {
         Assert.Contains("--no-osd", PlaybackSession.LibVlcOptions);

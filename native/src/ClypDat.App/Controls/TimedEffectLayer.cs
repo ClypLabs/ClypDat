@@ -170,6 +170,71 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         }
     }
 
+    // Playing, the overlay clock follows libvlc's input time, and the picture
+    // libvlc actually shows sits some frames from it - how many depends on the
+    // machine, the clip and the display. On moving footage one frame is enough
+    // for the blurred box to visibly slide against the video around it. So once
+    // a second the picture on screen is sampled and matched against the decoded
+    // frames near the clock; the median of the recent offsets shifts which
+    // decoded frame is shown.
+    private const int CalibrationIntervalMs = 1000;
+    private const double MaximumSyncOffset = .4;
+    private readonly System.Diagnostics.Stopwatch _calibrationClock = System.Diagnostics.Stopwatch.StartNew();
+    private readonly List<double> _offsets = [];
+    private string? _calibrationPath;
+    private bool _calibrating;
+    private double _syncOffset;
+
+    private void Calibrate(MainWindowViewModel model, ClipRenderFilters.CropRect crop, TimedEffectFrameSource.DecodeArea area, double clock)
+    {
+        if (_calibrationPath != model.SelectedVideoPath)
+        {
+            _calibrationPath = model.SelectedVideoPath;
+            _offsets.Clear();
+            _syncOffset = 0;
+        }
+        if (_calibrating || _snapshotInFlight || Snapshot is not { } take || _calibrationClock.ElapsedMilliseconds < CalibrationIntervalMs) return;
+        _calibrationClock.Restart();
+        _ = CalibrateAsync(take, model.SelectedVideoPath, crop, area, clock, model.SelectedSourceWidth, model.SelectedSourceHeight);
+    }
+
+    private async Task CalibrateAsync(Func<string, uint, Task<bool>> take, string path, ClipRenderFilters.CropRect crop,
+        TimedEffectFrameSource.DecodeArea area, double clock, int sourceWidth, int sourceHeight)
+    {
+        _calibrating = true;
+        var png = Path.Combine(Path.GetTempPath(), $"clypdat-blur-sync-{Guid.NewGuid():N}.png");
+        try
+        {
+            // Small: a 24x16 thumbnail of the blur area is all the match needs.
+            if (!await take(png, (uint)Math.Min(640, Math.Max(2, sourceWidth)))) return;
+            var offset = await Task.Run(() =>
+            {
+                if (TimedEffectFrameSource.LoadSnapshot(png) is not { } shot ||
+                    TimedEffectFrameSource.FromSnapshot(shot.Pixels, shot.Width, shot.Height, crop, sourceWidth, sourceHeight) is not { } screen) return null;
+                var (pixels, width, height, _) = TimedEffectFrameSource.Extract(screen, area.Area);
+                // Frames of another decode area (the box moved meanwhile) are a
+                // different size and a different picture; skip them.
+                var candidates = _frames.Candidates(clock - MaximumSyncOffset, clock + MaximumSyncOffset)
+                    .Where(c => c.Pixels.Length == area.Width * area.Height * 4)
+                    .Select(c => (c.Time, TimedEffectFrameSource.Signature(c.Pixels, area.Width, area.Height))).ToList();
+                return TimedEffectFrameSource.EstimateOffset(TimedEffectFrameSource.Signature(pixels, width, height), candidates, clock);
+            });
+            if (offset is not { } found || path != _calibrationPath) return;
+            _offsets.Add(found);
+            if (_offsets.Count > 7) _offsets.RemoveAt(0);
+            var previous = _syncOffset;
+            _syncOffset = Math.Clamp(_offsets.Order().ElementAt(_offsets.Count / 2), -MaximumSyncOffset, MaximumSyncOffset);
+            if (Math.Abs(_syncOffset - previous) >= 1 / TimedEffectFrameSource.Fps)
+                AppLog.Info($"Blur sync offset {_syncOffset * 1000:0} ms (sample {found * 1000:0} ms, {_offsets.Count} samples).");
+        }
+        catch (Exception error) { AppLog.Error("Blur sync calibration failed", error); }
+        finally
+        {
+            _calibrating = false;
+            try { File.Delete(png); } catch { }
+        }
+    }
+
     private void UpdateBlurs(MainWindowViewModel model, double time)
     {
         var crop = model.ActiveCropRect ?? new ClipRenderFilters.CropRect(0, 0, model.SelectedSourceWidth, model.SelectedSourceHeight);
@@ -184,7 +249,10 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
             var upcoming = model.BlurEffects.Where(e => e.Visible && e.Start > time && e.Start - time <= 1);
             frame = SnapshotFrame(model, crop, displayWidth);
             if (frame is null && TimedEffectFrameSource.PlanArea(blurs.Concat(upcoming), crop, displayWidth, displayHeight) is { } area)
-                frame = _frames.Request(model.SelectedVideoPath, area, time, duration);
+            {
+                if (model.IsPlaying) Calibrate(model, crop, area, time);
+                frame = _frames.Request(model.SelectedVideoPath, area, Math.Max(0, time + _syncOffset), duration);
+            }
         }
         else if (model.BlurEffects.Where(e => e.Visible && e.Start > time && e.Start - time <= 1).MinBy(e => e.Start) is { } next &&
                  TimedEffectFrameSource.PlanArea([next], crop, displayWidth, displayHeight) is { } warm)
