@@ -7747,6 +7747,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         string kind;
         string details;
         var state = clipLine;
+        GameMatchPresence? match = null;
 
         // A running game is the user's primary activity regardless of which
         // ClypDat page is open. Settings/editor navigation must not replace it.
@@ -7770,6 +7771,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? onXbox ? $"Recording {activityName} on an Xbox {(EffectiveXboxSnapshot.ConsoleName ?? "Xbox")}" : $"Recording {activityName}"
                 : onXbox ? $"Playing {activityName} on an Xbox {(EffectiveXboxSnapshot.ConsoleName ?? "Xbox")}" : $"Playing {activityName}";
             state = _clipTally.Describe();
+
+            // A snapshot only counts for the game it came from. One arriving
+            // late from a game that just closed must not describe the next.
+            if (pcGameActive && Settings.DiscordRichPresenceShowMatchDetails && _gameMatchPresence is { } current
+                && string.Equals(current.GameId, AutoClipCatalog.MatchGame(ActiveGameDetection.DetectionKey, ActiveGameDetection.ExeName, ActiveGameDetection.DisplayName), StringComparison.OrdinalIgnoreCase))
+            {
+                match = current;
+                details = current.Details;
+                state = _clipTally.Count > 0 ? $"{current.State} · {_clipTally.Describe()}" : current.State;
+            }
         }
         else if (IsSettingsVisible)
         {
@@ -7816,10 +7827,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         DiscordRichPresenceService.SetPresence(new DiscordPresence(
             details,
             state,
-            _discordActivityStartedUtc,
+            match?.MatchStartedUtc ?? _discordActivityStartedUtc,
             gameImage,
             gameImage is null ? null : activityName,
-            gameImage is null ? null : _discordGameProfileUrl));
+            gameImage is null ? null : _discordGameProfileUrl,
+            match?.SmallImageUrl,
+            match?.SmallImageText));
+    }
+
+    private GameMatchPresence? _gameMatchPresence;
+
+    /// <summary>Latest match snapshot from League, CS2 or Dota 2; null between matches.</summary>
+    public void SetGameMatchPresence(GameMatchPresence? presence)
+    {
+        if (_gameMatchPresence == presence) return;
+        _gameMatchPresence = presence;
+        UpdateDiscordPresence();
+    }
+
+    /// <summary>Whether the game listeners should report match snapshots at all.</summary>
+    public bool WantsGameMatchPresence => Settings.DiscordRichPresenceEnabled && Settings.DiscordRichPresenceShowMatchDetails;
+
+    public bool DiscordRichPresenceShowMatchDetails
+    {
+        get => Settings.DiscordRichPresenceShowMatchDetails;
+        set
+        {
+            if (Settings.DiscordRichPresenceShowMatchDetails == value) return;
+            Settings.DiscordRichPresenceShowMatchDetails = value;
+            OnPropertyChanged();
+            SaveSettings();
+            UpdateDiscordPresence();
+        }
     }
 
     private void ResolveDiscordGameImage(string detectionKey, string displayName)

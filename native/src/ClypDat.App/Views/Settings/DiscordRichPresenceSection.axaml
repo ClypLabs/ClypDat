@@ -36,6 +36,14 @@
           <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceOnlyWhenGameActive}" OnContent="{x:Null}" OffContent="{x:Null}" />
         </Grid>
         <Border Classes="settingsDivider" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding DiscordRichPresenceEnabled}">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Show match details" />
+            <TextBlock Classes="settingsRowDescSm" Text="League of Legends, Counter-Strike 2 and Dota 2: your champion or hero, map, score and K/D/A. Dota 2 also needs -gamestateintegration in its Steam launch options." />
+          </StackPanel>
+          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceShowMatchDetails}" OnContent="{x:Null}" OffContent="{x:Null}" />
+        </Grid>
+        <Border Classes="settingsDivider" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
           <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Show “Get ClypDat” Link" />

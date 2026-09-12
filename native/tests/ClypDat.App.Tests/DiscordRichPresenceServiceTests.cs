@@ -69,4 +69,18 @@ public sealed class DiscordRichPresenceServiceTests
         Assert.False(assets.TryGetProperty("small_text", out _));
     }
 
+    [Fact]
+    public void CreateActivity_MatchSmallImage_AddsCornerBadge()
+    {
+        var activity = DiscordRichPresenceService.CreateActivity(
+            new DiscordPresence("Ahri · Summoner's Rift", "7/2/9", DateTime.UtcNow,
+                SmallImageUrl: "https://cdn.communitydragon.org/latest/champion/Ahri/square", SmallImageText: "Ahri"),
+            showGetClypDatButton: false);
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(activity));
+        var assets = document.RootElement.GetProperty("assets");
+        Assert.Equal("clypdat", assets.GetProperty("large_image").GetString());
+        Assert.Equal("https://cdn.communitydragon.org/latest/champion/Ahri/square", assets.GetProperty("small_image").GetString());
+        Assert.Equal("Ahri", assets.GetProperty("small_text").GetString());
+    }
 }

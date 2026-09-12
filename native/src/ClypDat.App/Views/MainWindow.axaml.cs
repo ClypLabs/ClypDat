@@ -444,7 +444,9 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.ActiveGameDetection)) _ = UpdateVideoOverlaySettingsAsync();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
                         UpdateEditorSurfaceVisibility();
-                    if (e.PropertyName == nameof(MainWindowViewModel.AutoClippingEnabled)) UpdateAutoClipStates();
+                    if (e.PropertyName is nameof(MainWindowViewModel.AutoClippingEnabled)
+                        or nameof(MainWindowViewModel.DiscordRichPresenceEnabled)
+                        or nameof(MainWindowViewModel.DiscordRichPresenceShowMatchDetails)) UpdateAutoClipStates();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayAdaptiveFrameRateEnabled))
                     {
@@ -5775,7 +5777,9 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || !ViewModel.Settings.AutoClipping.Games.TryGetValue(gameId, out var source)) return;
         _autoClipSettingsSnapshots[gameId] = new AutoClipGameSettings
         {
-            Enabled = source.Enabled,
+            // Includes the master switch: the listeners also run for Discord
+            // match details alone, and must not clip while auto-clip is off.
+            Enabled = source.Enabled && ViewModel.AutoClippingEnabled,
             DeathmatchClipping = source.DeathmatchClipping,
             ListenerPort = source.ListenerPort,
             Events = new Dictionary<string, bool>(source.Events, StringComparer.OrdinalIgnoreCase)
@@ -5791,7 +5795,8 @@ public sealed partial class MainWindow : Window
         var game = ViewModel.FindAutoClipGame("cs2");
         if (game is null) return;
 
-        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled || !IsActiveAutoClipGame("cs2"))
+        var clipping = ViewModel.AutoClippingEnabled && game.IsEnabled;
+        if ((!clipping && !ViewModel.WantsGameMatchPresence) || !IsActiveAutoClipGame("cs2"))
         {
             if (_cs2GsiListener is not null)
             {
@@ -5800,12 +5805,21 @@ public sealed partial class MainWindow : Window
                 _cs2GsiListener.Stop();
             }
 
-            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled ? "Disabled" : "Waiting for Game";
+            game.StatusText = !clipping ? "Disabled" : "Waiting for Game";
             return;
         }
 
-        _cs2GsiListener ??= new Cs2GsiListener(() => GetAutoClipSettingsSnapshot("cs2"));
-        if (_cs2GsiListener.IsListening) return;
+        if (_cs2GsiListener is null)
+        {
+            _cs2GsiListener = new Cs2GsiListener(() => GetAutoClipSettingsSnapshot("cs2"));
+            _cs2GsiListener.MatchPresence.Changed += MatchPresence_OnChanged;
+        }
+        _cs2GsiListener.ReportMatchPresence = ViewModel.WantsGameMatchPresence;
+        if (_cs2GsiListener.IsListening)
+        {
+            if (!clipping) game.StatusText = "Disabled";
+            return;
+        }
 
         var port = ViewModel.Settings.AutoClipping.Games["cs2"].ListenerPort;
         var cs2Token = GsiAuth.EnsureToken(ViewModel.Settings, ViewModel.SaveSettings);
@@ -5819,42 +5833,59 @@ public sealed partial class MainWindow : Window
         _cs2GsiListener.AutoClipReady += Cs2GsiListener_OnAutoClipReady;
         var deployed = Cs2GsiDeployer.TryDeploy(port, cs2Token, out var statusMessage);
         _cs2GsiListener.SetConfigurationDeploymentResult(deployed);
-        game.StatusText = statusMessage;
+        game.StatusText = clipping ? statusMessage : "Disabled";
     }
 
     private void UpdateDotaAutoClipState()
     {
         if (ViewModel is null) return;
         var game = ViewModel.FindAutoClipGame("dota2"); if (game is null) return;
-        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled || !IsActiveAutoClipGame("dota2"))
+        var clipping = ViewModel.AutoClippingEnabled && game.IsEnabled;
+        if ((!clipping && !ViewModel.WantsGameMatchPresence) || !IsActiveAutoClipGame("dota2"))
         {
             if (_dotaGsiListener is not null) { _dotaGsiListener.AutoClipPending -= AutoClip_OnPending; _dotaGsiListener.AutoClipReady -= AutoClip_OnReady; _dotaGsiListener.Stop(); }
-            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled ? "Disabled" : "Waiting for Game"; return;
+            game.StatusText = !clipping ? "Disabled" : "Waiting for Game"; return;
         }
-        _dotaGsiListener ??= new DotaGsiListener(() => GetAutoClipSettingsSnapshot("dota2"));
+        if (_dotaGsiListener is null)
+        {
+            _dotaGsiListener = new DotaGsiListener(() => GetAutoClipSettingsSnapshot("dota2"));
+            _dotaGsiListener.MatchPresence.Changed += MatchPresence_OnChanged;
+        }
+        _dotaGsiListener.ReportMatchPresence = ViewModel.WantsGameMatchPresence;
         if (!_dotaGsiListener.IsListening)
         {
             var port = ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort;
             if (!_dotaGsiListener.Start(port, GsiAuth.EnsureToken(ViewModel.Settings, ViewModel.SaveSettings))) { game.StatusText = $"Listener couldn't start on port {port}."; return; }
             _dotaGsiListener.AutoClipPending += AutoClip_OnPending; _dotaGsiListener.AutoClipReady += AutoClip_OnReady;
         }
-        DotaGsiDeployer.TryDeploy(ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort, GsiAuth.EnsureToken(ViewModel.Settings, ViewModel.SaveSettings), out var status); game.StatusText = status;
+        DotaGsiDeployer.TryDeploy(ViewModel.Settings.AutoClipping.Games["dota2"].ListenerPort, GsiAuth.EnsureToken(ViewModel.Settings, ViewModel.SaveSettings), out var status);
+        game.StatusText = clipping ? status : "Disabled";
     }
 
     private void UpdateLeagueAutoClipState()
     {
         if (ViewModel is null) return;
         var game = ViewModel.FindAutoClipGame("league"); if (game is null) return;
-        if (!ViewModel.AutoClippingEnabled || !game.IsEnabled || !IsActiveAutoClipGame("league"))
+        var clipping = ViewModel.AutoClippingEnabled && game.IsEnabled;
+        if ((!clipping && !ViewModel.WantsGameMatchPresence) || !IsActiveAutoClipGame("league"))
         {
             _leagueAutoClipListener?.Stop();
-            game.StatusText = !ViewModel.AutoClippingEnabled || !game.IsEnabled ? "Disabled" : "Waiting for Game"; return;
+            game.StatusText = !clipping ? "Disabled" : "Waiting for Game"; return;
         }
-        _leagueAutoClipListener ??= new LeagueAutoClipListener(() => GetAutoClipSettingsSnapshot("league"));
+        if (_leagueAutoClipListener is null)
+        {
+            _leagueAutoClipListener = new LeagueAutoClipListener(() => GetAutoClipSettingsSnapshot("league"));
+            _leagueAutoClipListener.MatchPresence.Changed += MatchPresence_OnChanged;
+        }
+        _leagueAutoClipListener.ReportMatchPresence = ViewModel.WantsGameMatchPresence;
         _leagueAutoClipListener.AutoClipPending -= AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady -= AutoClip_OnReady;
         _leagueAutoClipListener.AutoClipPending += AutoClip_OnPending; _leagueAutoClipListener.AutoClipReady += AutoClip_OnReady;
-        _leagueAutoClipListener.Start(); game.StatusText = "Waiting for a live League match";
+        _leagueAutoClipListener.Start(); game.StatusText = clipping ? "Waiting for a live League match" : "Disabled";
     }
+
+    // Listener threads publish; presence is owned by the UI thread.
+    private void MatchPresence_OnChanged(object? sender, GameMatchPresence? presence) =>
+        Dispatcher.UIThread.Post(() => ViewModel?.SetGameMatchPresence(presence));
 
     private void Cs2GsiListener_OnAutoClipPending(object? sender, string message)
     {

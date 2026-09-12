@@ -57,6 +57,8 @@ public sealed class DotaGsiListener : IDisposable
     public DotaGsiListener(Func<AutoClipGameSettings> settings) => _settings = settings;
     public event EventHandler<string>? AutoClipPending;
     public event EventHandler<AutoClipRequest>? AutoClipReady;
+    public GameMatchPresencePublisher MatchPresence { get; } = new();
+    public volatile bool ReportMatchPresence;
     public bool IsListening => _listener?.IsListening == true;
 
     public bool Start(int port, string authToken)
@@ -76,6 +78,7 @@ public sealed class DotaGsiListener : IDisposable
         try { _listener?.Stop(); } catch { }
         _listener?.Close(); _listener = null;
         lock (_gate) { _seeded = false; _kills = _deaths = _assists = 0; _killTimes.Clear(); _pendingEvents.Clear(); _pendingLabel = null; _hadAegis = false; }
+        MatchPresence.Publish(null);
     }
 
     private async Task ListenAsync(HttpListener listener, CancellationToken token)
@@ -119,6 +122,7 @@ public sealed class DotaGsiListener : IDisposable
         using var doc = JsonDocument.Parse(json); var root = doc.RootElement;
         // This listener had no sender check of any kind before the token.
         if (!GsiAuth.IsPayloadAuthorized(root, _authToken)) return;
+        MatchPresence.Publish(ReportMatchPresence ? GameMatchPresenceParser.FromDota(root, DateTime.UtcNow) : null);
         if (!root.TryGetProperty("player", out var player)) return;
         var now = MonotonicClock.UtcNow;
         var kills = GetInt(player, "kills");
@@ -223,25 +227,49 @@ public sealed class LeagueAutoClipListener : IDisposable
     }
     public event EventHandler<string>? AutoClipPending;
     public event EventHandler<AutoClipRequest>? AutoClipReady;
+    public GameMatchPresencePublisher MatchPresence { get; } = new();
+    // Set by the owner. The listener also runs for Discord alone, with
+    // auto-clip off, and then only this poll has any reason to exist.
+    public volatile bool ReportMatchPresence;
+    private static readonly TimeSpan MatchPresenceInterval = TimeSpan.FromSeconds(10);
     public bool IsListening => _cts is not null;
     public void Start() { if (_cts is not null) return; _cts = new CancellationTokenSource(); _ = PollAsync(_cts.Token); }
     public void Stop()
     {
         _cts?.Cancel(); _cts?.Dispose(); _cts = null; _seenEventIds.Clear();
         lock (_playGate) { _playFlushCts?.Cancel(); _playFlushCts?.Dispose(); _playFlushCts = null; _pendingPlayEvents.Clear(); _firstPlayUtc = _lastPlayUtc = default; }
+        MatchPresence.Publish(null);
     }
     private async Task PollAsync(CancellationToken token)
     {
+        var nextMatchPresenceUtc = DateTime.MinValue;
         while (!token.IsCancellationRequested)
         {
+            var clipping = _settings().Enabled;
             try
             {
-                var playerName = await _client.GetStringAsync("liveclientdata/activeplayername", token);
-                var json = await _client.GetStringAsync("liveclientdata/eventdata", token); Process(json, playerName.Trim());
+                if (clipping)
+                {
+                    var playerName = await _client.GetStringAsync("liveclientdata/activeplayername", token);
+                    var json = await _client.GetStringAsync("liveclientdata/eventdata", token); Process(json, playerName.Trim());
+                }
             }
-            catch (OperationCanceledException) { break; }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
             catch { /* League is simply not in a live match yet. */ }
-            try { await Task.Delay(500, token); } catch (OperationCanceledException) { break; }
+
+            if (!ReportMatchPresence) MatchPresence.Publish(null);
+            else if (DateTime.UtcNow >= nextMatchPresenceUtc)
+            {
+                nextMatchPresenceUtc = DateTime.UtcNow + MatchPresenceInterval;
+                try
+                {
+                    using var doc = JsonDocument.Parse(await _client.GetStringAsync("liveclientdata/allgamedata", token));
+                    MatchPresence.Publish(GameMatchPresenceParser.FromLeague(doc.RootElement, DateTime.UtcNow));
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
+                catch { MatchPresence.Publish(null); }
+            }
+            try { await Task.Delay(clipping ? 500 : 2000, token); } catch (OperationCanceledException) { break; }
         }
     }
     private void Process(string json, string playerName)

@@ -84,6 +84,9 @@ public sealed class Cs2GsiListener : IDisposable
 
     public event EventHandler<string>? AutoClipPending;
     public event EventHandler<Cs2AutoClipRequest>? AutoClipReady;
+    public GameMatchPresencePublisher MatchPresence { get; } = new();
+    public volatile bool ReportMatchPresence;
+    private DateTime? _matchStartedUtc;
 
     public bool IsListening => _listener?.IsListening == true;
 
@@ -174,9 +177,11 @@ public sealed class Cs2GsiListener : IDisposable
             _lastRoundNumber = -1;
             _lastMapName = string.Empty;
             _lastMapMode = string.Empty;
+            _matchStartedUtc = null;
             ClearRoundLocked();
             SetHealthStageLocked("Stopped");
         }
+        MatchPresence.Publish(null);
         PersistHealthSnapshot(force: true);
     }
 
@@ -351,6 +356,11 @@ public sealed class Cs2GsiListener : IDisposable
                 ClearRoundLocked();
                 _seeded = false;
             }
+
+            // Wall clock, not MonotonicClock: this becomes Discord's timer.
+            if (string.IsNullOrWhiteSpace(mapName)) _matchStartedUtc = null;
+            else if (mapChanged || modeChanged || _matchStartedUtc is null) _matchStartedUtc = DateTime.UtcNow;
+            MatchPresence.Publish(ReportMatchPresence ? GameMatchPresenceParser.FromCs2(root, _matchStartedUtc) : null);
 
             if (!_seeded)
             {

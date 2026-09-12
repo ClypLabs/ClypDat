@@ -11,7 +11,9 @@ internal sealed record DiscordPresence(
     DateTime? StartedUtc,
     string? LargeImageUrl = null,
     string? LargeImageText = null,
-    string? LargeImageLink = null)
+    string? LargeImageLink = null,
+    string? SmallImageUrl = null,
+    string? SmallImageText = null)
 {
     public static readonly DiscordPresence None = new(string.Empty, string.Empty, null);
 
@@ -329,22 +331,32 @@ internal static class DiscordRichPresenceService
 
     private static Dictionary<string, string> CreateAssets(DiscordPresence presence)
     {
+        Dictionary<string, string> assets;
         if (IsExternalImageUrl(presence.LargeImageUrl))
         {
-            var assets = new Dictionary<string, string>
+            assets = new Dictionary<string, string>
             {
                 ["large_image"] = presence.LargeImageUrl!,
                 ["large_text"] = presence.LargeImageText is { } text ? Trim(text) ?? "Current game" : "Current game"
             };
             if (!string.IsNullOrWhiteSpace(presence.LargeImageLink)) assets["large_url"] = presence.LargeImageLink;
-            return assets;
+        }
+        else
+        {
+            assets = new Dictionary<string, string>
+            {
+                ["large_image"] = "clypdat",
+                ["large_text"] = "ClypDat"
+            };
         }
 
-        return new Dictionary<string, string>
+        // The corner badge: the champion or hero being played.
+        if (IsExternalImageUrl(presence.SmallImageUrl))
         {
-            ["large_image"] = "clypdat",
-            ["large_text"] = "ClypDat"
-        };
+            assets["small_image"] = presence.SmallImageUrl!;
+            if (presence.SmallImageText is { } smallText && Trim(smallText) is { } trimmed) assets["small_text"] = trimmed;
+        }
+        return assets;
     }
 
     private static bool IsExternalImageUrl(string? value) =>

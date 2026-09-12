@@ -225,6 +225,9 @@ public sealed class AppSettings
     // the account publishing it. Keep promotion opt-in and separate from
     // Rich Presence itself.
     public bool DiscordRichPresenceShowGetClypDatButton { get; set; }
+    // Champion or hero, map, score and K/D/A from League, CS2 and Dota 2. More
+    // than a game name, so it is its own opt-in on top of Rich Presence.
+    public bool DiscordRichPresenceShowMatchDetails { get; set; }
     // Optional Xbox link. Tokens live in a separately encrypted per-user cache;
     // settings only remember whether the user enabled the activity source.
     public bool XboxActivityEnabled { get; set; }
