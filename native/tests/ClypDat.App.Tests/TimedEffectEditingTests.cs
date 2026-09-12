@@ -127,6 +127,53 @@ public sealed class TimedEffectEditingTests
     }
 
     [Fact]
+    public void LiveBlurSmoothsEdgesAndLeavesFlatAreasAlone()
+    {
+        const int width = 32, height = 8;
+        byte[] Frame(Func<int, byte> value)
+        {
+            var pixels = new byte[width * height * 4];
+            for (var i = 0; i < width * height; i++)
+            {
+                var v = value(i % width);
+                pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = v;
+                pixels[i * 4 + 3] = 255;
+            }
+            return pixels;
+        }
+        var flat = Frame(_ => 90);
+        TimedEffectPainter.Blur(flat, width, height, 3);
+        Assert.All(flat, value => Assert.True(value is 90 or 255));
+
+        var edge = Frame(x => (byte)(x < width / 2 ? 0 : 255));
+        TimedEffectPainter.Blur(edge, width, height, 3);
+        var row = Enumerable.Range(0, width).Select(x => (int)edge[(4 * width + x) * 4]).ToArray();
+        Assert.True(row[15] > 0 && row[16] < 255, "the edge is softened");
+        for (var x = 1; x < width; x++) Assert.True(row[x] >= row[x - 1], "values rise monotonically across the edge");
+    }
+
+    [Fact]
+    public void DownsampleAveragesBlocksIncludingPartialOnes()
+    {
+        // 3x1: values 0, 100, 200 at factor 2 → blocks {0,100} and {200}.
+        var pixels = new byte[] { 0, 0, 0, 255, 100, 100, 100, 255, 200, 200, 200, 255 };
+        var (small, w, h) = TimedEffectPainter.Downsample(pixels, 3, 1, 2);
+        Assert.Equal((2, 1), (w, h));
+        Assert.Equal(50, small[0]);
+        Assert.Equal(200, small[4]);
+        Assert.Same(pixels, TimedEffectPainter.Downsample(pixels, 3, 1, 1).Pixels);
+    }
+
+    [Fact]
+    public void WorkingFactorKeepsTheBlurNearThreePixels()
+    {
+        // Strength 10 on a 1000-line frame: sigma ≈ 9.3 px.
+        Assert.Equal(3, TimedEffectPainter.WorkingFactor(10 * 1000 / 1080.0));
+        Assert.True(TimedEffectPainter.WorkingFactor(100 * 1000 / 1080.0) > 3);
+        Assert.Equal(1, TimedEffectPainter.WorkingFactor(2));
+    }
+
+    [Fact]
     public void FrameSourceIndexesOneSecondChunksAtSixtyFpsNeverAhead()
     {
         Assert.Equal(1, TimedEffectFrameSource.ChunkIndex(1.99));

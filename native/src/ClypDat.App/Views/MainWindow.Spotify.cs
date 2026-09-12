@@ -191,7 +191,7 @@ public sealed partial class MainWindow
             _spotifySurface.IsHitTestVisible = showSpotify || showCamera || showPeripherals || showEffects;
             _timedEffectLayer!.Width = _timedEffectLayer.BlurHost.Width = width / dpi;
             _timedEffectLayer.Height = _timedEffectLayer.BlurHost.Height = height / dpi;
-            if (showEffects) _timedEffectLayer.Update(model);
+            if (showEffects) _timedEffectLayer.Update(model, overlayTime);
             UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), dpi, overlayTime);
             UpdateCapturedOverlayAdorner(model, dpi, width, height);
             _capturedOverlayScene!.Width = width / dpi;

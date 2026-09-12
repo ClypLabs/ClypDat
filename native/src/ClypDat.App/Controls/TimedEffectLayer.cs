@@ -43,15 +43,16 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     }
 
     /// <summary>
-    /// One blur on screen: a clip at the effect's box holding the sharp source
-    /// pixels of the box grown by three sigma, blurred on the GPU. The margin is
-    /// real neighbouring picture, so after the clip the edges are fully opaque
-    /// with no halo, and the result is a gaussian at display resolution.
+    /// One blur on screen: a clip at the effect's box holding the box grown by
+    /// three sigma, already blurred. The margin is real neighbouring picture, so
+    /// after the clip the edges are fully opaque with no halo. The blur is baked
+    /// into the pixels rather than left to a GPU effect: a BlurEffect over a
+    /// bitmap rewritten every frame came out unblurred during playback.
     /// </summary>
     private sealed class BlurView
     {
         public readonly Border Clip = new() { ClipToBounds = true, IsHitTestVisible = false };
-        public readonly FrameImage Image = new() { Effect = new BlurEffect(), IsHitTestVisible = false };
+        public readonly FrameImage Image = new() { IsHitTestVisible = false };
         public WriteableBitmap? Bitmap;
         public int Key;
         public int ShapeKey;
@@ -81,10 +82,16 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     /// <summary>Called from the overlay window's 60Hz tick. Rebuilds the blur
     /// pixels for the frame under the playhead and repaints only when anything
     /// drawn has changed.</summary>
-    public void Update(MainWindowViewModel model)
+    public void Update(MainWindowViewModel model) => Update(model, model.CurrentTime);
+
+    /// <summary>As <see cref="Update(MainWindowViewModel)"/>, at the overlay
+    /// clock's position, so blur and text follow the picture on screen the same
+    /// way the camera and Spotify layers do.</summary>
+    public void Update(MainWindowViewModel model, TimeSpan position)
     {
         _model = model;
-        var time = model.CurrentTime.TotalSeconds;
+        _position = position;
+        var time = position.TotalSeconds;
         _active.Clear();
         foreach (var e in model.BlurEffects) if (IsActive(e, time)) _active.Add((e, true));
         foreach (var e in model.TextEffects) if (IsActive(e, time)) _active.Add((e, false));
@@ -118,8 +125,12 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     private string? _snapshotKey;
     private TimedEffectFrameSource.Frame? _snapshotFrame;
 
+    private TimeSpan _position;
+
     private TimedEffectFrameSource.Frame? SnapshotFrame(MainWindowViewModel model, ClipRenderFilters.CropRect crop, double displayWidth)
     {
+        // Keyed on the model's playhead, not the overlay clock: paused, it only
+        // moves on a real seek, so the settle timer never restarts on clock jitter.
         var key = $"{model.SelectedVideoPath}|{crop}|{model.CurrentTime.Ticks}";
         if (model.IsPlaying || key != _settleKey)
         {
@@ -203,16 +214,18 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
                 view.Clip.Clip = TimedEffectPainter.BlurShape(effect.Shape, new Rect(rect.Size));
                 view.ShapeKey = shapeKey;
             }
-            // Same relation as export: sigma = Strength × frame height / 1080,
-            // here in DIPs. Skia's radius→sigma is 0.288675·r + 0.5.
-            var sigma = effect.Strength * Bounds.Height / 1080;
-            ((BlurEffect)view.Image.Effect!).Radius = Math.Max(0, (sigma - .5) / .288675);
             view.Clip.Background = view.Bitmap is null ? PlaceholderBrush : null;
             if (frame is not { } f) continue;
             var padded = TimedEffectFrameSource.Padded(effect, crop, clamp: false);
-            var key = HashCode.Combine(f.Id, padded, Bounds.Size);
+            var key = HashCode.Combine(f.Id, padded, effect.Strength, Bounds.Size);
             if (view.Key == key && view.Bitmap is not null) continue;
-            var (pixels, width, height, covered) = TimedEffectFrameSource.Extract(f, padded);
+            var (sharp, sharpWidth, sharpHeight, covered) = TimedEffectFrameSource.Extract(f, padded);
+            // Same relation as export: sigma = Strength × frame height / 1080,
+            // in the extract's own pixels (frame height = Area.Height of the crop output).
+            var sigmaPixels = effect.Strength * (f.Height / Math.Max(1e-9, f.Area.Height)) / 1080;
+            var factor = TimedEffectPainter.WorkingFactor(sigmaPixels);
+            var (pixels, width, height) = TimedEffectPainter.Downsample(sharp, sharpWidth, sharpHeight, factor);
+            TimedEffectPainter.Blur(pixels, width, height, sigmaPixels / factor);
             var size = new PixelSize(width, height);
             if (view.Bitmap is null || view.Bitmap.PixelSize != size)
             {
@@ -223,8 +236,10 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
                 for (var row = 0; row < height; row++)
                     Marshal.Copy(pixels, row * width * 4, target.Address + row * target.RowBytes, width * 4);
             view.Image.Bitmap = view.Bitmap;
-            view.Image.Width = covered.Width * Bounds.Width;
-            view.Image.Height = covered.Height * Bounds.Height;
+            // A partial last block makes the shrunk buffer reach slightly past
+            // the extract; stretch it by the same amount so pixels stay in place.
+            view.Image.Width = covered.Width * (width * factor / (double)sharpWidth) * Bounds.Width;
+            view.Image.Height = covered.Height * (height * factor / (double)sharpHeight) * Bounds.Height;
             Canvas.SetLeft(view.Image, (covered.X - effect.X) * Bounds.Width);
             Canvas.SetTop(view.Image, (covered.Y - effect.Y) * Bounds.Height);
             view.Image.InvalidateVisual();
@@ -303,7 +318,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         _gesture = new Gesture(hit.Effect.Id, hit.Blur, hit.Handle, point, hit.Effect, e.Pointer);
         e.Pointer.Capture(this);
         e.Handled = true;
-        Update(model);
+        Update(model, _position);
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -313,7 +328,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         {
             var hit = Hit(point);
             Cursor = hit is { } h ? CursorFor(h.Handle) : Cursor.Default;
-            if (_hover != hit?.Effect.Id && _model is not null) { _hover = hit?.Effect.Id; Update(_model); }
+            if (_hover != hit?.Effect.Id && _model is not null) { _hover = hit?.Effect.Id; Update(_model, _position); }
             return;
         }
         e.Handled = true;
@@ -325,7 +340,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         _guides = guides;
         try { model.SetTimedEffect(effect, persist: false); }
         catch (Exception error) { AppLog.Error("Timed effect drag rejected", error); }
-        Update(model);
+        Update(model, _position);
     }
 
     // Hit testing stops at the effect's edge, so leaving it arrives as an exit
@@ -334,7 +349,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     {
         if (_gesture is not null || _hover is null || _model is null) return;
         _hover = null;
-        Update(_model);
+        Update(_model, _position);
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -358,7 +373,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
             try { model.CommitTimedEffects(); }
             catch (Exception error) { AppLog.Error("Timed effect save failed", error); }
         }
-        Update(model);
+        Update(model, _position);
     }
 
     private static readonly Cursor NorthWestCursor = new(StandardCursorType.TopLeftCorner);
