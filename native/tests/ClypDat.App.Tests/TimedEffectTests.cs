@@ -72,6 +72,28 @@ public sealed class TimedEffectTests
     }
 
     [Fact]
+    public void ExportBlurMixesInThePictureAroundTheBox()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "clypdat-effect-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            // The box covers only black; white starts right after its right edge.
+            var graph = ClipRenderFilters.ComposeWithOverlays(null,
+                [new(new(0, 0, 32, 64), "gte(t,0)", false, "", 5, FrameWidth: 64, FrameHeight: 64)], "[0:v:0]", "[out]");
+            var output = Path.Combine(root, "pixels.rgb");
+            Run("-y", "-f", "lavfi", "-i", "color=black:s=64x64:r=4:d=0.25,drawbox=x=32:y=0:w=32:h=64:color=white:t=fill",
+                "-filter_complex", graph, "-map", "[out]", "-pix_fmt", "rgb24", "-f", "rawvideo", output);
+            var pixels = File.ReadAllBytes(output);
+            int Pixel(int x) => pixels[(32 * 64 + x) * 3];
+            Assert.True(Pixel(31) > 30, "the box edge should pick up the white beside it");
+            Assert.True(Pixel(2) < 10);
+            Assert.True(Pixel(40) > 245, "outside the box stays untouched");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     [Trait("Category", "IsolatedSTA")]
     public void UnicodeCaptionRasterFeedsFfmpegAndStopsAtBaseDuration()
     {

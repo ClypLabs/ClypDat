@@ -29,7 +29,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     private static readonly Pen GuidePen = new(new SolidColorBrush(Color.FromRgb(255, 64, 160)), 1);
     private static readonly IBrush PlaceholderBrush = new SolidColorBrush(Color.FromArgb(150, 120, 130, 140));
     private readonly TimedEffectFrameSource _frames = new();
-    private readonly Dictionary<Guid, BlurSurface> _blurs = [];
+    private readonly Dictionary<Guid, BlurView> _blurs = [];
     private readonly List<(TimedVideoEffect Effect, bool Blur)> _active = [];
     private MainWindowViewModel? _model;
     private Gesture? _gesture;
@@ -42,15 +42,38 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         public bool Changed { get; set; }
     }
 
-    private sealed class BlurSurface
+    /// <summary>
+    /// One blur on screen: a clip at the effect's box holding the sharp source
+    /// pixels of the box grown by three sigma, blurred on the GPU. The margin is
+    /// real neighbouring picture, so after the clip the edges are fully opaque
+    /// with no halo, and the result is a gaussian at display resolution.
+    /// </summary>
+    private sealed class BlurView
     {
+        public readonly Border Clip = new() { ClipToBounds = true, IsHitTestVisible = false };
+        public readonly FrameImage Image = new() { Effect = new BlurEffect(), IsHitTestVisible = false };
         public WriteableBitmap? Bitmap;
-        public long Key;
+        public int Key;
+        public BlurView()
+        {
+            RenderOptions.SetBitmapInterpolationMode(Image, BitmapInterpolationMode.HighQuality);
+            Clip.Child = new Canvas { Children = { Image } };
+        }
     }
 
-    // The blur is decoded at 270 lines and drawn at display size; smooth
-    // upscaling keeps it reading as blur rather than as blocks.
-    public TimedEffectLayer() => RenderOptions.SetBitmapInterpolationMode(this, BitmapInterpolationMode.HighQuality);
+    private sealed class FrameImage : Control
+    {
+        public Bitmap? Bitmap { get; set; }
+        public override void Render(DrawingContext context)
+        {
+            if (Bitmap is { } bitmap) context.DrawImage(bitmap, new Rect(bitmap.Size), new Rect(Bounds.Size));
+        }
+    }
+
+    /// <summary>Holds the blur views. Sits directly below this layer in the
+    /// overlay surface, so text and handles draw over the blurs as text burns in
+    /// over blur on export.</summary>
+    public Canvas BlurHost { get; } = new() { IsHitTestVisible = false, ClipToBounds = true };
 
     public bool IsGestureActive => _gesture is not null;
 
@@ -70,11 +93,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         hash.Add(model.SelectedTimedEffectId);
         hash.Add(_hover);
         hash.Add(_guides);
-        foreach (var (effect, blur) in _active)
-        {
-            hash.Add(effect);
-            if (blur && _blurs.TryGetValue(effect.Id, out var surface)) hash.Add(surface.Key);
-        }
+        foreach (var (effect, _) in _active) hash.Add(effect);
         var signature = hash.ToHashCode();
         if (signature == _signature) return;
         _signature = signature;
@@ -98,7 +117,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     private string? _snapshotKey;
     private TimedEffectFrameSource.Frame? _snapshotFrame;
 
-    private TimedEffectFrameSource.Frame? SnapshotFrame(MainWindowViewModel model, ClipRenderFilters.CropRect crop)
+    private TimedEffectFrameSource.Frame? SnapshotFrame(MainWindowViewModel model, ClipRenderFilters.CropRect crop, double displayWidth)
     {
         var key = $"{model.SelectedVideoPath}|{crop}|{model.CurrentTime.Ticks}";
         if (model.IsPlaying || key != _settleKey)
@@ -112,18 +131,18 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         if (!_snapshotInFlight && _shots < SnapshotDelaysMs.Length && _settle.ElapsedMilliseconds >= SnapshotDelaysMs[_shots] && Snapshot is { } take)
         {
             _shots++;
-            _ = CaptureAsync(take, key, crop, model.SelectedSourceWidth, model.SelectedSourceHeight);
+            _ = CaptureAsync(take, key, crop, model.SelectedSourceWidth, model.SelectedSourceHeight, displayWidth);
         }
         return _snapshotFrame;
     }
 
-    private async Task CaptureAsync(Func<string, uint, Task<bool>> take, string key, ClipRenderFilters.CropRect crop, int sourceWidth, int sourceHeight)
+    private async Task CaptureAsync(Func<string, uint, Task<bool>> take, string key, ClipRenderFilters.CropRect crop, int sourceWidth, int sourceHeight, double displayWidth)
     {
         _snapshotInFlight = true;
         var path = Path.Combine(Path.GetTempPath(), $"clypdat-blur-{Guid.NewGuid():N}.png");
         try
         {
-            if (!await take(path, TimedEffectFrameSource.SnapshotWidth(sourceWidth, sourceHeight, crop))) return;
+            if (!await take(path, TimedEffectFrameSource.SnapshotWidth(displayWidth, sourceWidth, crop))) return;
             var frame = await Task.Run(() => TimedEffectFrameSource.LoadSnapshot(path) is { } shot
                 ? TimedEffectFrameSource.FromSnapshot(shot.Pixels, shot.Width, shot.Height, crop, sourceWidth, sourceHeight)
                 : null);
@@ -143,37 +162,67 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     {
         var crop = model.ActiveCropRect ?? new ClipRenderFilters.CropRect(0, 0, model.SelectedSourceWidth, model.SelectedSourceHeight);
         var duration = model.Duration.TotalSeconds;
+        var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        var displayWidth = Bounds.Width * scaling;
+        var displayHeight = Bounds.Height * scaling;
+        var blurs = _active.Where(item => item.Blur).Select(item => item.Effect).ToList();
         TimedEffectFrameSource.Frame? frame = null;
-        if (_active.Any(item => item.Blur))
-            frame = SnapshotFrame(model, crop) ?? _frames.Request(model.SelectedVideoPath, crop, time, duration);
-        else if (model.BlurEffects.Where(e => e.Visible && e.Start > time && e.Start - time <= 1).MinBy(e => e.Start) is { } upcoming)
-            _frames.Request(model.SelectedVideoPath, crop, upcoming.Start, duration);
-
-        foreach (var stale in _blurs.Keys.Where(id => !_active.Any(item => item.Effect.Id == id)).ToArray())
+        if (blurs.Count > 0)
         {
+            var upcoming = model.BlurEffects.Where(e => e.Visible && e.Start > time && e.Start - time <= 1);
+            frame = SnapshotFrame(model, crop, displayWidth);
+            if (frame is null && TimedEffectFrameSource.PlanArea(blurs.Concat(upcoming), crop, displayWidth, displayHeight) is { } area)
+                frame = _frames.Request(model.SelectedVideoPath, area, time, duration);
+        }
+        else if (model.BlurEffects.Where(e => e.Visible && e.Start > time && e.Start - time <= 1).MinBy(e => e.Start) is { } next &&
+                 TimedEffectFrameSource.PlanArea([next], crop, displayWidth, displayHeight) is { } warm)
+            _frames.Request(model.SelectedVideoPath, warm, next.Start, duration);
+
+        foreach (var stale in _blurs.Keys.Where(id => !blurs.Any(e => e.Id == id)).ToArray())
+        {
+            BlurHost.Children.Remove(_blurs[stale].Clip);
             _blurs[stale].Bitmap?.Dispose();
             _blurs.Remove(stale);
         }
-        if (frame is not { } f) return;
-        foreach (var (effect, blur) in _active)
+        foreach (var effect in blurs)
         {
-            if (!blur) continue;
-            var region = TimedEffectState.Pixels(effect, f.Width, f.Height);
-            var sigma = Math.Max(.1, effect.Strength * f.Height / 1080);
-            var key = HashCode.Combine(f.Id, region, sigma);
-            if (!_blurs.TryGetValue(effect.Id, out var surface)) _blurs[effect.Id] = surface = new BlurSurface();
-            if (surface.Key == key && surface.Bitmap is not null) continue;
-            var pixels = TimedEffectPainter.BlurRegion(f.Pixels, f.Width, f.Height, new PixelRect(region.X, region.Y, region.Width, region.Height), sigma);
-            var size = new PixelSize(Math.Min(region.Width, f.Width - Math.Clamp(region.X, 0, f.Width - 1)), Math.Min(region.Height, f.Height - Math.Clamp(region.Y, 0, f.Height - 1)));
-            if (surface.Bitmap is null || surface.Bitmap.PixelSize != size)
+            if (!_blurs.TryGetValue(effect.Id, out var view))
             {
-                surface.Bitmap?.Dispose();
-                surface.Bitmap = new WriteableBitmap(size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
+                _blurs[effect.Id] = view = new BlurView();
+                BlurHost.Children.Add(view.Clip);
             }
-            using (var target = surface.Bitmap.Lock())
-                for (var row = 0; row < size.Height; row++)
-                    Marshal.Copy(pixels, row * size.Width * 4, target.Address + row * target.RowBytes, size.Width * 4);
-            surface.Key = key;
+            var rect = RectOf(effect);
+            Canvas.SetLeft(view.Clip, rect.X);
+            Canvas.SetTop(view.Clip, rect.Y);
+            view.Clip.Width = rect.Width;
+            view.Clip.Height = rect.Height;
+            // Same relation as export: sigma = Strength × frame height / 1080,
+            // here in DIPs. Skia's radius→sigma is 0.288675·r + 0.5.
+            var sigma = effect.Strength * Bounds.Height / 1080;
+            ((BlurEffect)view.Image.Effect!).Radius = Math.Max(0, (sigma - .5) / .288675);
+            view.Clip.Background = view.Bitmap is null ? PlaceholderBrush : null;
+            if (frame is not { } f) continue;
+            var padded = TimedEffectFrameSource.Padded(effect, crop, clamp: false);
+            var key = HashCode.Combine(f.Id, padded, Bounds.Size);
+            if (view.Key == key && view.Bitmap is not null) continue;
+            var (pixels, width, height, covered) = TimedEffectFrameSource.Extract(f, padded);
+            var size = new PixelSize(width, height);
+            if (view.Bitmap is null || view.Bitmap.PixelSize != size)
+            {
+                view.Bitmap?.Dispose();
+                view.Bitmap = new WriteableBitmap(size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
+            }
+            using (var target = view.Bitmap.Lock())
+                for (var row = 0; row < height; row++)
+                    Marshal.Copy(pixels, row * width * 4, target.Address + row * target.RowBytes, width * 4);
+            view.Image.Bitmap = view.Bitmap;
+            view.Image.Width = covered.Width * Bounds.Width;
+            view.Image.Height = covered.Height * Bounds.Height;
+            Canvas.SetLeft(view.Image, (covered.X - effect.X) * Bounds.Width);
+            Canvas.SetTop(view.Image, (covered.Y - effect.Y) * Bounds.Height);
+            view.Image.InvalidateVisual();
+            view.Clip.Background = null;
+            view.Key = key;
         }
     }
 
@@ -183,16 +232,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     {
         if (_model is not { } model || Bounds.Width <= 0 || Bounds.Height <= 0) return;
         foreach (var (effect, blur) in _active)
-        {
-            var rect = RectOf(effect);
-            if (blur)
-            {
-                if (_blurs.TryGetValue(effect.Id, out var surface) && surface.Bitmap is { } bitmap)
-                    context.DrawImage(bitmap, new Rect(bitmap.Size), rect);
-                else context.DrawRectangle(PlaceholderBrush, null, rect);
-            }
-            else TimedEffectPainter.DrawText(context, effect, rect, Bounds.Height);
-        }
+            if (!blur) TimedEffectPainter.DrawText(context, effect, RectOf(effect), Bounds.Height);
         foreach (var (effect, _) in _active)
         {
             var rect = RectOf(effect);
@@ -333,8 +373,9 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         EndGesture();
         _active.Clear();
         _hover = null;
-        foreach (var surface in _blurs.Values) surface.Bitmap?.Dispose();
+        foreach (var view in _blurs.Values) view.Bitmap?.Dispose();
         _blurs.Clear();
+        BlurHost.Children.Clear();
         _frames.Reset();
         _snapshotFrame = null;
         _snapshotKey = _settleKey = null;

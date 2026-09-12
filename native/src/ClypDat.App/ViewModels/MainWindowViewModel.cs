@@ -4334,7 +4334,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (overlays.Effects is { } effects)
         {
             foreach (var blur in effects.Blur)
-                composites.Add(new(blur.Bounds, blur.Enable, false, "", blur.Sigma));
+                composites.Add(new(blur.Bounds, blur.Enable, false, "", blur.Sigma, FrameWidth: effects.FrameWidth, FrameHeight: effects.FrameHeight));
             foreach (var text in effects.Text)
             {
                 args.AddRange(new[] { "-loop", "1", "-i", text.Path });

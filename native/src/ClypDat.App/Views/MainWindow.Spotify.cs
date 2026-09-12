@@ -148,6 +148,7 @@ public sealed partial class MainWindow
                 {
                     Snapshot = (path, snapshotWidth) => _playback is { } session ? session.TakeSnapshotAsync(path, snapshotWidth) : Task.FromResult(false)
                 };
+                _spotifySurface.Children.Add(_timedEffectLayer.BlurHost);
                 _spotifySurface.Children.Add(_timedEffectLayer);
                 _spotifyViewport = new Canvas { Background = Brushes.Transparent, ClipToBounds = true, Children = { _spotifySurface } };
                 _spotifySurface.PointerPressed += SpotifySurface_OnPointerPressed;
@@ -182,8 +183,8 @@ public sealed partial class MainWindow
             // meant a clip with only a camera overlay received no pointer events
             // at all, so its overlay could never be moved.
             _spotifySurface.IsHitTestVisible = showSpotify || showCamera || showPeripherals || showEffects;
-            _timedEffectLayer!.Width = width / dpi;
-            _timedEffectLayer.Height = height / dpi;
+            _timedEffectLayer!.Width = _timedEffectLayer.BlurHost.Width = width / dpi;
+            _timedEffectLayer.Height = _timedEffectLayer.BlurHost.Height = height / dpi;
             if (showEffects) _timedEffectLayer.Update(model);
             UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), dpi);
             UpdateCapturedOverlayAdorner(model, dpi, width, height);

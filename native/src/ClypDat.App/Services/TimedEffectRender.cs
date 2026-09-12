@@ -10,6 +10,9 @@ public sealed class TimedEffectRender : IDisposable
 {
     public List<ClipOverlayBurnLayer> Text { get; } = [];
     public List<(SpotifyOverlayBounds Bounds, double Sigma, string Enable)> Blur { get; } = [];
+    /// <summary>Output frame the bounds are in; blurs sample around their box within it.</summary>
+    public int FrameWidth { get; private init; }
+    public int FrameHeight { get; private init; }
     public bool IsEmpty => Text.Count == 0 && Blur.Count == 0;
     public void Dispose() { foreach (var layer in Text) layer.Dispose(); }
     private static string F(double n) => n.ToString("0.######", CultureInfo.InvariantCulture);
@@ -18,7 +21,7 @@ public sealed class TimedEffectRender : IDisposable
     public static async Task<TimedEffectRender> PrepareAsync(IReadOnlyList<TimedVideoEffect> texts, IReadOnlyList<TimedVideoEffect> blurs,
         double start, double end, double speed, int width, int height, CancellationToken token)
     {
-        var result = new TimedEffectRender();
+        var result = new TimedEffectRender { FrameWidth = width, FrameHeight = height };
         try
         {
             foreach (var e in TimedEffectState.Rebase(blurs, start, end, speed).Where(e => e.Visible))

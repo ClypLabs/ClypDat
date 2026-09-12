@@ -111,7 +111,10 @@ public static class ClipRenderFilters
 
     /// <summary>One overlay input in the graph: which FFmpeg input it is, where
     /// it goes, and when it is visible.</summary>
-    public readonly record struct OverlayComposite(SpotifyOverlayBounds Bounds, string? Enable, bool StraightAlpha, string InputLabel, double BlurSigma = 0, bool StillImage = false);
+    /// <remarks>FrameWidth/FrameHeight let a blur sample the picture around its
+    /// box (0 = unknown, blur only what is inside it).</remarks>
+    public readonly record struct OverlayComposite(SpotifyOverlayBounds Bounds, string? Enable, bool StraightAlpha, string InputLabel, double BlurSigma = 0, bool StillImage = false,
+        int FrameWidth = 0, int FrameHeight = 0);
 
     /// <summary>
     /// Chains any number of overlay inputs over the effects chain. The input
@@ -130,7 +133,17 @@ public static class ClipRenderFilters
             var next = i == layers.Count - 1 ? outputLabel ?? string.Empty : $"[ovs{i}]";
             if (layer.BlurSigma > 0)
             {
-                graph.Append($";{current}split[blurbase{i}][blurcut{i}];[blurcut{i}]crop={layer.Bounds.Width}:{layer.Bounds.Height}:{layer.Bounds.X}:{layer.Bounds.Y}:exact=1,gblur=sigma={Format(layer.BlurSigma)}[blurred{i}]");
+                // Blur the box grown by three sigma, then cut the box back out:
+                // the gaussian then mixes in the real picture around the box, as
+                // the live preview does, instead of smearing the box's own border.
+                var b = layer.Bounds;
+                var pad = layer.FrameWidth > 0 && layer.FrameHeight > 0 ? (int)Math.Ceiling(3 * layer.BlurSigma) : 0;
+                var left = Math.Max(0, b.X - pad);
+                var top = Math.Max(0, b.Y - pad);
+                var right = pad > 0 ? Math.Min(layer.FrameWidth, b.X + b.Width + pad) : b.X + b.Width;
+                var bottom = pad > 0 ? Math.Min(layer.FrameHeight, b.Y + b.Height + pad) : b.Y + b.Height;
+                graph.Append($";{current}split[blurbase{i}][blurcut{i}];[blurcut{i}]crop={right - left}:{bottom - top}:{left}:{top}:exact=1,gblur=sigma={Format(layer.BlurSigma)}");
+                graph.Append($",crop={b.Width}:{b.Height}:{b.X - left}:{b.Y - top}:exact=1[blurred{i}]");
                 graph.Append($";[blurbase{i}][blurred{i}]overlay={layer.Bounds.X}:{layer.Bounds.Y}:enable='{layer.Enable}'{next}");
                 current = next;
                 continue;
