@@ -2768,6 +2768,15 @@
     <Setter Property="Cursor" Value="Arrow" />
     <Setter Property="BoxShadow" Value="none" />
   </Style>
+  <Style Selector="Button.timelineMarker:pointerover">
+    <Setter Property="Background" Value="#3313C8B5" />
+    <Setter Property="BorderBrush" Value="{StaticResource Text_F2F6FB}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Button.timelineMarker:focus">
+    <Setter Property="BorderBrush" Value="{StaticResource Text_F2F6FB}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
   <Style Selector="Border.videoOverlayPreviewCanvas">
     <Setter Property="Background" Value="#FF0B1218" />
   </Style>

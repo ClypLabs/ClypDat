@@ -1627,7 +1627,10 @@
                              Points="0,0 16,0 8,10"
                              Fill="{StaticResource Text_F2F6FB}" />
                   </Canvas>
-                  <Canvas x:Name="TimelineMarkerLayer" IsHitTestVisible="True" />
+                  <controls:TimelineMarkersControl x:Name="TimelineMarkers"
+                                                   IsHitTestVisible="True"
+                                                   HorizontalAlignment="Left"
+                                                   VerticalAlignment="Top" />
 
                   <!-- Trim start/end handles - thin full-height lines with a
                        small flag-style triangle cap at the top, matching the

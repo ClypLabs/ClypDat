@@ -321,6 +321,7 @@ public sealed partial class MainWindow : Window
         _startupWindowCloaked = StartupWindowPresentation.TryCloak(this);
         if (!_startupWindowCloaked) Opacity = 0;
         EditorVideoView.VideoClicked += EditorVideoView_OnVideoClicked;
+        TimelineMarkers.MarkerActivated += TimelineMarker_OnActivated;
         // The popup's buttons live inside NewClipsPanel now, so their handlers
         // are subscribed here instead of through Click= in this window's XAML.
         NewClipsPanelHost.CloseRequested += NewClipsCloseButton_OnClick;
@@ -10400,7 +10401,11 @@ public sealed partial class MainWindow : Window
         // trim rails stop exactly at the filmstrip instead of bleeding into
         // the first audio track.
         var videoLaneHeight = ViewModel.TimelineTracks.FirstOrDefault(track => track.IsVideo)?.LaneHeight ?? 0;
-        RenderTimelineMarkers(width, videoLaneHeight);
+        TimelineMarkers.Width = width;
+        TimelineMarkers.Height = videoLaneHeight;
+        TimelineMarkers.Duration = ViewModel.Duration;
+        TimelineMarkers.VideoTrackHeight = videoLaneHeight;
+        TimelineMarkers.Markers = ViewModel.SelectedAutoClipMarkers;
         PositionTimedEffectTrack(videoLaneHeight);
 
         // Width of the visible pill, which is NOT the handle Border's own width -
@@ -10450,39 +10455,11 @@ public sealed partial class MainWindow : Window
         KeepTimelinePlayheadVisible(playheadCenter);
     }
 
-    private void RenderTimelineMarkers(double width, double videoLaneHeight)
+    private void TimelineMarker_OnActivated(object? sender, TimelineMarkerActivatedEventArgs e)
     {
-        TimelineMarkerLayer.Children.Clear();
-        if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero || videoLaneHeight <= 0) return;
-
-        foreach (var marker in ViewModel.SelectedAutoClipMarkers.Where(item => item.OffsetSeconds >= 0 && item.OffsetSeconds <= ViewModel.Duration.TotalSeconds))
-        {
-            var button = new Button
-            {
-                Content = "⚑",
-                Width = 24,
-                Height = 24,
-                Padding = new Thickness(0),
-                Background = Brushes.Transparent,
-                Foreground = AppThemeService.Brush("Semantic_E5A00D", "#E5A00D"),
-                FontSize = 15,
-                FontWeight = FontWeight.Bold,
-                Tag = marker
-            };
-            ToolTip.SetTip(button, $"{marker.EventLabel} — {TimeSpan.FromSeconds(marker.OffsetSeconds):mm\\:ss}");
-            button.Click += TimelineMarker_OnClick;
-            Canvas.SetLeft(button, Math.Clamp(marker.OffsetSeconds / ViewModel.Duration.TotalSeconds * width - 12, 0, Math.Max(0, width - 24)));
-            Canvas.SetTop(button, Math.Max(0, videoLaneHeight - 25));
-            TimelineMarkerLayer.Children.Add(button);
-        }
-    }
-
-    private void TimelineMarker_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: ClipEventMarker marker } || ViewModel is null) return;
-        e.Handled = true;
+        if (ViewModel is null) return;
         var resume = ViewModel.IsPlaying;
-        _ = ApplyTimelineSeekAsync(TimeSpan.FromSeconds(marker.OffsetSeconds), resume);
+        _ = ApplyTimelineSeekAsync(TimeSpan.FromSeconds(e.Marker.OffsetSeconds), resume);
     }
 
     private void KeepTimelinePlayheadVisible(double playheadCenter)
