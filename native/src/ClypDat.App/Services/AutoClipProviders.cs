@@ -221,9 +221,15 @@ public sealed class LeagueAutoClipListener : IDisposable
     private DateTime _firstPlayUtc;
     private DateTime _lastPlayUtc;
     public LeagueAutoClipListener(Func<AutoClipGameSettings> settings)
+        : this(settings, new HttpClientHandler { ServerCertificateCustomValidationCallback = (request, _, _, _) => request.RequestUri?.Host is "127.0.0.1" or "localhost" })
+    {
+    }
+
+    // Tests stand in for the game client here; nothing else needs to.
+    internal LeagueAutoClipListener(Func<AutoClipGameSettings> settings, HttpMessageHandler handler)
     {
         _settings = settings;
-        _client = new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (request, _, _, _) => request.RequestUri?.Host is "127.0.0.1" or "localhost" }) { BaseAddress = new Uri("https://127.0.0.1:2999/"), Timeout = TimeSpan.FromSeconds(1) };
+        _client = new HttpClient(handler) { BaseAddress = new Uri("https://127.0.0.1:2999/"), Timeout = TimeSpan.FromSeconds(1) };
     }
     public event EventHandler<string>? AutoClipPending;
     public event EventHandler<AutoClipRequest>? AutoClipReady;
@@ -250,8 +256,8 @@ public sealed class LeagueAutoClipListener : IDisposable
             {
                 if (clipping)
                 {
-                    var playerName = await _client.GetStringAsync("liveclientdata/activeplayername", token);
-                    var json = await _client.GetStringAsync("liveclientdata/eventdata", token); Process(json, playerName.Trim());
+                    var playerName = ActivePlayerName(await _client.GetStringAsync("liveclientdata/activeplayername", token));
+                    var json = await _client.GetStringAsync("liveclientdata/eventdata", token); Process(json, playerName);
                 }
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
@@ -346,7 +352,24 @@ public sealed class LeagueAutoClipListener : IDisposable
     private static (string, string, int) MultiKill(JsonElement item) => GetInt(item, "KillStreak") switch { 2 => ("double", "Double Kill", 20), 3 => ("triple", "Triple Kill", 30), 4 => ("quadra", "Quadra Kill", 40), >= 5 => ("penta", "Pentakill", 50), _ => (string.Empty, string.Empty, 0) };
     private static (string, string, int) StealOrKill(JsonElement item, string type) => string.Equals(item.TryGetProperty("Stolen", out var stolen) ? stolen.GetString() : null, "True", StringComparison.OrdinalIgnoreCase) ? ($"{type}-steal", $"{char.ToUpperInvariant(type[0]) + type[1..]} Steal", 45) : ($"{type}-kill", $"{char.ToUpperInvariant(type[0]) + type[1..]} Kill", 35);
     private static int? GetInt(JsonElement parent, string name) => parent.TryGetProperty(name, out var element) && element.TryGetInt32(out var value) ? value : null;
-    private static bool Matches(JsonElement item, string property, string playerName) => !string.IsNullOrWhiteSpace(playerName) && item.TryGetProperty(property, out var value) && string.Equals(value.GetString(), playerName, StringComparison.OrdinalIgnoreCase);
-    private static bool IsAssister(JsonElement item, string playerName) => item.TryGetProperty("Assisters", out var assisters) && assisters.ValueKind == JsonValueKind.Array && assisters.EnumerateArray().Any(value => string.Equals(value.GetString(), playerName, StringComparison.OrdinalIgnoreCase));
+    // The endpoint answers with a JSON string - quotes included - so trimming
+    // left "\"Name#TAG\"" and no event ever matched the player.
+    internal static string ActivePlayerName(string body)
+    {
+        try { return JsonSerializer.Deserialize<string>(body)?.Trim() ?? string.Empty; }
+        catch (JsonException) { return body.Trim().Trim('"'); }
+    }
+
+    // Since Riot IDs the active name can be "Name#TAG". Riot does not document
+    // whether event fields carry the tag, so either spelling counts as the player.
+    private static bool IsPlayer(string? name, string playerName)
+    {
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(playerName)) return false;
+        if (string.Equals(name, playerName, StringComparison.OrdinalIgnoreCase)) return true;
+        static string GameName(string value) => value.Split('#')[0];
+        return string.Equals(GameName(name), GameName(playerName), StringComparison.OrdinalIgnoreCase);
+    }
+    private static bool Matches(JsonElement item, string property, string playerName) => item.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String && IsPlayer(value.GetString(), playerName);
+    private static bool IsAssister(JsonElement item, string playerName) => item.TryGetProperty("Assisters", out var assisters) && assisters.ValueKind == JsonValueKind.Array && assisters.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String && IsPlayer(value.GetString(), playerName));
     public void Dispose() { Stop(); _client.Dispose(); }
 }
