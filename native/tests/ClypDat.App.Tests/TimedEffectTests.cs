@@ -94,6 +94,34 @@ public sealed class TimedEffectTests
     }
 
     [Fact]
+    public void ShapedExportBlurOnlyReplacesPixelsInsideTheMask()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "clypdat-effect-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            // Box x16-48 straddles a black/white edge at x32; the mask is the
+            // ellipse inscribed in the box, a single frame like the real PNG.
+            var graph = ClipRenderFilters.ComposeWithOverlays(null,
+                [new(new(16, 0, 32, 64), "gte(t,0)", false, "[1:v:0]", 10, FrameWidth: 64, FrameHeight: 64)], "[0:v:0]", "[out]");
+            var output = Path.Combine(root, "pixels.rgb");
+            Run("-y", "-f", "lavfi", "-i", "color=black:s=64x64:r=4:d=0.5,drawbox=x=32:y=0:w=32:h=64:color=white:t=fill",
+                "-f", "lavfi", "-i", "color=black:s=32x64:d=0.04,format=gray,geq=lum='255*lte(pow((X-15.5)/16\\,2)+pow((Y-31.5)/32\\,2)\\,1)'",
+                "-filter_complex", graph, "-map", "[out]", "-pix_fmt", "rgb24", "-f", "rawvideo", output);
+            var pixels = File.ReadAllBytes(output);
+            const int frameSize = 64 * 64 * 3;
+            Assert.Equal(2 * frameSize, pixels.Length);
+            int Pixel(int frame, int x, int y) => pixels[frame * frameSize + (y * 64 + x) * 3];
+            foreach (var frame in new[] { 0, 1 })
+            {
+                Assert.True(Pixel(frame, 33, 32) < 235, "the middle of the ellipse is blurred");
+                Assert.True(Pixel(frame, 40, 2) > 250, "the box corner outside the ellipse is untouched");
+            }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     [Trait("Category", "IsolatedSTA")]
     public void UnicodeCaptionRasterFeedsFfmpegAndStopsAtBaseDuration()
     {
@@ -117,6 +145,27 @@ public sealed class TimedEffectTests
             }
             finally { File.Delete(output); }
         }, TimeSpan.FromSeconds(45), "timed text raster");
+    }
+
+    [Fact]
+    [Trait("Category", "IsolatedSTA")]
+    public void ShapedBlurGetsAMaskAndRectangleDoesNot()
+    {
+        AvaloniaTestThread.Run(() =>
+        {
+            var blurs = new TimedVideoEffect[] { new() { Shape = "Ellipse", X = 0, Y = 0, Width = .5, Height = .5 }, new() { X = .5, Y = .5, Width = .5, Height = .5 } };
+            using var render = TimedEffectRender.PrepareAsync([], blurs, 0, 3, 1, 40, 20, CancellationToken.None).GetAwaiter().GetResult();
+            Assert.Null(render.Blur[1].Mask);
+            var mask = render.Blur[0].Mask!;
+            using var bitmap = new Avalonia.Media.Imaging.Bitmap(mask);
+            Assert.Equal(new Avalonia.PixelSize(20, 10), bitmap.PixelSize);
+            var pixels = new byte[20 * 10 * 4];
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+            try { bitmap.CopyPixels(new Avalonia.PixelRect(0, 0, 20, 10), handle.AddrOfPinnedObject(), pixels.Length, 20 * 4); }
+            finally { handle.Free(); }
+            Assert.True(pixels[(5 * 20 + 10) * 4] > 240, "centre is inside the ellipse");
+            Assert.True(pixels[0] < 15, "corner is outside it");
+        }, TimeSpan.FromSeconds(45), "blur shape mask");
     }
 
     private static void Run(params string[] args)

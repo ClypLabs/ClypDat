@@ -7,6 +7,7 @@ public static class TimedEffectState
 {
     public const int MaximumItems = 32;
     public const int MaximumCaptionLength = 2000;
+    public static readonly string[] BlurShapes = ["Rectangle", "Rounded", "Ellipse"];
 
     /// <summary>Assigns each effect the first row free at its start, so overlapping
     /// clips stack inside the video track instead of hiding each other.</summary>
@@ -37,6 +38,8 @@ public static class TimedEffectState
             if (e.Text is null || e.Text.Length > MaximumCaptionLength || string.IsNullOrWhiteSpace(e.Font) || e.Font.Length > 200 ||
                 !Color.TryParse(e.Colour, out _) || !Color.TryParse(e.Background, out _) || e.Alignment is not ("Left" or "Center" or "Right"))
                 throw new InvalidDataException("Check caption length (maximum 2000), font, colours and alignment.");
+            if (!BlurShapes.Contains(e.Shape))
+                throw new InvalidDataException("Blur shape must be Rectangle, Rounded or Ellipse.");
         }
     }
 

@@ -20,4 +20,6 @@ public sealed record TimedVideoEffect
     public double BackgroundOpacity { get; init; }
     public string Alignment { get; init; } = "Center";
     public double Strength { get; init; } = 20;
+    /// <summary>Blur outline inside the box: Rectangle, Rounded or Ellipse.</summary>
+    public string Shape { get; init; } = "Rectangle";
 }

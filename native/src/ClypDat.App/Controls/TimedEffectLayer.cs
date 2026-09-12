@@ -54,6 +54,7 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         public readonly FrameImage Image = new() { Effect = new BlurEffect(), IsHitTestVisible = false };
         public WriteableBitmap? Bitmap;
         public int Key;
+        public int ShapeKey;
         public BlurView()
         {
             RenderOptions.SetBitmapInterpolationMode(Image, BitmapInterpolationMode.HighQuality);
@@ -196,6 +197,12 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
             Canvas.SetTop(view.Clip, rect.Y);
             view.Clip.Width = rect.Width;
             view.Clip.Height = rect.Height;
+            var shapeKey = HashCode.Combine(effect.Shape, rect.Size);
+            if (view.ShapeKey != shapeKey)
+            {
+                view.Clip.Clip = TimedEffectPainter.BlurShape(effect.Shape, new Rect(rect.Size));
+                view.ShapeKey = shapeKey;
+            }
             // Same relation as export: sigma = Strength × frame height / 1080,
             // here in DIPs. Skia's radius→sigma is 0.288675·r + 0.5.
             var sigma = effect.Strength * Bounds.Height / 1080;
@@ -233,16 +240,24 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         if (_model is not { } model || Bounds.Width <= 0 || Bounds.Height <= 0) return;
         foreach (var (effect, blur) in _active)
             if (!blur) TimedEffectPainter.DrawText(context, effect, RectOf(effect), Bounds.Height);
-        foreach (var (effect, _) in _active)
+        foreach (var (effect, blur) in _active)
         {
             var rect = RectOf(effect);
+            // A shaped blur shows its outline, with the box it is fitted to
+            // dashed around it so the handles still read as belonging to it.
+            var shape = blur ? TimedEffectPainter.BlurShape(effect.Shape, rect) : null;
             if (effect.Id == model.SelectedTimedEffectId)
             {
-                context.DrawRectangle(null, SelectionPen, rect);
-                foreach (var (_, handle) in Handles(rect, model.IsBlurEffect(effect.Id)))
+                if (shape is null) context.DrawRectangle(null, SelectionPen, rect);
+                else { context.DrawRectangle(null, HoverPen, rect); context.DrawGeometry(null, SelectionPen, shape); }
+                foreach (var (_, handle) in Handles(rect, blur))
                     context.DrawRectangle(Brushes.White, SelectionPen, handle);
             }
-            else if (effect.Id == _hover) context.DrawRectangle(null, HoverPen, rect);
+            else if (effect.Id == _hover)
+            {
+                if (shape is null) context.DrawRectangle(null, HoverPen, rect);
+                else context.DrawGeometry(null, HoverPen, shape);
+            }
         }
         if (_guides.X is { } gx) context.DrawLine(GuidePen, new Point(gx * Bounds.Width, 0), new Point(gx * Bounds.Width, Bounds.Height));
         if (_guides.Y is { } gy) context.DrawLine(GuidePen, new Point(0, gy * Bounds.Height), new Point(Bounds.Width, gy * Bounds.Height));

@@ -4334,7 +4334,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (overlays.Effects is { } effects)
         {
             foreach (var blur in effects.Blur)
-                composites.Add(new(blur.Bounds, blur.Enable, false, "", blur.Sigma, FrameWidth: effects.FrameWidth, FrameHeight: effects.FrameHeight));
+            {
+                // A shaped blur's input is its mask: one still frame, which
+                // alphamerge repeats for the rest of the clip.
+                var mask = "";
+                if (blur.Mask is { } maskPath) { args.Add("-i"); args.Add(maskPath); mask = $"[{index++}:v:0]"; }
+                composites.Add(new(blur.Bounds, blur.Enable, false, mask, blur.Sigma, FrameWidth: effects.FrameWidth, FrameHeight: effects.FrameHeight));
+            }
             foreach (var text in effects.Text)
             {
                 args.AddRange(new[] { "-loop", "1", "-i", text.Path });

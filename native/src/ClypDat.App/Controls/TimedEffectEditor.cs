@@ -152,7 +152,7 @@ public sealed class TimedEffectEditor : StackPanel
         foreach (var (effect, blur) in items)
         {
             var row = _rows[effect.Id];
-            row.Title.Text = blur ? "Blur" : string.IsNullOrWhiteSpace(effect.Text) ? "(empty caption)" : effect.Text.Replace('\n', ' ');
+            row.Title.Text = blur ? (effect.Shape == "Rectangle" ? "Blur" : $"Blur · {effect.Shape}") : string.IsNullOrWhiteSpace(effect.Text) ? "(empty caption)" : effect.Text.Replace('\n', ' ');
             row.Time.Text = $"{Timecode(effect.Start)} – {Timecode(effect.End)}";
             row.Eye.Content = effect.Visible ? "Hide" : "Show";
             row.Row.Background = effect.Id == model.SelectedTimedEffectId ? SelectedRow : Brushes.Transparent;
@@ -274,6 +274,16 @@ public sealed class TimedEffectEditor : StackPanel
     private void BuildBlurFields()
     {
         _fields.Children.Add(Muted("Drag the box on the video to cover what should be hidden. Drag its edges to resize."));
+        _fields.Children.Add(Label("Shape"));
+        var shapes = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        foreach (var shape in TimedEffectState.BlurShapes)
+        {
+            var button = new ToggleButton { Content = shape, FontSize = 11 };
+            button.Click += (_, _) => Apply(x => x with { Shape = shape });
+            _sync.Add(() => button.IsChecked = Selected?.Shape == shape);
+            shapes.Children.Add(button);
+        }
+        _fields.Children.Add(shapes);
         _fields.Children.Add(SliderRow("Strength", 1, 100, 1, e => e.Strength, (e, v) => e with { Strength = v }, v => $"{v:0}"));
     }
 

@@ -81,7 +81,7 @@ public sealed class TimedEffectTrackLayer : Control, ICustomHitTest
                 context.DrawRectangle(blur ? BlurFill : TextFill, selected ? SelectedPen : IdlePen, rect, 3, 3);
                 if (rect.Height >= 10 && rect.Width > 14)
                 {
-                    var label = blur ? "Blur" : "T  " + effect.Text.Replace('\n', ' ');
+                    var label = blur ? (effect.Shape == "Rectangle" ? "Blur" : $"Blur · {effect.Shape}") : "T  " + effect.Text.Replace('\n', ' ');
                     var text = new FormattedText(label, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Typeface.Default,
                         Math.Min(11, rect.Height - 3), Brushes.White);
                     using (context.PushClip(rect.Deflate(new Thickness(5, 0))))

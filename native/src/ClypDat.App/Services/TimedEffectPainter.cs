@@ -39,4 +39,16 @@ public static class TimedEffectPainter
     }
 
     public static Color ParseColour(string? value, Color fallback) => Color.TryParse(value, out var colour) ? colour : fallback;
+
+    /// <summary>
+    /// Outline of a blur inside its box, or null for a plain rectangle. The
+    /// live clip, the on-video outline and the export mask all come from here,
+    /// so the three cannot disagree. Rounded corners are a fifth of the short side.
+    /// </summary>
+    public static Geometry? BlurShape(string? shape, Rect box) => shape switch
+    {
+        "Ellipse" => new EllipseGeometry(box),
+        "Rounded" => new RectangleGeometry(box, Math.Min(box.Width, box.Height) / 5, Math.Min(box.Width, box.Height) / 5),
+        _ => null
+    };
 }

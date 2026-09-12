@@ -144,6 +144,16 @@ public static class ClipRenderFilters
                 var bottom = pad > 0 ? Math.Min(layer.FrameHeight, b.Y + b.Height + pad) : b.Y + b.Height;
                 graph.Append($";{current}split[blurbase{i}][blurcut{i}];[blurcut{i}]crop={right - left}:{bottom - top}:{left}:{top}:exact=1,gblur=sigma={Format(layer.BlurSigma)}");
                 graph.Append($",crop={b.Width}:{b.Height}:{b.X - left}:{b.Y - top}:exact=1[blurred{i}]");
+                // For a blur, InputLabel is the shape mask; the patch
+                // takes the mask's luma as alpha so only the shape is replaced.
+                if (!string.IsNullOrEmpty(layer.InputLabel))
+                {
+                    graph.Append($";{layer.InputLabel}format=gray,scale={b.Width}:{b.Height}[blurmask{i}]");
+                    graph.Append($";[blurred{i}][blurmask{i}]alphamerge[blurshaped{i}]");
+                    graph.Append($";[blurbase{i}][blurshaped{i}]overlay={b.X}:{b.Y}:enable='{layer.Enable}'{next}");
+                    current = next;
+                    continue;
+                }
                 graph.Append($";[blurbase{i}][blurred{i}]overlay={layer.Bounds.X}:{layer.Bounds.Y}:enable='{layer.Enable}'{next}");
                 current = next;
                 continue;
