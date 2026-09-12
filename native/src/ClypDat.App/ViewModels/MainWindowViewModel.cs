@@ -727,7 +727,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // gap, a 34px ruler, then fixed lane heights plus separators. The outer
     // editor grid needs this explicit measured child because the real timeline
     // spans both rows underneath the clip-details column.
-    public double EditorTimelineHeight => 22 + 68 + 34 + 26 * (TimedEffectState.Rows(TextEffects) + TimedEffectState.Rows(BlurEffects)) +
+    public double EditorTimelineHeight => 22 + 68 + 34 +
         TimelineTracks.Sum(track => track.LaneHeight + track.LaneMargin.Bottom);
     public ObservableCollection<AudioDeviceOption> ChatAudioDevices { get; }
     public ObservableCollection<AudioDeviceOption> MicrophoneDevices { get; }

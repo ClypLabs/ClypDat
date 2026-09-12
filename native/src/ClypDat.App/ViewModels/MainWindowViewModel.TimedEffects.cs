@@ -6,97 +6,130 @@ namespace ClypDat.App.ViewModels;
 
 public sealed partial class MainWindowViewModel
 {
-    public async Task RenderEffectPreviewAsync(string output, CancellationToken token, double? frameTime = null)
-    {
-        var source = SelectedVideoPath;
-        var sourceWidth = SelectedSourceWidth;
-        var sourceHeight = SelectedSourceHeight;
-        var crop = ActiveCropRect;
-        var start = frameTime ?? 0;
-        var duration = frameTime is null ? Duration.TotalSeconds : 1.0 / 30;
-        var texts = TextEffects.ToArray();
-        var blurs = BlurEffects.ToArray();
-        var scale = Math.Min(1, Math.Min(1280.0 / sourceWidth, 720.0 / sourceHeight));
-        var width = Math.Max(2, (int)(sourceWidth * scale) / 2 * 2);
-        var height = Math.Max(2, (int)(sourceHeight * scale) / 2 * 2);
-        var cropWidth = crop?.Width ?? sourceWidth;
-        var cropHeight = crop?.Height ?? sourceHeight;
-        var outputWidth = Math.Max(2, (int)(cropWidth * scale) / 2 * 2);
-        var outputHeight = Math.Max(2, (int)(cropHeight * scale) / 2 * 2);
-        var capturedSpec = CaptureOverlayBurnSpec() is { } captured
-            ? captured with { TrimStartSeconds = start, TrimEndSeconds = start + duration, Speed = 1 } : null;
-        var spotifySpec = CaptureSpotifyRenderSpec() is { } spotify
-            ? spotify with { Start = start, Duration = duration, Speed = 1, Width = outputWidth, Height = outputHeight } : null;
-        using var effects = await TimedEffectRender.PrepareAsync(texts, blurs, start, start + duration, 1, outputWidth, outputHeight, token);
-        using var card = spotifySpec is null ? null : await SpotifyOverlayAnimation.PrepareAsync(spotifySpec, token);
-        var layers = capturedSpec is null ? (Camera: (ClipOverlayBurnLayer?)null, Keyboard: (ClipOverlayBurnLayer?)null)
-            : await ClipOverlayBurn.PrepareAsync(capturedSpec, outputWidth, outputHeight, token);
-        using var render = new ClipOverlayRender { Camera = layers.Camera, Keyboard = layers.Keyboard, Spotify = card, Effects = effects };
-        var args = new List<string> { "-y", "-ss", start.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture), "-i", source };
-        var composites = AppendOverlayInputs(args, render);
-        var filter = ClipRenderFilters.BuildVideoFilter(crop, 1, $"scale={outputWidth}:{outputHeight},fps=30");
-        var composed = ClipRenderFilters.ComposeWithOverlays(filter, composites, "[effectsource]", "[effectresult]");
-        if (composites.Count == 0) composed = $"[effectsource]{filter}[effectresult]";
-        string graph;
-        if (crop is { } c)
-            graph = $"[0:v:0]split[original][effectsource];[original]scale={width}:{height},fps=30[originalsmall];{composed};[originalsmall][effectresult]overlay={(int)(c.X * scale)}:{(int)(c.Y * scale)}[preview]";
-        else graph = composed.Replace("[effectsource]", "[0:v:0]").Replace("[effectresult]", "[preview]");
-        args.AddRange(new[] { "-filter_complex", graph, "-map", "[preview]", "-an" });
-        if (frameTime is null) args.AddRange(new[] { "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart" });
-        else args.AddRange(new[] { "-frames:v", "1", "-c:v", "png", "-f", "image2" });
-        await TimedEffectPreview.RenderAsync(args, output, token);
-    }
     public ObservableCollection<TimedVideoEffect> TextEffects { get; } = [];
     public ObservableCollection<TimedVideoEffect> BlurEffects { get; } = [];
+    /// <summary>Raised for every change, including unsaved mid-drag ones, so the
+    /// overlay, the video track and the inspector redraw together.</summary>
     public event EventHandler? TimedEffectsChanged;
-    public bool DrawBlurRectangle { get; set; }
+    /// <summary>Asks the view to move the playhead, e.g. to a clip picked from the list.</summary>
+    public event EventHandler<TimeSpan>? TimedEffectSeekRequested;
+    /// <summary>Asks the inspector to put the caret in the selected caption.</summary>
+    public event EventHandler? TimedEffectCaptionFocusRequested;
+    /// <summary>Asks the view to pause and add text (false) or blur (true) at
+    /// the playhead. The view owns playback, so adding goes through it.</summary>
+    public event EventHandler<bool>? TimedEffectAddRequested;
     private Guid? _selectedTimedEffectId;
     public Guid? SelectedTimedEffectId
     {
         get => _selectedTimedEffectId;
         set { if (_selectedTimedEffectId == value) return; _selectedTimedEffectId = value; TimedEffectsChanged?.Invoke(this, EventArgs.Empty); }
     }
+
+    public TimedVideoEffect? SelectedTimedEffect => FindTimedEffect(SelectedTimedEffectId, out _);
+
+    public TimedVideoEffect? FindTimedEffect(Guid? id, out bool blur)
+    {
+        blur = false;
+        if (id is null) return null;
+        if (TextEffects.FirstOrDefault(e => e.Id == id) is { } text) return text;
+        blur = true;
+        return BlurEffects.FirstOrDefault(e => e.Id == id);
+    }
+
+    public bool IsBlurEffect(Guid id) => BlurEffects.Any(e => e.Id == id);
+
+    /// <summary>Selecting an effect releases the Spotify/camera selection, since
+    /// only one layer owns the handles on the video at a time.</summary>
+    public void SelectTimedEffect(Guid? id)
+    {
+        if (id is not null)
+        {
+            IsSpotifyOverlaySelected = false;
+            DeselectCapturedOverlays();
+            OpenEditorSidebar(EditorSidebarSection.Effects);
+        }
+        SelectedTimedEffectId = id;
+    }
+
+    public void RequestTimedEffectSeek(TimeSpan time) => TimedEffectSeekRequested?.Invoke(this, time);
+    public void RequestAddTimedEffect(bool blur) => TimedEffectAddRequested?.Invoke(this, blur);
+    public void RequestTimedEffectCaptionFocus() => TimedEffectCaptionFocusRequested?.Invoke(this, EventArgs.Empty);
+
     public void NotifyTimedEffectsChanged()
     {
-        OnPropertyChanged(nameof(EditorTimelineHeight));
         OnEditorEffectsChanged();
         TimedEffectsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    public TimedVideoEffect AddTimedEffect(bool blur)
+    public TimedVideoEffect AddTimedEffect(bool blur, double? atSeconds = null)
     {
         var list = blur ? BlurEffects : TextEffects;
-        if (list.Count >= TimedEffectState.MaximumItems) throw new InvalidOperationException("Maximum 32 effects per lane.");
-        var end = (TrimEnd > TrimStart ? TrimEnd : Duration).TotalSeconds;
-        var start = Math.Clamp(CurrentTime.TotalSeconds, TrimStart.TotalSeconds, Math.Max(TrimStart.TotalSeconds, end - .01));
-        var item = new TimedVideoEffect { Start = start, End = Math.Min(end, start + 3),
-            X = blur ? .35 : .1, Y = blur ? .35 : .75, Width = blur ? .3 : .8, Height = blur ? .3 : .2 };
+        if (list.Count >= TimedEffectState.MaximumItems) throw new InvalidOperationException("Maximum 32 effects per type.");
+        var duration = Duration.TotalSeconds;
+        var rangeStart = TrimEnd > TrimStart ? TrimStart.TotalSeconds : 0;
+        var rangeEnd = TrimEnd > TrimStart ? TrimEnd.TotalSeconds : duration;
+        var start = Math.Clamp(atSeconds ?? CurrentTime.TotalSeconds, rangeStart, Math.Max(rangeStart, rangeEnd - .1));
+        var end = Math.Min(rangeEnd, start + 3);
+        if (end - start < .1) end = Math.Min(Math.Max(duration, start + .1), start + 3);
+        var item = new TimedVideoEffect
+        {
+            Start = start, End = end,
+            X = blur ? .35 : .1, Y = blur ? .35 : .4, Width = blur ? .3 : .8, Height = blur ? .3 : .2,
+            Text = blur ? "" : "Your text", FontSize = 72, Bold = true, Outline = 3
+        };
         TimedEffectState.Validate([item]);
         ValidateTimedEdit(list.Append(item), blur);
         list.Add(item);
-        DrawBlurRectangle = blur;
-        SelectedTimedEffectId = item.Id;
+        SelectTimedEffect(item.Id);
         NotifyTimedEffectsChanged();
         return item;
     }
 
-    public void UpdateTimedEffect(TimedVideoEffect item, bool blur)
+    /// <summary>Replaces an effect by identity. persist=false is the mid-gesture
+    /// path: it redraws without touching the sidecar, and the gesture calls
+    /// <see cref="CommitTimedEffects"/> once on release.</summary>
+    public void SetTimedEffect(TimedVideoEffect item, bool persist)
     {
         TimedEffectState.Validate([item]);
+        var blur = IsBlurEffect(item.Id);
         var list = blur ? BlurEffects : TextEffects;
         var index = list.ToList().FindIndex(e => e.Id == item.Id);
         if (index < 0) return;
+        if (list[index] == item && !persist) return;
         ValidateTimedEdit(list.Select(e => e.Id == item.Id ? item : e), blur);
         list[index] = item;
+        if (persist) NotifyTimedEffectsChanged();
+        else TimedEffectsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void CommitTimedEffects() => NotifyTimedEffectsChanged();
+
+    public void RemoveTimedEffect(Guid id)
+    {
+        var list = IsBlurEffect(id) ? BlurEffects : TextEffects;
+        var index = list.ToList().FindIndex(e => e.Id == id);
+        if (index < 0) return;
+        list.RemoveAt(index);
+        if (SelectedTimedEffectId == id) _selectedTimedEffectId = null;
         NotifyTimedEffectsChanged();
     }
 
-    public void DuplicateTimedEffect(TimedVideoEffect item, bool blur)
+    /// <summary>Copies an effect to just after the original, or on top of it
+    /// when the clip has no room left after it.</summary>
+    public TimedVideoEffect? DuplicateTimedEffect(Guid id)
     {
+        if (FindTimedEffect(id, out var blur) is not { } item) return null;
         var list = blur ? BlurEffects : TextEffects;
-        var copy = item with { Id = Guid.NewGuid() };
+        if (list.Count >= TimedEffectState.MaximumItems) throw new InvalidOperationException("Maximum 32 effects per type.");
+        var length = item.End - item.Start;
+        var copy = item.End + length <= Duration.TotalSeconds
+            ? item with { Id = Guid.NewGuid(), Start = item.End, End = item.End + length }
+            : item with { Id = Guid.NewGuid() };
         ValidateTimedEdit(list.Append(copy), blur);
-        list.Add(copy); SelectedTimedEffectId = copy.Id; NotifyTimedEffectsChanged();
+        list.Add(copy);
+        SelectTimedEffect(copy.Id);
+        NotifyTimedEffectsChanged();
+        return copy;
     }
 
     private void ValidateTimedEdit(IEnumerable<TimedVideoEffect> items, bool blur)

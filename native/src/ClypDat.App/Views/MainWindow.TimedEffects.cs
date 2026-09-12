@@ -1,112 +1,112 @@
-using System.Text.Json;
 using Avalonia;
-using Avalonia.Media.Imaging;
-using ClypDat.App.Controls;
 using Avalonia.Controls;
-using Avalonia.Media;
-using Avalonia.Threading;
+using Avalonia.Input;
+using ClypDat.App.Controls;
 using ClypDat.App.Services;
+using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Views;
 
 public sealed partial class MainWindow
 {
-    private CancellationTokenSource? _effectPreviewCancellation;
-    private string? _effectPreviewKey;
-    private string? _effectProxy;
-    private string? _effectProxySource;
-    private bool _effectPreviewPending;
-    private string _effectPreviewStatus = "";
-    private TextBlock? _effectStatus;
-    private Button? _effectPreviewButton;
-    private TimedEffectFrame? _effectFrame;
-    private double _effectFrameTime;
-    private ClypDat.App.Controls.TimedEffectSurface? _timedEffectSurface;
+    // Text and blur draw live in the overlay window (MainWindow.Spotify.cs), so
+    // playback always runs on the original file at full quality. This file only
+    // wires the pieces that need the window: seeking, keys and the video-track
+    // menu.
+    private TimedEffectLayer? _timedEffectLayer;
+    private MainWindowViewModel? _timedEffectModel;
 
-    private void InitializeTimedEffectPreview()
+    private void InitializeTimedEffects()
     {
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-        timer.Tick += (_, _) => CheckTimedEffectPreview();
-        Opened += (_, _) => timer.Start();
-        Closed += (_, _) => { timer.Stop(); _effectPreviewCancellation?.Cancel(); if (_effectProxy is not null) AudioCapturePipeline.TryDelete(_effectProxy); };
+        DataContextChanged += (_, _) =>
+        {
+            if (_timedEffectModel is not null)
+            {
+                _timedEffectModel.TimedEffectSeekRequested -= OnTimedEffectSeekRequested;
+                _timedEffectModel.TimedEffectAddRequested -= OnTimedEffectAddRequested;
+            }
+            _timedEffectModel = ViewModel;
+            if (_timedEffectModel is not null)
+            {
+                _timedEffectModel.TimedEffectSeekRequested += OnTimedEffectSeekRequested;
+                _timedEffectModel.TimedEffectAddRequested += OnTimedEffectAddRequested;
+            }
+        };
     }
 
-    private async void CheckTimedEffectPreview()
+    private void OnTimedEffectSeekRequested(object? sender, TimeSpan time)
     {
-        var model = ViewModel;
-        if (model is null || !model.IsEditorVisible || model.IsExporting || _playback is null || model.SelectedSourceWidth <= 0 || _playback.LoadedPath != model.SelectedVideoPath)
-        { _effectPreviewCancellation?.Cancel(); _effectPreviewKey = null; return; }
-        var hasEffects = model.TextEffects.Any(e => e.Visible) || model.BlurEffects.Any(e => e.Visible);
-        if (!hasEffects && _effectProxySource != model.SelectedVideoPath && !_effectPreviewPending) return;
-        var key = JsonSerializer.Serialize(new { model.SelectedVideoPath, model.TextEffects, model.BlurEffects, model.ClipCropMode,
-            model.CameraOverlayTransform, model.PeripheralOverlayTransform, model.SpotifyOverlayTransform,
-            model.CameraOverlayLayerVisible, model.PeripheralOverlayLayerVisible, model.SpotifyOverlayLayerVisible,
-            model.Settings.SpotifyOverlayDynamicBackground, model.Settings.SpotifyOverlayPosition });
-        if (_effectPreviewPending && model.IsPlaying) { _playback.Pause(); model.IsPlaying = false; }
-        if (key == _effectPreviewKey && (!_effectPreviewPending || Math.Abs(model.CurrentTime.TotalSeconds - _effectFrameTime) < .001)) return;
-        _effectPreviewKey = key;
-        _effectPreviewCancellation?.Cancel();
-        _effectPreviewCancellation?.Dispose();
-        var cancellation = new CancellationTokenSource();
-        _effectPreviewCancellation = cancellation;
-        var token = cancellation.Token;
-        var session = _playback;
-        var source = model.SelectedVideoPath;
-        var resume = model.IsPlaying;
-        session.Pause(); model.IsPlaying = false;
-        _effectPreviewPending = true;
-        _effectFrameTime = model.CurrentTime.TotalSeconds;
-        var frameTime = _effectFrameTime;
-        if (_effectFrame is not null) { _effectFrame.Bitmap?.Dispose(); _effectFrame.Bitmap = null; }
-        _effectPreviewStatus = "Preparing text / blur preview…";
-        string? output = null;
+        if (ViewModel is null) return;
+        _ = ApplyTimelineSeekAsync(time, ViewModel.IsPlaying);
+        UpdateTimelineChrome();
+    }
+
+    private void PositionTimedEffectTrack(double videoLaneHeight)
+    {
+        if (ViewModel is null) return;
+        var top = 0d;
+        foreach (var track in ViewModel.TimelineTracks)
+        {
+            if (track.IsVideo) break;
+            top += track.LaneHeight + track.LaneMargin.Bottom;
+        }
+        TimedEffectTrack.Margin = new Thickness(0, top, 0, 0);
+        TimedEffectTrack.Height = Math.Max(0, videoLaneHeight);
+    }
+
+    /// <summary>Delete removes the selected text or blur; Ctrl+D duplicates it.</summary>
+    private bool HandleTimedEffectKey(KeyEventArgs e)
+    {
+        if (ViewModel is not { IsEditorVisible: true } model || model.SelectedTimedEffectId is not { } id) return false;
         try
         {
-            await Task.Delay(350, token);
-            if (hasEffects)
-            {
-                output = TimedEffectPreview.WorkPath();
-                var framePath = Path.ChangeExtension(output, ".png");
-                try
-                {
-                    await model.RenderEffectPreviewAsync(framePath, token, frameTime);
-                    token.ThrowIfCancellationRequested();
-                    if (_effectFrame is not null)
-                    {
-                        _effectFrame.Bitmap = new Bitmap(framePath);
-                        _effectFrame.SourceFraction = model.ActiveCropRect is { } crop
-                            ? new Rect((double)crop.X / model.SelectedSourceWidth, (double)crop.Y / model.SelectedSourceHeight, (double)crop.Width / model.SelectedSourceWidth, (double)crop.Height / model.SelectedSourceHeight)
-                            : new Rect(0, 0, 1, 1);
-                        _effectFrame.InvalidateVisual();
-                    }
-                }
-                finally { AudioCapturePipeline.TryDelete(framePath); }
-                await model.RenderEffectPreviewAsync(output, token);
-            }
-            token.ThrowIfCancellationRequested();
-            if (source != model.SelectedVideoPath || session != _playback) return;
-            await session.ReplaceVideoAsync(source, output ?? source, model.CurrentTime, resume, token);
-            token.ThrowIfCancellationRequested();
-            var previous = _effectProxy;
-            _effectProxy = output; output = null;
-            _effectProxySource = hasEffects ? source : null;
-            _effectPreviewPending = false;
-            _effectPreviewStatus = "";
-            model.IsPlaying = resume;
-            ApplyEditorEffectPreview();
-            if (previous is not null) AudioCapturePipeline.TryDelete(previous);
+            if (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None) model.RemoveTimedEffect(id);
+            else if (e.Key == Key.D && e.KeyModifiers == KeyModifiers.Control) model.DuplicateTimedEffect(id);
+            else return false;
         }
-        catch (OperationCanceledException) { }
-        catch (Exception error)
-        {
-            if (_effectPreviewKey == key)
-            {
-                _effectPreviewStatus = error.Message;
-                AppLog.Error("Effect preview failed", error);
-            }
-        }
-        finally { if (output is not null) AudioCapturePipeline.TryDelete(output); }
+        catch (Exception error) { AppLog.Error("Timed effect shortcut failed", error); }
+        e.Handled = true;
+        return true;
     }
 
-    private bool ComposedEffectPreview => _effectProxySource == ViewModel?.SelectedVideoPath || _effectPreviewPending;
+    /// <summary>Right-click on the Video track offers to add text or blur at
+    /// the clicked time. Other lanes keep their normal click behaviour.</summary>
+    private bool TryOpenVideoLaneMenu(PointerPressedEventArgs e)
+    {
+        if (ViewModel is not { } model || !e.GetCurrentPoint(TimelineSurface).Properties.IsRightButtonPressed) return false;
+        var point = e.GetPosition(TimedEffectTrack);
+        if (point.Y < 0 || point.Y > TimedEffectTrack.Bounds.Height || TimelineSurface.Bounds.Width <= 0) return false;
+        var seconds = Math.Clamp(e.GetPosition(TimelineSurface).X / TimelineSurface.Bounds.Width, 0, 1) * model.Duration.TotalSeconds;
+        MenuItem Item(string header, bool blur)
+        {
+            var item = new MenuItem { Header = header };
+            item.Click += (_, _) =>
+            {
+                try { AddTimedEffect(blur, seconds); }
+                catch (Exception error) { AppLog.Error("Add timed effect failed", error); }
+            };
+            return item;
+        }
+        new ContextMenu { ItemsSource = new[] { Item("Add text here", false), Item("Add blur here", true) } }.Open(TimelineSurface);
+        e.Handled = true;
+        return true;
+    }
+
+    /// <summary>Pauses, adds at <paramref name="seconds"/>, and parks the
+    /// playhead on the new clip so it is on screen to be dragged into place.</summary>
+    private void AddTimedEffect(bool blur, double seconds)
+    {
+        if (ViewModel is not { } model) return;
+        PauseEditorPlayback();
+        var effect = model.AddTimedEffect(blur, seconds);
+        if (!blur) model.RequestTimedEffectCaptionFocus();
+        if (Math.Abs(model.CurrentTime.TotalSeconds - effect.Start) > .001)
+            _ = ApplyTimelineSeekAsync(TimeSpan.FromSeconds(effect.Start), false);
+    }
+
+    private void OnTimedEffectAddRequested(object? sender, bool blur)
+    {
+        if (ViewModel is null) return;
+        AddTimedEffect(blur, ViewModel.CurrentTime.TotalSeconds);
+    }
 }

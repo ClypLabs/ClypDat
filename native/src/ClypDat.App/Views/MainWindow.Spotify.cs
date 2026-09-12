@@ -62,7 +62,7 @@ public sealed partial class MainWindow
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 60) };
         timer.Tick += (_, _) => UpdateSpotifyPreview();
         Opened += (_, _) => timer.Start();
-        Closed += (_, _) => { timer.Stop(); EndSpotifyGesture(); _spotifyPerPixel?.Dispose(); _spotifyWindow?.Close(); _spotifyPreview?.Dispose(); _capturedPlayback?.Dispose(); };
+        Closed += (_, _) => { timer.Stop(); EndSpotifyGesture(); _timedEffectLayer?.Dispose(); _spotifyPerPixel?.Dispose(); _spotifyWindow?.Close(); _spotifyPreview?.Dispose(); _capturedPlayback?.Dispose(); };
     }
     private void UpdateSpotifyPreview()
     {
@@ -83,7 +83,9 @@ public sealed partial class MainWindow
             var showSpotify = original is not null && model.Settings.SpotifyOverlayEnabled && model.SpotifyOverlayLayerVisible;
             var showCamera = model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible && model.CameraOverlayTransform is not null;
             var showPeripherals = model.HasPeripheralOverlayLayer && model.PeripheralOverlayLayerVisible && model.PeripheralOverlayTransform is not null;
-            if (!showSpotify && !showCamera && !showPeripherals && !ComposedEffectPreview && model.TextEffects.Count == 0 && model.BlurEffects.Count == 0) { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
+            var showEffects = model.TextEffects.Count > 0 || model.BlurEffects.Count > 0;
+            if (!showEffects) _timedEffectLayer?.Clear();
+            if (!showSpotify && !showCamera && !showPeripherals && !showEffects) { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
             var spec = original is null ? null : original with { Position = model.Settings.SpotifyOverlayPosition, Font = SpotifyOverlayCardRenderer.ResolveFont(),
                 DynamicBackground = model.Settings.SpotifyOverlayDynamicBackground, Transform = model.SpotifyOverlayTransform };
             var top = EditorVideoView.PointToScreen(default);
@@ -139,19 +141,11 @@ public sealed partial class MainWindow
                 _spotifyAdorner = new() { IsHitTestVisible = false };
                 _capturedAdorner = new() { IsHitTestVisible = false, ShowRotationHandle = false };
                 _spotifySurface = new Canvas { Background = Brushes.Transparent, Children = { _capturedOverlayScene, _capturedAdorner, _spotifyPreview, _spotifyAdorner } };
-                _effectFrame = new TimedEffectFrame { IsHitTestVisible = false };
-                _spotifySurface.Children.Add(_effectFrame);
-                _effectStatus = new TextBlock { Foreground = Brushes.White, Background = Brushes.Black, TextWrapping = TextWrapping.Wrap, IsHitTestVisible = false };
-                _spotifySurface.Children.Add(_effectStatus);
-                _timedEffectSurface = new TimedEffectSurface { DataContext = model };
-                _spotifySurface.Children.Add(_timedEffectSurface);
-                _effectPreviewButton = new Button { Content = "Cancel preview" };
-                _effectPreviewButton.Click += (_, _) =>
-                {
-                    _effectPreviewCancellation?.Cancel();
-                    _effectPreviewStatus = "Preview cancelled. Edit an effect to prepare again.";
-                };
-                _spotifySurface.Children.Add(_effectPreviewButton);
+                // Last child: text and blur burn in above every other layer on
+                // export, so they sit above them here too, and win the hit test
+                // wherever an effect is drawn.
+                _timedEffectLayer = new TimedEffectLayer();
+                _spotifySurface.Children.Add(_timedEffectLayer);
                 _spotifyViewport = new Canvas { Background = Brushes.Transparent, ClipToBounds = true, Children = { _spotifySurface } };
                 _spotifySurface.PointerPressed += SpotifySurface_OnPointerPressed;
                 _spotifySurface.PointerMoved += SpotifySurface_OnPointerMoved;
@@ -184,21 +178,10 @@ public sealed partial class MainWindow
             // Any editable layer keeps the surface live. Gating on Spotify alone
             // meant a clip with only a camera overlay received no pointer events
             // at all, so its overlay could never be moved.
-            _spotifySurface.IsHitTestVisible = showSpotify || showCamera || showPeripherals || model.TextEffects.Count > 0 || model.BlurEffects.Count > 0;
-            _effectStatus!.Text = _effectPreviewStatus;
-            _effectStatus.Width = width / dpi;
-            _effectFrame!.Width = width / dpi;
-            _effectFrame.Height = height / dpi;
-            _effectFrame.IsVisible = _effectPreviewPending && _effectFrame.Bitmap is not null;
-            _effectStatus.Height = _effectPreviewPending ? (_effectFrame.Bitmap is null ? height / dpi : 28) : 0;
-            _effectStatus.IsVisible = _effectPreviewPending;
-            _effectPreviewButton!.IsVisible = _effectPreviewPending;
-            Canvas.SetLeft(_effectPreviewButton, Math.Max(0, width / dpi - 130));
-            Canvas.SetTop(_effectPreviewButton, 30);
-            _timedEffectSurface!.DataContext = model;
-            _timedEffectSurface.Width = width / dpi;
-            _timedEffectSurface.Height = height / dpi;
-            _timedEffectSurface.InvalidateVisual();
+            _spotifySurface.IsHitTestVisible = showSpotify || showCamera || showPeripherals || showEffects;
+            _timedEffectLayer!.Width = width / dpi;
+            _timedEffectLayer.Height = height / dpi;
+            if (showEffects) _timedEffectLayer.Update(model);
             UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), dpi);
             UpdateCapturedOverlayAdorner(model, dpi, width, height);
             _capturedOverlayScene!.Width = width / dpi;
@@ -225,13 +208,7 @@ public sealed partial class MainWindow
             var rasterScale = Math.Min(1, 4096.0 / width);
             if (showSpotify) _spotifyPreview!.Update(spec!, model.CurrentTime.TotalSeconds,
                 Math.Max(1, (int)Math.Round(width * rasterScale)), Math.Max(1, (int)Math.Round(height * rasterScale)));
-            if (showSpotify && !_spotifyPreview!.HasCard && !_spotifyAdorner!.IsVisible && !showCamera && !showPeripherals) { HideSpotifyPreview(); return; }
-            if (ComposedEffectPreview)
-            {
-                _spotifyPreview!.IsVisible = false;
-                _capturedOverlayScene!.IsVisible = false;
-            }
-            else { _spotifyPreview!.IsVisible = true; _capturedOverlayScene!.IsVisible = true; }
+            if (showSpotify && !_spotifyPreview!.HasCard && !_spotifyAdorner!.IsVisible && !showCamera && !showPeripherals && !showEffects) { HideSpotifyPreview(); return; }
             var handle = NativeHandleOf(_spotifyWindow);
             if (!_spotifyWindow.IsVisible || (handle != IntPtr.Zero && !IsWindowVisible(handle)))
             { _spotifyWindow.Show(this); _spotifyRaiseNeeded = true; }
@@ -270,6 +247,9 @@ public sealed partial class MainWindow
         // Hide both native surfaces before releasing pointer capture. Capture
         // loss can finish a drag and save its layout synchronously.
         EndSpotifyGesture();
+        // Not Clear(): hiding happens whenever the editor is covered, and the
+        // decoded blur frames are still wanted when it comes back.
+        _timedEffectLayer?.EndGesture();
     }
 
     private void UpdateCapturedOverlayPreview(MainWindowViewModel model, Rect videoBounds, double dpi)
@@ -381,10 +361,12 @@ public sealed partial class MainWindow
         {
             surfaceModel.IsSpotifyOverlaySelected = false;
             surfaceModel.DeselectCapturedOverlays();
+            surfaceModel.SelectTimedEffect(null);
             _spotifySurface.Cursor = Cursor.Default;
             EditorVideoView_OnVideoClicked(this, EventArgs.Empty);
             return;
         }
+        surfaceModel.SelectTimedEffect(null);
         if (target is OverlaySurfaceTarget.Camera or OverlaySurfaceTarget.Peripherals)
         {
             BeginCapturedOverlayGesture(surfaceModel, target == OverlaySurfaceTarget.Camera ? "Camera" : "Peripherals", capturedMode, surfacePoint, e);
@@ -548,6 +530,7 @@ public sealed partial class MainWindow
     {
         if (sender is not Control { DataContext: TrackLaneViewModel { IsOverlay: true } } control ||
             !e.GetCurrentPoint(control).Properties.IsLeftButtonPressed || ViewModel is null) return;
+        ViewModel.SelectTimedEffect(null);
         ViewModel.IsSpotifyOverlaySelected = true;
         ViewModel.OpenEditorSidebar(EditorSidebarSection.Overlays);
         e.Handled = true;

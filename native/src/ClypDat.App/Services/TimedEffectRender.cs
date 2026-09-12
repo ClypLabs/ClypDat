@@ -1,8 +1,6 @@
 using System.Globalization;
 using Avalonia;
-using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using ClypDat.Core.Settings;
 
@@ -43,21 +41,8 @@ public sealed class TimedEffectRender : IDisposable
     private static void Rasterize(TimedVideoEffect e, SpotifyOverlayBounds bounds, int frameHeight, string path)
     {
         using var bitmap = new RenderTargetBitmap(new PixelSize(bounds.Width, bounds.Height), new Vector(96, 96));
-        var typeface = new Typeface(new FontFamily(e.Font), weight: e.Bold ? FontWeight.Bold : FontWeight.Normal);
-        var alignment = Enum.Parse<TextAlignment>(e.Alignment);
-        var size = e.FontSize * frameHeight / 1080;
-        using var text = new TextLayout(e.Text, typeface, size, new SolidColorBrush(Color.Parse(e.Colour)), textAlignment: alignment,
-            textWrapping: TextWrapping.Wrap, maxWidth: bounds.Width, maxHeight: bounds.Height);
-        using var outline = new TextLayout(e.Text, typeface, size, Brushes.Black, textAlignment: alignment,
-            textWrapping: TextWrapping.Wrap, maxWidth: bounds.Width, maxHeight: bounds.Height);
         using (var context = bitmap.CreateDrawingContext())
-        {
-            context.DrawRectangle(new SolidColorBrush(Color.Parse(e.Background), e.BackgroundOpacity), null, new Rect(0, 0, bounds.Width, bounds.Height));
-            var radius = e.Outline * frameHeight / 1080;
-            if (radius > 0)
-                for (var i = 0; i < 16; i++) outline.Draw(context, new Point(Math.Cos(i * Math.PI / 8) * radius, Math.Sin(i * Math.PI / 8) * radius));
-            text.Draw(context, new Point());
-        }
+            TimedEffectPainter.DrawText(context, e, new Rect(0, 0, bounds.Width, bounds.Height), frameHeight);
         using var file = File.Create(path);
         bitmap.Save(file);
     }

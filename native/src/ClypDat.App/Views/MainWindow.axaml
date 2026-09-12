@@ -1580,7 +1580,6 @@
                       PointerMoved="TimelineSurface_OnPointerMoved"
                       PointerReleased="TimelineSurface_OnPointerReleased"
                       PointerCaptureLost="TimelineSurface_OnPointerCaptureLost">
-                  <StackPanel>
                   <ItemsControl ItemsSource="{Binding TimelineTracks}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -1607,8 +1606,11 @@
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
-                    <controls:TimedEffectTimeline x:Name="TimedEffectLanes" />
-                  </StackPanel>
+
+                  <!-- Text and blur clips live inside the Video track, over its
+                       filmstrip. Placed and sized in UpdateTimelineChrome;
+                       below the playhead and trim handles so both stay on top. -->
+                  <controls:TimedEffectTrackLayer x:Name="TimedEffectTrack" VerticalAlignment="Top" />
 
                   <Canvas x:Name="TimelineOverlay" IsHitTestVisible="False">
                     <!-- Per-lane dimming for the excluded-from-trim portion is
@@ -1858,6 +1860,8 @@
               </StackPanel>
 
               <StackPanel Spacing="14" IsVisible="{Binding IsEditorEffectsSidebarActive}">
+                <Border Classes="editorInspectorCard"><controls:TimedEffectEditor x:Name="TimedEffectInspector" /></Border>
+
                 <Border Classes="editorInspectorCard">
                   <StackPanel Spacing="9">
                     <TextBlock Text="CLIP SPEED" Classes="editorCardLabel" />
@@ -1909,10 +1913,6 @@
                     <TextBlock Text="This overlay is already part of the video. Its layout is fixed." Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding !HasEditableSpotifyOverlay}" />
                   </StackPanel>
                 </Border>
-
-                <Border Classes="editorInspectorCard"><controls:TimedEffectEditor /></Border>
-                <Border Classes="editorInspectorCard"><controls:TimedEffectEditor Blur="True" /></Border>
-                <TextBlock Text="Save Trim retains editable text and blur. Export and Share apply them permanently." TextWrapping="Wrap" FontSize="11" />
 
                 <Button Content="Reset effects" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                         Height="34" IsEnabled="{Binding HasClipEffects}" Click="ResetClipEffectsButton_OnClick" />

@@ -8,15 +8,19 @@ public static class TimedEffectState
     public const int MaximumItems = 32;
     public const int MaximumCaptionLength = 2000;
 
-    public static int Rows(IEnumerable<TimedVideoEffect> effects)
+    /// <summary>Assigns each effect the first row free at its start, so overlapping
+    /// clips stack inside the video track instead of hiding each other.</summary>
+    public static (Dictionary<Guid, int> Rows, int Count) PackRows(IEnumerable<TimedVideoEffect> effects)
     {
         var ends = new List<double>();
-        foreach (var effect in effects.OrderBy(e => e.Start))
+        var rows = new Dictionary<Guid, int>();
+        foreach (var effect in effects.OrderBy(e => e.Start).ThenBy(e => e.Id))
         {
             var row = ends.FindIndex(end => end <= effect.Start);
-            if (row < 0) ends.Add(effect.End); else ends[row] = effect.End;
+            if (row < 0) { row = ends.Count; ends.Add(effect.End); } else ends[row] = effect.End;
+            rows[effect.Id] = row;
         }
-        return Math.Max(1, ends.Count);
+        return (rows, Math.Max(1, ends.Count));
     }
 
     public static void Validate(IEnumerable<TimedVideoEffect> effects)

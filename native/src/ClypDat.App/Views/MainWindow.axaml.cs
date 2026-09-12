@@ -313,7 +313,7 @@ public sealed partial class MainWindow : Window
         Background = Brushes.Black;
         InitializeComponent();
         InitializeSpotifyPreview();
-        InitializeTimedEffectPreview();
+        InitializeTimedEffects();
         // A hard-killed export leaves its half-written overlay tracks behind,
         // and a camera track is far larger than a Spotify card.
         Task.Run(ClipOverlayBurn.SweepWorkFiles);
@@ -6302,6 +6302,8 @@ public sealed partial class MainWindow : Window
             e.Handled = true;
         }
 
+        if (!IsTypingInTextInput(e.Source) && HandleTimedEffectKey(e)) return;
+
         if (ViewModel is null ||
             !ViewModel.IsEditorVisible ||
             !ViewModel.Settings.EnableEditorKeyboardShortcuts ||
@@ -6547,6 +6549,7 @@ public sealed partial class MainWindow : Window
     private void TimelineSurface_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
+        if (TryOpenVideoLaneMenu(e)) return;
         _timelineDragMode = TimelineDragMode.Playhead;
         // Scrubbing the surface genuinely does mean "go where I clicked".
         _trimDragGrabOffsetMs = 0;
@@ -7305,20 +7308,11 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var maskWidth = viewModel.SelectedSourceWidth;
-        var maskHeight = viewModel.SelectedSourceHeight;
-        if (_effectProxySource == viewModel.SelectedVideoPath)
-        {
-            var scale = Math.Min(1, Math.Min(1280.0 / maskWidth, 720.0 / maskHeight));
-            maskWidth = Math.Max(2, (int)(maskWidth * scale) / 2 * 2);
-            maskHeight = Math.Max(2, (int)(maskHeight * scale) / 2 * 2);
-            crop = ClipRenderFilters.ComputeCrop(viewModel.ClipCropMode, .5, .5, maskWidth, maskHeight) ?? new(0, 0, maskWidth, maskHeight);
-        }
         _pendingCropPreview = new CropPreviewRequest(
             ++_cropPreviewGeneration,
             crop,
-            maskWidth,
-            maskHeight,
+            viewModel.SelectedSourceWidth,
+            viewModel.SelectedSourceHeight,
             ((Application.Current?.Resources["AccentBrush"] as ISolidColorBrush)?.Color) ?? Color.Parse("#38D996"));
         if (_cropPreviewRenderInFlight) return;
 
@@ -10407,6 +10401,7 @@ public sealed partial class MainWindow : Window
         // the first audio track.
         var videoLaneHeight = ViewModel.TimelineTracks.FirstOrDefault(track => track.IsVideo)?.LaneHeight ?? 0;
         RenderTimelineMarkers(width, videoLaneHeight);
+        PositionTimedEffectTrack(videoLaneHeight);
 
         // Width of the visible pill, which is NOT the handle Border's own width -
         // that is deliberately wider and transparent to make the handle easier to
