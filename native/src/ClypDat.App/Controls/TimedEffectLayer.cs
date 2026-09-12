@@ -84,13 +84,68 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
     private bool IsActive(TimedVideoEffect e, double time) =>
         (e.Visible && e.Start <= time && e.End > time) || _gesture?.Id == e.Id;
 
+    /// <summary>Writes the displayed video picture to a PNG of the given width.</summary>
+    public Func<string, uint, Task<bool>>? Snapshot { get; set; }
+    // Paused, the blur switches from decoded chunk frames to a snapshot of the
+    // picture libvlc is showing: the clock behind CurrentTime can sit frames
+    // away from it, and on moving footage a frame off reads as the box being
+    // zoomed. Two shots per settle, the second in case a seek was still landing.
+    private static readonly int[] SnapshotDelaysMs = [150, 700];
+    private readonly System.Diagnostics.Stopwatch _settle = new();
+    private string? _settleKey;
+    private int _shots;
+    private bool _snapshotInFlight;
+    private string? _snapshotKey;
+    private TimedEffectFrameSource.Frame? _snapshotFrame;
+
+    private TimedEffectFrameSource.Frame? SnapshotFrame(MainWindowViewModel model, ClipRenderFilters.CropRect crop)
+    {
+        var key = $"{model.SelectedVideoPath}|{crop}|{model.CurrentTime.Ticks}";
+        if (model.IsPlaying || key != _settleKey)
+        {
+            _settleKey = key;
+            _settle.Restart();
+            _shots = 0;
+        }
+        if (_snapshotKey != key) _snapshotFrame = null;
+        if (model.IsPlaying) return null;
+        if (!_snapshotInFlight && _shots < SnapshotDelaysMs.Length && _settle.ElapsedMilliseconds >= SnapshotDelaysMs[_shots] && Snapshot is { } take)
+        {
+            _shots++;
+            _ = CaptureAsync(take, key, crop, model.SelectedSourceWidth, model.SelectedSourceHeight);
+        }
+        return _snapshotFrame;
+    }
+
+    private async Task CaptureAsync(Func<string, uint, Task<bool>> take, string key, ClipRenderFilters.CropRect crop, int sourceWidth, int sourceHeight)
+    {
+        _snapshotInFlight = true;
+        var path = Path.Combine(Path.GetTempPath(), $"clypdat-blur-{Guid.NewGuid():N}.png");
+        try
+        {
+            if (!await take(path, TimedEffectFrameSource.SnapshotWidth(sourceWidth, sourceHeight, crop))) return;
+            var frame = await Task.Run(() => TimedEffectFrameSource.LoadSnapshot(path) is { } shot
+                ? TimedEffectFrameSource.FromSnapshot(shot.Pixels, shot.Width, shot.Height, crop, sourceWidth, sourceHeight)
+                : null);
+            if (frame is null || key != _settleKey) return;
+            _snapshotFrame = frame;
+            _snapshotKey = key;
+        }
+        catch (Exception error) { AppLog.Error("Blur snapshot failed", error); }
+        finally
+        {
+            _snapshotInFlight = false;
+            try { File.Delete(path); } catch { }
+        }
+    }
+
     private void UpdateBlurs(MainWindowViewModel model, double time)
     {
         var crop = model.ActiveCropRect ?? new ClipRenderFilters.CropRect(0, 0, model.SelectedSourceWidth, model.SelectedSourceHeight);
         var duration = model.Duration.TotalSeconds;
         TimedEffectFrameSource.Frame? frame = null;
         if (_active.Any(item => item.Blur))
-            frame = _frames.Request(model.SelectedVideoPath, crop, time, duration);
+            frame = SnapshotFrame(model, crop) ?? _frames.Request(model.SelectedVideoPath, crop, time, duration);
         else if (model.BlurEffects.Where(e => e.Visible && e.Start > time && e.Start - time <= 1).MinBy(e => e.Start) is { } upcoming)
             _frames.Request(model.SelectedVideoPath, crop, upcoming.Start, duration);
 
@@ -281,6 +336,8 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
         foreach (var surface in _blurs.Values) surface.Bitmap?.Dispose();
         _blurs.Clear();
         _frames.Reset();
+        _snapshotFrame = null;
+        _snapshotKey = _settleKey = null;
         _signature = 0;
         InvalidateVisual();
     }

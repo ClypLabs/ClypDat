@@ -144,7 +144,10 @@ public sealed partial class MainWindow
                 // Last child: text and blur burn in above every other layer on
                 // export, so they sit above them here too, and win the hit test
                 // wherever an effect is drawn.
-                _timedEffectLayer = new TimedEffectLayer();
+                _timedEffectLayer = new TimedEffectLayer
+                {
+                    Snapshot = (path, snapshotWidth) => _playback is { } session ? session.TakeSnapshotAsync(path, snapshotWidth) : Task.FromResult(false)
+                };
                 _spotifySurface.Children.Add(_timedEffectLayer);
                 _spotifyViewport = new Canvas { Background = Brushes.Transparent, ClipToBounds = true, Children = { _spotifySurface } };
                 _spotifySurface.PointerPressed += SpotifySurface_OnPointerPressed;

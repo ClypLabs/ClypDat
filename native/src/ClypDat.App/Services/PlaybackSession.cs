@@ -258,6 +258,18 @@ public sealed class PlaybackSession : IDisposable
 
     public Task LoadVideoAsync(string path, bool replayArmed = false) => LoadVideoAsync(path, string.Empty, replayArmed);
 
+    /// <summary>
+    /// Writes the picture libvlc is displaying right now to a PNG, width
+    /// <paramref name="width"/> with the aspect kept. The live blur uses it while
+    /// paused: the input clock behind <see cref="Position"/> can sit frames away
+    /// from the picture on screen, and only the picture itself is exact.
+    /// </summary>
+    public Task<bool> TakeSnapshotAsync(string pngPath, uint width) => Task.Run(() =>
+    {
+        try { return VideoPlayer.TakeSnapshot(0, pngPath, width, 0) && File.Exists(pngPath); }
+        catch (Exception error) { AppLog.Error("Video snapshot failed", error); return false; }
+    });
+
     internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false, CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
         using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);

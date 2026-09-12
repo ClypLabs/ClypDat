@@ -7,16 +7,19 @@ namespace ClypDat.App.Services;
 /// Low-resolution copy of the playing clip, cut to the crop output, which
 /// the editor blurs live under each blur effect. LibVLC's picture lives in a
 /// native child window that nothing can sample, so the overlay decodes its own
-/// frames: two-second chunks at a fixed 30fps, the current one plus the next
-/// once playback nears its end. Latest request wins. An evicted chunk's decoder
-/// is killed, so fast scrubbing never piles up FFmpeg processes.
+/// frames while playing: one-second chunks at a fixed 60fps, the current one
+/// plus the next once playback nears its end. Latest request wins. An evicted
+/// chunk's decoder is killed, so fast scrubbing never piles up FFmpeg
+/// processes. While paused the layer uses a libvlc snapshot instead (see
+/// <see cref="FromSnapshot"/>), because only that is the exact picture shown.
 /// </summary>
 internal sealed class TimedEffectFrameSource : IDisposable
 {
-    public const double Fps = 30;
-    public const double ChunkSeconds = 2;
+    public const double Fps = 60;
+    public const double ChunkSeconds = 1;
     public const int DecodeHeight = 270;
-    private const double PrefetchSeconds = .75;
+    private const double PrefetchSeconds = .5;
+    private static long _snapshotIds;
     private readonly object _gate = new();
     private readonly Dictionary<int, Chunk> _chunks = [];
     private string? _key;
@@ -36,9 +39,54 @@ internal sealed class TimedEffectFrameSource : IDisposable
     public static int ChunkIndex(double seconds) => (int)Math.Floor(Math.Max(0, seconds) / ChunkSeconds);
 
     /// <summary>Frames are resampled to <see cref="Fps"/>, so frame i of a chunk is
-    /// exactly chunk start + i/Fps.</summary>
+    /// exactly chunk start + i/Fps. Floor, not round: a player shows the last
+    /// frame at or before its clock, never the next one.</summary>
     public static int FrameIndex(double seconds, int chunk, int count) =>
-        count <= 0 ? 0 : Math.Clamp((int)Math.Round((seconds - chunk * ChunkSeconds) * Fps), 0, count - 1);
+        count <= 0 ? 0 : Math.Clamp((int)Math.Floor((seconds - chunk * ChunkSeconds) * Fps + 1e-6), 0, count - 1);
+
+    /// <summary>Snapshot width that lands the crop output near <see cref="DecodeHeight"/> lines.</summary>
+    public static uint SnapshotWidth(int sourceWidth, int sourceHeight, ClipRenderFilters.CropRect crop) =>
+        (uint)Math.Clamp((int)Math.Round(sourceWidth * (double)Math.Min(DecodeHeight, crop.Height) / Math.Max(1, crop.Height)), 2, Math.Min(1920, Math.Max(2, sourceWidth)));
+
+    /// <summary>
+    /// Cuts the crop output out of a full-frame snapshot. The snapshot is the
+    /// source scaled to width × height, so the crop rect is scaled by the same
+    /// factor on each axis.
+    /// </summary>
+    public static Frame? FromSnapshot(byte[] bgra, int width, int height, ClipRenderFilters.CropRect crop, int sourceWidth, int sourceHeight)
+    {
+        if (width <= 0 || height <= 0 || sourceWidth <= 0 || sourceHeight <= 0 || bgra.Length < width * height * 4) return null;
+        var sx = (double)width / sourceWidth;
+        var sy = (double)height / sourceHeight;
+        var x = Math.Clamp((int)Math.Round(crop.X * sx), 0, width - 1);
+        var y = Math.Clamp((int)Math.Round(crop.Y * sy), 0, height - 1);
+        var w = Math.Clamp((int)Math.Round(crop.Width * sx), 1, width - x);
+        var h = Math.Clamp((int)Math.Round(crop.Height * sy), 1, height - y);
+        var pixels = new byte[w * h * 4];
+        for (var row = 0; row < h; row++)
+            Buffer.BlockCopy(bgra, ((y + row) * width + x) * 4, pixels, row * w * 4, w * 4);
+        return new Frame(pixels, w, h, long.MinValue + Interlocked.Increment(ref _snapshotIds));
+    }
+
+    /// <summary>Reads a snapshot PNG as BGRA and deletes it.</summary>
+    public static (byte[] Pixels, int Width, int Height)? LoadSnapshot(string path)
+    {
+        try
+        {
+            using var bitmap = new Avalonia.Media.Imaging.Bitmap(path);
+            var width = bitmap.PixelSize.Width;
+            var height = bitmap.PixelSize.Height;
+            var pixels = new byte[width * height * 4];
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+            try { bitmap.CopyPixels(new Avalonia.PixelRect(0, 0, width, height), handle.AddrOfPinnedObject(), pixels.Length, width * 4); }
+            finally { handle.Free(); }
+            if (bitmap.Format is { } format && format == Avalonia.Platform.PixelFormat.Rgba8888)
+                for (var i = 0; i < pixels.Length; i += 4) (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
+            return (pixels, width, height);
+        }
+        catch (Exception error) { AppLog.Error("Blur snapshot could not be read", error); return null; }
+        finally { try { File.Delete(path); } catch { } }
+    }
 
     /// <summary>The decoded frame nearest <paramref name="seconds"/>, or null
     /// while its chunk has not produced that frame yet.</summary>

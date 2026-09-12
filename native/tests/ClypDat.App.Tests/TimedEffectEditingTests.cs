@@ -107,15 +107,42 @@ public sealed class TimedEffectEditingTests
     }
 
     [Fact]
-    public void FrameSourceIndexesChunksAtThirtyFps()
+    public void FrameSourceIndexesOneSecondChunksAtSixtyFpsNeverAhead()
     {
-        Assert.Equal(0, TimedEffectFrameSource.ChunkIndex(1.99));
-        Assert.Equal(1, TimedEffectFrameSource.ChunkIndex(2));
-        Assert.Equal(15, TimedEffectFrameSource.FrameIndex(2.5, 1, 60));
-        Assert.Equal(59, TimedEffectFrameSource.FrameIndex(9, 1, 60));
+        Assert.Equal(1, TimedEffectFrameSource.ChunkIndex(1.99));
+        Assert.Equal(2, TimedEffectFrameSource.ChunkIndex(2));
+        Assert.Equal(30, TimedEffectFrameSource.FrameIndex(2.5, 2, 60));
+        // 2.532s is still frame 31 (2.5167s); rounding would jump ahead to frame 32 (2.5333s).
+        Assert.Equal(31, TimedEffectFrameSource.FrameIndex(2.532, 2, 60));
+        Assert.Equal(59, TimedEffectFrameSource.FrameIndex(9, 2, 60));
         Assert.Equal((480, 270), TimedEffectFrameSource.DecodeSize(1920, 1080));
         Assert.Equal((152, 270), TimedEffectFrameSource.DecodeSize(1080, 1920));
         Assert.Equal((100, 50), TimedEffectFrameSource.DecodeSize(100, 50));
+    }
+
+    [Fact]
+    public void SnapshotYieldsTheScaledCropOutput()
+    {
+        // 8x4 snapshot of a 16x8 source: left half black, right half white.
+        const int width = 8, height = 4;
+        var bgra = new byte[width * height * 4];
+        for (var i = 0; i < width * height; i++)
+        {
+            var value = (byte)(i % width < width / 2 ? 0 : 255);
+            bgra[i * 4] = bgra[i * 4 + 1] = bgra[i * 4 + 2] = value;
+            bgra[i * 4 + 3] = 255;
+        }
+        var full = TimedEffectFrameSource.FromSnapshot(bgra, width, height, new(0, 0, 16, 8), 16, 8)!.Value;
+        Assert.Equal((8, 4), (full.Width, full.Height));
+        Assert.Equal(bgra, full.Pixels);
+
+        var right = TimedEffectFrameSource.FromSnapshot(bgra, width, height, new(8, 0, 8, 8), 16, 8)!.Value;
+        Assert.Equal((4, 4), (right.Width, right.Height));
+        Assert.All(right.Pixels, value => Assert.Equal(255, value));
+        Assert.NotEqual(full.Id, right.Id);
+
+        Assert.Equal(480u, TimedEffectFrameSource.SnapshotWidth(2560, 1440, new(0, 0, 2560, 1440)));
+        Assert.Equal(1920u, TimedEffectFrameSource.SnapshotWidth(2560, 1440, new(1875, 0, 810, 1440 / 6)));
     }
 
     [Fact]
