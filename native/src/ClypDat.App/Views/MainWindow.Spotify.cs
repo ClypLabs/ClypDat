@@ -79,6 +79,12 @@ public sealed partial class MainWindow
         if (model.SelectedSourceWidth <= 0) { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
         try
         {
+            // One VLC-anchored position for the whole scene update. The model's
+            // smooth playhead remains the preview fallback while dragging/seeking.
+            var overlayTime = _timelineDragMode == TimelineDragMode.None && !_editorSeekInFlight &&
+                              _playback.TryGetOverlayPosition(out var vlcTime)
+                ? vlcTime
+                : model.CurrentTime;
             var original = _spotifyPreviewSpec;
             var showSpotify = original is not null && model.Settings.SpotifyOverlayEnabled && model.SpotifyOverlayLayerVisible;
             var showCamera = model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible && model.CameraOverlayTransform is not null;
@@ -186,7 +192,7 @@ public sealed partial class MainWindow
             _timedEffectLayer!.Width = _timedEffectLayer.BlurHost.Width = width / dpi;
             _timedEffectLayer.Height = _timedEffectLayer.BlurHost.Height = height / dpi;
             if (showEffects) _timedEffectLayer.Update(model);
-            UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), dpi);
+            UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), dpi, overlayTime);
             UpdateCapturedOverlayAdorner(model, dpi, width, height);
             _capturedOverlayScene!.Width = width / dpi;
             _capturedOverlayScene.Height = height / dpi;
@@ -210,7 +216,7 @@ public sealed partial class MainWindow
             // A four-times zoom must not allocate a monitor-sized offscreen
             // bitmap four times over. This caps preview raster size only.
             var rasterScale = Math.Min(1, 4096.0 / width);
-            if (showSpotify) _spotifyPreview!.Update(spec!, model.CurrentTime.TotalSeconds,
+            if (showSpotify) _spotifyPreview!.Update(spec!, overlayTime.TotalSeconds,
                 Math.Max(1, (int)Math.Round(width * rasterScale)), Math.Max(1, (int)Math.Round(height * rasterScale)));
             if (showSpotify && !_spotifyPreview!.HasCard && !_spotifyAdorner!.IsVisible && !showCamera && !showPeripherals && !showEffects) { HideSpotifyPreview(); return; }
             var handle = NativeHandleOf(_spotifyWindow);
@@ -256,7 +262,7 @@ public sealed partial class MainWindow
         _timedEffectLayer?.EndGesture();
     }
 
-    private void UpdateCapturedOverlayPreview(MainWindowViewModel model, Rect videoBounds, double dpi)
+    private void UpdateCapturedOverlayPreview(MainWindowViewModel model, Rect videoBounds, double dpi, TimeSpan overlayTime)
     {
         var showCamera = model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible && model.CameraOverlayTransform is not null;
         var showPeripherals = model.HasPeripheralOverlayLayer && model.PeripheralOverlayLayerVisible && model.PeripheralOverlayTransform is not null;
@@ -277,7 +283,7 @@ public sealed partial class MainWindow
                 _capturedPlayback = new CapturedOverlayPlayback();
                 _capturedPlayback.FrameReady += image => _capturedOverlayScene?.SetCamera(image, _capturedCameraBounds);
             }
-            _capturedPlayback.Request(model.Settings.LibraryFolder, model.SelectedOverlayManifestCamera(), model.CurrentTime.TotalSeconds);
+            _capturedPlayback.Request(model.Settings.LibraryFolder, model.SelectedOverlayManifestCamera(), overlayTime.TotalSeconds);
         }
         else { _capturedOverlayScene.ClearCamera(); _capturedCameraBounds = default; }
         if (showPeripherals)
@@ -295,7 +301,7 @@ public sealed partial class MainWindow
             _capturedPeripheralBounds = new Rect(width * normalized.X / dpi, height * normalized.Y / dpi,
                 layerWidth / dpi, layerWidth / aspect / dpi);
             _capturedOverlayScene.SetPeripherals(layout, _capturedPeripheralBounds,
-                ClipInputIndex.PressedAt(_capturedInput, model.CurrentTime.TotalSeconds),
+                ClipInputIndex.PressedAt(_capturedInput, overlayTime.TotalSeconds),
                 ClipOverlayManifest.BoardOf(peripheralLayer));
         }
         else { _capturedOverlayScene.ClearPeripherals(); _capturedPeripheralBounds = default; }

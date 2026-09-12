@@ -93,6 +93,9 @@ public sealed class PlaybackSession : IDisposable
     private readonly EditorSeekRequestQueue _previewRequests = new();
     private readonly EditorSeekCoordinator _seekCoordinator;
     private readonly EditorAvClockPolicy _audioClockPolicy = new();
+    private readonly EditorOverlayClock _overlayClock;
+    private EventHandler<MediaPlayerTimeChangedEventArgs>? _overlayClockHandler;
+    private long _overlayClockGeneration;
     private Task? _previewWorker;
     private readonly List<Task> _seekTasks = new();
     private EventHandler<MediaPlayerTimeChangedEventArgs>? _audioDriftHandler;
@@ -124,9 +127,16 @@ public sealed class PlaybackSession : IDisposable
         // detector goes blind.
         _libVlc = new LibVLC("--quiet", "--stats", "--no-drop-late-frames", "--no-skip-frames");
         VideoPlayer = new MediaPlayer(_libVlc);
+        _overlayClock = new EditorOverlayClock(() => Duration);
         VideoPlayer.EnableKeyInput = false;
         VideoPlayer.EnableMouseInput = false;
-        VideoPlayer.EndReached += (_, _) => _ended = true;
+        VideoPlayer.EndReached += (_, _) => { _ended = true; _overlayClock.FreezeAtCurrent(_overlayClockGeneration, Stopwatch.GetTimestamp()); };
+        VideoPlayer.Buffering += (_, args) =>
+        {
+            if (args.Cache < 100) _overlayClock.FreezeAtCurrent(_overlayClockGeneration, Stopwatch.GetTimestamp());
+            else if (_shouldPlay && !_isSeeking) _overlayClock.Continue(_overlayClockGeneration, Stopwatch.GetTimestamp());
+        };
+        ResetOverlayClock(TimeSpan.Zero);
     }
 
     public MediaPlayer VideoPlayer { get; }
@@ -143,6 +153,24 @@ public sealed class PlaybackSession : IDisposable
     }
     public bool IsPlaying => VideoPlayer.IsPlaying;
     public double PlaybackRate => _playbackRate;
+    internal bool TryGetOverlayPosition(out TimeSpan position) => _overlayClock.TryGetOverlayPosition(out position);
+
+    private void ResetOverlayClock(TimeSpan position)
+    {
+        var generation = Interlocked.Increment(ref _overlayClockGeneration);
+        _overlayClock.Reset(generation, position, _playbackRate);
+        if (_overlayClockHandler is not null) VideoPlayer.TimeChanged -= _overlayClockHandler;
+        _overlayClockHandler = (_, args) => _overlayClock.Sample(generation, TimeSpan.FromMilliseconds(Math.Max(0, args.Time)), Stopwatch.GetTimestamp());
+        VideoPlayer.TimeChanged += _overlayClockHandler;
+    }
+
+    private void BeginOverlaySeek(TimeSpan requested)
+    {
+        ResetOverlayClock(requested);
+        _overlayClock.BeginSeek(_overlayClockGeneration, requested, _playbackRate);
+    }
+    private void ResumeOverlayClock(TimeSpan confirmed) => _overlayClock.Resume(_overlayClockGeneration, confirmed, _playbackRate);
+    private void FreezeOverlayClock(TimeSpan confirmed) => _overlayClock.Freeze(_overlayClockGeneration, confirmed);
 
     /// <summary>
     /// Shows the editor's crop guide by handing libvlc a PNG to composite into
@@ -292,6 +320,7 @@ public sealed class PlaybackSession : IDisposable
         var teardownMs = loadClock.ElapsedMilliseconds;
         _ended = false;
         _lastRequestedPosition = TimeSpan.Zero;
+        ResetOverlayClock(TimeSpan.Zero);
         LoadedPath = path;
         _videoMedia = new Media(_libVlc, new Uri(path));
         _videoMedia.AddOption(":no-audio");
@@ -476,12 +505,15 @@ public sealed class PlaybackSession : IDisposable
         _shouldPlay = true;
         ResetSlowRateMonitor();
         _lastRequestedPosition = time < TimeSpan.Zero ? TimeSpan.Zero : time;
+        BeginOverlaySeek(_lastRequestedPosition);
         ForceVideoSilent();
         await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var startId = $"{GetHashCode():x}:{generation}";
-            return await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken).ConfigureAwait(false);
+            var result = await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken).ConfigureAwait(false);
+            if (result.Succeeded) ResumeOverlayClock(result.Landed);
+            return result;
         }
         finally { _seekLock.Release(); }
     }
@@ -505,6 +537,7 @@ public sealed class PlaybackSession : IDisposable
         _shouldPlay = true;
         ResetSlowRateMonitor();
         _lastRequestedPosition = TimeSpan.FromMilliseconds(milliseconds);
+        BeginOverlaySeek(_lastRequestedPosition);
         ForceVideoSilent();
 
         // A simple resume-from-pause is already sitting at this position; forcing
@@ -528,6 +561,7 @@ public sealed class PlaybackSession : IDisposable
             VideoPlayer.Play();
             VideoPlayer.SetPause(false);
             StartAudioAt(anchor, Interlocked.Read(ref _seekVersion));
+            ResumeOverlayClock(anchor);
         }
 
         AppLog.Debug($"Editor play from requested={time.TotalSeconds:0.###}s (seek={needsSeek}), vlc after={VideoPlayer.Time / 1000d:0.###}s, state={VideoPlayer.State}.");
@@ -552,6 +586,7 @@ public sealed class PlaybackSession : IDisposable
             // video each time. Re-anchoring to the true (video) pause position
             // here resets it every time instead of letting it accumulate.
             SeekAudio(Position);
+            FreezeOverlayClock(Position);
         }
         AppLog.Debug($"Editor pause at {Position.TotalSeconds:0.###}s.");
     }
@@ -569,6 +604,7 @@ public sealed class PlaybackSession : IDisposable
             }
             _ended = false;
             _shouldPlay = false;
+            FreezeOverlayClock(TimeSpan.Zero);
         }
         catch (Exception error)
         {
@@ -642,6 +678,7 @@ public sealed class PlaybackSession : IDisposable
         if (!_previewRequests.TryQueuePreview(target)) return;
         Interlocked.Increment(ref _seekVersion);
         _lastRequestedPosition = target;
+        BeginOverlaySeek(target);
         try
         {
             // One worker owns all preview writes. New drag positions replace a
@@ -818,6 +855,7 @@ public sealed class PlaybackSession : IDisposable
         _shouldPlay = resumePlayback;
         ResetSlowRateMonitor();
         _lastRequestedPosition = requested;
+        BeginOverlaySeek(requested);
         try
         {
             if (finalRequest.QuietPeriod > TimeSpan.Zero)
@@ -846,6 +884,8 @@ public sealed class PlaybackSession : IDisposable
             }
 
             _lastRequestedPosition = result.Landed;
+            if (result.Resumed) ResumeOverlayClock(result.Landed);
+            else FreezeOverlayClock(result.Landed);
             AppLog.Debug($"Editor seek end: requested={requested.TotalSeconds:0.###}s, landed={result.Landed.TotalSeconds:0.###}s, audioAnchor={result.AudioAnchor.TotalSeconds:0.###}s, rollConfirmed={result.Resumed}, state={VideoPlayer.State}, resume={resumePlayback}, generation={seekVersion}.");
             return PlaybackSeekResult.Completed(result.Resumed);
         }
@@ -867,6 +907,7 @@ public sealed class PlaybackSession : IDisposable
             if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
             VideoPlayer.SetPause(false);
             if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) StartAudioAt(Position, Interlocked.Read(ref _seekVersion));
+            ResumeOverlayClock(Position);
         }
     }
 
@@ -929,6 +970,7 @@ public sealed class PlaybackSession : IDisposable
         }
 
         _playbackRate = normalized;
+        _overlayClock.SetRate(_overlayClockGeneration, normalized);
 
         // Discard interpolation from the previous ratio before the audio thread
         // reads again; otherwise it blends frames from two playback speeds.
@@ -1134,6 +1176,7 @@ public sealed class PlaybackSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        if (_overlayClockHandler is not null) VideoPlayer.TimeChanged -= _overlayClockHandler;
         _disposeCts.Cancel();
         _previewRequests.BeginFinalSeek();
 
