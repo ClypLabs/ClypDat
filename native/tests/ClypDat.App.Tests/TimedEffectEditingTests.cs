@@ -153,6 +153,13 @@ public sealed class TimedEffectEditingTests
     }
 
     [Fact]
+    public void BlurSnapshotsNeverPutLibVlcTextOverTheVideo()
+    {
+        Assert.Contains("--no-osd", PlaybackSession.LibVlcOptions);
+        Assert.Contains("--no-snapshot-preview", PlaybackSession.LibVlcOptions);
+    }
+
+    [Fact]
     public void DownsampleAveragesBlocksIncludingPartialOnes()
     {
         // 3x1: values 0, 100, 200 at factor 2 → blocks {0,100} and {200}.

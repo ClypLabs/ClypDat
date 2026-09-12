@@ -125,7 +125,7 @@ public sealed class PlaybackSession : IDisposable
         // reads DisplayedPictures out of it to tell a frozen picture from a
         // healthy one, and without this the counters can stay at zero and that
         // detector goes blind.
-        _libVlc = new LibVLC("--quiet", "--stats", "--no-drop-late-frames", "--no-skip-frames");
+        _libVlc = new LibVLC(LibVlcOptions);
         VideoPlayer = new MediaPlayer(_libVlc);
         _overlayClock = new EditorOverlayClock(() => Duration);
         VideoPlayer.EnableKeyInput = false;
@@ -138,6 +138,16 @@ public sealed class PlaybackSession : IDisposable
         };
         ResetOverlayClock(TimeSpan.Zero);
     }
+
+    /// <summary>
+    /// Options for the editor's libvlc instance (see the constructor for why
+    /// the first four). --no-osd and --no-snapshot-preview: the live blur takes
+    /// a snapshot whenever playback settles, and libvlc otherwise prints the
+    /// saved file's path across the video and flashes a thumbnail of it. The app
+    /// draws its own overlays and never uses libvlc's on-screen display.
+    /// </summary>
+    internal static readonly string[] LibVlcOptions =
+        ["--quiet", "--stats", "--no-drop-late-frames", "--no-skip-frames", "--no-osd", "--no-snapshot-preview"];
 
     public MediaPlayer VideoPlayer { get; }
     public TimeSpan Duration => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Length));
