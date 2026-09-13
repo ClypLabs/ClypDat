@@ -153,14 +153,21 @@ int main() {
             "blur artwork");
     require(sample(64, 32)[1] > .1f && sample(64, 32)[1] < .9f,
             "artwork below blur must be sampled");
-    for (unsigned shape : {1u, 2u}) {
+    blur.bounds.x = .28125f;
+    auto outsideBlur = sample(35, 32);
+    auto shapeCorner = sample(36, 16);
+    for (unsigned shape : {0u, 1u, 2u}) {
       blur.shape = shape;
       state.revision++;
       require(cdvo_submit(token, &state) != 0, "shape state");
       require(cdvo_compose(renderer, rtv.Get(), &viewport, 1) != 0,
               "shape redraw");
-      require(sample(32, 16)[1] > .99f, "shape corner remains unblurred");
-      require(sample(64, 32)[1] > .1f && sample(64, 32)[1] < .9f,
+      require(std::abs(sample(35, 32)[1] - outsideBlur[1]) < .001f,
+              "pixels outside blur remain unchanged");
+      if (shape != 0)
+        require(std::abs(sample(36, 16)[1] - shapeCorner[1]) < .001f,
+                "shape corner remains unblurred");
+      require(sample(68, 32)[1] > .1f && sample(68, 32)[1] < .9f,
               "shape center blurred");
     }
     for (unsigned layer : {1u, 2u}) {

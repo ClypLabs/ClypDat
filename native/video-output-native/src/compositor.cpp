@@ -83,15 +83,22 @@ float4 gaussian(Vertex v) : SV_Target {
 }
 float4 mask(Vertex v) : SV_Target {
     float2 p=(v.uv-rect.xy)/rect.zw;
-    if(any(p<0)||any(p>1)) discard;
-    if(parameters.y==2 && dot((p-.5)*2,(p-.5)*2)>1) discard;
-    if(parameters.y==1) {
-        float2 size=rect.zw*step.zw;
-        float radius=min(size.x,size.y)*.2;
-        float2 q=abs((p-.5)*size)-(size*.5-radius);
-        if(length(max(q,0))+min(max(q.x,q.y),0)>radius) discard;
+    float2 size=rect.zw*step.zw;
+    float2 localPosition=(p-.5)*size+.5;
+    float distance=min(size.x,size.y)*.5-max(abs(localPosition.x),abs(localPosition.y));
+    if(parameters.y==2) {
+        float2 radius=size*.5;
+        distance=(1-length(localPosition/radius))*min(radius.x,radius.y);
     }
-    return source.Sample(linearClamp,v.uv);
+    if(parameters.y==1) {
+        float radius=min(size.x,size.y)*.2;
+        float2 q=abs(localPosition)-(size*.5-radius);
+        distance=radius-(length(max(q,0))+min(max(q.x,q.y),0));
+    }
+    float shortSide=min(size.x,size.y);
+    float feather=min(max(1,shortSide*.05),shortSide*.25);
+    float coverage=smoothstep(0,feather,distance);
+    return source.Sample(linearClamp,v.uv)*coverage;
 }
 )";
 struct Renderer {
@@ -540,7 +547,7 @@ int cdvo_compose(void *renderer, ID3D11RenderTargetView *output,
         r.draw(r.horizontal.srv.Get(), r.vertical.rtv.Get(), r.gaussian.Get(),
                c, full, box);
         r.draw(r.vertical.srv.Get(), r.scene.rtv.Get(), r.mask.Get(), c, full,
-               box);
+               box, true);
       }
     drawArt(1);
     drawArt(2);

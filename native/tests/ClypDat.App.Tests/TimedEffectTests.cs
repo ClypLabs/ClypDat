@@ -149,22 +149,29 @@ public sealed class TimedEffectTests
 
     [Fact]
     [Trait("Category", "IsolatedSTA")]
-    public void ShapedBlurGetsAMaskAndRectangleDoesNot()
+    public void EveryBlurShapeGetsASoftMaskAndCleanupRemovesIt()
     {
         AvaloniaTestThread.Run(() =>
         {
-            var blurs = new TimedVideoEffect[] { new() { Shape = "Ellipse", X = 0, Y = 0, Width = .5, Height = .5 }, new() { X = .5, Y = .5, Width = .5, Height = .5 } };
+            var blurs = new TimedVideoEffect[] { new() { Shape = "Rectangle", X = 0, Y = 0, Width = .5, Height = .5 }, new() { Shape = "Rounded", X = .5, Y = 0, Width = .5, Height = .5 }, new() { Shape = "Ellipse", X = 0, Y = .5, Width = .5, Height = .5 } };
             using var render = TimedEffectRender.PrepareAsync([], blurs, 0, 3, 1, 40, 20, CancellationToken.None).GetAwaiter().GetResult();
-            Assert.Null(render.Blur[1].Mask);
-            var mask = render.Blur[0].Mask!;
-            using var bitmap = new Avalonia.Media.Imaging.Bitmap(mask);
-            Assert.Equal(new Avalonia.PixelSize(20, 10), bitmap.PixelSize);
-            var pixels = new byte[20 * 10 * 4];
-            var handle = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
-            try { bitmap.CopyPixels(new Avalonia.PixelRect(0, 0, 20, 10), handle.AddrOfPinnedObject(), pixels.Length, 20 * 4); }
-            finally { handle.Free(); }
-            Assert.True(pixels[(5 * 20 + 10) * 4] > 240, "centre is inside the ellipse");
-            Assert.True(pixels[0] < 15, "corner is outside it");
+            var masks = render.Blur.Select(blur => blur.Mask!).ToArray();
+            Assert.All(masks, path => Assert.True(File.Exists(path)));
+            for (var i = 0; i < masks.Length; i++)
+            {
+                var mask = masks[i];
+                using var bitmap = new Avalonia.Media.Imaging.Bitmap(mask);
+                Assert.Equal(new Avalonia.PixelSize(20, 10), bitmap.PixelSize);
+                var pixels = new byte[20 * 10 * 4];
+                var handle = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+                try { bitmap.CopyPixels(new Avalonia.PixelRect(0, 0, 20, 10), handle.AddrOfPinnedObject(), pixels.Length, 20 * 4); }
+                finally { handle.Free(); }
+                Assert.True(pixels[(5 * 20 + 10) * 4] > 250, "centre retains full blur");
+                var expected = (byte)Math.Round(255 * TimedEffectRender.Coverage(blurs[i].Shape, .5, 5.5, 20, 10));
+                Assert.InRange(pixels[(5 * 20) * 4], (byte)Math.Max(0, expected - 1), (byte)Math.Min(255, expected + 1));
+            }
+            render.Dispose();
+            Assert.All(masks, path => Assert.False(File.Exists(path)));
         }, TimeSpan.FromSeconds(45), "blur shape mask");
     }
 
