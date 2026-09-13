@@ -8637,6 +8637,7 @@ public sealed partial class MainWindow : Window
             if (cancellationToken.IsCancellationRequested || !ReferenceEquals(ViewModel, openingViewModel) || !string.Equals(ViewModel.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase)) return;
             playback.SetMasterVolume(openingVolume);
             _playback = playback;
+            var openingComposition = playback.Composition;
             _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
             ViewModel.IsRecordingPausedAtCurrentTime = false;
             // Redundant with StopEditorPlayback's own Hide() above, but closes
@@ -8678,8 +8679,10 @@ public sealed partial class MainWindow : Window
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (cancellationToken.IsCancellationRequested) return;
-                    if (ViewModel is null) return;
-                    ViewModel.IsEditorVideoLoading = false;
+                    if (!ReferenceEquals(_playback, playback) || !ReferenceEquals(playback.Composition, openingComposition) ||
+                        !ReferenceEquals(ViewModel, openingViewModel) ||
+                        !string.Equals(ViewModel?.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase)) return;
+                    openingViewModel.IsEditorVideoLoading = false;
                 });
             }
             var cropMaskReapplied = 0;
@@ -8702,7 +8705,8 @@ public sealed partial class MainWindow : Window
                 // first tick could swap the thumbnail for a black native surface
                 // for a beat. Require the compositor to confirm a complete
                 // picture from the current seek generation before revealing it.
-                if (playback.VideoPlayer.VoutCount == 0 || playback.Composition?.HasPresentedPicture != true) return;
+                if (playback.VideoPlayer.VoutCount == 0 || !ReferenceEquals(playback.Composition, openingComposition) ||
+                    openingComposition?.HasPresentedPicture != true) return;
                 playback.VideoPlayer.TimeChanged -= OnTimeChanged;
                 playback.VideoPlayer.Vout -= OnVout;
                 // Time from play request to first decoded frame - the primary
@@ -8727,7 +8731,8 @@ public sealed partial class MainWindow : Window
             // A claimed hover player already rendered a frame through this
             // exact HWND, then paused. Reveal it immediately; PlayFrom below
             // resumes from the same nearby position without a new vout start.
-            var resumeWarmFrame = hoverWarmup?.FirstFrameReady == true && playback.VideoPlayer.VoutCount > 0 && playback.Composition?.HasPresentedPicture == true;
+            var resumeWarmFrame = hoverWarmup?.FirstFrameReady == true && playback.VideoPlayer.VoutCount > 0 &&
+                ReferenceEquals(playback.Composition, openingComposition) && openingComposition?.HasPresentedPicture == true;
             if (resumeWarmFrame)
             {
                 // The paused warm frame can be a few milliseconds beyond the
@@ -8749,6 +8754,10 @@ public sealed partial class MainWindow : Window
             if (cancellationToken.IsCancellationRequested || _playback != playback) return;
             var startup = await playback.StartCoordinatedAsync(startPosition, cancellationToken);
             if (!startup.Succeeded) return;
+            // StartCoordinatedAsync ends its seek generation. Submit the
+            // selected clip's scene immediately afterwards, before any screen
+            // placement or visibility gate can park its overlay window.
+            UpdateNativeComposition(openingViewModel, startup.Landed);
             ViewModel.CurrentTime = startup.Landed;
             StartPlayheadClock(startup.Landed);
             _endedAtTrimBoundary = false;
@@ -8767,7 +8776,7 @@ public sealed partial class MainWindow : Window
             // loading flag and the editor would sit on the thumbnail forever.
             // Reveal anyway rather than stay stuck; a black surface is at least
             // honest about the clip not playing.
-            _ = RevealEditorVideoIfStalledAsync(videoReady.Task, cancellationToken);
+            _ = RevealEditorVideoIfStalledAsync(videoReady.Task, playback, openingComposition, openingViewModel, openingPath, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -8788,7 +8797,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task RevealEditorVideoIfStalledAsync(Task videoReady, CancellationToken cancellationToken)
+    private async Task RevealEditorVideoIfStalledAsync(Task videoReady, PlaybackSession playback,
+        NativeVideoOutput? composition, MainWindowViewModel openingViewModel, string openingPath,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -8802,18 +8813,34 @@ public sealed partial class MainWindow : Window
         {
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (cancellationToken.IsCancellationRequested || ViewModel is null) return;
-                if (!ViewModel.IsEditorVideoLoading) return;
-                if (_playback?.Composition?.HasPresentedPicture == true)
+                if (cancellationToken.IsCancellationRequested || !ReferenceEquals(_playback, playback) ||
+                    !ReferenceEquals(playback.Composition, composition) || !ReferenceEquals(ViewModel, openingViewModel) ||
+                    !string.Equals(ViewModel?.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase) ||
+                    !openingViewModel.IsEditorVideoLoading) return;
+                if (composition?.HasPresentedPicture == true)
                 {
-                    ViewModel.IsEditorVideoLoading = false;
+                    openingViewModel.IsEditorVideoLoading = false;
                     return;
                 }
-                _playback?.Pause();
-                ViewModel.IsPlaying = false;
-                AppLog.Error("Editor compositor never reported a complete picture.");
-                _ = ShowMessageAsync("Video preview paused", "The GPU compositor could not present a complete picture. Reopen the clip; reinstall ClypDat if this persists.");
+                playback.Pause();
+                openingViewModel.IsPlaying = false;
+                var status = composition is null ? "none" : DescribeCompositionStatus(composition);
+                AppLog.Error($"Editor compositor did not present first picture: path={openingPath}, loading={openingViewModel.IsEditorVideoLoading}, {status}.");
+                _ = ShowMessageAsync("Video preview paused", "Preview could not render its first frame. Reopen the clip; if it persists, send the editor log from this attempt.");
             });
+        }
+    }
+
+    private static string DescribeCompositionStatus(NativeVideoOutput composition)
+    {
+        try
+        {
+            var status = composition.ReadStatus();
+            return $"nativeStatus=version:{status.Version},generation:{status.Generation},revision:{status.Revision},decoded:{status.DecodedPicture},presented:{status.PresentedPicture},attached:{status.Attached},failed:{status.Failed}";
+        }
+        catch (Exception error)
+        {
+            return $"nativeStatus=unavailable,error:{error.Message}";
         }
     }
 

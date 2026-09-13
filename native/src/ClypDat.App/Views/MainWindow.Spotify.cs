@@ -69,7 +69,19 @@ public sealed partial class MainWindow
     private void UpdateSpotifyPreview()
     {
         var model = ViewModel;
-        if (model is null || !model.IsEditorVisible || !IsVisible || WindowState == WindowState.Minimized || IsEditorSurfaceCovered || _playback is null)
+        if (model is null || _playback is null)
+        { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
+        // Scene submission must not depend on an overlay window having screen
+        // coordinates. During editor startup the video can be parked, covered,
+        // or minimized while LibVLC is waiting for this compositor state before
+        // it presents its first picture. Keep blur and text moving through that
+        // path; artwork is added below once its retained preview is available.
+        var compositionTime = _timelineDragMode == TimelineDragMode.None && !_editorSeekInFlight &&
+                              _playback.TryGetOverlayPosition(out var compositionVlcTime)
+            ? compositionVlcTime
+            : model.CurrentTime;
+        UpdateNativeComposition(model, compositionTime);
+        if (!model.IsEditorVisible || !IsVisible || WindowState == WindowState.Minimized || IsEditorSurfaceCovered)
         { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
         if (_spotifyPreviewDirty || _spotifyPreviewPath != model.SelectedVideoPath)
         {
@@ -83,10 +95,7 @@ public sealed partial class MainWindow
         {
             // One VLC-anchored position for the whole scene update. The model's
             // smooth playhead remains the preview fallback while dragging/seeking.
-            var overlayTime = _timelineDragMode == TimelineDragMode.None && !_editorSeekInFlight &&
-                              _playback.TryGetOverlayPosition(out var vlcTime)
-                ? vlcTime
-                : model.CurrentTime;
+            var overlayTime = compositionTime;
             var original = _spotifyPreviewSpec;
             var showSpotify = original is not null && model.Settings.SpotifyOverlayEnabled && model.SpotifyOverlayLayerVisible;
             var showCamera = model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible && model.CameraOverlayTransform is not null;

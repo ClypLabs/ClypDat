@@ -14,6 +14,11 @@ internal sealed class EditorCompositionScene
     private ulong _generation, _nextId = 4;
     private long _cameraRevision = -1, _spotifyRevision = -1;
     private string? _keyboardKey;
+    // The overlay window may be hidden while a dialog covers the editor or
+    // while the video is parked for startup. Keep already-uploaded artwork in
+    // the native scene during that interval: dropping it would replace a
+    // complete scene with an empty one before the next presentation.
+    private Rect? _cameraBounds, _keyboardBounds, _spotifyBounds;
     private readonly Dictionary<Guid, (ulong Id, TimedVideoEffect Effect, int Width, int Height, int FrameHeight)> _texts = [];
 
     internal void Update(NativeVideoOutput output, MainWindowViewModel model, TimeSpan time, long anchorMicroseconds,
@@ -23,6 +28,7 @@ internal sealed class EditorCompositionScene
         {
             _output = output; _generation = output.Generation;
             _texts.Clear(); _cameraRevision = _spotifyRevision = -1; _keyboardKey = null;
+            _cameraBounds = _keyboardBounds = _spotifyBounds = null;
         }
         var sourceWidth = model.SelectedSourceWidth; var sourceHeight = model.SelectedSourceHeight;
         if (sourceWidth <= 0 || sourceHeight <= 0) return;
@@ -53,7 +59,8 @@ internal sealed class EditorCompositionScene
             if (captured.CameraArtwork is { } camera)
             {
                 if (_cameraRevision != captured.CameraRevision) { output.UpdateArtwork(1, camera); _cameraRevision = captured.CameraRevision; }
-                Add(1, Normalize(captured.CameraArtworkBounds), 0);
+                _cameraBounds = Normalize(captured.CameraArtworkBounds);
+                Add(1, _cameraBounds.Value, 0);
             }
             if (captured.KeyboardArtwork is { } keyboard)
             {
@@ -68,14 +75,24 @@ internal sealed class EditorCompositionScene
                     using var bitmap = new RenderTargetBitmap(new PixelSize(width, height), new Vector(96, 96));
                     bitmap.Render(clone); output.UpdateArtwork(2, bitmap); _keyboardKey = key;
                 }
+                _keyboardBounds = bounds;
                 Add(2, bounds, 0);
             }
             if (spotify?.Artwork is { } card)
             {
                 if (_spotifyRevision != spotify.ArtworkRevision) { output.UpdateArtwork(3, card); _spotifyRevision = spotify.ArtworkRevision; }
-                Add(3, Normalize(new Rect(Canvas.GetLeft(spotify), Canvas.GetTop(spotify), spotify.Width, spotify.Height)), 0);
+                _spotifyBounds = Normalize(new Rect(Canvas.GetLeft(spotify), Canvas.GetTop(spotify), spotify.Width, spotify.Height));
+                Add(3, _spotifyBounds.Value, 0);
             }
         }
+        // No display-space geometry exists while the window is parked. Reuse
+        // last geometry only for layers that remain enabled in the model.
+        if (captured?.CameraArtwork is null && model.HasCameraOverlayLayer && model.CameraOverlayLayerVisible && _cameraBounds is { } cameraBounds)
+            Add(1, cameraBounds, 0);
+        if (captured?.KeyboardArtwork is null && model.HasPeripheralOverlayLayer && model.PeripheralOverlayLayerVisible && _keyboardBounds is { } keyboardBounds)
+            Add(2, keyboardBounds, 0);
+        if (spotify?.Artwork is null && model.Settings.SpotifyOverlayEnabled && model.SpotifyOverlayLayerVisible && _spotifyBounds is { } spotifyBounds)
+            Add(3, spotifyBounds, 0);
         foreach (var effect in model.TextEffects.Where(e => e.Visible))
         {
             var width = Math.Max(1, (int)Math.Ceiling(effect.Width * crop.Width));
@@ -90,9 +107,9 @@ internal sealed class EditorCompositionScene
             Add(cached.Id, new Rect(effect.X, effect.Y, effect.Width, effect.Height), 1, effect.Start, effect.End);
         }
         foreach (var id in _texts.Keys.Where(id => !model.TextEffects.Any(e => e.Visible && e.Id == id)).ToArray()) _texts.Remove(id);
-        if (captured?.CameraArtwork is null) _cameraRevision = -1;
-        if (captured?.KeyboardArtwork is null) _keyboardKey = null;
-        if (spotify?.Artwork is null) _spotifyRevision = -1;
+        if (!model.HasCameraOverlayLayer || !model.CameraOverlayLayerVisible) { _cameraRevision = -1; _cameraBounds = null; }
+        if (!model.HasPeripheralOverlayLayer || !model.PeripheralOverlayLayerVisible) { _keyboardKey = null; _keyboardBounds = null; }
+        if (!model.Settings.SpotifyOverlayEnabled || !model.SpotifyOverlayLayerVisible) { _spotifyRevision = -1; _spotifyBounds = null; }
         output.Submit(blurs, artwork.ToArray(), time, model.IsPlaying ? model.ClipSpeed : 0, anchorMicroseconds);
         output.ReadStatus();
     }
