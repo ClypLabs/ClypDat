@@ -14,9 +14,11 @@ namespace ClypDat.App.Views;
 public sealed partial class MainWindow
 {
     private Window? _spotifyWindow;
+    private readonly EditorCompositionScene _compositionScene = new();
+    private NativeVideoOutput? _compositionErrorOutput;
     private SpotifyCardPreview? _spotifyPreview;
-    // One owned native scene sits above LibVLC. A native video child always
-    // covers Avalonia siblings, so every editable overlay belongs here.
+    // The owned surface above LibVLC retains selection handles and gestures.
+    // Artwork itself is composed into the native video picture.
     private OverlaySceneControl? _capturedOverlayScene;
     private Canvas? _spotifySurface;
     private Canvas? _spotifyViewport;
@@ -91,9 +93,14 @@ public sealed partial class MainWindow
             var showPeripherals = model.HasPeripheralOverlayLayer && model.PeripheralOverlayLayerVisible && model.PeripheralOverlayTransform is not null;
             var showEffects = model.TextEffects.Count > 0 || model.BlurEffects.Count > 0;
             if (!showEffects) _timedEffectLayer?.Clear();
-            if (!showSpotify && !showCamera && !showPeripherals && !showEffects) { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
-            var spec = original is null ? null : original with { Position = model.Settings.SpotifyOverlayPosition, Font = SpotifyOverlayCardRenderer.ResolveFont(),
-                DynamicBackground = model.Settings.SpotifyOverlayDynamicBackground, Transform = model.SpotifyOverlayTransform };
+            if (!showSpotify && !showCamera && !showPeripherals && !showEffects) { UpdateNativeComposition(model, overlayTime); HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
+            var spec = original is null ? null : original with
+            {
+                Position = model.Settings.SpotifyOverlayPosition,
+                Font = SpotifyOverlayCardRenderer.ResolveFont(),
+                DynamicBackground = model.Settings.SpotifyOverlayDynamicBackground,
+                Transform = model.SpotifyOverlayTransform
+            };
             var top = EditorVideoView.PointToScreen(default);
             var bottom = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
             var fullWidth = Math.Max(1, bottom.X - top.X);
@@ -147,23 +154,27 @@ public sealed partial class MainWindow
                 _spotifyAdorner = new() { IsHitTestVisible = false };
                 _capturedAdorner = new() { IsHitTestVisible = false, ShowRotationHandle = false };
                 _spotifySurface = new Canvas { Background = Brushes.Transparent, Children = { _capturedOverlayScene, _capturedAdorner, _spotifyPreview, _spotifyAdorner } };
-                // Last child: text and blur burn in above every other layer on
-                // export, so they sit above them here too, and win the hit test
-                // wherever an effect is drawn.
-                _timedEffectLayer = new TimedEffectLayer
-                {
-                    Snapshot = (path, snapshotWidth) => _playback is { } session ? session.TakeSnapshotAsync(path, snapshotWidth) : Task.FromResult(false)
-                };
-                _spotifySurface.Children.Add(_timedEffectLayer.BlurHost);
+                // Effect handles win hit testing above artwork gestures.
+                _timedEffectLayer = new TimedEffectLayer();
+                _capturedOverlayScene.Opacity = 0;
+                _spotifyPreview.NativeComposition = true;
                 _spotifySurface.Children.Add(_timedEffectLayer);
                 _spotifyViewport = new Canvas { Background = Brushes.Transparent, ClipToBounds = true, Children = { _spotifySurface } };
                 _spotifySurface.PointerPressed += SpotifySurface_OnPointerPressed;
                 _spotifySurface.PointerMoved += SpotifySurface_OnPointerMoved;
                 _spotifySurface.PointerReleased += SpotifySurface_OnPointerReleased;
                 _spotifySurface.PointerCaptureLost += (_, _) => { EndCapturedOverlayGesture(); EndSpotifyGesture(); };
-                _spotifyWindow = new Window { WindowDecorations = WindowDecorations.None, ShowInTaskbar = false, CanResize = false,
-                    ShowActivated = false, Topmost = false, Background = Brushes.Transparent,
-                    TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent }, Content = _spotifyViewport };
+                _spotifyWindow = new Window
+                {
+                    WindowDecorations = WindowDecorations.None,
+                    ShowInTaskbar = false,
+                    CanResize = false,
+                    ShowActivated = false,
+                    Topmost = false,
+                    Background = Brushes.Transparent,
+                    TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+                    Content = _spotifyViewport
+                };
                 _spotifyWindow.Opened += (_, _) =>
                 {
                     var handle = NativeHandleOf(_spotifyWindow);
@@ -189,8 +200,8 @@ public sealed partial class MainWindow
             // meant a clip with only a camera overlay received no pointer events
             // at all, so its overlay could never be moved.
             _spotifySurface.IsHitTestVisible = showSpotify || showCamera || showPeripherals || showEffects;
-            _timedEffectLayer!.Width = _timedEffectLayer.BlurHost.Width = width / dpi;
-            _timedEffectLayer.Height = _timedEffectLayer.BlurHost.Height = height / dpi;
+            _timedEffectLayer!.Width = width / dpi;
+            _timedEffectLayer.Height = height / dpi;
             if (showEffects) _timedEffectLayer.Update(model, overlayTime);
             UpdateCapturedOverlayPreview(model, new Rect(x, y, width, height), dpi, overlayTime);
             UpdateCapturedOverlayAdorner(model, dpi, width, height);
@@ -218,6 +229,7 @@ public sealed partial class MainWindow
             var rasterScale = Math.Min(1, 4096.0 / width);
             if (showSpotify) _spotifyPreview!.Update(spec!, overlayTime.TotalSeconds,
                 Math.Max(1, (int)Math.Round(width * rasterScale)), Math.Max(1, (int)Math.Round(height * rasterScale)));
+            UpdateNativeComposition(model, overlayTime, _capturedOverlayScene, _spotifyPreview, width / dpi, height / dpi);
             if (showSpotify && !_spotifyPreview!.HasCard && !_spotifyAdorner!.IsVisible && !showCamera && !showPeripherals && !showEffects) { HideSpotifyPreview(); return; }
             var handle = NativeHandleOf(_spotifyWindow);
             if (!_spotifyWindow.IsVisible || (handle != IntPtr.Zero && !IsWindowVisible(handle)))
@@ -238,6 +250,27 @@ public sealed partial class MainWindow
             if (raised) RestoreOverlayChrome();
         }
         catch (InvalidOperationException) { HideSpotifyPreview(); }
+    }
+
+    private void UpdateNativeComposition(MainWindowViewModel model, TimeSpan time,
+        OverlaySceneControl? captured = null, SpotifyCardPreview? spotify = null,
+        double width = 0, double height = 0)
+    {
+        var session = _playback;
+        if (session?.Composition is not { } output || !string.Equals(session.LoadedPath, model.SelectedVideoPath, StringComparison.OrdinalIgnoreCase)) return;
+        var anchorMicroseconds = NativeVideoOutput.ClockMicroseconds;
+        if (!session.IsSeeking && session.TryGetOverlayPosition(out var sampled)) time = sampled;
+        try { output.UpdateScene(() => _compositionScene.Update(output, model, time, anchorMicroseconds, captured, spotify, width, height)); }
+        catch (Exception error)
+        {
+            if (session.Composition != output) return;
+            session.Pause();
+            model.IsPlaying = false;
+            if (_compositionErrorOutput == output) return;
+            _compositionErrorOutput = output;
+            AppLog.Error("Editor GPU composition failed", error);
+            _ = ShowMessageAsync("Video preview paused", error.Message);
+        }
     }
 
     /// <summary>Puts the editor chrome back on top after the overlay window has

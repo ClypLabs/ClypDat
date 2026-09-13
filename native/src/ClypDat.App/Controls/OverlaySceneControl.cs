@@ -11,6 +11,11 @@ public sealed class OverlaySceneControl : Canvas
 {
     private readonly Image _camera = new() { Stretch = Avalonia.Media.Stretch.Fill, IsHitTestVisible = false };
     private readonly KeyboardOverlayPreview _keyboard = new() { IsHitTestVisible = false };
+    internal long CameraRevision { get; private set; }
+    internal Bitmap? CameraArtwork => _camera.Source as Bitmap;
+    internal Rect CameraArtworkBounds => new(GetLeft(_camera), GetTop(_camera), _camera.Width, _camera.Height);
+    internal KeyboardOverlayPreview? KeyboardArtwork => _keyboard.IsVisible ? _keyboard : null;
+    internal Rect KeyboardArtworkBounds => new(GetLeft(_keyboard), GetTop(_keyboard), _keyboard.Width, _keyboard.Height);
     public OverlaySceneControl() { ClipToBounds = true; Children.Add(_camera); Children.Add(_keyboard); }
     /// <summary>The bitmap belongs to the playback service, which reuses one
     /// surface for every frame. Disposing it here would destroy the surface the
@@ -18,6 +23,7 @@ public sealed class OverlaySceneControl : Canvas
     /// reference does not invalidate on its own.</summary>
     public void SetCamera(Bitmap? image, Rect bounds)
     {
+        CameraRevision++;
         if (ReferenceEquals(_camera.Source, image)) _camera.InvalidateVisual();
         _camera.Source = image;
         _camera.IsVisible = image is not null;

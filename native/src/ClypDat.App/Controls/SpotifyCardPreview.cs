@@ -11,9 +11,13 @@ internal sealed class SpotifyCardPreview : Control, IDisposable
     private (int Width, int Height, string Position, FontFamily Font, bool DynamicBackground, double? OverlayWidth, double? Rotation, bool Right)? _key;
     private (SpotifyCard? Card, double SongSeconds)? _state;
     public bool HasCard => _state?.Card is not null;
+    internal bool NativeComposition { get; set; }
+    internal long ArtworkRevision { get; private set; }
+    internal Avalonia.Media.Imaging.Bitmap? Artwork => HasCard ? _frames?.Bitmap : null;
     public void Clear()
     {
         _state = null;
+        ArtworkRevision++;
         _frames?.ClearPixels();
         InvalidateVisual();
     }
@@ -34,11 +38,13 @@ internal sealed class SpotifyCardPreview : Control, IDisposable
         var state = spec.At(seconds);
         if (_state == state) return;
         _state = state;
+        ArtworkRevision++;
         _frames!.Render(state.Card, state.SongSeconds);
         InvalidateVisual();
     }
     public override void Render(DrawingContext context)
     {
+        if (NativeComposition) return;
         if (_state?.Card is not null && _frames is not null)
             context.DrawImage(_frames.Bitmap, new Rect(_frames.Bitmap.Size), new Rect(Bounds.Size));
     }

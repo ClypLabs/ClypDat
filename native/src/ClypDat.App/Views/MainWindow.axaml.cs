@@ -8700,10 +8700,9 @@ public sealed partial class MainWindow : Window
                 // TimeChanged alone only proves the position advanced, not that
                 // a picture exists to show - revealing the VideoView on the very
                 // first tick could swap the thumbnail for a black native surface
-                // for a beat. Vout is libvlc's count of live video outputs, so
-                // waiting for it to come up means there is something rendered
-                // underneath by the time the placeholder is dropped.
-                if (playback.VideoPlayer.VoutCount == 0) return;
+                // for a beat. Require the compositor to confirm a complete
+                // picture from the current seek generation before revealing it.
+                if (playback.VideoPlayer.VoutCount == 0 || playback.Composition?.HasPresentedPicture != true) return;
                 playback.VideoPlayer.TimeChanged -= OnTimeChanged;
                 playback.VideoPlayer.Vout -= OnVout;
                 // Time from play request to first decoded frame - the primary
@@ -8728,7 +8727,7 @@ public sealed partial class MainWindow : Window
             // A claimed hover player already rendered a frame through this
             // exact HWND, then paused. Reveal it immediately; PlayFrom below
             // resumes from the same nearby position without a new vout start.
-            var resumeWarmFrame = hoverWarmup?.FirstFrameReady == true && playback.VideoPlayer.VoutCount > 0;
+            var resumeWarmFrame = hoverWarmup?.FirstFrameReady == true && playback.VideoPlayer.VoutCount > 0 && playback.Composition?.HasPresentedPicture == true;
             if (resumeWarmFrame)
             {
                 // The paused warm frame can be a few milliseconds beyond the
@@ -8805,8 +8804,15 @@ public sealed partial class MainWindow : Window
             {
                 if (cancellationToken.IsCancellationRequested || ViewModel is null) return;
                 if (!ViewModel.IsEditorVideoLoading) return;
-                AppLog.Info("Editor video never reported a frame; revealing the video surface anyway.");
-                ViewModel.IsEditorVideoLoading = false;
+                if (_playback?.Composition?.HasPresentedPicture == true)
+                {
+                    ViewModel.IsEditorVideoLoading = false;
+                    return;
+                }
+                _playback?.Pause();
+                ViewModel.IsPlaying = false;
+                AppLog.Error("Editor compositor never reported a complete picture.");
+                _ = ShowMessageAsync("Video preview paused", "The GPU compositor could not present a complete picture. Reopen the clip; reinstall ClypDat if this persists.");
             });
         }
     }

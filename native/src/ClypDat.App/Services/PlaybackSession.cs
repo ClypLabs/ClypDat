@@ -141,15 +141,13 @@ public sealed class PlaybackSession : IDisposable
 
     /// <summary>
     /// Options for the editor's libvlc instance (see the constructor for why
-    /// the first four). --no-osd and --no-snapshot-preview: the live blur takes
-    /// a snapshot whenever playback settles, and libvlc otherwise prints the
-    /// saved file's path across the video and flashes a thumbnail of it. The app
-    /// draws its own overlays and never uses libvlc's on-screen display.
+    /// the first four). The compositor owns editor artwork; VLC OSD is disabled.
     /// </summary>
     internal static readonly string[] LibVlcOptions =
         ["--quiet", "--stats", "--no-drop-late-frames", "--no-skip-frames", "--no-osd", "--no-snapshot-preview"];
 
     public MediaPlayer VideoPlayer { get; }
+    internal NativeVideoOutput? Composition { get; private set; }
     public TimeSpan Duration => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Length));
     public TimeSpan Position
     {
@@ -176,11 +174,20 @@ public sealed class PlaybackSession : IDisposable
 
     private void BeginOverlaySeek(TimeSpan requested)
     {
+        Composition?.BeginSeek(requested);
         ResetOverlayClock(requested);
         _overlayClock.BeginSeek(_overlayClockGeneration, requested, _playbackRate);
     }
-    private void ResumeOverlayClock(TimeSpan confirmed) => _overlayClock.Resume(_overlayClockGeneration, confirmed, _playbackRate);
-    private void FreezeOverlayClock(TimeSpan confirmed) => _overlayClock.Freeze(_overlayClockGeneration, confirmed);
+    private void ResumeOverlayClock(TimeSpan confirmed)
+    {
+        Composition?.EndSeek(confirmed);
+        _overlayClock.Resume(_overlayClockGeneration, confirmed, _playbackRate);
+    }
+    private void FreezeOverlayClock(TimeSpan confirmed)
+    {
+        Composition?.EndSeek(confirmed);
+        _overlayClock.Freeze(_overlayClockGeneration, confirmed);
+    }
 
     /// <summary>
     /// Shows the editor's crop guide by handing libvlc a PNG to composite into
@@ -296,18 +303,6 @@ public sealed class PlaybackSession : IDisposable
 
     public Task LoadVideoAsync(string path, bool replayArmed = false) => LoadVideoAsync(path, string.Empty, replayArmed);
 
-    /// <summary>
-    /// Writes the picture libvlc is displaying right now to a PNG, width
-    /// <paramref name="width"/> with the aspect kept. The live blur uses it while
-    /// paused: the input clock behind <see cref="Position"/> can sit frames away
-    /// from the picture on screen, and only the picture itself is exact.
-    /// </summary>
-    public Task<bool> TakeSnapshotAsync(string pngPath, uint width) => Task.Run(() =>
-    {
-        try { return VideoPlayer.TakeSnapshot(0, pngPath, width, 0) && File.Exists(pngPath); }
-        catch (Exception error) { AppLog.Error("Video snapshot failed", error); return false; }
-    });
-
     internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false, CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
         using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);
@@ -333,6 +328,10 @@ public sealed class PlaybackSession : IDisposable
         ResetOverlayClock(TimeSpan.Zero);
         LoadedPath = path;
         _videoMedia = new Media(_libVlc, new Uri(path));
+        Composition = new NativeVideoOutput();
+        Composition.BindPlayer(VideoPlayer);
+        _videoMedia.AddOption(Composition.MediaOption);
+        _videoMedia.AddOption(":vout=clypdat_d3d11,none");
         _videoMedia.AddOption(":no-audio");
         if (IsH264(videoCodec))
         {
@@ -568,6 +567,7 @@ public sealed class PlaybackSession : IDisposable
             EnsureAudioOutputConnected();
             var anchor = Position;
             SeekAudio(anchor);
+            Composition?.BindPlayer(VideoPlayer);
             VideoPlayer.Play();
             VideoPlayer.SetPause(false);
             StartAudioAt(anchor, Interlocked.Read(ref _seekVersion));
@@ -786,6 +786,7 @@ public sealed class PlaybackSession : IDisposable
                         {
                             VideoPlayer.Stop();
                             _ended = false;
+                            Composition?.BindPlayer(VideoPlayer);
                             VideoPlayer.Play();
                         }
                         else if (!VideoPlayer.IsPlaying)
@@ -797,6 +798,7 @@ public sealed class PlaybackSession : IDisposable
                             VideoPlayer.SetPause(false);
                         }
                         VideoPlayer.Time = (long)target.TotalMilliseconds;
+                        Composition?.EndSeek(target);
                         previewLease.MarkWritten(DateTimeOffset.UtcNow);
                         lastPreviewGeneration = generation;
                     }
@@ -914,7 +916,7 @@ public sealed class PlaybackSession : IDisposable
         ForceVideoSilent();
         lock (_transportLock)
         {
-            if (!VideoPlayer.IsPlaying) VideoPlayer.Play();
+            if (!VideoPlayer.IsPlaying) { Composition?.BindPlayer(VideoPlayer); VideoPlayer.Play(); }
             VideoPlayer.SetPause(false);
             if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) StartAudioAt(Position, Interlocked.Read(ref _seekVersion));
             ResumeOverlayClock(Position);
@@ -1375,7 +1377,7 @@ public sealed class PlaybackSession : IDisposable
                 catch (Exception error) { AppLog.Error($"seek={seekId} audio-prepare track failed: {error.Message}"); return false; }
             })).ConfigureAwait(false);
             var ready = results.Count(result => result);
-            AppLog.Debug($"seek={seekId} audio-prepare: scheduled={readers.Length}, ready={ready}, failed={results.Length-ready}, pending=0, ms={clock.ElapsedMilliseconds}.");
+            AppLog.Debug($"seek={seekId} audio-prepare: scheduled={readers.Length}, ready={ready}, failed={results.Length - ready}, pending=0, ms={clock.ElapsedMilliseconds}.");
             return new AudioPreparationResult(ready, results.Length - ready, false);
         }
 
@@ -1398,6 +1400,7 @@ public sealed class PlaybackSession : IDisposable
                 {
                     session.VideoPlayer.Stop();
                     session._ended = false;
+                    session.Composition?.BindPlayer(session.VideoPlayer);
                     session.VideoPlayer.Play();
                 }
                 else if (session.VideoPlayer.State != VLCState.Paused && !session.VideoPlayer.IsPlaying)
@@ -1405,6 +1408,7 @@ public sealed class PlaybackSession : IDisposable
                     // A just-loaded LibVLC player is often NothingSpecial;
                     // it must be started once before a pause/Time sequence is
                     // accepted by the transport.
+                    session.Composition?.BindPlayer(session.VideoPlayer);
                     session.VideoPlayer.Play();
                 }
                 session.VideoPlayer.SetPause(true);
@@ -1423,6 +1427,7 @@ public sealed class PlaybackSession : IDisposable
                 session.ForceVideoSilent();
                 session.VideoPlayer.Stop();
                 session._ended = false;
+                session.Composition?.BindPlayer(session.VideoPlayer);
                 session.VideoPlayer.Play();
                 session.VideoPlayer.SetPause(true);
             }
@@ -1508,6 +1513,8 @@ public sealed class PlaybackSession : IDisposable
 
     private void DisposeMedia()
     {
+        Composition?.Dispose();
+        Composition = null;
         _videoMedia?.Dispose();
         _videoMedia = null;
     }
@@ -1672,9 +1679,9 @@ public sealed class PlaybackSession : IDisposable
                 var outputFrames = count / _channels;
                 if (outputFrames <= 0) return 0;
 
-            // +2, not +1: the last output sample interpolates towards the frame
-            // after the one it sits on, and the frame it sits on has to survive
-            // into the next block as the tail.
+                // +2, not +1: the last output sample interpolates towards the frame
+                // after the one it sits on, and the frame it sits on has to survive
+                // into the next block as the tail.
                 var neededFrames = (int)Math.Floor(_phase + rate * (outputFrames - 1)) + 2;
                 EnsureInput(neededFrames);
 

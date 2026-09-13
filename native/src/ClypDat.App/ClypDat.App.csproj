@@ -266,6 +266,21 @@
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\capture-native\build.ps1&quot; -Configuration $(Configuration)" />
   </Target>
 
+  <Target Name="BuildEditorVideoOutput" BeforeTargets="PrepareForBuild" Condition="'$(ClypDatUiPreview)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\video-output-native\build-video-output.ps1&quot; -Configuration $(Configuration) -VlcRoot &quot;$(PkgVideoLAN_LibVLC_Windows)\build\x64&quot;" />
+  </Target>
+  <ItemGroup Condition="'$(ClypDatUiPreview)' != 'true'">
+    <Content Include="..\..\video-output-native\build\$(Configuration)\libclypdat_d3d11_plugin.dll"
+             Link="libvlc\win-x64\plugins\video_output\libclypdat_d3d11_plugin.dll"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\video-output-native\vendor\vlc\UPSTREAM.md"
+             Link="licenses\ClypDat-video-output-NOTICE.md"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\video-output-native\vendor\vlc\COPYING.LIB"
+             Link="licenses\ClypDat-video-output-LGPL-2.1.txt"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <Target Name="CopyNativeCaptureEngineToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll')">
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll"
           DestinationFolder="$(OutDir)"

@@ -57,6 +57,7 @@ Desktop.ini
 *.swo
 
 # Local screenshots and generated media
+/native/video-output-native/build/
 Screenshot *.png
 *.tmp
 *.temp

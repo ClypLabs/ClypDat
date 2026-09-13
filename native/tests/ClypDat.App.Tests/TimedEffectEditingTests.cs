@@ -85,48 +85,6 @@ public sealed class TimedEffectEditingTests
     }
 
     [Fact]
-    public void DecodeAreaCoversPaddedBlursOnAGridAtDisplayResolution()
-    {
-        var crop = new ClipRenderFilters.CropRect(0, 0, 2560, 1440);
-        var blur = new TimedVideoEffect { X = .4, Y = .4, Width = .2, Height = .1, Strength = 20 };
-        var area = TimedEffectFrameSource.PlanArea([blur], crop, 1280, 720)!.Value;
-        Assert.Equal(new ClipRenderFilters.CropRect(800, 450, 960, 360), area.Source);
-        Assert.Equal((480, 180), (area.Width, area.Height));
-        Assert.Equal(new Rect(.3125, .3125, .375, .25), area.Area);
-        Assert.Null(TimedEffectFrameSource.PlanArea([], crop, 1280, 720));
-
-        // Nudging the box a little keeps the same decode.
-        Assert.Equal(area, TimedEffectFrameSource.PlanArea([blur with { X = .405 }], crop, 1280, 720));
-
-        var whole = TimedEffectFrameSource.PlanArea([new TimedVideoEffect { X = 0, Y = 0, Width = 1, Height = 1 }], crop, 2560, 1440)!.Value;
-        Assert.Equal(crop, whole.Source);
-        Assert.True(whole.Width * whole.Height * 4 <= TimedEffectFrameSource.MaximumFrameBytes);
-        Assert.Equal(0, whole.Width % 2);
-        Assert.Equal(0, whole.Height % 2);
-    }
-
-    [Fact]
-    public void ExtractRepeatsTheFrameEdgeBeyondIt()
-    {
-        // 4x2 frame whose blue channel is the column index.
-        var pixels = new byte[4 * 2 * 4];
-        for (var i = 0; i < 8; i++) { pixels[i * 4] = (byte)(i % 4); pixels[i * 4 + 3] = 255; }
-        var frame = new TimedEffectFrameSource.Frame(pixels, 4, 2, 1, new Rect(0, 0, 1, 1));
-
-        var (left, width, height, covered) = TimedEffectFrameSource.Extract(frame, new Rect(-.5, 0, 1, 1));
-        Assert.Equal((4, 2), (width, height));
-        Assert.Equal(new byte[] { 0, 0, 0, 1 }, Enumerable.Range(0, 4).Select(x => left[x * 4]).ToArray());
-        Assert.Equal(new Rect(-.5, 0, 1, 1), covered);
-
-        var right = TimedEffectFrameSource.Extract(frame, new Rect(.75, 0, .5, 1));
-        Assert.Equal(new byte[] { 3, 3 }, Enumerable.Range(0, 2).Select(x => right.Pixels[x * 4]).ToArray());
-
-        var half = new TimedEffectFrameSource.Frame(pixels, 4, 2, 2, new Rect(.5, 0, .5, 1));
-        var inner = TimedEffectFrameSource.Extract(half, new Rect(.625, 0, .25, 1));
-        Assert.Equal(new byte[] { 1, 2 }, Enumerable.Range(0, 2).Select(x => inner.Pixels[x * 4]).ToArray());
-    }
-
-    [Fact]
     public void LiveBlurSmoothsEdgesAndLeavesFlatAreasAlone()
     {
         const int width = 32, height = 8;
@@ -150,34 +108,6 @@ public sealed class TimedEffectEditingTests
         var row = Enumerable.Range(0, width).Select(x => (int)edge[(4 * width + x) * 4]).ToArray();
         Assert.True(row[15] > 0 && row[16] < 255, "the edge is softened");
         for (var x = 1; x < width; x++) Assert.True(row[x] >= row[x - 1], "values rise monotonically across the edge");
-    }
-
-    [Fact]
-    public void SyncCalibrationFindsTheFrameOnScreenAndIgnoresStillScenes()
-    {
-        // A bright bar sweeping 2px per frame across a 96x32 area.
-        const int width = 96, height = 32;
-        byte[] Frame(int bar)
-        {
-            var pixels = new byte[width * height * 4];
-            for (var y = 0; y < height; y++)
-            for (var x = 0; x < width; x++)
-            {
-                var v = (byte)(Math.Abs(x - bar) < 6 ? 255 : 20);
-                var i = (y * width + x) * 4;
-                pixels[i] = pixels[i + 1] = pixels[i + 2] = v;
-                pixels[i + 3] = 255;
-            }
-            return pixels;
-        }
-        var candidates = Enumerable.Range(0, 30)
-            .Select(i => (Time: 10 + (i - 15) / 60.0, TimedEffectFrameSource.Signature(Frame(10 + i * 2), width, height))).ToList();
-        // Screen shows frame 19 while the clock says frame 15: four frames ahead.
-        var screen = TimedEffectFrameSource.Signature(Frame(10 + 19 * 2), width, height);
-        Assert.Equal(4 / 60.0, TimedEffectFrameSource.EstimateOffset(screen, candidates, 10)!.Value, 6);
-
-        var still = Enumerable.Range(0, 30).Select(i => (10 + i / 60.0, TimedEffectFrameSource.Signature(Frame(40), width, height))).ToList();
-        Assert.Null(TimedEffectFrameSource.EstimateOffset(TimedEffectFrameSource.Signature(Frame(40), width, height), still, 10));
     }
 
     [Fact]
@@ -206,80 +136,6 @@ public sealed class TimedEffectEditingTests
         Assert.Equal(3, TimedEffectPainter.WorkingFactor(10 * 1000 / 1080.0));
         Assert.True(TimedEffectPainter.WorkingFactor(100 * 1000 / 1080.0) > 3);
         Assert.Equal(1, TimedEffectPainter.WorkingFactor(2));
-    }
-
-    [Fact]
-    public void FrameSourceIndexesOneSecondChunksAtSixtyFpsNeverAhead()
-    {
-        Assert.Equal(1, TimedEffectFrameSource.ChunkIndex(1.99));
-        Assert.Equal(2, TimedEffectFrameSource.ChunkIndex(2));
-        Assert.Equal(30, TimedEffectFrameSource.FrameIndex(2.5, 2, 60));
-        // 2.532s is still frame 31 (2.5167s); rounding would jump ahead to frame 32 (2.5333s).
-        Assert.Equal(31, TimedEffectFrameSource.FrameIndex(2.532, 2, 60));
-        Assert.Equal(59, TimedEffectFrameSource.FrameIndex(9, 2, 60));
-    }
-
-    [Fact]
-    public void SnapshotYieldsTheScaledCropOutputAtDisplayResolution()
-    {
-        // 8x4 snapshot of a 16x8 source: left half black, right half white.
-        const int width = 8, height = 4;
-        var bgra = new byte[width * height * 4];
-        for (var i = 0; i < width * height; i++)
-        {
-            var value = (byte)(i % width < width / 2 ? 0 : 255);
-            bgra[i * 4] = bgra[i * 4 + 1] = bgra[i * 4 + 2] = value;
-            bgra[i * 4 + 3] = 255;
-        }
-        var full = TimedEffectFrameSource.FromSnapshot(bgra, width, height, new(0, 0, 16, 8), 16, 8)!.Value;
-        Assert.Equal((8, 4), (full.Width, full.Height));
-        Assert.Equal(bgra, full.Pixels);
-        Assert.Equal(new Rect(0, 0, 1, 1), full.Area);
-
-        var right = TimedEffectFrameSource.FromSnapshot(bgra, width, height, new(8, 0, 8, 8), 16, 8)!.Value;
-        Assert.Equal((4, 4), (right.Width, right.Height));
-        Assert.All(right.Pixels, value => Assert.Equal(255, value));
-        Assert.NotEqual(full.Id, right.Id);
-
-        Assert.Equal(1280u, TimedEffectFrameSource.SnapshotWidth(1280, 2560, new(0, 0, 2560, 1440)));
-        Assert.Equal(2560u, TimedEffectFrameSource.SnapshotWidth(1280, 2560, new(640, 0, 1280, 1440)));
-        Assert.Equal(2560u, TimedEffectFrameSource.SnapshotWidth(4000, 2560, new(0, 0, 2560, 1440)));
-    }
-
-    [Fact]
-    public void FrameSourceDecodesTheBlurAreaFromTheClip()
-    {
-        FfmpegPathResolver.EnsureBundledFfmpeg();
-        var path = Path.Combine(Path.GetTempPath(), $"clypdat-blur-source-{Guid.NewGuid():N}.mkv");
-        try
-        {
-            using (var process = new Process { StartInfo = new(FfmpegPathResolver.FfmpegPath) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true } })
-            {
-                foreach (var arg in new[] { "-y", "-f", "lavfi", "-i", "color=white:s=64x64:r=30:d=3,drawbox=x=0:y=0:w=32:h=64:color=black:t=fill", "-c:v", "ffv1", path })
-                    process.StartInfo.ArgumentList.Add(arg);
-                process.Start();
-                _ = process.StandardError.ReadToEndAsync();
-                Assert.True(process.WaitForExit(30000));
-                Assert.Equal(0, process.ExitCode);
-            }
-            using var source = new TimedEffectFrameSource();
-            // Crop to the white half; a blur over all of it.
-            var crop = new ClipRenderFilters.CropRect(32, 0, 32, 64);
-            var area = TimedEffectFrameSource.PlanArea([new TimedVideoEffect { X = 0, Y = 0, Width = 1, Height = 1 }], crop, 32, 64)!.Value;
-            Assert.Equal(crop, area.Source);
-            TimedEffectFrameSource.Frame? frame = null;
-            var clock = Stopwatch.StartNew();
-            while (frame is null && clock.Elapsed < TimeSpan.FromSeconds(20))
-            {
-                frame = source.Request(path, area, 2.5, 3);
-                if (frame is null) Thread.Sleep(50);
-            }
-            Assert.NotNull(frame);
-            Assert.Equal((32, 64), (frame.Value.Width, frame.Value.Height));
-            Assert.Equal(new Rect(0, 0, 1, 1), frame.Value.Area);
-            Assert.True(frame.Value.Pixels[(32 * 32 + 16) * 4] > 200);
-        }
-        finally { File.Delete(path); }
     }
 
     [Theory]

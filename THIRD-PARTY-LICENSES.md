@@ -16,6 +16,15 @@ ClypDat's editor playback uses LibVLC (via the `VideoLAN.LibVLC.Windows` and
   consistent with LGPL's linking terms.
 - The LGPL-2.1 text is included below.
 
+## ClypDat D3D11 video-output plugin (LGPL-2.1-or-later)
+
+The editor bundles a modified VideoLAN D3D11 output pinned to VLC commit
+`79128878ddb2c280bbb6c89c76a46b31a80ade1c` (the core in NuGet 3.0.23.1).
+Original notices, modified source, native compositor, bridge and build scripts
+are included in `native/video-output-native` in this repository. See its
+`vendor/vlc/UPSTREAM.md` for provenance and modification details. Distributed
+builds include that notice and the LGPL text under `licenses/`.
+
 ## ScreenRecorderLib (MIT)
 
 ClypDat's legacy Windows Capture backend uses `ScreenRecorderLib` by Sverre
