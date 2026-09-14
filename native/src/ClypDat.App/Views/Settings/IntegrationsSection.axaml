@@ -78,9 +78,17 @@
           <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
             <Button Content="Create or sign in" Click="CreateClypDatButton_OnClick"
                     IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
-            <Button Classes="primaryButton" Content="Link account" Click="LinkClypDatButton_OnClick"
+            <Button Classes="primaryButton" Click="LinkClypDatButton_OnClick"
                     IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}"
-                    IsEnabled="{Binding ClypDatAccountCanLink}" />
+                    IsEnabled="{Binding ClypDatAccountCanLink}">
+              <Grid>
+                <TextBlock Text="Link account" IsVisible="{Binding !ClypDatLinkBusy}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding ClypDatLinkBusy}">
+                  <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                  <TextBlock Text="Waiting for your browser…" VerticalAlignment="Center" />
+                </StackPanel>
+              </Grid>
+            </Button>
             <Button Content="Refresh" Click="RefreshClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}"
                     ToolTip.Tip="Re-read your linked accounts and pull your current Discord name and picture. ClypDat also checks Discord every 30 minutes." />
             <Button Content="Sign out" Click="UnlinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" />
@@ -142,8 +150,16 @@
                              Text="This build has no Spotify application registered, so connecting is unavailable."
                              IsVisible="{Binding !SpotifyIsConfigured}" />
                 </StackPanel>
-                <Button Grid.Column="2" VerticalAlignment="Center" Content="Connect"
-                        Click="ConnectSpotifyButton_OnClick" IsEnabled="{Binding SpotifyIsConfigured}" />
+                <Button Grid.Column="2" VerticalAlignment="Center"
+                        Click="ConnectSpotifyButton_OnClick" IsEnabled="{Binding SpotifyConnectEnabled}">
+                  <Grid>
+                    <TextBlock Text="Connect" IsVisible="{Binding !SpotifyConnectBusy}" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding SpotifyConnectBusy}">
+                      <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                      <TextBlock Text="Connecting…" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
               </Grid>
             </Border>
           </StackPanel>

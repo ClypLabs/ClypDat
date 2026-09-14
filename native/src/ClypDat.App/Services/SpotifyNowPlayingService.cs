@@ -94,9 +94,11 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly string _cachePath = Path.Combine(AppDataPaths.Root, "spotify-auth.bin");
+    private readonly SemaphoreSlim _pollWake = new(0, 1);
     private CancellationTokenSource? _pollCts;
     private SpotifyTokens? _tokens;
     private SpotifyNowPlaying _snapshot = SpotifyNowPlaying.Disconnected;
+    private DateTimeOffset _lastRefresh;
 
     public SpotifyNowPlaying Snapshot => _snapshot;
     public event EventHandler<SpotifyNowPlaying>? Changed;
@@ -188,16 +190,49 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         _ = PollAsync(_pollCts.Token);
     }
 
+    /// <summary>
+    /// Asks for a refresh at the next opportunity without waiting out the
+    /// rest of the current poll interval - what the window regaining focus
+    /// asks for (<see cref="ClypDatAccountActivityService.RefreshSoon"/> does
+    /// the same for the ClypDat account). No-ops if there is nothing to
+    /// refresh; debounced so rapid focus toggling cannot flood the poll.
+    /// </summary>
+    public void RefreshSoon()
+    {
+        if (!_snapshot.IsConnected) return;
+        if (DateTimeOffset.UtcNow - _lastRefresh < TimeSpan.FromSeconds(1)) return;
+        try { if (_pollWake.CurrentCount == 0) _pollWake.Release(); }
+        catch (SemaphoreFullException) { }
+        catch (ObjectDisposedException) { }
+    }
+
     private async Task PollAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+                await _pollWake.WaitAsync(PollInterval, cancellationToken).ConfigureAwait(false);
                 await RefreshNowPlayingAsync(cancellationToken).ConfigureAwait(false);
+                _lastRefresh = DateTimeOffset.UtcNow;
             }
             catch (OperationCanceledException) { return; }
+            catch (HttpRequestException error) when (IsRefreshTokenDead(error))
+            {
+                // The refresh token itself was rejected - reconnecting needs a
+                // fresh browser sign-in, so there is nothing left to poll for.
+                // Unlike a transient failure, the UI must stop claiming
+                // "Connected" here instead of silently retrying forever.
+                AppLog.Error("Spotify: session expired.", error);
+                _pollCts?.Cancel();
+                _snapshot = SpotifyNowPlaying.Disconnected with { Error = "Spotify session expired. Reconnect." };
+                Current = _snapshot;
+                TryDeleteCache();
+                _tokens = null;
+                Sampled?.Invoke(this, _snapshot);
+                Changed?.Invoke(this, _snapshot);
+                return;
+            }
             catch (Exception error)
             {
                 // A poll failing is a network blip or a token that needs one
@@ -207,6 +242,11 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             }
         }
     }
+
+    // Spotify answers a dead/revoked refresh token with 400 (invalid_grant) or
+    // 401; anything else (a timeout, a 5xx) is transient and worth retrying.
+    private static bool IsRefreshTokenDead(HttpRequestException error) =>
+        error.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized;
 
     private async Task RefreshNowPlayingAsync(CancellationToken cancellationToken)
     {
@@ -384,7 +424,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Spotify rejected the sign-in ({(int)response.StatusCode}: {OAuthError(body)}).");
+            throw new HttpRequestException($"Spotify rejected the sign-in ({(int)response.StatusCode}: {OAuthError(body)}).", null, response.StatusCode);
 
         return JsonSerializer.Deserialize<OAuthTokenResponse>(body)
             ?? throw new InvalidOperationException("Spotify returned an unreadable token response.");
@@ -438,6 +478,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     {
         _pollCts?.Cancel();
         _pollCts?.Dispose();
+        _pollWake.Dispose();
         _http.Dispose();
     }
 

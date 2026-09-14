@@ -105,6 +105,24 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         try
         {
             _token = await RunBrowserHandoffAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (BrowserHandoffTimedOutException timedOut)
+        {
+            // The local listener gave up without ever seeing a matching
+            // request - most often because the browser detoured through a
+            // sign-in that took longer than the window. The webapp already
+            // minted the token server-side when the session was found; claim
+            // it instead of making the user notice and click Link again.
+            try { _token = await PollClaimAsync(timedOut.State, cancellationToken).ConfigureAwait(false); }
+            catch (Exception error) { return Fail(error); }
+        }
+        catch (Exception error)
+        {
+            return Fail(error);
+        }
+
+        try
+        {
             SaveToken(_token);
             await RefreshAsync(cancellationToken).ConfigureAwait(false);
             StartPolling();
@@ -112,18 +130,23 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
         catch (Exception error)
         {
-            AppLog.Error("ClypDat account: connection failed.", error);
-            _token = null;
-            var serverProblem = IsServerProblem(error);
-            var message = serverProblem
-                ? ServerProblemMessage
-                : error is InvalidOperationException invalid && invalid.Message.StartsWith("ClypDat sign-in required.", StringComparison.Ordinal)
-                    ? invalid.Message
-                    : "ClypDat account connection failed. Sign in through the browser and try again.";
-            _snapshot = new XboxActivitySnapshot(false, null, null, null, null, message, ServerUnavailable: serverProblem);
-            Changed?.Invoke(this, _snapshot);
-            return false;
+            return Fail(error);
         }
+    }
+
+    private bool Fail(Exception error)
+    {
+        AppLog.Error("ClypDat account: connection failed.", error);
+        _token = null;
+        var serverProblem = IsServerProblem(error);
+        var message = serverProblem
+            ? ServerProblemMessage
+            : error is InvalidOperationException invalid && invalid.Message.StartsWith("ClypDat sign-in required.", StringComparison.Ordinal)
+                ? invalid.Message
+                : "ClypDat account connection failed. Sign in through the browser and try again.";
+        _snapshot = new XboxActivitySnapshot(false, null, null, null, null, message, ServerUnavailable: serverProblem);
+        Changed?.Invoke(this, _snapshot);
+        return false;
     }
 
     public void Disconnect()
@@ -199,6 +222,32 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             _snapshot = _snapshot with { Error = message, ServerUnavailable = false };
             Changed?.Invoke(this, _snapshot);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Tells clypdat.xyz whether Spotify is connected in this app, so the
+    /// account page can show it too. Spotify's own OAuth never touches the
+    /// server - this is purely a status flag - so a failure here must never
+    /// disrupt whatever caused the report (connecting/disconnecting Spotify,
+    /// or linking this ClypDat account while Spotify was already connected).
+    /// </summary>
+    public async Task ReportSpotifyStatusAsync(bool connected, CancellationToken cancellationToken = default)
+    {
+        if (!IsAuthenticated) return;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/spotify")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { connected }), Encoding.UTF8, "application/json"),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token!.AccessToken);
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized) Disconnect();
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("ClypDat account: reporting Spotify status failed.", error);
         }
     }
 
@@ -330,6 +379,12 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         Changed?.Invoke(this, _snapshot);
     }
 
+    // Was 5 minutes. A round trip that detours through signing in (Discord's
+    // consent screen, 2FA) can take longer, and the loop below now absorbs a
+    // stray request instead of failing on one - so the window can afford to
+    // be generous; PollClaimAsync below is the real backstop past this anyway.
+    private static readonly TimeSpan HandoffWindow = TimeSpan.FromMinutes(10);
+
     private async Task<DesktopToken> RunBrowserHandoffAsync(CancellationToken cancellationToken)
     {
         var port = GetFreePort();
@@ -340,27 +395,86 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         listener.Start();
         var url = $"{BaseUrl}api/desktop/connect?redirect_uri={Uri.EscapeDataString(redirectUri)}&state={Uri.EscapeDataString(state)}";
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        var context = await listener.GetContextAsync().WaitAsync(TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
-        try
+
+        var deadline = DateTimeOffset.UtcNow.Add(HandoffWindow);
+        // A single GetContextAsync used to be enough, but a request that does
+        // not carry this attempt's state - a duplicated redirect, a reload, a
+        // stray probe - must not fail the whole attempt. Answer it and keep
+        // waiting for the one that matches, until the window runs out.
+        while (true)
         {
-            if (!string.Equals(context.Request.QueryString["state"], state, StringComparison.Ordinal)) throw new InvalidOperationException("ClypDat sign-in returned an invalid response.");
-            var error = context.Request.QueryString["error"];
-            if (string.Equals(error, "login-required", StringComparison.Ordinal))
-                throw new InvalidOperationException("ClypDat sign-in required. Open clypdat.xyz/account, sign in, then retry here.");
-            if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException("ClypDat sign-in was not completed.");
-            var accessToken = context.Request.QueryString["token"];
-            if (string.IsNullOrWhiteSpace(accessToken)) throw new InvalidOperationException("ClypDat sign-in returned no token.");
-            var expiresIn = int.TryParse(context.Request.QueryString["expires_in"], out var seconds) ? seconds : 60 * 60 * 24 * 30;
-            var body = BrowserCallbackPage.Success();
-            context.Response.ContentType = "text/html; charset=utf-8";
-            context.Response.ContentLength64 = body.Length;
-            await context.Response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
-            return new DesktopToken(accessToken, DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, expiresIn)));
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) throw new BrowserHandoffTimedOutException(state);
+
+            HttpListenerContext context;
+            try { context = await listener.GetContextAsync().WaitAsync(remaining, cancellationToken).ConfigureAwait(false); }
+            catch (TimeoutException) { throw new BrowserHandoffTimedOutException(state); }
+
+            if (!string.Equals(context.Request.QueryString["state"], state, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.NoContent;
+                context.Response.Close();
+                continue;
+            }
+
+            try
+            {
+                var error = context.Request.QueryString["error"];
+                if (string.Equals(error, "login-required", StringComparison.Ordinal))
+                    throw new InvalidOperationException("ClypDat sign-in required. Open clypdat.xyz/account, sign in, then retry here.");
+                if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException("ClypDat sign-in was not completed.");
+                var accessToken = context.Request.QueryString["token"];
+                if (string.IsNullOrWhiteSpace(accessToken)) throw new InvalidOperationException("ClypDat sign-in returned no token.");
+                var expiresIn = int.TryParse(context.Request.QueryString["expires_in"], out var seconds) ? seconds : 60 * 60 * 24 * 30;
+                var body = BrowserCallbackPage.Success();
+                context.Response.ContentType = "text/html; charset=utf-8";
+                context.Response.ContentLength64 = body.Length;
+                await context.Response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+                return new DesktopToken(accessToken, DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, expiresIn)));
+            }
+            finally
+            {
+                context.Response.Close();
+            }
         }
-        finally
+    }
+
+    private static readonly TimeSpan ClaimPollWindow = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan ClaimPollInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Falls back to asking the server directly for the token it minted for
+    /// this attempt's <paramref name="state"/>, for when the local listener's
+    /// window ran out before the browser ever made it back to localhost -
+    /// /api/desktop/connect stashes the token there the moment a session is
+    /// found, specifically so a slow or interrupted round trip is not lost.
+    /// </summary>
+    private async Task<DesktopToken> PollClaimAsync(string state, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(ClaimPollWindow);
+        while (DateTimeOffset.UtcNow < deadline)
         {
-            context.Response.Close();
+            await Task.Delay(ClaimPollInterval, cancellationToken).ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"api/desktop/connect/claim?state={Uri.EscapeDataString(state)}");
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound) continue;
+            if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ClypDat connect claim rejected the request ({(int)response.StatusCode}).", null, response.StatusCode);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var claim = JsonSerializer.Deserialize<ClaimResponse>(body) ?? throw new InvalidOperationException("ClypDat connect claim returned no data.");
+            return new DesktopToken(claim.Token, DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, claim.ExpiresIn)));
         }
+        throw new InvalidOperationException("ClypDat sign-in was not completed in time. Sign in through the browser and try again.");
+    }
+
+    private sealed class BrowserHandoffTimedOutException(string state) : Exception
+    {
+        public string State { get; } = state;
+    }
+
+    private sealed class ClaimResponse
+    {
+        [JsonPropertyName("token")] public string Token { get; set; } = string.Empty;
+        [JsonPropertyName("expires_in")] public int ExpiresIn { get; set; }
     }
 
     private static int GetFreePort()
