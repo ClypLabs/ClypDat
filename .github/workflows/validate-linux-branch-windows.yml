@@ -1,0 +1,58 @@
+name: Linux branch Windows compatibility
+on:
+  push:
+    branches: [linux-support]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          path: clypdat-app
+      - name: Read unchanged Windows dependency pin
+        shell: pwsh
+        run: |
+          [xml]$pin = Get-Content clypdat-app/eng/AvaloniaPin.props
+          "avalonia_commit=$($pin.Project.PropertyGroup.ClypDatAvaloniaStableCommit)" >> $env:GITHUB_ENV
+          "avalonia_version=$($pin.Project.PropertyGroup.ClypDatAvaloniaStablePackageVersion)" >> $env:GITHUB_ENV
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ClypLabs/clypdat-avalonia
+          ref: ${{ env.avalonia_commit }}
+          path: clypdat-avalonia
+          submodules: recursive
+      - name: Build pinned Avalonia packages
+        working-directory: clypdat-app
+        shell: pwsh
+        run: |
+          ./dotnet.ps1 msbuild ../clypdat-avalonia/build/ClypDat.Win32Packages.proj /t:Pack /p:ClypDatPackageVersion=$env:avalonia_version
+          if ($LASTEXITCODE) { throw 'Avalonia package build failed.' }
+      - name: Restore application and compile native capture and video output
+        working-directory: clypdat-app
+        shell: pwsh
+        run: |
+          ./dotnet.ps1 restore native/tests/ClypDat.App.Tests/ClypDat.App.Tests.csproj -r win-x64
+          if ($LASTEXITCODE) { throw 'Restore failed.' }
+          cmake -S native/capture-native -B native/capture-native/build -A x64
+          if ($LASTEXITCODE) { throw 'Capture configure failed.' }
+          cmake --build native/capture-native/build --config Release
+          if ($LASTEXITCODE) { throw 'Capture build failed.' }
+          $vlc = "$env:USERPROFILE/.nuget/packages/videolan.libvlc.windows/3.0.23.1/build/x64"
+          cmake -S native/video-output-native -B native/video-output-native/build -A x64 "-DVLC_ROOT=$vlc"
+          if ($LASTEXITCODE) { throw 'Video output configure failed.' }
+          cmake --build native/video-output-native/build --config Release
+          if ($LASTEXITCODE) { throw 'Video output build failed.' }
+      - name: Run managed and native tests without publishing
+        working-directory: clypdat-app
+        shell: pwsh
+        run: |
+          # Native components were built above with the runner's installed MSVC.
+          ./dotnet.ps1 test native/tests/ClypDat.App.Tests/ClypDat.App.Tests.csproj -r win-x64 -c Release -p:Platform=x64 -p:ClypDatManagedValidation=true --logger trx
+          if ($LASTEXITCODE) { throw 'Managed tests failed.' }
+          ctest --test-dir native/capture-native/build -C Release --output-on-failure
+          if ($LASTEXITCODE) { throw 'Capture native tests failed.' }
+          ctest --test-dir native/video-output-native/build -C Release --output-on-failure
+          if ($LASTEXITCODE) { throw 'Video output native tests failed.' }

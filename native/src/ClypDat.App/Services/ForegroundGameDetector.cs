@@ -17,12 +17,14 @@ public sealed record GameDetection(
     bool IsDetected,
     bool IsForeground = false,
     GameMatchSource MatchSource = GameMatchSource.None,
-    string DetectionKey = "")
+    string DetectionKey = "",
+    ClypDat.Capture.Abstractions.LinuxCaptureTarget? LinuxTarget = null,
+    ulong LinuxProcessStartTime = 0)
 {
     public static GameDetection None { get; } = new("No game detected", string.Empty, string.Empty, string.Empty, 0, 0, false);
 }
 
-public sealed class ForegroundGameDetector
+public sealed partial class ForegroundGameDetector
 {
     private readonly SteamGameLibrary _steamGames;
     private SteamClassificationSnapshot? _steamSnapshot;
@@ -81,6 +83,7 @@ public sealed class ForegroundGameDetector
 
     public GameDetection Detect()
     {
+        if (OperatingSystem.IsLinux()) return DetectLinux();
         if (!OperatingSystem.IsWindows()) return GameDetection.None;
 
         var all = ScanWindows();
@@ -137,7 +140,7 @@ public sealed class ForegroundGameDetector
 
     public string DetectDisplayName() => Detect().DisplayName;
 
-    public IReadOnlyList<GameDetection> DetectAllRunningGames() => ScanWindows()
+    public IReadOnlyList<GameDetection> DetectAllRunningGames() => (OperatingSystem.IsLinux() ? ScanLinuxWindows() : ScanWindows())
         .GroupBy(game => string.IsNullOrWhiteSpace(game.DetectionKey) ? game.ExeName : game.DetectionKey, StringComparer.OrdinalIgnoreCase)
         .Select(group => group.OrderByDescending(game => WindowArea(game.WindowHandle)).First())
         .ToArray();
@@ -588,7 +591,7 @@ public sealed class ForegroundGameDetector
 
     private bool IsIgnored(string executable) => _userIgnoredExecutables.Contains(executable);
     private static bool IsStillUsable(GameDetection detection) => detection.WindowHandle != 0 && IsWindow(detection.WindowHandle) && IsWindowVisible(detection.WindowHandle) && !IsIconic(detection.WindowHandle);
-    private static long WindowArea(nint handle) => GetWindowRect(handle, out var rect) ? (long)Math.Max(0, rect.Right - rect.Left) * Math.Max(0, rect.Bottom - rect.Top) : 0;
+    private static long WindowArea(nint handle) => OperatingSystem.IsWindows() && handle != 0 && GetWindowRect(handle, out var rect) ? (long)Math.Max(0, rect.Right - rect.Left) * Math.Max(0, rect.Bottom - rect.Top) : 0;
 
     // Process.GetProcessById + MainModule used to sit here. On Windows,
     // Process.GetProcessById validates its PID via NtQuerySystemInformation,

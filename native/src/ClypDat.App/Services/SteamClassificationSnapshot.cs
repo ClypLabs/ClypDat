@@ -33,6 +33,9 @@ public sealed class SteamClassificationSnapshot
     internal SteamGameInstall? FindInstall(string? path) => string.IsNullOrWhiteSpace(path) ? null :
         _installs.FirstOrDefault(i => SteamGameLibrary.IsUnderPath(path, i.InstallPath));
 
+    public SteamGameInstall? FindGameByAppId(int appId) => Classify(appId) == SteamAppKind.Game
+        ? _installs.FirstOrDefault(i => i.AppId == appId) : null;
+
     public SteamGameInstall? FindGameByPath(string? path) => FindInstall(path) is { } install && Classify(install.AppId) == SteamAppKind.Game ? install : null;
 
     public SteamGameInstall? FindGameByName(string? name) => name is not null && _names.TryGetValue(name, out var install)

@@ -10,7 +10,7 @@ namespace ClypDat.App.Services;
 /// <summary>Copies artwork, never video, into the native presentation scene.</summary>
 internal sealed class EditorCompositionScene
 {
-    private NativeVideoOutput? _output;
+    private IEditorVideoOutput? _output;
     private ulong _generation, _nextId = 4;
     private long _cameraRevision = -1, _spotifyRevision = -1;
     private string? _keyboardKey;
@@ -21,7 +21,7 @@ internal sealed class EditorCompositionScene
     private Rect? _cameraBounds, _keyboardBounds, _spotifyBounds;
     private readonly Dictionary<Guid, (ulong Id, TimedVideoEffect Effect, int Width, int Height, int FrameHeight)> _texts = [];
 
-    internal void Update(NativeVideoOutput output, MainWindowViewModel model, TimeSpan time, long anchorMicroseconds,
+    internal void Update(IEditorVideoOutput output, MainWindowViewModel model, TimeSpan time, long anchorMicroseconds,
         OverlaySceneControl? captured = null, SpotifyCardPreview? spotify = null, double displayWidth = 0, double displayHeight = 0)
     {
         if (_output != output || _generation != output.Generation)
@@ -33,10 +33,10 @@ internal sealed class EditorCompositionScene
         var sourceWidth = model.SelectedSourceWidth; var sourceHeight = model.SelectedSourceHeight;
         if (sourceWidth <= 0 || sourceHeight <= 0) return;
         var crop = model.ActiveCropRect ?? new ClipRenderFilters.CropRect(0, 0, sourceWidth, sourceHeight);
-        NativeVideoOutput.Rectangle SourceBounds(Rect normalized) => new(new Rect(
+        EditorVideoModels.Rectangle SourceBounds(Rect normalized) => new(new Rect(
             (crop.X + normalized.X * crop.Width) / sourceWidth, (crop.Y + normalized.Y * crop.Height) / sourceHeight,
             normalized.Width * crop.Width / sourceWidth, normalized.Height * crop.Height / sourceHeight));
-        var blurs = model.BlurEffects.Where(e => e.Visible).Select(e => new NativeVideoOutput.Blur
+        var blurs = model.BlurEffects.Where(e => e.Visible).Select(e => new EditorVideoModels.Blur
         {
             Bounds = SourceBounds(new Rect(e.X, e.Y, e.Width, e.Height)),
             Start = e.Start,
@@ -44,7 +44,7 @@ internal sealed class EditorCompositionScene
             Sigma = (float)(e.Strength * crop.Height / 1080),
             Shape = e.Shape switch { "Rounded" => 1u, "Ellipse" => 2u, _ => 0u }
         }).ToArray();
-        List<NativeVideoOutput.Artwork> artwork = [];
+        List<EditorVideoModels.Artwork> artwork = [];
         void Add(ulong id, Rect normalized, uint layer, double start = 0, double end = double.MaxValue) => artwork.Add(new()
         {
             Id = id,

@@ -1,3 +1,4 @@
+#if !CLYPDAT_LINUX
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
@@ -318,3 +319,5 @@ internal sealed class ClickableVideoView : VideoView
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();
 }
+
+#endif

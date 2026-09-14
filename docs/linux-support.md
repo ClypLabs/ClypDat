@@ -1,96 +1,137 @@
-# Experimental Linux support
+# Experimental KDE support
 
-This branch is a **foundation build, not the completed KDE milestone**. Do not
-use it for gameplay capture. The app explicitly refuses replay and editor
-playback until their Linux backends exist. No Windows installer may be downloaded
-or launched through the Linux update path.
+The Linux implementation keeps the shared layouts, navigation, themes, settings
+and editor controls. It remains experimental pending the live acceptance below.
+The banner now reports actual worker readiness and failure reasons.
 
 ## Build and run
 
-Run `./publish-linux.sh` from `clypdat-app`. It bootstraps SDK 10.0.302 into
-`$XDG_CACHE_HOME/clypdat/dotnet-linux` (default `~/.cache`), independently of the
-Windows `.dotnet` SDK. It builds matching Linux Avalonia packages, the pinned
-private recorder and self-contained .NET app/worker into `.local/linux-x64`.
-Windows package pin 12.2.1006 is unchanged; Linux uses 12.2.1006-linux.1.
+Run `./publish-linux.sh` from `clypdat-app`. SDK 10.0.302, matching Avalonia
+12.2.1006-linux.2 packages, private GSR and the self-contained app/worker are built
+into `.local/linux-x64`. `CLYPDAT_LINUX_OUTPUT` can select a separate verification
+folder. The unchanged Windows package pin remains 12.2.1006. The sibling Avalonia
+checkout must match `eng/AvaloniaPin.props`.
 
-Install the native build dependencies listed in `native/gsr/UPSTREAM.md` first.
-Runtime dependencies include KDE Wayland, PipeWire/PipeWire-Pulse, compatible GPU
-libraries, libsqlite3, libsecret's `secret-tool`, libnotify's `notify-send`,
-`busctl`, and `/usr/bin/ffmpeg` and `/usr/bin/ffprobe`. .NET is bundled; this is
-not a statically linked distribution of all Linux system libraries. FFmpeg runs
-as a subprocess, without loading distro FFmpeg through FFmpeg.AutoGen bindings.
+Native build prerequisites and pinned sources are in `native/gsr/UPSTREAM.md`.
+Runtime requires KDE Wayland with window-management v17 and screencast v6,
+PipeWire/PipeWire-Pulse, compatible graphics/encoding drivers, LibVLC 3 with its
+plugins, libpulse and libpulse-simple, libsqlite3, Secret Service (`secret-tool`),
+`notify-send`, `busctl`, `dbus-monitor`, `pactl`, `xdg-desktop-portal-kde`, and
+`/usr/bin/ffmpeg` / `/usr/bin/ffprobe`. FFmpeg needs the configured software
+encoder for exact trims (libx264, libx265 or libsvtav1). .NET is bundled; system
+native libraries are not statically bundled. Distro FFmpeg is used by subprocess.
 
-Register desktop integration:
+Stop the previous user service before publishing over its executable folder.
+Then register and start the build:
 
 ```sh
 python3 .local/linux-x64/install-desktop.py
-env -u DISPLAY .local/linux-x64/ClypDat --diagnose-startup
+systemctl --user daemon-reload
+systemctl --user start clypdat-experimental.service
+journalctl --user -u clypdat-experimental.service -b --no-pager
 ```
 
-The private desktop entry grants KDE interface access only to this build's
-absolute recorder path. Rerun registration after moving the folder. Autostart
-uses `~/.config/autostart` or the absolute `XDG_CONFIG_HOME` equivalent.
-Credentials use Secret Service; there is no plaintext disk fallback.
+The installer registers the exact private recorder path for KDE interfaces and a
+persistent user service that unsets `DISPLAY`. Rerun registration after moving
+the folder. Existing autostart settings remain authoritative. Credentials use
+Secret Service; no plaintext fallback or Windows updater is enabled.
 
-## Implemented
+## Capture and saves
 
-- Explicit `net10.0` / `linux-x64` app and worker targets, native Wayland/Skia/
-  HarfBuzz packages, Linux SQLite and executable discovery.
-- Per-user activation IPC, Linux autostart and desktop notification backend,
-  Secret Service credentials, Discord Unix socket transport, Windows update guards.
-- Linux Steam installation-root discovery (not running-game detection).
-- Typed compositor capture identities, capability/readiness contract, worker
-  protocol 12 rejecting older workers.
-- GSR 6.1.2 pinned source with metadata-only KDE watcher patch and source notices.
-  The watcher has no capture pipeline, audio graph, picker or disk-media writer.
-- Explicit unavailable capture/editor states, preserving the shared UI.
+KDE metadata enters shared custom/catalog/Steam classification. Native and
+Proton identities include process start time to reject reused PIDs. Background
+or minimized selected games remain selected. Monitors use real output names;
+an unavailable named output never changes to the first monitor.
 
-## Required before the first milestone is complete
+Worker protocol 13 includes readiness. The private recorder targets screencast
+v6 object serials and owns the last foreground GPU texture. An initial isolated
+window frame seeds that texture when capture starts with the game in the background. Focus loss/minimize
+repeats that frame while audio and timestamps continue. Lock/suspend tears down
+capture; source/service failures trigger worker retries of the selected source.
 
-- Integrate watcher events with native/Proton process discovery and custom rules.
-- Implement `kde-window:<uuid>` and `kde-output:<name>` streams using screencast
-  protocol v6 object serials. Handle stream failure and output removal explicitly.
-- Own a GPU frame copy and repeat it on focus loss/minimize; never change source.
-- RAM replay, correlated Unix-socket commands, exact clip windows, overlapping
-  saves, save IDs and finalization, full-session shared encoding and quotas.
-- PipeWire application/device routing, separate tracks, exclusion from main mix,
-  reconnect handling, gain/channel processing and recoverable finalization staging.
-- Global shortcuts and lock/suspend recovery.
-- Editor video/audio interfaces, LibVLC callback buffers and Avalonia/Skia output,
-  PipeWire-Pulse playback, effects, seeking, synchronization and export validation.
-- Complete runtime guards and unavailable states for deferred controls; resolve
-  video-overlay binding diagnostics seen during native startup.
-- Windows native build/runtime tests and full Linux machine acceptance.
+Replay explicitly uses RAM, with an owned mode-0700 Unix socket directory.
+Two replay finalizations may overlap. A concurrent native snapshot returns a
+busy failure immediately; it is never silently queued for a different interval.
+Each completion retains its save ID. Snapshots include timeline metadata and
+requested intervals are mapped to that clock. Exact keyframe/packet boundaries
+without frame reordering can copy video; other trims re-encode with the chosen
+codec. GPU mode uses a probed hardware encoder for conversion and fails with
+recoverable staging if unavailable; CPU encoding requires explicit CPU mode.
+Preroll remains in staging. Pending output is not a library media file;
+only a successful mux/probe publishes it. Failed staging and request metadata
+remain under the application data `replay-staging` directory for recovery.
 
-Deferred parity: camera/input overlays, computer-vision highlights, remaining
-highlight integrations, microphone noise processing, device-only chat isolation,
-HDR, other desktops/GPUs, and release/update packaging.
+Full sessions toggle the shared encoder without restarting replay. Background
+codec conversion is serialized, reports progress and retains the existing quota
+and sidecar format. Failed session staging remains recoverable.
 
-## Verification
+Application audio follows PipeWire executable identities, with PID/application
+ID support in the native selector. Game mix excludes Chat/additional selections;
+microphones remain separate. FFmpeg finalization applies gain and microphone
+mono/stereo processing while copying video whenever timing/codec allow it.
+
+KDE shortcuts are worker-owned stable actions `save-replay` and
+`toggle-full-session`. Existing shortcut controls open KDE configuration through
+a leased Wayland parent and show confirmed trigger descriptions. Initial binding
+can require KDE confirmation. Button saves remain available without bindings.
+
+## Editor
+
+Shared video/audio interfaces retain the existing mixer, seek/speed logic and
+composition model. Linux video uses LibVLC callbacks and three leased buffers,
+rendered by Avalonia/Skia. Text/blur selection and playback controls are hosted
+inside the Linux tree, including fullscreen. Linux audio runs PulseAudio writes
+on a dedicated thread and exposes measured output latency to the shared clock.
+
+Verification on 2026-09-14: 37 Linux app tests and 41 Avalonia Wayland tests
+passed. All six native fixture suites passed. The 720p software Skia fixture
+decoded at 30 FPS for three seconds, averaging approximately 1 ms per draw.
+Linux uses one software decoder thread: the host's LibVLC 3/FFmpeg frame-thread
+pool stalled after seeking with the shared Windows thread count. A fresh pinned
+recorder checkout built with the shipped source procedure. Windows managed
+app/test assemblies cross-compiled successfully. A native Wayland backend check
+with DISPLAY unset captured 1080p60, finalized a replay and concurrent session,
+and kept replay running after session stop. A captured 1080p60 gameplay clip
+decoded at 60 FPS in the eight-second Skia playback check (1.5 ms per draw). Gameplay image/audio acceptance
+and lock/suspend recovery still require user checks.
+
+## Validation and acceptance
 
 ```sh
 ./eng/dotnet-linux.sh test native/tests/ClypDat.Linux.Tests/ClypDat.Linux.Tests.csproj -p:ClypDatLinux=true -c Release
-python3 native/gsr/tests/test-watcher.py .local/linux-x64/libexec/clypdat-gsr
-# From clypdat-avalonia:
+python3 native/gsr/tests/test-watcher.py native/gsr/build/source/build/gpu-screen-recorder
+python3 native/gsr/tests/test-kde-targets.py
+python3 native/gsr/tests/test-replay-ram.py
+python3 native/gsr/tests/test-mux-failure.py
+python3 native/gsr/tests/test-ipc-contract.py
+python3 native/gsr/tests/test-parent-lifetime.py
+# In clypdat-avalonia:
 ../clypdat-app/eng/dotnet-linux.sh test --project tests/Avalonia.Wayland.UnitTests/Avalonia.Wayland.UnitTests.csproj -c Release -p:AvsSkipBuildingLegacyTargetFrameworks=True
 ```
 
-Watcher tests use an isolated synthetic compositor, with no connection to the
-user's desktop. They cover identity/escaping, focus/minimize, resize, destruction,
-missing protocol and source loss. App tests cover protocol rejection, identity
-validation, activation IPC and unavailable capture/update guards.
+Fixtures cover native/Proton classification, PID reuse, exact source selection,
+64-bit serials, focus/minimize and rotated/scaled output metadata, source loss,
+RAM snapshot immutability, exact decoded clip frames, copy boundaries, distinct
+audio tones/gain/channels, failed muxes and LibVLC frame leasing. RAM fixture:
+20,000 packets, two overlapping 1,024-packet snapshots, zero media write bytes,
+peak process RSS approximately 143 MiB on this host. This measures the packet
+ring fixture, not total live recorder/GPU memory.
 
-Linux can cross-compile Windows managed code with `-r win-x64
--p:Platform=x64 -p:EnableWindowsTargeting=true -p:ClypDatManagedValidation=true`. That property
-skips MSVC targets and explicitly prohibits publishing; it is not a Windows
-native build or runtime test.
+Windows managed app/test assemblies can cross-compile on Linux with
+`-r win-x64 -p:Platform=x64 -p:EnableWindowsTargeting=true -p:ClypDatManagedValidation=true`.
+The feature-branch `validate-linux-branch-windows.yml` workflow builds native
+capture/video components and runs Windows tests without release publishing.
+Cross-compilation alone does not establish Windows native/runtime acceptance.
 
-No gameplay capture, track-tone tests, frame-freeze tests, replay RAM/write
-measurements, session finalization or editor playback acceptance has passed.
-User gameplay checks remain necessary after those implementations exist.
+Still required for milestone acceptance: actual native/Proton gameplay detection,
+replay save and concurrent full session; decoded foreground-frame repetition
+through alt-tab/minimize; live PipeWire routing and device/application reconnects;
+lock/suspend/service recovery; crop/text/blur/fullscreen and trim/export review;
+sustained audible A/V synchronization and playback performance on target GPU;
+real recorder memory and replay-only filesystem-write observation. User performs
+gameplay checks; logs and saved media establish acceptance. Synthetic fixtures
+and startup health alone do not establish this acceptance.
 
-Verification on 2026-09-14: 11 Linux app tests and 41 Avalonia Wayland tests
-passed; isolated watcher fixtures passed. Linux app/worker and private GSR
-built, self-contained loader checks passed, and `DISPLAY`-unset startup reached
-the main window. Windows app/test assemblies cross-compiled successfully.
-Windows native/runtime validation was not available on this Linux host.
+Deferred with runtime guards/status: camera/input overlays, CV and remaining
+highlight integrations, microphone noise processing, device-only chat isolation,
+HDR, other desktops/GPUs, and release/update packaging.

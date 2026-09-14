@@ -1018,6 +1018,7 @@ public sealed class AudioCapturePipeline : IDisposable
 
     public static IReadOnlyList<ActiveAudioProcess> GetActiveAudioProcesses()
     {
+        if (OperatingSystem.IsLinux()) return LinuxAudioDevices.GetApplications();
         if (!OperatingSystem.IsWindows()) return Array.Empty<ActiveAudioProcess>();
         using var enumerator = new MMDeviceEnumerator();
         return ResolveActiveAudioProcessIds(enumerator)

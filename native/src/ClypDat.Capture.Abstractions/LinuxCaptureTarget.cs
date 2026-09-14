@@ -7,7 +7,7 @@ public sealed record LinuxCaptureTarget(LinuxCaptureTargetKind Kind, string Iden
 {
     public string ToRecorderSource()
     {
-        if (string.IsNullOrWhiteSpace(Identifier) || Identifier.Any(char.IsControl))
+        if (string.IsNullOrWhiteSpace(Identifier) || Identifier.Any(char.IsControl) || Identifier.IndexOfAny(['|', ';']) >= 0)
             throw new ArgumentException("A compositor target identifier is required.");
         return Kind switch
         {

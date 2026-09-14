@@ -21,7 +21,8 @@ public static class CaptureWorkerProtocol
     // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
     // the proxy's read loop already routes into recovery.
     // 12 adds typed compositor identities to the capture configuration.
-    public const int Version = 12;
+    // 13 adds backend capabilities/readiness to attach and start responses.
+    public const int Version = 13;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 
@@ -51,7 +52,7 @@ public sealed record CaptureWorkerEnvelope(
     JsonElement Payload);
 
 public sealed record CaptureWorkerAck(bool Accepted, string Error = "");
-public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "");
+public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "", ReplayBackendReadiness? Readiness = null);
 public sealed record CaptureWorkerHandshake(int Version, string ClientId);
 public sealed record CaptureWorkerAttachResponse(
     bool Recording,
@@ -60,7 +61,8 @@ public sealed record CaptureWorkerAttachResponse(
     IReadOnlyList<CaptureWorkerSaveResult> UnacknowledgedSaves,
     // Lets an app that restarted while the worker kept running re-lock the cards
     // for sessions still being muxed, instead of offering a silent video.
-    IReadOnlyList<FullSessionFinalizeProgress>? ActiveFinalizes = null);
+    IReadOnlyList<FullSessionFinalizeProgress>? ActiveFinalizes = null,
+    ReplayBackendReadiness? Readiness = null);
 public sealed record CaptureWorkerSaveResult(
     string Path,
     string? Title,

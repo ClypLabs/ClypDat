@@ -37,7 +37,8 @@ public sealed class PlaybackSession : IDisposable
     private string _audioInputPath = string.Empty;
     private TimeSpan _audioDuration = TimeSpan.Zero;
     private readonly Dictionary<int, double> _audioVolumes = new();
-    private WasapiOut? _audioOutput;
+    private IEditorAudioOutput? _audioOutput;
+    private volatile bool _audioOutputFailed;
     private MixingSampleProvider? _audioMixer;
     private VolumeSampleProvider? _masterVolume;
     private PlaybackRateSampleProvider? _rateStage;
@@ -108,12 +109,11 @@ public sealed class PlaybackSession : IDisposable
 
     public PlaybackSession()
     {
-        if (OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Editor playback is not available in this experimental Linux build.");
         global::LibVLCSharp.Shared.Core.Initialize();
         // Not a field initializer: the coordinator has to read the LIVE clip
         // speed on every wait, because the transport times it confirms are
         // published on libvlc's media-clocked loop. See AttemptTimeout.
-        _seekCoordinator = new EditorSeekCoordinator(rate: () => _playbackRate);
+        _seekCoordinator = new EditorSeekCoordinator(rate: () => _playbackRate, attemptTimeout: OperatingSystem.IsLinux() ? TimeSpan.FromSeconds(3) : null);
         // Playback runs on software decode (see LoadVideo), which is enough for
         // a short clip on its own but has to share the machine with an active
         // replay buffer. When the decoder falls behind, libvlc's defaults
@@ -148,7 +148,7 @@ public sealed class PlaybackSession : IDisposable
         ["--quiet", "--stats", "--no-drop-late-frames", "--no-skip-frames", "--no-osd", "--no-snapshot-preview"];
 
     public MediaPlayer VideoPlayer { get; }
-    internal NativeVideoOutput? Composition { get; private set; }
+    internal IEditorVideoOutput? Composition { get; private set; }
     public TimeSpan Duration => TimeSpan.FromMilliseconds(Math.Max(0, VideoPlayer.Length));
     public TimeSpan Position
     {
@@ -306,7 +306,6 @@ public sealed class PlaybackSession : IDisposable
 
     internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false, CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
-        if (OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Editor playback is not available in this experimental Linux build.");
         using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);
         using var processingRead = SpotifyProcessingPaths.TryRead(path);
         if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlay�");
@@ -330,10 +329,14 @@ public sealed class PlaybackSession : IDisposable
         ResetOverlayClock(TimeSpan.Zero);
         LoadedPath = path;
         _videoMedia = new Media(_libVlc, new Uri(path));
-        Composition = new NativeVideoOutput();
+        if (OperatingSystem.IsLinux()) {
+            await _videoMedia.Parse(MediaParseOptions.ParseLocal);
+            var videoTrack = _videoMedia.Tracks.FirstOrDefault(t => t.TrackType == TrackType.Video).Data.Video;
+            Composition = new LinuxEditorVideoOutput(videoTrack.Width, videoTrack.Height);
+        } else Composition = new NativeVideoOutput();
         Composition.BindPlayer(VideoPlayer);
         _videoMedia.AddOption(Composition.MediaOption);
-        _videoMedia.AddOption(":vout=clypdat_d3d11,none");
+        if (!OperatingSystem.IsLinux()) _videoMedia.AddOption(":vout=clypdat_d3d11,none");
         _videoMedia.AddOption(":no-audio");
         if (IsH264(videoCodec))
         {
@@ -358,8 +361,11 @@ public sealed class PlaybackSession : IDisposable
         // ResolveDecodeThreads. Still generous enough that a short 1080p clip
         // decodes comfortably ahead of playback; just not at the price of
         // starving the capture pipeline of the machine it is recording with.
-        var decodeThreads = ResolveDecodeThreads(replayArmed);
+        // LibVLC 3's vmem/FFmpeg frame-thread pool can deadlock on paused seeks.
+        // A single decoder thread preserves callback progress (covered by a real VLC fixture).
+        var decodeThreads = OperatingSystem.IsLinux() ? 1 : ResolveDecodeThreads(replayArmed);
         _videoMedia.AddOption($":avcodec-threads={decodeThreads}");
+        if (OperatingSystem.IsLinux()) _videoMedia.AddOption(":avcodec-hw=none");
         // LibVLC already streams windowed around the playhead (it never reads
         // the whole file), but its default read-ahead cache is sized for
         // local disks - on a network drive (UNC path or mapped SMB share) the
@@ -493,10 +499,14 @@ public sealed class PlaybackSession : IDisposable
         // so this is normally a no-op; the timeout is only so a WasapiOut whose
         // PlaybackStopped never fires can't wedge the rebuild forever.
         try { _audioOutputRelease.Wait(TimeSpan.FromMilliseconds(500)); } catch { }
-        _audioOutput = new WasapiOut(AudioClientShareMode.Shared, false, 120);
+        _audioOutputFailed = false;
+        _audioOutput = OperatingSystem.IsLinux() ? new LinuxEditorAudioOutput() : new WindowsEditorAudioOutput();
         _audioOutput.PlaybackStopped += (_, args) =>
         {
             if (_disposed) return;
+            // Linux acknowledges explicit Stop/seek flushes asynchronously.
+            if (OperatingSystem.IsLinux() && args.Exception is null) return;
+            if (args.Exception is not null) _audioOutputFailed = true;
             AppLog.Error($"Editor audio stopped unexpectedly: shouldPlay={_shouldPlay}, rate={_playbackRate:0.###}x, seekGeneration={Interlocked.Read(ref _seekVersion)}, error={args.Exception?.Message ?? "none"}.");
         };
         _audioOutput.Init(limited);
@@ -1360,7 +1370,9 @@ public sealed class PlaybackSession : IDisposable
     private sealed class PlaybackSeekTransport(PlaybackSession session, long generation) : IEditorSeekTransport
     {
         private TimeSpan _audioAnchor;
+        private long _pauseRequest;
 
+        public bool HasPresentedPicture => !OperatingSystem.IsLinux() || (session.Composition?.HasPresentedPicture == true && IsPaused);
         public bool IsPaused => session.VideoPlayer.State == VLCState.Paused;
         public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, session.VideoPlayer.Time));
         public int AudioTrackCount => session._audioSources.Count;
@@ -1413,13 +1425,38 @@ public sealed class PlaybackSession : IDisposable
                     session.Composition?.BindPlayer(session.VideoPlayer);
                     session.VideoPlayer.Play();
                 }
-                session.VideoPlayer.SetPause(true);
+                if (OperatingSystem.IsLinux() && session.Composition?.HasPresentedPicture != true && session.VideoPlayer.State != VLCState.Paused)
+                    _ = PauseAfterFirstPictureAsync();
+                else session.VideoPlayer.SetPause(true);
             }
+        }
+
+        private async Task PauseAfterFirstPictureAsync()
+        {
+            var request = Interlocked.Increment(ref _pauseRequest);
+            try {
+                var deadline = Stopwatch.StartNew();
+                while (session.Composition?.HasPresentedPicture != true && deadline.Elapsed < TimeSpan.FromSeconds(3)) {
+                    if (generation != Interlocked.Read(ref session._seekVersion) || request != Interlocked.Read(ref _pauseRequest) || session._disposed) return;
+                    await Task.Delay(5, session._disposeCts.Token);
+                }
+                lock (session._transportLock)
+                    if (generation == Interlocked.Read(ref session._seekVersion) && request == Interlocked.Read(ref _pauseRequest) && !session._disposed) session.VideoPlayer.SetPause(true);
+            } catch (OperationCanceledException) { }
         }
 
         public void WritePosition(TimeSpan target)
         {
-            lock (session._transportLock) session.VideoPlayer.Time = (long)target.TotalMilliseconds;
+            lock (session._transportLock) {
+                if (OperatingSystem.IsLinux()) {
+                    session._audioOutput?.Stop();
+                    session.Composition?.BeginSeek(target);
+                    // vmem requires decode progress to deliver a new paused picture.
+                    session.VideoPlayer.SetPause(false);
+                    session.VideoPlayer.Time = (long)target.TotalMilliseconds;
+                    _ = PauseAfterFirstPictureAsync();
+                } else session.VideoPlayer.Time = (long)target.TotalMilliseconds;
+            }
         }
 
         public void ResetVideo()
@@ -1437,6 +1474,7 @@ public sealed class PlaybackSession : IDisposable
 
         public void CommitPaused(TimeSpan position)
         {
+            Interlocked.Increment(ref _pauseRequest);
             lock (session._transportLock)
             {
                 session.SeekAudio(position);
@@ -1448,6 +1486,7 @@ public sealed class PlaybackSession : IDisposable
 
         public void CommitPlaying(TimeSpan position, string seekId)
         {
+            Interlocked.Increment(ref _pauseRequest);
             lock (session._transportLock)
             {
                 session.EnsureAudioOutputConnected();
@@ -1460,6 +1499,7 @@ public sealed class PlaybackSession : IDisposable
 
         public void CommitVideoOnly()
         {
+            Interlocked.Increment(ref _pauseRequest);
             lock (session._transportLock) session.VideoPlayer.SetPause(false);
         }
 
@@ -1482,7 +1522,7 @@ public sealed class PlaybackSession : IDisposable
     private void EnsureAudioOutputConnected()
     {
         if (_audioStreamIndexes.Count == 0) return;
-        if (_audioOutput is null)
+        if (_audioOutput is null || _audioOutputFailed)
         {
             RebuildAudioOutput();
             return;
@@ -1532,7 +1572,7 @@ public sealed class PlaybackSession : IDisposable
 
     private void DisposeAudioOutput()
     {
-        WasapiOut? previous;
+        IEditorAudioOutput? previous;
         lock (_transportLock)
         {
             StopAudioClockMonitoring();
@@ -1570,7 +1610,7 @@ public sealed class PlaybackSession : IDisposable
     // the rest of the app run. Wait for PlaybackStopped (or a short timeout if
     // it never started) before disposing, so the endpoint is actually free by
     // the time the next WasapiOut is created.
-    private static void ReleaseAudioOutput(WasapiOut previous)
+    private static void ReleaseAudioOutput(IEditorAudioOutput previous)
     {
         using var stopped = new ManualResetEventSlim(false);
         void OnStopped(object? sender, StoppedEventArgs args) => stopped.Set();

@@ -43,20 +43,30 @@ public sealed class LinuxFoundationTests
     }
 
     [Fact]
+    public void RecorderCleanupWithoutAnErrorCannotHideTheActualFailure()
+    {
+        Assert.True(LinuxReplayBuffer.IsRecorderFailure("gsr error: Selected source unavailable"));
+        Assert.False(LinuxReplayBuffer.IsRecorderFailure("gsr info: pipewire: previous state: paused, new state: unconnected (error: none)"));
+    }
+
+    [Fact]
     public async Task UnavailableRecorderNeverClaimsRecordingOrSavesAClip()
     {
         using var buffer = new LinuxReplayBuffer();
         Assert.False(buffer.GetReadiness().Ready);
         Assert.Equal(ReplayBackendCapabilities.None, buffer.GetReadiness().Capabilities);
         await Assert.ThrowsAsync<PlatformNotSupportedException>(() => buffer.StartAsync());
-        await Assert.ThrowsAsync<PlatformNotSupportedException>(() => buffer.SaveReplayAsync("/unused"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => buffer.SaveReplayAsync("/unused"));
         Assert.False(buffer.IsRecording);
         Assert.Equal(ReplayCaptureState.Failed, buffer.GetHealthSnapshot().State);
     }
 
     [Fact]
-    public void UnavailableEditorFailsBeforeLoadingWindowsVideoOutput() =>
-        Assert.Throws<PlatformNotSupportedException>(() => new PlaybackSession());
+    public void LinuxEditorLoadsWithoutWindowsVideoOutput()
+    {
+        using var session = new PlaybackSession();
+        Assert.NotNull(session.VideoPlayer);
+    }
 
     [Fact]
     public void ActivationReachesExistingOwner()

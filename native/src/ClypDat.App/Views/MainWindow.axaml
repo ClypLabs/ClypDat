@@ -301,7 +301,7 @@
          keeps the sidebar mounted and unmovable across every view, and the three
          column-1 children just gate their own visibility instead. -->
     <Border Grid.Row="1" IsVisible="{Binding IsLinuxExperimental}" Padding="16,8" Background="{StaticResource Surface_171F27}">
-      <TextBlock Text="Experimental Linux build — replay, game detection, audio capture, global hotkeys and editor playback are not available yet."
+      <TextBlock Text="{Binding LinuxFeatureStatus}"
                  TextWrapping="Wrap" />
     </Border>
     <Grid Grid.Row="2" ColumnDefinitions="Auto,*">

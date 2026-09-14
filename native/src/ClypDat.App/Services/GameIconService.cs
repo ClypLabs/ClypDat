@@ -701,6 +701,7 @@ public static class GameIconService
     // against a limited-rights handle works where MainModule doesn't.
     private static string? ResolveExecutablePath(int processId)
     {
+        if (OperatingSystem.IsLinux()) return LinuxProcessIdentity.Read(processId)?.ExecutablePath;
         var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
         if (handle == nint.Zero)
         {
@@ -732,6 +733,7 @@ public static class GameIconService
     // into a DC and reading that back loses transparency.
     private static Bitmap? ExtractIconBitmap(string exePath)
     {
+        if (!OperatingSystem.IsWindows()) return null;
         var large = new nint[1];
         var small = new nint[1];
         if (ExtractIconEx(exePath, 0, large, small, 1) <= 0) return null;

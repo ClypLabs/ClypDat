@@ -14,7 +14,7 @@ internal static class CaptureWorkerHost
     private static IReadOnlyList<FullSessionFinalizeProgress> ActiveFinalizeSnapshot()
     {
 #if CLYPDAT_LINUX
-        return [];
+        return (_buffer as LinuxReplayBuffer)?.ActiveFinalizes ?? [];
 #else
         return NativeReplayBuffer.ActiveFinalizeSnapshot();
 #endif
@@ -29,6 +29,7 @@ internal static class CaptureWorkerHost
     // from the library folder anyway.
     internal const int MaximumUnacknowledgedSaves = 32;
     private static readonly SemaphoreSlim SaveGate = new(1, 1);
+    private static readonly SemaphoreSlim LinuxSaveGate = new(2, 2);
     private static readonly SemaphoreSlim CaptureLifecycleGate = new(1, 1);
     private static readonly SemaphoreSlim FullSessionToggleGate = new(1, 1);
     private static readonly StorageProtectionService Storage = new();
@@ -37,6 +38,10 @@ internal static class CaptureWorkerHost
     private static NamedPipeServerStream? _client;
     private static ReplayBufferConfig? _config;
     private static IReplayBuffer? _buffer;
+#if CLYPDAT_LINUX
+    private static LinuxGlobalShortcuts? _linuxShortcuts;
+    private static Task? _linuxShortcutsStart;
+#endif
     private static GlobalHotkeyService? _hotkey;
     private static GlobalHotkeyService? _fullSessionHotkey;
     private static string? _clipGameName;
@@ -46,9 +51,13 @@ internal static class CaptureWorkerHost
     private static bool _autoClipDetectionEnabled;
     private static string? _autoClipGameId;
     private static DisplayAvailabilityMonitor? _displayAvailability;
+    private static LinuxCaptureAvailabilityMonitor? _linuxAvailability;
     private static readonly CaptureLifecycleCoordinator Lifecycle = new(
         CaptureLifecycleGate, SaveGate, () => _buffer?.IsRecording == true,
-        async token => { await EnsureBufferAsync(); await _buffer!.StartAsync(token).ConfigureAwait(false); },
+        async token => {
+            if (OperatingSystem.IsLinux() && (_videoOverlays.Camera is not null || _videoOverlays.KeyboardLayout is not ("None" or "")))
+                throw new PlatformNotSupportedException("Camera and input overlays are unavailable on Linux. Disable them before recording.");
+            await EnsureBufferAsync(); await _buffer!.StartAsync(token).ConfigureAwait(false); },
         token => _buffer?.StopAsync(token) ?? Task.CompletedTask,
         (recording, suspended) =>
         {
@@ -59,7 +68,7 @@ internal static class CaptureWorkerHost
 
     public static int Run()
     {
-        if (!OperatingSystem.IsWindows()) return 2;
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux()) return 2;
         Storage.HealthChanged += (_, _) => _ = SendEventAsync("health", GetHealth());
         using var mutex = new Mutex(true, CaptureWorkerProtocol.MutexName, out var created);
         if (!created) return 0;
@@ -67,9 +76,16 @@ internal static class CaptureWorkerHost
         var revision = typeof(CaptureWorkerHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         CaptureWorkerLog.Info($"Worker revision: {revision}.");
         ApplyWorkerPriority();
-        _displayAvailability = new DisplayAvailabilityMonitor();
-        _displayAvailability.AvailabilityChanged += (_, available) => _ = SetDesktopAvailabilityAsync(available);
-        _displayAvailability.Start();
+        if (OperatingSystem.IsWindows()) {
+            _displayAvailability = new DisplayAvailabilityMonitor();
+            _displayAvailability.AvailabilityChanged += (_, available) => _ = SetDesktopAvailabilityAsync(available);
+            _displayAvailability.Start();
+        } else {
+            _linuxAvailability = new LinuxCaptureAvailabilityMonitor();
+            _linuxAvailability.AvailabilityChanged += (_, available) => _ = SetDesktopAvailabilityAsync(available);
+            _linuxAvailability.Start();
+            _ = RecoverLinuxRecorderAsync();
+        }
         try
         {
             RunLoopAsync().GetAwaiter().GetResult();
@@ -82,10 +98,14 @@ internal static class CaptureWorkerHost
         }
         finally
         {
+#if CLYPDAT_LINUX
+            _linuxShortcuts?.Dispose();
+#endif
             _hotkey?.Dispose();
             _fullSessionHotkey?.Dispose();
             Shutdown.Cancel();
             _displayAvailability?.Dispose();
+            _linuxAvailability?.Dispose();
             Lifecycle.Request(false);
             try { Lifecycle.ReconcileAsync(CancellationToken.None).GetAwaiter().GetResult(); }
             catch (Exception error) { CaptureWorkerLog.Error("Final capture teardown failed.", error); }
@@ -125,6 +145,11 @@ internal static class CaptureWorkerHost
             if (message is null) return;
             switch (message.Type)
             {
+#if CLYPDAT_LINUX
+                case "configure-linux-shortcuts":
+                    _ = ConfigureLinuxShortcutsAsync(client, message);
+                    break;
+#endif
                 case "handshake":
                     await ReplyAsync(client, message, new CaptureWorkerHandshake(CaptureWorkerProtocol.Version, "capture-worker"), cancellationToken);
                     break;
@@ -133,8 +158,14 @@ internal static class CaptureWorkerHost
                     break;
                 case "start":
                     Lifecycle.Request(true);
-                    await StartCaptureIfAvailableAsync(cancellationToken);
-                    await ReplyAsync(client, message, new CaptureWorkerStartAck(true, _buffer?.IsRecording == true), cancellationToken);
+                    try {
+                        await StartCaptureIfAvailableAsync(cancellationToken);
+                        await ReplyAsync(client, message, new CaptureWorkerStartAck(true, _buffer?.IsRecording == true,
+                            Readiness: (_buffer as IReplayBackendReadiness)?.GetReadiness()), cancellationToken);
+                    } catch (Exception error) when (error is not OperationCanceledException) {
+                        await ReplyAsync(client, message, new CaptureWorkerStartAck(false, false, error.Message,
+                            (_buffer as IReplayBackendReadiness)?.GetReadiness()), cancellationToken);
+                    }
                     break;
                 case "stop":
                     Lifecycle.Request(false);
@@ -176,8 +207,11 @@ internal static class CaptureWorkerHost
                     break;
                 case "save":
                     var request = message.Payload.Deserialize<CaptureWorkerSaveRequest>(JsonOptions) ?? throw new InvalidDataException("Invalid save request.");
-                    var result = await SaveAsync(request, cancellationToken);
-                    await ReplyAsync(client, message, result, cancellationToken);
+                    if (OperatingSystem.IsLinux()) _ = SaveAndReplyAsync(client, message, request);
+                    else {
+                        var result = await SaveAsync(request, cancellationToken);
+                        await ReplyAsync(client, message, result, cancellationToken);
+                    }
                     break;
                 case "ack-save":
                     var acknowledgedId = message.Payload.TryGetProperty("saveId", out var saveIdElement) && saveIdElement.TryGetGuid(out var parsedId)
@@ -253,6 +287,9 @@ internal static class CaptureWorkerHost
                     (Path.GetTempPath(), "system-temp"),
                     (config.FullSessionRecordingFolder, "full-session")
                 });
+#if CLYPDAT_LINUX
+                _linuxShortcutsStart ??= StartLinuxShortcutsAsync();
+#endif
                 SetHotkey(config.SaveReplayHotkey);
                 SetFullSessionHotkey(config.FullSessionHotkey);
                 var response = new CaptureWorkerAttachResponse(
@@ -260,7 +297,7 @@ internal static class CaptureWorkerHost
                     ConfigIdentity(_config),
                     GetHealth(),
                     DrainUnacknowledgedSaves(UnacknowledgedSaves),
-                    ActiveFinalizeSnapshot());
+                    ActiveFinalizeSnapshot(), (_buffer as IReplayBackendReadiness)?.GetReadiness());
                 await ReplyAsync(client, message, response, cancellationToken);
             }
             finally { SaveGate.Release(); }
@@ -275,6 +312,35 @@ internal static class CaptureWorkerHost
             if (_config is null) throw new InvalidOperationException("Worker is not attached.");
             _buffer = ReplayBufferFactory.CreateLocal(() => _config!);
             AttachDetectorFrameSource(_buffer);
+        }
+    }
+
+    private static async Task RecoverLinuxRecorderAsync()
+    {
+        var attempts = 0;
+        while (!Shutdown.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, 3 + attempts * 3)), Shutdown.Token);
+#if CLYPDAT_LINUX
+                if (_config is not null) {
+                    if (_linuxShortcutsStart is null || (_linuxShortcutsStart.IsCompleted && _linuxShortcuts is null))
+                        _linuxShortcutsStart = StartLinuxShortcutsAsync();
+                    if (_linuxShortcutsStart.IsCompleted && _linuxShortcuts is not null) {
+                        try { using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2)); await _linuxShortcuts.CheckSessionAsync(timeout.Token); }
+                        catch { _linuxShortcuts.Dispose(); _linuxShortcuts = null; }
+                    }
+                }
+#endif
+                if (_buffer?.IsRecording == true) { attempts = 0; continue; }
+                if (!Lifecycle.Requested || !Lifecycle.Available || _buffer is null) continue;
+                await SendEventAsync("health", GetHealth() with { State = ReplayCaptureState.Recovering,
+                    RecoveryAttempt = ++attempts, LastFailure = "Reacquiring the selected KDE source." });
+                await Lifecycle.ReconcileAsync(Shutdown.Token);
+            }
+            catch (OperationCanceledException) when (Shutdown.IsCancellationRequested) { break; }
+            catch (Exception error) { CaptureWorkerLog.Error("KDE recorder recovery pending.", error); }
         }
     }
 
@@ -344,6 +410,12 @@ internal static class CaptureWorkerHost
             var gameId = payload.TryGetProperty("gameId", out var game) ? game.GetString() : null;
             // Any catalog game that ships HUD regions and a detector can run
             // here; the pair is what makes a game supported, not a hardcoded id.
+            if (OperatingSystem.IsLinux()) {
+                _autoClipDetectionEnabled = false;
+                if (payload.TryGetProperty("enabled", out var requested) && requested.GetBoolean())
+                    await SendEventAsync("auto-clip-status", new { gameId = gameId ?? string.Empty, status = "Unavailable on Linux" });
+                return new CaptureWorkerAck(true);
+            }
             var regions = DetectorRegions.ForGame(gameId);
             var enabled = payload.TryGetProperty("enabled", out var value) && value.GetBoolean() && regions is not null;
             var eventIds = payload.TryGetProperty("enabledEventIds", out var events) && events.ValueKind == JsonValueKind.Array
@@ -430,13 +502,23 @@ internal static class CaptureWorkerHost
 
     private static void DetectorFrameAvailable(object? sender, DetectorFrameSnapshot frame) => _detectorHost?.Offer(frame);
 
+    private static async Task SaveAndReplyAsync(Stream client, CaptureWorkerEnvelope message, CaptureWorkerSaveRequest request)
+    {
+        var result = await SaveAsync(request, CancellationToken.None);
+        try { await ReplyAsync(client, message, result, CancellationToken.None); }
+        catch (Exception error) when (error is IOException or ObjectDisposedException) {
+            CaptureWorkerLog.Info("Save completed after app disconnected; completion retained for reattach.");
+        }
+    }
+
     private static async Task<CaptureWorkerSaveResult> SaveAsync(CaptureWorkerSaveRequest request, CancellationToken cancellationToken)
     {
+        var saveGate = OperatingSystem.IsLinux() ? LinuxSaveGate : SaveGate;
         var saveId = request.SaveId.GetValueOrDefault();
         if (saveId == Guid.Empty) saveId = Guid.NewGuid();
         var requestedUtc = request.RequestedUtc ?? DateTime.UtcNow;
         await SendEventAsync("save-started", new ReplaySaveStarted(saveId, requestedUtc));
-        if (!await SaveGate.WaitAsync(0, cancellationToken))
+        if (!await saveGate.WaitAsync(0, cancellationToken))
         {
             var busy = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, "A replay save is already in progress.", saveId, requestedUtc);
             await SendEventAsync("save-failed", busy);
@@ -491,11 +573,43 @@ internal static class CaptureWorkerHost
             await SendEventAsync("save-failed", result);
             return result;
         }
-        finally { SaveGate.Release(); }
+        finally { saveGate.Release(); }
     }
+
+#if CLYPDAT_LINUX
+    private static async Task StartLinuxShortcutsAsync()
+    {
+        try {
+            _linuxShortcuts = new(_config?.SaveReplayHotkey ?? "F7", _config?.FullSessionHotkey ?? "F8");
+            _linuxShortcuts.Activated += action => {
+                if (action == LinuxGlobalShortcuts.SessionAction) _ = ToggleFullSessionRecordingAsync();
+                else if (action == LinuxGlobalShortcuts.SaveAction && _config is not null && _buffer?.IsRecording == true)
+                    _ = SaveAsync(new CaptureWorkerSaveRequest(LibraryLayout.ClipsRoot(_config.LibraryFolder), null, null,
+                        _clipGameName ?? _config.GameDisplayName, Guid.NewGuid(), DateTime.UtcNow), CancellationToken.None);
+            };
+            _linuxShortcuts.BindingsChanged += bindings => _ = SendEventAsync("linux-shortcut-bindings", bindings);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await _linuxShortcuts.StartAsync(timeout.Token);
+        } catch (Exception error) { _linuxShortcuts?.Dispose(); _linuxShortcuts = null; CaptureWorkerLog.Error("KDE shortcuts unavailable; button saves remain available.", error); }
+    }
+    private static async Task ConfigureLinuxShortcutsAsync(Stream client, CaptureWorkerEnvelope message)
+    {
+        try {
+            if (_linuxShortcutsStart is null || (_linuxShortcutsStart.IsCompleted && _linuxShortcuts is null)) _linuxShortcutsStart = StartLinuxShortcutsAsync();
+            await _linuxShortcutsStart;
+            if (_linuxShortcuts is null) throw new InvalidOperationException("KDE shortcut portal unavailable. Check xdg-desktop-portal-kde; button saves remain available.");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            await _linuxShortcuts!.ConfigureAsync(message.Payload.GetProperty("parent").GetString() ?? string.Empty, timeout.Token);
+            await ReplyAsync(client, message, new CaptureWorkerAck(true), CancellationToken.None);
+        } catch (Exception error) {
+            try { await ReplyAsync(client, message, new CaptureWorkerAck(false, error.Message), CancellationToken.None); } catch (IOException) { }
+        }
+    }
+#endif
 
     private static void SetHotkey(string hotkey)
     {
+        if (OperatingSystem.IsLinux()) return;
         if (string.IsNullOrWhiteSpace(hotkey)) return;
         _hotkey ??= new GlobalHotkeyService();
         _hotkey.SetHotkey(hotkey);
@@ -506,6 +620,7 @@ internal static class CaptureWorkerHost
 
     private static void SetFullSessionHotkey(string hotkey)
     {
+        if (OperatingSystem.IsLinux()) return;
         if (string.IsNullOrWhiteSpace(hotkey)) return;
         _fullSessionHotkey ??= new GlobalHotkeyService();
         _fullSessionHotkey.SetHotkey(hotkey);
@@ -527,7 +642,8 @@ internal static class CaptureWorkerHost
         {
             if (_buffer?.IsRecording != true || _config is null) return;
             var enabled = !_config.FullSessionRecordingEnabled;
-            await _buffer.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            if (_buffer is ILiveFullSessionControl live) await live.SetFullSessionEnabledAsync(enabled, CancellationToken.None).ConfigureAwait(false);
+            else await _buffer.StopAsync(CancellationToken.None).ConfigureAwait(false);
             _config = _config with { FullSessionRecordingEnabled = enabled };
 
             CaptureWorkerLog.Info($"Full session recording toggled {(enabled ? "on" : "off")} by hotkey.");

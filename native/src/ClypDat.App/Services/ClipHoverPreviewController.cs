@@ -346,8 +346,11 @@ internal sealed class ClipHoverPreviewController : IDisposable
         var freeSlots = Channel.CreateBounded<FrameSlot>(new BoundedChannelOptions(3) { FullMode = BoundedChannelFullMode.Wait, SingleWriter = true, SingleReader = true });
         foreach (var slot in slots) await freeSlots.Writer.WriteAsync(slot, token);
 
-        var producer = ProduceFramesAsync(stream, freeSlots, frames, clip, generation, pacer, metrics, token);
-        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, presenter, previewSize, expectedFrameCount, metrics, token);
+        // Present the restart frame before the latest-frame mailbox can replace
+        // it. Fast decoders otherwise race the consumer during initial staging.
+        var firstPresented = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var producer = ProduceFramesAsync(stream, freeSlots, frames, clip, generation, pacer, metrics, firstPresented, token);
+        var consumer = ConsumeFramesAsync(frames, freeSlots.Writer, clip, generation, presenter, previewSize, expectedFrameCount, metrics, firstPresented, token);
         await Task.WhenAll(producer, consumer);
         return (metrics.DecodedFrames - decodedBefore, metrics.DisplayedFrames - displayedBefore);
     }
@@ -383,8 +386,9 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally { _sessionLock.Release(); }
     }
 
-    private async Task ProduceFramesAsync(Stream stream, Channel<FrameSlot> freeSlots, LatestFrameMailbox<FrameSlot> frames, ClipCardViewModel clip, int generation, HoverPreviewFramePacer pacer, PreviewMetrics metrics, CancellationToken token)
+    private async Task ProduceFramesAsync(Stream stream, Channel<FrameSlot> freeSlots, LatestFrameMailbox<FrameSlot> frames, ClipCardViewModel clip, int generation, HoverPreviewFramePacer pacer, PreviewMetrics metrics, TaskCompletionSource firstPresented, CancellationToken token)
     {
+        var first = true;
         try
         {
             while (await freeSlots.Reader.WaitToReadAsync(token))
@@ -397,6 +401,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
                     metrics.MarkDecoded();
                     slot.Sequence = metrics.DecodedFrames;
                     var dropped = frames.Publish(slot);
+                    if (first) { first = false; await firstPresented.Task.WaitAsync(token); }
                     if (dropped is not null)
                     {
                         metrics.MarkDropped();
@@ -408,7 +413,7 @@ internal sealed class ClipHoverPreviewController : IDisposable
         finally { frames.Complete(); }
     }
 
-    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, int expectedFrameCount, PreviewMetrics metrics, CancellationToken token)
+    private async Task ConsumeFramesAsync(LatestFrameMailbox<FrameSlot> frames, ChannelWriter<FrameSlot> freeSlots, ClipCardViewModel clip, int generation, IClipPreviewPresenter presenter, PixelSize previewSize, int expectedFrameCount, PreviewMetrics metrics, TaskCompletionSource firstPresented, CancellationToken token)
     {
         try
         {
@@ -419,11 +424,12 @@ internal sealed class ClipHoverPreviewController : IDisposable
                 if (AttachAfterStaging(clip, generation)) await presenter.SetAttachedAsync(true);
                 metrics.MarkPresent(result.Path, result.Latency);
                 metrics.MarkDisplayed();
+                firstPresented.TrySetResult();
                 await presenter.SetProgressAsync(((slot.Sequence - 1) % expectedFrameCount + 1) / (double)expectedFrameCount);
                 await freeSlots.WriteAsync(slot, token);
             }
         }
-        finally { freeSlots.TryComplete(); }
+        finally { firstPresented.TrySetCanceled(); freeSlots.TryComplete(); }
     }
 
     private bool AttachAfterStaging(ClipCardViewModel clip, int generation)

@@ -38,7 +38,7 @@ public sealed class NativeVideoOutputTests
         using var vlc = new LibVLC("--quiet");
         using var output = new NativeVideoOutput();
         Assert.Throws<InvalidOperationException>(() => output.Submit([
-            new NativeVideoOutput.Blur { Sigma = float.NaN, Start = 0, End = 1 }
+            new EditorVideoModels.Blur { Sigma = float.NaN, Start = 0, End = 1 }
         ], [], TimeSpan.Zero, 0));
     }
 }

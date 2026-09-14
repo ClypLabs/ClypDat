@@ -139,6 +139,10 @@
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(ClypDatLinux)' == 'true'">
+    <PackageReference Include="Tmds.DBus.Generator" Version="0.94.1" PrivateAssets="all" />
+    <AdditionalFiles Include="Services/LinuxPortal/*.xml" Namespace="ClypDat.App.Services.LinuxPortal" DBusGeneratorMode="Proxy" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ClypDat.Core\ClypDat.Core.csproj" />
     <ProjectReference Include="..\ClypDat.Capture.Abstractions\ClypDat.Capture.Abstractions.csproj" />
@@ -286,6 +290,7 @@
   </Target>
   <ItemGroup Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'">
     <Content Include="..\..\video-output-native\build\$(Configuration)\libclypdat_d3d11_plugin.dll"
+             Condition="'$(ClypDatManagedValidation)' != 'true' Or Exists('$(MSBuildProjectDirectory)\..\..\video-output-native\build\$(Configuration)\libclypdat_d3d11_plugin.dll')"
              Link="libvlc\win-x64\plugins\video_output\libclypdat_d3d11_plugin.dll"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\..\video-output-native\vendor\vlc\UPSTREAM.md"

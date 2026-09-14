@@ -19,6 +19,7 @@ public sealed class AudioDeviceService
 
     public string? GetDefaultCaptureDeviceName()
     {
+        if (OperatingSystem.IsLinux()) return LinuxAudioDevices.DefaultCaptureName();
         try
         {
             using var enumerator = new MMDeviceEnumerator();
@@ -33,6 +34,7 @@ public sealed class AudioDeviceService
 
     private static IReadOnlyList<AudioDeviceOption> Enumerate(DataFlow flow)
     {
+        if (OperatingSystem.IsLinux()) return LinuxAudioDevices.GetDevices(flow == DataFlow.Capture);
         try
         {
             using var enumerator = new MMDeviceEnumerator();

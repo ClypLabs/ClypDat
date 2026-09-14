@@ -10,7 +10,7 @@ public static class ReplayBufferFactory
 #if CLYPDAT_UI_PREVIEW
         return new UiPreviewReplayBuffer();
 #elif CLYPDAT_LINUX
-        return new LinuxReplayBuffer();
+        return new CaptureWorkerProxy(configProvider);
 #else
         if (!OperatingSystem.IsWindows()) return new FfmpegReplayBuffer(configProvider);
 
@@ -23,7 +23,7 @@ public static class ReplayBufferFactory
 #if CLYPDAT_UI_PREVIEW
         return new UiPreviewReplayBuffer();
 #elif CLYPDAT_LINUX
-        return new LinuxReplayBuffer();
+        return new LinuxReplayBuffer(configProvider);
 #else
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("ClypDat replay capture requires Windows DXGI Desktop Duplication.");
 

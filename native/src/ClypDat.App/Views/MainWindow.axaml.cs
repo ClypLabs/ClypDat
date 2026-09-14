@@ -946,6 +946,9 @@ public sealed partial class MainWindow : Window
     // capture quality remains the ceiling for the replay session.
     private void AttachEncoderTuning(IReplayBuffer buffer)
     {
+#if CLYPDAT_LINUX
+        if (buffer is CaptureWorkerProxy proxy) proxy.LinuxBindingsChanged += ApplyKdeBindings;
+#endif
         if (buffer is IReplayCaptureDiagnostics diagnostics)
         {
             diagnostics.HealthChanged += EncoderTuning_OnHealthChanged;
@@ -2831,6 +2834,7 @@ public sealed partial class MainWindow : Window
         config.CaptureMonitorDeviceName,
         config.GameExecutableName,
         config.GameWindowHandle,
+        config.LinuxTarget?.ToRecorderSource(),
         config.Backend);
 
     private void ReconcileReplayTarget()
@@ -3893,6 +3897,7 @@ public sealed partial class MainWindow : Window
         var active = _activeReplayConfigSnapshot;
         var targetMatches = active is not null && (ViewModel.IsEffectiveDesktopCapture
             ? string.Equals(active.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
+            : OperatingSystem.IsLinux() ? active.LinuxTarget == detection.LinuxTarget
             : (nint)active.GameWindowHandle == detection.WindowHandle);
         var ready = targetMatches && !_replayTransitioning && string.IsNullOrEmpty(_pendingReplayTargetIdentity)
             && _replayBuffer is { IsRecording: true };
@@ -6003,6 +6008,9 @@ public sealed partial class MainWindow : Window
 
     internal void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
     {
+#if CLYPDAT_LINUX
+        _ = ConfigureKdeShortcutsAsync(); return;
+#endif
         EndHotkeyCapture();
         if (ViewModel is null) return;
         _hotkeyCaptureCustomGame = sender is Control { DataContext: CustomGameTabViewModel tab } ? tab : null;
@@ -8798,7 +8806,7 @@ public sealed partial class MainWindow : Window
     }
 
     private async Task RevealEditorVideoIfStalledAsync(Task videoReady, PlaybackSession playback,
-        NativeVideoOutput? composition, MainWindowViewModel openingViewModel, string openingPath,
+        IEditorVideoOutput? composition, MainWindowViewModel openingViewModel, string openingPath,
         CancellationToken cancellationToken)
     {
         try
@@ -8831,7 +8839,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static string DescribeCompositionStatus(NativeVideoOutput composition)
+    private static string DescribeCompositionStatus(IEditorVideoOutput composition)
     {
         try
         {
@@ -9413,6 +9421,7 @@ public sealed partial class MainWindow : Window
     // and nothing else.
     private void PollEditorHoverControls()
     {
+        if (OperatingSystem.IsLinux()) { UpdateLinuxPlaybackControls(); return; }
         // IsVisible is the main window's own. Closing ClypDat hides it to the
         // tray rather than exiting, and Avalonia refuses outright to show a
         // window whose owner isn't visible ("Cannot show window with
@@ -9530,6 +9539,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowEditorHoverControls()
     {
+        if (OperatingSystem.IsLinux()) { UpdateLinuxPlaybackControls(); return; }
         if (IsEditorSurfaceCovered)
         {
             HideEditorHoverControls(immediate: true);
@@ -9615,6 +9625,7 @@ public sealed partial class MainWindow : Window
     // the pointer moving off the video, which slides it away.
     private void HideEditorHoverControls(bool immediate)
     {
+        if (OperatingSystem.IsLinux()) { if (_linuxPlaybackControls is not null) _linuxPlaybackControls.IsVisible = false; return; }
         if (_editorHoverControlsWindow is not { IsVisible: true } window)
         {
             _hoverControlsSlidingOut = false;

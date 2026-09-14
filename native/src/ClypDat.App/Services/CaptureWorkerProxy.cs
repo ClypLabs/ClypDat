@@ -6,7 +6,7 @@ using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
 
-internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IReplayCaptureWorkerEvents, IReplayCaptureWorkerControl
+internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IReplayCaptureWorkerEvents, IReplayCaptureWorkerControl, IReplayBackendReadiness
 {
     private static readonly TimeSpan[] RetryDelays = [TimeSpan.Zero, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4)];
     private readonly Func<ReplayBufferConfig> _configProvider;
@@ -38,9 +38,18 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private volatile bool _disposed;
 
     public CaptureWorkerProxy(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
+    private ReplayBackendReadiness _readiness = new(false, ReplayBackendCapabilities.None, "Waiting for capture worker.");
+    public ReplayBackendReadiness GetReadiness() => _readiness;
     public bool IsRecording => _isRecording;
     public TimeSpan Duration => TimeSpan.FromSeconds(Math.Max(0, _durationSeconds));
     public bool LastSaveVideoWasFrozen => false;
+    internal event Action<IReadOnlyDictionary<string, string>>? LinuxBindingsChanged;
+    internal async Task ConfigureLinuxShortcutsAsync(string parent, CancellationToken token)
+    {
+        await EnsureAttachedAsync(token);
+        Accept(await SendAsync<CaptureWorkerAck>("configure-linux-shortcuts", new { parent }, token), "configure KDE shortcuts");
+    }
+
     public event EventHandler? RecordingStopped;
     public event EventHandler? RecordingStateChanged;
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
@@ -77,6 +86,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         {
             var started = await SendAsync<CaptureWorkerStartAck>("start", new { }, cancellationToken);
             if (!started.Accepted) throw new InvalidOperationException($"Capture worker failed to start capture: {started.Error}");
+            if (started.Readiness is not null) _readiness = started.Readiness;
             SetRecording(started.Recording);
         }
     }
@@ -191,6 +201,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         => SendAsync<CaptureWorkerAttachResponse>("attach", new CaptureWorkerAttachRequest(config, _videoOverlaySettings), token);
     private void ApplyAttach(CaptureWorkerAttachResponse attach, ReplayBufferConfig config, bool preserveRecording)
     {
+        if (attach.Readiness is not null) _readiness = attach.Readiness;
         _durationSeconds = config.DurationSeconds;
         if (!preserveRecording) SetRecording(attach.Recording);
         PublishHealth(attach.Health with { RecoveryAttempt = _health.RecoveryAttempt, RecentWorkerFailureCount = _health.RecentWorkerFailureCount, LastWorkerExitCode = _health.LastWorkerExitCode });
@@ -229,6 +240,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                 if (message.Type == "response") { TaskCompletionSource<JsonElement>? completion; lock (_pending) _pending.TryGetValue(message.RequestId, out completion); completion?.TrySetResult(message.Payload); continue; }
                 switch (message.Type)
                 {
+                    case "linux-shortcut-bindings":
+                        var bindings = message.Payload.Deserialize<Dictionary<string, string>>() ?? new();
+                        Dispatcher.UIThread.Post(() => LinuxBindingsChanged?.Invoke(bindings)); break;
                     case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => HandleWorkerHealth(health)); break;
                     case "recording-state":
                         if (message.Payload.TryGetProperty("recording", out var recording))
@@ -308,7 +322,12 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
     private void HandleWorkerHealth(ReplayCaptureHealth health)
     {
+        if (OperatingSystem.IsLinux()) {
+            _readiness = _readiness with { Ready = health.State == ReplayCaptureState.Healthy, Reason = health.LastFailure };
+            if (health.State is ReplayCaptureState.Failed or ReplayCaptureState.Recovering) SetRecording(false);
+        }
         PublishHealth(health);
+        if (OperatingSystem.IsLinux()) return; // The worker reacquires sources without abandoning finalizations.
         if (!_fatalHealthPolicy.Observe(health)) return;
 
         if (Interlocked.CompareExchange(ref _fatalHealthRecoveryUsed, 1, 0) == 0)
@@ -367,6 +386,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         {
             var started = await SendAsync<CaptureWorkerStartAck>("start", new { }, token);
             if (!started.Accepted) throw new InvalidOperationException($"Capture worker failed to restart capture: {started.Error}");
+            if (started.Readiness is not null) _readiness = started.Readiness;
             SetRecording(started.Recording);
         }
     }

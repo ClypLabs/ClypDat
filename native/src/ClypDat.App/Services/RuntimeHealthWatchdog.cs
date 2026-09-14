@@ -109,8 +109,8 @@ public static class RuntimeHealthWatchdog
             // long-running Windows app actually hits (GDI is capped at 10,000
             // per process by default, and blows up as silent draw failures and
             // freezes rather than an exception).
-            var gdi = GetGuiResources(process.Handle, 0);
-            var user = GetGuiResources(process.Handle, 1);
+            var gdi = OperatingSystem.IsWindows() ? GetGuiResources(process.Handle, 0) : 0;
+            var user = OperatingSystem.IsWindows() ? GetGuiResources(process.Handle, 1) : 0;
             return $"managedMb={GC.GetTotalMemory(false) / (1024 * 1024)}, " +
                    $"workingSetMb={process.WorkingSet64 / (1024 * 1024)}, " +
                    $"privateMb={process.PrivateMemorySize64 / (1024 * 1024)}, " +

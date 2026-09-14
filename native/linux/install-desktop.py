@@ -38,3 +38,18 @@ for name, text in entries.items():
 if shutil.which("update-desktop-database"):
     subprocess.run(["update-desktop-database", str(desktop)], check=True)
 print(f"Desktop entries registered for {root}")
+
+# A persistent user unit keeps the launch environment reproducible across builds.
+config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+if not config.is_absolute():
+    config = Path.home() / ".config"
+units = config / "systemd/user"
+units.mkdir(parents=True, exist_ok=True)
+def systemd_quote(value):
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
+(units / "clypdat-experimental.service").write_text(
+    "[Unit]\nDescription=ClypDat experimental KDE application\nAfter=graphical-session.target\n\n"
+    "[Service]\nType=simple\nExecStart=" + systemd_quote(app) + "\nWorkingDirectory=" + str(root).replace("%", "%%") + "\n"
+    "PassEnvironment=WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS\nUnsetEnvironment=DISPLAY\n"
+    "Restart=on-failure\nRestartSec=3\nTimeoutStopSec=90\n")
+print("User service registered. Run systemctl --user daemon-reload, then systemctl --user start clypdat-experimental.service")

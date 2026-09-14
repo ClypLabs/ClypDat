@@ -8,6 +8,11 @@ public static class ProcessListService
 {
     public static IReadOnlyList<ProcessOption> GetOpenExecutables()
     {
+        if (OperatingSystem.IsLinux()) return KdeWindowMonitor.Shared.Snapshot
+            .Select(w => (Window: w, Process: LinuxProcessIdentity.Read(w.Pid)))
+            .Where(p => p.Process is not null)
+            .Select(p => new ProcessOption(Path.GetFileName(p.Process!.ExecutablePath), p.Process.ExecutablePath, p.Window.Title))
+            .Distinct().OrderBy(p => p.Name).ToArray();
         if (!OperatingSystem.IsWindows()) return Array.Empty<ProcessOption>();
 
         var windows = new List<ProcessOption>();

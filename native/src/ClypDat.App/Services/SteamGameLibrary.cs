@@ -232,7 +232,7 @@ public sealed class SteamGameLibrary
         {
             var normalizedCandidate = Path.GetFullPath(candidate);
             var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)) + Path.DirectorySeparatorChar;
-            return normalizedCandidate.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
+            return normalizedCandidate.StartsWith(normalizedRoot, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }

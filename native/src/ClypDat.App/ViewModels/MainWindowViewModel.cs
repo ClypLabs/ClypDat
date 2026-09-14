@@ -224,6 +224,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _onboardingStep = "Replay Buffer";
 
     public bool IsLinuxExperimental => OperatingSystem.IsLinux();
+    private string _linuxCaptureStatus = "Capture waiting for a selected KDE source.";
+    public string LinuxFeatureStatus => "Experimental Linux — " + _linuxCaptureStatus +
+        " Shortcut buttons configure KDE bindings. Camera/input overlays, CV highlights and microphone noise processing remain unavailable.";
 
     public MainWindowViewModel()
     {
@@ -1073,8 +1076,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public string HotkeyDisplay => IsCapturingHotkey && !IsCapturingFullSessionHotkey ? "Press keys..." : EffectiveSaveReplayHotkey;
-    public string FullSessionHotkeyDisplay => IsCapturingHotkey && IsCapturingFullSessionHotkey ? "Press keys..." : EffectiveFullSessionHotkey;
+    private string _linuxSaveBinding = "Configure in KDE", _linuxSessionBinding = "Configure in KDE";
+    internal void ApplyLinuxBindings(IReadOnlyDictionary<string, string> bindings)
+    {
+        _linuxSaveBinding = bindings.GetValueOrDefault("save-replay", "Configure in KDE");
+        _linuxSessionBinding = bindings.GetValueOrDefault("toggle-full-session", "Configure in KDE");
+        OnPropertyChanged(nameof(HotkeyDisplay)); OnPropertyChanged(nameof(FullSessionHotkeyDisplay));
+    }
+    public string HotkeyDisplay => OperatingSystem.IsLinux() ? _linuxSaveBinding : IsCapturingHotkey && !IsCapturingFullSessionHotkey ? "Press keys..." : EffectiveSaveReplayHotkey;
+    public string FullSessionHotkeyDisplay => OperatingSystem.IsLinux() ? _linuxSessionBinding : IsCapturingHotkey && IsCapturingFullSessionHotkey ? "Press keys..." : EffectiveFullSessionHotkey;
 
     public string EffectiveSaveReplayHotkey
     {
@@ -2258,6 +2268,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void UpdateReplayEncoderHealth(ReplayCaptureHealth health)
     {
+        if (OperatingSystem.IsLinux()) {
+            _linuxCaptureStatus = health.State == ReplayCaptureState.Healthy ? "Replay capture ready." :
+                string.IsNullOrWhiteSpace(health.LastFailure) ? $"Capture: {health.State}." : health.LastFailure;
+            OnPropertyChanged(nameof(LinuxFeatureStatus));
+        }
         if (!string.IsNullOrWhiteSpace(health.Encoder))
         {
             _activeReplayEncoder = health.Encoder;
@@ -8483,7 +8498,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneChannelMode: Settings.MicrophoneChannelMode,
             MicrophoneNoiseSuppressionEnabled: effective.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseGateThresholdDb: effective.MicrophoneNoiseGateThresholdDb,
-            AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled);
+            AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled,
+            LinuxTarget: OperatingSystem.IsLinux()
+                ? desktopCapture
+                    ? new LinuxCaptureTarget(LinuxCaptureTargetKind.KdeOutput, desktopMonitor.DeviceName)
+                    : ActiveGameDetection.LinuxTarget
+                : null);
     }
 
     public void SetDuration(TimeSpan duration)

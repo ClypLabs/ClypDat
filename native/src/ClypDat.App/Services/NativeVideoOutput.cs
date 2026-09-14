@@ -4,12 +4,13 @@ using System.Security.Cryptography;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using LibVLCSharp.Shared;
+using static ClypDat.App.Services.EditorVideoModels;
 
 namespace ClypDat.App.Services;
 
 /// <summary>Owns one editor output context. The plugin DLL remains loaded until process exit,
 /// so VLC and the bridge share its registry even while players are being replaced.</summary>
-internal sealed unsafe class NativeVideoOutput : IDisposable
+internal sealed unsafe class NativeVideoOutput : IEditorVideoOutput
 {
     internal const uint Abi = 1;
     private const string CoreSha256 = "D3475B834DD3EB77910F37F71B0341D358BCBDDA5B9F04CC4A3A8E2BE1BC8E35";
@@ -22,12 +23,6 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
     private bool _wasAttached;
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct Rectangle { public float X, Y, Width, Height; public Rectangle(Rect r) { X = (float)r.X; Y = (float)r.Y; Width = (float)r.Width; Height = (float)r.Height; } }
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct Blur { public Rectangle Bounds; public double Start, End; public float Sigma; public uint Shape; }
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct Artwork { public ulong Id; public Rectangle Bounds; public double Start, End; public uint Layer, Reserved; }
-    [StructLayout(LayoutKind.Sequential)]
     private struct State
     {
         public uint Size, Version;
@@ -38,15 +33,6 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
         public Blur* Blurs;
         public Artwork* Artworks;
     }
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct Status
-    {
-        public uint Size, Version;
-        public ulong Generation, Revision, DecodedPicture, PresentedPicture, Redraws;
-        public uint Width, Height, Attached, Failed;
-        public fixed byte Error[256];
-        public string ErrorMessage { get { fixed (byte* p = Error) return Marshal.PtrToStringUTF8((nint)p) ?? "Video composition failed."; } }
-    }
     private static nint Export(string name) => NativeLibrary.GetExport(Module.Value, name);
     private static readonly delegate* unmanaged[Cdecl]<uint, ulong> Create = (delegate* unmanaged[Cdecl]<uint, ulong>)Export("cdvo_create");
     private static readonly delegate* unmanaged[Cdecl]<ulong, nint, int> Bind = (delegate* unmanaged[Cdecl]<ulong, nint, int>)Export("cdvo_bind_player");
@@ -56,7 +42,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
     private static readonly delegate* unmanaged[Cdecl]<ulong, void> Release = (delegate* unmanaged[Cdecl]<ulong, void>)Export("cdvo_release");
     [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl)] private static extern long libvlc_clock();
     internal static long ClockMicroseconds => libvlc_clock();
-    internal void UpdateScene(Action update) { lock (_gate) { if (_token != 0) update(); } }
+    public void UpdateScene(Action update) { lock (_gate) { if (_token != 0) update(); } }
 
     private static nint LoadModule()
     {
@@ -70,10 +56,10 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
         return NativeLibrary.Load(path);
     }
     internal NativeVideoOutput() { _token = Create(Abi); if (_token == 0) throw new InvalidOperationException("Could not create the editor GPU compositor."); BeginSeek(TimeSpan.Zero); }
-    internal ulong Generation { get { lock (_gate) return _generation; } }
-    internal string MediaOption { get { lock (_gate) return $":clypdat-context={_token}"; } }
-    internal void BindPlayer(MediaPlayer player) { lock (_gate) { if (_token != 0 && Bind(_token, player.NativeReference) == 0) throw new InvalidOperationException("Could not select the editor GPU compositor."); } }
-    internal void BeginSeek(TimeSpan position)
+    public ulong Generation { get { lock (_gate) return _generation; } }
+    public string MediaOption { get { lock (_gate) return $":clypdat-context={_token}"; } }
+    public void BindPlayer(MediaPlayer player) { lock (_gate) { if (_token != 0 && Bind(_token, player.NativeReference) == 0) throw new InvalidOperationException("Could not select the editor GPU compositor."); } }
+    public void BeginSeek(TimeSpan position)
     {
         lock (_gate)
         {
@@ -91,7 +77,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
             if (SubmitState(_token, &state) == 0) throw new InvalidOperationException("Could not reset editor composition after seeking.");
         }
     }
-    internal void EndSeek(TimeSpan position)
+    public void EndSeek(TimeSpan position)
     {
         lock (_gate)
         {
@@ -101,7 +87,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
             _seeking = false;
         }
     }
-    internal void UpdateArtwork(ulong id, Bitmap bitmap)
+    public void UpdateArtwork(ulong id, Bitmap bitmap)
     {
         var width = bitmap.PixelSize.Width; var height = bitmap.PixelSize.Height;
         var pixels = GC.AllocateUninitializedArray<byte>(checked(width * height * 4));
@@ -114,7 +100,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
                 throw new InvalidOperationException("Could not upload editor artwork to the GPU compositor.");
         }
     }
-    internal void Submit(Blur[] blurs, Artwork[] artwork, TimeSpan position, double rate, long? anchorMicroseconds = null)
+    public void Submit(Blur[] blurs, Artwork[] artwork, TimeSpan position, double rate, long? anchorMicroseconds = null)
     {
         lock (_gate)
         {
@@ -139,7 +125,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
             }
         }
     }
-    internal Status ReadStatus()
+    public Status ReadStatus()
     {
         lock (_gate)
         {
@@ -151,7 +137,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
             return status;
         }
     }
-    internal bool HasPresentedPicture
+    public bool HasPresentedPicture
     {
         get
         {

@@ -15,6 +15,7 @@ public static class DesktopMonitorService
 
     public static IReadOnlyList<DesktopMonitorOption> GetMonitors()
     {
+        if (OperatingSystem.IsLinux()) return LinuxDesktopOutputs.Snapshot;
         if (!OperatingSystem.IsWindows()) return new[] { DesktopMonitorOption.PrimaryFallback };
 
         var monitors = new List<DesktopMonitorOption>();
@@ -47,6 +48,10 @@ public static class DesktopMonitorService
     public static DesktopMonitorOption Resolve(string? deviceName, IReadOnlyList<DesktopMonitorOption>? monitors = null)
     {
         monitors ??= GetMonitors();
+        if (OperatingSystem.IsLinux())
+            return monitors.FirstOrDefault(m => string.Equals(m.DeviceName, deviceName, StringComparison.Ordinal))
+                ?? (string.IsNullOrWhiteSpace(deviceName) ? monitors.FirstOrDefault() : null)
+                ?? new DesktopMonitorOption(deviceName ?? string.Empty, "Selected output unavailable", 0, 0, 0, 0, false);
         return monitors.FirstOrDefault(m => !string.IsNullOrWhiteSpace(deviceName) && string.Equals(m.DeviceName, deviceName, StringComparison.OrdinalIgnoreCase))
                ?? monitors.FirstOrDefault(m => m.IsPrimary)
                ?? monitors.FirstOrDefault()

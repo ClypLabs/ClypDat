@@ -120,7 +120,7 @@ public sealed class AutoClipCatalogTests
         // replay duration rather than retained media timing.
         // older install is rejected rather than answering without it.
         // 11 carries the overlay recording mode (editable layers or burned in).
-        Assert.Equal(11, CaptureWorkerProtocol.Version);
+        Assert.Equal(13, CaptureWorkerProtocol.Version);
         Assert.Equal(1, DetectorHostProtocol.Version);
         Assert.Equal(3, DetectorHostProtocol.FrameSlotCount);
         Assert.Equal(10, DetectorHostProtocol.MaximumFramesPerSecond);

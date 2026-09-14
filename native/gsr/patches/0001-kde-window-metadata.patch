@@ -1,41 +1,395 @@
+diff --git a/include/capture/capture.h b/include/capture/capture.h
+index 56cf909..d896592 100644
+--- a/include/capture/capture.h
++++ b/include/capture/capture.h
+@@ -50,6 +50,7 @@ struct gsr_capture {
+ 
+     void *priv; /* can be NULL */
+     bool started;
++    uint64_t clypdat_source_frames;
+ };
+ 
+ int gsr_capture_start(gsr_capture *cap, gsr_capture_metadata *capture_metadata);
+diff --git a/include/capture/portal.h b/include/capture/portal.h
+index 74cdba9..a95fe18 100644
+--- a/include/capture/portal.h
++++ b/include/capture/portal.h
+@@ -5,6 +5,7 @@
+ 
+ typedef struct {
+     gsr_egl *egl;
++    const char *kde_source;
+     bool record_cursor;
+     bool restore_portal_session;
+     /* If this is set to NULL then this defaults to $XDG_CONFIG_HOME/gpu-screen-recorder/restore_token ($XDG_CONFIG_HOME defaults to $HOME/.config) */
+diff --git a/include/cli/ipc.h b/include/cli/ipc.h
+index 0c4c076..188bf9e 100644
+--- a/include/cli/ipc.h
++++ b/include/cli/ipc.h
+@@ -41,6 +41,7 @@ typedef enum {
+     GSR_IPC_DEFERRED_REQUEST_STOP,
+     GSR_IPC_DEFERRED_REQUEST_SAVE_REPLAY,
+     GSR_IPC_DEFERRED_REQUEST_STOP_REPLAY_RECORDING,
++    GSR_IPC_DEFERRED_REQUEST_START_REPLAY_RECORDING,
+     GSR_IPC_DEFERRED_REQUEST_TYPE_COUNT
+ } gsr_ipc_deferred_request_type;
+ 
+diff --git a/include/encoder/encoder.h b/include/encoder/encoder.h
+index 54b558d..7798461 100644
+--- a/include/encoder/encoder.h
++++ b/include/encoder/encoder.h
+@@ -33,6 +33,7 @@ typedef struct {
+ typedef struct {
+     gsr_replay_buffer *replay_buffer;
+     int64_t first_pts;
++    double latest_replay_video_seconds; /* video encoder thread only */
+ 
+     pthread_mutex_t file_write_mutex;
+     bool file_write_mutex_created;
+diff --git a/include/pipewire_audio.h b/include/pipewire_audio.h
+index b80c199..9a53aca 100644
+--- a/include/pipewire_audio.h
++++ b/include/pipewire_audio.h
+@@ -17,6 +17,7 @@ typedef enum {
+ typedef struct {
+     uint32_t id;
+     char *name;
++    char executable[256], application_id[256], process_id[32];
+     gsr_pipewire_audio_node_type type;
+     bool is_virtual;
+     bool is_application; /* The node has application properties (application.id, application.name or application.process.binary), so it's an application and not a device or a module stream */
+@@ -36,6 +37,11 @@ typedef struct {
+     char *name;
+ } gsr_pipewire_audio_port;
+ 
++typedef struct {
++    struct pw_proxy *proxy;
++    uint32_t output_port, input_port;
++} clypdat_owned_audio_link;
++
+ typedef struct {
+     uint32_t id;
+     uint32_t output_node_id;
+@@ -94,6 +100,8 @@ typedef struct {
+     size_t num_ports;
+     size_t ports_capacity_items;
+ 
++    clypdat_owned_audio_link *owned_links;
++    size_t num_owned_links, owned_links_capacity;
+     gsr_pipewire_audio_link *links;
+     size_t num_links;
+     size_t links_capacity_items;
+diff --git a/include/pipewire_video.h b/include/pipewire_video.h
+index 00228c5..aa8ba07 100644
+--- a/include/pipewire_video.h
++++ b/include/pipewire_video.h
+@@ -114,6 +114,8 @@ typedef struct {
+     bool paused;
+     double paused_start_secs;
+     bool streaming;
++    bool source_failed;
++    uint64_t target_serial;
+ 
+     gsr_monitor_rotation rotation;
+ } gsr_pipewire_video;
+@@ -124,6 +126,7 @@ typedef struct {
+     Note that the cursor is not guaranteed to be shown even if set to true, it depends on the wayland compositor.
+ */
+ bool gsr_pipewire_video_init(gsr_pipewire_video *self, int pipewire_fd, uint32_t pipewire_node, int fps, bool capture_cursor, gsr_egl *egl);
++bool gsr_pipewire_video_init_serial(gsr_pipewire_video *self, int pipewire_fd, uint32_t pipewire_node, uint64_t serial, int fps, bool capture_cursor, gsr_egl *egl);
+ void gsr_pipewire_video_deinit(gsr_pipewire_video *self);
+ 
+ bool gsr_pipewire_video_map_texture(gsr_pipewire_video *self, gsr_texture_map texture_map, gsr_map_texture_output *output);
 diff --git a/meson.build b/meson.build
-index 502b825..939cc94 100644
+index 502b825..cc1913a 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -66,6 +66,7 @@ src = [
      'src/dbus.c',
      'src/sound.c',
      'src/cli/main.c',
-+    'src/clypdat_watcher.c',
++    'src/clypdat_kde.c',
  ]
  
  subdir('protocol')
 diff --git a/protocol/meson.build b/protocol/meson.build
-index 296c057..d3ebbb5 100644
+index 296c057..a56ab2f 100644
 --- a/protocol/meson.build
 +++ b/protocol/meson.build
-@@ -15,6 +15,7 @@ wayland_scanner_client = generator(
+@@ -15,6 +15,8 @@ wayland_scanner_client = generator(
  )
  
  protocols = [
 +    'plasma-window-management.xml',
++    'zkde-screencast-unstable-v1.xml',
  	'xdg-output-unstable-v1.xml',
  	'color-management-v1.xml',
  ]
+diff --git a/src/capture/portal.c b/src/capture/portal.c
+index 622cf4a..e30f71b 100644
+--- a/src/capture/portal.c
++++ b/src/capture/portal.c
+@@ -5,6 +5,7 @@
+ #include "../../include/utils.h"
+ #include "../../include/dbus.h"
+ #include "../../include/pipewire_video.h"
++#include "../clypdat_kde.h"
+ 
+ #include <stdlib.h>
+ #include <stdio.h>
+@@ -25,6 +26,12 @@ typedef struct {
+     gsr_capture_portal_params params;
+ 
+     gsr_texture_map texture_map;
++    void *kde;
++    unsigned int owned_texture;
++    vec2i owned_size;
++    gsr_color_conversion owned_conversion;
++    bool owned_ready;
++    bool frozen;
+ 
+     gsr_dbus dbus;
+     char *session_handle;
+@@ -50,6 +57,12 @@ static void gsr_capture_portal_cleanup_plane_fds(gsr_capture_portal *self) {
+ }
+ 
+ static void gsr_capture_portal_stop(gsr_capture_portal *self) {
++    if (self->owned_texture) {
++        gsr_color_conversion_deinit(&self->owned_conversion);
++        self->params.egl->glDeleteTextures(1, &self->owned_texture);
++        self->owned_texture = 0; self->owned_ready = false;
++    }
++    if (self->kde) { clypdat_kde_close(self->kde); self->kde = NULL; }
+     if(self->texture_map.texture_id) {
+         self->params.egl->glDeleteTextures(1, &self->texture_map.texture_id);
+         self->texture_map.texture_id = 0;
+@@ -229,14 +242,20 @@ static int gsr_capture_portal_setup_dbus(gsr_capture_portal *self, int *pipewire
+     return 0;
+ }
+ 
++static vec2i clypdat_visible_size(const gsr_capture_portal *self) {
++    vec2i size = { self->pipewire_data.region.width, self->pipewire_data.region.height };
++    const gsr_rotation rotation = gsr_monitor_rotation_to_rotation(self->pipewire_data.rotation);
++    if (self->kde && (rotation == GSR_ROT_90 || rotation == GSR_ROT_270)) return (vec2i){size.y, size.x};
++    return size;
++}
++
+ static bool gsr_capture_portal_get_frame_dimensions(gsr_capture_portal *self) {
+     gsr_log(GSR_LOG_LEVEL_INFO, "gsr_capture_portal_start: waiting for pipewire negotiation");
+ 
+     const double start_time = clock_get_monotonic_seconds();
+     while(clock_get_monotonic_seconds() - start_time < 5.0) {
+         if(gsr_pipewire_video_map_texture(&self->pipewire, self->texture_map, &self->pipewire_data)) {
+-            self->capture_size.x = self->pipewire_data.region.width;
+-            self->capture_size.y = self->pipewire_data.region.height;
++            self->capture_size = clypdat_visible_size(self);
+             gsr_log(GSR_LOG_LEVEL_INFO, "gsr_capture_portal_start: pipewire negotiation finished");
+             return true;
+         }
+@@ -252,7 +271,8 @@ static int gsr_capture_portal_setup(gsr_capture_portal *self, int fps) {
+ 
+     int pipewire_fd = 0;
+     uint32_t pipewire_node = 0;
+-    const int response_status = gsr_capture_portal_setup_dbus(self, &pipewire_fd, &pipewire_node);
++    if (self->params.kde_source) self->kde = clypdat_kde_open(self->params.kde_source, self->params.record_cursor);
++    const int response_status = self->params.kde_source ? (self->kde ? 0 : -1) : gsr_capture_portal_setup_dbus(self, &pipewire_fd, &pipewire_node);
+     if(response_status != 0) {
+         // Response status values:
+         // 0: Success, the request is carried out
+@@ -273,7 +293,7 @@ static int gsr_capture_portal_setup(gsr_capture_portal *self, int fps) {
+     gsr_log(GSR_LOG_LEVEL_INFO, "gsr_capture_portal_setup: setting up pipewire");
+     /* TODO: support hdr when pipewire supports it */
+     /* gsr_pipewire closes the pipewire fd, even on failure */
+-    if(!gsr_pipewire_video_init(&self->pipewire, pipewire_fd, pipewire_node, fps, self->params.record_cursor, self->params.egl)) {
++    if(!gsr_pipewire_video_init_serial(&self->pipewire, self->kde ? -1 : pipewire_fd, pipewire_node, self->kde ? clypdat_kde_serial(self->kde) : 0, fps, self->params.record_cursor, self->params.egl)) {
+         gsr_log(GSR_LOG_LEVEL_ERROR, "gsr_capture_portal_setup: failed to setup pipewire with fd: %d, node: %" PRIu32, pipewire_fd, pipewire_node);
+         return -1;
+     }
+@@ -297,6 +317,9 @@ static int gsr_capture_portal_start(gsr_capture *cap, gsr_capture_metadata *capt
+     if(self->params.output_resolution.x == 0 && self->params.output_resolution.y == 0) {
+         capture_metadata->video_size = self->capture_size;
+     } else {
++        /* ClypDat height limit: preserve the actual source aspect, never upscale. */
++        if (self->params.kde_source && self->params.output_resolution.x == 0)
++            self->params.output_resolution.x = self->capture_size.x;
+         self->params.output_resolution = scale_keep_aspect_ratio(self->capture_size, self->params.output_resolution);
+         capture_metadata->video_size = self->params.output_resolution;
+     }
+@@ -310,7 +333,7 @@ static int max_int(int a, int b) {
+ 
+ static bool gsr_capture_portal_capture_has_synchronous_task(gsr_capture *cap) {
+     gsr_capture_portal *self = cap->priv;
+-    return gsr_pipewire_video_should_restart(&self->pipewire);
++    return !self->kde && gsr_pipewire_video_should_restart(&self->pipewire);
+ }
+ 
+ static bool fourcc_has_alpha(uint32_t fourcc) {
+@@ -329,7 +352,18 @@ static void gsr_capture_portal_pre_capture(gsr_capture *cap, gsr_capture_metadat
+     if(self->should_stop)
+         return;
+ 
+-    if(gsr_pipewire_video_should_restart(&self->pipewire)) {
++    if (self->kde) {
++        int state = clypdat_kde_poll(self->kde);
++        pthread_mutex_lock(&self->pipewire.mutex);
++        bool failed = self->pipewire.source_failed;
++        pthread_mutex_unlock(&self->pipewire.mutex);
++        if (state < 0 || failed) { self->should_stop = self->stop_is_error = true; return; }
++        /* Seed the owned texture from this isolated window's first frame even
++           when ClypDat has focus. Later background frames must never replace it. */
++        self->frozen = state == 1 && self->owned_ready;
++        if (self->frozen) { self->do_capture = true; return; }
++    }
++    if(!self->kde && gsr_pipewire_video_should_restart(&self->pipewire)) {
+         gsr_log(GSR_LOG_LEVEL_INFO, "gsr_capture_portal_pre_capture: pipewire capture was paused, trying to start capture again");
+         gsr_capture_portal_stop(self);
+         const int result = gsr_capture_portal_setup(self, capture_metadata->fps);
+@@ -343,9 +377,10 @@ static void gsr_capture_portal_pre_capture(gsr_capture *cap, gsr_capture_metadat
+     /* TODO: Handle formats other than RGB(A) */
+     if(self->pipewire_data.num_dmabuf_data == 0) {
+         if(gsr_pipewire_video_map_texture(&self->pipewire, self->texture_map, &self->pipewire_data)) {
+-            if(self->pipewire_data.region.width != self->capture_size.x || self->pipewire_data.region.height != self->capture_size.y) {
+-                self->capture_size.x = self->pipewire_data.region.width;
+-                self->capture_size.y = self->pipewire_data.region.height;
++            ++cap->clypdat_source_frames;
++            const vec2i visible = clypdat_visible_size(self);
++            if(visible.x != self->capture_size.x || visible.y != self->capture_size.y) {
++                self->capture_size = visible;
+                 color_conversion->schedule_clear = true;
+             }
+         } else if(self->pipewire_data.texture_width == 0 || !gsr_pipewire_video_update_cursor(&self->pipewire, self->texture_map, &self->pipewire_data.cursor_region)) {
+@@ -370,6 +405,46 @@ static int gsr_capture_portal_capture(gsr_capture *cap, gsr_capture_metadata *ca
+     if(self->should_stop || !self->do_capture)
+         return -1;
+ 
++    if (self->kde) {
++        if (!self->frozen) {
++            if (self->owned_texture && (self->owned_size.x != self->capture_size.x || self->owned_size.y != self->capture_size.y)) {
++                gsr_color_conversion_deinit(&self->owned_conversion);
++                self->params.egl->glDeleteTextures(1, &self->owned_texture); self->owned_texture = 0;
++            }
++            if (!self->owned_texture) {
++                self->owned_size = self->capture_size;
++                self->params.egl->glGenTextures(1, &self->owned_texture);
++                self->params.egl->glBindTexture(GL_TEXTURE_2D, self->owned_texture);
++                self->params.egl->glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, self->owned_size.x, self->owned_size.y, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
++                self->params.egl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++                self->params.egl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++                gsr_color_conversion_params params = { .egl = self->params.egl, .destination_color = GSR_DESTINATION_COLOR_RGB,
++                    .destination_textures = { self->owned_texture, 0 }, .destination_textures_size = { self->owned_size, {0,0} },
++                    .num_destination_textures = 1, .load_external_image_shader = true };
++                if (gsr_color_conversion_init(&self->owned_conversion, &params) != 0) {
++                    self->should_stop = self->stop_is_error = true; return -1;
++                }
++            }
++            gsr_color_conversion_clear(&self->owned_conversion);
++            gsr_color_conversion_draw(&self->owned_conversion,
++                self->pipewire_data.using_external_image ? self->texture_map.external_texture_id : self->texture_map.texture_id,
++                (vec2i){0,0}, self->owned_size,
++                (vec2i){self->pipewire_data.region.x, self->pipewire_data.region.y},
++                (vec2i){self->pipewire_data.region.width, self->pipewire_data.region.height},
++                (vec2i){self->pipewire_data.texture_width, self->pipewire_data.texture_height},
++                gsr_monitor_rotation_to_rotation(self->pipewire_data.rotation), GSR_FLIP_NONE,
++                GSR_SOURCE_COLOR_RGB, self->pipewire_data.using_external_image);
++            self->params.egl->glFinish();
++            self->owned_ready = true;
++            gsr_capture_portal_cleanup_plane_fds(self);
++        }
++        if (!self->owned_ready) return -1;
++        const vec2i size = scale_keep_aspect_ratio(self->owned_size, capture_metadata->recording_size);
++        gsr_color_conversion_draw(color_conversion, self->owned_texture,
++            gsr_capture_get_target_position(size, capture_metadata), size, (vec2i){0,0}, self->owned_size,
++            self->owned_size, GSR_ROT_0, capture_metadata->flip, GSR_SOURCE_COLOR_RGB, false);
++        return 0;
++    }
+     const vec2i output_size = scale_keep_aspect_ratio(self->capture_size, capture_metadata->recording_size);
+     const vec2i target_pos = gsr_capture_get_target_position(output_size, capture_metadata);
+ 
+diff --git a/src/cli/ipc.c b/src/cli/ipc.c
+index 2fb3000..2a54f05 100644
+--- a/src/cli/ipc.c
++++ b/src/cli/ipc.c
+@@ -403,6 +403,11 @@ static bool ipc_request_name_to_deferred_request_type(const char *name, gsr_ipc_
+         return true;
+     }
+ 
++    if(strcmp(name, "start-replay-recording") == 0) {
++        *type = GSR_IPC_DEFERRED_REQUEST_START_REPLAY_RECORDING;
++        return true;
++    }
++
+     if(strcmp(name, "stop-replay-recording") == 0) {
+         *type = GSR_IPC_DEFERRED_REQUEST_STOP_REPLAY_RECORDING;
+         return true;
+@@ -416,6 +421,7 @@ static const char* deferred_request_already_pending_error(gsr_ipc_deferred_reque
+         case GSR_IPC_DEFERRED_REQUEST_STOP:                  return "GPU Screen Recorder is already stopping";
+         case GSR_IPC_DEFERRED_REQUEST_SAVE_REPLAY:           return "a replay is already being saved";
+         case GSR_IPC_DEFERRED_REQUEST_STOP_REPLAY_RECORDING: return "the recording is already being stopped";
++        case GSR_IPC_DEFERRED_REQUEST_START_REPLAY_RECORDING: return "recording start is pending or failed";
+         case GSR_IPC_DEFERRED_REQUEST_TYPE_COUNT:            break;
+     }
+     return "the request is already being handled";
+@@ -426,6 +432,7 @@ static const char* deferred_request_failed_error(gsr_ipc_deferred_request_type t
+         case GSR_IPC_DEFERRED_REQUEST_STOP:                  return "failed to save the recording";
+         case GSR_IPC_DEFERRED_REQUEST_SAVE_REPLAY:           return "failed to save the replay";
+         case GSR_IPC_DEFERRED_REQUEST_STOP_REPLAY_RECORDING: return "failed to save the recording";
++        case GSR_IPC_DEFERRED_REQUEST_START_REPLAY_RECORDING: return "recording start is pending or failed";
+         case GSR_IPC_DEFERRED_REQUEST_TYPE_COUNT:            break;
+     }
+     return "the request failed";
 diff --git a/src/cli/main.c b/src/cli/main.c
-index ca0fca0..d27966d 100644
+index ca0fca0..dbdb49e 100644
 --- a/src/cli/main.c
 +++ b/src/cli/main.c
-@@ -650,7 +650,14 @@ static int run(args_parser *arg_parser) {
+@@ -166,6 +166,10 @@ static bool ipc_start_replay_recording_handler(char *error_message, size_t error
+         return false;
+     }
+ 
++    if(gsr_recorder_is_replay_recording(recorder)) {
++        snprintf(error_message, error_message_size, "recording is already running");
++        return false;
++    }
+     gsr_recorder_start_replay_recording(recorder);
+     return true;
+ }
+@@ -217,12 +221,7 @@ static void install_signal_handlers(void) {
+ 
+ static void set_display_server_environment_variables(void) {
+     /* Some users dont have properly setup environments (no display manager that does systemctl --user import-environment DISPLAY WAYLAND_DISPLAY) */
+-    const char *display = getenv("DISPLAY");
+-    if(!display) {
+-        display = ":0";
+-        setenv("DISPLAY", display, true);
+-    }
+-
++    /* An explicitly DISPLAY-unset worker must never connect to Xwayland. */
+     const char *wayland_display = getenv("WAYLAND_DISPLAY");
+     if(!wayland_display) {
+         wayland_display = "wayland-0";
+@@ -360,7 +359,8 @@ static void replay_saved_callback(const char *filepath, void *userdata) {
+ }
+ 
+ static void recording_started_callback(const char *filepath, void *userdata) {
+-    (void)userdata;
++    recorder_callbacks_context *context = userdata;
++    gsr_ipc_complete_request(context->ipc, GSR_IPC_DEFERRED_REQUEST_START_REPLAY_RECORDING, filepath != NULL, filepath);
+     if(!filepath) {
+         printf("gsr error: Failed to start recording\n");
+         fflush(stdout);
+@@ -650,7 +650,18 @@ static int run(args_parser *arg_parser) {
      return exit_code;
  }
  
++#include "../clypdat_parent.h"
 +int clypdat_watch_windows(void);
++int clypdat_list_outputs(void);
  int main(int argc, char **argv) {
++    if (clypdat_watch_parent() != 0) { fprintf(stderr, "ClypDat parent-process monitoring unavailable.\n"); return 2; }
++    if (argc == 2 && strcmp(argv[1], "--clypdat-list-outputs") == 0) return clypdat_list_outputs();
 +    if (argc == 2 && strcmp(argv[1], "--clypdat-watch-windows") == 0)
 +        return clypdat_watch_windows();
 +    if (argc == 2 && strcmp(argv[1], "--clypdat-capabilities") == 0) {
-+        puts("{\"version\":1,\"upstream\":\"6.1.2\",\"windowMetadata\":true,\"kdeCapture\":false}");
++        puts("{\"version\":2,\"upstream\":\"6.1.2\",\"windowMetadata\":true,\"kdeCapture\":true,\"ramReplay\":true,\"fullSession\":true,\"exactTimeline\":true}");
 +        return 0;
 +    }
      setlocale(LC_ALL, "C"); /* Sigh... stupid C */
@@ -43,10 +397,10 @@ index ca0fca0..d27966d 100644
      mallopt(M_MMAP_THRESHOLD, 65536);
 diff --git a/src/clypdat_watcher.c b/src/clypdat_watcher.c
 new file mode 100644
-index 0000000..a55b491
+index 0000000..87643f0
 --- /dev/null
 +++ b/src/clypdat_watcher.c
-@@ -0,0 +1,271 @@
+@@ -0,0 +1,273 @@
 +/* SPDX-License-Identifier: GPL-3.0-or-later
 + * ClypDat metadata-only KDE watcher. Never acquires video or audio streams. */
 +#include <wayland-client.h>
@@ -83,7 +437,9 @@ index 0000000..a55b491
 +    }
 +    putchar('"');
 +}
++static bool watcher_silent;
 +static void publish(struct window *w, const char *event) {
++    if (watcher_silent) return;
 +    if (!w->ready) return;
 +    printf("{\"version\":1,\"event\":"); json_string(event);
 +    printf(",\"uuid\":"); json_string(w->uuid);
@@ -318,3 +674,461 @@ index 0000000..a55b491
 +    wl_display_disconnect(display);
 +    return 2; /* Disconnection is source loss, never a successful empty list. */
 +}
+diff --git a/src/encoder/encoder.c b/src/encoder/encoder.c
+index b59c612..124da5b 100644
+--- a/src/encoder/encoder.c
++++ b/src/encoder/encoder.c
+@@ -40,7 +40,7 @@ bool gsr_encoder_init(gsr_encoder *self, gsr_replay_storage replay_storage, size
+     memset(self, 0, sizeof(*self));
+     self->num_recording_destinations = 0;
+     self->recording_destination_id_counter = 0;
+-    self->first_pts = -1;
++    self->first_pts = 0; /* shared recording clock origin for every stream */
+ 
+     if(pthread_mutex_init(&self->file_write_mutex, NULL) != 0) {
+         gsr_log(GSR_LOG_LEVEL_ERROR, "gsr_encoder_init: failed to create mutex");
+@@ -101,7 +101,7 @@ void gsr_encoder_deinit(gsr_encoder *self, bool exiting)  {
+ 
+     self->num_recording_destinations = 0;
+     self->recording_destination_id_counter = 0;
+-    self->first_pts = -1;
++    self->first_pts = 0; /* shared recording clock origin for every stream */
+ }
+ 
+ /* The streams of a recording all write to the same output file, so the format context identifies the streams that belong to the same recording.
+@@ -148,6 +148,8 @@ void gsr_encoder_receive_packets(gsr_encoder *self, AVCodecContext *codec_contex
+                 const double time_now = clock_get_monotonic_seconds();
+                 if(!gsr_replay_buffer_append(self->replay_buffer, av_packet, time_now))
+                     gsr_log(GSR_LOG_LEVEL_ERROR, "gsr_encoder_receive_packets: failed to add replay buffer data");
++                else if(codec_context->codec_type == AVMEDIA_TYPE_VIDEO)
++                    self->latest_replay_video_seconds = av_packet->dts * av_q2d(codec_context->time_base);
+                 pthread_mutex_unlock(&self->replay_mutex);
+             }
+ 
+@@ -194,6 +196,7 @@ void gsr_encoder_receive_packets(gsr_encoder *self, AVCodecContext *codec_contex
+                 if(ret >= 0)
+                     gsr_av_format_context_mark_packet_written(recording_destination->format_context);
+                 if(ret < 0) {
++                    recording_destination->format_context->opaque = (void*)2; // Latch failures through trailer/finalization.
+                     char error_buffer[AV_ERROR_MAX_STRING_SIZE];
+                     if(av_strerror(ret, error_buffer, sizeof(error_buffer)) < 0)
+                         snprintf(error_buffer, sizeof(error_buffer), "Unknown error");
+diff --git a/src/ffmpeg_utils.c b/src/ffmpeg_utils.c
+index fc4e4ed..65d5a3d 100644
+--- a/src/ffmpeg_utils.c
++++ b/src/ffmpeg_utils.c
+@@ -15,7 +15,7 @@ const char* gsr_av_error_to_string(int err) {
+ }
+ 
+ void gsr_av_format_context_mark_packet_written(AVFormatContext *av_format_context) {
+-    av_format_context->opaque = (void*)1;
++    if (av_format_context->opaque != (void*)2) av_format_context->opaque = (void*)1;
+ }
+ 
+ static bool av_format_context_uses_hybrid_fragmented(AVFormatContext *av_format_context) {
+@@ -36,5 +36,7 @@ int gsr_av_format_context_write_trailer(AVFormatContext *av_format_context) {
+         return 0;
+     }
+ 
+-    return av_write_trailer(av_format_context);
++    const bool write_failed = av_format_context->opaque == (void*)2;
++    const int result = av_write_trailer(av_format_context);
++    return write_failed ? AVERROR(EIO) : result;
+ }
+diff --git a/src/pipewire_audio.c b/src/pipewire_audio.c
+index f4d2b27..e8c80fc 100644
+--- a/src/pipewire_audio.c
++++ b/src/pipewire_audio.c
+@@ -165,17 +165,16 @@ static size_t gsr_pipewire_get_node_output_ports(gsr_pipewire_audio *self, const
+ }
+ 
+ static void gsr_pipewire_audio_establish_link(gsr_pipewire_audio *self, const gsr_pipewire_audio_port *output_port, const gsr_pipewire_audio_port *input_port) {
+-    // TODO: Detect if link already exists before so we dont create these proxies when not needed.
+-    // We could do that by saving which nodes have been linked with which nodes after linking them.
+-
+-    //fprintf(stderr, "linking!\n");
+-    // TODO: error check and cleanup
++    for (size_t i = 0; i < self->num_owned_links; ++i)
++        if (self->owned_links[i].output_port == output_port->id && self->owned_links[i].input_port == input_port->id) return;
++    if (!gsr_array_ensure_capacity((void**)&self->owned_links, self->num_owned_links,
++        &self->owned_links_capacity, sizeof(clypdat_owned_audio_link))) return;
+     struct pw_properties *props = pw_properties_new(NULL, NULL);
+     pw_properties_setf(props, PW_KEY_LINK_OUTPUT_PORT, "%u", output_port->id);
+     pw_properties_setf(props, PW_KEY_LINK_INPUT_PORT, "%u", input_port->id);
+     // TODO: Clean this up when removing node
+     struct pw_proxy *proxy = pw_core_create_object(self->core, "link-factory", PW_TYPE_INTERFACE_Link, PW_VERSION_LINK, &props->dict, 0);
+-    //self->server_version_sync = pw_core_sync(self->core, PW_ID_CORE, self->server_version_sync);
++    if (proxy) self->owned_links[self->num_owned_links++] = (clypdat_owned_audio_link){ proxy, output_port->id, input_port->id };
+     pw_properties_free(props);
+ }
+ 
+@@ -200,7 +199,13 @@ static void gsr_pipewire_audio_create_link(gsr_pipewire_audio *self, const gsr_p
+         if(requested_link->output_type == GSR_PIPEWIRE_AUDIO_NODE_TYPE_STREAM_OUTPUT && !gsr_pipewire_audio_node_is_application(output_node))
+             continue;
+ 
+-        const bool requested_link_matches_app = requested_link_matches_name_case_insensitive_any_type(self, requested_link, output_node->name);
++        bool requested_link_matches_app = requested_link_matches_name_case_insensitive_any_type(self, requested_link, output_node->name);
++        for (int n = 0; n < requested_link->num_outputs; ++n) {
++            const char *requested = requested_link->outputs[n].name;
++            if (!strncmp(requested, "exe:", 4) && !strcasecmp(requested + 4, output_node->executable)) requested_link_matches_app = true;
++            if (!strncmp(requested, "id:", 3) && !strcmp(requested + 3, output_node->application_id)) requested_link_matches_app = true;
++            if (!strncmp(requested, "pid:", 4) && !strcmp(requested + 4, output_node->process_id)) requested_link_matches_app = true;
++        }
+         if(requested_link->inverted) {
+             if(requested_link_matches_app)
+                 continue;
+@@ -430,9 +435,14 @@ static void gsr_pipewire_audio_add_node(gsr_pipewire_audio *self, uint32_t id, c
+     self->stream_nodes[self->num_stream_nodes].type = type;
+     self->stream_nodes[self->num_stream_nodes].is_virtual = is_virtual;
+     self->stream_nodes[self->num_stream_nodes].is_application = is_application;
++    self->stream_nodes[self->num_stream_nodes].executable[0] = 0;
++    self->stream_nodes[self->num_stream_nodes].application_id[0] = 0;
++    self->stream_nodes[self->num_stream_nodes].process_id[0] = 0;
+     ++self->num_stream_nodes;
+ 
+-    gsr_pipewire_audio_create_links(self);
++    /* Application identity must be populated before inverse-mix links exist. */
++    if (type != GSR_PIPEWIRE_AUDIO_NODE_TYPE_STREAM_OUTPUT)
++        gsr_pipewire_audio_create_links(self);
+ }
+ 
+ static bool node_properties_is_virtual(const char *node_virtual, const char *media_class) {
+@@ -470,6 +480,16 @@ static void on_node_info_cb(void *data, const struct pw_node_info *info) {
+     } else {
+         gsr_pipewire_audio_add_node(self, node_binding->node_id, node_name, GSR_PIPEWIRE_AUDIO_NODE_TYPE_STREAM_OUTPUT, is_virtual, is_application);
+     }
++    existing_node = gsr_pipewire_audio_get_node_by_id(self, node_binding->node_id);
++    if (existing_node) {
++        const char *binary = spa_dict_lookup(info->props, PW_KEY_APP_PROCESS_BINARY);
++        const char *id = spa_dict_lookup(info->props, PW_KEY_APP_ID);
++        const char *pid = spa_dict_lookup(info->props, PW_KEY_APP_PROCESS_ID);
++        if (binary) snprintf(existing_node->executable, sizeof(existing_node->executable), "%s", binary);
++        if (id) snprintf(existing_node->application_id, sizeof(existing_node->application_id), "%s", id);
++        if (pid) snprintf(existing_node->process_id, sizeof(existing_node->process_id), "%s", pid);
++        gsr_pipewire_audio_create_links(self);
++    }
+ }
+ 
+ static const struct pw_node_events node_events = {
+@@ -653,9 +673,20 @@ static bool gsr_pipewire_audio_remove_link_by_id(gsr_pipewire_audio *self, uint3
+     return false;
+ }
+ 
++static void clypdat_remove_owned_links(gsr_pipewire_audio *self, uint32_t id) {
++    for (size_t i = 0; i < self->num_owned_links;) {
++        clypdat_owned_audio_link link = self->owned_links[i];
++        if (link.output_port == id || link.input_port == id || pw_proxy_get_bound_id(link.proxy) == id) {
++            self->owned_links[i] = self->owned_links[--self->num_owned_links];
++            pw_proxy_destroy(link.proxy);
++        } else ++i;
++    }
++}
++
+ static void registry_event_global_remove(void *data, uint32_t id) {
+     //fprintf(stderr, "remove: %d\n", (int)id);
+     gsr_pipewire_audio *self = (gsr_pipewire_audio*)data;
++    clypdat_remove_owned_links(self, id);
+     if(gsr_pipewire_audio_remove_node_by_id(self, id)) {
+         //fprintf(stderr, "removed node\n");
+         return;
+@@ -775,6 +806,8 @@ void gsr_pipewire_audio_deinit(gsr_pipewire_audio *self) {
+         pw_thread_loop_stop(self->thread_loop);
+     }
+ 
++    for (size_t i = 0; i < self->num_owned_links; ++i) pw_proxy_destroy(self->owned_links[i].proxy);
++    free(self->owned_links); self->owned_links = NULL; self->num_owned_links = self->owned_links_capacity = 0;
+     if(self->metadata_proxy) {
+         spa_hook_remove(&self->metadata_listener);
+         spa_hook_remove(&self->metadata_proxy_listener);
+diff --git a/src/pipewire_video.c b/src/pipewire_video.c
+index 80cef7e..e1ea350 100644
+--- a/src/pipewire_video.c
++++ b/src/pipewire_video.c
+@@ -392,6 +392,7 @@ static void on_state_changed_cb(void *user_data, enum pw_stream_state prev_state
+         self->paused = false;
+     }
+     self->streaming = (new_state == PW_STREAM_STATE_STREAMING);
++    if (new_state == PW_STREAM_STATE_ERROR || (new_state == PW_STREAM_STATE_UNCONNECTED && prev_state != PW_STREAM_STATE_UNCONNECTED)) self->source_failed = true;
+     pthread_mutex_unlock(&self->mutex);
+ }
+ 
+@@ -632,7 +633,7 @@ static bool gsr_pipewire_video_setup_stream(gsr_pipewire_video *self) {
+     pw_thread_loop_lock(self->thread_loop);
+ 
+     // TODO: Why pass 5 to fcntl?
+-    self->core = pw_context_connect_fd(self->context, fcntl(self->fd, F_DUPFD_CLOEXEC, 5), NULL, 0);
++    self->core = self->target_serial ? pw_context_connect(self->context, NULL, 0) : pw_context_connect_fd(self->context, fcntl(self->fd, F_DUPFD_CLOEXEC, 5), NULL, 0);
+     if(!self->core) {
+         pw_thread_loop_unlock(self->thread_loop);
+         gsr_log(GSR_LOG_LEVEL_ERROR, "gsr_pipewire_video_setup_stream: failed to connect to fd %d", self->fd);
+@@ -664,6 +665,12 @@ static bool gsr_pipewire_video_setup_stream(gsr_pipewire_video *self) {
+         gsr_log(GSR_LOG_LEVEL_ERROR, "gsr_pipewire_video_setup_stream: failed to create stream");
+         goto error;
+     }
++    if (self->target_serial) {
++        char serial[32]; snprintf(serial, sizeof(serial), "%" PRIu64, self->target_serial);
++        struct pw_properties *properties = pw_properties_new(PW_KEY_TARGET_OBJECT, serial, NULL);
++        pw_stream_update_properties(self->stream, &properties->dict);
++        pw_properties_free(properties);
++    }
+     pw_stream_add_listener(self->stream, &self->stream_listener, &stream_events, self);
+ 
+     if(!gsr_pipewire_video_build_format_params(self, &pod_builder, params, &num_video_formats)) {
+@@ -673,7 +680,7 @@ static bool gsr_pipewire_video_setup_stream(gsr_pipewire_video *self) {
+     }
+ 
+     if(pw_stream_connect(
+-        self->stream, PW_DIRECTION_INPUT, self->node,
++        self->stream, PW_DIRECTION_INPUT, self->target_serial ? PW_ID_ANY : self->node,
+         PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS, (const struct spa_pod**)params,
+         num_video_formats) < 0)
+     {
+@@ -716,6 +723,9 @@ static bool gsr_pipewire_video_setup_stream(gsr_pipewire_video *self) {
+ 
+ static int pw_init_counter = 0;
+ bool gsr_pipewire_video_init(gsr_pipewire_video *self, int pipewire_fd, uint32_t pipewire_node, int fps, bool capture_cursor, gsr_egl *egl) {
++    return gsr_pipewire_video_init_serial(self, pipewire_fd, pipewire_node, 0, fps, capture_cursor, egl);
++}
++bool gsr_pipewire_video_init_serial(gsr_pipewire_video *self, int pipewire_fd, uint32_t pipewire_node, uint64_t serial, int fps, bool capture_cursor, gsr_egl *egl) {
+     if(pw_init_counter == 0)
+         pw_init(NULL, NULL);
+     ++pw_init_counter;
+@@ -724,6 +734,7 @@ bool gsr_pipewire_video_init(gsr_pipewire_video *self, int pipewire_fd, uint32_t
+     self->egl = egl;
+     self->fd = pipewire_fd;
+     self->node = pipewire_node;
++    self->target_serial = serial;
+     if(pthread_mutex_init(&self->mutex, NULL) != 0) {
+         gsr_log(GSR_LOG_LEVEL_ERROR, "gsr_pipewire_video_init: failed to initialize mutex");
+         gsr_pipewire_video_deinit(self);
+diff --git a/src/recorder/capture_setup.c b/src/recorder/capture_setup.c
+index c76563e..01d683a 100644
+--- a/src/recorder/capture_setup.c
++++ b/src/recorder/capture_setup.c
+@@ -378,6 +378,7 @@ static gsr_capture* create_capture_impl(const gsr_recorder_settings *settings, g
+         gsr_capture_portal_params portal_params;
+         memset(&portal_params, 0, sizeof(portal_params));
+         portal_params.egl = egl;
++        portal_params.kde_source = strncmp(capture_source->name, "kde-", 4) == 0 ? capture_source->name : NULL;
+         portal_params.record_cursor = settings->record_cursor;
+         portal_params.restore_portal_session = settings->restore_portal_session;
+         portal_params.portal_session_token_filepath = settings->portal_session_token_filepath;
+diff --git a/src/recorder/capture_source.c b/src/recorder/capture_source.c
+index 5407abc..0e4c4e1 100644
+--- a/src/recorder/capture_source.c
++++ b/src/recorder/capture_source.c
+@@ -281,7 +281,9 @@ static bool parse_capture_source_arg_callback(const char *sub, size_t size, void
+     gsr_capture_source capture_source;
+     gsr_capture_source_init(&capture_source, parse_userdata->region_position, parse_userdata->region_size);
+ 
+-    if(gsr_string_starts_with(sub, capture_source_size, "monitor:")) {
++    if(gsr_string_starts_with(sub, capture_source_size, "kde-window:") || gsr_string_starts_with(sub, capture_source_size, "kde-output:")) {
++        capture_source.type = GSR_CAPTURE_SOURCE_TYPE_PORTAL;
++    } else if(gsr_string_starts_with(sub, capture_source_size, "monitor:")) {
+         capture_source.type = GSR_CAPTURE_SOURCE_TYPE_MONITOR;
+         sub += 8;
+         capture_source_size -= 8;
+diff --git a/src/recorder/muxer.c b/src/recorder/muxer.c
+index b36d8f7..8066771 100644
+--- a/src/recorder/muxer.c
++++ b/src/recorder/muxer.c
+@@ -217,7 +217,7 @@ bool gsr_recording_output_start(gsr_recording_output *self, const char *filename
+ bool gsr_recording_output_stop(gsr_recording_output *self) {
+     bool trailer_written = true;
+     if(gsr_av_format_context_write_trailer(self->av_format_context) != 0) {
+-        //trailer_written = false;
++        trailer_written = false;
+     }
+ 
+     const bool closed = avio_close(self->av_format_context->pb) == 0;
+diff --git a/src/recorder/recorder.c b/src/recorder/recorder.c
+index 6731ea0..da69431 100644
+--- a/src/recorder/recorder.c
++++ b/src/recorder/recorder.c
+@@ -91,6 +91,8 @@ struct gsr_recorder {
+     int damage_fps_counter;
+     bool paused;
+     double record_start_time;
++    bool clypdat_ready;
++    uint64_t clypdat_output_frames, clypdat_previous_source_frames;
+     int64_t video_pts_counter;
+     int64_t video_prev_pts;
+     bool hdr_metadata_set;
+@@ -101,6 +103,7 @@ struct gsr_recorder {
+     atomic_int replay_recording_request;
+     atomic_int replay_recording_state;
+     atomic_int save_replay_seconds;
++    _Atomic double save_replay_end_seconds;
+     atomic_int save_replay_restart_replay;
+     bool should_stop_error;
+     bool force_iframe_frame;
+@@ -430,6 +433,7 @@ gsr_recorder* gsr_recorder_create(const gsr_recorder_params *params, const gsr_r
+     atomic_init(&self->replay_recording_request, GSR_REPLAY_RECORDING_REQUEST_NONE);
+     atomic_init(&self->replay_recording_state, 0);
+     atomic_init(&self->save_replay_seconds, 0);
++    atomic_init(&self->save_replay_end_seconds, 0.0);
+     atomic_init(&self->save_replay_restart_replay, GSR_RESTART_REPLAY_USE_OPTION);
+     self->audio_max_frame_size = 1024;
+     int error_code = GSR_ERROR_GENERIC;
+@@ -536,6 +540,17 @@ static void recorder_update_fps_counters(gsr_recorder *self) {
+     //const double frame_timer_elapsed = time_now - frame_timer_start;
+     const double elapsed = time_now - self->fps_start_time;
+     if (elapsed >= 1.0) {
++        if(self->clypdat_ready) {
++            uint64_t source_frames = 0;
++            for(size_t i = 0; i < self->video_sources->num_items; ++i)
++                source_frames += self->video_sources->items[i].capture->clypdat_source_frames;
++            printf("{\"event\":\"health\",\"outputFps\":%.3f,\"sourceFps\":%.3f,\"encoder\":\"%s\"}\n",
++                self->clypdat_output_frames / elapsed, (source_frames - self->clypdat_previous_source_frames) / elapsed,
++                self->video_codec_context->codec->name);
++            fflush(stdout);
++            self->clypdat_previous_source_frames = source_frames;
++        }
++        self->clypdat_output_frames = 0;
+         if(self->settings.verbose) {
+             gsr_log(GSR_LOG_LEVEL_INFO, "update fps: %d, damage fps: %d", self->fps_counter, self->damage_fps_counter);
+         }
+@@ -634,8 +649,17 @@ static void recorder_capture_and_encode_frame(gsr_recorder *self, bool damaged)
+ 
+             int ret = avcodec_send_frame(self->video_codec_context, self->video_frame);
+             if(ret == 0) {
+-                // TODO: Move to separate thread because this could write to network (for example when livestreaming)
++                ++self->clypdat_output_frames;
+                 gsr_encoder_receive_packets(&self->encoder, self->video_codec_context, self->video_frame->pts, GSR_VIDEO_STREAM_INDEX);
++                if (!self->clypdat_ready && self->encoder.replay_buffer && strncmp(self->capture_sources->items[0].name, "kde-", 4) == 0) {
++                    pthread_mutex_lock(&self->encoder.replay_mutex);
++                    const bool has_keyframe = gsr_replay_buffer_find_keyframe(self->encoder.replay_buffer, (gsr_replay_buffer_iterator){0}, GSR_VIDEO_STREAM_INDEX, false).packet_index != (size_t)-1;
++                    pthread_mutex_unlock(&self->encoder.replay_mutex);
++                    if (has_keyframe) {
++                        printf("{\"event\":\"ready\",\"monotonicStart\":%.9f}\n", self->record_start_time);
++                        fflush(stdout); self->clypdat_ready = true;
++                    }
++                }
+             } else {
+                 gsr_log(GSR_LOG_LEVEL_ERROR, "avcodec_send_frame failed, error: %s", gsr_av_error_to_string(ret));
+             }
+@@ -756,6 +780,16 @@ static void recorder_poll_replay_save(gsr_recorder *self) {
+     }
+ 
+     if(atomic_load(&self->save_replay_seconds) != 0 && !gsr_replay_save_is_running(&self->replay_save) && self->settings.is_replaying) {
++        /* Snapshot the requested endpoint after encoder latency, without moving
++           the endpoint forward or silently clipping the last encoded frames. */
++        const double endpoint = atomic_load(&self->save_replay_end_seconds);
++        if(self->encoder.latest_replay_video_seconds < endpoint) {
++            if(gsr_recording_clock_get_time(self->recording_clock) - self->record_start_time - endpoint > 2.0) {
++                atomic_store(&self->save_replay_seconds, 0);
++                if(self->callbacks.replay_saved) self->callbacks.replay_saved(NULL, self->callbacks.userdata);
++            }
++            return;
++        }
+         int current_save_replay_seconds = atomic_load(&self->save_replay_seconds);
+         if(current_save_replay_seconds > 0)
+             current_save_replay_seconds += self->settings.keyint;
+@@ -884,8 +918,8 @@ static void gsr_recorder_stop_recording(gsr_recorder *self) {
+     bool final_replay_save_result = false;
+     const char *final_replay_save_output_filepath = NULL;
+     if(gsr_replay_save_join(&self->replay_save, &final_replay_save_result, &final_replay_save_output_filepath)) {
+-        if(final_replay_save_output_filepath[0] != '\0' && self->callbacks.replay_saved)
+-            self->callbacks.replay_saved(final_replay_save_output_filepath, self->callbacks.userdata);
++        if(self->callbacks.replay_saved)
++            self->callbacks.replay_saved(final_replay_save_result && final_replay_save_output_filepath[0] != '\0' ? final_replay_save_output_filepath : NULL, self->callbacks.userdata);
+     }
+ 
+     gsr_plugins_deinit(&self->plugins);
+@@ -986,6 +1020,7 @@ bool gsr_recorder_is_replay_recording(const gsr_recorder *self) {
+ }
+ 
+ void gsr_recorder_save_replay(gsr_recorder *self, int seconds, int restart_replay) {
++    atomic_store(&self->save_replay_end_seconds, gsr_recording_clock_get_time(self->recording_clock) - self->record_start_time);
+     atomic_store(&self->save_replay_restart_replay, restart_replay);
+     atomic_store(&self->save_replay_seconds, seconds);
+ }
+diff --git a/src/recorder/replay_save.c b/src/recorder/replay_save.c
+index 4d92f10..6d5404e 100644
+--- a/src/recorder/replay_save.c
++++ b/src/recorder/replay_save.c
+@@ -5,6 +5,8 @@
+ #include <string.h>
+ #include <stdlib.h>
+ #include <assert.h>
++#include <stdio.h>
++#include <unistd.h>
+ 
+ void gsr_replay_save_init(gsr_replay_save *self) {
+     memset(self, 0, sizeof(*self));
+@@ -33,6 +35,7 @@ static void gsr_replay_save_cleanup(gsr_replay_save *self) {
+ static void* replay_save_thread(void *userdata) {
+     gsr_replay_save *self = userdata;
+     bool success = true;
++    double end_seconds = 0.0;
+     gsr_replay_buffer_iterator replay_iterator = self->video_start_iterator;
+ 
+     for(;;) {
+@@ -72,6 +75,8 @@ static void* replay_save_thread(void *userdata) {
+         AVCodecContext *codec_context = self->video_codec_context;
+ 
+         if(av_packet.stream_index == self->video_stream_index) {
++            double end = (av_packet.pts + (replay_packet->duration > 0 ? replay_packet->duration : 1)) * av_q2d(codec_context->time_base);
++            if (end > end_seconds) end_seconds = end;
+             av_packet.pts -= self->video_pts_offset;
+             av_packet.dts -= self->video_pts_offset;
+         } else {
+@@ -98,8 +103,10 @@ static void* replay_save_thread(void *userdata) {
+         const int ret = av_write_frame(self->recording_output.av_format_context, &av_packet);
+         if(ret >= 0)
+             gsr_av_format_context_mark_packet_written(self->recording_output.av_format_context);
+-        else
++        else {
+             gsr_log(GSR_LOG_LEVEL_ERROR, "Failed to write frame index %d to muxer, reason: %s (%d)", av_packet.stream_index, gsr_av_error_to_string(ret), ret);
++            success = false;
++        }
+ 
+         free(replay_packet_data);
+ 
+@@ -108,8 +115,20 @@ static void* replay_save_thread(void *userdata) {
+             break;
+     }
+ 
+-    gsr_recording_output_stop(&self->recording_output);
+-
++    if (!gsr_recording_output_stop(&self->recording_output)) success = false;
++
++    if (success) {
++        char timeline[PATH_MAX];
++        if (snprintf(timeline, sizeof(timeline), "%s.timeline.json", self->output_filepath) >= (int)sizeof(timeline)) success = false;
++        else {
++            FILE *f = fopen(timeline, "wx");
++            if (!f) success = false;
++            else {
++                if (fprintf(f, "{\"start\":%.9f,\"end\":%.9f}\n", self->video_pts_offset * av_q2d(self->video_codec_context->time_base), end_seconds) < 0) success = false;
++                if (fclose(f) != 0) success = false;
++            }
++        }
++    }
+     self->success = success;
+     gsr_replay_save_cleanup(self);
+     atomic_store(&self->finished, 1);
+@@ -158,8 +177,8 @@ bool gsr_replay_save_start(gsr_replay_save *self, AVCodecContext *video_codec_co
+ 
+     for(size_t i = 0; i < audio_capture->num_tracks; ++i) {
+         const gsr_audio_track *audio_track = &audio_capture->tracks[i];
+-        const gsr_replay_buffer_iterator audio_start_iterator = gsr_replay_buffer_find_keyframe(self->cloned_replay_buffer, self->video_start_iterator, audio_track->stream_index, false);
+-        const int64_t audio_pts_offset = audio_start_iterator.packet_index == (size_t)-1 ? 0 : gsr_replay_buffer_iterator_get_packet(self->cloned_replay_buffer, audio_start_iterator)->pts;
++        /* Keep all streams on the same origin; late audio must retain its offset. */
++        const int64_t audio_pts_offset = av_rescale_q(self->video_pts_offset, video_codec_context->time_base, audio_track->codec_context->time_base);
+         self->audio_pts_offsets[i].pts_offset = audio_pts_offset;
+         self->audio_pts_offsets[i].stream_index = audio_track->stream_index;
+         ++self->num_audio_pts_offsets;
+diff --git a/src/recorder/windowing.c b/src/recorder/windowing.c
+index a1ff5d3..b97354a 100644
+--- a/src/recorder/windowing.c
++++ b/src/recorder/windowing.c
+@@ -75,7 +75,7 @@ int gsr_windowing_init(gsr_windowing *self, const gsr_windowing_params *params)
+     disable_prime_run();
+ 
+     bool wayland = false;
+-    self->display = XOpenDisplay(NULL);
++    self->display = getenv("DISPLAY") ? XOpenDisplay(NULL) : NULL;
+     if(self->display) {
+         if(params->listen_to_x11_events)
+             XSelectInput(self->display, DefaultRootWindow(self->display), PropertyChangeMask);

@@ -15,7 +15,7 @@ public sealed partial class MainWindow
 {
     private Window? _spotifyWindow;
     private readonly EditorCompositionScene _compositionScene = new();
-    private NativeVideoOutput? _compositionErrorOutput;
+    private IEditorVideoOutput? _compositionErrorOutput;
     private SpotifyCardPreview? _spotifyPreview;
     // The owned surface above LibVLC retains selection handles and gestures.
     // Artwork itself is composed into the native video picture.
@@ -81,6 +81,7 @@ public sealed partial class MainWindow
             ? compositionVlcTime
             : model.CurrentTime;
         UpdateNativeComposition(model, compositionTime);
+        if (OperatingSystem.IsLinux()) { UpdateLinuxEffectControls(model, compositionTime); return; }
         if (!model.IsEditorVisible || !IsVisible || WindowState == WindowState.Minimized || IsEditorSurfaceCovered)
         { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
         if (_spotifyPreviewDirty || _spotifyPreviewPath != model.SelectedVideoPath)
@@ -267,7 +268,7 @@ public sealed partial class MainWindow
     {
         var session = _playback;
         if (session?.Composition is not { } output || !string.Equals(session.LoadedPath, model.SelectedVideoPath, StringComparison.OrdinalIgnoreCase)) return;
-        var anchorMicroseconds = NativeVideoOutput.ClockMicroseconds;
+        var anchorMicroseconds = EditorVideoClock.Microseconds;
         if (!session.IsSeeking && session.TryGetOverlayPosition(out var sampled)) time = sampled;
         try { output.UpdateScene(() => _compositionScene.Update(output, model, time, anchorMicroseconds, captured, spotify, width, height)); }
         catch (Exception error)
