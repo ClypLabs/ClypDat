@@ -10,9 +10,9 @@ public sealed partial class IntegrationsSection : UserControl
     {
         if (DataContext is MainWindowViewModel vm) await vm.LinkClypDatAccountAsync();
     }
-    private void ConnectSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async void ConnectSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm) _ = vm.ConnectSpotifyAsync();
+        if (DataContext is MainWindowViewModel vm) await vm.ConnectSpotifyAsync();
     }
     private void ConfigureSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
