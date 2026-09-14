@@ -11,6 +11,15 @@ internal sealed record CaptureWorkerAttachRequest(ReplayBufferConfig Configurati
 
 internal static class CaptureWorkerHost
 {
+    private static IReadOnlyList<FullSessionFinalizeProgress> ActiveFinalizeSnapshot()
+    {
+#if CLYPDAT_LINUX
+        return [];
+#else
+        return NativeReplayBuffer.ActiveFinalizeSnapshot();
+#endif
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly SemaphoreSlim WriteGate = new(1, 1);
     private static readonly List<CaptureWorkerSaveResult> UnacknowledgedSaves = new();
@@ -251,7 +260,7 @@ internal static class CaptureWorkerHost
                     ConfigIdentity(_config),
                     GetHealth(),
                     DrainUnacknowledgedSaves(UnacknowledgedSaves),
-                    NativeReplayBuffer.ActiveFinalizeSnapshot());
+                    ActiveFinalizeSnapshot());
                 await ReplyAsync(client, message, response, cancellationToken);
             }
             finally { SaveGate.Release(); }

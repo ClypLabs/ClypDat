@@ -42,6 +42,13 @@ public static class FfmpegPathResolver
 
     public static void EnsureBundledFfmpeg()
     {
+        if (OperatingSystem.IsLinux())
+        {
+            // Subprocesses only: the distro ABI need not match FFmpeg.AutoGen.
+            FfmpegPath = File.Exists("/usr/bin/ffmpeg") ? "/usr/bin/ffmpeg" : string.Empty;
+            FfprobePath = File.Exists("/usr/bin/ffprobe") ? "/usr/bin/ffprobe" : string.Empty;
+            return;
+        }
         var bundledFolder = Path.Combine(AppContext.BaseDirectory, "ffmpeg");
         var ffmpeg = Path.Combine(bundledFolder, "ffmpeg.exe");
         var ffprobe = Path.Combine(bundledFolder, "ffprobe.exe");

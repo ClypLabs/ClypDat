@@ -1,0 +1,320 @@
+diff --git a/meson.build b/meson.build
+index 502b825..939cc94 100644
+--- a/meson.build
++++ b/meson.build
+@@ -66,6 +66,7 @@ src = [
+     'src/dbus.c',
+     'src/sound.c',
+     'src/cli/main.c',
++    'src/clypdat_watcher.c',
+ ]
+ 
+ subdir('protocol')
+diff --git a/protocol/meson.build b/protocol/meson.build
+index 296c057..d3ebbb5 100644
+--- a/protocol/meson.build
++++ b/protocol/meson.build
+@@ -15,6 +15,7 @@ wayland_scanner_client = generator(
+ )
+ 
+ protocols = [
++    'plasma-window-management.xml',
+ 	'xdg-output-unstable-v1.xml',
+ 	'color-management-v1.xml',
+ ]
+diff --git a/src/cli/main.c b/src/cli/main.c
+index ca0fca0..d27966d 100644
+--- a/src/cli/main.c
++++ b/src/cli/main.c
+@@ -650,7 +650,14 @@ static int run(args_parser *arg_parser) {
+     return exit_code;
+ }
+ 
++int clypdat_watch_windows(void);
+ int main(int argc, char **argv) {
++    if (argc == 2 && strcmp(argv[1], "--clypdat-watch-windows") == 0)
++        return clypdat_watch_windows();
++    if (argc == 2 && strcmp(argv[1], "--clypdat-capabilities") == 0) {
++        puts("{\"version\":1,\"upstream\":\"6.1.2\",\"windowMetadata\":true,\"kdeCapture\":false}");
++        return 0;
++    }
+     setlocale(LC_ALL, "C"); /* Sigh... stupid C */
+ #ifdef __GLIBC__
+     mallopt(M_MMAP_THRESHOLD, 65536);
+diff --git a/src/clypdat_watcher.c b/src/clypdat_watcher.c
+new file mode 100644
+index 0000000..a55b491
+--- /dev/null
++++ b/src/clypdat_watcher.c
+@@ -0,0 +1,271 @@
++/* SPDX-License-Identifier: GPL-3.0-or-later
++ * ClypDat metadata-only KDE watcher. Never acquires video or audio streams. */
++#include <wayland-client.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <string.h>
++#include "plasma-window-management-client-protocol.h"
++
++struct watcher;
++struct window {
++    struct watcher *owner;
++    struct window *next;
++    struct org_kde_plasma_window *proxy;
++    char *uuid, *title, *app_id;
++    uint32_t pid, flags, width, height;
++    int32_t x, y;
++    bool ready;
++};
++struct watcher {
++    struct org_kde_plasma_window_management *manager;
++    struct window *windows;
++    uint32_t global_name;
++    unsigned count;
++    bool failed;
++};
++static void json_string(const char *value) {
++    putchar('"');
++    for (const unsigned char *p = (const unsigned char *)(value ? value : ""); *p; ++p) {
++        if (*p == '"' || *p == '\\') { putchar('\\'); putchar(*p); }
++        else if (*p < 32) printf("\\u%04x", *p);
++        else putchar(*p);
++    }
++    putchar('"');
++}
++static void publish(struct window *w, const char *event) {
++    if (!w->ready) return;
++    printf("{\"version\":1,\"event\":"); json_string(event);
++    printf(",\"uuid\":"); json_string(w->uuid);
++    printf(",\"appId\":"); json_string(w->app_id);
++    printf(",\"title\":"); json_string(w->title);
++    printf(",\"pid\":%u,\"focused\":%s,\"minimized\":%s,\"x\":%d,\"y\":%d,\"width\":%u,\"height\":%u}\n",
++        w->pid, (w->flags & 1) ? "true" : "false", (w->flags & 2) ? "true" : "false",
++        w->x, w->y, w->width, w->height);
++    fflush(stdout);
++}
++static void release_window(struct window *w) {
++    struct window **link = &w->owner->windows;
++    while (*link && *link != w) link = &(*link)->next;
++    if (*link) *link = w->next;
++    w->owner->count--;
++    org_kde_plasma_window_destroy(w->proxy);
++    free(w->uuid); free(w->title); free(w->app_id); free(w);
++}
++static void replace_string(struct window *w, char **target, const char *value) {
++    char *copy = strdup(value);
++    if (!copy) { w->owner->failed = true; return; }
++    free(*target); *target = copy; publish(w, "changed");
++}
++static void window_title_changed(void *data, struct org_kde_plasma_window *proxy ,const char * title) {
++    (void)proxy;
++    struct window *w = data;
++    replace_string(w, &w->title, title);
++}
++static void window_app_id_changed(void *data, struct org_kde_plasma_window *proxy ,const char * app_id) {
++    (void)proxy;
++    struct window *w = data;
++    replace_string(w, &w->app_id, app_id);
++}
++static void window_state_changed(void *data, struct org_kde_plasma_window *proxy ,uint32_t flags) {
++    (void)proxy;
++    struct window *w = data;
++    w->flags = flags; publish(w, "changed");
++}
++static void window_virtual_desktop_changed(void *data, struct org_kde_plasma_window *proxy ,int32_t number) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)number;
++}
++static void window_themed_icon_name_changed(void *data, struct org_kde_plasma_window *proxy ,const char * name) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)name;
++}
++static void window_unmapped(void *data, struct org_kde_plasma_window *proxy) {
++    (void)proxy;
++    struct window *w = data;
++    publish(w, "removed"); release_window(w);
++}
++static void window_initial_state(void *data, struct org_kde_plasma_window *proxy) {
++    (void)proxy;
++    struct window *w = data;
++    w->ready = true; publish(w, "added");
++}
++static void window_parent_window(void *data, struct org_kde_plasma_window *proxy ,struct org_kde_plasma_window * parent) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)parent;
++}
++static void window_geometry(void *data, struct org_kde_plasma_window *proxy ,int32_t x, int32_t y, uint32_t width, uint32_t height) {
++    (void)proxy;
++    struct window *w = data;
++    w->x = x; w->y = y; w->width = width; w->height = height; publish(w, "changed");
++}
++static void window_icon_changed(void *data, struct org_kde_plasma_window *proxy) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++}
++static void window_pid_changed(void *data, struct org_kde_plasma_window *proxy ,uint32_t pid) {
++    (void)proxy;
++    struct window *w = data;
++    w->pid = pid; publish(w, "changed");
++}
++static void window_virtual_desktop_entered(void *data, struct org_kde_plasma_window *proxy ,const char * id) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)id;
++}
++static void window_virtual_desktop_left(void *data, struct org_kde_plasma_window *proxy ,const char * is) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)is;
++}
++static void window_application_menu(void *data, struct org_kde_plasma_window *proxy ,const char * service_name, const char * object_path) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)service_name;
++    (void)object_path;
++}
++static void window_activity_entered(void *data, struct org_kde_plasma_window *proxy ,const char * id) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)id;
++}
++static void window_activity_left(void *data, struct org_kde_plasma_window *proxy ,const char * id) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)id;
++}
++static void window_resource_name_changed(void *data, struct org_kde_plasma_window *proxy ,const char * resource_name) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)resource_name;
++}
++static void window_client_geometry(void *data, struct org_kde_plasma_window *proxy ,int32_t x, int32_t y, uint32_t width, uint32_t height) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++    (void)x;
++    (void)y;
++    (void)width;
++    (void)height;
++}
++static void window_mapped(void *data, struct org_kde_plasma_window *proxy) {
++    (void)proxy;
++    struct window *w = data;
++    (void)w;
++}
++static const struct org_kde_plasma_window_listener window_listener = {
++    .title_changed = window_title_changed,
++    .app_id_changed = window_app_id_changed,
++    .state_changed = window_state_changed,
++    .virtual_desktop_changed = window_virtual_desktop_changed,
++    .themed_icon_name_changed = window_themed_icon_name_changed,
++    .unmapped = window_unmapped,
++    .initial_state = window_initial_state,
++    .parent_window = window_parent_window,
++    .geometry = window_geometry,
++    .icon_changed = window_icon_changed,
++    .pid_changed = window_pid_changed,
++    .virtual_desktop_entered = window_virtual_desktop_entered,
++    .virtual_desktop_left = window_virtual_desktop_left,
++    .application_menu = window_application_menu,
++    .activity_entered = window_activity_entered,
++    .activity_left = window_activity_left,
++    .resource_name_changed = window_resource_name_changed,
++    .client_geometry = window_client_geometry,
++    .mapped = window_mapped,
++};
++static const struct org_kde_plasma_window_listener window_listener;
++static void manager_show_desktop_changed(void *data, struct org_kde_plasma_window_management *proxy ,uint32_t state) {
++    (void)proxy;
++    (void)data;
++    (void)state;
++}
++static void manager_window(void *data, struct org_kde_plasma_window_management *proxy ,uint32_t id) {
++    (void)proxy;
++    (void)data;
++    (void)id;
++}
++static void manager_stacking_order_changed(void *data, struct org_kde_plasma_window_management *proxy ,struct wl_array * ids) {
++    (void)proxy;
++    (void)data;
++    (void)ids;
++}
++static void manager_stacking_order_uuid_changed(void *data, struct org_kde_plasma_window_management *proxy ,const char * uuids) {
++    (void)proxy;
++    (void)data;
++    (void)uuids;
++}
++static void manager_window_with_uuid(void *data, struct org_kde_plasma_window_management *proxy ,uint32_t id, const char * uuid) {
++    (void)proxy;
++    (void)id;
++    struct watcher *self = data;
++    for (struct window *w = self->windows; w; w = w->next)
++        if (strcmp(w->uuid, uuid) == 0) return;
++    if (self->count >= 4096) { self->failed = true; return; }
++    struct window *w = calloc(1, sizeof(*w));
++    if (!w) { self->failed = true; return; }
++    w->owner = self;
++    w->uuid = strdup(uuid);
++    if (!w->uuid) { free(w); self->failed = true; return; }
++    w->proxy = org_kde_plasma_window_management_get_window_by_uuid(self->manager, uuid);
++    if (!w->proxy) { free(w->uuid); free(w); self->failed = true; return; }
++    w->next = self->windows; self->windows = w; self->count++;
++    org_kde_plasma_window_add_listener(w->proxy, &window_listener, w);
++}
++static void manager_stacking_order_changed_2(void *data, struct org_kde_plasma_window_management *proxy) {
++    (void)proxy;
++    (void)data;
++}
++static const struct org_kde_plasma_window_management_listener manager_listener = {
++    .show_desktop_changed = manager_show_desktop_changed,
++    .window = manager_window,
++    .stacking_order_changed = manager_stacking_order_changed,
++    .stacking_order_uuid_changed = manager_stacking_order_uuid_changed,
++    .window_with_uuid = manager_window_with_uuid,
++    .stacking_order_changed_2 = manager_stacking_order_changed_2,
++};
++static void global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version) {
++    struct watcher *self = data;
++    if (strcmp(interface, "org_kde_plasma_window_management") == 0 && version >= 17 && !self->manager) {
++        self->global_name = name;
++        self->manager = wl_registry_bind(registry, name, &org_kde_plasma_window_management_interface, 17);
++        org_kde_plasma_window_management_add_listener(self->manager, &manager_listener, self);
++    }
++}
++static void global_remove(void *data, struct wl_registry *registry, uint32_t name) {
++    (void)registry;
++    struct watcher *self = data;
++    if (name == self->global_name) self->failed = true;
++}
++int clypdat_watch_windows(void) {
++    struct watcher self = {0};
++    struct wl_display *display = wl_display_connect(NULL);
++    if (!display) { fprintf(stderr, "ClypDat watcher: native Wayland unavailable.\n"); return 2; }
++    struct wl_registry *registry = wl_display_get_registry(display);
++    const struct wl_registry_listener listener = { global, global_remove };
++    wl_registry_add_listener(registry, &listener, &self);
++    if (wl_display_roundtrip(display) < 0 || !self.manager) {
++        fprintf(stderr, "ClypDat watcher: KDE window-management v17 unavailable; check desktop registration.\n");
++        self.failed = true;
++    }
++    while (!self.failed && wl_display_dispatch(display) >= 0) {}
++    while (self.windows) release_window(self.windows);
++    if (self.manager) org_kde_plasma_window_management_destroy(self.manager);
++    wl_registry_destroy(registry);
++    wl_display_disconnect(display);
++    return 2; /* Disconnection is source loss, never a successful empty list. */
++}

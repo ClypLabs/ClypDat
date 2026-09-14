@@ -385,7 +385,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
 internal static class CaptureWorkerExecutable
 {
-    internal const string FileName = "ClypDatRecorder.exe";
+    internal static string FileName => OperatingSystem.IsWindows() ? "ClypDatRecorder.exe" : "ClypDatRecorder";
 
     internal static string Resolve(string appPath, Func<string, bool>? fileExists = null)
     {

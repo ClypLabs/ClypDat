@@ -3967,7 +3967,7 @@ public sealed partial class MainWindow : Window
     private ClipOverlayCoordinator? _clipOverlayCoordinator;
 
     private ClipOverlayCoordinator ClipNotifications => _clipOverlayCoordinator ??= new ClipOverlayCoordinator(
-        new NativeClipOverlaySurface(),
+        OperatingSystem.IsLinux() ? new LinuxNotificationSurface() : new NativeClipOverlaySurface(),
         new ClipOverlayScheduler(),
         ClipNotificationSound.Play);
 

@@ -18,7 +18,18 @@ public sealed class SteamGameLibrary
     private Task? _refreshTask;
     private DateTime _nextRefreshUtc = DateTime.MinValue;
 
-    public SteamGameLibrary() : this(() => Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath", null) as string) { }
+    public SteamGameLibrary() : this(FindSteamRoot) { }
+    private static string? FindSteamRoot()
+    {
+        if (OperatingSystem.IsWindows())
+            return Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath", null) as string;
+        if (!OperatingSystem.IsLinux()) return null;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string[] candidates = [Path.Combine(home, ".steam", "steam"),
+            Path.Combine(home, ".local", "share", "Steam"),
+            Path.Combine(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam")];
+        return candidates.FirstOrDefault(path => Directory.Exists(Path.Combine(path, "steamapps")));
+    }
     internal SteamGameLibrary(Func<string?> steamPath, Action? beforeIndexBuild = null)
     {
         _steamPath = steamPath;

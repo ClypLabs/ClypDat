@@ -138,3 +138,12 @@ RNNoise is licensed under BSD-3-Clause. Its full license text is reproduced in
 `licenses/RNNoise-BSD-3-Clause.txt`. The `arnndn` filter that consumes the
 model is part of ffmpeg's libavfilter, already covered by the ffmpeg entry
 above.
+
+## Experimental Linux recorder
+
+Linux development builds include GPU Screen Recorder 6.1.2, pinned to commit
+`af736d4c38789f6c6f4b2236b9ac2a03c186703d`, with the ClypDat metadata watcher
+patch. See `native/gsr/UPSTREAM.md` and `native/gsr/COPYING` for source and
+license information. Linux build folders include the corresponding source
+archive, patches and KDE protocol XML under `source/gsr`, plus notices under
+`licenses/gsr`. The KDE XML retains its LGPL-2.1-or-later notice.

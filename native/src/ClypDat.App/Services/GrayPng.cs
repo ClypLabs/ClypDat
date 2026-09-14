@@ -1,5 +1,7 @@
+#if !CLYPDAT_LINUX
 using Windows.Graphics.Imaging;
 using Windows.Storage;
+#endif
 
 namespace ClypDat.App.Services;
 
@@ -13,6 +15,17 @@ public static class GrayPng
 
     public static async Task<GrayDetectorImage> ReadAsync(string path)
     {
+#if CLYPDAT_LINUX
+        using var bitmap = SkiaSharp.SKBitmap.Decode(path) ?? throw new InvalidDataException("Invalid template image.");
+        var gray = new byte[checked(bitmap.Width * bitmap.Height)];
+        for (var y = 0; y < bitmap.Height; y++)
+        for (var x = 0; x < bitmap.Width; x++)
+        {
+            var pixel = bitmap.GetPixel(x, y);
+            gray[y * bitmap.Width + x] = (byte)((pixel.Red * 299 + pixel.Green * 587 + pixel.Blue * 114) / 1000);
+        }
+        return new GrayDetectorImage(bitmap.Width, bitmap.Height, gray);
+#else
         var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(path));
         using var stream = await file.OpenReadAsync();
         var decoder = await BitmapDecoder.CreateAsync(stream);
@@ -32,5 +45,6 @@ public static class GrayPng
             gray[index] = (byte)((bgra[offset + 2] * 299 + bgra[offset + 1] * 587 + bgra[offset] * 114) / 1000);
         }
         return new GrayDetectorImage(width, height, gray);
+#endif
     }
 }

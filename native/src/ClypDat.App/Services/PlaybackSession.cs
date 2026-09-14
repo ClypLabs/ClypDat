@@ -108,6 +108,7 @@ public sealed class PlaybackSession : IDisposable
 
     public PlaybackSession()
     {
+        if (OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Editor playback is not available in this experimental Linux build.");
         global::LibVLCSharp.Shared.Core.Initialize();
         // Not a field initializer: the coordinator has to read the LIVE clip
         // speed on every wait, because the transport times it confirms are
@@ -305,6 +306,7 @@ public sealed class PlaybackSession : IDisposable
 
     internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false, CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
+        if (OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Editor playback is not available in this experimental Linux build.");
         using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);
         using var processingRead = SpotifyProcessingPaths.TryRead(path);
         if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlay�");

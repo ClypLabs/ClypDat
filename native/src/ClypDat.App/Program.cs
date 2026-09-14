@@ -49,6 +49,8 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        var diagnoseStartup = args.Contains("--diagnose-startup", StringComparer.Ordinal);
+        if (diagnoseStartup) Console.Error.WriteLine("ClypDat: entering Main.");
         DevChannelMode.ConfigureDataRoot();
         // Release packaging calls this after publish. Reaching Main proves the
         // app host loaded ClypDat with its bundled runtime before any user data,
@@ -69,7 +71,7 @@ internal static class Program
             // path. Initialize bundled FFmpeg before the worker loads any
             // backend; the normal UI path does this below after its mutex setup.
             FfmpegPathResolver.EnsureBundledFfmpeg();
-            CaptureWorkerHost.Run();
+            Environment.ExitCode = CaptureWorkerHost.Run();
             return;
         }
 
@@ -88,9 +90,36 @@ internal static class Program
         // through Windows' own winsqlite3.dll instead of a bundled native
         // SQLite binary - see the SQLitePCLRaw.provider.winsqlite3 PackageReference
         // comment in ClypDat.App.csproj for why.
-#if !CLYPDAT_UI_PREVIEW
+#if CLYPDAT_LINUX
+        if (diagnoseStartup) Console.Error.WriteLine("ClypDat: initializing Linux SQLite.");
+        raw.SetProvider(new SQLite3Provider_sqlite3());
+#elif !CLYPDAT_UI_PREVIEW
         raw.SetProvider(new SQLite3Provider_winsqlite3());
 #endif
+
+        if (OperatingSystem.IsLinux())
+        {
+            if (diagnoseStartup) Console.Error.WriteLine("ClypDat: initializing activation listener.");
+            using var instance = new LinuxSingleInstance(() =>
+            {
+                if (Application.Current is App app) app.ShowMainWindowFromExternalRequest();
+            });
+            if (!instance.IsOwner) return;
+            if (diagnoseStartup) Console.Error.WriteLine("ClypDat: loading Linux settings.");
+            var settings = AppSettingsStore.Load();
+            StartupService.SetLaunchOnStartup(settings.LaunchOnWindowsStartup, settings.StartMinimizedToTray);
+            FfmpegPathResolver.EnsureBundledFfmpeg();
+            if (diagnoseStartup) Console.Error.WriteLine("ClypDat: starting native Wayland UI.");
+            var builder = BuildAvaloniaApp();
+            if (diagnoseStartup)
+            {
+                System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.TextWriterTraceListener(Console.Error));
+                builder.AfterPlatformServicesSetup(_ => Console.Error.WriteLine("ClypDat: platform services ready."));
+                builder.AfterSetup(_ => Console.Error.WriteLine("ClypDat: application setup complete."));
+            }
+            builder.StartWithClassicDesktopLifetime(args);
+            return;
+        }
 
         var singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
         var restartRequested = args.Contains("--restart", StringComparer.OrdinalIgnoreCase) ||
@@ -215,7 +244,13 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp()
     {
         return AppBuilder.Configure<App>()
+#if CLYPDAT_LINUX
+            .UseWayland()
+            .UseSkia()
+            .UseHarfBuzz()
+#else
             .UsePlatformDetect()
+#endif
             .With(GraphicsOptionsResolver.Resolve())
             .WithInterFont()
             .LogToTrace();

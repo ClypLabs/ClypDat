@@ -374,9 +374,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     {
         try
         {
-            if (!File.Exists(_cachePath)) return null;
-            var protectedBytes = File.ReadAllBytes(_cachePath);
-            var bytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
+            var bytes = CredentialStore.Load(_cachePath);
+            if (bytes is null) return null;
             return JsonSerializer.Deserialize<DesktopToken>(bytes);
         }
         catch { return null; }
@@ -386,7 +385,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     {
         Directory.CreateDirectory(AppDataPaths.Root);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(token);
-        File.WriteAllBytes(_cachePath, ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+        CredentialStore.Save(_cachePath, bytes);
     }
 
     private const string ServerProblemMessage = "Couldn't reach clypdat.xyz. Check your connection, or the status page for an outage.";
@@ -412,7 +411,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         Changed?.Invoke(this, _snapshot);
     }
 
-    private void TryDeleteCache() { try { if (File.Exists(_cachePath)) File.Delete(_cachePath); } catch { } }
+    private void TryDeleteCache() { try { CredentialStore.Delete(_cachePath); } catch { } }
     private static string? TryReadError(string body)
     {
         try

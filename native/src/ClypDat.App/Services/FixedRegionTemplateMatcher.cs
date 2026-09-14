@@ -1,5 +1,7 @@
+#if !CLYPDAT_LINUX
 using Windows.Graphics.Imaging;
 using Windows.Storage;
+#endif
 
 namespace ClypDat.App.Services;
 
@@ -54,6 +56,18 @@ public sealed class FixedRegionTemplateMatcher
 
     private static async Task<byte[]> ReadGrayAsync(string imagePath, NormalizedRegion region)
     {
+#if CLYPDAT_LINUX
+        using var bitmap = SkiaSharp.SKBitmap.Decode(imagePath) ?? throw new InvalidDataException("Invalid template image.");
+        var rect = region.ToPixelRect(bitmap.Width, bitmap.Height);
+        var gray = new byte[checked(rect.Width * rect.Height)];
+        for (var y = 0; y < rect.Height; y++)
+        for (var x = 0; x < rect.Width; x++)
+        {
+            var pixel = bitmap.GetPixel(rect.X + x, rect.Y + y);
+            gray[y * rect.Width + x] = (byte)((pixel.Blue * 29 + pixel.Green * 150 + pixel.Red * 77) >> 8);
+        }
+        return gray;
+#else
         var file = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(imagePath));
         using var stream = await file.OpenReadAsync();
         var decoder = await BitmapDecoder.CreateAsync(stream);
@@ -81,5 +95,6 @@ public sealed class FixedRegionTemplateMatcher
         for (int source = 0, destination = 0; destination < gray.Length; source += 4, destination++)
             gray[destination] = (byte)((bgra[source] * 29 + bgra[source + 1] * 150 + bgra[source + 2] * 77) >> 8);
         return gray;
+#endif
     }
 }

@@ -6,6 +6,8 @@ public static class ClipNotificationSound
 {
     public static void Play(string volumeLevel)
     {
+        if (!OperatingSystem.IsWindows()) return;
+
         var gain = volumeLevel switch
         {
             "Low" => 0.035f,

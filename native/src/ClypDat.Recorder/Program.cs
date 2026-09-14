@@ -9,13 +9,16 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        // Configure before loading capture dependencies. Keep WER/dumps enabled.
-        const uint failCriticalErrors = 0x0001;
-        const uint noOpenFileErrorBox = 0x8000;
-        const uint noReportingUi = 0x0020;
-        SetErrorMode(GetErrorMode() | failCriticalErrors | noOpenFileErrorBox);
-        var reportingResult = WerSetFlags(noReportingUi);
-        if (reportingResult < 0) Console.Error.WriteLine($"Recorder WER UI configuration failed: 0x{reportingResult:X8}.");
+        if (OperatingSystem.IsWindows())
+        {
+            // Configure before loading capture dependencies. Keep WER/dumps enabled.
+            const uint failCriticalErrors = 0x0001;
+            const uint noOpenFileErrorBox = 0x8000;
+            const uint noReportingUi = 0x0020;
+            SetErrorMode(GetErrorMode() | failCriticalErrors | noOpenFileErrorBox);
+            var reportingResult = WerSetFlags(noReportingUi);
+            if (reportingResult < 0) Console.Error.WriteLine($"Recorder WER UI configuration failed: 0x{reportingResult:X8}.");
+        }
 
         var appAssemblyPath = Path.Combine(AppContext.BaseDirectory, "ClypDat.dll");
         if (!File.Exists(appAssemblyPath)) return 2;
@@ -34,7 +37,7 @@ internal static class Program
             ? args
             : [.. args, "--capture-worker"];
         entryPoint.Invoke(null, [workerArgs]);
-        return 0;
+        return Environment.ExitCode;
     }
 
     [DllImport("kernel32.dll")] private static extern uint GetErrorMode();

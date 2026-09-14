@@ -21,8 +21,31 @@ public static class StartupService
 
     public static StartupRegistrationResult SetLaunchOnStartup(bool enabled, bool minimized)
     {
+        if (OperatingSystem.IsLinux()) return Remember(SetLinuxStartup(enabled, minimized));
         if (!OperatingSystem.IsWindows()) return Remember(StartupRegistrationResult.Ok(false));
         return SetLaunchOnStartup(enabled, minimized, new WindowsStartupRegistryAdapter(), Environment.ProcessPath);
+    }
+
+    private static StartupRegistrationResult SetLinuxStartup(bool enabled, bool minimized)
+    {
+        try
+        {
+            var config = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+            if (string.IsNullOrEmpty(config) || !Path.IsPathRooted(config))
+                config = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config");
+            var path = Path.Combine(config, "autostart", "com.clyplabs.ClypDat.desktop");
+            if (!enabled)
+            {
+                File.Delete(path);
+                return StartupRegistrationResult.Ok(false);
+            }
+            var executable = Environment.ProcessPath ?? throw new InvalidOperationException("Missing application executable.");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var command = LinuxDesktopEntry.QuoteExec(executable) + (minimized ? " --minimized" : "");
+            File.WriteAllText(path, "[Desktop Entry]\nType=Application\nName=ClypDat\nExec=" + command + "\nTerminal=false\n");
+            return StartupRegistrationResult.Ok(true);
+        }
+        catch (Exception error) { return new StartupRegistrationResult(false, error.Message, false, false); }
     }
 
     internal static StartupRegistrationResult SetLaunchOnStartup(

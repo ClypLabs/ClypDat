@@ -144,6 +144,8 @@ public sealed class ForegroundGameDetector
 
     private IReadOnlyList<GameDetection> ScanWindows()
     {
+        if (!OperatingSystem.IsWindows()) return [];
+
         RefreshSteamClassification();
         var seen = new HashSet<nint>();
         var results = new List<GameDetection>();

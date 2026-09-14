@@ -32,7 +32,7 @@
        chrome - with ExtendClientAreaToDecorationsHint there IS no system
        chrome, so without this the top of the header and the left of the
        sidebar render past the screen edge. -->
-  <Grid x:Name="RootLayout" RowDefinitions="48,*">
+  <Grid x:Name="RootLayout" RowDefinitions="48,Auto,*">
     <!-- Somewhere for focus to GO. This Avalonia version's IFocusManager has no
          ClearFocus, and focus has to land on something focusable, so anything
          wanting to hand the keyboard back (the search boxes on Enter or an
@@ -300,7 +300,11 @@
          open, so opening a clip took the sidebar away with it. Sharing one grid
          keeps the sidebar mounted and unmovable across every view, and the three
          column-1 children just gate their own visibility instead. -->
-    <Grid Grid.Row="1" ColumnDefinitions="Auto,*">
+    <Border Grid.Row="1" IsVisible="{Binding IsLinuxExperimental}" Padding="16,8" Background="{StaticResource Surface_171F27}">
+      <TextBlock Text="Experimental Linux build — replay, game detection, audio capture, global hotkeys and editor playback are not available yet."
+                 TextWrapping="Wrap" />
+    </Border>
+    <Grid Grid.Row="2" ColumnDefinitions="Auto,*">
       <Border x:Name="EditorSidebarRail" Grid.Column="0" Width="{Binding EditorSidebarWidth}" Background="{StaticResource Surface_0D1116}" BorderBrush="{StaticResource Surface_1E2A33}" BorderThickness="0,0,1,0">
         <Grid RowDefinitions="*,Auto">
           <!-- The rail is one column serving two modes. The library's filters
@@ -1984,7 +1988,7 @@
          #F5141D24). Written the wrong way round this parsed as alpha 00 with AA
          landing in the BLUE channel, i.e. fully transparent, so the scrim behind
          this dialog was never actually drawn. -->
-    <Border x:Name="OnboardingOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}" PointerPressed="OnboardingOverlay_OnPointerPressed">
+    <Border x:Name="OnboardingOverlay" Grid.RowSpan="3" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}" PointerPressed="OnboardingOverlay_OnPointerPressed">
       <!-- Four settings pages fit in 500 DIPs: 52 header, fixed footer, body
            padding, and 12 DIP clearance below Capture's wrapped replay pills.
            Keeping this fixed prevents navigation from jumping as pages change. -->
@@ -2062,7 +2066,7 @@
          behind. The card grid is still built in code-behind, into the panel's
          Cards host. Centre alignment is load-bearing: stretched, the panel
          would cover the scrim and swallow the click that dismisses it. -->
-    <Border x:Name="NewClipsOverlay" Grid.RowSpan="2" Background="#C7000000" IsVisible="False"
+    <Border x:Name="NewClipsOverlay" Grid.RowSpan="3" Background="#C7000000" IsVisible="False"
             PointerPressed="NewClipsOverlay_OnPointerPressed">
       <controls:NewClipsPanel x:Name="NewClipsPanelHost" HorizontalAlignment="Center" VerticalAlignment="Center" />
     </Border>
@@ -2070,7 +2074,7 @@
     <!-- Video-only fullscreen overlay. Grid.RowSpan="2" + last child of the
          root Grid, same pattern as the onboarding overlay above, so this
          covers the header row too despite its fixed 48px height. -->
-    <Border Grid.RowSpan="2" Background="Black" IsVisible="{Binding IsVideoFullscreen}">
+    <Border Grid.RowSpan="3" Background="Black" IsVisible="{Binding IsVideoFullscreen}">
       <!--
         Video row (star) and controls row (auto) are non-overlapping on
         purpose. VideoView hosts LibVLC's video output as a real native
@@ -2244,7 +2248,7 @@
          than a library assembling itself in public. Lifted, with a short fade,
          the moment the loader closes. -->
     <Border x:Name="StartupCurtain"
-            Grid.Row="0" Grid.RowSpan="2"
+            Grid.Row="0" Grid.RowSpan="3"
             Background="{StaticResource Surface_0D1116}"
             IsVisible="False"
             IsHitTestVisible="True"

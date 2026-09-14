@@ -829,7 +829,8 @@ public sealed record ReplayBufferConfig(
     bool MicrophoneNoiseSuppressionEnabled = false,
     double MicrophoneNoiseGateThresholdDb = -100,
     bool AdaptiveFrameRateProtectionEnabled = false,
-    string FullSessionHotkey = "F8");
+    string FullSessionHotkey = "F8",
+    LinuxCaptureTarget? LinuxTarget = null);
 
 internal enum AudioSnapshotPurpose
 {

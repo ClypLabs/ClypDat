@@ -394,8 +394,8 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     {
         try
         {
-            if (!File.Exists(_cachePath)) return null;
-            var bytes = ProtectedData.Unprotect(File.ReadAllBytes(_cachePath), null, DataProtectionScope.CurrentUser);
+            var bytes = CredentialStore.Load(_cachePath);
+            if (bytes is null) return null;
             return JsonSerializer.Deserialize<SpotifyTokens>(bytes);
         }
         catch { return null; }
@@ -407,7 +407,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         {
             Directory.CreateDirectory(AppDataPaths.Root);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(tokens);
-            File.WriteAllBytes(_cachePath, ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+            CredentialStore.Save(_cachePath, bytes);
         }
         catch (Exception error)
         {
@@ -416,7 +416,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         }
     }
 
-    private void TryDeleteCache() { try { if (File.Exists(_cachePath)) File.Delete(_cachePath); } catch { } }
+    private void TryDeleteCache() { try { CredentialStore.Delete(_cachePath); } catch { } }
 
     private static string Base64Url(byte[] bytes) =>
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');

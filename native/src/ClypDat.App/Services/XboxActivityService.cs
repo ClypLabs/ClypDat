@@ -280,9 +280,8 @@ internal sealed class XboxActivityService : IDisposable
     {
         try
         {
-            if (!File.Exists(_cachePath)) return null;
-            var protectedBytes = File.ReadAllBytes(_cachePath);
-            var bytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
+            var bytes = CredentialStore.Load(_cachePath);
+            if (bytes is null) return null;
             return JsonSerializer.Deserialize<XboxTokens>(bytes);
         }
         catch { return null; }
@@ -292,10 +291,10 @@ internal sealed class XboxActivityService : IDisposable
     {
         Directory.CreateDirectory(AppDataPaths.Root);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(tokens);
-        File.WriteAllBytes(_cachePath, ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+        CredentialStore.Save(_cachePath, bytes);
     }
 
-    private void TryDeleteCache() { try { if (File.Exists(_cachePath)) File.Delete(_cachePath); } catch { } }
+    private void TryDeleteCache() { try { CredentialStore.Delete(_cachePath); } catch { } }
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     private static string OAuthError(string body)
     {

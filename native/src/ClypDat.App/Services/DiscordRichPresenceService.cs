@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
@@ -166,7 +167,7 @@ internal static class DiscordRichPresenceService
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            NamedPipeClientStream? pipe = null;
+            Stream? pipe = null;
             try
             {
                 pipe = await ConnectAsync(cancellationToken).ConfigureAwait(false);
@@ -203,26 +204,45 @@ internal static class DiscordRichPresenceService
         }
     }
 
-    private static async Task<NamedPipeClientStream?> ConnectAsync(CancellationToken cancellationToken)
+    private static async Task<Stream?> ConnectAsync(CancellationToken cancellationToken)
     {
         for (var index = 0; index <= MaxPipeIndex; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var pipe = new NamedPipeClientStream(".", $"discord-ipc-{index}", PipeDirection.InOut, PipeOptions.Asynchronous);
+            Stream? pipe = null;
             try
             {
                 // Short timeout per index: a missing pipe should fail fast so
                 // the next one is tried, not stall the loop for ten seconds.
-                await pipe.ConnectAsync(300, cancellationToken).ConfigureAwait(false);
+                if (OperatingSystem.IsLinux())
+                {
+                    var runtime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+                    if (string.IsNullOrEmpty(runtime) || !Path.IsPathRooted(runtime)) return null;
+                    var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                    try
+                    {
+                        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        timeout.CancelAfter(300);
+                        await socket.ConnectAsync(new UnixDomainSocketEndPoint(Path.Combine(runtime, $"discord-ipc-{index}")), timeout.Token).ConfigureAwait(false);
+                        pipe = new NetworkStream(socket, ownsSocket: true);
+                    }
+                    catch { socket.Dispose(); throw; }
+                }
+                else
+                {
+                    var namedPipe = new NamedPipeClientStream(".", $"discord-ipc-{index}", PipeDirection.InOut, PipeOptions.Asynchronous);
+                    pipe = namedPipe;
+                    await namedPipe.ConnectAsync(300, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                pipe.Dispose();
+                pipe?.Dispose();
                 throw;
             }
             catch
             {
-                pipe.Dispose();
+                pipe?.Dispose();
                 continue;
             }
 
@@ -240,7 +260,7 @@ internal static class DiscordRichPresenceService
                 if (reply is null || !IsReady(reply))
                 {
                     AppLog.Error($"Discord Rich Presence: handshake refused on discord-ipc-{index}: {Shorten(reply ?? "no reply")}");
-                    pipe.Dispose();
+                    pipe?.Dispose();
                     continue;
                 }
 
@@ -250,20 +270,20 @@ internal static class DiscordRichPresenceService
             catch (Exception error)
             {
                 AppLog.Info($"Discord Rich Presence: handshake failed on discord-ipc-{index} ({error.GetType().Name}).");
-                pipe.Dispose();
+                pipe?.Dispose();
             }
         }
 
         return null;
     }
 
-    private static async Task PumpAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+    private static async Task PumpAsync(Stream pipe, CancellationToken cancellationToken)
     {
         // Reads are drained but ignored. Discord answers every frame, and a
         // pipe whose read buffer is never emptied eventually blocks the writer.
         var drain = Task.Run(() => DrainAsync(pipe, cancellationToken), cancellationToken);
 
-        while (!cancellationToken.IsCancellationRequested && pipe.IsConnected)
+        while (!cancellationToken.IsCancellationRequested && !drain.IsCompleted)
         {
             // Null means "nothing changed". Resolved under the lock, sent
             // outside it - a pipe write must never be held across a lock the
@@ -286,7 +306,7 @@ internal static class DiscordRichPresenceService
         await drain.ConfigureAwait(false);
     }
 
-    private static async Task SendActivityAsync(NamedPipeClientStream pipe, ActivityRevision revision, CancellationToken cancellationToken)
+    private static async Task SendActivityAsync(Stream pipe, ActivityRevision revision, CancellationToken cancellationToken)
     {
         var activity = CreateActivity(revision.Presence, revision.ShowButton);
 
@@ -373,7 +393,7 @@ internal static class DiscordRichPresenceService
         return trimmed.Length <= 128 ? trimmed : trimmed[..128];
     }
 
-    private static async Task WriteFrameAsync(NamedPipeClientStream pipe, Opcode opcode, string payload, CancellationToken cancellationToken)
+    private static async Task WriteFrameAsync(Stream pipe, Opcode opcode, string payload, CancellationToken cancellationToken)
     {
         var body = Encoding.UTF8.GetBytes(payload);
         var frame = new byte[8 + body.Length];
@@ -384,12 +404,12 @@ internal static class DiscordRichPresenceService
         await pipe.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task DrainAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+    private static async Task DrainAsync(Stream pipe, CancellationToken cancellationToken)
     {
         var header = new byte[8];
         try
         {
-            while (!cancellationToken.IsCancellationRequested && pipe.IsConnected)
+            while (!cancellationToken.IsCancellationRequested)
             {
                 if (!await ReadExactlyAsync(pipe, header, cancellationToken).ConfigureAwait(false)) return;
                 var length = BitConverter.ToInt32(header, 4);
@@ -465,7 +485,7 @@ internal static class DiscordRichPresenceService
     }
 
     /// <summary>Reads one whole frame, or null when the pipe ends.</summary>
-    private static async Task<string?> ReadFrameAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+    private static async Task<string?> ReadFrameAsync(Stream pipe, CancellationToken cancellationToken)
     {
         var header = new byte[8];
         if (!await ReadExactlyAsync(pipe, header, cancellationToken).ConfigureAwait(false)) return null;
@@ -476,7 +496,7 @@ internal static class DiscordRichPresenceService
         return Encoding.UTF8.GetString(body);
     }
 
-    private static async Task<bool> ReadExactlyAsync(NamedPipeClientStream pipe, byte[] buffer, CancellationToken cancellationToken)
+    private static async Task<bool> ReadExactlyAsync(Stream pipe, byte[] buffer, CancellationToken cancellationToken)
     {
         var offset = 0;
         while (offset < buffer.Length)

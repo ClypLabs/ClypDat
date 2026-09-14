@@ -36,7 +36,10 @@ public sealed partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        var diagnoseStartup = Environment.GetCommandLineArgs().Contains("--diagnose-startup");
+        if (diagnoseStartup) Console.Error.WriteLine("ClypDat: starting application services.");
         AppLog.Startup();
+        if (diagnoseStartup) Console.Error.WriteLine("ClypDat: logging ready.");
         AppLog.Info($"Graphics: os={Environment.OSVersion.Version}; {GraphicsOptionsResolver.ActiveDescription}");
         InstallGlobalExceptionHandlers();
         RuntimeHealthWatchdog.Start();
@@ -57,7 +60,9 @@ public sealed partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            if (diagnoseStartup) Console.Error.WriteLine("ClypDat: creating main view model.");
             var viewModel = new MainWindowViewModel();
+            if (diagnoseStartup) Console.Error.WriteLine("ClypDat: main view model ready.");
             var launchPresentation = ResolveLaunchPresentation(desktop.Args, viewModel);
             var minimized = LaunchPresentationPolicy.StartsInTray(launchPresentation);
             // LibVLC construction is deferred until the editor asks for it.
@@ -95,6 +100,7 @@ public sealed partial class App : Application
                 _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
                 desktop.Exit += (_, _) => _serverTrayMenuRenderer?.Dispose();
             }
+            if (diagnoseStartup) Console.Error.WriteLine("ClypDat: main window ready.");
             InitializeTrayIcon();
             // Every launch, not only on toggle: updates rerun the installer, which
             // recreates the Start menu and desktop shortcuts with the exe's icon.

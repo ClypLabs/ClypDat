@@ -17,7 +17,7 @@ public static class DevUpdateService
 
     public static void StartBackgroundCheck()
     {
-        if (!DevChannelMode.Enabled) return;
+        if (!DevChannelMode.Enabled || !OperatingSystem.IsWindows()) return;
         _ = Task.Run(async () =>
         {
             try { await StageLatestAsync(); }
@@ -27,6 +27,8 @@ public static class DevUpdateService
 
     internal static async Task StageLatestAsync(CancellationToken cancellationToken = default)
     {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Linux development updates are not available.");
+
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ClypDat-Dev");
         var release = await client.GetFromJsonAsync<ReleaseResponse>(ReleaseApiUrl, cancellationToken) ??

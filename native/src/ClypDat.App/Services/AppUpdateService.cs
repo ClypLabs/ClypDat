@@ -199,6 +199,7 @@ public static class AppUpdateService
 
     public static async Task<AppUpdateInfo?> CheckAsync(CancellationToken cancellationToken = default)
     {
+        if (!OperatingSystem.IsWindows()) return null;
         using var client = CreateClient();
         var releases = await GetJsonFromAllSourcesAsync(client, LatestReleaseSources, ParseRelease, cancellationToken);
         var candidates = new List<(ReleaseResponse Release, Version Version)>();
@@ -241,6 +242,7 @@ public static class AppUpdateService
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
     {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Linux installer updates are not available.");
         // Resolve the digest to enforce BEFORE downloading anything. When a signing key
         // is pinned this must come from the signed manifest; the release API's own digest
         // is not an independent control, because whoever serves the metadata serves both

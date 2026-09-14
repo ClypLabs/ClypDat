@@ -1,0 +1,3 @@
+
+# Unified patches retain upstream whitespace in their context lines.
+native/gsr/patches/*.patch -whitespace

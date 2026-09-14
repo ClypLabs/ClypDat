@@ -1,3 +1,4 @@
+#if !CLYPDAT_LINUX
 using Windows.Globalization;
 using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
@@ -80,3 +81,19 @@ public sealed class WindowsOcrFrameReader
         }
     }
 }
+
+#else
+namespace ClypDat.App.Services;
+public sealed record OcrWordObservation(string Text, double X, double Y, double Width, double Height)
+{
+    public double CenterX => X + Width / 2;
+    public double CenterY => Y + Height / 2;
+}
+public sealed class WindowsOcrFrameReader
+{
+    public WindowsOcrFrameReader() => throw new PlatformNotSupportedException("Computer-vision highlights are unavailable on Linux.");
+    public Task<IReadOnlyList<OcrWordObservation>> ReadAsync(string path) => throw new PlatformNotSupportedException();
+    public Task<IReadOnlyList<OcrWordObservation>> ReadAsync(string path, NormalizedRegion? region) => throw new PlatformNotSupportedException();
+    public Task<string> ReadTextAsync(GrayDetectorImage image) => throw new PlatformNotSupportedException();
+}
+#endif

@@ -20,7 +20,8 @@ public static class CaptureWorkerProtocol
     // start intent without claiming that recording is active. A worker left over from an
     // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
     // the proxy's read loop already routes into recovery.
-    public const int Version = 11;
+    // 12 adds typed compositor identities to the capture configuration.
+    public const int Version = 12;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 

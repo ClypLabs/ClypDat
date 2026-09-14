@@ -53,6 +53,21 @@
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(ClypDatLinux)' == 'true'">
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ApplicationIcon />
+    <ApplicationManifest />
+    <SupportedOSPlatformVersion />
+    <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
+    <DefineConstants>$(DefineConstants);CLYPDAT_LINUX</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(ClypDatLinux)' == 'true'">
+    <PackageReference Include="Avalonia.Wayland" Version="$(ClypDatAvaloniaPackageVersion)" />
+    <PackageReference Include="SQLitePCLRaw.provider.sqlite3" Version="3.0.4" />
+    <Compile Remove="Services\CaptureInterop.cs;Services\NativeReplayBuffer.cs;Services\WindowGraphicsCaptureSource.cs;Services\DesktopDuplicationFrameSource.cs" />
+  </ItemGroup>
+
   <PropertyGroup Condition="'$(ClypDatChannel)' == 'Dev'">
     <DefineConstants>$(DefineConstants);CLYPDAT_DEV</DefineConstants>
     <AssemblyName>ClypDat</AssemblyName>
@@ -112,9 +127,9 @@
          fixed version available. winsqlite3 below points it at Windows'
          own SQLite (ships with Win10+, patched via Windows Update) instead. -->
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.0.11" />
-    <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="3.0.4" Condition="'$(ClypDatUiPreview)' != 'true'" />
-    <PackageReference Include="ScreenRecorderLib" Version="6.6.0" Condition="'$(ClypDatUiPreview)' != 'true'" />
-    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" Condition="'$(ClypDatUiPreview)' != 'true'" />
+    <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="3.0.4" Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'" />
+    <PackageReference Include="ScreenRecorderLib" Version="6.6.0" Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'" />
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" GeneratePathProperty="true" Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
@@ -132,7 +147,7 @@
                       Condition="'$(ClypDatUiPreview)' != 'true'" />
     <ProjectReference Include="..\ClypDat.DetectorHost\ClypDat.DetectorHost.csproj"
                       ReferenceOutputAssembly="false"
-                      Condition="'$(ClypDatUiPreview)' != 'true'" />
+                      Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'" />
     <Compile Include="..\ClypDat.DevChannel\DevChannelConstants.cs" Link="Services\DevChannel\DevChannelConstants.cs" />
     <Compile Include="..\ClypDat.DevChannel\DevBuildManifest.cs" Link="Services\DevChannel\DevBuildManifest.cs" />
     <Compile Include="..\ClypDat.DevChannel\DevPackageVerifier.cs" Link="Services\DevChannel\DevPackageVerifier.cs" />
@@ -175,7 +190,7 @@
     </PropertyGroup>
   </Target>
 
-  <Target Name="CopyLibVlcRuntimeToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true'">
+  <Target Name="CopyLibVlcRuntimeToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'">
     <ItemGroup>
       <LibVlcRuntimeFiles Include="$(PkgVideoLAN_LibVLC_Windows)\build\x64\**\*" />
     </ItemGroup>
@@ -184,7 +199,7 @@
           SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="CopyFfmpegToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\ffmpeg')">
+  <Target Name="CopyFfmpegToPublish" AfterTargets="Publish" Condition="'$(ClypDatLinux)' != 'true' And Exists('..\..\vendor\ffmpeg')">
     <ItemGroup>
       <FfmpegFiles Include="..\..\vendor\ffmpeg\**\*" />
     </ItemGroup>
@@ -202,7 +217,7 @@
        capture loop dies instantly and every clip attempt reports "Replay
        just started". Recording has to work when running a dev build, not
        only a published one. -->
-  <Target Name="CopyFfmpegToOutput" AfterTargets="Build" Condition="Exists('..\..\vendor\ffmpeg')">
+  <Target Name="CopyFfmpegToOutput" AfterTargets="Build" Condition="'$(ClypDatLinux)' != 'true' And Exists('..\..\vendor\ffmpeg')">
     <ItemGroup>
       <FfmpegOutputFiles Include="..\..\vendor\ffmpeg\**\*" />
     </ItemGroup>
@@ -240,7 +255,7 @@
           SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="BuildDetectorHostAppHost" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
+  <Target Name="BuildDetectorHostAppHost" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'">
     <MSBuild Projects="..\ClypDat.DetectorHost\ClypDat.DetectorHost.csproj"
              Targets="GetDetectorHostOutputFiles"
              Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);Version=$(Version)">
@@ -249,7 +264,7 @@
     <Copy SourceFiles="@(DetectorHostOutputFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="PublishDetectorHostAppHost" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true'">
+  <Target Name="PublishDetectorHostAppHost" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'">
     <MSBuild Projects="..\ClypDat.DetectorHost\ClypDat.DetectorHost.csproj"
              Targets="GetDetectorHostOutputFiles"
              Properties="Configuration=$(Configuration);Platform=$(Platform);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);Version=$(Version)">
@@ -262,14 +277,14 @@
        MSVC with its static CRT, then keep DLL beside both developer and
        published app output. The bridge is presently probe-only, so an absent
        DLL cannot affect capture startup before the native media path is live. -->
-  <Target Name="BuildNativeCaptureEngine" BeforeTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
+  <Target Name="BuildNativeCaptureEngine" BeforeTargets="Build" Condition="'$(ClypDatManagedValidation)' != 'true' And '$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\capture-native\build.ps1&quot; -Configuration $(Configuration)" />
   </Target>
 
-  <Target Name="BuildEditorVideoOutput" BeforeTargets="PrepareForBuild" Condition="'$(ClypDatUiPreview)' != 'true'">
+  <Target Name="BuildEditorVideoOutput" BeforeTargets="PrepareForBuild" Condition="'$(ClypDatManagedValidation)' != 'true' And '$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\video-output-native\build-video-output.ps1&quot; -Configuration $(Configuration) -VlcRoot &quot;$(PkgVideoLAN_LibVLC_Windows)\build\x64&quot;" />
   </Target>
-  <ItemGroup Condition="'$(ClypDatUiPreview)' != 'true'">
+  <ItemGroup Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true'">
     <Content Include="..\..\video-output-native\build\$(Configuration)\libclypdat_d3d11_plugin.dll"
              Link="libvlc\win-x64\plugins\video_output\libclypdat_d3d11_plugin.dll"
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -281,13 +296,13 @@
              CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <Target Name="CopyNativeCaptureEngineToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll')">
+  <Target Name="CopyNativeCaptureEngineToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll')">
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll"
           DestinationFolder="$(OutDir)"
           SkipUnchangedFiles="true" />
   </Target>
 
-  <Target Name="CopyNativeCaptureEngineToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll')">
+  <Target Name="CopyNativeCaptureEngineToPublish" AfterTargets="Publish" Condition="'$(ClypDatUiPreview)' != 'true' And '$(ClypDatLinux)' != 'true' And Exists('$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll')">
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\capture-native\build\$(Configuration)\ClypDat.Capture.Native.dll"
           DestinationFolder="$(PublishDir)"
           SkipUnchangedFiles="true" />
@@ -328,5 +343,8 @@
     <Copy SourceFiles="@(ThirdPartyLicenseFiles)"
           DestinationFiles="@(ThirdPartyLicenseFiles->'$(PublishDir)licenses\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="RejectManagedValidationPublish" BeforeTargets="Publish" Condition="'$(ClypDatManagedValidation)' == 'true'">
+    <Error Text="Managed validation skips native builds and cannot be published." />
   </Target>
 </Project>

@@ -112,7 +112,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // card for it.
     private readonly SemaphoreSlim _libraryRefreshLock = new(1, 1);
     private readonly AudioDeviceService _audioDevices = new();
-    private readonly DefaultMicrophoneWatcher _defaultMicrophoneWatcher;
+    private readonly DefaultMicrophoneWatcher? _defaultMicrophoneWatcher;
     private bool _isReplayRecording;
     private bool _isFirstRunOnboarding;
     private bool _isEditorVisible;
@@ -222,6 +222,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private LibraryCardLayout? _pendingLibraryLayout;
     private bool _isOnboardingVisible;
     private string _onboardingStep = "Replay Buffer";
+
+    public bool IsLinuxExperimental => OperatingSystem.IsLinux();
 
     public MainWindowViewModel()
     {
@@ -358,7 +360,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // coming up and this can block for seconds. Keep both enumeration and
         // device-name resolution off Avalonia's UI thread; only the finished
         // lists are applied back on the dispatcher.
-        _defaultMicrophoneWatcher = new DefaultMicrophoneWatcher(DefaultMicrophoneWatcher_OnChanged);
+        if (OperatingSystem.IsWindows())
+            _defaultMicrophoneWatcher = new DefaultMicrophoneWatcher(DefaultMicrophoneWatcher_OnChanged);
         _ = RefreshAudioDevicesAsync();
         SelectedReplayDurationPreset = ReplayDurationPresets.FirstOrDefault(preset => preset.Seconds == Settings.ReplayDurationSeconds) ??
                                        ReplayDurationPresets.First(preset => preset.Seconds == 60);
@@ -6191,7 +6194,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
         _micLevelMonitor.LevelChanged -= MicLevelMonitor_OnLevelChanged;
         _micLevelMonitor.Dispose();
-        _defaultMicrophoneWatcher.Dispose();
+        _defaultMicrophoneWatcher?.Dispose();
         try { _gameIconSweepCts?.Cancel(); } catch (ObjectDisposedException) { }
         _gameIconSweepCts?.Dispose();
         _gameIconSweepCts = null;
