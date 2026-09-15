@@ -59,9 +59,13 @@ internal static class BrowserCallbackPage
 
             .ambience { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
             .ambience span { position: absolute; }
-            .wash-a { left: -14%; top: -22%; width: 1220px; height: 1040px; background: radial-gradient(closest-side, rgb(16 185 129 / 0.13), transparent); }
-            .wash-b { right: -20%; top: 18%; width: 1160px; height: 980px; background: radial-gradient(closest-side, rgb(45 212 191 / 0.09), transparent); }
-            .wash-c { bottom: -18%; left: 14%; width: 1200px; height: 940px; background: radial-gradient(closest-side, rgb(6 182 212 / 0.08), transparent); }
+            /* The washes drift, like the site's hero glow: translate and opacity
+               only, so the compositor moves layers it already has and nothing
+               repaints. Mismatched durations keep the loop from lining up. */
+            .ambience span:not(.grain) { will-change: transform, opacity; }
+            .wash-a { left: -14%; top: -22%; width: 1220px; height: 1040px; background: radial-gradient(closest-side, rgb(16 185 129 / 0.13), transparent); animation: drift-a 17s ease-in-out infinite; }
+            .wash-b { right: -20%; top: 18%; width: 1160px; height: 980px; background: radial-gradient(closest-side, rgb(45 212 191 / 0.09), transparent); animation: drift-b 21s ease-in-out infinite; }
+            .wash-c { bottom: -18%; left: 14%; width: 1200px; height: 940px; background: radial-gradient(closest-side, rgb(6 182 212 / 0.08), transparent); animation: drift-c 27s ease-in-out infinite; }
             .grain {
               inset: 0;
               opacity: 0.025;
@@ -182,6 +186,18 @@ internal static class BrowserCallbackPage
             .button:focus-visible { outline: 2px solid #34d399; outline-offset: 3px; }
             .hint { margin: 16px 0 0; color: var(--faint); font-size: 13px; }
 
+            @keyframes drift-a {
+              0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.75; }
+              50% { transform: translate3d(8%, 6%, 0); opacity: 1; }
+            }
+            @keyframes drift-b {
+              0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.65; }
+              50% { transform: translate3d(-10%, 7%, 0); opacity: 1; }
+            }
+            @keyframes drift-c {
+              0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.6; }
+              50% { transform: translate3d(7%, -8%, 0); opacity: 1; }
+            }
             @keyframes rise { from { opacity: 0; transform: translate3d(0, 14px, 0); } }
             @keyframes draw { to { stroke-dashoffset: 0; } }
             @keyframes ripple {
@@ -190,7 +206,7 @@ internal static class BrowserCallbackPage
             }
 
             @media (prefers-reduced-motion: reduce) {
-              .stack > *, .badge::after { animation: none; }
+              .stack > *, .badge::after, .ambience span { animation: none; }
               .badge path { animation: none; stroke-dashoffset: 0; }
               .button span { transition: none; }
             }
