@@ -390,7 +390,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         var context = await listener.GetContextAsync().WaitAsync(TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
         var code = context.Request.QueryString["code"];
         var returnedState = context.Request.QueryString["state"];
-        var page = BrowserCallbackPage.Success();
+        var page = BrowserCallbackPage.Success(BrowserCallbackService.Spotify);
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.ContentLength64 = page.Length;
         await context.Response.OutputStream.WriteAsync(page, cancellationToken).ConfigureAwait(false);

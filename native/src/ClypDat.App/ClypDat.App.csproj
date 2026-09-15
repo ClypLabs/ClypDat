@@ -147,6 +147,10 @@
     <AvaloniaResource Include="..\..\..\assets\clypdat-classic.ico" Link="Assets\clypdat-classic.ico" />
     <AvaloniaResource Include="..\..\..\assets\video-overlay-preview.jpg" Link="Assets\video-overlay-preview.jpg" />
     <AvaloniaResource Include="..\..\..\assets\contributors\*.png" Link="Assets\contributors\%(Filename)%(Extension)" />
+    <!-- The clypdat.xyz logo, inlined into the browser callback page so it
+         matches the website without a network fetch. Copy of the WebApp's
+         public/logo.svg. -->
+    <EmbeddedResource Include="..\..\..\assets\clypdat-logo.svg" LogicalName="ClypDat.App.Assets.clypdat-logo.svg" />
   </ItemGroup>
 
   <ItemGroup>

@@ -426,7 +426,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
                 var accessToken = context.Request.QueryString["token"];
                 if (string.IsNullOrWhiteSpace(accessToken)) throw new InvalidOperationException("ClypDat sign-in returned no token.");
                 var expiresIn = int.TryParse(context.Request.QueryString["expires_in"], out var seconds) ? seconds : 60 * 60 * 24 * 30;
-                var body = BrowserCallbackPage.Success();
+                var body = BrowserCallbackPage.Success(BrowserCallbackService.ClypDat);
                 context.Response.ContentType = "text/html; charset=utf-8";
                 context.Response.ContentLength64 = body.Length;
                 await context.Response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
