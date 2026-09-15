@@ -59,18 +59,16 @@ internal static class BrowserCallbackPage
 
             .ambience { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
             .ambience span { position: absolute; }
-            /* The washes drift, like the site's hero glow. Translate only: the
-               compositor slides a texture it already has, so nothing repaints,
-               and the dithered washes (see the script) keep their grain intact.
-               Fading them as well re-quantised the faint gradient every frame,
-               which made its bands pop in and out. Mismatched durations keep the
-               loop from lining up.
-
-               The CSS gradients show until the script's canvases replace them,
-               and stay if it cannot run. Their stops trace the same smoothstep
-               falloff the script paints, so the swap does not shift the light. */
+            /* The drifting washes are drawn by the shader in the script, onto
+               .field. These CSS gradients are only the fallback for when WebGL
+               is unavailable: a gradient this faint gets ~20 shades to span
+               hundreds of pixels, so as CSS it shows rings. The shader mixes in
+               full precision and dithers the final colour, which CSS cannot.
+               Same positions, sizes, drift and smoothstep falloff either way. */
+            .field { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+            .ambience.live .field { display: block; }
+            .ambience.live .wash { display: none; }
             .wash { will-change: transform; background: radial-gradient(closest-side, rgb(var(--rgb) / var(--peak)), rgb(var(--rgb) / calc(var(--peak) * 0.84)) 25%, rgb(var(--rgb) / calc(var(--peak) * 0.5)) 50%, rgb(var(--rgb) / calc(var(--peak) * 0.16)) 75%, rgb(var(--rgb) / 0)); }
-            .wash canvas { display: block; width: 100%; height: 100%; }
             .wash-a { --rgb: 16 185 129; --peak: 0.13; left: -14%; top: -22%; width: 1220px; height: 1040px; animation: drift-a 19s ease-in-out infinite; }
             .wash-b { --rgb: 45 212 191; --peak: 0.09; right: -20%; top: 18%; width: 1160px; height: 980px; animation: drift-b 23s ease-in-out infinite; }
             .wash-c { --rgb: 6 182 212; --peak: 0.08; bottom: -18%; left: 14%; width: 1200px; height: 940px; animation: drift-c 31s ease-in-out infinite; }
@@ -213,6 +211,7 @@ internal static class BrowserCallbackPage
         </head>
         <body>
           <div class="ambience" aria-hidden="true">
+            <canvas class="field"></canvas>
             <span class="wash wash-a"></span>
             <span class="wash wash-b"></span>
             <span class="wash wash-c"></span>
@@ -236,73 +235,137 @@ internal static class BrowserCallbackPage
             // already taken them, so drop them from the address bar and history.
             history.replaceState(null, "", location.pathname);
 
-            // Paint each wash once, with a little noise in its alpha. A gradient
-            // this faint gets only ~20 shades to cover hundreds of pixels, so as
-            // CSS it draws visible rings - and they crawl as the wash drifts.
-            // Dithering breaks the rings into grain the eye averages back into
-            // a smooth ramp. If anything here fails, the CSS gradient stays.
+            // The washes, drawn on the GPU. Base colour and all three washes are
+            // mixed per pixel in full precision, then the final colour gets
+            // +-1 step of fresh noise before the display rounds it to 8 bits.
+            // That dither is what removes the rings: the step between shades
+            // dissolves into grain too fine to see. It has to happen on the
+            // final colour - dithering each translucent wash separately was
+            // undone by the browser storing it premultiplied, and by the
+            // sub-pixel sampling as it drifted.
             //
-            // The wash is symmetric, so only its top-left quarter is computed and
-            // the rest are mirrored copies. Even so it is ~100ms of pixel work at
-            // 150%, so it waits until the page has painted and does one wash per
-            // task: the card is up at once and never waits on its background.
-            let seed = 0x2f6b9d;
-            const random = () => {
-              seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
-              return (seed >>> 0) / 4294967296;
-            };
-            const paintWash = (wash) => {
-              const style = getComputedStyle(wash);
-              const [r, g, b] = style.getPropertyValue("--rgb").trim().split(/\s+/).map(Number);
-              const peak = parseFloat(style.getPropertyValue("--peak"));
-              const scale = Math.min(window.devicePixelRatio || 1, 2);
-              // Even sizes, so the mirrored quarters meet without overlapping.
-              const qw = Math.round((wash.offsetWidth * scale) / 2);
-              const qh = Math.round((wash.offsetHeight * scale) / 2);
-              const w = qw * 2;
-              const h = qh * 2;
-              const quarter = document.createElement("canvas");
-              quarter.width = qw;
-              quarter.height = qh;
-              const quarterContext = quarter.getContext("2d");
-              const image = quarterContext.createImageData(qw, qh);
-              const data = image.data;
-              for (let y = 0; y < qh; y++) {
-                const dy = ((y + 0.5) / h) * 2 - 1;
-                for (let x = 0; x < qw; x++) {
-                  const dx = ((x + 0.5) / w) * 2 - 1;
-                  const t = Math.sqrt(dx * dx + dy * dy);
-                  if (t >= 1) continue;
-                  const f = 1 - t;
-                  const i = (y * qw + x) * 4;
-                  data[i] = r;
-                  data[i + 1] = g;
-                  data[i + 2] = b;
-                  // Smoothstep falloff, so there is no hard outer edge, plus
-                  // triangular noise of +-1 step; the clamped array rounds.
-                  data[i + 3] = peak * 255 * f * f * (3 - 2 * f) + random() + random() - 1;
+            // Positions, sizes and drift match the CSS fallback above. Capped at
+            // 30fps - the drift is slow enough that more is wasted work - and
+            // rAF stops by itself while the tab is hidden.
+            (() => {
+              const ambience = document.querySelector(".ambience");
+              const canvas = ambience.querySelector(".field");
+              const gl = canvas.getContext("webgl", { alpha: false, antialias: false, depth: false, stencil: false, powerPreference: "low-power" });
+              if (!gl) return;
+
+              const vertexSource = "attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }";
+              const fragmentSource = `
+                precision highp float;
+                uniform vec2 size;   // viewport, CSS px
+                uniform float scale; // device px per CSS px
+                uniform float time;  // seconds
+                uniform float frame; // changes the noise each frame
+
+                vec3 wash(vec3 base, vec2 point, vec2 center, vec2 radii, vec3 rgb, float peak) {
+                  float f = clamp(1.0 - length((point - center) / radii), 0.0, 1.0);
+                  return mix(base, rgb / 255.0, peak * f * f * (3.0 - 2.0 * f));
                 }
-              }
-              quarterContext.putImageData(image, 0, 0);
-              const canvas = document.createElement("canvas");
-              canvas.width = w;
-              canvas.height = h;
-              const context = canvas.getContext("2d");
-              for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
-                context.setTransform(sx, 0, 0, sy, sx < 0 ? w : 0, sy < 0 ? h : 0);
-                context.drawImage(quarter, 0, 0);
-              }
-              wash.appendChild(canvas);
-              wash.style.background = "none";
-            };
-            const pending = [...document.querySelectorAll(".wash")];
-            const paintNext = () => {
-              const wash = pending.shift();
-              if (!wash) return;
-              try { paintWash(wash); } catch {}
-              setTimeout(paintNext, 0);
-            };
-            requestAnimationFrame(() => setTimeout(paintNext, 0));
+
+                // 0 -> 1 -> 0 over one period, eased at both ends.
+                float drift(float period) {
+                  return 0.5 - 0.5 * cos(6.2831853 * time / period);
+                }
+
+                // Sine-free hash (Hoskins), so it holds up at large coordinates.
+                float hash(vec2 p) {
+                  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                  p3 += dot(p3, p3.yzx + 33.33);
+                  return fract((p3.x + p3.y) * p3.z);
+                }
+
+                void main() {
+                  vec2 point = vec2(gl_FragCoord.x, size.y * scale - gl_FragCoord.y) / scale;
+                  vec3 colour = vec3(10.0, 13.0, 17.0) / 255.0;
+                  colour = wash(colour, point,
+                    vec2(-0.14 * size.x + 610.0, -0.22 * size.y + 520.0) + vec2(97.6, 62.4) * drift(19.0),
+                    vec2(610.0, 520.0), vec3(16.0, 185.0, 129.0), 0.13);
+                  colour = wash(colour, point,
+                    vec2(1.2 * size.x - 580.0, 0.18 * size.y + 490.0) + vec2(-116.0, 68.6) * drift(23.0),
+                    vec2(580.0, 490.0), vec3(45.0, 212.0, 191.0), 0.09);
+                  colour = wash(colour, point,
+                    vec2(0.14 * size.x + 600.0, 1.18 * size.y - 470.0) + vec2(84.0, -75.2) * drift(31.0),
+                    vec2(600.0, 470.0), vec3(6.0, 182.0, 212.0), 0.08);
+                  vec2 seed = gl_FragCoord.xy + frame * vec2(7.31, 3.17);
+                  float noise = hash(seed) + hash(seed + 91.7) - 1.0;
+                  gl_FragColor = vec4(colour + noise / 255.0, 1.0);
+                }`;
+
+              const compile = (type, source) => {
+                const shader = gl.createShader(type);
+                gl.shaderSource(shader, source);
+                gl.compileShader(shader);
+                return gl.getShaderParameter(shader, gl.COMPILE_STATUS) ? shader : null;
+              };
+              const vertex = compile(gl.VERTEX_SHADER, vertexSource);
+              const fragment = compile(gl.FRAGMENT_SHADER, fragmentSource);
+              if (!vertex || !fragment) return;
+              const program = gl.createProgram();
+              gl.attachShader(program, vertex);
+              gl.attachShader(program, fragment);
+              gl.linkProgram(program);
+              if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return;
+              gl.useProgram(program);
+
+              gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+              const position = gl.getAttribLocation(program, "p");
+              gl.enableVertexAttribArray(position);
+              gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+              const uniform = (name) => gl.getUniformLocation(program, name);
+              const sizeUniform = uniform("size");
+              const scaleUniform = uniform("scale");
+              const timeUniform = uniform("time");
+              const frameUniform = uniform("frame");
+
+              const still = matchMedia("(prefers-reduced-motion: reduce)");
+              const started = performance.now();
+              let frame = 0;
+              let last = -Infinity;
+              let queued = false;
+
+              const draw = (now) => {
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                const scale = Math.min(window.devicePixelRatio || 1, 2);
+                const pixelWidth = Math.round(width * scale);
+                const pixelHeight = Math.round(height * scale);
+                if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+                  canvas.width = pixelWidth;
+                  canvas.height = pixelHeight;
+                  gl.viewport(0, 0, pixelWidth, pixelHeight);
+                }
+                gl.uniform2f(sizeUniform, width, height);
+                gl.uniform1f(scaleUniform, pixelWidth / width);
+                gl.uniform1f(timeUniform, still.matches ? 0 : (now - started) / 1000);
+                gl.uniform1f(frameUniform, frame = (frame + 1) % 1024);
+                gl.drawArrays(gl.TRIANGLES, 0, 3);
+              };
+              const tick = (now) => {
+                queued = false;
+                if (now - last >= 32) {
+                  last = now;
+                  draw(now);
+                }
+                if (!still.matches) schedule();
+              };
+              const schedule = () => {
+                if (queued) return;
+                queued = true;
+                requestAnimationFrame(tick);
+              };
+
+              draw(performance.now());
+              ambience.classList.add("live");
+              schedule();
+              // Held still, the field only needs redrawing when it changes size.
+              window.addEventListener("resize", () => { last = -Infinity; schedule(); });
+              still.addEventListener("change", schedule);
+            })();
           </script>
         </body>
         </html>
