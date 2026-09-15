@@ -59,13 +59,21 @@ internal static class BrowserCallbackPage
 
             .ambience { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
             .ambience span { position: absolute; }
-            /* The washes drift, like the site's hero glow: translate and opacity
-               only, so the compositor moves layers it already has and nothing
-               repaints. Mismatched durations keep the loop from lining up. */
-            .ambience span:not(.grain) { will-change: transform, opacity; }
-            .wash-a { left: -14%; top: -22%; width: 1220px; height: 1040px; background: radial-gradient(closest-side, rgb(16 185 129 / 0.13), transparent); animation: drift-a 17s ease-in-out infinite; }
-            .wash-b { right: -20%; top: 18%; width: 1160px; height: 980px; background: radial-gradient(closest-side, rgb(45 212 191 / 0.09), transparent); animation: drift-b 21s ease-in-out infinite; }
-            .wash-c { bottom: -18%; left: 14%; width: 1200px; height: 940px; background: radial-gradient(closest-side, rgb(6 182 212 / 0.08), transparent); animation: drift-c 27s ease-in-out infinite; }
+            /* The washes drift, like the site's hero glow. Translate only: the
+               compositor slides a texture it already has, so nothing repaints,
+               and the dithered washes (see the script) keep their grain intact.
+               Fading them as well re-quantised the faint gradient every frame,
+               which made its bands pop in and out. Mismatched durations keep the
+               loop from lining up.
+
+               The CSS gradients show until the script's canvases replace them,
+               and stay if it cannot run. Their stops trace the same smoothstep
+               falloff the script paints, so the swap does not shift the light. */
+            .wash { will-change: transform; background: radial-gradient(closest-side, rgb(var(--rgb) / var(--peak)), rgb(var(--rgb) / calc(var(--peak) * 0.84)) 25%, rgb(var(--rgb) / calc(var(--peak) * 0.5)) 50%, rgb(var(--rgb) / calc(var(--peak) * 0.16)) 75%, rgb(var(--rgb) / 0)); }
+            .wash canvas { display: block; width: 100%; height: 100%; }
+            .wash-a { --rgb: 16 185 129; --peak: 0.13; left: -14%; top: -22%; width: 1220px; height: 1040px; animation: drift-a 19s ease-in-out infinite; }
+            .wash-b { --rgb: 45 212 191; --peak: 0.09; right: -20%; top: 18%; width: 1160px; height: 980px; animation: drift-b 23s ease-in-out infinite; }
+            .wash-c { --rgb: 6 182 212; --peak: 0.08; bottom: -18%; left: 14%; width: 1200px; height: 940px; animation: drift-c 31s ease-in-out infinite; }
             .grain {
               inset: 0;
               opacity: 0.025;
@@ -186,18 +194,9 @@ internal static class BrowserCallbackPage
             .button:focus-visible { outline: 2px solid #34d399; outline-offset: 3px; }
             .hint { margin: 16px 0 0; color: var(--faint); font-size: 13px; }
 
-            @keyframes drift-a {
-              0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.75; }
-              50% { transform: translate3d(8%, 6%, 0); opacity: 1; }
-            }
-            @keyframes drift-b {
-              0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.65; }
-              50% { transform: translate3d(-10%, 7%, 0); opacity: 1; }
-            }
-            @keyframes drift-c {
-              0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.6; }
-              50% { transform: translate3d(7%, -8%, 0); opacity: 1; }
-            }
+            @keyframes drift-a { 50% { transform: translate3d(8%, 6%, 0); } }
+            @keyframes drift-b { 50% { transform: translate3d(-10%, 7%, 0); } }
+            @keyframes drift-c { 50% { transform: translate3d(7%, -8%, 0); } }
             @keyframes rise { from { opacity: 0; transform: translate3d(0, 14px, 0); } }
             @keyframes draw { to { stroke-dashoffset: 0; } }
             @keyframes ripple {
@@ -214,9 +213,9 @@ internal static class BrowserCallbackPage
         </head>
         <body>
           <div class="ambience" aria-hidden="true">
-            <span class="wash-a"></span>
-            <span class="wash-b"></span>
-            <span class="wash-c"></span>
+            <span class="wash wash-a"></span>
+            <span class="wash wash-b"></span>
+            <span class="wash wash-c"></span>
             <span class="grain"></span>
           </div>
           <main class="stack">
@@ -236,6 +235,74 @@ internal static class BrowserCallbackPage
             // The callback URL carries the one-time token and state. The app has
             // already taken them, so drop them from the address bar and history.
             history.replaceState(null, "", location.pathname);
+
+            // Paint each wash once, with a little noise in its alpha. A gradient
+            // this faint gets only ~20 shades to cover hundreds of pixels, so as
+            // CSS it draws visible rings - and they crawl as the wash drifts.
+            // Dithering breaks the rings into grain the eye averages back into
+            // a smooth ramp. If anything here fails, the CSS gradient stays.
+            //
+            // The wash is symmetric, so only its top-left quarter is computed and
+            // the rest are mirrored copies. Even so it is ~100ms of pixel work at
+            // 150%, so it waits until the page has painted and does one wash per
+            // task: the card is up at once and never waits on its background.
+            let seed = 0x2f6b9d;
+            const random = () => {
+              seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+              return (seed >>> 0) / 4294967296;
+            };
+            const paintWash = (wash) => {
+              const style = getComputedStyle(wash);
+              const [r, g, b] = style.getPropertyValue("--rgb").trim().split(/\s+/).map(Number);
+              const peak = parseFloat(style.getPropertyValue("--peak"));
+              const scale = Math.min(window.devicePixelRatio || 1, 2);
+              // Even sizes, so the mirrored quarters meet without overlapping.
+              const qw = Math.round((wash.offsetWidth * scale) / 2);
+              const qh = Math.round((wash.offsetHeight * scale) / 2);
+              const w = qw * 2;
+              const h = qh * 2;
+              const quarter = document.createElement("canvas");
+              quarter.width = qw;
+              quarter.height = qh;
+              const quarterContext = quarter.getContext("2d");
+              const image = quarterContext.createImageData(qw, qh);
+              const data = image.data;
+              for (let y = 0; y < qh; y++) {
+                const dy = ((y + 0.5) / h) * 2 - 1;
+                for (let x = 0; x < qw; x++) {
+                  const dx = ((x + 0.5) / w) * 2 - 1;
+                  const t = Math.sqrt(dx * dx + dy * dy);
+                  if (t >= 1) continue;
+                  const f = 1 - t;
+                  const i = (y * qw + x) * 4;
+                  data[i] = r;
+                  data[i + 1] = g;
+                  data[i + 2] = b;
+                  // Smoothstep falloff, so there is no hard outer edge, plus
+                  // triangular noise of +-1 step; the clamped array rounds.
+                  data[i + 3] = peak * 255 * f * f * (3 - 2 * f) + random() + random() - 1;
+                }
+              }
+              quarterContext.putImageData(image, 0, 0);
+              const canvas = document.createElement("canvas");
+              canvas.width = w;
+              canvas.height = h;
+              const context = canvas.getContext("2d");
+              for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+                context.setTransform(sx, 0, 0, sy, sx < 0 ? w : 0, sy < 0 ? h : 0);
+                context.drawImage(quarter, 0, 0);
+              }
+              wash.appendChild(canvas);
+              wash.style.background = "none";
+            };
+            const pending = [...document.querySelectorAll(".wash")];
+            const paintNext = () => {
+              const wash = pending.shift();
+              if (!wash) return;
+              try { paintWash(wash); } catch {}
+              setTimeout(paintNext, 0);
+            };
+            requestAnimationFrame(() => setTimeout(paintNext, 0));
           </script>
         </body>
         </html>
