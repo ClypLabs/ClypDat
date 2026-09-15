@@ -6,6 +6,29 @@ namespace ClypDat.App.Tests;
 
 public sealed class AutoClipEscalationBufferTests
 {
+    [Fact]
+    public void CompletedHelldiversStreaksHandoffImmediatelyAndStaySeparate()
+    {
+        var catalog = AutoClipCatalog.Get("helldivers2");
+        using var buffer = new AutoClipEscalationBuffer(catalog.Id, catalog.Name, catalog.Events);
+        var ready = new List<AutoClipRequest>();
+        buffer.Ready += (_, request) => ready.Add(request);
+        var completion = new Helldivers2DetectedEvent("killstreak-50", "Killstreak ×57",
+            TimeSpan.FromTicks(Origin.AddSeconds(28).Ticks), "first", 0.95, TimeSpan.FromTicks(Origin.Ticks));
+        var detected = LiveHelldivers2Detector.ToAutoClipEvent(completion);
+        buffer.Offer(detected);
+        var first = Assert.Single(ready);
+        Assert.Equal("Killstreak ×57", first.Title);
+        Assert.Equal(Origin.AddSeconds(-10), first.StartUtc);
+        Assert.Equal(Origin.AddSeconds(34), first.EndUtc);
+        Assert.Equal(Origin.AddSeconds(28), Assert.Single(first.Events!).OccurredUtc);
+
+        buffer.Offer(detected with { OccurrenceId = "second", StreakStartUtc = Origin.AddSeconds(29), TimestampUtc = Origin.AddSeconds(32) });
+        Assert.Equal(2, ready.Count);
+        Assert.Equal(Origin.AddSeconds(19), ready[1].StartUtc);
+        Assert.Equal(Origin.AddSeconds(38), ready[1].EndUtc);
+    }
+
     private static readonly DateTime Origin = new(2026, 9, 6, 0, 8, 32, DateTimeKind.Utc);
 
     // Real windows are 6s and 20s. The tests drive the same code on a compressed

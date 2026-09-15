@@ -63,12 +63,14 @@ internal sealed class AutoClipEscalationBuffer : IDisposable
         var definition = _definitions.GetValueOrDefault(detected.EventId);
         var item = new AutoClipEvent(detected.EventId, detected.EventLabel, detected.TimestampUtc, definition?.Priority ?? 0);
 
-        // No group means nothing to escalate into: fire it on its own.
-        if (definition?.GroupId is not { } group)
+        // Helldivers has already observed the entire streak, including its end.
+        var completedStreak = detected.GameId == "helldivers2" && detected.StreakStartUtc.HasValue
+            && detected.EventId.StartsWith("killstreak-", StringComparison.Ordinal);
+        if (definition?.GroupId is not { } group || completedStreak)
         {
             Pending?.Invoke(this, PendingMessage(detected.EventLabel));
             Ready?.Invoke(this, Build(new[] { item },
-                detected.TimestampUtc - TimeSpan.FromSeconds(detected.LeadSeconds),
+                (completedStreak ? detected.StreakStartUtc!.Value : detected.TimestampUtc) - TimeSpan.FromSeconds(detected.LeadSeconds),
                 detected.TimestampUtc + TimeSpan.FromSeconds(detected.TailSeconds)));
             return;
         }

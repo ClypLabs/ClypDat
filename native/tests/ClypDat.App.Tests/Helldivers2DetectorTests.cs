@@ -6,6 +6,15 @@ namespace ClypDat.App.Tests;
 public sealed class Helldivers2DetectorTests
 {
     [Fact]
+    public void GrowingCounterDoesNotClipAtThresholdCrossings()
+    {
+        var detector = new Helldivers2Detector();
+        var counts = new[] { 19, 20, 20, 50, 50, 57, 57 };
+        for (var i = 0; i < counts.Length; i++)
+            Assert.Empty(Observe(detector, i, counter: $"X{counts[i]}"));
+    }
+
+    [Fact]
     public void SuccessfulMission_UsesSquadPayoutAsSoleSmoothedTrigger()
     {
         var detector = new Helldivers2Detector();
@@ -28,29 +37,6 @@ public sealed class Helldivers2DetectorTests
         Assert.Single(Observe(detector, 11.5, mission: "SQUAD PAYOUT"));
     }
 
-    [Fact]
-    public void Eliminated_IsSmoothedAndResetsKillThresholds()
-    {
-        var detector = new Helldivers2Detector();
-        Assert.Empty(Observe(detector, 0, counter: "X19"));
-        Assert.Equal("killstreak-20", Assert.Single(Observe(detector, 0.5, counter: "X20")).EventId);
-        Assert.Empty(Observe(detector, 1, center: "ELIMINATED"));
-        Assert.Equal("eliminated", Assert.Single(Observe(detector, 1.5, center: "ELIMINATED", counter: "X100")).EventId);
-        Assert.Equal("killstreak-20", Assert.Single(Observe(detector, 2, counter: "20 KILLS")).EventId);
-    }
-
-    [Fact]
-    public void KillThresholds_FireOnceWhenCrossedAndResetWhenCounterDrops()
-    {
-        var detector = new Helldivers2Detector();
-        Assert.Empty(Observe(detector, 0, counter: "X19"));
-        Assert.Equal("killstreak-20", Assert.Single(Observe(detector, 1, counter: "X21")).EventId);
-        Assert.Empty(Observe(detector, 2, counter: "X21"));
-        Assert.Equal("killstreak-50", Assert.Single(Observe(detector, 3, counter: "X50")).EventId);
-        Assert.Empty(Observe(detector, 4, counter: "X3"));
-        Assert.Equal("killstreak-20", Assert.Single(Observe(detector, 5, counter: "X20")).EventId);
-    }
-
     [Theory]
     [InlineData("×19", 19)]
     [InlineData("X 50", 50)]
@@ -63,5 +49,5 @@ public sealed class Helldivers2DetectorTests
 
     private static IReadOnlyList<Helldivers2DetectedEvent> Observe(
         Helldivers2Detector detector, double seconds, string center = "", string mission = "", string counter = "") =>
-        detector.Observe(new Helldivers2FrameObservation(TimeSpan.FromSeconds(seconds), center, mission, counter));
+        detector.Observe(new Helldivers2FrameObservation(TimeSpan.FromSeconds(seconds), center, mission, counter, Helldivers2CounterVisibility.Present));
 }

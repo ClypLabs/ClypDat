@@ -5,6 +5,45 @@ namespace ClypDat.App.Tests;
 
 public sealed class AutoClipWindowPolicyTests
 {
+    [Theory]
+    [InlineData(10, 60, 30)]
+    [InlineData(80, 120, 96)]
+    [InlineData(80, 60, 60)]
+    [InlineData(80, 15, 15)]
+    public void HelldiversWindowCoversWholeStreakWithinHistory(int streakLength, int history, int expectedLength)
+    {
+        var events = new[] { new AutoClipEvent("killstreak-50", "Killstreak ×57", Event) };
+        var request = new AutoClipRequest("helldivers2", "Helldivers 2", "killstreak-50", "Killstreak ×57",
+            "Killstreak ×57", Event.AddSeconds(-streakLength - 10), Event.AddSeconds(6), Events: events);
+        var window = AutoClipWindowPolicy.ForRequest(request, TimeSpan.FromSeconds(history));
+        Assert.Equal(expectedLength, (window.EndUtc - window.StartUtc).TotalSeconds);
+        Assert.Equal(Event.AddSeconds(6), window.EndUtc);
+        var marker = Assert.Single(ClipEventMarkerMapping.FromEvents(events, window.StartUtc, window.EndUtc));
+        Assert.Equal(expectedLength - 6, marker.OffsetSeconds);
+    }
+
+    [Fact]
+    public void SaveQueueDelayClampsHistoryBeforeMappingMarkers()
+    {
+        var window = AutoClipWindowPolicy.ClampToHistory(Event.AddSeconds(-90), Event.AddSeconds(6),
+            TimeSpan.FromSeconds(60), Event.AddSeconds(10));
+        Assert.Equal(Event.AddSeconds(-50), window.StartUtc);
+        Assert.Equal(Event.AddSeconds(6), window.EndUtc);
+        var marker = Assert.Single(ClipEventMarkerMapping.FromEvents(
+            new[] { new AutoClipEvent("killstreak-50", "Killstreak ×57", Event) }, window.StartUtc, window.EndUtc));
+        Assert.Equal(50, marker.OffsetSeconds);
+    }
+
+    [Fact]
+    public void FreshReplayBufferMapsMarkersAgainstActualSavedHistory()
+    {
+        var events = new[] { new AutoClipEvent("killstreak-50", "Killstreak ×57", Event) };
+        var source = new SpotifySourceWindow(MonotonicClock.ToSharedSeconds(Event.AddSeconds(-8)), 14, MonotonicClock.BootId);
+        var marker = Assert.Single(ClipEventMarkerMapping.FromSavedWindow(events,
+            Event.AddSeconds(-90), Event.AddSeconds(6), source));
+        Assert.Equal(8, marker.OffsetSeconds, precision: 3);
+    }
+
     private static readonly DateTime Event = new(2026, 9, 6, 0, 8, 32, DateTimeKind.Utc);
     private static readonly TimeSpan OneMinuteBuffer = TimeSpan.FromMinutes(1);
 

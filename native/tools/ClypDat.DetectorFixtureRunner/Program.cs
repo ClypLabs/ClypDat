@@ -8,9 +8,7 @@ namespace ClypDat.DetectorFixtureRunner;
 internal static class Program
 {
     private const double FramesPerSecond = 2;
-    private static readonly NormalizedRegion EliminatedRegion = new(0.34, 0.445, 0.32, 0.065);
-    private static readonly NormalizedRegion SquadPayoutRegion = new(0.42, 0.335, 0.16, 0.055);
-    private static readonly NormalizedRegion KillCounterRegion = new(0.45, 0.72, 0.12, 0.12);
+    private static readonly DetectorRegionSet Regions = DetectorRegions.ForGame("helldivers2")!;
 
     [STAThread]
     private static async Task<int> Main(string[] args)
@@ -37,9 +35,9 @@ internal static class Program
 
         var workingDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ClypDat", "DetectorFixtureCache", fixture.RecordingId);
+            "ClypDat", "DetectorFixtureCache", fixture.RecordingId + "-counter-v2");
         Directory.CreateDirectory(workingDirectory);
-        if (!Directory.EnumerateFiles(workingDirectory, "frame-*.jpg").Any())
+        if (!Directory.EnumerateFiles(workingDirectory, "frame-*.png").Any())
             await ExtractFramesAsync(ffmpegPath, recordingPath, workingDirectory, fixture);
         var detections = await DetectAsync(workingDirectory, fixture);
         return Report(fixture, detections);
@@ -51,6 +49,11 @@ internal static class Program
             .Select(label => new FixtureWindow(Math.Max(0, label.TimeSeconds - 8), 16))
             .OrderBy(window => window.StartSeconds)
             .ToArray();
+
+        // Streak start and intermediate thresholds must be observed, even when
+        // the only positive label is the eventual disappearance.
+        if (fixture.Labels.Any(label => label.EventId?.StartsWith("killstreak-", StringComparison.Ordinal) == true))
+            windows = [new FixtureWindow(0, fixture.Labels.Max(label => label.TimeSeconds) + 8)];
 
         foreach (var window in windows)
         {
@@ -66,9 +69,9 @@ internal static class Program
                          "-hide_banner", "-loglevel", "error", "-hwaccel", "auto",
                          "-ss", window.StartSeconds.ToString(CultureInfo.InvariantCulture), "-i", recordingPath,
                          "-t", window.DurationSeconds.ToString(CultureInfo.InvariantCulture),
-                         "-vf", $"fps={FramesPerSecond.ToString(CultureInfo.InvariantCulture)},scale=1920:1080:flags=fast_bilinear",
-                         "-q:v", "4", "-start_number", "0",
-                         Path.Combine(outputDirectory, $"frame-{startMilliseconds:D9}-%04d.jpg")
+                         "-vf", $"fps={FramesPerSecond.ToString(CultureInfo.InvariantCulture)}",
+                         "-start_number", "0",
+                         Path.Combine(outputDirectory, $"frame-{startMilliseconds:D9}-%04d.png")
                      })
                 startInfo.ArgumentList.Add(argument);
 
@@ -82,40 +85,33 @@ internal static class Program
     private static async Task<IReadOnlyList<Helldivers2DetectedEvent>> DetectAsync(string workingDirectory, Fixture fixture)
     {
         var reader = new WindowsOcrFrameReader();
+        var counterReader = new Helldivers2CounterReader(reader.ReadTextAsync);
         var detector = new Helldivers2Detector();
         var detections = new List<Helldivers2DetectedEvent>();
-        var frames = Directory.EnumerateFiles(workingDirectory, "frame-*.jpg").Select(path =>
+        var frames = Directory.EnumerateFiles(workingDirectory, "frame-*.png").Select(path =>
         {
             var parts = Path.GetFileNameWithoutExtension(path).Split('-');
             var startMilliseconds = long.Parse(parts[1], CultureInfo.InvariantCulture);
             var frameIndex = int.Parse(parts[2], CultureInfo.InvariantCulture);
             return new FrameSample(path, TimeSpan.FromMilliseconds(startMilliseconds + frameIndex * 1000 / FramesPerSecond));
-        }).OrderBy(frame => frame.Timestamp).ToArray();
+        }).OrderBy(frame => frame.Timestamp).DistinctBy(frame => frame.Timestamp).ToArray();
         TimeSpan? previousTimestamp = null;
         for (var index = 0; index < frames.Length; index++)
         {
             var frame = frames[index];
             if (previousTimestamp is { } previous && frame.Timestamp - previous > TimeSpan.FromSeconds(2)) detector.ResetSession();
             previousTimestamp = frame.Timestamp;
-            var centerWords = await reader.ReadAsync(frame.Path, EliminatedRegion);
-            var missionWords = await reader.ReadAsync(frame.Path, SquadPayoutRegion);
-            var center = string.Join(' ', centerWords.Select(word => word.Text));
-            var mission = string.Join(' ', missionWords.Select(word => word.Text));
-            var needsCounterOcr = fixture.Labels.Any(label => string.Equals(label.Kind, "ocr-observation", StringComparison.OrdinalIgnoreCase)
-                                                               && Math.Abs(label.TimeSeconds - frame.Timestamp.TotalSeconds) <= 8);
-            var counter = string.Empty;
-            if (needsCounterOcr)
-            {
-                var counterWords = await reader.ReadAsync(frame.Path, KillCounterRegion);
-                counter = string.Join(' ', counterWords.Select(word => word.Text));
-                if (Helldivers2Detector.TryParseKillCounter(counter, out var parsedCounter))
-                    Console.WriteLine($"{frame.Timestamp:mm\\:ss\\.fff} kill-counter={parsedCounter}");
-            }
-            var current = detector.Observe(new Helldivers2FrameObservation(frame.Timestamp, center, mission, counter));
+            var full = GrayPng.Read(frame.Path);
+            var center = await reader.ReadTextAsync(GrayTemplateMatcher.Crop(full, Regions.First));
+            var mission = await reader.ReadTextAsync(GrayTemplateMatcher.Crop(full, Regions.Second));
+            var counter = await counterReader.ReadAsync(GrayTemplateMatcher.Crop(full, Regions.Third));
+            Console.WriteLine($"{frame.Timestamp:mm\\:ss\\.fff} counter={counter.Count} visibility={counter.Visibility} score={counter.SkullScore:F3}");
+            var current = detector.Observe(new Helldivers2FrameObservation(frame.Timestamp, center, mission,
+                counter.Text, counter.Visibility, counter.Count));
             foreach (var item in current)
             {
                 detections.Add(item);
-                Console.WriteLine($"{item.Timestamp:mm\\:ss\\.fff} {item.EventId} confidence={item.Confidence:F2}");
+                Console.WriteLine($"{item.Timestamp:mm\\:ss\\.fff} {item.EventId} label={item.Label} confirmed={frame.Timestamp.TotalSeconds:F1}s confidence={item.Confidence:F2}");
             }
             if ((index + 1) % 25 == 0 || index + 1 == frames.Length)
                 Console.Error.WriteLine($"Analyzed {index + 1}/{frames.Length} sampled frames");

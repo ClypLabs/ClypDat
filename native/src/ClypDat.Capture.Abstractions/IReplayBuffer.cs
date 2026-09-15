@@ -225,7 +225,7 @@ public sealed record ReplaySaveCompleted(
     string? Error = null,
     bool IsRecovered = false);
 public sealed record AutoClipDetectorEvent(string GameId, string EventId, string EventLabel, string OccurrenceId,
-    double Confidence, DateTime TimestampUtc, int LeadSeconds, int TailSeconds);
+    double Confidence, DateTime TimestampUtc, int LeadSeconds, int TailSeconds, DateTime? StreakStartUtc = null);
 public sealed record AutoClipDetectorStatus(string GameId, string Status);
 
 /// <summary>

@@ -22,7 +22,7 @@ public static class DetectorRegions
     private static readonly DetectorRegionSet Helldivers2 = new(
         new NormalizedRegion(0.34, 0.445, 0.32, 0.065),
         new NormalizedRegion(0.42, 0.335, 0.16, 0.055),
-        new NormalizedRegion(0.45, 0.72, 0.12, 0.12));
+        new NormalizedRegion(1152.0 / 2560, 1036.0 / 1440, 308.0 / 2560, 174.0 / 1440));
 
     // Overwatch, measured from a 1920x1080 capture (see AutoClipResearch/
     // overwatch-2026-09-06):

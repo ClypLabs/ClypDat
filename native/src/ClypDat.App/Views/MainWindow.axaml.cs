@@ -3083,7 +3083,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async Task<bool> SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null, IReadOnlyList<AutoClipEvent>? autoClipEvents = null)
+    private async Task<bool> SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null, IReadOnlyList<AutoClipEvent>? autoClipEvents = null, bool clampToReplayHistory = false)
     {
         var isAutoClip = autoClipLabel is not null;
         var saveId = Guid.NewGuid();
@@ -3160,6 +3160,13 @@ public sealed partial class MainWindow : Window
                 {
                     var wait = clipWindow.EndUtc - MonotonicClock.UtcNow;
                     if (wait > TimeSpan.Zero) await Task.Delay(wait);
+                    if (clampToReplayHistory)
+                    {
+                        var clamped = AutoClipWindowPolicy.ClampToHistory(clipWindow.StartUtc, clipWindow.EndUtc,
+                            _replayBuffer.Duration, MonotonicClock.UtcNow);
+                        if (clamped.StartUtc >= clamped.EndUtc) return false;
+                        clipWindow = clipWindow with { StartUtc = clamped.StartUtc };
+                    }
                     RememberUiOwnedSave(saveId);
                     ShowClipNotification("ui-save", $"Saving {autoClipLabel} Clip…", playSound: false, saveStart: true, saveId: saveId, requestedUtc: requestedUtc);
                 }
@@ -3188,6 +3195,9 @@ public sealed partial class MainWindow : Window
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
+                var savedMarkerSource = clampToReplayHistory
+                    ? await Task.Run(() => SpotifySourceWindow.Load(libraryFolder, outputPath))
+                    : null;
                 var clipInfo = new ClipInfo(
                     effectiveGameName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
@@ -3195,7 +3205,7 @@ public sealed partial class MainWindow : Window
                     File.GetCreationTimeUtc(outputPath),
                     CaptureSource: replayConfig.CaptureSource,
                     AutoClipMarkers: clipWindow is { } window && autoClipEvents is not null
-                        ? ClipEventMarkerMapping.FromEvents(autoClipEvents, window.StartUtc, window.EndUtc)
+                        ? ClipEventMarkerMapping.FromSavedWindow(autoClipEvents, window.StartUtc, window.EndUtc, savedMarkerSource)
                         : null);
                 // Another plain file write with no UI affinity.
                 await Task.Run(() => ClipInfoSidecar.SaveCaptureDetails(libraryFolder, outputPath, clipInfo));
@@ -5922,9 +5932,10 @@ public sealed partial class MainWindow : Window
     // is applied - see AutoClipWindowPolicy for why CS2 keeps its own window.
     private void AutoClip_OnReady(object? sender, AutoClipRequest request)
     {
-        var (startUtc, endUtc) = AutoClipWindowPolicy.Extend(request.StartUtc, request.EndUtc,
+        var (startUtc, endUtc) = AutoClipWindowPolicy.ForRequest(request,
             _replayBuffer?.Duration ?? AutoClipWindowPolicy.MinimumLength);
-        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(startUtc, endUtc), request.GameName, request.EventType, request.Events));
+        var clampToHistory = request.GameId == "helldivers2" && request.EventId.StartsWith("killstreak-", StringComparison.Ordinal);
+        Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(startUtc, endUtc), request.GameName, request.EventType, request.Events, clampToHistory));
     }
 
     internal void SetupDotaAutoClipButton_OnClick(object? sender, RoutedEventArgs e)

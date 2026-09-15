@@ -20,6 +20,21 @@ public static class AutoClipWindowPolicy
 {
     public static readonly TimeSpan MinimumLength = TimeSpan.FromSeconds(30);
 
+    public static (DateTime StartUtc, DateTime EndUtc) ForRequest(AutoClipRequest request, TimeSpan available)
+    {
+        var window = Extend(request.StartUtc, request.EndUtc, available);
+        return request.GameId == "helldivers2" && request.EventId.StartsWith("killstreak-", StringComparison.Ordinal)
+            ? ClampToHistory(window.StartUtc, window.EndUtc, available, window.EndUtc)
+            : window;
+    }
+
+    public static (DateTime StartUtc, DateTime EndUtc) ClampToHistory(
+        DateTime startUtc, DateTime endUtc, TimeSpan available, DateTime snapshotUtc)
+    {
+        var oldest = snapshotUtc - (available > TimeSpan.Zero ? available : TimeSpan.Zero);
+        return (startUtc < oldest ? oldest : startUtc, endUtc);
+    }
+
     /// <summary>
     /// Backs the start off until the clip runs <see cref="MinimumLength"/> up to
     /// the event's tail. Never shortens a window that is already longer, so a

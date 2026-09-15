@@ -16,6 +16,19 @@ public sealed record ClipEventMarker(string EventId, string EventLabel, double O
 
 public static class ClipEventMarkerMapping
 {
+    internal static IReadOnlyList<ClipEventMarker> FromSavedWindow(IEnumerable<AutoClipEvent> events,
+        DateTime requestedStartUtc, DateTime requestedEndUtc, SpotifySourceWindow? savedSource)
+    {
+        if (savedSource is null) return FromEvents(events, requestedStartUtc, requestedEndUtc);
+        // The ring may contain less than its configured history after startup
+        // or recovery. The saved source window records what was actually kept.
+        return events.Select(item => new ClipEventMarker(item.Id, item.Label,
+                MonotonicClock.ToSharedSeconds(item.OccurredUtc) - savedSource.StartSeconds))
+            .Where(item => double.IsFinite(item.OffsetSeconds) && item.OffsetSeconds >= 0
+                && item.OffsetSeconds <= savedSource.DurationSeconds)
+            .ToArray();
+    }
+
     public static IReadOnlyList<ClipEventMarker> FromEvents(IEnumerable<AutoClipEvent> events, DateTime clipStartUtc, DateTime clipEndUtc)
     {
         return events
