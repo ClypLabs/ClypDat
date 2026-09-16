@@ -6795,6 +6795,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         "Capture",
         "Quality",
         "Audio",
+        "Tracks",
+        "Exclusions",
         "Startup"
     };
 

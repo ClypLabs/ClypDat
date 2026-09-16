@@ -214,6 +214,8 @@ public sealed class ClipOverlayCardRendererTests
                     ("Capture", "OnboardingCaptureCard"),
                     ("Quality", "OnboardingQualityCard"),
                     ("Audio", "OnboardingAudioCard"),
+                    ("Tracks", "OnboardingTracksCard"),
+                    ("Exclusions", "OnboardingExclusionsCard"),
                     ("Startup", "OnboardingStartupCard")
                 })
                 {
