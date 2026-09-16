@@ -12,6 +12,17 @@ public sealed class RecordingAudioProcessPolicyTests
     public void Recorder_IsNeverEligible(string processName) =>
         Assert.False(RecordingAudioProcessPolicy.IsEligible(processName));
 
+    // Voicemeeter carries every stream on the machine, so recording it as a
+    // track duplicates the game and microphone tracks into one mix.
+    [Theory]
+    [InlineData("voicemeeter", false)]
+    [InlineData("voicemeeter8x64.exe", false)]
+    [InlineData("VoicemeeterPro.exe", false)]
+    [InlineData("Discord.exe", true)]
+    [InlineData("Voice.exe", true)]
+    public void VirtualAudioMixers_AreNeverEligible(string processName, bool expected) =>
+        Assert.Equal(expected, RecordingAudioProcessPolicy.IsEligible(processName));
+
     [Fact]
     public void Filter_RemovesRecorderButKeepsUserApps()
     {

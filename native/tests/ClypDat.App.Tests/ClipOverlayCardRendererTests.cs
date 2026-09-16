@@ -177,6 +177,16 @@ public sealed class ClipOverlayCardRendererTests
         viewModel.IsOnboardingVisible = true;
         Assert.Equal(6, viewModel.ReplayDurationPresets.Count);
 
+        // Both audio pages are lists, and an empty list fits anything - which
+        // is how a card that ran under the footer with a dozen apps playing
+        // passed this test. Fill them with more rows than can ever be shown so
+        // the pages are measured at the size they actually reach.
+        for (var index = 0; index < 24; index++)
+        {
+            viewModel.ActiveAudioProcesses.Add(new AudioTrackProcessViewModel($"App {index}", index % 2 == 0, 100, _ => { }));
+            viewModel.ExcludedProcesses.Add($"app{index}.exe");
+        }
+
         foreach (var scaling in new[] { 1d, 1.5d, 2d })
         {
             // Exercise real physical viewport sizes, then convert them back

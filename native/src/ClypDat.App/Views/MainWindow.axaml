@@ -2056,16 +2056,25 @@
                  without being read. Both are the Settings lists with the
                  sliders, icons and manual entry removed - during setup the
                  question is which apps are involved, not their levels. -->
-            <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Tracks}">
-              <TextBlock Text="Audio tracks" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Switch on any app you want saved as its own track, so it can be muted or remixed while you edit." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-              <Border x:Name="OnboardingTracksCard" Classes="onboardingSettingCard" Padding="14">
-                <StackPanel Spacing="8">
+            <!-- A Grid, not a StackPanel: a StackPanel hands its children all
+                 the height they ask for and lets them run off the bottom of the
+                 body, which is exactly what a list of every app playing audio
+                 did - the card grew under the footer and the step counter was
+                 drawn over it. Here the list row is the star, so the card is
+                 always the height the dialog actually has left and its own
+                 scroller takes the overflow. No magic MaxHeight to re-tune per
+                 scale factor. -->
+            <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Tracks}">
+              <TextBlock Text="Audio tracks" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
+              <TextBlock Grid.Row="1" Text="Switch on any app you want saved as its own track, so it can be muted or remixed while you edit." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              <Border Grid.Row="2" x:Name="OnboardingTracksCard" Classes="onboardingSettingCard" Padding="14" VerticalAlignment="Stretch">
+                <Grid RowDefinitions="Auto,*,Auto" RowSpacing="8">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="Game audio and your microphone are always their own tracks." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
                     <Button Classes="onboardingAction" Grid.Column="1" Content="Refresh" VerticalAlignment="Center" Click="RefreshProcessesButton_OnClick" />
                   </Grid>
-                  <ScrollViewer MaxHeight="208" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <Border Classes="audioProcessList">
+                  <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <Border Classes="audioProcessList" VerticalAlignment="Top">
                       <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
                         <ItemsControl.ItemTemplate>
                           <DataTemplate>
@@ -2092,20 +2101,21 @@
                       </ItemsControl>
                     </Border>
                   </ScrollViewer>
-                  <TextBlock Text="Nothing is playing audio yet - start a game or an app, then press Refresh." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding !ActiveAudioProcesses.Count}" />
-                </StackPanel>
+                  <TextBlock Grid.Row="2" Text="Nothing is playing audio yet - start a game or an app, then press Refresh." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding !ActiveAudioProcesses.Count}" />
+                </Grid>
               </Border>
-            </StackPanel>
-            <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Exclusions}">
-              <TextBlock Text="Keep apps out of game audio" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Excluded apps are removed from the Game Audio track, so a Discord call or your music never ends up welded into the game." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-              <Border x:Name="OnboardingExclusionsCard" Classes="onboardingSettingCard" Padding="14">
-                <StackPanel Spacing="8">
+            </Grid>
+            <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Exclusions}">
+              <TextBlock Text="Keep apps out of game audio" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
+              <TextBlock Grid.Row="1" Text="Excluded apps are removed from the Game Audio track, so a Discord call or your music never ends up welded into the game." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              <Border Grid.Row="2" x:Name="OnboardingExclusionsCard" Classes="onboardingSettingCard" Padding="14" VerticalAlignment="Stretch">
+                <Grid RowDefinitions="Auto,*,Auto" RowSpacing="8">
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
                     <Button Classes="onboardingAction" Grid.Column="1" Content="Exclude" Click="AddSelectedProcessButton_OnClick" />
                   </Grid>
-                  <ScrollViewer MaxHeight="168" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding ExcludedProcesses.Count}">
-                    <Border Classes="audioProcessList">
+                  <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding ExcludedProcesses.Count}">
+                    <Border Classes="audioProcessList" VerticalAlignment="Top">
                       <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
                         <ItemsControl.ItemTemplate>
                           <DataTemplate>
@@ -2120,10 +2130,10 @@
                       </ItemsControl>
                     </Border>
                   </ScrollViewer>
-                  <TextBlock Text="Nothing is excluded, so every app you hear goes into the game track." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding !ExcludedProcesses.Count}" />
-                </StackPanel>
+                  <TextBlock Grid.Row="2" Text="Nothing is excluded, so every app you hear goes into the game track." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding !ExcludedProcesses.Count}" />
+                </Grid>
               </Border>
-            </StackPanel>
+            </Grid>
             <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Startup}">
               <TextBlock Text="Ready when you are" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Choose how ClypDat starts. Change this later in Settings." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
               <Border x:Name="OnboardingStartupCard" Classes="onboardingSettingCard" Padding="14"><StackPanel Spacing="12"><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="Launch ClypDat on Windows boot" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="Keep replay ready after sign-in." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="Start minimized to tray" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="Keep ClypDat out of way while it records." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid></StackPanel></Border>
