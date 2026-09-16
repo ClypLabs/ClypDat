@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -59,6 +60,9 @@ public sealed partial class CustomGameSection : UserControl
     private void GameTabScroll_OnScrollChanged(object? sender, ScrollChangedEventArgs e) => UpdateTabStripFade();
 
     private void GameTabScroll_OnSizeChanged(object? sender, SizeChangedEventArgs e) => UpdateTabStripFade();
+
+    private void GameTabScrollBar_OnScroll(object? sender, ScrollEventArgs e)
+        => GameTabScroll.SetCurrentValue(ScrollViewer.OffsetProperty, new Vector(e.NewValue, 0));
 
     private void UpdateTabStripFade()
     {

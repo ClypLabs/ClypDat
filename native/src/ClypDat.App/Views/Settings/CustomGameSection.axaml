@@ -70,8 +70,8 @@
          edges are faded from code-behind rather than slicing a tab in half at
          the viewport edge - see UpdateTabStripFade. -->
     <StackPanel Spacing="0" IsVisible="{Binding HasCustomGameTabs}">
-      <ScrollViewer x:Name="GameTabScroll" Classes="gameTabStrip"
-                    HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+      <ScrollViewer x:Name="GameTabScroll"
+                    HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled"
                     ScrollChanged="GameTabScroll_OnScrollChanged"
                     SizeChanged="GameTabScroll_OnSizeChanged">
         <ItemsControl ItemsSource="{Binding CustomGameTabs}">
@@ -103,6 +103,29 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
       </ScrollViewer>
+      <ScrollBar Classes="gameTabStrip" Orientation="Horizontal" Margin="0,12,0,0"
+                 AllowAutoHide="False" Visibility="Auto"
+                 Maximum="{Binding #GameTabScroll.ScrollBarMaximum.X}"
+                 ViewportSize="{Binding #GameTabScroll.Viewport.Width}"
+                 Value="{Binding #GameTabScroll.Offset.X, Mode=OneWay}"
+                 Scroll="GameTabScrollBar_OnScroll">
+        <ScrollBar.Theme>
+          <ControlTheme TargetType="ScrollBar" BasedOn="{StaticResource {x:Type ScrollBar}}">
+            <Setter Property="Template">
+              <ControlTemplate>
+                <Track Name="PART_Track" Orientation="Horizontal" IsDirectionReversed="False"
+                       Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}"
+                       Value="{TemplateBinding Value, Mode=TwoWay}"
+                       ViewportSize="{TemplateBinding ViewportSize}">
+                  <Track.Thumb>
+                    <Thumb Name="thumb" Classes="scrollThumb" />
+                  </Track.Thumb>
+                </Track>
+              </ControlTemplate>
+            </Setter>
+          </ControlTheme>
+        </ScrollBar.Theme>
+      </ScrollBar>
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
 

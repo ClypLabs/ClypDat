@@ -423,14 +423,10 @@
   <Style Selector="Button.customGameTab.active:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
   </Style>
-  <!-- The tab strip's own scrollbar. The shared 10px bar spanned the full width
-       under the tabs as a grey slab that looked like a second, broken divider.
-       Half the height and pushed clear of the pills, it reads as a hint that
-       there are more games than fit. -->
-  <Style Selector="ScrollViewer.gameTabStrip ScrollBar:horizontal">
-    <Setter Property="Height" Value="5" />
-    <Setter Property="MinHeight" Value="5" />
-    <Setter Property="Margin" Value="0,8,0,0" />
+  <!-- Separate from the tab viewport, with a thumb large enough to drag. -->
+  <Style Selector="ScrollBar.gameTabStrip:horizontal">
+    <Setter Property="Height" Value="14" />
+    <Setter Property="MinHeight" Value="14" />
   </Style>
 
   <!-- The "Add Setting" drop zone under the enabled groups. Dashed outline
