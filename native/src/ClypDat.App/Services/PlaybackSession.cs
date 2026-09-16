@@ -475,11 +475,19 @@ public sealed class PlaybackSession : IDisposable
             _audioMixer.AddMixerInput(provider);
         }
 
-        var normalized = new GainSampleProvider(_audioMixer, 1f / Math.Max(1, providers.Count));
+        // Unity sum, deliberately: the mixed tracks used to be divided by track
+        // count here, which made a three-track clip play ~9.5dB quieter in the
+        // editor than the file it exports to. Both mux paths mix with
+        // amix=inputs=N:normalize=0 (MainWindowViewModel and
+        // AudioCapturePipeline), so any attenuation here is preview lying about
+        // the clip. Peaks are SoftLimiterSampleProvider's job at the end of this
+        // chain - and the exported file has no limiter at all, so preview stays
+        // the gentler of the two.
+        //
         // Master volume sits BEFORE the limiter (not after) so boosting past
         // 100% still gets caught by SoftLimiterSampleProvider instead of
         // clipping the final output unprotected.
-        _masterVolume = new VolumeSampleProvider(normalized) { Volume = VolumeCurve(_masterVolumePercent) };
+        _masterVolume = new VolumeSampleProvider(_audioMixer) { Volume = VolumeCurve(_masterVolumePercent) };
         // Permanent member of the chain, transparent at 1x. Clip speed changes
         // its ratio in place - see SetPlaybackRate for why it must never be
         // spliced in and out.
@@ -1778,32 +1786,6 @@ public sealed class PlaybackSession : IDisposable
 
                 var limited = 0.95f + ((magnitude - 0.95f) / (1f + magnitude - 0.95f)) * 0.05f;
                 buffer[index] = MathF.CopySign(limited, sample);
-            }
-
-            return read;
-        }
-    }
-
-    private sealed class GainSampleProvider : ISampleProvider
-    {
-        private readonly ISampleProvider _source;
-        private readonly float _gain;
-
-        public GainSampleProvider(ISampleProvider source, float gain)
-        {
-            _source = source;
-            _gain = gain;
-            WaveFormat = source.WaveFormat;
-        }
-
-        public WaveFormat WaveFormat { get; }
-
-        public int Read(float[] buffer, int offset, int count)
-        {
-            var read = _source.Read(buffer, offset, count);
-            for (var index = offset; index < offset + read; index++)
-            {
-                buffer[index] *= _gain;
             }
 
             return read;
