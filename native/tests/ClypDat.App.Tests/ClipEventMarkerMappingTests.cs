@@ -1,3 +1,5 @@
+using Avalonia;
+using Avalonia.Media;
 using ClypDat.App.Services;
 using ClypDat.App.Controls;
 using Xunit;
@@ -26,6 +28,28 @@ public sealed class ClipEventMarkerMappingTests
     [InlineData("not-a-known-event", true)]
     public void LineGlyphsAreStrokedAndSilhouettesAreFilled(string eventId, bool filled) =>
         Assert.Equal(filled, TimelineMarkerPresentation.AppearanceFor(eventId).Filled);
+
+    // Every glyph is drawn on a 24x24 grid but none of them fills it: the X
+    // occupies x 7-17, the flame 5-19 and taller than wide. Scaling the box
+    // they sit in leaves each one a different distance from the middle, which
+    // is how the flame ended up low and to the right of its disc.
+    [Theory]
+    [InlineData("kill")]
+    [InlineData("death")]
+    [InlineData("triple_kill_streak")]
+    [InlineData("team_wipe")]
+    [InlineData("win")]
+    [InlineData("not-a-known-event")]
+    public void EveryGlyphCentresOnTheSamePointWhateverGridItWasDrawnOn(string eventId)
+    {
+        const double size = 11;
+        var glyph = Geometry.Parse(TimelineMarkerPresentation.AppearanceFor(eventId).Glyph);
+        var centred = glyph.Bounds.TransformToAABB(TimelineMarkersControl.CentreGlyph(glyph.Bounds, size));
+
+        Assert.Equal(size / 2, centred.Center.X, 3);
+        Assert.Equal(size / 2, centred.Center.Y, 3);
+        Assert.Equal(size, Math.Max(centred.Width, centred.Height), 3);
+    }
 
     [Fact]
     public void GroupsDenseAndSimultaneousEventsWithoutDroppingOccurrences()

@@ -125,6 +125,8 @@ public sealed class TimelineMarkersControl : Canvas
     private const double MarkerWidth = 26;
     private const double DiscSize = 22;
     private const double StemHeight = 8;
+    private const double GlyphSize = 11;
+    private const double GlyphStroke = 2;
     private const double MarkerHeight = DiscSize + StemHeight;
 
     private void AddGroup(TimelineMarkerGroup group)
@@ -239,22 +241,53 @@ public sealed class TimelineMarkersControl : Canvas
         Children.Add(button);
     }
 
-    private static Shapes.Path BuildGlyph(TimelineMarkerAppearance appearance, IBrush accent)
+    // Centred by transforming the geometry, not by asking a layout panel to do
+    // it. Avalonia draws a Path at the coordinates its data actually uses, and
+    // these glyphs are drawn on a 24x24 grid: the flame occupies roughly x 5-19
+    // and the X only 7-17, so each one landed a different distance from the
+    // middle of its box. Stretch and Viewbox both scale the box rather than
+    // recentre the drawing inside it, which is why the flame sat low and right.
+    //
+    // Measuring first, then moving the glyph's own centre onto the middle of
+    // the icon box, puts every mark in the same place whatever grid it was
+    // drawn on. Stroked glyphs measure with their pen, so a thick stroke on one
+    // side cannot push the drawing off centre either.
+    private static Control BuildGlyph(TimelineMarkerAppearance appearance, IBrush accent)
     {
         var glyph = Geometry.Parse(appearance.Glyph);
-        return appearance.Filled
-            ? new Shapes.Path { Data = glyph, Fill = accent, Stretch = Stretch.Uniform, Width = 11, Height = 11 }
+        var pen = appearance.Filled ? null : new Pen(accent, GlyphStroke, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
+        var bounds = pen is null ? glyph.Bounds : glyph.GetRenderBounds(pen);
+        var extent = Math.Max(bounds.Width, bounds.Height);
+        if (extent > 0) glyph.Transform = new MatrixTransform(CentreGlyph(bounds, GlyphSize));
+
+        var path = appearance.Filled
+            ? new Shapes.Path { Data = glyph, Fill = accent }
             : new Shapes.Path
             {
                 Data = glyph,
                 Stroke = accent,
-                StrokeThickness = 1.5,
+                // Scaled with the glyph, so the pen is the same weight on screen
+                // whatever grid the drawing came off.
+                StrokeThickness = GlyphStroke * (extent > 0 ? GlyphSize / extent : 1),
                 StrokeJoin = PenLineJoin.Round,
-                StrokeLineCap = PenLineCap.Round,
-                Stretch = Stretch.Uniform,
-                Width = 11,
-                Height = 11
+                StrokeLineCap = PenLineCap.Round
             };
+
+        path.Width = GlyphSize;
+        path.Height = GlyphSize;
+        return path;
+    }
+
+    /// <summary>
+    /// Moves the middle of <paramref name="bounds"/> onto the middle of a
+    /// square of <paramref name="size"/>, scaled to fit it.
+    /// </summary>
+    internal static Matrix CentreGlyph(Rect bounds, double size)
+    {
+        var scale = size / Math.Max(bounds.Width, bounds.Height);
+        return Matrix.CreateTranslation(-(bounds.X + bounds.Width / 2), -(bounds.Y + bounds.Height / 2)) *
+               Matrix.CreateScale(scale, scale) *
+               Matrix.CreateTranslation(size / 2, size / 2);
     }
 
     private static IBrush Fade(IBrush brush, double opacity) =>
