@@ -6,16 +6,23 @@ internal static class RecordingAudioProcessPolicy
 {
     private static readonly string[] BlockedProcessNames = ["ClypDat", "ClypDatRecorder", "MedalEncoder"];
 
-    // Virtual audio devices are the routing layer, not an app making sound.
-    // Voicemeeter holds a session for every stream passing through it, so it
-    // offered to record a mix of everything the machine plays - including the
-    // game and microphone ClypDat already captures as their own tracks. Anyone
-    // who switched it on got their whole desktop a second time, phase-aligned
-    // with itself.
+    // Two kinds of process hold an audio session without being something a
+    // viewer would ever want on its own track.
     //
-    // Matched by prefix because one installer ships voicemeeter.exe,
-    // voicemeeter8x64.exe, voicemeeterpro.exe and the Banana/Potato builds.
-    private static readonly string[] BlockedProcessPrefixes = ["voicemeeter"];
+    // Voicemeeter is the routing layer rather than an app making sound: it
+    // holds a session for every stream passing through it, so it offered to
+    // record a mix of everything the machine plays, including the game and
+    // microphone ClypDat already captures separately. Anyone who switched it on
+    // got their whole desktop a second time, phase-aligned with itself.
+    //
+    // SignalRGB keeps a session open to drive lighting from audio levels. It
+    // never plays anything, so the track it offers is a silent one, sitting in
+    // the list between the apps that do.
+    //
+    // Matched by prefix because these ship under several executable names -
+    // voicemeeter.exe, voicemeeter8x64.exe, voicemeeterpro.exe and the
+    // Banana/Potato builds; SignalRgb.exe and SignalRgbLauncher.exe.
+    private static readonly string[] BlockedProcessPrefixes = ["voicemeeter", "signalrgb"];
 
     internal static bool IsEligible(string? processName) =>
         !BlockedProcessNames.Any(blocked => AudioProcessIdentity.Equals(processName, blocked)) &&
