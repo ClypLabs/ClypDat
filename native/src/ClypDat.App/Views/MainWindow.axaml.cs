@@ -8294,25 +8294,7 @@ public sealed partial class MainWindow : Window
                         Margin = new Avalonia.Thickness(0, 7, 0, 0),
                         VerticalAlignment = VerticalAlignment.Top
                     },
-                    new TextBlock
-                    {
-                        Text = note,
-                        Foreground = AppThemeService.Brush("Text_C4D2E0", "#C4D2E0"),
-                        FontSize = 13,
-                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
-                        // A horizontal StackPanel measures children with
-                        // unbounded width, so TextWrapping does nothing
-                        // without an explicit Width to actually wrap
-                        // against. The window is fixed-size (CanResize
-                        // false) at 680, so this is safe as a constant:
-                        // 680 - hero/body's 44 side margin, split into two
-                        // equal Grid columns (minus the 14 gap column),
-                        // minus each column's own list margin (26) and
-                        // this row's own bullet dot + spacing (12), minus
-                        // a little slack for the column's ScrollViewer
-                        // reserving space for its scrollbar track.
-                        Width = 260
-                    }
+                    BuildReleaseNoteText(note)
                 }
             });
         }
@@ -8333,6 +8315,22 @@ public sealed partial class MainWindow : Window
                 }
             }
         };
+    }
+
+    private static TextBlock BuildReleaseNoteText(string note)
+    {
+        var textBlock = new TextBlock
+        {
+            Foreground = AppThemeService.Brush("Text_C4D2E0", "#C4D2E0"),
+            FontSize = 13,
+            TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+            // A horizontal StackPanel measures children with unbounded width,
+            // so TextWrapping needs an explicit width. The fixed window leaves
+            // 260px after column, margin, bullet, spacing and scrollbar space.
+            Width = 260
+        };
+        ReleaseNotesMarkdownRenderer.Apply(textBlock, note);
+        return textBlock;
     }
 
     // "You're up to date" dialog - shares CreateUpdateDialog's chrome/notes-

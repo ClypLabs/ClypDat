@@ -119,6 +119,7 @@
     <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
+    <PackageReference Include="Markdig" Version="1.3.2" />
     <!-- Pinned directly to the forked Avalonia version's required version.
          No direct usage. -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />

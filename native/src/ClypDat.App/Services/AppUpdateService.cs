@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -459,10 +460,10 @@ public static class AppUpdateService
                              item.Version > CurrentVersion && item.Version <= latest)
                          .OrderBy(item => item.Version))
             {
-                var versionLabel = $"{item.Version.Major}.{item.Version.Minor}.{item.Version.Build}";
                 var (releaseWhatsNew, releaseFixes) = ExtractCategorizedNotes(item.Release.Body);
-                whatsNew.AddRange(releaseWhatsNew.Select(note => $"{versionLabel}: {note}"));
-                fixes.AddRange(releaseFixes.Select(note => $"{versionLabel}: {note}"));
+                var prefixed = PrefixReleaseNotes(item.Version, releaseWhatsNew, releaseFixes);
+                whatsNew.AddRange(prefixed.WhatsNew);
+                fixes.AddRange(prefixed.Fixes);
             }
 
             return (whatsNew, fixes);
@@ -480,17 +481,31 @@ public static class AppUpdateService
     // apart instead of one flat mixed list. A release written before this
     // convention (or with no headings at all) has all its bullets fall
     // through to What's New, the more common case, rather than being dropped.
-    private static (IReadOnlyList<string> WhatsNew, IReadOnlyList<string> Fixes) ExtractCategorizedNotes(string? body)
+    internal static (IReadOnlyList<string> WhatsNew, IReadOnlyList<string> Fixes) ExtractCategorizedNotes(string? body)
     {
         var whatsNew = new List<string>();
         var fixes = new List<string>();
         var current = whatsNew;
+        List<string>? activeDestination = null;
+        StringBuilder? activeNote = null;
 
-        foreach (var raw in (body ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        void FinishActiveNote()
+        {
+            if (activeNote is { Length: > 0 } && activeDestination is not null)
+            {
+                activeDestination.Add(activeNote.ToString());
+            }
+
+            activeNote = null;
+            activeDestination = null;
+        }
+
+        foreach (var raw in (body ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
         {
             var line = raw.TrimStart();
             if (line.StartsWith('#'))
             {
+                FinishActiveNote();
                 var heading = line.TrimStart('#', ' ').Trim();
                 if (heading.Contains("fix", StringComparison.OrdinalIgnoreCase))
                 {
@@ -506,13 +521,42 @@ public static class AppUpdateService
                 continue;
             }
 
-            if (line.StartsWith("- ", StringComparison.Ordinal) && line.Length > 2)
+            if (line.Length >= 2 &&
+                line[1] is ' ' or '\t' &&
+                line[0] is '-' or '*' or '+' &&
+                !string.IsNullOrWhiteSpace(line[2..]))
             {
-                current.Add(line[2..].Trim());
+                FinishActiveNote();
+                activeDestination = current;
+                activeNote = new StringBuilder(line[2..].Trim());
+            }
+            else if (activeNote is not null && (raw.Length == 0 || char.IsWhiteSpace(raw[0])))
+            {
+                activeNote.Append('\n');
+                if (!string.IsNullOrWhiteSpace(raw))
+                {
+                    activeNote.Append(raw.Trim());
+                }
+            }
+            else
+            {
+                FinishActiveNote();
             }
         }
 
+        FinishActiveNote();
         return (whatsNew, fixes);
+    }
+
+    internal static (IReadOnlyList<string> WhatsNew, IReadOnlyList<string> Fixes) PrefixReleaseNotes(
+        Version version,
+        IReadOnlyList<string> whatsNew,
+        IReadOnlyList<string> fixes)
+    {
+        var versionLabel = $"{version.Major}.{version.Minor}.{version.Build}";
+        return (
+            whatsNew.Select(note => $"{versionLabel}: {note}").ToArray(),
+            fixes.Select(note => $"{versionLabel}: {note}").ToArray());
     }
 
     // Gate on what the updater is willing to download and execute. Kept as an

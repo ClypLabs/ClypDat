@@ -46,6 +46,14 @@ backend's audio routing) uses NAudio, licensed under the **MIT License**.
 
 - Project: https://github.com/naudio/NAudio
 
+## Markdig (BSD-2-Clause)
+
+Release-note formatting uses Markdig by Alexandre Mutel, licensed under the
+**BSD 2-Clause License**.
+
+- Project: https://github.com/xoofx/markdig
+- The BSD-2-Clause text is included in `licenses/Markdig-BSD-2-Clause.txt`.
+
 ## ffmpeg / ffprobe (GPL)
 
 ClypDat bundles `ffmpeg.exe` and `ffprobe.exe` (the gyan.dev "essentials"
