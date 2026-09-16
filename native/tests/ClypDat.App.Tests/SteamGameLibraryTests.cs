@@ -13,6 +13,55 @@ namespace ClypDat.App.Tests;
 public sealed class SteamGameLibraryTests
 {
     [Theory]
+    [InlineData("Game")]
+    [InlineData("common")]
+    public void ClassificationValuesAndKeysStillRequireStrictUtf8(string target)
+    {
+        var bytes = AppInfo(40, (730, "Game"));
+        var index = bytes.AsSpan(76).IndexOf(Encoding.UTF8.GetBytes(target));
+        Assert.True(index >= 0);
+        bytes[76 + index] = 0xFD;
+        SHA1.HashData(bytes.AsSpan(76, bytes.Length - 80)).CopyTo(bytes, 56);
+        Assert.Throws<DecoderFallbackException>(() => SteamAppInfoReader.Parse(bytes));
+    }
+
+    [Fact]
+    public void UnrelatedStringsRemainBoundedAndRequireTerminator()
+    {
+        var oversized = Enumerable.Repeat((byte)0xFD, 1024 * 1024 + 1).Append((byte)0).ToArray();
+        Assert.Throws<InvalidDataException>(() => SteamAppInfoReader.Parse(AppInfoWithText(40, oversized, (730, "Game"))));
+        Assert.ThrowsAny<Exception>(() => SteamAppInfoReader.Parse(AppInfoWithText(40, [0xFD], (730, null))));
+    }
+
+    [Theory]
+    [InlineData(39)]
+    [InlineData(40)]
+    [InlineData(41)]
+    public void UnrelatedInvalidUtf8DoesNotSuppressCs2(int version)
+    {
+        var bytes = AppInfoWithText(version, [0xFD, 0], (730, "Game"), (1905180, "Application"));
+        var kinds = SteamAppInfoReader.Parse(bytes);
+        Assert.Equal(SteamAppKind.Game, kinds[730]);
+        Assert.Equal(SteamAppKind.NonGame, kinds[1905180]);
+    }
+
+    [Fact]
+    public async Task BundledCs2MatchesWithoutMetadataAndHonorsIgnore()
+    {
+        using var fixture = new LibraryFixture();
+        var path = fixture.Install(730, "cs2.exe");
+        var library = fixture.Library();
+        await library.RefreshAsync();
+        var detector = new ForegroundGameDetector(library);
+        var result = detector.MatchWindow(path, "cs2.exe", "Counter-Strike 2", "SDL_app");
+        Assert.True(result.IsDetected);
+        Assert.Equal("Counter-Strike 2", result.DisplayName);
+        Assert.Equal("steam-730", result.DetectionKey);
+        detector.ApplyUserIgnoredExecutables(["steam-730"]);
+        Assert.False(detector.MatchWindow(path, "cs2.exe", "Counter-Strike 2", "SDL_app").IsDetected);
+    }
+
+    [Theory]
     [InlineData(39)]
     [InlineData(40)]
     [InlineData(41)]
@@ -55,6 +104,7 @@ public sealed class SteamGameLibraryTests
     }
 
     [Theory]
+    [InlineData(730, "cs2.exe")]
     [InlineData(1905180, "obs64.exe")]
     [InlineData(1009850, "AdvancedSettings.exe")]
     [InlineData(250820, "vrmonitor.exe")]
@@ -296,6 +346,9 @@ public sealed class SteamGameLibraryTests
     }
 
     internal static byte[] AppInfo(int version, params (int Id, string? Type)[] entries)
+        => AppInfoWithText(version, Encoding.UTF8.GetBytes("Tool\0"), entries);
+
+    private static byte[] AppInfoWithText(int version, byte[] text, params (int Id, string? Type)[] entries)
     {
         string[] strings = ["appinfo", "common", "type", "unrelated"];
         using var stream = new MemoryStream();
@@ -315,7 +368,7 @@ public sealed class SteamGameLibraryTests
             }
             Key(0, "appinfo");
             Key(1, "type"); // must not classify an unrelated root-level type
-            record.Write(Encoding.UTF8.GetBytes("Tool\0"));
+            record.Write(text);
             Key(0, "common");
             if (type is not null) { Key(1, "type"); record.Write(Encoding.UTF8.GetBytes(type + "\0")); }
             record.Write((byte)8);

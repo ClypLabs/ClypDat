@@ -93,14 +93,24 @@ internal static class SteamAppInfoReader
             {
                 case 0: ReadObject(reader, strings, childPath, depth + 1, ref appType); break;
                 case 1:
-                    var value = ReadString(reader);
-                    if (childPath.Equals("appinfo/common/type", StringComparison.OrdinalIgnoreCase)) appType = value;
+                    if (childPath.Equals("appinfo/common/type", StringComparison.OrdinalIgnoreCase))
+                        appType = ReadString(reader);
+                    else SkipString(reader);
                     break;
                 case 2: case 3: case 4: case 6: reader.ReadUInt32(); break;
                 case 7: case 10: reader.ReadUInt64(); break;
                 default: throw new InvalidDataException("Unsupported Steam VDF value type.");
             }
         }
+    }
+
+    private static void SkipString(BinaryReader reader)
+    {
+        // Steam descriptions can contain non-UTF8 bytes. Only classification
+        // values need decoding; still reject oversized or unterminated strings.
+        var length = 0;
+        while (reader.ReadByte() != 0)
+            if (++length > 1024 * 1024) throw new InvalidDataException("Steam VDF string limit exceeded.");
     }
 
     private static string ReadString(BinaryReader reader)

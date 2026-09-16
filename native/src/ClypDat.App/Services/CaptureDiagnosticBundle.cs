@@ -40,7 +40,7 @@ public static class CaptureDiagnosticBundle
 
                 var skippedLogs = new List<string>();
                 var logs = Directory.EnumerateFiles(logFolder, "clypdat*.log")
-                    .Concat(new[] { Path.Combine(logFolder, "capture-worker.log") })
+                    .Concat(new[] { Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "capture-worker.log") })
                     .Where(File.Exists);
                 foreach (var log in logs.Distinct(StringComparer.OrdinalIgnoreCase))
                 {

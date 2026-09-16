@@ -2,6 +2,12 @@
   "schemaVersion": 1,
   "games": [
     {
+      "id": "steam-730",
+      "displayName": "Counter-Strike 2",
+      "steamAppIds": [ 730 ],
+      "matchers": [ { "executable": "cs2.exe" } ]
+    },
+    {
       "id": "FortniteClient-Win64-Shipping.exe",
       "displayName": "Fortnite",
       "matchers": [

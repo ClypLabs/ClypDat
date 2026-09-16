@@ -47,8 +47,11 @@ public sealed class ForegroundGameDetector
         _catalog = BuildCatalog(local.Concat(RemoteGameCatalogService.LoadCached()));
     }
 
-    public void ApplyUserIgnoredExecutables(IEnumerable<string> executableNames) =>
+    public void ApplyUserIgnoredExecutables(IEnumerable<string> executableNames)
+    {
         _userIgnoredExecutables = new HashSet<string>(executableNames.Where(name => !string.IsNullOrWhiteSpace(name)), StringComparer.OrdinalIgnoreCase);
+        Interlocked.Increment(ref _catalogGeneration);
+    }
 
     public void ApplyRemoteCatalog(IEnumerable<GameCatalogEntry> entries)
     {

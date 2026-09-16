@@ -26,6 +26,8 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     private readonly ID3D11DeviceContext _context;
     private readonly IDXGIOutputDuplication _duplication;
     private readonly object _stateLock = new();
+    private readonly object _nativeGate;
+    private readonly TimeSpan _frameInterval;
     private readonly CancellationTokenSource _stopping = new();
     private readonly LatestFrameSignal _signal = new();
     // Allocated at the maximum and used up to _activeSlots: a SurfaceSlot holds
@@ -51,10 +53,12 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     // thrown away; _releaseLagFrames is the number of CPU leases outstanding.
     private long _allBusyDrops, _releaseLagFrames, _acquireTicks;
 
-    private DesktopDuplicationFrameSource(ID3D11Device device, IDXGIOutputDuplication duplication, int frameRate, bool captureCursor, int? appliedGpuPriority)
+    private DesktopDuplicationFrameSource(ID3D11Device device, IDXGIOutputDuplication duplication, int frameRate, bool captureCursor, int? appliedGpuPriority, object nativeGate)
     {
         _device = device; _context = device.ImmediateContext; _duplication = duplication;
         _captureCursor = captureCursor;
+        _nativeGate = nativeGate;
+        _frameInterval = TimeSpan.FromSeconds(1.0 / Math.Max(1, frameRate));
         AppliedGpuPriority = appliedGpuPriority;
         for (var i = 0; i < _slots.Length; i++) _slots[i] = new SurfaceSlot();
         _transportSamplingBudget = new PresentSamplingBudget(frameRate);
@@ -62,15 +66,19 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
         _producer.Start();
     }
 
-    public static DesktopDuplicationFrameSource Create(ID3D11Device processingDevice, nint targetHandle, ReplayBufferConfig config, out RawRect desktopBounds)
+    public static DesktopDuplicationFrameSource Create(ID3D11Device processingDevice, nint targetHandle, ReplayBufferConfig config, out RawRect desktopBounds, object? nativeGate = null)
     {
         // Own an AddRef'd wrapper while sharing the exact native device/context
         // with processing. CreateD3D11Device enabled ID3D10Multithread protection
         // before this source starts its producer thread.
-        var device = processingDevice.QueryInterface<ID3D11Device>();
-        var appliedGpuPriority = GpuScheduling.TryRaiseDeviceGpuPriority(device.NativePointer, "DXGI acquisition");
-        try { return new DesktopDuplicationFrameSource(device, NativeReplayBuffer.CreateDuplicationFor(device, targetHandle, config, out desktopBounds), config.FrameRate, config.CaptureCursor, appliedGpuPriority); }
-        catch { device.Dispose(); throw; }
+        nativeGate ??= new object();
+        lock (nativeGate)
+        {
+            var device = processingDevice.QueryInterface<ID3D11Device>();
+            var appliedGpuPriority = GpuScheduling.TryRaiseDeviceGpuPriority(device.NativePointer, "DXGI acquisition");
+            try { return new DesktopDuplicationFrameSource(device, NativeReplayBuffer.CreateDuplicationFor(device, targetHandle, config, out desktopBounds), config.FrameRate, config.CaptureCursor, appliedGpuPriority, nativeGate); }
+            catch { device.Dispose(); throw; }
+        }
     }
 
     public string CaptureMode => "Game Capture (DXGI ordered device)";
@@ -105,86 +113,96 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
             var pendingPresents = 0L;
             var pendingPointerUpdate = false;
             var pendingPointerTimestamp = 0L;
+            var nextAcquire = TimeSpan.Zero;
             while (!_stopping.IsCancellationRequested)
             {
-                var acquireStarted = Stopwatch.GetTimestamp();
-                var result = _duplication.AcquireNextFrame(100, out var info, out var resource);
-                if (result.Code == Vortice.DXGI.ResultCode.WaitTimeout.Code) continue;
-                if (!result.Success || resource is null) { resource?.Dispose(); Fail($"AcquireNextFrame failed with 0x{result.Code:X8}."); return; }
-                // Timeouts are excluded above on purpose: this measures what a
-                // productive acquire costs, so the gap between the desktop's
-                // present rate and this loop's rate is attributable rather than
-                // inferred.
-                Interlocked.Add(ref _acquireTicks, Stopwatch.GetElapsedTime(acquireStarted).Ticks);
-                Interlocked.Increment(ref _acquiredFrames);
-                try
+                var remaining = nextAcquire - _producerClock.Elapsed;
+                if (remaining > TimeSpan.Zero && _stopping.Token.WaitHandle.WaitOne(remaining)) break;
+                nextAcquire = _producerClock.Elapsed + _frameInterval;
+                lock (_stateLock)
+                lock (_nativeGate)
                 {
-                    var hasContentUpdate = info.LastPresentTime != 0;
-                    var hasPointerUpdate = _captureCursor && info.LastMouseUpdateTime != 0;
-                    if (!hasContentUpdate && !hasPointerUpdate) { Interlocked.Increment(ref _zeroPresentFrames); continue; }
-                    if (hasContentUpdate)
+                    using var acquired = new AcquiredCaptureFrame(() => _duplication.ReleaseFrame());
+                    var acquireStarted = Stopwatch.GetTimestamp();
+                    var result = _duplication.AcquireNextFrame(0, out var info, out var resource);
+                    acquired.Acquired = result.Success;
+                    if (result.Code == Vortice.DXGI.ResultCode.WaitTimeout.Code) continue;
+                    if (!result.Success || resource is null) { resource?.Dispose(); Fail($"AcquireNextFrame failed with 0x{result.Code:X8}."); return; }
+                    // Timeouts are excluded above on purpose: this measures what a
+                    // productive acquire costs, so the gap between the desktop's
+                    // present rate and this loop's rate is attributable rather than
+                    // inferred.
+                    Interlocked.Add(ref _acquireTicks, Stopwatch.GetElapsedTime(acquireStarted).Ticks);
+                    Interlocked.Increment(ref _acquiredFrames);
+                    try
                     {
-                        pendingContentUpdate = true;
-                        pendingContentTimestamp = info.LastPresentTime;
-                        pendingPresents += Math.Max(1, info.AccumulatedFrames);
-                    }
-                    if (hasPointerUpdate)
-                    {
-                        pendingPointerUpdate = true;
-                        pendingPointerTimestamp = info.LastMouseUpdateTime;
-                        Interlocked.Increment(ref _pointerUpdates);
-                    }
-                    // A source at or below the configured rate keeps a full
-                    // credit between presents and is transported intact.  A
-                    // faster source keeps only the newest present at the
-                    // selected cadence, before any shared-resource copy.
-                    if (!_transportSamplingBudget.TryConsume(_producerClock.Elapsed, pendingSample: true)) continue;
-                    using var source = resource.QueryInterface<ID3D11Texture2D>();
-                    SurfaceSlot? slot = null;
-                    lock (_stateLock)
-                    {
-                        if (_disposed) return;
-                        EnsureSlotCount(source.Description);
-                        for (var i = 0; i < _activeSlots; i++)
+                        var hasContentUpdate = info.LastPresentTime != 0;
+                        var hasPointerUpdate = _captureCursor && info.LastMouseUpdateTime != 0;
+                        if (!hasContentUpdate && !hasPointerUpdate) { Interlocked.Increment(ref _zeroPresentFrames); continue; }
+                        if (hasContentUpdate)
                         {
-                            var candidate = _slots[_nextSlot]; _nextSlot = (_nextSlot + 1) % _activeSlots;
-                            if (candidate.Leased) { Interlocked.Increment(ref _busySlotSkips); continue; }
-                            EnsureSurface(candidate, source.Description);
-                            slot = candidate;
-                            break;
+                            pendingContentUpdate = true;
+                            pendingContentTimestamp = info.LastPresentTime;
+                            pendingPresents += Math.Max(1, info.AccumulatedFrames);
                         }
-                        if (slot is null)
+                        if (hasPointerUpdate)
                         {
-                            _allBusyDrops++;
-                            _releaseLagFrames = _slots.Take(_activeSlots).LongCount(candidate => candidate.Leased);
-                            continue;
+                            pendingPointerUpdate = true;
+                            pendingPointerTimestamp = info.LastMouseUpdateTime;
+                            Interlocked.Increment(ref _pointerUpdates);
                         }
+                        // A source at or below the configured rate keeps a full
+                        // credit between presents and is transported intact.  A
+                        // faster source keeps only the newest present at the
+                        // selected cadence, before any shared-resource copy.
+                        if (!_transportSamplingBudget.TryConsume(_producerClock.Elapsed, pendingSample: true)) continue;
+                        using var source = resource.QueryInterface<ID3D11Texture2D>();
+                        SurfaceSlot? slot = null;
+                        lock (_stateLock)
+                        {
+                            if (_disposed) return;
+                            EnsureSlotCount(source.Description);
+                            for (var i = 0; i < _activeSlots; i++)
+                            {
+                                var candidate = _slots[_nextSlot]; _nextSlot = (_nextSlot + 1) % _activeSlots;
+                                if (candidate.Leased) { Interlocked.Increment(ref _busySlotSkips); continue; }
+                                EnsureSurface(candidate, source.Description);
+                                slot = candidate;
+                                break;
+                            }
+                            if (slot is null)
+                            {
+                                _allBusyDrops++;
+                                _releaseLagFrames = _slots.Take(_activeSlots).LongCount(candidate => candidate.Leased);
+                                continue;
+                            }
+                        }
+                        lock (_stateLock) { if (_disposed) return; }
+                        var timer = Stopwatch.StartNew();
+                        _context.CopyResource(slot.CaptureTexture!, source);
+                        timer.Stop(); Interlocked.Add(ref _producerCopyTicks, timer.Elapsed.Ticks);
+                        lock (_stateLock)
+                        {
+                            slot.Timestamp = Math.Max(pendingContentTimestamp, pendingPointerTimestamp);
+                            slot.ContentTimestamp = pendingContentTimestamp;
+                            slot.Presents = pendingContentUpdate ? Math.Max(1, pendingPresents) : 0;
+                            slot.HasDesktopContentUpdate = pendingContentUpdate;
+                            slot.HasPointerUpdate = pendingPointerUpdate;
+                            slot.Sequence = ++_sequence;
+                            if (slot.HasDesktopContentUpdate) _sourcePresents++;
+                            _accumulatedPresents += slot.Presents;
+                            _transportedFrames++;
+                            if (slot.HasPointerUpdate) _transportedPointerFrames++;
+                        }
+                        pendingContentUpdate = false;
+                        pendingContentTimestamp = 0;
+                        pendingPresents = 0;
+                        pendingPointerUpdate = false;
+                        pendingPointerTimestamp = 0;
+                        _signal.Publish();
                     }
-                    lock (_stateLock) { if (_disposed) return; }
-                    var timer = Stopwatch.StartNew();
-                    _context.CopyResource(slot.CaptureTexture!, source);
-                    timer.Stop(); Interlocked.Add(ref _producerCopyTicks, timer.Elapsed.Ticks);
-                    lock (_stateLock)
-                    {
-                        slot.Timestamp = Math.Max(pendingContentTimestamp, pendingPointerTimestamp);
-                        slot.ContentTimestamp = pendingContentTimestamp;
-                        slot.Presents = pendingContentUpdate ? Math.Max(1, pendingPresents) : 0;
-                        slot.HasDesktopContentUpdate = pendingContentUpdate;
-                        slot.HasPointerUpdate = pendingPointerUpdate;
-                        slot.Sequence = ++_sequence;
-                        if (slot.HasDesktopContentUpdate) _sourcePresents++;
-                        _accumulatedPresents += slot.Presents;
-                        _transportedFrames++;
-                        if (slot.HasPointerUpdate) _transportedPointerFrames++;
-                    }
-                    pendingContentUpdate = false;
-                    pendingContentTimestamp = 0;
-                    pendingPresents = 0;
-                    pendingPointerUpdate = false;
-                    pendingPointerTimestamp = 0;
-                    _signal.Publish();
+                    finally { resource.Dispose(); }
                 }
-                finally { resource.Dispose(); _duplication.ReleaseFrame(); }
             }
         }
         catch (Exception error) { if (!_stopping.IsCancellationRequested) Fail(error.Message, error); }
@@ -244,32 +262,28 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
 
     private void Fail(string failure, Exception? error = null) { lock (_stateLock) { if (_disposed) return; _failure ??= failure; } if (error is null) AppLog.Info($"Native capture: Game Capture producer stopped ({failure})."); else AppLog.Error("Native capture: Game Capture producer failed.", error); _signal.Wake(); }
 
+    internal bool StopProducer()
+    {
+        _stopping.Cancel();
+        _signal.Wake();
+        return Thread.CurrentThread != _producer && _producer.Join(TimeSpan.FromSeconds(10));
+    }
+
     public void Dispose()
     {
+        if (_disposed) return;
+        // Cancel/join before taking state: a wedged native call may own that lock.
+        if (!StopProducer())
+            throw new TimeoutException("Game Capture producer did not stop within 10s; native resources retained.");
         lock (_stateLock) { if (_disposed) return; _disposed = true; }
-        _stopping.Cancel(); _signal.Wake();
 
-        // The producer's GPU work is deliberately outside _stateLock, and neither
-        // AcquireNextFrame nor ReleaseFrame is _disposed-guarded, so disposing the
-        // slots while it is mid-CopyResource releases the destination texture out from
-        // under the copy. The old bound was 2s, which a 4K BGRA CopyResource under GPU
-        // contention can exceed. AcquireNextFrame's own timeout is 100ms, so a healthy
-        // producer notices cancellation almost immediately and this returns at once;
-        // 10s only matters when the GPU is genuinely stuck.
-        var producerStopped = true;
-        if (Thread.CurrentThread != _producer) producerStopped = _producer.Join(TimeSpan.FromSeconds(10));
-
-        if (!producerStopped)
+        lock (_stateLock)
+        lock (_nativeGate)
         {
-            // Leak rather than free-and-use. These are GPU resources held by a thread
-            // still writing into them; the process is ending this capture session, and
-            // a leaked texture is recoverable where a use-after-free is not.
-            AppLog.Error("Native capture: Game Capture producer did not stop within 10s; leaving its GPU resources alive rather than releasing them underneath it.");
-            return;
+            foreach (var slot in _slots) slot.Dispose();
+            _duplication.Dispose(); _context.Dispose(); _device.Dispose();
         }
-
-        lock (_stateLock) foreach (var slot in _slots) slot.Dispose();
-        _duplication.Dispose(); _context.Dispose(); _device.Dispose(); _signal.Dispose(); _stopping.Dispose();
+        _signal.Dispose(); _stopping.Dispose();
     }
 
     private sealed class SurfaceSlot : IDisposable
