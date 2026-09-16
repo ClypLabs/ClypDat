@@ -149,7 +149,12 @@ internal static class DiscordRichPresenceService
         // a connection closes, so the status went blank while the app believed
         // it had just published one. The worker owns its identity instead: it
         // notices the id it handshook with is stale and reconnects in place.
-        if (enabledChanged) Start();
+        if (applicationChanged)
+            AppLog.Info($"Discord Rich Presence: {(classicLogo ? "classic" : "current")} application requested.");
+
+        // An application change with no worker behind it (Rich Presence was
+        // enabled while the worker had already stopped) has nothing to wake.
+        if (enabledChanged || applicationChanged) Start();
         try { Wake.Release(); } catch (SemaphoreFullException) { }
     }
 
@@ -313,7 +318,7 @@ internal static class DiscordRichPresenceService
                     continue;
                 }
 
-                AppLog.Info($"Discord Rich Presence: connected on discord-ipc-{index}.");
+                AppLog.Info($"Discord Rich Presence: connected on discord-ipc-{index} as application {applicationId}.");
                 return pipe;
             }
             catch (Exception error)

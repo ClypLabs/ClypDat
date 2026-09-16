@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Views.Settings;
@@ -27,6 +28,7 @@ public sealed partial class AboutSection : UserControl
         if (point.X < 0 || point.Y < 0 || point.X > logo.Bounds.Width || point.Y > logo.Bounds.Height) return;
         if (TopLevel.GetTopLevel(this)?.DataContext is not MainWindowViewModel model) return;
         model.Settings.UseClassicLogo = !model.Settings.UseClassicLogo;
+        AppLog.Info($"Logo style: {(model.Settings.UseClassicLogo ? "classic" : "current")} selected.");
         model.SaveSettings();
         (Application.Current as App)?.ApplyLogoStyle(model.Settings.UseClassicLogo);
         // The logo lives in Discord too: the presence icon and the name beside
