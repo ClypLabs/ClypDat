@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Media;
 using ClypDat.App.Services;
 using ClypDat.App.Controls;
@@ -8,6 +9,44 @@ namespace ClypDat.App.Tests;
 
 public sealed class ClipEventMarkerMappingTests
 {
+    [Theory]
+    [InlineData("kill", null)]
+    [InlineData("triple_kill_streak", null)]
+    [InlineData("win", null)]
+    [InlineData("team_wipe", null)]
+    [InlineData("kill", "kill")]
+    [InlineData("kill", "win")]
+    [Trait("Category", "IsolatedSTA")]
+    public void HaloAndDiscShareTheSameCentre(string eventId, string? secondEventId)
+    {
+        AvaloniaTestThread.Run(() =>
+        {
+            var markers = new List<ClipEventMarker> { new(eventId, eventId, 50) };
+            if (secondEventId is not null) markers.Add(new(secondEventId, secondEventId, 50));
+            var control = new TimelineMarkersControl
+            {
+                Width = 400,
+                Height = 60,
+                Duration = TimeSpan.FromSeconds(100),
+                VideoTrackHeight = 60,
+                Markers = markers
+            };
+            control.Measure(new Size(400, 60));
+            control.Arrange(new Rect(0, 0, 400, 60));
+
+            var button = Assert.IsType<Button>(Assert.Single(control.Children));
+            var content = Assert.IsType<Panel>(button.Content);
+            content.Measure(new Size(button.Width, button.Height));
+            content.Arrange(new Rect(0, 0, button.Width, button.Height));
+            var halo = Assert.IsType<Border>(content.Children[0]);
+            var disc = Assert.IsType<Border>(content.Children[2]);
+
+            Assert.True(halo.Bounds.Width > disc.Bounds.Width);
+            Assert.Equal(disc.Bounds.Center.X, halo.Bounds.Center.X, 3);
+            Assert.Equal(disc.Bounds.Center.Y, halo.Bounds.Center.Y, 3);
+        }, TimeSpan.FromSeconds(10), "Marker layout timed out.");
+    }
+
     [Theory]
     [InlineData("kill", "M12,3a9,9 0 1 0 0,18a9,9 0 1 0 0-18m0,4v10m-5-5h10")]
     [InlineData("headshot", "M12,3a9,9 0 1 0 0,18a9,9 0 1 0 0-18m0,4v10m-5-5h10")]

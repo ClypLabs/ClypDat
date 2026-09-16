@@ -164,7 +164,9 @@ public sealed class TimelineMarkersControl : Canvas
             CornerRadius = new CornerRadius(MarkerWidth / 2),
             Background = Fade(accent, 0.22),
             HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top
+            VerticalAlignment = VerticalAlignment.Top,
+            // Offset the larger halo so its centre matches the disc's centre.
+            Margin = new Thickness(0, (DiscSize - MarkerWidth) / 2, 0, 0)
         });
         content.Children.Add(new Shapes.Rectangle
         {
