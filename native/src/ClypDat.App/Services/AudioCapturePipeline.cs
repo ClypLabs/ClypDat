@@ -483,19 +483,17 @@ public sealed class AudioCapturePipeline : IDisposable
         if (capture.EndedAtUtc is not null) return;
         capture.EndedAtUtc = MonotonicClock.UtcNow;
 
-        // A RAM-backed capture's audio only exists in its MemoryStream - once
-        // Dispose() below tears the session down, that data is gone for good
-        // unless it's flushed to a real file first. Ended captures are read
-        // back via a plain file copy elsewhere (GetOrCreateSourceSnapshot),
-        // the same as an already-closed disk-backed capture's WAV, so bridge
-        // it to that exact path here instead - an ended memory capture then
-        // behaves identically to a disk-backed one for every downstream
-        // consumer, no separate code path needed. The resulting file is
-        // temporary, cleaned up the same way any other ended capture's file
-        // already is (Stop()'s deleteCaptureFiles sweep, PruneOlderThan once
-        // the replay window passes it by) - this doesn't reintroduce
-        // continuous disk writes, just one final write of whatever's left
-        // once a capture actually ends (route change, roll, session stop).
+        // Stop first so the final held packet reaches the writer boundary.
+        // RAM captures retain that boundary for the persisted file below.
+        try
+        {
+            capture.Session.Dispose();
+        }
+        catch
+        {
+            // Stop best effort.
+        }
+
         if (capture.Session.IsMemoryBacked)
         {
             try
@@ -508,15 +506,6 @@ public sealed class AudioCapturePipeline : IDisposable
             {
                 AppLog.Error($"Audio capture memory->file flush on stop failed: {capture.Title}", error);
             }
-        }
-
-        try
-        {
-            capture.Session.Dispose();
-        }
-        catch
-        {
-            // Stop best effort.
         }
 
         AppLog.Debug($"Audio capture stopped: {capture.Title}, pid={capture.ProcessId?.ToString() ?? "none"}, start={capture.StartedAtUtc:o}, end={capture.EndedAtUtc:o}, bytes={capture.Session.BytesWritten}.");
@@ -1113,17 +1102,10 @@ public sealed class AudioCapturePipeline : IDisposable
             return await Task.Run(() =>
             {
             var sourceSnapshotPath = Path.Combine(_bufferFolder, $"audio_source_{Guid.NewGuid():N}.wav");
-            // For a live capture the newest sample in the snapshot corresponds to
-            // the pad-to-now moment SnapshotTo stamps (NOT "now" after the copy -
-            // the copy itself still takes a moment); for an ended one it was
-            // written at EndedAtUtc. Monotonic - a system clock step between
-            // capture start and save would otherwise shift the anchor by the
-            // step amount.
-            var lastSampleUtc = capture.EndedAtUtc ?? default;
+            // Both live and stopped captures use the writer boundary. A stop
+            // timeout must not expose an unfinished WAV or shift its timestamps.
             var copyTimer = System.Diagnostics.Stopwatch.StartNew();
-            var copied = capture.EndedAtUtc is null
-                ? capture.Session.SnapshotTo(sourceSnapshotPath, earliestNeededUtc, out lastSampleUtc, snapshotPurpose)
-                : CopyAudioFile(capture.Path, sourceSnapshotPath);
+            var copied = capture.Session.SnapshotTo(sourceSnapshotPath, earliestNeededUtc, out var lastSampleUtc, snapshotPurpose);
             var copyMs = copyTimer.ElapsedMilliseconds;
             if (!copied || !IsUsableAudioFile(sourceSnapshotPath))
             {
@@ -1168,9 +1150,9 @@ public sealed class AudioCapturePipeline : IDisposable
     {
         // BytesWritten, not IsUsableAudioFile(capture.Path) - a RAM-backed
         // capture (the plain replay-buffer window) never has a real file at
-        // capture.Path at all, so that check always failed for it. BytesWritten
-        // reports actual captured content either way, disk or memory.
-        if (capture is null || capture.Session.BytesWritten == 0) return string.Empty;
+        // capture.Path at all. Include accepted packets still waiting on disk;
+        // SnapshotTo orders them before the copied boundary.
+        if (capture is null || !capture.Session.HasAcceptedAudio) return string.Empty;
 
         var snapshotPath = Path.Combine(_bufferFolder, $"audio_{Guid.NewGuid():N}.wav");
         try
@@ -1566,21 +1548,6 @@ public sealed class AudioCapturePipeline : IDisposable
         }
 
         return process;
-    }
-
-    private static bool CopyAudioFile(string source, string destination)
-    {
-        try
-        {
-            using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-            input.CopyTo(output);
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     public static bool IsUsableAudioFile(string path)

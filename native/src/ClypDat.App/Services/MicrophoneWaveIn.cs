@@ -29,6 +29,7 @@ internal sealed class MicrophoneWaveIn : IWaveIn
     {
         _audioClient = device.AudioClient;
         WaveFormat = _audioClient.MixFormat;
+        var requestedDuration = BufferDuration100ns;
         try
         {
             _audioClient.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.None, BufferDuration100ns, 0, WaveFormat, Guid.Empty);
@@ -38,8 +39,10 @@ internal sealed class MicrophoneWaveIn : IWaveIn
             // A driver that will not give us the buffer size we asked for is
             // no reason to have no microphone track at all.
             AppLog.Info($"Mic capture could not use a {BufferDuration100ns / 10_000}ms buffer ({error.GetType().Name}); falling back to the device default.");
+            requestedDuration = 0;
             _audioClient.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.None, 0, 0, WaveFormat, Guid.Empty);
         }
+        AppLog.Info($"Mic capture buffer initialized: requestedMs={requestedDuration / 10_000d:0.###}, actualFrames={_audioClient.BufferSize}, actualMs={_audioClient.BufferSize * 1000d / WaveFormat.SampleRate:0.###}.");
     }
 
     public WaveFormat WaveFormat { get; set; }
@@ -99,6 +102,7 @@ internal sealed class MicrophoneWaveIn : IWaveIn
     private void CaptureLoop(CancellationToken token)
     {
         Exception? stoppedError = null;
+        var diagnostics = new AudioCaptureDiagnostics("microphone");
         // Same QPC-to-MonotonicClock base pairing as ProcessLoopbackWaveIn -
         // see the comment there for why this survives a mid-session system
         // clock step.
@@ -111,10 +115,12 @@ internal sealed class MicrophoneWaveIn : IWaveIn
             _audioClient.Start();
             while (!token.IsCancellationRequested)
             {
+                diagnostics.Drain();
                 var packetFrames = captureClient.GetNextPacketSize();
                 while (packetFrames > 0)
                 {
                     var data = captureClient.GetBuffer(out var frames, out var flags, out _, out var qpcPosition);
+                    diagnostics.Packet(flags);
                     var bytes = frames * WaveFormat.BlockAlign;
                     var buffer = new byte[bytes];
                     if (!flags.HasFlag(AudioClientBufferFlags.Silent) && data != IntPtr.Zero)
@@ -132,7 +138,9 @@ internal sealed class MicrophoneWaveIn : IWaveIn
                         }
 
                         var packetStartUtc = utcBase + TimeSpan.FromTicks((long)(qpcPosition - qpcBase100ns));
+                        var callbackStart = Stopwatch.GetTimestamp();
                         DataAvailable?.Invoke(this, new TimestampedWaveInEventArgs(buffer, bytes, packetStartUtc));
+                        diagnostics.Callback(callbackStart);
                     }
 
                     packetFrames = captureClient.GetNextPacketSize();
@@ -156,6 +164,7 @@ internal sealed class MicrophoneWaveIn : IWaveIn
                 // Stop is best effort.
             }
 
+            diagnostics.Log();
             RecordingStopped?.Invoke(this, new StoppedEventArgs(stoppedError));
         }
     }

@@ -58,11 +58,13 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     {
         private readonly IAudioClient _audioClient;
         private readonly IAudioCaptureClientNative _captureClient;
+        private readonly int _processId;
         public WaveFormat WaveFormat { get; }
 
         public NativeClient(int processId, ProcessLoopbackCaptureMode mode)
         {
             if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
+            _processId = processId;
             _audioClient = ActivateAudioClient((uint)processId, mode);
             try
             {
@@ -94,9 +96,8 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         // stall instead of taking the engine default (one device period, ~10ms in
         // shared mode). With a 10ms buffer drained by a 10ms poll loop there was
         // no margin at all: any hiccup longer than a single period overran the
-        // buffer and that audio was gone. Capture is written straight to a rolling
-        // RAM buffer, so a deep capture buffer costs nothing that matters here -
-        // there is no latency budget to protect.
+        // buffer and that audio was gone. Recording has no playback latency
+        // budget, so a deeper native buffer is acceptable.
         private const long BufferDuration100ns = 500 * 10_000L;
 
         private void InitializeClient()
@@ -120,11 +121,14 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                             0,
                             WaveFormat,
                             ref sessionGuid));
+                        var bufferResult = _audioClient.GetBufferSize(out var bufferFrames);
+                        AppLog.Info($"Process loopback buffer initialized: pid={_processId}, flags={flags}, requestedMs={duration / 10_000d:0.###}, actualFrames={(bufferResult >= 0 ? bufferFrames.ToString() : "unknown")}, actualMs={(bufferResult >= 0 ? (bufferFrames * 1000d / WaveFormat.SampleRate).ToString("0.###") : "unknown")}.");
                         return;
                     }
                     catch (Exception error)
                     {
                         lastError = error;
+                        AppLog.Info($"Process loopback buffer initialization failed: pid={_processId}, flags={flags}, requestedMs={duration / 10_000d:0.###}, error={error.Message}; trying fallback.");
                     }
                 }
             }
@@ -218,7 +222,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     private void CaptureLoop(CancellationToken token)
     {
         Exception? stoppedError = null;
-        var loggedDiscontinuity = false;
+        var diagnostics = new AudioCaptureDiagnostics($"process loopback pid={_processId}");
         // Base pair for converting each packet's QPC capture timestamp (100ns
         // units of the performance counter) into UTC on the MonotonicClock
         // timeline. Stopwatch.GetTimestamp reads the same QPC, so the offset
@@ -234,6 +238,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
             Marshal.ThrowExceptionForHR(_client.Start());
             while (!token.IsCancellationRequested)
             {
+                diagnostics.Drain();
                 Marshal.ThrowExceptionForHR(_client.GetNextPacketSize(out var packetFrames));
                 while (packetFrames > 0 && !token.IsCancellationRequested)
                 {
@@ -243,6 +248,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                         out var flags,
                         out _,
                         out var qpcPosition));
+                    diagnostics.Packet(flags);
 
                     var bytes = frames * WaveFormat.BlockAlign;
                     var buffer = new byte[bytes];
@@ -260,19 +266,15 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                             AppLog.Debug($"Process loopback first packet: pid={_processId}, mode={_mode}, frames={frames}, bytes={bytes}, silent={flags.HasFlag(AudioClientBufferFlags.Silent)}.");
                         }
 
-                        if (!loggedDiscontinuity && flags.HasFlag(AudioClientBufferFlags.DataDiscontinuity))
-                        {
-                            loggedDiscontinuity = true;
-                            AppLog.Info($"Process loopback data discontinuity flagged: pid={_processId} - per-packet timestamps keep placement correct through it.");
-                        }
-
                         // Exact capture moment of this packet's first frame -
                         // the ground truth AudioCaptureSession places bytes
                         // by, instead of guessing from byte counts and
                         // callback times (which drifted hundreds of ms over
                         // long sessions and desynced saved clips).
                         var packetStartUtc = utcBase + TimeSpan.FromTicks((long)(qpcPosition - qpcBase100ns));
+                        var callbackStart = Stopwatch.GetTimestamp();
                         QueueWithDeclick(buffer, bytes, packetStartUtc, flags.HasFlag(AudioClientBufferFlags.Silent) || data == IntPtr.Zero);
+                        diagnostics.Callback(callbackStart);
                     }
                     if (token.IsCancellationRequested) break;
                     Marshal.ThrowExceptionForHR(_client.GetNextPacketSize(out packetFrames));
@@ -302,6 +304,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                 // Stop is best effort.
             }
 
+            diagnostics.Log();
             RecordingStopped?.Invoke(this, new StoppedEventArgs(stoppedError));
         }
     }
