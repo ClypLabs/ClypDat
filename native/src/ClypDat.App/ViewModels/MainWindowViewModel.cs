@@ -7830,7 +7830,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         DiscordRichPresenceService.Configure(
             Settings.DiscordRichPresenceEnabled,
-            Settings.DiscordRichPresenceShowGetClypDatButton);
+            Settings.DiscordRichPresenceShowGetClypDatButton,
+            Settings.UseClassicLogo);
         UpdateDiscordPresence();
     }
 

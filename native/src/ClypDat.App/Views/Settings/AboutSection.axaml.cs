@@ -29,6 +29,10 @@ public sealed partial class AboutSection : UserControl
         model.Settings.UseClassicLogo = !model.Settings.UseClassicLogo;
         model.SaveSettings();
         (Application.Current as App)?.ApplyLogoStyle(model.Settings.UseClassicLogo);
+        // The logo lives in Discord too: the presence icon and the name beside
+        // it come from the application the connection handshook as, so the mark
+        // only follows the toggle if the connection is remade.
+        model.ApplyDiscordSettings();
         e.Handled = true;
     }
 

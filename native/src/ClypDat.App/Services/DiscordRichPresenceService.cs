@@ -54,6 +54,25 @@ internal static class DiscordRichPresenceService
     /// </summary>
     private const string ApplicationId = "1542340384418439189";
 
+    /// <summary>
+    /// The twin application carrying the original hexagon mark. Discord takes
+    /// both the presence artwork and the name printed beside it from whichever
+    /// application the connection handshook as, so showing the old logo means
+    /// connecting as a different application - there is no per-activity
+    /// override for either. Its Rich Presence assets have to include one named
+    /// "clypdat", since that is the key CreateAssets sends when there is no
+    /// game art to show.
+    ///
+    /// Empty until that application exists, in which case the classic logo
+    /// keeps the current presence art rather than breaking the connection.
+    /// </summary>
+    private const string ClassicApplicationId = "";
+
+    private static bool _useClassicApplication;
+
+    private static string ActiveApplicationId =>
+        _useClassicApplication && ClassicApplicationId.Length > 0 ? ClassicApplicationId : ApplicationId;
+
     // SET_ACTIVITY is rate limited by Discord to roughly five updates per
     // twenty seconds. Updates are coalesced to comfortably inside that: going
     // over does not error, it silently drops the update, which would leave a
@@ -84,17 +103,20 @@ internal static class DiscordRichPresenceService
     /// Applies the user's settings. Safe to call on every settings save: it
     /// only restarts the worker when something it actually depends on changed.
     /// </summary>
-    public static void Configure(bool enabled, bool showGetClypDatButton)
+    public static void Configure(bool enabled, bool showGetClypDatButton, bool classicLogo)
     {
         var enabledChanged = false;
         var buttonChanged = false;
+        var applicationChanged = false;
         lock (Sync)
         {
             enabledChanged = _enabled != enabled;
             buttonChanged = _showGetClypDatButton != showGetClypDatButton;
-            if (!enabledChanged && !buttonChanged) return;
+            applicationChanged = _useClassicApplication != classicLogo && ClassicApplicationId.Length > 0;
+            if (!enabledChanged && !buttonChanged && !applicationChanged) return;
             _enabled = enabled;
             _showGetClypDatButton = showGetClypDatButton;
+            _useClassicApplication = classicLogo;
 
             // Same activity needs sending again when only its Discord button
             // changes; otherwise SetPresence correctly coalesces it away.
@@ -108,7 +130,17 @@ internal static class DiscordRichPresenceService
             return;
         }
 
-        if (enabledChanged) Start();
+        // The client id is sent once, in the handshake, so a different
+        // application means a different connection. Tear the pipe down and let
+        // the worker dial back out rather than trying to switch identity on a
+        // live one.
+        if (applicationChanged && !enabledChanged)
+        {
+            Stop();
+            AppLog.Info($"Discord Rich Presence: reconnecting as the {(classicLogo ? "classic" : "current")} application.");
+        }
+
+        if (enabledChanged || applicationChanged) Start();
         try { Wake.Release(); } catch (SemaphoreFullException) { }
     }
 
@@ -229,7 +261,7 @@ internal static class DiscordRichPresenceService
             try
             {
                 await WriteFrameAsync(pipe, Opcode.Handshake,
-                    JsonSerializer.Serialize(new { v = 1, client_id = ApplicationId }), cancellationToken).ConfigureAwait(false);
+                    JsonSerializer.Serialize(new { v = 1, client_id = ActiveApplicationId }), cancellationToken).ConfigureAwait(false);
 
                 // Read the reply here, before anything else uses the pipe.
                 // Writing the handshake only proves the pipe accepted bytes -
