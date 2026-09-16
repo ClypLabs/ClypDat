@@ -2064,16 +2064,27 @@
                     <TextBlock Text="Game audio and your microphone are always their own tracks." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
                     <Button Classes="onboardingAction" Grid.Column="1" Content="Refresh" VerticalAlignment="Center" Click="RefreshProcessesButton_OnClick" />
                   </Grid>
-                  <ScrollViewer MaxHeight="176" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <ScrollViewer MaxHeight="208" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <Border Classes="audioProcessList">
                       <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
                         <ItemsControl.ItemTemplate>
                           <DataTemplate>
                             <Border Classes="audioProcessRow" Classes.enabledRow="{Binding IsEnabled}">
-                              <Grid ColumnDefinitions="3,44,*" ColumnSpacing="10" MinHeight="34">
+                              <Grid ColumnDefinitions="3,44,34,*" ColumnSpacing="10" MinHeight="40">
                                 <Border Classes="audioRowRail" IsVisible="{Binding IsEnabled}" />
                                 <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                                <TextBlock Grid.Column="2" Classes="audioTrackName" Text="{Binding Name}" VerticalAlignment="Center" />
+                                <!-- Initial under the image, not instead of it:
+                                     the icon is fetched per app and can arrive
+                                     late or not at all, and a letter tile reads
+                                     as an app where an empty square reads as a
+                                     broken one. -->
+                                <Border Grid.Column="2" Classes="audioIconTile">
+                                  <Grid>
+                                    <TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" FontWeight="Bold" />
+                                    <Image Source="{Binding Icon}" Stretch="Uniform" Margin="5" />
+                                  </Grid>
+                                </Border>
+                                <TextBlock Grid.Column="3" Classes="audioTrackName" Text="{Binding Name}" VerticalAlignment="Center" />
                               </Grid>
                             </Border>
                           </DataTemplate>
