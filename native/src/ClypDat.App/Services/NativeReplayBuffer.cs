@@ -63,8 +63,23 @@ namespace ClypDat.App.Services;
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource, IFullSessionFinalizeReporter, IVideoOverlaySettingsReceiver
 {
-    internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing, bool textureIsOwnedByCapture) =>
-        directBltAvailable && !requiresCopyBeforeProcessing && textureIsOwnedByCapture;
+    // cursorCompositingActive refuses the direct path outright, and that is the
+    // whole point of it. The direct Blt runs on the capture thread; the cursor
+    // overlay is a second video-processor stream whose source rect, dest rect
+    // and alpha are per-Blt state on a processor the PACING thread also drives.
+    // Letting both threads rewrite that state and blit it with different stream
+    // counts killed the capture worker inside nvwgf2umx.dll (NVIDIA's D3D11 user
+    // -mode driver) with a null dereference on the driver's own deferred worker
+    // thread - 62 identical 0xC0000005 crashes at the same fault offset in the
+    // day after it landed, none before it. One owner per processor instead: when
+    // the cursor has to be drawn, the crop copy runs and the pacing tick does
+    // the single two-stream Blt, which is how it worked for the six weeks before.
+    //
+    // Keeping the cursor off the direct path is not a downgrade for cursor-on
+    // capture either - the direct Blt set nv12Ready, so the tick skipped its own
+    // cursor Blt and those frames came out with no cursor at all.
+    internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing, bool textureIsOwnedByCapture, bool cursorCompositingActive) =>
+        directBltAvailable && !requiresCopyBeforeProcessing && textureIsOwnedByCapture && !cursorCompositingActive;
 
     internal static bool IsCropWithinTexture(int textureWidth, int textureHeight, int left, int top, int width, int height) =>
         textureWidth > 0 && textureHeight > 0 && left >= 0 && top >= 0 && width > 0 && height > 0 &&
@@ -1027,10 +1042,22 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // source. DXGI transport leases always take that path regardless: their
         // producer slots must be released immediately after one bounded copy.
         var directBltAvailable = Environment.GetEnvironmentVariable("CLYPDAT_DISABLE_DIRECT_BLT") != "1";
+        var d3dDebugActive = IsD3DDebugRequested();
         // Input views are per-texture, and capture sources rotate a small pool
         // of them, so these are cached by native pointer rather than
         // rebuilt per frame. Disposed with the rest of the D3D state.
         var desktopInputViews = new Dictionary<nint, ID3D11VideoProcessorInputView>();
+        // Every entry is a view over a surface the CAPTURE SOURCE owns, keyed by
+        // that surface's pointer. The moment the duplication behind them is
+        // disposed those surfaces stop being ours to read, and the next
+        // duplication hands back its own pool - which can reuse the same
+        // addresses. Anything that replaces the capture source calls this, not
+        // just the paths that also rebuild the device.
+        void InvalidateDesktopInputViews()
+        {
+            foreach (var view in desktopInputViews.Values) view.Dispose();
+            desktopInputViews.Clear();
+        }
         // Cursor position for the GPU path, already converted into OUTPUT-resolution
         // pixels at crop time. The crop block is the only place the crop origin and
         // capture size are in scope, but the cursor has to be drawn after the scaled
@@ -1069,6 +1096,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         token = session.Token;
         var nativeGate = session.NativeGate;
         var retainedHardwareFrame = new RetainedHardwareFrame(gpuLock, nativeGate);
+        // Duplication teardown and view invalidation are one operation, not two
+        // that happen to be written next to each other: the cached input views
+        // are views over surfaces this duplication owns.
+        void DisposeDuplication()
+        {
+            InvalidateDesktopInputViews();
+            lock (nativeGate) duplication?.Dispose();
+            duplication = null;
+        }
         // Vortice wrappers over the pool's texture pointers. ffmpeg hands back
         // a raw ID3D11Texture2D*; wrapping it fresh per frame would allocate 60
         // times a second, and disposing a wrapper would Release a reference the
@@ -1718,6 +1754,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var foregroundForDiagnostics = isMonitorMode || IsWindowForegroundAndVisible(targetHandle);
                     var capturePaused = Volatile.Read(ref _capturePaused) != 0 || (!isMonitorMode && !foregroundForDiagnostics);
                     if (packetsOutSinceLog > 0) encoderHasProducedPacket = true;
+                    if (d3dDebugActive) { lock (nativeGate) DrainD3DDebugMessages(device); }
                     AppLog.Debug($"Native capture diag: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, framesSeen={framesSeen}, pointerFramesSeen={pointerFramesSeenSinceLog}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringSpanSeconds={ringSpanSeconds:0.0}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}{dxgiTelemetryText}.");
                     // Raw encoded rate, deliberately NOT crediting suppressed pads
                     // back in. It remains useful telemetry, but a low rate with
@@ -2095,12 +2132,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         if (wgcCapture is not null || freshMonitor != targetMonitor || duplication is null)
                         {
                             targetMonitor = freshMonitor;
+                            InvalidateDesktopInputViews();
                             wgcCapture?.Dispose();
                             wgcCapture = null;
                             dxgiCapture?.Dispose();
                             dxgiCapture = null;
-                            lock (nativeGate) duplication?.Dispose();
-                            duplication = null;
+                            DisposeDuplication();
                             try
                             {
                                 duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds, nativeGate);
@@ -2288,6 +2325,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (usingWgc)
                     {
                         AppLog.Info($"Native capture: WGC source closed ({selectedGameFrameSource.Failure}); restarting WGC.");
+                        InvalidateDesktopInputViews();
                         wgcCapture!.Dispose();
                         try { wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate); activeGameFrameSource = wgcCapture; }
                         catch (Exception error) { throw new InvalidOperationException("Windows.Graphics.Capture could not restart for game capture.", error); }
@@ -2295,6 +2333,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     else
                     {
                         AppLog.Info($"Native capture: DXGI producer stopped ({selectedGameFrameSource.Failure}); recreating.");
+                        InvalidateDesktopInputViews();
                         dxgiCapture?.Dispose();
                         dxgiCapture = null;
                         activeGameFrameSource = null;
@@ -2424,8 +2463,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     captureHeight = Math.Max(2, cropHeight);
                                     contentBounds = CaptureAspectFit.Create(captureWidth, captureHeight, outputWidth, outputHeight);
                                     AppLog.Info($"Native capture: source size accepted {captureWidth}x{captureHeight}; content={contentBounds.X},{contentBounds.Y},{contentBounds.Width}x{contentBounds.Height}, canvas={outputWidth}x{outputHeight}.");
-                                    foreach (var view in desktopInputViews.Values) view.Dispose();
-                                    desktopInputViews.Clear();
+                                    InvalidateDesktopInputViews();
                                     nv12StagingIndex = nv12RingWritten = 0;
                                     detectorStagingIndex = detectorRingWritten = 0;
                                     cursorOutputX = cursorOutputY = int.MinValue;
@@ -2653,7 +2691,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                             if (CanUseDirectVideoProcessorInput(
                                                     directBltAvailable,
                                                     frameLease?.RequiresCopyBeforeProcessing == true,
-                                                    frameLease?.TextureIsOwnedByCapture == true))
+                                                    frameLease?.TextureIsOwnedByCapture == true,
+                                                    hardwareFramesActive && gpuCursorAvailable && config.CaptureCursor))
                                             {
                                                 try
                                                 {
@@ -2674,8 +2713,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                                         new Vortice.RawRect(cropLeft, cropTop, cropLeft + captureWidth, cropTop + captureHeight));
                                                     bltStreams[0].Enable = true;
                                                     bltStreams[0].InputSurface = desktopView;
-                                                    if (hardwareFramesActive) ConfigureCursorStream();
-                                                    videoContext.VideoProcessorBlt(videoProcessor, outputView, 0, hardwareFramesActive ? 2u : 1u, bltStreams);
+                                                    // Single stream, always: the cursor overlay
+                                                    // belongs to the pacing thread's Blt, and the
+                                                    // gate above already refused this path when
+                                                    // there is a cursor to draw.
+                                                    DisableCursorStream();
+                                                    videoContext.VideoProcessorBlt(videoProcessor, outputView, 0, ActiveBltStreamCount(), bltStreams);
                                                     nv12Ready = true;
                                                 }
                                                 catch (Exception error)
@@ -2795,8 +2838,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (!usingWgc && acquireResultCode == ResultCode.AccessLost.Code)
                     {
                         AppLog.Info("Native capture: DXGI duplication access lost, recreating.");
-                        lock (nativeGate) duplication?.Dispose();
-                        duplication = null;
+                        DisposeDuplication();
                         try
                         {
                         duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds, nativeGate);
@@ -2903,8 +2945,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             // hour. Losing the old duplication early costs
                             // nothing here; it has already stopped producing
                             // frames, which is the entire reason for recovering.
-                            lock (nativeGate) duplication?.Dispose();
-                            duplication = null;
+                            DisposeDuplication();
 
                             var newDevice = CreateD3D11Device(out processingGpuPriority);
                             IDXGIOutputDuplication? newDuplication = null;
@@ -2923,11 +2964,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             }
 
                             staging?.Dispose();
-                            // Keyed by texture pointer and owned by the device
-                            // going away here - a stale entry would hand the
-                            // rebuilt pipeline a view over a dead resource.
-                            foreach (var view in desktopInputViews.Values) view.Dispose();
-                            desktopInputViews.Clear();
                             nv12Ready = false;
                             inputView?.Dispose();
                             croppedTexture?.Dispose();
@@ -3080,8 +3116,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         }
                         else
                         {
-                            lock (nativeGate) duplication?.Dispose();
-                            duplication = null;
+                            DisposeDuplication();
                             duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds, nativeGate);
                             AppLog.Info($"Native capture: DXGI duplication recreated after a stall (attempt {recoveryAttempts}).");
                         }
@@ -3108,8 +3143,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 activeGameFrameSource = wgcCapture;
                                 var size = wgcCapture.ContentSize;
                                 desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
-                                lock (nativeGate) duplication?.Dispose();
-                                duplication = null;
+                                DisposeDuplication();
                                 AppLog.Info("Native capture: DXGI recovery exhausted; switched to bounded WGC for this target session.");
                             }
                             catch (Exception wgcError)
@@ -3154,8 +3188,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 bltStreams[0].Enable = true;
                                 bltStreams[0].InputSurface = inputView;
                                 videoContext!.VideoProcessorSetStreamSourceRect(videoProcessor, 0, false, null);
-                                bltStreams[1].Enable = false;
-                                videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                                DisableCursorStream();
+                                videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, ActiveBltStreamCount(), bltStreams);
                             }
 
                             var qualificationSlot = nv12StagingIndex;
@@ -3325,11 +3359,24 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         bltStreams[1].Enable = true;
                         bltStreams[1].InputSurface = cursorInputView;
+                        return;
                     }
-                    else bltStreams[1].Enable = false;
                 }
-                else bltStreams[1].Enable = false;
+                DisableCursorStream();
             }
+
+            // A disabled stream keeps whatever surface it was last given, and
+            // that surface can be a view the resize or device-rebuild path has
+            // since disposed. The driver is handed the whole stream array, so
+            // clear the pointer as well as the flag and never count a stream
+            // that has none.
+            void DisableCursorStream()
+            {
+                bltStreams[1].Enable = false;
+                bltStreams[1].InputSurface = null;
+            }
+
+            uint ActiveBltStreamCount() => bltStreams[1].Enable ? 2u : 1u;
 
             // Zero-copy twin of EncodeScheduledFrame below: the scaled NV12
             // surface goes straight into one of the encoder's own D3D11
@@ -3401,7 +3448,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 bltStreams[0].InputSurface = inputView;
                                 videoContext!.VideoProcessorSetStreamSourceRect(videoProcessor, 0, false, null);
                                 ConfigureCursorStream();
-                                videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 2, bltStreams);
+                                videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, ActiveBltStreamCount(), bltStreams);
                             }
 
                             TryOfferDetectorGpuFrameUnderLock();
@@ -3529,7 +3576,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             bltStreams[0].Enable = true;
                             bltStreams[0].InputSurface = inputView;
                             videoContext!.VideoProcessorSetStreamSourceRect(videoProcessor, 0, false, null);
-                            videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, 1, bltStreams);
+                            DisableCursorStream();
+                            videoContext!.VideoProcessorBlt(videoProcessor, outputView, 0, ActiveBltStreamCount(), bltStreams);
                         }
 
                         TryOfferDetectorGpuFrameUnderLock();
@@ -4099,8 +4147,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 dxgiCapture?.Dispose();
                 lock (nativeGate) duplication?.Dispose();
                 staging?.Dispose();
-                foreach (var view in desktopInputViews.Values) view.Dispose();
-                desktopInputViews.Clear();
+                InvalidateDesktopInputViews();
                 inputView?.Dispose();
                 croppedTexture?.Dispose();
                 cursorInputView?.Dispose();
@@ -6326,21 +6373,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             Vortice.Direct3D.FeatureLevel.Level_11_0,
             Vortice.Direct3D.FeatureLevel.Level_10_1,
         };
-        // The immediate context is captured and released, NOT discarded with
-        // `out _`. This overload hands back its own AddRef'd wrapper for it, and
-        // a live COM reference on the context keeps the entire D3D11 device
-        // alive no matter how thoroughly the device itself is disposed. Measured
-        // at 14.4MB of private bytes per created-and-disposed device - which the
-        // stall-recovery loop below was doing every 2 seconds, indefinitely,
-        // for a steady ~7MB/s native leak that no GC could reach (it is not
-        // managed memory) and that took the process past 16GB.
-        //
-        // Safe to release: this is a distinct wrapper from the one the device
-        // caches for its own ImmediateContext property (verified by reference
-        // comparison), so the per-frame device.ImmediateContext calls elsewhere
-        // are unaffected.
-        D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport, levels, out var device, out _, out Vortice.Direct3D11.ID3D11DeviceContext? createdContext).CheckError();
-        createdContext?.Dispose();
+        // The debug layer is how a crash INSIDE the driver gets a name. A driver
+        // access violation leaves no managed exception and no stack of ours, so
+        // D3D11's own validation is the only thing that can say which call was
+        // wrong - and it has to be asked for at device creation. Opt-in because
+        // it needs the Graphics Tools feature installed and costs throughput;
+        // the helper falls back to an undebugged device when the debug runtime
+        // is missing, so requesting it can never stop capture from starting.
+        var device = CreateD3D11DeviceWithFlags(levels, IsD3DDebugRequested());
 
         // Microsoft's own WGC samples explicitly mark the D3D11 device
         // multithread-protected when it's touched from both the capture
@@ -6362,6 +6402,66 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         GpuScheduling.TryRaiseProcessGpuPriority();
         appliedGpuPriority = GpuScheduling.TryRaiseDeviceGpuPriority(device!.NativePointer, "processing");
         return device!;
+    }
+
+    internal static bool IsD3DDebugRequested() => Environment.GetEnvironmentVariable("CLYPDAT_D3D_DEBUG") == "1";
+
+    private static ID3D11Device CreateD3D11DeviceWithFlags(Vortice.Direct3D.FeatureLevel[] levels, bool debug)
+    {
+        // The immediate context is captured and released, NOT discarded with
+        // `out _`. This overload hands back its own AddRef'd wrapper for it, and
+        // a live COM reference on the context keeps the entire D3D11 device
+        // alive no matter how thoroughly the device itself is disposed. Measured
+        // at 14.4MB of private bytes per created-and-disposed device - which the
+        // stall-recovery loop was doing every 2 seconds, indefinitely, for a
+        // steady ~7MB/s native leak that no GC could reach (it is not managed
+        // memory) and that took the process past 16GB.
+        //
+        // Safe to release: this is a distinct wrapper from the one the device
+        // caches for its own ImmediateContext property (verified by reference
+        // comparison), so the per-frame device.ImmediateContext calls elsewhere
+        // are unaffected.
+        var flags = DeviceCreationFlags.BgraSupport | (debug ? DeviceCreationFlags.Debug : DeviceCreationFlags.None);
+        var result = D3D11.D3D11CreateDevice(null, DriverType.Hardware, flags, levels, out var device, out _, out Vortice.Direct3D11.ID3D11DeviceContext? createdContext);
+        if (result.Failure && debug)
+        {
+            // DXGI_ERROR_SDK_COMPONENT_MISSING on a machine without the
+            // Graphics Tools optional feature. Say so once and carry on.
+            AppLog.Info($"Native capture: D3D11 debug layer unavailable (hr=0x{result.Code:X8}); continuing without validation.");
+            result = D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport, levels, out device, out _, out createdContext);
+        }
+        result.CheckError();
+        createdContext?.Dispose();
+        if (debug) AppLog.Info("Native capture: D3D11 debug layer active; validation messages are logged with the capture diagnostics.");
+        return device!;
+    }
+
+    // Drained on the diagnostics tick rather than per call: the queue keeps
+    // messages until read, and what matters is having the last few validation
+    // errors in the log next to the frame counters when something dies.
+    internal static void DrainD3DDebugMessages(ID3D11Device device)
+    {
+        try
+        {
+            using var infoQueue = device.QueryInterfaceOrNull<Vortice.Direct3D11.Debug.ID3D11InfoQueue>();
+            if (infoQueue is null) return;
+            var stored = infoQueue.NumStoredMessages;
+            for (ulong i = 0; i < stored; i++)
+            {
+                var message = infoQueue.GetMessage(i);
+                if (message.Severity is Vortice.Direct3D11.Debug.MessageSeverity.Corruption
+                    or Vortice.Direct3D11.Debug.MessageSeverity.Error
+                    or Vortice.Direct3D11.Debug.MessageSeverity.Warning)
+                {
+                    AppLog.Info($"Native capture: D3D11 {message.Severity} [{message.Category}/{message.Id}] {message.Description}");
+                }
+            }
+            infoQueue.ClearStoredMessages();
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"Native capture: D3D11 debug message drain failed (non-fatal): {error.Message}");
+        }
     }
 
     [System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.StdCall)]

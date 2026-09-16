@@ -38,15 +38,33 @@ public sealed class GameFrameOwnershipTests
         Assert.False(NativeReplayBuffer.CanUseDirectVideoProcessorInput(
             directBltAvailable: true,
             requiresCopyBeforeProcessing: true,
-            textureIsOwnedByCapture: true));
+            textureIsOwnedByCapture: true,
+            cursorCompositingActive: false));
         Assert.True(NativeReplayBuffer.CanUseDirectVideoProcessorInput(
             directBltAvailable: true,
             requiresCopyBeforeProcessing: false,
-            textureIsOwnedByCapture: true));
+            textureIsOwnedByCapture: true,
+            cursorCompositingActive: false));
         Assert.False(NativeReplayBuffer.CanUseDirectVideoProcessorInput(
             directBltAvailable: true,
             requiresCopyBeforeProcessing: false,
-            textureIsOwnedByCapture: false));
+            textureIsOwnedByCapture: false,
+            cursorCompositingActive: false));
+    }
+
+    // The capture thread's direct Blt and the pacing thread's tick share one
+    // ID3D11VideoProcessor, and the cursor overlay is per-Blt state on it. Two
+    // threads writing that state killed the capture worker inside NVIDIA's
+    // D3D11 driver, so whenever the cursor has to be composited the crop copy
+    // runs instead and the pacing tick owns the processor alone.
+    [Fact]
+    public void CursorCompositing_KeepsTheVideoProcessorOnOneThread()
+    {
+        Assert.False(NativeReplayBuffer.CanUseDirectVideoProcessorInput(
+            directBltAvailable: true,
+            requiresCopyBeforeProcessing: false,
+            textureIsOwnedByCapture: true,
+            cursorCompositingActive: true));
     }
 
     [Theory]
