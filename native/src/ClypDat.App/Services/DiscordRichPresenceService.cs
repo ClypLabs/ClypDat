@@ -340,13 +340,20 @@ internal static class DiscordRichPresenceService
     {
         // Reads are drained but ignored. Discord answers every frame, and a
         // pipe whose read buffer is never emptied eventually blocks the writer.
-        var drain = Task.Run(() => DrainAsync(pipe, cancellationToken), cancellationToken);
+        //
+        // The drain gets its own token, linked to the caller's. It sits in a
+        // blocking read that only ends when the pipe dies or its token trips,
+        // so the session token alone is not enough: leaving on a logo switch
+        // means leaving while the pipe is still perfectly healthy, and awaiting
+        // that read to finish on its own wedges the pump forever.
+        using var reading = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var drain = Task.Run(() => DrainAsync(pipe, reading.Token), reading.Token);
 
         while (!cancellationToken.IsCancellationRequested && pipe.IsConnected)
         {
             if (ActiveApplicationId != applicationId)
             {
-                await drain.ConfigureAwait(false);
+                await StopDrainAsync(reading, drain).ConfigureAwait(false);
                 return true;
             }
 
@@ -368,8 +375,19 @@ internal static class DiscordRichPresenceService
             catch (OperationCanceledException) { break; }
         }
 
-        await drain.ConfigureAwait(false);
+        await StopDrainAsync(reading, drain).ConfigureAwait(false);
         return false;
+    }
+
+    /// <summary>
+    /// Ends the reply reader and waits for it, so its task is always observed
+    /// and its exceptions never surface as unobserved ones later.
+    /// </summary>
+    private static async Task StopDrainAsync(CancellationTokenSource reading, Task drain)
+    {
+        try { reading.Cancel(); } catch { /* teardown is best effort */ }
+        try { await drain.ConfigureAwait(false); }
+        catch { /* the read was cancelled or the pipe went away; both are expected here */ }
     }
 
     private static async Task SendActivityAsync(NamedPipeClientStream pipe, ActivityRevision revision, CancellationToken cancellationToken)
