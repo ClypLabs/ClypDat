@@ -95,9 +95,19 @@ public sealed class ForegroundGameDetector
             return _lastGame;
         }
 
-        if (_lastGame.IsDetected && all.Any(game => game.WindowHandle == _lastGame.WindowHandle && game.ProcessId == _lastGame.ProcessId) && IsStillUsable(_lastGame) && !IsIgnored(_lastGame.ExeName) && !IsIgnored(_lastGame.DetectionKey))
+        // Deliberately not "is it still in the scan": a minimised window cannot
+        // be scanned at all (BuildDetection rejects it before any matching), and
+        // an exclusive-fullscreen game minimises itself the moment you alt-tab.
+        // See IsStillUsable.
+        if (_lastGame.IsDetected && IsStillUsable(_lastGame) && !IsIgnored(_lastGame.ExeName) && !IsIgnored(_lastGame.DetectionKey))
         {
-            _lastGame = PreferRealGameWindow(_lastGame, all) with { IsForeground = false };
+            // A minimised window measures ~160x60 at (-32000,-32000), so every
+            // other window of the same game looks "comfortably bigger" than it
+            // and the launcher-stub rescue below would hand back the launcher.
+            // Keep the held window while it is minimised; alt-tabbing back puts
+            // the real one in the foreground branch above anyway.
+            var held = IsIconic(_lastGame.WindowHandle) ? _lastGame : PreferRealGameWindow(_lastGame, all);
+            _lastGame = held with { IsForeground = false };
             return _lastGame;
         }
 
@@ -588,7 +598,29 @@ public sealed class ForegroundGameDetector
     }
 
     private bool IsIgnored(string executable) => _userIgnoredExecutables.Contains(executable);
-    private static bool IsStillUsable(GameDetection detection) => detection.WindowHandle != 0 && IsWindow(detection.WindowHandle) && IsWindowVisible(detection.WindowHandle) && !IsIconic(detection.WindowHandle);
+    // Minimised and hidden both count as usable. A fullscreen game that loses
+    // focus minimises itself - GLFW does it by default (GLFW_AUTO_ICONIFY), so
+    // Minecraft Java dropped out of detection on every alt-tab while borderless
+    // games survived, and with it went the per-game settings, the overlay and
+    // the capture target. What actually ends a game is its window being
+    // destroyed, so that is what this asks: does the window still exist, and is
+    // the same process still behind it. The second half matters because Windows
+    // recycles HWNDs - without it, a window handed to another process after the
+    // game exits would keep the game "running" forever.
+    //
+    // Capture is unaffected by the wider net: it pauses on
+    // IsWindowForegroundAndVisible, which still treats a minimised window as
+    // occluded, so a minimised game stays the detected game without being
+    // recorded.
+    private static bool IsStillUsable(GameDetection detection)
+    {
+        if (detection.WindowHandle == 0 || !IsWindow(detection.WindowHandle)) return false;
+        GetWindowThreadProcessId(detection.WindowHandle, out var windowProcessId);
+        return IsHeldGameStillRunning(windowExists: true, windowProcessId, detection.ProcessId);
+    }
+
+    internal static bool IsHeldGameStillRunning(bool windowExists, uint windowProcessId, int detectionProcessId) =>
+        windowExists && windowProcessId != 0 && detectionProcessId > 0 && windowProcessId == (uint)detectionProcessId;
     private static long WindowArea(nint handle) => GetWindowRect(handle, out var rect) ? (long)Math.Max(0, rect.Right - rect.Left) * Math.Max(0, rect.Bottom - rect.Top) : 0;
 
     // Process.GetProcessById + MainModule used to sit here. On Windows,

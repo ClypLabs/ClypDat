@@ -8396,6 +8396,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return true;
     }
 
+    // Last "custom game settings applied" line written, so the next identical
+    // one is skipped. Null means nothing is currently overridden.
+    private string? _lastCustomGameSettingsLog;
+
     public ReplayBufferConfig CreateReplayConfig()
     {
         var desktopCapture = IsEffectiveDesktopCapture;
@@ -8411,9 +8415,18 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var effective = desktopCapture
             ? CustomGameSettingsResolver.Resolve(Settings, null)
             : CustomGameSettingsResolver.Resolve(Settings, detectionKey);
-        if (effective.AppliedGroups.Length > 0)
+        // CreateReplayConfig runs on every poll tick and every clip save, so an
+        // unconditional line here wrote the same sentence once a second for as
+        // long as a game with overrides was running - thousands of identical
+        // lines in a session's log, burying everything worth reading. The event
+        // is the override CHANGING, so that is what gets logged.
+        var appliedSignature = effective.AppliedGroups.Length > 0
+            ? $"Custom game settings applied: game='{ActiveGameDetection.DisplayName}', key='{detectionKey}', groups=[{effective.AppliedGroups}]."
+            : null;
+        if (appliedSignature != _lastCustomGameSettingsLog)
         {
-            AppLog.Info($"Custom game settings applied: game='{ActiveGameDetection.DisplayName}', key='{detectionKey}', groups=[{effective.AppliedGroups}].");
+            if (appliedSignature is not null) AppLog.Info(appliedSignature);
+            _lastCustomGameSettingsLog = appliedSignature;
         }
 
         // SelectedChatProcess/SelectedMicrophoneDevice reflect whatever the

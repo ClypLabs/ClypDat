@@ -67,6 +67,20 @@ public sealed class GameFrameOwnershipTests
             cursorCompositingActive: true));
     }
 
+    // Alt-tabbing out of an exclusive-fullscreen game minimises it (GLFW does
+    // this by default), and a minimised window cannot be scanned - so the held
+    // game has to survive on window identity alone, and drop only when the
+    // window is gone or its handle has been recycled by another process.
+    [Theory]
+    [InlineData(true, 4321u, 4321, true)]    // minimised, same process - still the game
+    [InlineData(false, 4321u, 4321, false)]  // window destroyed - game closed
+    [InlineData(true, 9999u, 4321, false)]   // handle recycled by another process
+    [InlineData(true, 0u, 4321, false)]      // no owning process
+    public void HeldGameSurvivesMinimiseButNotWindowDeathOrHandleReuse(bool windowExists, uint windowProcessId, int detectionProcessId, bool expected)
+    {
+        Assert.Equal(expected, ForegroundGameDetector.IsHeldGameStillRunning(windowExists, windowProcessId, detectionProcessId));
+    }
+
     [Theory]
     [InlineData(3840, 2160, 0, 0, 3840, 2160, true)]
     [InlineData(3840, 2160, 3200, 0, 640, 2160, true)]
