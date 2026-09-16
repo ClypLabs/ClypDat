@@ -43,6 +43,20 @@ public sealed class CaptureHealthRecoveryPolicyTests
     }
 
     [Fact]
+    public void FailedWorkerRestartRequest_IsImmediateForEveryCaptureSource()
+    {
+        var health = ReplayCaptureHealth.Unknown("Worker") with
+        {
+            State = ReplayCaptureState.Failed,
+            CaptureMode = "DXGI Desktop Duplication",
+            PipelineRecoveryAction = ReplayPipelineRecoveryAction.RestartWorker,
+            LastFailure = "Capture worker shutdown timed out; preserving live native resources."
+        };
+
+        Assert.True(new CaptureHealthRecoveryPolicy().Observe(health));
+    }
+
+    [Fact]
     public void SourceStarvation_RecreatesThenFallsBackToWgc()
     {
         var policy = new CaptureSourceRecoveryPolicy();

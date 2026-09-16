@@ -21,6 +21,10 @@ internal abstract class GameFrameLease : IDisposable
     // through scale/convert keeps its release fence behind that work and can
     // exhaust every producer slot while the encoder itself remains idle.
     public virtual bool RequiresCopyBeforeProcessing => false;
+    // Direct video-processor input may outlive the immediate call in a driver
+    // command queue. It is therefore safe only for textures whose lifetime is
+    // owned by this capture session, never a DXGI duplication surface.
+    public virtual bool TextureIsOwnedByCapture => false;
     public abstract long SourceTimestamp { get; }
     public abstract long AccumulatedPresents { get; }
     public abstract int Width { get; }

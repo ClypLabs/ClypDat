@@ -69,6 +69,9 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     public string CaptureMode => "Windows Graphics Capture";
     public string? Failure { get { lock (_stateLock) return _failure; } }
 
+    internal static bool CanPublishFrame(int contentWidth, int contentHeight, int surfaceWidth, int surfaceHeight) =>
+        contentWidth > 0 && contentHeight > 0 && contentWidth == surfaceWidth && contentHeight == surfaceHeight;
+
     internal WindowGraphicsCaptureTelemetry GetTelemetrySnapshot()
     {
         lock (_stateLock)
@@ -162,24 +165,38 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
                     {
                         Interlocked.Add(ref _gpuLockWaitTicks, gpuLockTimer.Elapsed.Ticks);
                         if (_disposed) return;
-                        if (_latestTexture is null || size.Width != _contentSize.Width || size.Height != _contentSize.Height)
+                        var sourceDescription = sourceTexture.Description;
+                        if (!CanPublishFrame(size.Width, size.Height, (int)sourceDescription.Width, (int)sourceDescription.Height))
                         {
-                            _latestTexture?.Dispose();
-                            _latestTexture = CreateOwnedTexture(size.Width, size.Height);
+                            // A frame from the old pool can report a new content size.
+                            // It cannot be copied into a new-size texture: CopyResource
+                            // requires identical dimensions. Recreate, then wait for a
+                            // matching frame while retaining the last valid publication.
                             _contentSize = size;
                             recreatePool = true;
                             _resizeEvents++;
                         }
-                        _device.ImmediateContext.CopyResource(_latestTexture!, sourceTexture);
-                        if (sourceTimestamp > TimeSpan.Zero && _lastSourceTimestamp > TimeSpan.Zero && sourceTimestamp > _lastSourceTimestamp)
+                        else
                         {
-                            var gap = sourceTimestamp - _lastSourceTimestamp;
-                            _sourceTimestampGapTicks += gap.Ticks;
-                            _sourceTimestampGapCount++;
-                            if (gap.Ticks > _sourceTimestampGapMaxTicks) _sourceTimestampGapMaxTicks = gap.Ticks;
+                            if (_latestTexture is null || size.Width != _contentSize.Width || size.Height != _contentSize.Height)
+                            {
+                                _latestTexture?.Dispose();
+                                _latestTexture = CreateOwnedTexture(size.Width, size.Height);
+                                _contentSize = size;
+                                recreatePool = true;
+                                _resizeEvents++;
+                            }
+                            _device.ImmediateContext.CopyResource(_latestTexture!, sourceTexture);
+                            if (sourceTimestamp > TimeSpan.Zero && _lastSourceTimestamp > TimeSpan.Zero && sourceTimestamp > _lastSourceTimestamp)
+                            {
+                                var gap = sourceTimestamp - _lastSourceTimestamp;
+                                _sourceTimestampGapTicks += gap.Ticks;
+                                _sourceTimestampGapCount++;
+                                if (gap.Ticks > _sourceTimestampGapMaxTicks) _sourceTimestampGapMaxTicks = gap.Ticks;
+                            }
+                            if (sourceTimestamp > _lastSourceTimestamp) _lastSourceTimestamp = sourceTimestamp;
+                            publishFrame = true;
                         }
-                        if (sourceTimestamp > _lastSourceTimestamp) _lastSourceTimestamp = sourceTimestamp;
-                        publishFrame = true;
                     }
                 }
             }
@@ -251,6 +268,7 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         public override int Width => width;
         public override int Height => height;
         public override long Generation => 0;
+        public override bool TextureIsOwnedByCapture => true;
         public override void Dispose() => texture.Dispose();
     }
 }

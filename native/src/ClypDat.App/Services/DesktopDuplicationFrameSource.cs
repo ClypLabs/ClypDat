@@ -119,7 +119,6 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
                 var remaining = nextAcquire - _producerClock.Elapsed;
                 if (remaining > TimeSpan.Zero && _stopping.Token.WaitHandle.WaitOne(remaining)) break;
                 nextAcquire = _producerClock.Elapsed + _frameInterval;
-                lock (_stateLock)
                 lock (_nativeGate)
                 {
                     using var acquired = new AcquiredCaptureFrame(() => _duplication.ReleaseFrame());

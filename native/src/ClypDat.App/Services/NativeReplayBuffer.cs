@@ -63,8 +63,12 @@ namespace ClypDat.App.Services;
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource, IFullSessionFinalizeReporter, IVideoOverlaySettingsReceiver
 {
-    internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing) =>
-        directBltAvailable && !requiresCopyBeforeProcessing;
+    internal static bool CanUseDirectVideoProcessorInput(bool directBltAvailable, bool requiresCopyBeforeProcessing, bool textureIsOwnedByCapture) =>
+        directBltAvailable && !requiresCopyBeforeProcessing && textureIsOwnedByCapture;
+
+    internal static bool IsCropWithinTexture(int textureWidth, int textureHeight, int left, int top, int width, int height) =>
+        textureWidth > 0 && textureHeight > 0 && left >= 0 && top >= 0 && width > 0 && height > 0 &&
+        left <= textureWidth - width && top <= textureHeight - height;
 
     internal static bool IsSupportedDetectorAspectRatio(int width, int height) =>
         width > 0 && height > 0 && Math.Abs((double)width / height - 16.0 / 9.0) <= 0.01;
@@ -1471,6 +1475,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // used as `stopwatch.Elapsed - x`, and subtracting MinValue
             // overflows TimeSpan outright.
             var lastAcquireFailureLog = TimeSpan.FromHours(-1);
+            var lastInvalidCropLog = TimeSpan.FromHours(-1);
+            TimeSpan? invalidCropSince = null;
             var lastRealFrameElapsed = TimeSpan.Zero;
             var lastRecoveryAttempt = TimeSpan.FromHours(-1);
             var recoveryAttempts = 0;
@@ -2358,7 +2364,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             int cropLeft = 0, cropTop = 0, cropWidth = captureWidth, cropHeight = captureHeight;
                             if (usingWgc)
                             {
-                                (cropWidth, cropHeight) = wgcCapture!.ContentSize;
+                                (cropWidth, cropHeight) = frameLease is null
+                                    ? wgcCapture!.ContentSize
+                                    : (frameLease.Width, frameLease.Height);
                             }
                             else if (isMonitorMode)
                             {
@@ -2374,6 +2382,28 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                 cropHeight = captureHeight;
                             }
                             getFrameMs += stageStopwatch.Elapsed.TotalMilliseconds;
+
+                            // Window geometry can change between a desktop update and
+                            // the next acquired texture. Validate the requested source
+                            // box against this exact texture before either the video
+                            // processor or CopySubresourceRegion sees it.
+                            using (var geometryTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
+                            {
+                                var description = geometryTexture.Description;
+                                if (!IsCropWithinTexture((int)description.Width, (int)description.Height, cropLeft, cropTop, cropWidth, cropHeight))
+                                {
+                                    invalidCropSince ??= stopwatch.Elapsed;
+                                    if (stopwatch.Elapsed - lastInvalidCropLog >= TimeSpan.FromSeconds(5))
+                                    {
+                                        lastInvalidCropLog = stopwatch.Elapsed;
+                                        AppLog.Info($"Native capture: skipped invalid crop {cropLeft},{cropTop},{cropWidth}x{cropHeight} for acquired {description.Width}x{description.Height} texture.");
+                                    }
+                                    if (stopwatch.Elapsed - invalidCropSince >= stallRecreateAfter)
+                                        throw new InvalidOperationException("Native capture source kept returning invalid crop geometry.");
+                                    continue;
+                                }
+                                invalidCropSince = null;
+                            }
 
                             if (!occluded && (cropWidth != captureWidth || cropHeight != captureHeight))
                             {
@@ -2460,6 +2490,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     }
 
                                     pendingCropStableCount = 0;
+                                }
+                                else
+                                {
+                                    // Do not crop a new origin with an old width/height
+                                    // while resize debounce is still collecting samples.
+                                    continue;
                                 }
                             }
                             else
@@ -2616,7 +2652,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                             // those throwing here would kill the capture thread.
                                             if (CanUseDirectVideoProcessorInput(
                                                     directBltAvailable,
-                                                    frameLease?.RequiresCopyBeforeProcessing == true))
+                                                    frameLease?.RequiresCopyBeforeProcessing == true,
+                                                    frameLease?.TextureIsOwnedByCapture == true))
                                             {
                                                 try
                                                 {
@@ -2659,16 +2696,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                                 device.ImmediateContext.CopySubresourceRegion(croppedTexture, 0, 0, 0, 0, desktopTexture, 0, box);
                                             }
                                         }
-                                        if (frameLease?.RequiresCopyBeforeProcessing == true)
-                                        {
-                                            // Signal transport release directly behind the
-                                            // copy. Cursor work, scaling, readback and encode
-                                            // now use processing-owned resources only.
-                                            frameLease.Dispose();
-                                            frameLease = null;
-                                            desktopResource.Dispose();
-                                            desktopResource = null;
-                                        }
                                         copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 
                                         croppedDirty = true;
@@ -2689,14 +2716,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         var box = new Vortice.Mathematics.Box(cropLeft, cropTop, 0, cropLeft + captureWidth, cropTop + captureHeight, 1);
                                         device.ImmediateContext.CopySubresourceRegion(staging, 0, 0, 0, 0, desktopTexture, 0, box);
                                     }
-                                    if (frameLease?.RequiresCopyBeforeProcessing == true)
-                                    {
-                                        frameLease.Dispose();
-                                        frameLease = null;
-                                        desktopResource.Dispose();
-                                        desktopResource = null;
-                                    }
-
                                     var mapped = device.ImmediateContext.Map(staging, 0, MapMode.Read, MapFlags.None);
                                     copyMapMs += stageStopwatch.Elapsed.TotalMilliseconds;
 

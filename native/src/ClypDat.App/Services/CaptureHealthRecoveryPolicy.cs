@@ -16,7 +16,8 @@ internal sealed class CaptureHealthRecoveryPolicy
         // longer owns valid frames for its encoder, so restart before another
         // capture tick can submit a stale native resource.
         if (health.PipelineRecoveryAction == ReplayPipelineRecoveryAction.RestartWorker &&
-            health.LastFailure.StartsWith("D3D11 encoder could not rebind", StringComparison.Ordinal))
+            (health.State == ReplayCaptureState.Failed ||
+             health.LastFailure.StartsWith("D3D11 encoder could not rebind", StringComparison.Ordinal)))
         {
             _consecutiveFatalSamples = RequiredSamples;
             return true;

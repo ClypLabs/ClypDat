@@ -37,11 +37,37 @@ public sealed class GameFrameOwnershipTests
     {
         Assert.False(NativeReplayBuffer.CanUseDirectVideoProcessorInput(
             directBltAvailable: true,
-            requiresCopyBeforeProcessing: true));
+            requiresCopyBeforeProcessing: true,
+            textureIsOwnedByCapture: true));
         Assert.True(NativeReplayBuffer.CanUseDirectVideoProcessorInput(
             directBltAvailable: true,
-            requiresCopyBeforeProcessing: false));
-}
+            requiresCopyBeforeProcessing: false,
+            textureIsOwnedByCapture: true));
+        Assert.False(NativeReplayBuffer.CanUseDirectVideoProcessorInput(
+            directBltAvailable: true,
+            requiresCopyBeforeProcessing: false,
+            textureIsOwnedByCapture: false));
+    }
+
+    [Theory]
+    [InlineData(3840, 2160, 0, 0, 3840, 2160, true)]
+    [InlineData(3840, 2160, 3200, 0, 640, 2160, true)]
+    [InlineData(3840, 2160, 3200, 0, 641, 2160, false)]
+    [InlineData(3840, 2160, -1, 0, 1920, 1080, false)]
+    [InlineData(3840, 2160, 0, 0, 0, 1080, false)]
+    public void CropMustFitAcquiredTexture(int textureWidth, int textureHeight, int left, int top, int width, int height, bool expected)
+    {
+        Assert.Equal(expected, NativeReplayBuffer.IsCropWithinTexture(textureWidth, textureHeight, left, top, width, height));
+    }
+
+    [Theory]
+    [InlineData(1920, 1080, 1920, 1080, true)]
+    [InlineData(1920, 1080, 3840, 2160, false)]
+    [InlineData(0, 1080, 0, 1080, false)]
+    public void WgcPublishesOnlyWhenContentMatchesSurface(int contentWidth, int contentHeight, int surfaceWidth, int surfaceHeight, bool expected)
+    {
+        Assert.Equal(expected, WindowGraphicsCaptureSource.CanPublishFrame(contentWidth, contentHeight, surfaceWidth, surfaceHeight));
+    }
 
     [Fact]
     public void DxgiAcquireDeadline_CapsCallsToCaptureCadenceAndSnapsAfterAStall()
