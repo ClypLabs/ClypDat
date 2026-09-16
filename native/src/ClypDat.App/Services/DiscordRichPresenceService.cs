@@ -70,8 +70,10 @@ internal static class DiscordRichPresenceService
 
     private static bool _useClassicApplication;
 
-    private static string ActiveApplicationId =>
-        _useClassicApplication && ClassicApplicationId.Length > 0 ? ClassicApplicationId : ApplicationId;
+    private static string ActiveApplicationId => ResolveApplicationId(_useClassicApplication);
+
+    internal static string ResolveApplicationId(bool classicLogo) =>
+        classicLogo && ClassicApplicationId.Length > 0 ? ClassicApplicationId : ApplicationId;
 
     // SET_ACTIVITY is rate limited by Discord to roughly five updates per
     // twenty seconds. Updates are coalesced to comfortably inside that: going
@@ -82,6 +84,12 @@ internal static class DiscordRichPresenceService
     // Discord not running is the normal case, not a failure - retry quietly
     // and indefinitely rather than giving up on the first miss.
     private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(30);
+
+    // How long a new worker generation waits for the previous one to unwind
+    // before starting anyway. Cancellation normally lands in well under a
+    // second; this only exists so a pipe wedged in a driver-level read cannot
+    // keep Rich Presence off forever.
+    private static readonly TimeSpan WorkerDrainTimeout = TimeSpan.FromSeconds(5);
 
     private static readonly object Sync = new();
     private static readonly SemaphoreSlim Wake = new(0, 1);
@@ -97,6 +105,9 @@ internal static class DiscordRichPresenceService
     private static ActivityRevision _desired = new(DiscordPresence.None, false, 0);
     private static ActivityRevision? _sent;
     private static Task? _worker;
+    // Kept after Stop clears _worker, so the next generation has something to
+    // wait on. Cleared nowhere: a completed task is free to await.
+    private static Task? _previousWorker;
     private static CancellationTokenSource? _cts;
 
     /// <summary>
@@ -130,14 +141,15 @@ internal static class DiscordRichPresenceService
             return;
         }
 
-        // The client id is sent once, in the handshake, so a different
-        // application means a different connection. Tear the pipe down and let
-        // the worker dial back out rather than trying to switch identity on a
-        // live one.
-        if (applicationChanged && !enabledChanged)
-            Stop($"reconnecting as the {(classicLogo ? "classic" : "current")} application");
-
-        if (enabledChanged || applicationChanged) Start();
+        // An application change is NOT a restart. Stopping and starting left
+        // the outgoing worker alive inside its own connect or pump - Stop only
+        // cancels, it does not wait - so a fast old/new/old flip ran two or
+        // three of them at once against the same pid. Whichever one lost the
+        // race disposed its pipe last, and Discord clears a pid's activity when
+        // a connection closes, so the status went blank while the app believed
+        // it had just published one. The worker owns its identity instead: it
+        // notices the id it handshook with is stale and reconnects in place.
+        if (enabledChanged) Start();
         try { Wake.Release(); } catch (SemaphoreFullException) { }
     }
 
@@ -168,7 +180,21 @@ internal static class DiscordRichPresenceService
             if (_worker is not null) return;
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
-            _worker = Task.Run(() => RunAsync(token), token);
+            // Chained onto whatever the last generation is still doing. Stop
+            // cancels without waiting, so its worker can be mid-handshake when
+            // this one is created, and two live pipes from one pid is how the
+            // presence ends up showing the wrong application or nothing at all.
+            var previous = _previousWorker;
+            _worker = _previousWorker = Task.Run(async () =>
+            {
+                if (previous is not null)
+                {
+                    try { await previous.WaitAsync(WorkerDrainTimeout).ConfigureAwait(false); }
+                    catch { /* a wedged previous generation must not block this one forever */ }
+                }
+
+                await RunAsync(token).ConfigureAwait(false);
+            });
         }
 
         AppLog.Info("Discord Rich Presence: enabled.");
@@ -196,9 +222,13 @@ internal static class DiscordRichPresenceService
         while (!cancellationToken.IsCancellationRequested)
         {
             NamedPipeClientStream? pipe = null;
+            // Read once per connection: the handshake fixes the identity for
+            // the life of the pipe, so this is what the pump compares against.
+            var applicationId = ActiveApplicationId;
+            var switching = false;
             try
             {
-                pipe = await ConnectAsync(cancellationToken).ConfigureAwait(false);
+                pipe = await ConnectAsync(applicationId, cancellationToken).ConfigureAwait(false);
                 if (pipe is null)
                 {
                     // Discord is not running. Nothing is wrong; wait and look
@@ -208,7 +238,7 @@ internal static class DiscordRichPresenceService
                 }
 
                 lock (Sync) _sent = null;
-                await PumpAsync(pipe, cancellationToken).ConfigureAwait(false);
+                switching = await PumpAsync(pipe, applicationId, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -227,12 +257,22 @@ internal static class DiscordRichPresenceService
             }
 
             if (cancellationToken.IsCancellationRequested) break;
+
+            // The delay is there for "Discord is not running", which is worth
+            // being patient about. A logo swap is a user standing in front of
+            // the app waiting to see it change, so that reconnect goes now.
+            if (switching)
+            {
+                AppLog.Info($"Discord Rich Presence: reconnecting as the {(ActiveApplicationId == ApplicationId ? "current" : "classic")} application.");
+                continue;
+            }
+
             try { await Task.Delay(ReconnectDelay, cancellationToken).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
     }
 
-    private static async Task<NamedPipeClientStream?> ConnectAsync(CancellationToken cancellationToken)
+    private static async Task<NamedPipeClientStream?> ConnectAsync(string applicationId, CancellationToken cancellationToken)
     {
         for (var index = 0; index <= MaxPipeIndex; index++)
         {
@@ -258,7 +298,7 @@ internal static class DiscordRichPresenceService
             try
             {
                 await WriteFrameAsync(pipe, Opcode.Handshake,
-                    JsonSerializer.Serialize(new { v = 1, client_id = ActiveApplicationId }), cancellationToken).ConfigureAwait(false);
+                    JsonSerializer.Serialize(new { v = 1, client_id = applicationId }), cancellationToken).ConfigureAwait(false);
 
                 // Read the reply here, before anything else uses the pipe.
                 // Writing the handshake only proves the pipe accepted bytes -
@@ -286,7 +326,12 @@ internal static class DiscordRichPresenceService
         return null;
     }
 
-    private static async Task PumpAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+    /// <summary>
+    /// Returns true when the pump stopped because the presence identity
+    /// changed under it, which the caller answers with an immediate reconnect
+    /// rather than the usual backoff.
+    /// </summary>
+    private static async Task<bool> PumpAsync(NamedPipeClientStream pipe, string applicationId, CancellationToken cancellationToken)
     {
         // Reads are drained but ignored. Discord answers every frame, and a
         // pipe whose read buffer is never emptied eventually blocks the writer.
@@ -294,6 +339,12 @@ internal static class DiscordRichPresenceService
 
         while (!cancellationToken.IsCancellationRequested && pipe.IsConnected)
         {
+            if (ActiveApplicationId != applicationId)
+            {
+                await drain.ConfigureAwait(false);
+                return true;
+            }
+
             // Null means "nothing changed". Resolved under the lock, sent
             // outside it - a pipe write must never be held across a lock the
             // UI thread also takes to push a new presence.
@@ -313,6 +364,7 @@ internal static class DiscordRichPresenceService
         }
 
         await drain.ConfigureAwait(false);
+        return false;
     }
 
     private static async Task SendActivityAsync(NamedPipeClientStream pipe, ActivityRevision revision, CancellationToken cancellationToken)

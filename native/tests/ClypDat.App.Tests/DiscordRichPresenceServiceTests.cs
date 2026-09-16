@@ -6,6 +6,18 @@ namespace ClypDat.App.Tests;
 
 public sealed class DiscordRichPresenceServiceTests
 {
+    // The presence artwork and the name beside it come from the application the
+    // connection handshook as, so the logo toggle has to pick a different one.
+    [Fact]
+    public void ClassicLogo_ResolvesToItsOwnApplication()
+    {
+        var current = DiscordRichPresenceService.ResolveApplicationId(classicLogo: false);
+        var classic = DiscordRichPresenceService.ResolveApplicationId(classicLogo: true);
+
+        Assert.NotEqual(current, classic);
+        Assert.All([current, classic], id => Assert.Matches("^[0-9]{17,20}$", id));
+    }
+
     [Fact]
     public void CreateActivity_EmptyState_OmitsStateField()
     {
