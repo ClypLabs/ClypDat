@@ -60,6 +60,7 @@
     "Minecraft": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-icons/minecraft.png"
   },
   "portraits": {
-    "League of Legends": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-portraits/league-of-legends.jpg"
+    "League of Legends": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-portraits/league-of-legends.jpg",
+    "Minecraft": "https://raw.githubusercontent.com/ClypLabs/ClypDat/master/native/game-portraits/minecraft.jpg"
   }
 }

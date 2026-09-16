@@ -120,7 +120,14 @@ public static class GamePortraitService
     {
         if (string.IsNullOrWhiteSpace(displayName)) return false;
         if (File.Exists(CachePathFor(displayName))) return false;
-        if (IsNegativeCacheFresh(displayName)) return false;
+
+        // A game that missed before can gain art the moment game-icons.json
+        // grows an entry for it, and that file refreshes daily - so a miss
+        // marker only holds off the network search, never a source that
+        // resolves offline. Without this, adding curated art left everyone who
+        // had already seen the game with no portrait for another week.
+        var offlineUrl = ResolveOfflinePortraitUrl(detectionKey, displayName);
+        if (offlineUrl is null && IsNegativeCacheFresh(displayName)) return false;
 
         // One download per name per session even if several cards ask at once.
         lock (InFlight)
@@ -130,7 +137,7 @@ public static class GamePortraitService
 
         try
         {
-            var url = await ResolvePortraitUrlAsync(detectionKey, displayName, cancellationToken).ConfigureAwait(false);
+            var url = offlineUrl ?? await SearchPortraitUrlAsync(displayName, cancellationToken).ConfigureAwait(false);
             if (url is null)
             {
                 MarkMiss(displayName);
@@ -180,8 +187,9 @@ public static class GamePortraitService
     }
 
     // Order matters: the cheapest and most certain source first, the one that
-    // costs a network search last.
-    private static async Task<string?> ResolvePortraitUrlAsync(string detectionKey, string displayName, CancellationToken cancellationToken)
+    // costs a network search last. Everything here answers without touching the
+    // network, which is also what lets a miss marker be ignored for these.
+    private static string? ResolveOfflinePortraitUrl(string detectionKey, string displayName)
     {
         // 1. Steam, straight off the detection key - no lookup, no ambiguity.
         var appId = ResolveAppId(detectionKey, displayName);
@@ -199,15 +207,16 @@ public static class GamePortraitService
         //    everything in the user's library, so an Epic-only title
         //    (Fortnite, Genshin, Honkai - none of which are on Steam) resolves
         //    locally and offline.
-        var epic = EpicPortraitUrl(displayName);
-        if (epic is not null) return epic;
+        return EpicPortraitUrl(displayName);
+    }
 
-        // 4. Anything else - a Battle.net or Riot title that also ships on
-        //    Steam (Call of Duty, Diablo IV), or a game launched from
-        //    its own exe - by searching Steam for the name. Plenty of games
-        //    that ship on other launchers also have a Steam page, and this
-        //    reuses the icon service's own name matching rather than a second
-        //    guess at it.
+    // 4. Anything else - a Battle.net or Riot title that also ships on Steam
+    //    (Call of Duty, Diablo IV), or a game launched from its own exe - by
+    //    searching Steam for the name. Plenty of games that ship on other
+    //    launchers also have a Steam page, and this reuses the icon service's
+    //    own name matching rather than a second guess at it.
+    private static async Task<string?> SearchPortraitUrlAsync(string displayName, CancellationToken cancellationToken)
+    {
         var searched = await GameIconService.ResolveSteamAppIdForAsync(displayName, cancellationToken).ConfigureAwait(false);
         return searched is > 0 ? SteamPortraitUrl(searched.Value) : null;
     }

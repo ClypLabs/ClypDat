@@ -66,22 +66,31 @@
       </StackPanel>
     </Border>
 
-    <!-- Tab strip -->
+    <!-- Tab strip. Scrolls sideways once there are more games than fit, so the
+         edges are faded from code-behind rather than slicing a tab in half at
+         the viewport edge - see UpdateTabStripFade. -->
     <StackPanel Spacing="0" IsVisible="{Binding HasCustomGameTabs}">
-      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+      <ScrollViewer x:Name="GameTabScroll" Classes="gameTabStrip"
+                    HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                    ScrollChanged="GameTabScroll_OnScrollChanged"
+                    SizeChanged="GameTabScroll_OnSizeChanged">
         <ItemsControl ItemsSource="{Binding CustomGameTabs}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
-              <StackPanel Orientation="Horizontal" Spacing="4" />
+              <StackPanel Orientation="Horizontal" Spacing="6" />
             </ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
-              <Button Classes="customGameTab" Classes.active="{Binding IsSelected}" Click="CustomGameTab_OnClick">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Border Width="18" Height="18" CornerRadius="4" Background="{StaticResource EdgeBrush}" VerticalAlignment="Center">
+              <Button Classes="customGameTab" Classes.active="{Binding IsSelected}" Click="CustomGameTab_OnClick"
+                      ToolTip.Tip="{Binding DisplayName}">
+                <StackPanel Orientation="Horizontal" Spacing="9">
+                  <!-- ClipToBounds so a square icon takes the rounded corner
+                       instead of overhanging the badge it sits in. -->
+                  <Border Width="20" Height="20" CornerRadius="5" ClipToBounds="True"
+                          Background="{StaticResource EdgeBrush}" VerticalAlignment="Center">
                     <Grid>
-                      <TextBlock Text="{Binding Initial}" FontSize="10" FontWeight="Bold" Foreground="{StaticResource LinkBrush}"
+                      <TextBlock Text="{Binding Initial}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource LinkBrush}"
                                  HorizontalAlignment="Center" VerticalAlignment="Center"
                                  IsVisible="{Binding !HasIcon}" />
                       <Image Source="{Binding Icon}" Stretch="Uniform" IsVisible="{Binding HasIcon}" />
@@ -94,7 +103,7 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
       </ScrollViewer>
-      <Border Classes="settingsDivider" />
+      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
 
     <!-- Selected game. DataContext is the tab, so everything below

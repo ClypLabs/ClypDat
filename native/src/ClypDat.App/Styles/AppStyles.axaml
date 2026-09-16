@@ -377,15 +377,26 @@
        pill: the strip sits directly on the page background with a hairline
        under it, and a filled tab would read as a button floating above that
        line instead of as the selected one attached to it. -->
+  <!-- Game tabs in Custom Game Settings. Pills, not an underlined tab row: the
+       strip scrolls horizontally, and a 2px underline sat directly on top of
+       the horizontal scrollbar, so the two read as one broken rule rather than
+       as "this tab is selected". A filled pill carries selection on its own and
+       leaves the space under the strip to the scrollbar alone. -->
   <Style Selector="Button.customGameTab">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="0,0,0,2" />
+    <Setter Property="BorderThickness" Value="1" />
     <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="CornerRadius" Value="0" />
-    <Setter Property="Padding" Value="10,8" />
+    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="Padding" Value="10,7" />
     <Setter Property="Margin" Value="0" />
-    <Setter Property="Foreground" Value="{StaticResource Text_8C98A7}" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}"
@@ -401,11 +412,25 @@
     </Setter>
   </Style>
   <Style Selector="Button.customGameTab:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="Button.customGameTab.active">
+    <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Text_FFFFFF}" />
+  </Style>
+  <Style Selector="Button.customGameTab.active:not(ToggleSwitch):pointerover">
+    <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
+  </Style>
+  <!-- The tab strip's own scrollbar. The shared 10px bar spanned the full width
+       under the tabs as a grey slab that looked like a second, broken divider.
+       Half the height and pushed clear of the pills, it reads as a hint that
+       there are more games than fit. -->
+  <Style Selector="ScrollViewer.gameTabStrip ScrollBar:horizontal">
+    <Setter Property="Height" Value="5" />
+    <Setter Property="MinHeight" Value="5" />
+    <Setter Property="Margin" Value="0,8,0,0" />
   </Style>
 
   <!-- The "Add Setting" drop zone under the enabled groups. Dashed outline
