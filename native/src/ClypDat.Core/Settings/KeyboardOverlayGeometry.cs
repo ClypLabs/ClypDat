@@ -33,7 +33,21 @@ public static class KeyboardOverlayGeometry
     };
 
     private static Row ToRow(IReadOnlyList<CustomKeyCap> caps) => new(0, caps.Select(cap => new Key(cap.Label, cap.Units, cap.Code)).ToArray());
-    private static Board Truncated(string top, string home, string bottom) => new([new(0, Letters(top, TopRowCodes)), new(.42, Letters(home, HomeRowCodes)), new(.72, Letters(bottom, BottomRowCodes)), new(0, [new("Ctrl", 1.4, "ControlLeft"), new("Space", 3.8, "Space")])]);
+    // Esc, left Shift and left Alt earn their place on a compact board: they are
+    // what a viewer is looking for when they watch someone crouch, sprint or
+    // quit a menu, and the truncated board had no modifier but Ctrl.
+    //
+    // The row offsets keep the stagger the letters had before they arrived.
+    // Esc takes a full unit ahead of the top row, so the home row starts a unit
+    // and a gap further right than its old .42, and the left Shift is sized
+    // (1 + Gap + .72) - Gap = 1.72 units so Z lands exactly where it used to
+    // relative to Q - which is also about the width of a real short left Shift.
+    private static Board Truncated(string top, string home, string bottom) => new([
+        new(0, [new("Esc", 1, "Escape"), .. Letters(top, TopRowCodes)]),
+        new(1 + Gap + .42, Letters(home, HomeRowCodes)),
+        new(0, [new("Shift", 1.72, "ShiftLeft"), .. Letters(bottom, BottomRowCodes)]),
+        new(0, [new("Ctrl", 1.4, "ControlLeft"), new("Alt", 1.4, "AltLeft"), new("Space", 3.8, "Space")])
+    ]);
     private static readonly string[] TopRowCodes = ["KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP"];
     private static readonly string[] HomeRowCodes = ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL", "Semicolon"];
     private static readonly string[] BottomRowCodes = ["KeyZ", "KeyX", "KeyC", "KeyV", "KeyB", "KeyN", "KeyM"];
