@@ -63,10 +63,10 @@ internal static class DiscordRichPresenceService
     /// "clypdat", since that is the key CreateAssets sends when there is no
     /// game art to show.
     ///
-    /// Empty until that application exists, in which case the classic logo
-    /// keeps the current presence art rather than breaking the connection.
+    /// An empty id falls back to the current application, so a missing twin
+    /// leaves the presence working rather than breaking the connection.
     /// </summary>
-    private const string ClassicApplicationId = "";
+    private const string ClassicApplicationId = "1549768116165279774";
 
     private static bool _useClassicApplication;
 
@@ -135,10 +135,7 @@ internal static class DiscordRichPresenceService
         // the worker dial back out rather than trying to switch identity on a
         // live one.
         if (applicationChanged && !enabledChanged)
-        {
-            Stop();
-            AppLog.Info($"Discord Rich Presence: reconnecting as the {(classicLogo ? "classic" : "current")} application.");
-        }
+            Stop($"reconnecting as the {(classicLogo ? "classic" : "current")} application");
 
         if (enabledChanged || applicationChanged) Start();
         try { Wake.Release(); } catch (SemaphoreFullException) { }
@@ -177,7 +174,7 @@ internal static class DiscordRichPresenceService
         AppLog.Info("Discord Rich Presence: enabled.");
     }
 
-    private static void Stop()
+    private static void Stop(string reason = "disabled")
     {
         CancellationTokenSource? cts;
         lock (Sync)
@@ -191,7 +188,7 @@ internal static class DiscordRichPresenceService
         if (cts is null) return;
         try { cts.Cancel(); } catch { /* teardown is best effort */ }
         try { cts.Dispose(); } catch { /* teardown is best effort */ }
-        AppLog.Info("Discord Rich Presence: disabled.");
+        AppLog.Info($"Discord Rich Presence: {reason}.");
     }
 
     private static async Task RunAsync(CancellationToken cancellationToken)
