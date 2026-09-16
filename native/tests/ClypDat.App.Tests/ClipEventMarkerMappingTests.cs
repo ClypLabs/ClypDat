@@ -12,6 +12,21 @@ public sealed class ClipEventMarkerMappingTests
     [InlineData("not-a-known-event", "M12,3 21,12 12,21 3,12Z")]
     public void MapsEventFamiliesToCrispVectorGlyphs(string eventId, string glyph) => Assert.Equal(glyph, TimelineMarkerPresentation.AppearanceFor(eventId).Glyph);
 
+    // The marker draws its glyph with a pen or a brush depending on this flag,
+    // and getting it wrong is silent: a crosshair filled instead of stroked is
+    // a solid disc, and a plus sign filled is nothing at all, because neither
+    // encloses any area.
+    [Theory]
+    [InlineData("kill", false)]
+    [InlineData("headshot", false)]
+    [InlineData("assist", false)]
+    [InlineData("death", false)]
+    [InlineData("objective_capture", true)]
+    [InlineData("win", true)]
+    [InlineData("not-a-known-event", true)]
+    public void LineGlyphsAreStrokedAndSilhouettesAreFilled(string eventId, bool filled) =>
+        Assert.Equal(filled, TimelineMarkerPresentation.AppearanceFor(eventId).Filled);
+
     [Fact]
     public void GroupsDenseAndSimultaneousEventsWithoutDroppingOccurrences()
     {

@@ -2789,14 +2789,30 @@
     <Setter Property="Cursor" Value="Arrow" />
     <Setter Property="BoxShadow" Value="none" />
   </Style>
-  <Style Selector="Button.timelineMarker:pointerover">
-    <Setter Property="Background" Value="#3313C8B5" />
-    <Setter Property="BorderBrush" Value="{StaticResource Text_F2F6FB}" />
-    <Setter Property="BorderThickness" Value="1" />
+  <!-- Hover lifts the pin instead of filling a box behind it. The marker draws
+       its own disc, halo and stem, so a teal rectangle around all three read as
+       a second, square marker sitting behind the round one. Origin is the
+       stem's tip, so the pin grows away from the frame it points at rather
+       than sliding off it. -->
+  <Style Selector="Button.timelineMarker">
+    <Setter Property="Transitions">
+      <Transitions>
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" Easing="CubicEaseOut" />
+      </Transitions>
+    </Setter>
   </Style>
-  <Style Selector="Button.timelineMarker:focus">
+  <Style Selector="Button.timelineMarker:pointerover">
+    <Setter Property="RenderTransform" Value="scale(1.15)" />
+  </Style>
+  <Style Selector="Button.timelineMarker:pressed">
+    <Setter Property="RenderTransform" Value="scale(1.04)" />
+  </Style>
+  <!-- Keyboard focus still needs a ring of its own: the scale on hover is a
+       pointer affordance and says nothing about where focus is. -->
+  <Style Selector="Button.timelineMarker:focus-visible">
     <Setter Property="BorderBrush" Value="{StaticResource Text_F2F6FB}" />
     <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="13" />
   </Style>
   <Style Selector="Border.videoOverlayPreviewCanvas">
     <Setter Property="Background" Value="#FF0B1218" />

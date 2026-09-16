@@ -7,11 +7,18 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Shapes = Avalonia.Controls.Shapes;
 using ClypDat.App.Services;
 
 namespace ClypDat.App.Controls;
 
-public sealed record TimelineMarkerAppearance(string Glyph, string ColorKey, string FallbackColor);
+/// <summary>
+/// Filled says whether the glyph is a silhouette or a line drawing, and it is
+/// not decoration: PathIcon fills whatever it is given, so the crosshair and
+/// the plus - both single strokes enclosing no area - came out as a solid disc
+/// and as nothing at all. A stroked glyph has to be drawn with a pen.
+/// </summary>
+public sealed record TimelineMarkerAppearance(string Glyph, string ColorKey, string FallbackColor, bool Filled = true);
 public sealed record TimelineMarkerGroup(IReadOnlyList<ClipEventMarker> Markers, double CenterX, bool IsMixed);
 public sealed class TimelineMarkerActivatedEventArgs(ClipEventMarker marker) : EventArgs
 {
@@ -23,21 +30,21 @@ public static class TimelineMarkerPresentation
     public static TimelineMarkerAppearance AppearanceFor(string? eventId)
     {
         var id = eventId ?? string.Empty;
-        if (Contains(id, "death", "dead", "killed")) return new("M7,8a5,5 0 0 1 10,0v2h2v5h-3v3H8v-3H5v-5h2zm2,0v2h6V8a3,3 0 0 0-6,0", "Semantic_F05A63", "#F05A63");
-        if (Contains(id, "assist")) return new("M12,5v14M5,12h14", "Semantic_59B6FF", "#59B6FF");
+        if (Contains(id, "death", "dead", "killed")) return new("M7,7 17,17M17,7 7,17", "Semantic_F05A63", "#F05A63", Filled: false);
+        if (Contains(id, "assist")) return new("M12,5v14M5,12h14", "Semantic_59B6FF", "#59B6FF", Filled: false);
         if (Contains(id, "objective", "plant", "defuse", "capture")) return new("M12,2 19,5v6c0,5-3,8-7,11-4-3-7-6-7-11V5z", "Semantic_8BD9AE", "#8BD9AE");
         if (Contains(id, "steal", "thief")) return new("M13,2 4,14h7l-1,8 9-12h-7z", "Semantic_F4B73E", "#F4B73E");
         if (Contains(id, "win", "victory")) return new("M6,3h12v3c0,3-2,5-5,6v3h4v3H7v-3h4v-3C8,11,6,9,6,6z", "Semantic_E5A00D", "#E5A00D");
-        if (Contains(id, "precision", "headshot", "hs", "shot")) return new("M12,3a9,9 0 1 0 0,18a9,9 0 1 0 0-18m0,4v10m-5-5h10", "Semantic_CB8CFF", "#CB8CFF");
+        if (Contains(id, "precision", "headshot", "hs", "shot")) return new("M12,3a9,9 0 1 0 0,18a9,9 0 1 0 0-18m0,4v10m-5-5h10", "Semantic_CB8CFF", "#CB8CFF", Filled: false);
         if (Contains(id, "teamwipe", "team_wipe", "ace", "crown")) return new("M3,18 5,7l4,4 3-7 3,7 4-4 2,11z", "Semantic_F4B73E", "#F4B73E");
         if (Contains(id, "streak", "killstreak", "multi")) return new("M13,2C8,5 6,9 9,12c-2,0-4,2-4,4 0,3 3,5 7,5s7-2 7-6c0-3-2-5-5-6 1-3 0-5-1-7", "Semantic_F05A63", "#F05A63");
-        if (Contains(id, "kill", "frag", "elimination")) return new("M12,3a9,9 0 1 0 0,18a9,9 0 1 0 0-18m0,4v10m-5-5h10", "Semantic_59B6FF", "#59B6FF");
+        if (Contains(id, "kill", "frag", "elimination")) return new("M12,3a9,9 0 1 0 0,18a9,9 0 1 0 0-18m0,4v10m-5-5h10", "Semantic_59B6FF", "#59B6FF", Filled: false);
         return new("M12,3 21,12 12,21 3,12Z", "TextMuted", "#A8B5C3");
     }
 
     private static bool Contains(string value, params string[] terms) => terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
 
-    public static IReadOnlyList<TimelineMarkerGroup> Group(IReadOnlyList<ClipEventMarker> markers, double width, TimeSpan duration, double targetWidth = 24, double minimumGap = 4)
+    public static IReadOnlyList<TimelineMarkerGroup> Group(IReadOnlyList<ClipEventMarker> markers, double width, TimeSpan duration, double targetWidth = 26, double minimumGap = 4)
     {
         if (width <= 0 || duration <= TimeSpan.Zero) return [];
         var valid = markers.Select((marker, index) => (marker, index))
@@ -109,23 +116,151 @@ public sealed class TimelineMarkersControl : Canvas
         foreach (var group in groups) AddGroup(group);
     }
 
+    // A pin, not a dot. The old marker was a 24px disc floating above the lane
+    // with a filled glyph inside, which at a glance was a coloured circle and
+    // nothing else: the event it stood for was only readable from the tooltip,
+    // and it did not look attached to any particular frame. This draws a halo,
+    // a ringed disc carrying the glyph in the event's own colour, and a stem
+    // down to the lane edge so the eye can follow it to the time it marks.
+    private const double MarkerWidth = 26;
+    private const double DiscSize = 22;
+    private const double StemHeight = 8;
+    private const double MarkerHeight = DiscSize + StemHeight;
+
     private void AddGroup(TimelineMarkerGroup group)
     {
         var representative = group.Markers[0];
-        var appearance = group.IsMixed ? new("M5,7h14M5,12h14M5,17h14", "TextMuted", "#A8B5C3") : TimelineMarkerPresentation.AppearanceFor(representative.EventId);
-        var icon = new PathIcon { Data = Geometry.Parse(appearance.Glyph), Width = 16, Height = 16, Foreground = AppThemeService.Brush(appearance.ColorKey, appearance.FallbackColor) };
-        var content = new Grid { Width = 24, Height = 24, Children = { new Border { Background = new SolidColorBrush(Color.FromArgb(190, 18, 25, 32)), CornerRadius = new CornerRadius(12), Child = icon } } };
-        if (group.Markers.Count > 1) content.Children.Add(new Border { Background = AppThemeService.Brush("AccentBrush", "#13C8B5"), CornerRadius = new CornerRadius(7), Padding = new Thickness(3, 0), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Child = new TextBlock { Text = group.Markers.Count.ToString(), FontSize = 10, Foreground = Brushes.White } });
-        var button = new Button { Content = content, Width = 24, Height = 24, Padding = new Thickness(0), Background = Brushes.Transparent, BorderThickness = new Thickness(0), Tag = group };
+        var appearance = group.IsMixed
+            ? new(string.Empty, "TextMuted", "#A8B5C3")
+            : TimelineMarkerPresentation.AppearanceFor(representative.EventId);
+        var accent = AppThemeService.Brush(appearance.ColorKey, appearance.FallbackColor);
+
+        // A cluster of different events has no glyph that honestly represents
+        // it - the old three-line "list" icon said "menu" more than "several
+        // things happened here". The count IS the content in that case, and it
+        // is the one thing the viewer needs before deciding to open the list.
+        Control icon = group.IsMixed
+            ? new TextBlock
+            {
+                Text = group.Markers.Count.ToString(),
+                FontSize = 11,
+                FontWeight = FontWeight.Bold,
+                Foreground = accent
+            }
+            : BuildGlyph(appearance, accent);
+        icon.HorizontalAlignment = HorizontalAlignment.Center;
+        icon.VerticalAlignment = VerticalAlignment.Center;
+
+        var content = new Panel { Width = MarkerWidth, Height = MarkerHeight };
+
+        // Drawn before the stem so the stem appears to leave the disc rather
+        // than pass behind a translucent halo.
+        content.Children.Add(new Border
+        {
+            Width = MarkerWidth,
+            Height = MarkerWidth,
+            CornerRadius = new CornerRadius(MarkerWidth / 2),
+            Background = Fade(accent, 0.22),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top
+        });
+        content.Children.Add(new Shapes.Rectangle
+        {
+            Width = 2,
+            Height = StemHeight + 2,
+            RadiusX = 1,
+            RadiusY = 1,
+            Fill = Fade(accent, 0.75),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Bottom
+        });
+        content.Children.Add(new Border
+        {
+            Width = DiscSize,
+            Height = DiscSize,
+            CornerRadius = new CornerRadius(DiscSize / 2),
+            // Nearly opaque, because the lane behind it is video: a translucent
+            // disc took whatever colour the frame under it happened to be.
+            Background = new SolidColorBrush(Color.FromArgb(242, 10, 16, 21)),
+            BorderBrush = accent,
+            BorderThickness = new Thickness(1.5),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = icon
+        });
+
+        // Same-event clusters keep their glyph and carry the count as a badge.
+        // It sits on the disc rather than beside it, with the lane's own dark as
+        // a ring, so it reads as part of the pin instead of a second marker
+        // crowding the first.
+        if (group.Markers.Count > 1 && !group.IsMixed)
+            content.Children.Add(new Border
+            {
+                Background = accent,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(10, 16, 21)),
+                BorderThickness = new Thickness(1.5),
+                CornerRadius = new CornerRadius(8),
+                MinWidth = 15,
+                Height = 15,
+                Padding = new Thickness(3, 0),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, -1, 0, 0),
+                Child = new TextBlock
+                {
+                    Text = group.Markers.Count.ToString(),
+                    FontSize = 9,
+                    FontWeight = FontWeight.Bold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(10, 16, 21)),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, -1, 0, 0)
+                }
+            });
+
+        var button = new Button
+        {
+            Content = content,
+            Width = MarkerWidth,
+            Height = MarkerHeight,
+            Padding = new Thickness(0),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Tag = group,
+            RenderTransformOrigin = RelativePoint.Parse("50%,80%")
+        };
         button.Classes.Add("timelineMarker");
         var time = ClipDurationFormatter.Format(TimeSpan.FromSeconds(representative.OffsetSeconds));
         AutomationProperties.SetName(button, group.Markers.Count == 1 ? $"{representative.EventLabel}, {time}" : $"{group.Markers.Count} events at {time}");
-        ToolTip.SetTip(button, group.Markers.Count == 1 ? $"{representative.EventLabel} — {time}" : $"{group.Markers.Count} events — {time}");
+        ToolTip.SetTip(button, group.Markers.Count == 1 ? $"{representative.EventLabel}  ·  {time}" : $"{group.Markers.Count} events  ·  {time}");
         button.Click += GroupButton_OnClick;
-        SetLeft(button, Math.Clamp(group.CenterX - 12, 0, Math.Max(0, Bounds.Width - 24)));
-        SetTop(button, Math.Max(0, VideoTrackHeight - 25));
+        SetLeft(button, Math.Clamp(group.CenterX - MarkerWidth / 2, 0, Math.Max(0, Bounds.Width - MarkerWidth)));
+        SetTop(button, Math.Max(0, VideoTrackHeight - MarkerHeight));
         Children.Add(button);
     }
+
+    private static Shapes.Path BuildGlyph(TimelineMarkerAppearance appearance, IBrush accent)
+    {
+        var glyph = Geometry.Parse(appearance.Glyph);
+        return appearance.Filled
+            ? new Shapes.Path { Data = glyph, Fill = accent, Stretch = Stretch.Uniform, Width = 11, Height = 11 }
+            : new Shapes.Path
+            {
+                Data = glyph,
+                Stroke = accent,
+                StrokeThickness = 1.5,
+                StrokeJoin = PenLineJoin.Round,
+                StrokeLineCap = PenLineCap.Round,
+                Stretch = Stretch.Uniform,
+                Width = 11,
+                Height = 11
+            };
+    }
+
+    private static IBrush Fade(IBrush brush, double opacity) =>
+        brush is ISolidColorBrush solid
+            ? new SolidColorBrush(solid.Color, opacity)
+            : new SolidColorBrush(Color.FromArgb((byte)(opacity * 255), 255, 255, 255));
 
     private void GroupButton_OnClick(object? sender, RoutedEventArgs e)
     {
