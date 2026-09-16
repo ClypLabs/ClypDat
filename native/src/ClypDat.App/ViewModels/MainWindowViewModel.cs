@@ -234,6 +234,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _clypDatAccount.LiveActivityNeeded = () => ClypDatXboxActivityNeeded;
         if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
         var spotifyRestore = Settings.SpotifyEnabled ? _spotify.TryRestoreAsync() : Task.FromResult(false);
+        _spotifyRestore = spotifyRestore;
+        // Answers only once the saved Spotify session has been restored (or
+        // was never going to be): until then "not connected" is just the
+        // restore not having finished, and reporting it would overwrite a
+        // perfectly good "connected" on the site with false.
+        _clypDatAccount.SpotifyConnected = () => _spotifyRestore.IsCompleted ? SpotifyIsConnected : null;
         var clypDatRestore = _clypDatAccount.TryRestoreAsync();
         _ = SyncSpotifyStatusAfterStartupAsync(spotifyRestore, clypDatRestore);
         Settings.CustomThemes ??= new();
@@ -7222,6 +7228,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private XboxActivitySnapshot EffectiveXboxSnapshot => _clypDatSnapshot.IsConnected ? _clypDatSnapshot : _xboxSnapshot;
 
     public bool SpotifyIsConnected => _spotifySnapshot.IsConnected;
+    private readonly Task<bool> _spotifyRestore;
 
     public bool SpotifyOverlayEnabled
     {

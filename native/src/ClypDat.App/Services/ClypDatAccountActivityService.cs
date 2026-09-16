@@ -60,6 +60,17 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// </summary>
     public Func<bool>? LiveActivityNeeded { get; set; }
 
+    /// <summary>
+    /// Whether Spotify is connected in this app right now, or null while that
+    /// is not known yet - the saved Spotify session is still being restored at
+    /// startup. Every refresh compares this against what the site believes and
+    /// reports the difference, so a connect whose report was dropped (offline,
+    /// a 503, the account linked after Spotify) stops being permanent: the
+    /// account page catches up on the next poll instead of waiting for the
+    /// next connect or disconnect. Null means "say nothing".
+    /// </summary>
+    public Func<bool?>? SpotifyConnected { get; set; }
+
     /// <summary>Call when <see cref="LiveActivityNeeded"/> may have changed.</summary>
     public void LiveActivityNeedChanged()
     {
@@ -376,7 +387,25 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null,
             providers.Contains("google", StringComparer.OrdinalIgnoreCase), providers.Contains("discord", StringComparer.OrdinalIgnoreCase),
             ProfileName: result.Profile?.Name, ProfileImage: result.Profile?.Image);
+        ReconcileSpotifyStatus(result.Spotify, cancellationToken);
         Changed?.Invoke(this, _snapshot);
+    }
+
+    // Older builds of the site do not send the flag at all; nothing to compare
+    // against, so nothing to do. Re-sending is rate limited because a report
+    // that keeps failing would otherwise post on every poll for as long as the
+    // app is open.
+    private static readonly TimeSpan SpotifyResendInterval = TimeSpan.FromMinutes(5);
+    private DateTimeOffset _lastSpotifyReport = DateTimeOffset.MinValue;
+
+    private void ReconcileSpotifyStatus(bool? reported, CancellationToken cancellationToken)
+    {
+        if (reported is not { } onSite) return;
+        if (SpotifyConnected?.Invoke() is not { } inApp || inApp == onSite) return;
+        if (DateTimeOffset.UtcNow - _lastSpotifyReport < SpotifyResendInterval) return;
+        _lastSpotifyReport = DateTimeOffset.UtcNow;
+        AppLog.Info($"ClypDat account: Spotify reads {inApp} here and {onSite} on clypdat.xyz; reporting again.");
+        _ = ReportSpotifyStatusAsync(inApp, cancellationToken);
     }
 
     // Was 5 minutes. A round trip that detours through signing in (Discord's
@@ -548,6 +577,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         [JsonPropertyName("providers")] public string[]? Providers { get; set; }
         // Present only when the account has Discord linked.
         [JsonPropertyName("profile")] public Profile? Profile { get; set; }
+        [JsonPropertyName("spotify")] public bool? Spotify { get; set; }
     }
     private sealed class Profile
     {
