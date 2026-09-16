@@ -139,14 +139,19 @@ internal static class ReleaseNotesMarkdownRenderer
             }
 
             var decorations = CreateDecorations(style);
-            Inlines.Add(new Run(text)
+            var run = new Run(text)
             {
                 FontWeight = style.Bold ? FontWeight.Bold : FontWeight.Normal,
                 FontStyle = style.Italic ? FontStyle.Italic : FontStyle.Normal,
                 FontFamily = style.Code ? new FontFamily("Cascadia Mono") : FontFamily.Default,
-                Foreground = style.LinkUri is null ? null : LinkBrush,
                 TextDecorations = decorations
-            });
+            };
+            if (style.LinkUri is not null)
+            {
+                run.Foreground = LinkBrush;
+            }
+
+            Inlines.Add(run);
             _textLength += text.Length;
         }
 

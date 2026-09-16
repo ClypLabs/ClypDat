@@ -1,6 +1,8 @@
 using Avalonia.Controls.Documents;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using Avalonia.Controls;
+using Avalonia;
 using ClypDat.App.Services;
 using Xunit;
 
@@ -63,6 +65,48 @@ public sealed class ReleaseNotesMarkdownTests
         Assert.DoesNotContain(inlines, inline => inline is InlineUIContainer);
         Assert.Contains(runs, run => run.Text == "https://clypdat.xyz/releases" && run.TextDecorations!.Any(decoration => decoration.Location == TextDecorationLocation.Underline));
         Assert.Equal("Read https://clypdat.xyz/releases and **unfinished", inlines.Text);
+    }
+
+    [Fact]
+    public void InheritsParentForegroundKeepsLinksAccentedAndWrapsLongLabels()
+    {
+        AvaloniaTestThread.Run(() =>
+        {
+            var initialBrush = new SolidColorBrush(Colors.OrangeRed);
+            var changedBrush = new SolidColorBrush(Colors.MediumPurple);
+            var textBlock = new TextBlock
+            {
+                Foreground = initialBrush,
+                TextWrapping = TextWrapping.Wrap,
+                Width = 260
+            };
+            ReleaseNotesMarkdownRenderer.Apply(textBlock,
+                "plain **bold** *italic* ~~strike~~ `code` [this unsupported release note label wraps at the existing dialog width](mailto:updates@clypdat.xyz) [supported link](https://clypdat.xyz/releases)");
+
+            var runs = textBlock.Inlines!.OfType<Run>().ToArray();
+            var supportedLink = Assert.Single(runs, run => run.Text == "supported link");
+            var ordinaryRuns = runs.Where(run => run != supportedLink).ToArray();
+            var unsupportedLabel = Assert.Single(ordinaryRuns, run => run.Text == "this unsupported release note label wraps at the existing dialog width");
+
+            Assert.NotEmpty(ordinaryRuns);
+            Assert.All(ordinaryRuns, run => Assert.Same(initialBrush, run.Foreground));
+            Assert.DoesNotContain(unsupportedLabel.TextDecorations ?? [], decoration => decoration.Location == TextDecorationLocation.Underline);
+            Assert.Equal(Color.FromRgb(0x71, 0xD7, 0xFF), Assert.IsAssignableFrom<ISolidColorBrush>(supportedLink.Foreground).Color);
+
+            textBlock.Foreground = changedBrush;
+
+            Assert.All(ordinaryRuns, run => Assert.Same(changedBrush, run.Foreground));
+            Assert.Equal(Color.FromRgb(0x71, 0xD7, 0xFF), Assert.IsAssignableFrom<ISolidColorBrush>(supportedLink.Foreground).Color);
+
+            textBlock.Measure(new Size(260, double.PositiveInfinity));
+            textBlock.Arrange(new Rect(0, 0, 260, textBlock.DesiredSize.Height));
+            var layout = textBlock.TextLayout;
+            var drawableRuns = layout.TextLines.SelectMany(line => line.TextRuns).OfType<DrawableTextRun>().ToArray();
+
+            Assert.True(layout.TextLines.Count > 1, "Long unsupported labels must wrap at the dialog's 260px text width.");
+            Assert.NotEmpty(drawableRuns);
+            Assert.All(drawableRuns, run => Assert.NotNull(run.Properties!.ForegroundBrush));
+        }, TimeSpan.FromSeconds(30), "Release note text layout timed out.");
     }
 
     [Fact]
