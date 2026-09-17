@@ -170,6 +170,45 @@ public sealed class ProcessLoopbackLifetimeTests
         Assert.True(after[0] < level, $"packet after the hole was not faded in (starts at {after[0]})");
     }
 
+    [Fact]
+    public void SilenceCounter_FullySilentInterval_DoesNotCarryFramesForward()
+    {
+        var counter = new SilentHoleCounter();
+        // A whole interval of silence: no run STARTS, because nothing precedes
+        // it that was audible.
+        for (var i = 0; i < 6000; i++) counter.Packet(silent: true, previousSilent: true, frames: 480);
+        Assert.False(counter.TryTakeInterval(out var runs, out var frames));
+        Assert.Equal(0, runs);
+        Assert.Equal(2_880_000, frames);
+
+        // The next interval must report only its own silence, not the last
+        // one's - that is what produced silentMs=327550 inside a 60s window.
+        counter.Packet(silent: true, previousSilent: false, frames: 480);
+        counter.Packet(silent: true, previousSilent: true, frames: 480);
+        Assert.True(counter.TryTakeInterval(out runs, out frames));
+        Assert.Equal(1, runs);
+        Assert.Equal(960, frames);
+    }
+
+    [Fact]
+    public void SilenceCounter_CountsRunStartsNotPackets()
+    {
+        var counter = new SilentHoleCounter();
+        counter.Packet(silent: false, previousSilent: true, frames: 480);
+        counter.Packet(silent: true, previousSilent: false, frames: 480);
+        counter.Packet(silent: true, previousSilent: true, frames: 480);
+        counter.Packet(silent: false, previousSilent: true, frames: 480);
+        counter.Packet(silent: true, previousSilent: false, frames: 480);
+
+        Assert.True(counter.TryTakeInterval(out var runs, out var frames));
+        Assert.Equal(2, runs);
+        Assert.Equal(1440, frames);
+        // Cleared, so an idle capture reports nothing rather than repeating.
+        Assert.False(counter.TryTakeInterval(out runs, out frames));
+        Assert.Equal(0, runs);
+        Assert.Equal(0, frames);
+    }
+
     private static float[] ToSamples(byte[] buffer, int bytes)
     {
         var samples = new float[bytes / sizeof(float)];

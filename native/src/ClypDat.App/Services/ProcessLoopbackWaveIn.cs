@@ -417,8 +417,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     // Stream starts "in silence" so the very first packet fades in rather than
     // opening on a step from nothing.
     private bool _previousSilent = true;
-    private int _silentRuns;
-    private long _silentFrames;
+    private readonly SilentHoleCounter _holes = new();
     private DateTime _nextSilenceLogUtc = DateTime.MinValue;
 
     // WASAPI process loopback flags only some of its holes. A measured Minecraft
@@ -453,12 +452,8 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         if (buffer is null) return;
         _pendingBuffer = null;
 
-        if (_pendingSilent)
-        {
-            if (!_previousSilent) _silentRuns++;
-            _silentFrames += _pendingBytes / Math.Max(1, WaveFormat.BlockAlign);
-        }
-        else
+        _holes.Packet(_pendingSilent, _previousSilent, _pendingBytes / Math.Max(1, WaveFormat.BlockAlign));
+        if (!_pendingSilent)
         {
             if (_previousSilent) ApplyFade(buffer, _pendingBytes, fadeIn: true);
             if (nextSilent != false) ApplyFade(buffer, _pendingBytes, fadeIn: false);
@@ -498,10 +493,13 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         }
     }
 
-    // How much of a capture is actually arriving as SILENT-flagged holes -
-    // the thing the declick above is smoothing over. Logged only when there
-    // are any, once a minute, so a clip that still sounds wrong can be checked
-    // against how much the source stream was actually dropping.
+    // How much of a capture is actually arriving as holes - the thing the
+    // declick above is smoothing over. Logged only when there are any, once a
+    // minute, so a clip that still sounds wrong can be checked against how much
+    // the source stream was actually dropping. silentMs/runs is the number that
+    // separates the two causes: a run per device period (~10ms each, hundreds a
+    // minute) is capture loss, while hundreds of ms per run is the source
+    // genuinely playing nothing.
     private void LogSilenceDiagnostic()
     {
         var now = MonotonicClock.UtcNow;
@@ -513,11 +511,9 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
 
         if (now < _nextSilenceLogUtc) return;
         _nextSilenceLogUtc = now + TimeSpan.FromSeconds(60);
-        if (_silentRuns == 0) return;
-        var silentMs = _silentFrames * 1000.0 / Math.Max(1, WaveFormat.SampleRate);
-        AppLog.Debug($"Process loopback silent-packet holes: pid={_processId}, runs={_silentRuns}, silentMs={silentMs:0} (declicked).");
-        _silentRuns = 0;
-        _silentFrames = 0;
+        if (!_holes.TryTakeInterval(out var runs, out var silentFrames)) return;
+        var silentMs = silentFrames * 1000.0 / Math.Max(1, WaveFormat.SampleRate);
+        AppLog.Debug($"Process loopback silent-packet holes: pid={_processId}, runs={runs}, silentMs={silentMs:0} (declicked).");
     }
 
     private static IAudioClient ActivateAudioClient(uint processId, ProcessLoopbackCaptureMode mode)
@@ -748,6 +744,35 @@ internal enum ProcessLoopbackCaptureMode
 {
     IncludeTargetProcessTree,
     ExcludeTargetProcessTree
+}
+
+// Run and frame accounting for the silence diagnostic, split out so the
+// once-an-interval reset can be tested without a capture thread.
+internal sealed class SilentHoleCounter
+{
+    private int _runs;
+    private long _frames;
+
+    public void Packet(bool silent, bool previousSilent, int frames)
+    {
+        if (!silent) return;
+        if (!previousSilent) _runs++;
+        _frames += frames;
+    }
+
+    // Always clears, whether or not it reports. A stream that stays silent for
+    // a whole interval records no run STARTS, so returning early on runs==0
+    // without clearing carried its frames forward and the next interval that
+    // did report counted them as its own - a paused Spotify reported
+    // silentMs=327550 inside a 60s window.
+    public bool TryTakeInterval(out int runs, out long frames)
+    {
+        runs = _runs;
+        frames = _frames;
+        _runs = 0;
+        _frames = 0;
+        return runs > 0;
+    }
 }
 
 internal interface IProcessLoopbackClient : IDisposable
