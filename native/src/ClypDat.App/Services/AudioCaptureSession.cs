@@ -472,6 +472,7 @@ internal sealed class AudioCaptureSession : IDisposable
             if (aheadBytes > toleranceBytes)
             {
                 WriteZeros(aheadBytes);
+                _padBytes += aheadBytes;
                 if (aheadBytes > format.AverageBytesPerSecond / 4)
                 {
                     AppLog.Info($"Audio capture gap placed from packet timestamps: {Title}, gap={aheadBytes * 1000L / Math.Max(1, format.AverageBytesPerSecond)}ms.");
@@ -487,6 +488,7 @@ internal sealed class AudioCaptureSession : IDisposable
                 overlapBytes -= overlapBytes % Math.Max(1, format.BlockAlign);
                 bufferOffset = (int)overlapBytes;
                 bytesToWrite -= bufferOffset;
+                _trimBytes += overlapBytes;
                 if (aheadBytes < -toleranceBytes && !_loggedOverlap)
                 {
                     _loggedOverlap = true;
@@ -527,6 +529,12 @@ internal sealed class AudioCaptureSession : IDisposable
     private bool _loggedOverlap;
     private DateTime _nextPlacementDiagUtc = DateTime.MinValue;
 
+    // Silence written into, and real audio dropped out of, the timeline since
+    // the last placement diag. The individual INFO lines above only fire for a
+    // pad over 250ms and for the first trim of a capture, so a steady drizzle
+    // of sub-threshold corrections used to leave no trace at all.
+    private long _padBytes, _trimBytes;
+
     // Loudest absolute sample since the last placement diag - answers "is
     // this capture receiving actual signal or an active-but-silent stream?"
     // (a chat capture once delivered packets for a full hour whose content
@@ -557,7 +565,10 @@ internal sealed class AudioCaptureSession : IDisposable
         var writtenMs = BytesToMilliseconds(_bytesWritten);
         var peakDb = _diagPeak > 0 ? 20 * Math.Log10(_diagPeak) : -120;
         _diagPeak = 0;
-        AppLog.Debug($"Audio placement diag: {Title}, written={writtenMs / 1000:0.0}s, wall={wallMs / 1000:0.0}s, deficitMs={wallMs - writtenMs:0}, peakDb={peakDb:0}.");
+        var padMs = BytesToMilliseconds(_padBytes);
+        var trimMs = BytesToMilliseconds(_trimBytes);
+        _padBytes = _trimBytes = 0;
+        AppLog.Debug($"Audio placement diag: {Title}, written={writtenMs / 1000:0.0}s, wall={wallMs / 1000:0.0}s, deficitMs={wallMs - writtenMs:0}, peakDb={peakDb:0}, padMs={padMs:0}, trimMs={trimMs:0}.");
 
         var clockOffset = MonotonicClock.SystemClockOffset;
         if (!_loggedClockStep && Math.Abs(clockOffset.TotalSeconds) > 2)

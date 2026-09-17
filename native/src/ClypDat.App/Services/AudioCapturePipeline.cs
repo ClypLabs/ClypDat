@@ -437,6 +437,7 @@ public sealed class AudioCapturePipeline : IDisposable
     private void StopStaleAudioCaptures(AudioRoutes routes)
     {
         var wantedChat = routes.ChatRoutes.ToDictionary(route => route.AppName, route => route.ProcessId, StringComparer.OrdinalIgnoreCase);
+        var wantedGame = routes.GameProcessIds.ToHashSet();
         var wantedMics = routes.MicrophoneRoutes.ToDictionary(route => route.SourceKey, StringComparer.Ordinal);
         var excluded = routes.ExcludedProcessIds.ToHashSet();
         ReplayAudioCapture[] live;
@@ -445,8 +446,7 @@ public sealed class AudioCapturePipeline : IDisposable
         {
             var keep = capture.Kind switch
             {
-                AudioCaptureKind.Game when routes.UseProcessRouting => capture.ProcessId is int gamePid && !excluded.Contains(gamePid),
-                AudioCaptureKind.Game => capture.ProcessId is null,
+                AudioCaptureKind.Game => ShouldKeepGameCapture(routes.UseProcessRouting, capture.ProcessId, wantedGame, excluded),
                 // Keep only if this app is still configured AND its currently-resolved
                 // pid still matches - if the app restarted with a new pid, this capture
                 // is stale and a fresh one will start for the new pid.
@@ -463,6 +463,18 @@ public sealed class AudioCapturePipeline : IDisposable
                 StopAudioCapture(capture);
             }
         }
+    }
+
+    // Match the chat rule: a routed game capture is only wanted while its pid is
+    // still one the route resolves to. The old check asked only whether the pid
+    // was excluded, so a tap the route had long since stopped listing kept
+    // running against a live-but-unrelated process - one was measured writing
+    // 3.9GB of pure silence over 2h49m before the file-size roll reaped it, and
+    // being mixed into the Game Audio of every clip saved in between.
+    internal static bool ShouldKeepGameCapture(bool useProcessRouting, int? processId, IReadOnlySet<int> gameProcessIds, IReadOnlySet<int> excludedProcessIds)
+    {
+        if (!useProcessRouting) return processId is null;
+        return processId is int gamePid && gameProcessIds.Contains(gamePid) && !excludedProcessIds.Contains(gamePid);
     }
 
     private static bool IsProcessAlive(int processId)

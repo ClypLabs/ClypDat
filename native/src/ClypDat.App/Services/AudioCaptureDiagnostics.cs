@@ -19,6 +19,15 @@ internal sealed class AudioCaptureDiagnostics(string source)
         if (now >= _nextLog) Log();
     }
 
+    // A stream with nothing playing signals nothing, so the capture loop's wait
+    // returns on its own timeout instead. That interval is not thread
+    // starvation and must not be recorded as maxDrainMs - just re-base it.
+    public void Idle()
+    {
+        _lastDrain = Stopwatch.GetTimestamp();
+        if (_lastDrain >= _nextLog) Log();
+    }
+
     public void Packet(AudioClientBufferFlags flags)
     {
         _packets++;

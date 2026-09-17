@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -28,6 +29,17 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     private const string VirtualAudioDeviceProcessLoopback = "VAD\\Process_Loopback";
     private static readonly Guid AudioClientGuid = new("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
     private static readonly Guid AudioCaptureClientGuid = new("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
+    // Only reached when a driver refused event-driven capture. Sleep granularity
+    // is whatever the system timer resolution happens to be, so this is a
+    // best-effort improvement on the 10ms that was overrunning a one-period
+    // buffer, not a guarantee.
+    private const int PollIntervalMs = 2;
+    // How long a wake-up wait blocks before the loop runs its periodic work
+    // anyway. A stream with nothing playing signals rarely or not at all, and
+    // cancellation, the silence diagnostic and the drain counter all still
+    // need to run.
+    private const int PacketWaitTimeoutMs = 200;
+    private const uint WaitObject0 = 0;
     private readonly uint _processId;
     private readonly ProcessLoopbackCaptureMode _mode;
     private readonly IProcessLoopbackClient _client;
@@ -59,25 +71,42 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         private readonly IAudioClient _audioClient;
         private readonly IAudioCaptureClientNative _captureClient;
         private readonly int _processId;
+        private IntPtr _captureEvent;
         public WaveFormat WaveFormat { get; }
 
         public NativeClient(int processId, ProcessLoopbackCaptureMode mode)
         {
             if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
             _processId = processId;
-            _audioClient = ActivateAudioClient((uint)processId, mode);
-            try
+            WaveFormat = GetSharedRenderFormat();
+            // Event-driven first, polling second. A client that accepted
+            // EVENTCALLBACK but then refused SetEventHandle is stuck - an
+            // initialized IAudioClient cannot be initialized again - so the
+            // fallback gets its own activation instead of inheriting a client
+            // that can never be started.
+            foreach (var eventDriven in new[] { true, false })
             {
-                WaveFormat = GetSharedRenderFormat();
-                InitializeClient();
-                Marshal.ThrowExceptionForHR(_audioClient.GetService(AudioCaptureClientGuid, out var service));
-                _captureClient = (IAudioCaptureClientNative)service;
+                var client = ActivateAudioClient((uint)processId, mode);
+                try
+                {
+                    if (eventDriven) _captureEvent = CreateCaptureEvent();
+                    InitializeClient(client, eventDriven);
+                    Marshal.ThrowExceptionForHR(client.GetService(AudioCaptureClientGuid, out var service));
+                    _captureClient = (IAudioCaptureClientNative)service;
+                    _audioClient = client;
+                    return;
+                }
+                catch (Exception error)
+                {
+                    Marshal.ReleaseComObject(client);
+                    CloseCaptureEvent();
+                    if (!eventDriven) throw;
+                    AppLog.Info($"Process loopback event-driven capture unavailable: pid={processId}, error={error.Message}; falling back to the poll loop.");
+                }
             }
-            catch
-            {
-                Marshal.ReleaseComObject(_audioClient);
-                throw;
-            }
+
+            // Unreachable: the last attempt rethrows rather than falling out.
+            throw new InvalidOperationException("Process loopback client could not be initialized.");
         }
 
         public int Start() => _audioClient.Start();
@@ -86,21 +115,58 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         public int GetBuffer(out IntPtr data, out int frames, out AudioClientBufferFlags flags, out long position, out long qpc)
             => _captureClient.GetBuffer(out data, out frames, out flags, out position, out qpc);
         public int ReleaseBuffer(int frames) => _captureClient.ReleaseBuffer(frames);
+
+        // Event mode: WASAPI signals once per device period, so the loop wakes
+        // exactly when there is something to drain and never sleeps through a
+        // period. Polling fallback: the old fixed sleep.
+        public bool WaitForPacket(int timeoutMs)
+        {
+            if (_captureEvent == IntPtr.Zero)
+            {
+                Thread.Sleep(Math.Min(timeoutMs, PollIntervalMs));
+                return true;
+            }
+
+            return WaitForSingleObject(_captureEvent, (uint)timeoutMs) == WaitObject0;
+        }
+
         public void Dispose()
         {
             try { Marshal.ReleaseComObject(_captureClient); }
-            finally { Marshal.ReleaseComObject(_audioClient); }
+            finally
+            {
+                try { Marshal.ReleaseComObject(_audioClient); }
+                finally { CloseCaptureEvent(); }
+            }
         }
 
-        // Ask WASAPI for a capture buffer big enough to survive a scheduling
-        // stall instead of taking the engine default (one device period, ~10ms in
-        // shared mode). With a 10ms buffer drained by a 10ms poll loop there was
-        // no margin at all: any hiccup longer than a single period overran the
-        // buffer and that audio was gone. Recording has no playback latency
-        // budget, so a deeper native buffer is acceptable.
+        private static IntPtr CreateCaptureEvent()
+        {
+            // Auto-reset, initially unsignalled - what WASAPI expects from an
+            // event-driven client.
+            var handle = CreateEventW(IntPtr.Zero, false, false, null);
+            if (handle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return handle;
+        }
+
+        private void CloseCaptureEvent()
+        {
+            var handle = Interlocked.Exchange(ref _captureEvent, IntPtr.Zero);
+            if (handle != IntPtr.Zero) CloseHandle(handle);
+        }
+
+        // hnsBufferDuration is advisory here, not a guarantee: process loopback
+        // accepts the request and hands back one device period anyway (measured
+        // on this machine as requestedMs=500 -> actualFrames=480, actualMs=10,
+        // while an ordinary mic capture asking for the same 500ms got 24000
+        // frames). A capture that only holds one period cannot be polled
+        // safely - the poll loop's own wake-up jitter was measured at 12.5-14.5ms
+        // against that 10ms buffer, so whole periods were being overrun and lost
+        // as silent holes in the game track. Event-driven capture is the fix;
+        // the request stays because a driver that does honour it costs nothing.
         private const long BufferDuration100ns = 500 * 10_000L;
 
-        private void InitializeClient()
+        private void InitializeClient(IAudioClient client, bool eventDriven)
         {
             var sessionGuid = Guid.Empty;
             Exception? lastError = null;
@@ -108,28 +174,43 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
             // class), deep buffer before the default within each - if a driver
             // rejects the requested size, a working capture at the default size
             // still beats no capture.
-            foreach (var flags in new[] { AudioClientStreamFlags.Loopback, AudioClientStreamFlags.None })
+            var baseFlags = eventDriven
+                ? AudioClientStreamFlags.Loopback | AudioClientStreamFlags.EventCallback
+                : AudioClientStreamFlags.Loopback;
+            var fallbackFlags = eventDriven
+                ? AudioClientStreamFlags.EventCallback
+                : AudioClientStreamFlags.None;
+            foreach (var flags in new[] { baseFlags, fallbackFlags })
             {
                 foreach (var duration in new[] { BufferDuration100ns, 0L })
                 {
                     try
                     {
-                        Marshal.ThrowExceptionForHR(_audioClient.Initialize(
+                        Marshal.ThrowExceptionForHR(client.Initialize(
                             AudioClientShareMode.Shared,
                             flags,
                             duration,
                             0,
                             WaveFormat,
                             ref sessionGuid));
-                        var bufferResult = _audioClient.GetBufferSize(out var bufferFrames);
-                        AppLog.Info($"Process loopback buffer initialized: pid={_processId}, flags={flags}, requestedMs={duration / 10_000d:0.###}, actualFrames={(bufferResult >= 0 ? bufferFrames.ToString() : "unknown")}, actualMs={(bufferResult >= 0 ? (bufferFrames * 1000d / WaveFormat.SampleRate).ToString("0.###") : "unknown")}.");
-                        return;
                     }
                     catch (Exception error)
                     {
                         lastError = error;
                         AppLog.Info($"Process loopback buffer initialization failed: pid={_processId}, flags={flags}, requestedMs={duration / 10_000d:0.###}, error={error.Message}; trying fallback.");
+                        continue;
                     }
+
+                    // Past here the client is initialized, and an initialized
+                    // IAudioClient cannot be initialized again - so a failure
+                    // now ends this attempt for good and the constructor
+                    // re-activates for the polling fallback. SetEventHandle
+                    // must follow Initialize and precede Start, or Start fails
+                    // with AUDCLNT_E_EVENTHANDLE_NOT_SET.
+                    if (eventDriven) Marshal.ThrowExceptionForHR(client.SetEventHandle(_captureEvent));
+                    var bufferResult = client.GetBufferSize(out var bufferFrames);
+                    AppLog.Info($"Process loopback buffer initialized: pid={_processId}, flags={flags}, requestedMs={duration / 10_000d:0.###}, actualFrames={(bufferResult >= 0 ? bufferFrames.ToString() : "unknown")}, actualMs={(bufferResult >= 0 ? (bufferFrames * 1000d / WaveFormat.SampleRate).ToString("0.###") : "unknown")}.");
+                    return;
                 }
             }
 
@@ -236,9 +317,11 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         {
             token.ThrowIfCancellationRequested();
             Marshal.ThrowExceptionForHR(_client.Start());
+            var signalled = true;
             while (!token.IsCancellationRequested)
             {
-                diagnostics.Drain();
+                if (signalled) diagnostics.Drain();
+                else diagnostics.Idle();
                 Marshal.ThrowExceptionForHR(_client.GetNextPacketSize(out var packetFrames));
                 while (packetFrames > 0 && !token.IsCancellationRequested)
                 {
@@ -273,7 +356,7 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                         // long sessions and desynced saved clips).
                         var packetStartUtc = utcBase + TimeSpan.FromTicks((long)(qpcPosition - qpcBase100ns));
                         var callbackStart = Stopwatch.GetTimestamp();
-                        QueueWithDeclick(buffer, bytes, packetStartUtc, flags.HasFlag(AudioClientBufferFlags.Silent) || data == IntPtr.Zero);
+                        QueueWithDeclick(buffer, bytes, packetStartUtc, IsHole(buffer, bytes, flags, data));
                         diagnostics.Callback(callbackStart);
                     }
                     if (token.IsCancellationRequested) break;
@@ -281,7 +364,8 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
                 }
 
                 LogSilenceDiagnostic();
-                Thread.Sleep(10);
+                if (token.IsCancellationRequested) break;
+                signalled = _client.WaitForPacket(PacketWaitTimeoutMs);
             }
         }
         catch (Exception error)
@@ -336,6 +420,21 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
     private int _silentRuns;
     private long _silentFrames;
     private DateTime _nextSilenceLogUtc = DateTime.MinValue;
+
+    // WASAPI process loopback flags only some of its holes. A measured Minecraft
+    // capture had 10-20% of the stream arriving as whole zero-filled device
+    // periods with clean flags - discontinuities=0, timestampErrors=0, and the
+    // SILENT counter below had never fired once across a week of logs - while
+    // those same zero runs sat in the WAV. Unflagged, they skipped the declick
+    // and reached the file as a step at each edge, which is what the crackle
+    // was. The payload is the only dependable signal, so test that too.
+    private static bool IsHole(byte[] buffer, int bytes, AudioClientBufferFlags flags, IntPtr data)
+        => flags.HasFlag(AudioClientBufferFlags.Silent) || data == IntPtr.Zero || IsSilentPayload(buffer, bytes);
+
+    // Stops at the first non-zero byte, so audible audio costs a couple of
+    // comparisons per packet.
+    private static bool IsSilentPayload(byte[] buffer, int bytes)
+        => buffer.AsSpan(0, Math.Clamp(bytes, 0, buffer.Length)).IndexOfAnyExcept((byte)0) < 0;
 
     private void QueueWithDeclick(byte[] buffer, int bytes, DateTime startUtc, bool silent)
     {
@@ -499,6 +598,16 @@ internal sealed class ProcessLoopbackWaveIn : IWaveIn
         }
     }
 
+    [DllImport("kernel32.dll", ExactSpelling = true, CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateEventW(IntPtr eventAttributes, [MarshalAs(UnmanagedType.Bool)] bool manualReset, [MarshalAs(UnmanagedType.Bool)] bool initialState, string? name);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
     [DllImport("Mmdevapi.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
     private static extern int ActivateAudioInterfaceAsync(
         [MarshalAs(UnmanagedType.LPWStr)] string deviceInterfacePath,
@@ -649,4 +758,7 @@ internal interface IProcessLoopbackClient : IDisposable
     int GetNextPacketSize(out int frames);
     int GetBuffer(out IntPtr data, out int frames, out AudioClientBufferFlags flags, out long position, out long qpc);
     int ReleaseBuffer(int frames);
+    // Blocks until the client has something to drain, or the timeout expires.
+    // Returns whether a packet was actually signalled.
+    bool WaitForPacket(int timeoutMs);
 }

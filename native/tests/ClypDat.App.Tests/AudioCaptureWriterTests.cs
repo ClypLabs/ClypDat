@@ -319,6 +319,7 @@ public sealed class AudioCaptureWriterTests
             return 0;
         }
         public int ReleaseBuffer(int frames) { _released = 1; PacketReleased.Set(); return 0; }
+        public bool WaitForPacket(int timeoutMs) { Thread.Sleep(Math.Min(timeoutMs, 10)); return _released == 0; }
         public void Dispose() => Interlocked.Increment(ref Disposals);
     }
 
