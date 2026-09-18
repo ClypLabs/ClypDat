@@ -2,7 +2,7 @@ namespace ClypDat.App.Services;
 
 public sealed record AutoClipEventDefinition(
     string Id, string Name, string? GroupId = null, int Priority = 0,
-    bool DefaultEnabled = false, int LeadSeconds = 4, int TailSeconds = 4);
+    bool DefaultEnabled = false, int LeadSeconds = 4, int TailSeconds = 4, string? Description = null);
 
 public sealed record AutoClipGroupDefinition(string Id, string Name);
 
@@ -72,13 +72,11 @@ public static class AutoClipCatalog
         new AutoClipGameDefinition("helldivers2", "HELLDIVERS 2", new[]
         {
             Event("eliminated", "Eliminated", priority: 10, lead: 12, tail: 6),
-            Event("killstreak-20", "Killstreak ×20", "streaks", 20, true, 10, 6),
-            Event("killstreak-50", "Killstreak ×50", "streaks", 50, true, 10, 6),
-            Event("killstreak-100", "Killstreak ×100", "streaks", 100, true, 10, 6),
+            new AutoClipEventDefinition("killstreak", "Killstreaks", Priority: 100, DefaultEnabled: true, LeadSeconds: 10, TailSeconds: 6,
+                Description: "Saves one clip for a streak of 20+ kills after the HUD counter disappears for one second. Uses the highest confirmed count in the title and includes the streak, plus 10 seconds before and 6 seconds after, within your replay buffer."),
             Event("successful-mission", "Successful Mission", "missions", 80, true, 15, 10)
         }, new[]
         {
-            new AutoClipGroupDefinition("streaks", "Killstreaks"),
             new AutoClipGroupDefinition("missions", "Missions")
         }, ProviderId: "clypdat-cv",
             DetectionAliases: new[] { "helldivers2", "Helldivers 2", "HELLDIVERS™ 2" },
@@ -123,6 +121,14 @@ public static class AutoClipCatalog
     };
 
     public static AutoClipGameDefinition Get(string id) => Active.First(game => string.Equals(game.Id, id, StringComparison.OrdinalIgnoreCase));
+
+    internal static void MigrateHelldiversKillstreakSetting(IDictionary<string, bool> events)
+    {
+        string[] legacyIds = ["killstreak-20", "killstreak-50", "killstreak-100"];
+        if (!events.ContainsKey("killstreak") && legacyIds.Any(events.ContainsKey))
+            events["killstreak"] = legacyIds.Any(id => events.TryGetValue(id, out var enabled) && enabled);
+        foreach (var id in legacyIds) events.Remove(id);
+    }
 
     public static string? MatchGame(string? detectionKey, string? executable, string? displayName)
     {

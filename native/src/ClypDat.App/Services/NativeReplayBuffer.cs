@@ -2777,7 +2777,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         swsSrcData[0] = (byte*)mapped.DataPointer;
                                         swsSrcStride[0] = (int)mapped.RowPitch;
                                         ScaleSoftwareFrame(swsContext, swsSrcData, swsSrcStride, captureHeight, frame, contentBounds);
-                                        TryOfferDetectorSoftwareFrame(frame->data[0], frame->linesize[0]);
+                                        TryOfferDetectorSoftwareFrame(frame->data[0], frame->linesize[0], frame->data[1], frame->linesize[1]);
                                         if (cleanFrame is not null) ffmpeg.av_frame_copy(cleanFrame, frame);
                                     }
                                     finally
@@ -3745,7 +3745,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var candidate = ((detectorStagingIndex - age) % detectorStagingRing.Length + detectorStagingRing.Length) % detectorStagingRing.Length;
                     var result = device.ImmediateContext.Map(detectorStagingRing[candidate], 0u, MapMode.Read, MapFlags.DoNotWait, out var mapped);
                     if (result.Failure) continue;
-                    try { OfferDetectorFrame((byte*)mapped.DataPointer, (int)mapped.RowPitch); }
+                    try
+                    {
+                        var yPlane = (byte*)mapped.DataPointer;
+                        OfferDetectorFrame(yPlane, (int)mapped.RowPitch,
+                            yPlane + (int)mapped.RowPitch * outputHeight, (int)mapped.RowPitch);
+                    }
                     finally { device.ImmediateContext.Unmap(detectorStagingRing[candidate], 0); }
                     break;
                 }
@@ -3755,16 +3760,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (detectorRingWritten < detectorStagingRing.Length) detectorRingWritten++;
             }
 
-            unsafe void TryOfferDetectorSoftwareFrame(byte* luminance, int rowPitch)
+            unsafe void TryOfferDetectorSoftwareFrame(byte* luminance, int rowPitch, byte* chroma, int chromaPitch)
             {
                 if (DetectorFrameAvailable is null) return;
                 var now = stopwatch.Elapsed;
                 if (lastDetectorSample != TimeSpan.MinValue && now - lastDetectorSample < TimeSpan.FromMilliseconds(500)) return;
                 lastDetectorSample = now;
-                OfferDetectorFrame(luminance, rowPitch);
+                OfferDetectorFrame(luminance, rowPitch, chroma, chromaPitch);
             }
 
-            unsafe void OfferDetectorFrame(byte* luminance, int rowPitch)
+            unsafe void OfferDetectorFrame(byte* luminance, int rowPitch, byte* chroma, int chromaPitch)
             {
                 // Initial detector pack is deliberately fail-closed outside
                 // standard 16:9 SDR layouts, and below the resolution where
@@ -3786,7 +3791,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     MonotonicClock.UtcNow,
                     CropGray(luminance, rowPitch, regions.First),
                     CropGray(luminance, rowPitch, regions.Second),
-                    CropGray(luminance, rowPitch, regions.Third)));
+                    CropGray(luminance, rowPitch, regions.Third),
+                    regions == DetectorRegions.ForGame("helldivers2")
+                        ? Helldivers2CounterMask.FromNv12(
+                            new ReadOnlySpan<byte>(luminance, checked(rowPitch * outputHeight)), rowPitch,
+                            new ReadOnlySpan<byte>(chroma, checked(chromaPitch * ((outputHeight + 1) / 2))), chromaPitch,
+                            regions.Third.ToPixelRect(outputWidth, outputHeight))
+                        : null));
             }
 
             unsafe GrayDetectorImage CropGray(byte* luminance, int rowPitch, NormalizedRegion region)

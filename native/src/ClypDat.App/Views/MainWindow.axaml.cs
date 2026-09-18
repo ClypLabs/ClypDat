@@ -5934,7 +5934,7 @@ public sealed partial class MainWindow : Window
     {
         var (startUtc, endUtc) = AutoClipWindowPolicy.ForRequest(request,
             _replayBuffer?.Duration ?? AutoClipWindowPolicy.MinimumLength);
-        var clampToHistory = request.GameId == "helldivers2" && request.EventId.StartsWith("killstreak-", StringComparison.Ordinal);
+        var clampToHistory = request.GameId == "helldivers2" && request.EventId.Equals("killstreak", StringComparison.Ordinal);
         Dispatcher.UIThread.Post(() => _ = SaveReplayClipAsync(request.Title, new ReplayClipWindow(startUtc, endUtc), request.GameName, request.EventType, request.Events, clampToHistory));
     }
 

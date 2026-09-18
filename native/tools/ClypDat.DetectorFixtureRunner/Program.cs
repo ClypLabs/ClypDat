@@ -50,9 +50,13 @@ internal static class Program
             .OrderBy(window => window.StartSeconds)
             .ToArray();
 
+        // An empty label list means no events anywhere in the recording.
+        // Still replay every frame so a false completion cannot pass vacuously.
+        if (windows.Length == 0) windows = [new FixtureWindow(0, null)];
+
         // Streak start and intermediate thresholds must be observed, even when
         // the only positive label is the eventual disappearance.
-        if (fixture.Labels.Any(label => label.EventId?.StartsWith("killstreak-", StringComparison.Ordinal) == true))
+        if (fixture.Labels.Any(label => label.EventId?.StartsWith("killstreak", StringComparison.Ordinal) == true))
             windows = [new FixtureWindow(0, fixture.Labels.Max(label => label.TimeSeconds) + 8)];
 
         foreach (var window in windows)
@@ -68,12 +72,16 @@ internal static class Program
                      {
                          "-hide_banner", "-loglevel", "error", "-hwaccel", "auto",
                          "-ss", window.StartSeconds.ToString(CultureInfo.InvariantCulture), "-i", recordingPath,
-                         "-t", window.DurationSeconds.ToString(CultureInfo.InvariantCulture),
                          "-vf", $"fps={FramesPerSecond.ToString(CultureInfo.InvariantCulture)}",
-                         "-start_number", "0",
-                         Path.Combine(outputDirectory, $"frame-{startMilliseconds:D9}-%04d.png")
+                         "-start_number", "0"
                      })
                 startInfo.ArgumentList.Add(argument);
+            if (window.DurationSeconds is { } duration)
+            {
+                startInfo.ArgumentList.Add("-t");
+                startInfo.ArgumentList.Add(duration.ToString(CultureInfo.InvariantCulture));
+            }
+            startInfo.ArgumentList.Add(Path.Combine(outputDirectory, $"frame-{startMilliseconds:D9}-%04d.png"));
 
             using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start FFmpeg.");
             var error = await process.StandardError.ReadToEndAsync();
@@ -104,7 +112,8 @@ internal static class Program
             var full = GrayPng.Read(frame.Path);
             var center = await reader.ReadTextAsync(GrayTemplateMatcher.Crop(full, Regions.First));
             var mission = await reader.ReadTextAsync(GrayTemplateMatcher.Crop(full, Regions.Second));
-            var counter = await counterReader.ReadAsync(GrayTemplateMatcher.Crop(full, Regions.Third));
+            var counterImages = await GrayPng.ReadCounterAsync(frame.Path, Regions.Third);
+            var counter = await counterReader.ReadAsync(counterImages.Gray, counterImages.Mask);
             Console.WriteLine($"{frame.Timestamp:mm\\:ss\\.fff} counter={counter.Count} visibility={counter.Visibility} score={counter.SkullScore:F3}");
             var current = detector.Observe(new Helldivers2FrameObservation(frame.Timestamp, center, mission,
                 counter.Text, counter.Visibility, counter.Count));
@@ -130,6 +139,7 @@ internal static class Program
             var match = detections.Select((item, index) => (item, index))
                 .Where(pair => !matchedDetections.Contains(pair.index)
                                && string.Equals(pair.item.EventId, label.EventId, StringComparison.OrdinalIgnoreCase)
+                               && (label.ExpectedLabel is null || pair.item.Label == label.ExpectedLabel)
                                && Math.Abs(pair.item.Timestamp.TotalSeconds - label.TimeSeconds) <= 5)
                 .OrderBy(pair => Math.Abs(pair.item.Timestamp.TotalSeconds - label.TimeSeconds))
                 .FirstOrDefault();
@@ -145,7 +155,7 @@ internal static class Program
     }
 
     private sealed record Fixture(string RecordingId, IReadOnlyList<FixtureLabel> Labels);
-    private sealed record FixtureLabel(double TimeSeconds, string Kind, string? EventId);
-    private sealed record FixtureWindow(double StartSeconds, double DurationSeconds);
+    private sealed record FixtureLabel(double TimeSeconds, string Kind, string? EventId, string? ExpectedLabel = null);
+    private sealed record FixtureWindow(double StartSeconds, double? DurationSeconds);
     private sealed record FrameSample(string Path, TimeSpan Timestamp);
 }

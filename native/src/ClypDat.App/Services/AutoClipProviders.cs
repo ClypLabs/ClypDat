@@ -23,7 +23,7 @@ public static class AutoClipWindowPolicy
     public static (DateTime StartUtc, DateTime EndUtc) ForRequest(AutoClipRequest request, TimeSpan available)
     {
         var window = Extend(request.StartUtc, request.EndUtc, available);
-        return request.GameId == "helldivers2" && request.EventId.StartsWith("killstreak-", StringComparison.Ordinal)
+        return request.GameId == "helldivers2" && request.EventId.Equals("killstreak", StringComparison.Ordinal)
             ? ClampToHistory(window.StartUtc, window.EndUtc, available, window.EndUtc)
             : window;
     }

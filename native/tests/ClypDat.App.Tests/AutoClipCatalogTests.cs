@@ -57,12 +57,49 @@ public sealed class AutoClipCatalogTests
 
         var helldivers = AutoClipCatalog.Get("helldivers2");
         Assert.False(helldivers.Events.Single(item => item.Id == "eliminated").DefaultEnabled);
-        Assert.All(helldivers.Events.Where(item => item.Id.StartsWith("killstreak-", StringComparison.Ordinal)), item => Assert.True(item.DefaultEnabled));
+        var streak = Assert.Single(helldivers.Events, item => item.Id.StartsWith("killstreak", StringComparison.Ordinal));
+        Assert.True(streak.DefaultEnabled);
+        Assert.Equal("killstreak", streak.Id);
+        Assert.Null(streak.GroupId);
+        Assert.Contains("20+", streak.Description);
+        Assert.Contains("one second", streak.Description);
         var successfulMission = helldivers.Events.Single(item => item.Id == "successful-mission");
         Assert.True(successfulMission.DefaultEnabled);
         Assert.Equal("missions", successfulMission.GroupId);
         Assert.Equal(15, successfulMission.LeadSeconds);
         Assert.Equal(10, successfulMission.TailSeconds);
+    }
+
+    [Theory]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, false, false, true)]
+    [InlineData(false, true, false, true)]
+    [InlineData(false, false, true, true)]
+    public void LegacyKillstreakSettingsMigrateToOneToggle(bool twenty, bool fifty, bool hundred, bool expected)
+    {
+        var events = new Dictionary<string, bool>
+        {
+            ["killstreak-20"] = twenty, ["killstreak-50"] = fifty, ["killstreak-100"] = hundred, ["eliminated"] = false
+        };
+        AutoClipCatalog.MigrateHelldiversKillstreakSetting(events);
+        Assert.Equal(expected, events["killstreak"]);
+        Assert.False(events["eliminated"]);
+        Assert.Equal(2, events.Count);
+        events["killstreak"] = !expected;
+        AutoClipCatalog.MigrateHelldiversKillstreakSetting(events);
+        Assert.Equal(!expected, events["killstreak"]);
+    }
+
+    [Fact]
+    public void NewKillstreakPreferenceWinsOverLegacyAndMissingDefaultsRemainUnset()
+    {
+        var events = new Dictionary<string, bool>();
+        AutoClipCatalog.MigrateHelldiversKillstreakSetting(events);
+        Assert.Empty(events);
+        events["killstreak"] = false;
+        events["killstreak-100"] = true;
+        AutoClipCatalog.MigrateHelldiversKillstreakSetting(events);
+        Assert.False(Assert.Single(events).Value);
     }
 
     // The settings list renders the catalog in order, and every tile now comes
@@ -121,7 +158,7 @@ public sealed class AutoClipCatalogTests
         // older install is rejected rather than answering without it.
         // 11 carries the overlay recording mode (editable layers or burned in).
         Assert.Equal(11, CaptureWorkerProtocol.Version);
-        Assert.Equal(1, DetectorHostProtocol.Version);
+        Assert.Equal(2, DetectorHostProtocol.Version);
         Assert.Equal(3, DetectorHostProtocol.FrameSlotCount);
         Assert.Equal(10, DetectorHostProtocol.MaximumFramesPerSecond);
         Assert.Equal(512L * 1024 * 1024, DetectorHostProtocol.MaximumWorkingSetBytes);

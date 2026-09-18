@@ -18,12 +18,13 @@ public sealed class Helldivers2CounterReader
             templateRoot ?? DetectorTemplates.DefaultRoot, "helldivers2", "skull.png")), TemplateScoring.HighPass3);
     }
 
-    public async Task<Helldivers2CounterReading> ReadAsync(GrayDetectorImage image)
+    public async Task<Helldivers2CounterReading> ReadAsync(GrayDetectorImage image, GrayDetectorImage? mask = null)
     {
-        if (image.Width <= 0 || image.Height <= 0 || image.Pixels.Length != image.Width * image.Height)
+        if (image.Width <= 0 || image.Height <= 0 || image.Pixels.Length != (long)image.Width * image.Height ||
+            (mask is not null && (mask.Width != image.Width || mask.Height != image.Height || mask.Pixels.Length != image.Pixels.Length)))
             return new(Helldivers2CounterVisibility.Unknown, null, string.Empty, 0);
 
-        var hud = Resize(image, 308, 174);
+        var hud = Resize(mask ?? image, 308, 174);
         var score = 0.0;
         for (var size = 32; size <= 64; size += 2)
         for (var y = 72; y <= 82; y += 2)
@@ -35,16 +36,21 @@ public sealed class Helldivers2CounterReader
         if (visibility != Helldivers2CounterVisibility.Present)
             return new(visibility, null, string.Empty, score);
 
-        var text = await _readText(PrepareNumber(hud)).ConfigureAwait(false);
-        if (Helldivers2Detector.TryParseKillCounter(text, out var count))
-            return new(visibility, count, text, score);
+        var text = string.Empty;
+        for (var pass = 0; pass < (mask is null ? 1 : 2); pass++)
+        {
+            if (pass == 1) hud = Resize(image, 308, 174);
+            text = await _readText(PrepareNumber(hud)).ConfigureAwait(false);
+            if (Helldivers2Detector.TryParseKillCounter(text, out var count))
+                return new(visibility, count, text, score);
 
-        // At smaller resolutions OCR often treats the multiplier as part of a
-        // digit. Retry the digits alone; never accept bare numbers from the
-        // wider crop where an "x" misread as "8" would invent a hundred-tier.
-        var digits = (await _readText(PrepareNumber(hud, digitsOnly: true)).ConfigureAwait(false)).Trim();
-        return new(visibility, digits.Length is >= 1 and <= 3 && digits.All(char.IsAsciiDigit)
-            ? int.Parse(digits, System.Globalization.CultureInfo.InvariantCulture) : null, digits, score);
+            // Accept bare numbers only from the digits crop: a multiplier
+            // misread as "8" in the wider crop could invent a hundred-tier.
+            text = (await _readText(PrepareNumber(hud, digitsOnly: true)).ConfigureAwait(false)).Trim();
+            if (text.Length is >= 1 and <= 3 && text.All(char.IsAsciiDigit))
+                return new(visibility, int.Parse(text, System.Globalization.CultureInfo.InvariantCulture), text, score);
+        }
+        return new(visibility, null, text, score);
     }
 
     internal static GrayDetectorImage PrepareNumber(GrayDetectorImage hud, bool digitsOnly = false)

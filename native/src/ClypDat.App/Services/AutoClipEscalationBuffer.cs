@@ -65,7 +65,7 @@ internal sealed class AutoClipEscalationBuffer : IDisposable
 
         // Helldivers has already observed the entire streak, including its end.
         var completedStreak = detected.GameId == "helldivers2" && detected.StreakStartUtc.HasValue
-            && detected.EventId.StartsWith("killstreak-", StringComparison.Ordinal);
+            && detected.EventId.Equals("killstreak", StringComparison.Ordinal);
         if (definition?.GroupId is not { } group || completedStreak)
         {
             Pending?.Invoke(this, PendingMessage(detected.EventLabel));

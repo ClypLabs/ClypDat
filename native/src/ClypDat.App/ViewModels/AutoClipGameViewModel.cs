@@ -174,6 +174,8 @@ public sealed class AutoClipEventViewModel : ViewModelBase
     private readonly Action _changed;
     public AutoClipEventViewModel(AutoClipEventDefinition definition, AutoClipGameSettings settings, Action changed) { _definition = definition; _settings = settings; _changed = changed; }
     public string Name => _definition.Name;
+    public string? Description => _definition.Description;
+    public bool HasDescription => !string.IsNullOrWhiteSpace(Description);
     public bool IsEnabled { get => _settings.Events.TryGetValue(_definition.Id, out var enabled) && enabled; set { if (IsEnabled == value) return; _settings.Events[_definition.Id] = value; OnPropertyChanged(); _changed(); } }
     public void Refresh() => OnPropertyChanged(nameof(IsEnabled));
 }

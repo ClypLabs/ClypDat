@@ -13,7 +13,7 @@ public sealed class AutoClipEscalationBufferTests
         using var buffer = new AutoClipEscalationBuffer(catalog.Id, catalog.Name, catalog.Events);
         var ready = new List<AutoClipRequest>();
         buffer.Ready += (_, request) => ready.Add(request);
-        var completion = new Helldivers2DetectedEvent("killstreak-50", "Killstreak ×57",
+        var completion = new Helldivers2DetectedEvent("killstreak", "Killstreak ×57",
             TimeSpan.FromTicks(Origin.AddSeconds(28).Ticks), "first", 0.95, TimeSpan.FromTicks(Origin.Ticks));
         var detected = LiveHelldivers2Detector.ToAutoClipEvent(completion);
         buffer.Offer(detected);

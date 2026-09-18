@@ -12,8 +12,8 @@ public sealed class AutoClipWindowPolicyTests
     [InlineData(80, 15, 15)]
     public void HelldiversWindowCoversWholeStreakWithinHistory(int streakLength, int history, int expectedLength)
     {
-        var events = new[] { new AutoClipEvent("killstreak-50", "Killstreak ×57", Event) };
-        var request = new AutoClipRequest("helldivers2", "Helldivers 2", "killstreak-50", "Killstreak ×57",
+        var events = new[] { new AutoClipEvent("killstreak", "Killstreak ×57", Event) };
+        var request = new AutoClipRequest("helldivers2", "Helldivers 2", "killstreak", "Killstreak ×57",
             "Killstreak ×57", Event.AddSeconds(-streakLength - 10), Event.AddSeconds(6), Events: events);
         var window = AutoClipWindowPolicy.ForRequest(request, TimeSpan.FromSeconds(history));
         Assert.Equal(expectedLength, (window.EndUtc - window.StartUtc).TotalSeconds);
@@ -30,14 +30,14 @@ public sealed class AutoClipWindowPolicyTests
         Assert.Equal(Event.AddSeconds(-50), window.StartUtc);
         Assert.Equal(Event.AddSeconds(6), window.EndUtc);
         var marker = Assert.Single(ClipEventMarkerMapping.FromEvents(
-            new[] { new AutoClipEvent("killstreak-50", "Killstreak ×57", Event) }, window.StartUtc, window.EndUtc));
+            new[] { new AutoClipEvent("killstreak", "Killstreak ×57", Event) }, window.StartUtc, window.EndUtc));
         Assert.Equal(50, marker.OffsetSeconds);
     }
 
     [Fact]
     public void FreshReplayBufferMapsMarkersAgainstActualSavedHistory()
     {
-        var events = new[] { new AutoClipEvent("killstreak-50", "Killstreak ×57", Event) };
+        var events = new[] { new AutoClipEvent("killstreak", "Killstreak ×57", Event) };
         var source = new SpotifySourceWindow(MonotonicClock.ToSharedSeconds(Event.AddSeconds(-8)), 14, MonotonicClock.BootId);
         var marker = Assert.Single(ClipEventMarkerMapping.FromSavedWindow(events,
             Event.AddSeconds(-90), Event.AddSeconds(6), source));

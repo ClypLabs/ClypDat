@@ -63,7 +63,7 @@ internal sealed class LiveHelldivers2Detector : ILiveGameDetector
                 {
                     var center = await _ocr.ReadTextAsync(frame.First).ConfigureAwait(false);
                     var mission = await _ocr.ReadTextAsync(frame.Second).ConfigureAwait(false);
-                    var counter = await _counterReader.ReadAsync(frame.Third).ConfigureAwait(false);
+                    var counter = await _counterReader.ReadAsync(frame.Third, frame.ThirdMask).ConfigureAwait(false);
                     var timestamp = TimeSpan.FromTicks(frame.CapturedUtc.Ticks);
                     lock (_gate)
                     {

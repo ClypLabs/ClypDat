@@ -10,13 +10,15 @@ namespace ClypDat.App.Tests;
 
 public sealed class DetectorHostTests
 {
-    [Fact]
-    public void SharedMemoryCodecRoundTripsAllRegions()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SharedMemoryCodecRoundTripsAllRegions(bool withMask)
     {
         using var map = MemoryMappedFile.CreateNew(null, DetectorFrameCodec.SlotBytes * 3L);
         using var view = map.CreateViewAccessor();
         var timestamp = new DateTime(2026, 9, 5, 1, 2, 3, DateTimeKind.Utc);
-        var frame = new DetectorFrameSnapshot(timestamp, Image(10, 7, 1), Image(8, 6, 2), Image(5, 4, 3));
+        var frame = new DetectorFrameSnapshot(timestamp, Image(10, 7, 1), Image(8, 6, 2), Image(5, 4, 3), withMask ? Image(5, 4, 4) : null);
 
         DetectorFrameCodec.Write(view, 2, frame);
         var result = DetectorFrameCodec.Read(view, 2);
@@ -25,6 +27,68 @@ public sealed class DetectorHostTests
         Assert.Equal(frame.First.Pixels, result.First.Pixels);
         Assert.Equal(frame.Second.Pixels, result.Second.Pixels);
         Assert.Equal(frame.Third.Pixels, result.Third.Pixels);
+        Assert.Equal(frame.ThirdMask?.Pixels, result.ThirdMask?.Pixels);
+    }
+
+    [Fact]
+    public void RecycledSlotClearsMaskPresence()
+    {
+        using var map = MemoryMappedFile.CreateNew(null, DetectorFrameCodec.SlotBytes * 3L);
+        using var view = map.CreateViewAccessor();
+        var frame = new DetectorFrameSnapshot(DateTime.UtcNow, Image(1, 1, 1), Image(1, 1, 2), Image(5, 4, 3), Image(5, 4, 4));
+        DetectorFrameCodec.Write(view, 0, frame);
+        DetectorFrameCodec.Write(view, 0, frame with { ThirdMask = null });
+        Assert.Null(DetectorFrameCodec.Read(view, 0).ThirdMask);
+    }
+
+    [Fact]
+    public void CodecRejectsInvalidMaskGeometryOnWriteAndRead()
+    {
+        using var map = MemoryMappedFile.CreateNew(null, DetectorFrameCodec.SlotBytes * 3L);
+        using var view = map.CreateViewAccessor();
+        var frame = new DetectorFrameSnapshot(DateTime.UtcNow, Image(1, 1, 1), Image(1, 1, 2), Image(5, 4, 3), Image(4, 5, 4));
+        Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Write(view, 0, frame));
+        frame = frame with { ThirdMask = Image(5, 4, 4) };
+        DetectorFrameCodec.Write(view, 0, frame);
+        const int maskHeader = 8 + 13 + 13 + 12 + 20;
+        view.Write(maskHeader, 4); view.Write(maskHeader + 4, 5);
+        Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Read(view, 0));
+        view.Write(maskHeader, 0); view.Write(maskHeader + 4, 0); // A partial null marker is invalid.
+        Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Read(view, 0));
+        Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Write(view, -1, frame));
+        Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Read(view, 3));
+        Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Write(view, 0, frame with { First = new(2, 2, [1]) }));
+        Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Write(view, 0, frame with { First = Image(1024, 1024, 1) }));
+    }
+
+    [Theory]
+    [InlineData(1920, 1080)]
+    [InlineData(2560, 1440)]
+    [InlineData(3840, 2160)]
+    public void SupportedHelldiversCropsWithMaskFitSlot(int width, int height)
+    {
+        var regions = DetectorRegions.ForGame("helldivers2")!;
+        GrayDetectorImage Crop(NormalizedRegion area)
+        {
+            var rect = area.ToPixelRect(width, height);
+            return Image(rect.Width, rect.Height, 0);
+        }
+        using var map = MemoryMappedFile.CreateNew(null, DetectorFrameCodec.SlotBytes * 3L);
+        using var view = map.CreateViewAccessor();
+        var third = Crop(regions.Third);
+        DetectorFrameCodec.Write(view, 2, new(DateTime.UtcNow, Crop(regions.First), Crop(regions.Second), third, third));
+        Assert.Equal(third.Pixels, DetectorFrameCodec.Read(view, 2).ThirdMask!.Pixels);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task WireRejectsIncompatibleProtocol(int version)
+    {
+        using var stream = new MemoryStream();
+        var bytes = Encoding.UTF8.GetBytes($"{{\"version\":{version},\"type\":\"frame\",\"payload\":{{}}}}");
+        stream.Write(BitConverter.GetBytes(bytes.Length)); stream.Write(bytes); stream.Position = 0;
+        await Assert.ThrowsAsync<InvalidDataException>(() => DetectorHostWire.ReadAsync(stream, CancellationToken.None));
     }
 
     // The wire writes with web defaults (camelCase) but payloads used to be read

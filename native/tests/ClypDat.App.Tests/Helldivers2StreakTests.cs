@@ -7,12 +7,12 @@ public sealed class Helldivers2StreakTests
 {
     [Theory]
     [InlineData(19, null)]
-    [InlineData(20, "killstreak-20")]
-    [InlineData(49, "killstreak-20")]
-    [InlineData(50, "killstreak-50")]
-    [InlineData(99, "killstreak-50")]
-    [InlineData(100, "killstreak-100")]
-    [InlineData(123, "killstreak-100")]
+    [InlineData(20, "killstreak")]
+    [InlineData(49, "killstreak")]
+    [InlineData(50, "killstreak")]
+    [InlineData(99, "killstreak")]
+    [InlineData(100, "killstreak")]
+    [InlineData(123, "killstreak")]
     public void InclusiveBoundaries(int peak, string? expected)
     {
         var detector = new Helldivers2Detector();
@@ -34,11 +34,9 @@ public sealed class Helldivers2StreakTests
     }
 
     [Theory]
-    [InlineData("killstreak-20,killstreak-50", "killstreak-50")]
-    [InlineData("killstreak-20,killstreak-100", "killstreak-100")]
-    [InlineData("killstreak-20", "killstreak-20")]
+    [InlineData("killstreak", "killstreak")]
     [InlineData("", null)]
-    public void HighestEnabledReachedTierWins(string enabled, string? expected)
+    public void SingleSettingControlsCompletedStreak(string enabled, string? expected)
     {
         var detector = new Helldivers2Detector();
         Present(detector, 0, 125);

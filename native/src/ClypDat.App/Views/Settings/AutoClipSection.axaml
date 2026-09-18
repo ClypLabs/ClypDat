@@ -134,7 +134,11 @@
                   <ItemsControl ItemsSource="{Binding UngroupedEvents}" Margin="22,0,0,0">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <CheckBox Classes="autoClipEvent" Content="{Binding Name}" IsChecked="{Binding IsEnabled}" />
+                        <StackPanel>
+                          <CheckBox Classes="autoClipEvent" Content="{Binding Name}" IsChecked="{Binding IsEnabled}" />
+                          <TextBlock Classes="settingsRowDescSm" Text="{Binding Description}" IsVisible="{Binding HasDescription}"
+                                     TextWrapping="Wrap" Margin="28,0,0,8" />
+                        </StackPanel>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>

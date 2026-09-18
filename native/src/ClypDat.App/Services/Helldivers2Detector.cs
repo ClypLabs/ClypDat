@@ -26,7 +26,7 @@ public sealed record Helldivers2DetectedEvent(
 /// </summary>
 public sealed partial class Helldivers2Detector
 {
-    private static readonly int[] KillThresholds = [20, 50, 100];
+    private const int MinimumKillstreak = 20;
     private readonly PhraseLatch _eliminated = new("ELIMINATED", confirmationFrames: 2, resetFrames: 6);
     private readonly PhraseLatch _successfulMission = new("SQUAD PAYOUT", confirmationFrames: 2, resetFrames: 20);
     private TimeSpan? _streakStart;
@@ -74,10 +74,8 @@ public sealed partial class Helldivers2Detector
             _firstAbsent ??= frame.Timestamp;
             if (++_absentSamples >= 3 && frame.Timestamp - _firstAbsent.Value >= TimeSpan.FromSeconds(1))
             {
-                var threshold = KillThresholds.LastOrDefault(value => value <= _peak
-                    && (enabledEvents is null || enabledEvents.Contains($"killstreak-{value}")));
-                if (threshold > 0)
-                    events.Add(Create($"killstreak-{threshold}", $"Killstreak ×{_peak}", _firstAbsent.Value, 0.95)
+                if (_peak >= MinimumKillstreak && (enabledEvents is null || enabledEvents.Contains("killstreak")))
+                    events.Add(Create("killstreak", $"Killstreak ×{_peak}", _firstAbsent.Value, 0.95)
                         with { StreakStart = start });
                 ResetStreak();
             }

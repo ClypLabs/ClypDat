@@ -11,7 +11,8 @@ public sealed record DetectorFrameSnapshot(
     DateTime CapturedUtc,
     GrayDetectorImage First,
     GrayDetectorImage Second,
-    GrayDetectorImage Third);
+    GrayDetectorImage Third,
+    GrayDetectorImage? ThirdMask = null);
 
 public sealed record DetectorRegionSet(NormalizedRegion First, NormalizedRegion Second, NormalizedRegion Third);
 

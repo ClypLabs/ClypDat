@@ -70,10 +70,28 @@ internal static class DetectorFrameCodec
 
     public static void Write(MemoryMappedViewAccessor view, int slot, DetectorFrameSnapshot frame)
     {
+        ValidateSlot(slot);
+        var images = new[] { frame.First, frame.Second, frame.Third, frame.ThirdMask };
+        long bytes = 8 + 4 * 12;
+        foreach (var image in images)
+        {
+            if (image is null) continue;
+            ValidateImage(image.Width, image.Height, image.Pixels.Length);
+            bytes += image.Pixels.Length;
+        }
+        ValidateMask(frame.Third, frame.ThirdMask);
+        if (bytes > SlotBytes) throw new InvalidDataException("Detector frame exceeds its shared-memory slot.");
         var offset = (long)slot * SlotBytes;
         view.Write(offset, frame.CapturedUtc.Ticks); offset += 8;
-        foreach (var image in new[] { frame.First, frame.Second, frame.Third })
+        foreach (var image in images)
         {
+            // Always overwrite the absence marker when a slot is recycled.
+            if (image is null)
+            {
+                view.Write(offset, 0); view.Write(offset + 4, 0); view.Write(offset + 8, 0);
+                offset += 12;
+                continue;
+            }
             view.Write(offset, image.Width); offset += 4;
             view.Write(offset, image.Height); offset += 4;
             view.Write(offset, image.Pixels.Length); offset += 4;
@@ -85,22 +103,45 @@ internal static class DetectorFrameCodec
 
     public static DetectorFrameSnapshot Read(MemoryMappedViewAccessor view, int slot)
     {
-        if (slot is < 0 or >= DetectorHostProtocol.FrameSlotCount) throw new InvalidDataException("Detector frame slot is invalid.");
+        ValidateSlot(slot);
         var offset = (long)slot * SlotBytes;
+        var end = offset + SlotBytes;
         var timestamp = new DateTime(view.ReadInt64(offset), DateTimeKind.Utc); offset += 8;
-        var images = new GrayDetectorImage[3];
+        var images = new GrayDetectorImage?[4];
         for (var index = 0; index < images.Length; index++)
         {
+            if (offset + 12 > end) throw new InvalidDataException("Detector shared-memory image is invalid.");
             var width = view.ReadInt32(offset); offset += 4;
             var height = view.ReadInt32(offset); offset += 4;
             var length = view.ReadInt32(offset); offset += 4;
-            if (width <= 0 || height <= 0 || length != checked(width * height) || offset + length > (long)(slot + 1) * SlotBytes)
+            if (index == 3 && width == 0 && height == 0 && length == 0) continue;
+            ValidateImage(width, height, length);
+            if (offset + length > end)
                 throw new InvalidDataException("Detector shared-memory image is invalid.");
             var pixels = new byte[length];
             view.ReadArray(offset, pixels, 0, length); offset += length;
             images[index] = new GrayDetectorImage(width, height, pixels);
         }
-        return new DetectorFrameSnapshot(timestamp, images[0], images[1], images[2]);
+        ValidateMask(images[2]!, images[3]);
+        return new DetectorFrameSnapshot(timestamp, images[0]!, images[1]!, images[2]!, images[3]);
+    }
+
+    private static void ValidateSlot(int slot)
+    {
+        if (slot is < 0 or >= DetectorHostProtocol.FrameSlotCount)
+            throw new InvalidDataException("Detector frame slot is invalid.");
+    }
+
+    private static void ValidateImage(int width, int height, int length)
+    {
+        if (width <= 0 || height <= 0 || length != (long)width * height)
+            throw new InvalidDataException("Detector shared-memory image is invalid.");
+    }
+
+    private static void ValidateMask(GrayDetectorImage third, GrayDetectorImage? mask)
+    {
+        if (mask is not null && (mask.Width != third.Width || mask.Height != third.Height))
+            throw new InvalidDataException("Detector mask dimensions must match the third crop.");
     }
 }
 

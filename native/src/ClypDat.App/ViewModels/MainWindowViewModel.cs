@@ -2549,6 +2549,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 Settings.AutoClipping.Games[definition.Id] = game;
             }
             if (game.ListenerPort == 0) game.ListenerPort = definition.DefaultPort;
+            if (definition.Id == "helldivers2") AutoClipCatalog.MigrateHelldiversKillstreakSetting(game.Events);
             foreach (var item in definition.Events)
             {
                 if (!game.Events.ContainsKey(item.Id)) game.Events[item.Id] = item.DefaultEnabled;
