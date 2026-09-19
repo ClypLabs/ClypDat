@@ -8,7 +8,7 @@ the classic mark needs the same two forms the current one has:
     original mark exactly as it shipped before e2795df2, pulled from git history
     rather than redrawn;
   * a tile icon - clypdat-classic.ico - the original mark on its historical dark
-    tile with a top glow, independent of the current logo's colored avatar.
+    tile with a top glow, independent of the current transparent desktop icon.
 
 The tile's shape (alpha) and background come from the historical dark icon,
 not the current clypdat-icon.ico. Run from the repository root:
@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 # The last commit that still carried the original hexagon mark.
 CLASSIC_COMMIT = "e2795df2^"
-# Last dark tile before the approved colored avatar replaced it.
+# Historical dark tile, before the current desktop branding.
 TILE_COMMIT = "bba94c5cb4097f1be7aa9ea51a18c833cff8a9cf"
 SIZES = [16, 24, 32, 48, 64, 128, 256]
 # How much of the tile the mark fills. The original mark is a full-bleed
