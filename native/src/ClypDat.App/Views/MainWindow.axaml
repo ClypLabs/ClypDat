@@ -41,7 +41,7 @@
     <Border x:Name="FocusSink" Focusable="True" Width="0" Height="0" IsHitTestVisible="False"
             HorizontalAlignment="Left" VerticalAlignment="Top" />
     <Border Grid.Row="0" Background="{StaticResource PanelBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Stretch">
+      <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,0,0,0" VerticalAlignment="Stretch">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
           <Button Classes="brandButton" Padding="3,5" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
             <!-- 256px source downscaled to the actual 26px on-screen size

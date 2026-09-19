@@ -7,6 +7,12 @@
              x:Class="ClypDat.App.Views.Settings.AboutSection"
              x:DataType="vm:MainWindowViewModel">
   <UserControl.Styles>
+    <Style Selector="StackPanel.aboutBuildInfo > TextBlock">
+      <Setter Property="FontSize" Value="{StaticResource MetadataFontSize}" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
     <Style Selector="Button.creditCard">
       <Setter Property="MinWidth" Value="200" />
       <Setter Property="Height" Value="82" />
@@ -60,16 +66,14 @@
         <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
           <TextBlock Text="ClypDat" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="20" />
           <TextBlock Text="A clip recorder and editor, made to be fast and to stay out of your way." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-          <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
-            <TextBlock Classes="settingsCardLabel" Text="{Binding AppVersionDisplay}" />
-            <TextBlock Text="·" Foreground="{StaticResource LabelBrush}" FontSize="11" FontWeight="Bold" />
-            <TextBlock Classes="settingsCardLabel" Text="Made by ClypLabs" />
-            <TextBlock Text="·" Foreground="{StaticResource LabelBrush}" FontSize="11" FontWeight="Bold" IsVisible="{Binding HasAppCommit}" />
+          <StackPanel Classes="aboutBuildInfo" Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+            <TextBlock Text="{Binding AppVersionDisplay}" />
+            <TextBlock Text="·" Foreground="{StaticResource LabelBrush}" />
+            <TextBlock Text="Made by ClypLabs" />
+            <TextBlock Text="·" Foreground="{StaticResource LabelBrush}" IsVisible="{Binding HasAppCommit}" />
             <TextBlock Text="{Binding AppCommitDisplay}"
                        ToolTip.Tip="View this build's commit on GitHub"
                        Foreground="{StaticResource LinkBrush}"
-                       FontSize="12"
-                       FontWeight="Bold"
                        TextDecorations="Underline"
                        Cursor="Hand"
                        IsVisible="{Binding HasAppCommit}"
