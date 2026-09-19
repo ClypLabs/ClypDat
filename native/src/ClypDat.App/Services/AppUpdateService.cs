@@ -159,13 +159,13 @@ public static class AppUpdateService
 
     // Queries every source in order. GitLab's release schema is normalized to
     // ReleaseResponse before callers inspect it.
-    private static async Task<IReadOnlyList<T>> GetJsonFromAllSourcesAsync<T>(
+    private static async Task<IReadOnlyList<(T Value, ReleaseSourceKind Kind)>> GetJsonFromAllSourcesAsync<T>(
         HttpClient client,
         IEnumerable<ReleaseSource> sources,
         Func<string, ReleaseSourceKind, T?> parser,
         CancellationToken cancellationToken) where T : class
     {
-        var results = new List<T>();
+        var results = new List<(T Value, ReleaseSourceKind Kind)>();
         string? lastFailed = null;
         foreach (var source in sources)
         {
@@ -183,12 +183,16 @@ public static class AppUpdateService
                             lastFailed = null;
                         }
 
-                        results.Add(parsed);
+                        results.Add((parsed, source.Kind));
                     }
                 }
-                catch (JsonException)
+                catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    // Treat a malformed response like an unavailable source.
+                    // Treat a malformed response like an unavailable source. Not
+                    // just JsonException: a well-formed document of the wrong
+                    // shape used to surface later as a NullReferenceException and
+                    // abort the whole check, taking the healthy sources with it.
+                    AppLog.Info($"Update source {source.Url} returned an unreadable response ({exception.GetType().Name}); skipping it.");
                 }
             }
 
@@ -202,8 +206,8 @@ public static class AppUpdateService
     {
         using var client = CreateClient();
         var releases = await GetJsonFromAllSourcesAsync(client, LatestReleaseSources, ParseRelease, cancellationToken);
-        var candidates = new List<(ReleaseResponse Release, Version Version)>();
-        foreach (var release in releases)
+        var candidates = new List<(AppUpdateInfo Info, ReleaseSourceKind Kind)>();
+        foreach (var (release, kind) in releases)
         {
             if (release.Draft || release.Prerelease || !TryParseVersion(release.TagName, out var version) || version <= CurrentVersion)
             {
@@ -211,33 +215,78 @@ public static class AppUpdateService
             }
 
             var asset = release.Assets.FirstOrDefault(item => item.Name.Equals(ExpectedAssetName, StringComparison.OrdinalIgnoreCase));
-            if (asset is not null && IsTrustedReleaseAssetUrl(asset.DownloadUrl))
+            if (asset is null || !IsTrustedReleaseAssetUrl(asset.DownloadUrl))
             {
-                candidates.Add((release, version));
+                continue;
             }
+
+            var manifestAsset = release.Assets.FirstOrDefault(item => item.Name.Equals(ReleaseSigning.ManifestAssetName, StringComparison.OrdinalIgnoreCase));
+            var signatureAsset = release.Assets.FirstOrDefault(item => item.Name.Equals(ReleaseSigning.SignatureAssetName, StringComparison.OrdinalIgnoreCase));
+            candidates.Add((new AppUpdateInfo(
+                CurrentVersion,
+                version,
+                release.TagName,
+                asset.DownloadUrl,
+                [],
+                [],
+                ParseSha256Digest(asset.Digest),
+                manifestAsset?.DownloadUrl,
+                signatureAsset?.DownloadUrl), kind));
         }
 
-        var selected = candidates.OrderByDescending(item => item.Version).FirstOrDefault();
-        if (selected.Release is null)
+        // Newest first, and within one version in source order (GitHub first).
+        // The first candidate whose signed manifest verifies wins. Picking the
+        // highest version before verifying meant any one source advertising a
+        // release it could not back with a signature - a GitLab tag cut ahead of
+        // GitHub, or a tampered mirror - froze updates for everyone.
+        var ordered = candidates.OrderByDescending(item => item.Info.LatestVersion).ToList();
+        var selected = await SelectFirstVerifiedAsync(
+            ordered,
+            async (candidate, token) =>
+            {
+                if (ReleaseSigning.IsConfigured) await ResolveVerifiedDownloadAsync(candidate.Info, token);
+            },
+            candidate => $"{candidate.Info.TagName} from {candidate.Kind}",
+            cancellationToken);
+        if (selected is not { } chosen)
         {
             return null;
         }
 
-        var selectedAsset = selected.Release.Assets.First(item => item.Name.Equals(ExpectedAssetName, StringComparison.OrdinalIgnoreCase));
-        var (whatsNew, fixes) = await LoadReleaseNotesAsync(client, selected.Version, cancellationToken);
-        var manifestAsset = selected.Release.Assets.FirstOrDefault(item => item.Name.Equals(ReleaseSigning.ManifestAssetName, StringComparison.OrdinalIgnoreCase));
-        var signatureAsset = selected.Release.Assets.FirstOrDefault(item => item.Name.Equals(ReleaseSigning.SignatureAssetName, StringComparison.OrdinalIgnoreCase));
+        var (whatsNew, fixes) = await LoadReleaseNotesAsync(client, chosen.Info.LatestVersion, cancellationToken);
+        return chosen.Info with { WhatsNew = whatsNew, Fixes = fixes };
+    }
 
-        return new AppUpdateInfo(
-            CurrentVersion,
-            selected.Version,
-            selected.Release.TagName,
-            selectedAsset.DownloadUrl,
-            whatsNew,
-            fixes,
-            ParseSha256Digest(selectedAsset.Digest),
-            manifestAsset?.DownloadUrl,
-            signatureAsset?.DownloadUrl);
+    // Walks candidates in the order given and returns the first one verify
+    // accepts (does not throw for). Cancellation propagates; any other failure
+    // is logged and the next candidate is tried. Null when none verify.
+    internal static async Task<T?> SelectFirstVerifiedAsync<T>(
+        IEnumerable<T> candidatesNewestFirst,
+        Func<T, CancellationToken, Task> verify,
+        Func<T, string> describe,
+        CancellationToken cancellationToken) where T : struct
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (var candidate in candidatesNewestFirst)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await verify(candidate, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                return candidate;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                AppLog.Info($"Update candidate {describe(candidate)} failed verification ({exception.Message}); trying the next one.");
+            }
+        }
+
+        return null;
     }
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -246,7 +295,7 @@ public static class AppUpdateService
         // is pinned this must come from the signed manifest; the release API's own digest
         // is not an independent control, because whoever serves the metadata serves both
         // it and the download URL.
-        var expectedSha256 = await ResolveVerifiedSha256Async(update, cancellationToken);
+        var (expectedSha256, maximumBytes) = await ResolveVerifiedDownloadAsync(update, cancellationToken);
 
         var updateRoot = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "updates");
         Directory.CreateDirectory(updateRoot);
@@ -257,32 +306,15 @@ public static class AppUpdateService
         using (var response = await GetFollowingTrustedRedirectsAsync(client, update.DownloadUrl, cancellationToken))
         {
             response.EnsureSuccessStatusCode();
-            var contentLength = response.Content.Headers.ContentLength;
             await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
             await using var destination = File.Create(setupPath);
-            var buffer = new byte[81920];
-            long downloaded = 0;
-            var timer = Stopwatch.StartNew();
-            int read;
-            while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
-            {
-                await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-                downloaded += read;
-                progress?.Report(new UpdateDownloadProgress(
-                    contentLength is > 0 ? $"Downloading update... {downloaded * 100 / contentLength}%" : "Downloading update...",
-                    contentLength is > 0 ? (double)downloaded / contentLength : null,
-                    timer.Elapsed.TotalSeconds > 0 ? downloaded / timer.Elapsed.TotalSeconds : null));
-            }
+            await CopyInstallerAsync(source, destination, maximumBytes,
+                response.Content.Headers.ContentLength, progress, cancellationToken);
         }
 
-        // Verify before running the downloaded installer.
-        //
-        // NOTE: the digest still comes from the same document as the download URL,
-        // so it proves transport integrity only - it is not an independent control
-        // against whoever controls the release metadata (clypdat.xyz, its R2 bucket,
-        // its DNS, or the GitLab mirror). Closing that requires a detached signature
-        // over the metadata, verified against a pinned offline key, the way
-        // DevPackageVerifier already does for the Dev channel.
+        // Keep a deny-write/delete handle through verification and launch so a
+        // second process cannot swap the installer after its hash was checked.
+        using var verifiedInstaller = new FileStream(setupPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         await VerifyDownloadAsync(setupPath, expectedSha256, cancellationToken);
 
         progress?.Report(new UpdateDownloadProgress("Starting installer...", 1));
@@ -302,12 +334,15 @@ public static class AppUpdateService
     //
     // With no key pinned (signing not set up yet) this keeps the previous behaviour and
     // says so in the log, so the weaker state is visible rather than silent.
-    private static async Task<string> ResolveVerifiedSha256Async(AppUpdateInfo update, CancellationToken cancellationToken)
+    //
+    // The size is the signed manifest's record of the installer's length, enforced as
+    // a download cap; null when there is no signed manifest to take it from.
+    private static async Task<(string Sha256, long? MaximumBytes)> ResolveVerifiedDownloadAsync(AppUpdateInfo update, CancellationToken cancellationToken)
     {
         if (!ReleaseSigning.IsConfigured)
         {
             AppLog.Info("Update signature enforcement is off: no release signing key is pinned in this build.");
-            return update.Sha256;
+            return (update.Sha256, null);
         }
 
         if (string.IsNullOrEmpty(update.ManifestUrl) || string.IsNullOrEmpty(update.ManifestSignatureUrl))
@@ -316,7 +351,9 @@ public static class AppUpdateService
                 $"Release {update.TagName} publishes no signed manifest; refusing to install it.");
         }
 
-        using var client = CreateClient();
+        // Redirects are followed by hand so every hop is re-checked against the
+        // trusted-host list, the same as the installer download.
+        using var client = CreateClient(allowAutoRedirect: false);
         var manifestBytes = await GetTrustedAssetAsync(client, update.ManifestUrl, MaximumManifestBytes, cancellationToken);
         var signatureBytes = await GetTrustedAssetAsync(client, update.ManifestSignatureUrl, MaximumSignatureBytes, cancellationToken);
 
@@ -330,11 +367,51 @@ public static class AppUpdateService
                 $"Signed manifest is for {manifest.Tag}, not {update.TagName}; refusing to install it.");
         }
 
-        var signedDigest = ReleaseSigning.FindAssetSha256(manifest, ExpectedAssetName)
-            ?? throw new InvalidOperationException($"Signed manifest for {manifest.Tag} does not cover {ExpectedAssetName}.");
-
+        var installer = SignedInstaller(manifest);
         AppLog.Info($"Update {update.TagName}: signed manifest verified against pinned release key '{acceptedBy.Label}' ({acceptedBy.Fingerprint}).");
-        return signedDigest;
+        return installer;
+    }
+
+    internal const long MaximumInstallerBytes = 2L * 1024 * 1024 * 1024;
+
+    internal static (string Sha256, long? MaximumBytes) SignedInstaller(ReleaseManifest manifest)
+    {
+        var assets = (manifest.Assets ?? []).Where(asset => asset is not null &&
+            string.Equals(asset.Name, ExpectedAssetName, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (assets.Length != 1)
+            throw new InvalidDataException($"Signed manifest must contain exactly one {ExpectedAssetName}.");
+        var asset = assets[0];
+        var digest = asset.Sha256?.Trim().ToLowerInvariant();
+        if (digest is null || digest.Length != 64 || !digest.All(Uri.IsHexDigit))
+            throw new InvalidDataException("Signed installer SHA-256 is invalid.");
+        if (asset.Size <= 0 || asset.Size > MaximumInstallerBytes)
+            throw new InvalidDataException("Signed installer size is outside the permitted range.");
+        return (digest, asset.Size);
+    }
+
+    internal static async Task CopyInstallerAsync(Stream source, Stream destination, long? expectedSize,
+        long? contentLength, IProgress<UpdateDownloadProgress>? progress, CancellationToken cancellationToken)
+    {
+        var maximumBytes = expectedSize ?? MaximumInstallerBytes;
+        if (maximumBytes <= 0 || maximumBytes > MaximumInstallerBytes || contentLength > maximumBytes)
+            throw new InvalidDataException("The update download exceeds the permitted installer size.");
+        var buffer = new byte[81920];
+        long downloaded = 0;
+        var timer = Stopwatch.StartNew();
+        int read;
+        while ((read = await source.ReadAsync(buffer, cancellationToken)) > 0)
+        {
+            downloaded += read;
+            if (downloaded > maximumBytes)
+                throw new InvalidDataException("The update download exceeds the permitted installer size.");
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            progress?.Report(new UpdateDownloadProgress(
+                contentLength is > 0 ? $"Downloading update... {downloaded * 100 / contentLength}%" : "Downloading update...",
+                contentLength is > 0 ? (double)downloaded / contentLength : null,
+                timer.Elapsed.TotalSeconds > 0 ? downloaded / timer.Elapsed.TotalSeconds : null));
+        }
+        if (expectedSize is { } exactSize && downloaded != exactSize)
+            throw new InvalidDataException("The update download does not match its signed size.");
     }
 
     private const long MaximumManifestBytes = 256 * 1024;
@@ -343,16 +420,18 @@ public static class AppUpdateService
     // Bounded, allowlisted fetch for the small signed-metadata assets.
     private static async Task<byte[]> GetTrustedAssetAsync(HttpClient client, string url, long maximumBytes, CancellationToken cancellationToken)
     {
-        using var response = await GetFollowingTrustedRedirectsAsync(client, url, cancellationToken);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(client.Timeout);
+        using var response = await GetFollowingTrustedRedirectsAsync(client, url, deadline.Token);
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength > maximumBytes)
             throw new InvalidDataException($"Release asset {url} exceeds {maximumBytes} bytes.");
 
-        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var source = await response.Content.ReadAsStreamAsync(deadline.Token);
         using var buffer = new MemoryStream();
         var chunk = new byte[8192];
         int read;
-        while ((read = await source.ReadAsync(chunk, cancellationToken)) > 0)
+        while ((read = await source.ReadAsync(chunk, deadline.Token)) > 0)
         {
             if (buffer.Length + read > maximumBytes)
                 throw new InvalidDataException($"Release asset {url} exceeds {maximumBytes} bytes.");
@@ -362,9 +441,10 @@ public static class AppUpdateService
         return buffer.ToArray();
     }
 
-    private static HttpClient CreateClient()
+    private static HttpClient CreateClient(bool allowAutoRedirect = true)
     {
-        var client = new HttpClient();
+        var client = allowAutoRedirect ? new HttpClient() : new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+        client.MaxResponseContentBufferSize = 2 * 1024 * 1024;
         // Short enough that failing over to the mirror is quick rather than a
         // half-minute freeze, long enough for a slow connection to fetch the
         // 126KB release list. The installer download uses its own client below.
@@ -431,7 +511,7 @@ public static class AppUpdateService
         try
         {
             using var client = CreateClient();
-            var releases = DistinctReleases(await GetJsonFromAllSourcesAsync(client, ReleaseListSources, ParseReleaseList, cancellationToken));
+            var releases = DistinctReleases(await GetJsonFromAllSourcesAsync(client, ReleaseListSources.Where(source => source.Kind == ReleaseSourceKind.GitHub), ParseReleaseList, cancellationToken));
             // Version equality would fail here: a "v0.1.8" tag parses to a
             // 3-field Version (Revision=-1), but the assembly's CurrentVersion
             // is always 4-field (Revision=0) - compare only the 3 fields the
@@ -447,11 +527,14 @@ public static class AppUpdateService
         }
     }
 
+    // Signatures authenticate installer bytes, not release-note text. A mirror
+    // can replay a valid manifest with hostile notes, so only the canonical
+    // publisher supplies notes; an unavailable publisher means no notes.
     private static async Task<(IReadOnlyList<string> WhatsNew, IReadOnlyList<string> Fixes)> LoadReleaseNotesAsync(HttpClient client, Version latest, CancellationToken cancellationToken)
     {
         try
         {
-            var releases = DistinctReleases(await GetJsonFromAllSourcesAsync(client, ReleaseListSources, ParseReleaseList, cancellationToken));
+            var releases = DistinctReleases(await GetJsonFromAllSourcesAsync(client, ReleaseListSources.Where(source => source.Kind == ReleaseSourceKind.GitHub), ParseReleaseList, cancellationToken));
             var whatsNew = new List<string>();
             var fixes = new List<string>();
             foreach (var item in releases
@@ -712,19 +795,36 @@ public static class AppUpdateService
 
     private static ReleaseResponse? ParseRelease(string json, ReleaseSourceKind sourceKind) => sourceKind == ReleaseSourceKind.GitLab
         ? NormalizeGitLabRelease(JsonSerializer.Deserialize<GitLabReleaseResponse>(json))
-        : JsonSerializer.Deserialize<ReleaseResponse>(json);
+        : Sanitize(JsonSerializer.Deserialize<ReleaseResponse>(json));
+
+    // The records declare non-null members, but a document of the wrong shape
+    // deserialises with nulls in them anyway. Drop what cannot be used here so
+    // nothing downstream has to re-check.
+    private static ReleaseResponse? Sanitize(ReleaseResponse? release)
+    {
+        if (release is null || string.IsNullOrWhiteSpace(release.TagName)) return null;
+        var assets = (release.Assets ?? [])
+            .Where(asset => asset is not null && !string.IsNullOrWhiteSpace(asset.Name) && !string.IsNullOrWhiteSpace(asset.DownloadUrl))
+            .ToArray();
+        return release with { Assets = assets };
+    }
 
     private static ReleaseResponse[]? ParseReleaseList(string json, ReleaseSourceKind sourceKind)
     {
-        if (sourceKind != ReleaseSourceKind.GitLab) return JsonSerializer.Deserialize<ReleaseResponse[]>(json);
+        if (sourceKind != ReleaseSourceKind.GitLab)
+        {
+            return JsonSerializer.Deserialize<ReleaseResponse?[]>(json)?
+                .Select(Sanitize).Where(release => release is not null).Select(release => release!).ToArray();
+        }
 
         var releases = JsonSerializer.Deserialize<GitLabReleaseResponse[]>(json);
         return releases?.Select(NormalizeGitLabRelease).Where(release => release is not null).Select(release => release!).ToArray();
     }
 
-    private static ReleaseResponse[] DistinctReleases(IEnumerable<ReleaseResponse[]> releaseLists) =>
+    private static ReleaseResponse[] DistinctReleases(IEnumerable<(ReleaseResponse[] Value, ReleaseSourceKind Kind)> releaseLists) =>
         releaseLists
-            .SelectMany(releases => releases)
+            .Where(list => list.Kind == ReleaseSourceKind.GitHub)
+            .SelectMany(list => list.Value)
             .GroupBy(release => release.TagName, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .ToArray();

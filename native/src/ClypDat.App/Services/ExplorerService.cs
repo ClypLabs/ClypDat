@@ -62,9 +62,9 @@ public static class ExplorerService
 
         var folderParseResult = SHParseDisplayName(folder, IntPtr.Zero, out var folderItemIdList, 0, out _);
         var itemParseResult = SHParseDisplayName(path, IntPtr.Zero, out var itemIdList, 0, out _);
-        if (folderParseResult >= 0 && itemParseResult >= 0)
+        try
         {
-            try
+            if (folderParseResult >= 0 && itemParseResult >= 0)
             {
                 var childItemIdList = ILFindLastID(itemIdList);
                 var selectResult = SHOpenFolderAndSelectItems(folderItemIdList, 1, new[] { childItemIdList }, 0);
@@ -72,15 +72,14 @@ public static class ExplorerService
 
                 AppLog.Error($"Failed to select '{path}' in Explorer (HRESULT 0x{selectResult:X8}); opening its folder instead.");
             }
-            finally
-            {
-                Marshal.FreeCoTaskMem(itemIdList);
-                Marshal.FreeCoTaskMem(folderItemIdList);
-            }
+        }
+        finally
+        {
+            // Each PIDL is freed exactly once, whichever branch ran.
+            if (itemParseResult >= 0) Marshal.FreeCoTaskMem(itemIdList);
+            if (folderParseResult >= 0) Marshal.FreeCoTaskMem(folderItemIdList);
         }
 
-        if (itemParseResult >= 0) Marshal.FreeCoTaskMem(itemIdList);
-        if (folderParseResult >= 0) Marshal.FreeCoTaskMem(folderItemIdList);
         AppLog.Error($"Failed to resolve '{path}' for Explorer selection (folder HRESULT 0x{folderParseResult:X8}, item HRESULT 0x{itemParseResult:X8}); opening its folder instead.");
         OpenFolder(folder);
     }

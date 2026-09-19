@@ -121,6 +121,7 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
     public bool CanSave(int bitrateMbps, TimeSpan duration, out string reason)
     {
         var estimate = EstimateSave(bitrateMbps, duration);
+        string[] roots;
         lock (_sync)
         {
             if (SavesBlocked)
@@ -128,42 +129,90 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
                 reason = $"Storage pressure: {Health.VolumeRole}; {Health.Reason}";
                 return false;
             }
-            foreach (var root in _volumes)
+            roots = _volumes.Keys.ToArray();
+        }
+        // Queried outside the lock: a network share can take seconds to answer.
+        foreach (var root in roots)
+        {
+            try
             {
-                try
+                var free = GetAvailableFreeBytes(root);
+                if (free < estimate.RequiredFreeBytes)
                 {
-                    var free = new DriveInfo(root.Key).AvailableFreeSpace;
-                    if (free < estimate.RequiredFreeBytes)
-                    {
-                        reason = $"Save needs {estimate.RequiredFreeBytes} bytes free; {root.Key} has {free}.";
-                        return false;
-                    }
-                }
-                catch
-                {
-                    reason = $"Storage volume {root.Key} is inaccessible.";
+                    reason = $"Save needs {estimate.RequiredFreeBytes} bytes free; {root} has {free}.";
                     return false;
                 }
+            }
+            catch
+            {
+                reason = $"Storage volume {root} is inaccessible.";
+                return false;
             }
         }
         reason = string.Empty;
         return true;
     }
 
+    private int _sampling;
+
     private void Sample()
     {
-        List<ReplayStorageHealth> samples = new();
-        lock (_sync)
+        // The timer fires every 5s whether or not the last sample has returned,
+        // and a stalled share must not stack up callbacks behind it.
+        if (Interlocked.Exchange(ref _sampling, 1) != 0) return;
+        try
         {
-            foreach (var (root, volume) in _volumes)
+            string[] roots;
+            lock (_sync) roots = _volumes.Keys.ToArray();
+            var free = new Dictionary<string, long?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var root in roots)
             {
-                try { samples.Add(volume.Policy.ObserveFreeSpace(new DriveInfo(root).AvailableFreeSpace, DateTime.UtcNow)); }
-                catch { samples.Add(new ReplayStorageHealth(ReplayStorageState.Inaccessible, -1, 0, 0, volume.Role, "Volume inaccessible", DateTime.UtcNow)); }
+                try { free[root] = GetAvailableFreeBytes(root); }
+                catch { free[root] = null; }
             }
-            _health = samples.OrderByDescending(item => item.State).ThenBy(item => item.FreeBytes).FirstOrDefault() ?? ReplayStorageHealth.Unknown;
+
+            List<ReplayStorageHealth> samples = new();
+            lock (_sync)
+            {
+                foreach (var (root, volume) in _volumes)
+                {
+                    if (free.TryGetValue(root, out var bytes) && bytes is { } available)
+                        samples.Add(volume.Policy.ObserveFreeSpace(available, DateTime.UtcNow));
+                    else
+                        samples.Add(new ReplayStorageHealth(ReplayStorageState.Inaccessible, -1, 0, 0, volume.Role, "Volume inaccessible", DateTime.UtcNow));
+                }
+                _health = samples.OrderByDescending(item => item.State).ThenBy(item => item.FreeBytes).FirstOrDefault() ?? ReplayStorageHealth.Unknown;
+            }
+            HealthChanged?.Invoke(this, Health);
         }
-        HealthChanged?.Invoke(this, Health);
+        finally
+        {
+            Volatile.Write(ref _sampling, 0);
+        }
     }
+
+    // DriveInfo only understands drive letters: handed a UNC root such as
+    // \\nas\clips it throws, which used to mark the volume inaccessible and block
+    // every save for a library on a network share. GetDiskFreeSpaceEx takes any
+    // directory, and reports the space available to this user (quotas included).
+    internal static long GetAvailableFreeBytes(string root)
+    {
+        if (OperatingSystem.IsWindows() && IsUncRoot(root))
+        {
+            var directory = root.EndsWith('\\') ? root : root + "\\";
+            if (!GetDiskFreeSpaceEx(directory, out var available, out _, out _))
+                throw new IOException($"Could not read free space for {root}.", new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error()));
+            return available > long.MaxValue ? long.MaxValue : (long)available;
+        }
+        return new DriveInfo(root).AvailableFreeSpace;
+    }
+
+    internal static bool IsUncRoot(string root) =>
+        root.StartsWith(@"\\", StringComparison.Ordinal) || root.StartsWith("//", StringComparison.Ordinal);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool GetDiskFreeSpaceEx(string directoryName, out ulong freeBytesAvailable, out ulong totalNumberOfBytes, out ulong totalNumberOfFreeBytes);
 
     public void Dispose()
     {

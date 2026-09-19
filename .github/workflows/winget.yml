@@ -19,11 +19,13 @@ jobs:
     # performs this same check below, so retries cannot submit a prerelease.
     if: github.event_name == 'workflow_dispatch' || (github.event.release.draft == false && github.event.release.prerelease == false)
     runs-on: windows-latest
-    env:
-      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+    # WINGET_CREATE_GITHUB_TOKEN is deliberately not job-level: only the steps
+    # that talk to the winget-pkgs fork receive it.
     steps:
       - name: Check out manifest generator
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Resolve stable release asset
         id: release
@@ -41,8 +43,20 @@ jobs:
           $asset = @($release.assets | Where-Object { $_.name -eq 'ClypDat-Setup.exe' })
           if ($asset.Count -ne 1 -or [string]::IsNullOrWhiteSpace($asset[0].url)) { throw "Release $tag has no unique ClypDat-Setup.exe asset." }
           if ($asset[0].url -ne "https://github.com/ClypLabs/ClypDat/releases/download/$tag/ClypDat-Setup.exe") { throw 'Release setup URL is not the expected immutable GitHub release URL.' }
+          foreach ($signed in 'ClypDat-Release.manifest.json', 'ClypDat-Release.manifest.sig') {
+            if (@($release.assets | Where-Object { $_.name -eq $signed }).Count -ne 1) { throw "Release $tag has no unique $signed asset; sign the release before submitting to WinGet." }
+          }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "installer_url=$($asset[0].url)" >> $env:GITHUB_OUTPUT
+
+      - name: Check WinGet token
+        id: token
+        shell: pwsh
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+        run: |
+          $configured = if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) { 'false' } else { 'true' }
+          "configured=$configured" >> $env:GITHUB_OUTPUT
 
       - name: Download pinned WingetCreate
         shell: pwsh
@@ -53,11 +67,35 @@ jobs:
           $actualSha256 = (Get-FileHash wingetcreate.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actualSha256 -ne $expectedSha256) { throw "WingetCreate checksum mismatch: expected $expectedSha256, got $actualSha256." }
 
+      # New-WinGetManifest.ps1 verifies ClypDat-Release.manifest.sig against the
+      # pinned release key, takes InstallerSha256 from that signed manifest, and
+      # fails if the served installer does not hash to it. Runs without the token.
+      - name: Generate and validate manifest
+        id: manifest
+        shell: pwsh
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          INSTALLER_URL: ${{ steps.release.outputs.installer_url }}
+        run: |
+          $downloads = Join-Path $env:RUNNER_TEMP 'clypdat-release'
+          New-Item -ItemType Directory -Force $downloads | Out-Null
+          foreach ($name in 'ClypDat-Setup.exe', 'ClypDat-Release.manifest.json', 'ClypDat-Release.manifest.sig') {
+            Invoke-WebRequest -Uri "https://github.com/ClypLabs/ClypDat/releases/download/$env:TAG/$name" -OutFile (Join-Path $downloads $name)
+          }
+          $manifestDirectory = .\eng\New-WinGetManifest.ps1 -Tag $env:TAG -InstallerUrl $env:INSTALLER_URL -OutputDirectory .\winget-manifests `
+            -InstallerPath (Join-Path $downloads 'ClypDat-Setup.exe') `
+            -ReleaseManifestPath (Join-Path $downloads 'ClypDat-Release.manifest.json') `
+            -ReleaseSignaturePath (Join-Path $downloads 'ClypDat-Release.manifest.sig')
+          winget validate --manifest $manifestDirectory --disable-interactivity
+          if ($LASTEXITCODE -ne 0) { throw "winget validate failed with exit code $LASTEXITCODE." }
+          "downloads=$downloads" >> $env:GITHUB_OUTPUT
+
       # WingetCreate submits from its owner's fork. Its internal fork sync can fail
-      # after upstream moves; synchronise the fork explicitly before generation so
-      # submission starts from the current winget-pkgs default branch.
+      # after upstream moves; synchronise the fork explicitly after the signed
+      # manifest verifies and before submission, so submission starts from the
+      # current winget-pkgs default branch.
       - name: Sync WinGet fork with upstream
-        if: ${{ env.WINGET_CREATE_GITHUB_TOKEN != '' }}
+        if: ${{ steps.token.outputs.configured == 'true' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
@@ -70,20 +108,21 @@ jobs:
           }
           gh api --method POST "repos/$owner/winget-pkgs/merge-upstream" -f "branch=$($fork.default_branch)" | Out-Null
 
-      - name: Generate, validate, and submit manifest
-        if: ${{ env.WINGET_CREATE_GITHUB_TOKEN != '' }}
+      - name: Submit manifest
+        if: ${{ steps.token.outputs.configured == 'true' }}
         shell: pwsh
         env:
           WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
           TAG: ${{ steps.release.outputs.tag }}
           INSTALLER_URL: ${{ steps.release.outputs.installer_url }}
+          DOWNLOADS: ${{ steps.manifest.outputs.downloads }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINGET_CREATE_GITHUB_TOKEN)) { throw 'WINGET_CREATE_GITHUB_TOKEN is not configured.' }
-          $manifestDirectory = .\eng\New-WinGetManifest.ps1 -Tag $env:TAG -InstallerUrl $env:INSTALLER_URL -OutputDirectory .\winget-manifests
-          winget validate --manifest $manifestDirectory --disable-interactivity
-          if ($LASTEXITCODE -ne 0) { throw "winget validate failed with exit code $LASTEXITCODE." }
-          .\eng\New-WinGetManifest.ps1 -Tag $env:TAG -InstallerUrl $env:INSTALLER_URL -OutputDirectory .\winget-manifests -Submit -WingetCreatePath .\wingetcreate.exe
+          .\eng\New-WinGetManifest.ps1 -Tag $env:TAG -InstallerUrl $env:INSTALLER_URL -OutputDirectory .\winget-manifests `
+            -InstallerPath (Join-Path $env:DOWNLOADS 'ClypDat-Setup.exe') `
+            -ReleaseManifestPath (Join-Path $env:DOWNLOADS 'ClypDat-Release.manifest.json') `
+            -ReleaseSignaturePath (Join-Path $env:DOWNLOADS 'ClypDat-Release.manifest.sig') `
+            -Submit -WingetCreatePath .\wingetcreate.exe
 
       - name: Skip WinGet submission when token is unavailable
-        if: ${{ env.WINGET_CREATE_GITHUB_TOKEN == '' }}
+        if: ${{ steps.token.outputs.configured != 'true' }}
         run: Write-Host 'WINGET_CREATE_GITHUB_TOKEN is not configured; skipping WinGet submission.'

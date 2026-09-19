@@ -63,6 +63,8 @@
           </Panel>
           <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="{Binding ClypDatAccountTitle}" TextTrimming="CharacterEllipsis" />
+            <TextBlock Classes="settingsRowTitle" Text="{Binding ClypDatPairingCode}"
+                       IsVisible="{Binding ClypDatPairingCodeVisible}" />
             <!-- Connected is a state, so it is a pill. Every other value of
                  ClypDatAccountStatus is a sentence telling you what to do next,
                  so it stays body text. -->

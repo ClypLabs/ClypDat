@@ -68,11 +68,11 @@ internal static class DetectorFrameCodec
     // of shared memory, which is nothing next to the 512 MB the host is capped at.
     internal const int SlotBytes = 1024 * 1024;
 
-    public static void Write(MemoryMappedViewAccessor view, int slot, DetectorFrameSnapshot frame)
+    public static long Write(MemoryMappedViewAccessor view, int slot, DetectorFrameSnapshot frame)
     {
         ValidateSlot(slot);
         var images = new[] { frame.First, frame.Second, frame.Third, frame.ThirdMask };
-        long bytes = 8 + 4 * 12;
+        long bytes = 16 + 4 * 12;
         foreach (var image in images)
         {
             if (image is null) continue;
@@ -81,32 +81,45 @@ internal static class DetectorFrameCodec
         }
         ValidateMask(frame.Third, frame.ThirdMask);
         if (bytes > SlotBytes) throw new InvalidDataException("Detector frame exceeds its shared-memory slot.");
-        var offset = (long)slot * SlotBytes;
-        view.Write(offset, frame.CapturedUtc.Ticks); offset += 8;
-        foreach (var image in images)
+        Sequence(view, slot, increment: true); // Odd while the slot is being written.
+        long published;
+        try
         {
-            // Always overwrite the absence marker when a slot is recycled.
-            if (image is null)
+            var offset = (long)slot * SlotBytes + sizeof(long);
+            view.Write(offset, frame.CapturedUtc.Ticks); offset += 8;
+            foreach (var image in images)
             {
-                view.Write(offset, 0); view.Write(offset + 4, 0); view.Write(offset + 8, 0);
-                offset += 12;
-                continue;
+                // Always overwrite the absence marker when a slot is recycled.
+                if (image is null)
+                {
+                    view.Write(offset, 0); view.Write(offset + 4, 0); view.Write(offset + 8, 0);
+                    offset += 12;
+                    continue;
+                }
+                view.Write(offset, image.Width); offset += 4;
+                view.Write(offset, image.Height); offset += 4;
+                view.Write(offset, image.Pixels.Length); offset += 4;
+                if (offset + image.Pixels.Length > (long)(slot + 1) * SlotBytes)
+                    throw new InvalidDataException("Detector frame exceeds its shared-memory slot.");
+                view.WriteArray(offset, image.Pixels, 0, image.Pixels.Length); offset += image.Pixels.Length;
             }
-            view.Write(offset, image.Width); offset += 4;
-            view.Write(offset, image.Height); offset += 4;
-            view.Write(offset, image.Pixels.Length); offset += 4;
-            if (offset + image.Pixels.Length > (long)(slot + 1) * SlotBytes)
-                throw new InvalidDataException("Detector frame exceeds its shared-memory slot.");
-            view.WriteArray(offset, image.Pixels, 0, image.Pixels.Length); offset += image.Pixels.Length;
         }
+        finally { published = Sequence(view, slot, increment: true); }
+        return published;
     }
 
-    public static DetectorFrameSnapshot Read(MemoryMappedViewAccessor view, int slot)
+    public static DetectorFrameSnapshot Read(MemoryMappedViewAccessor view, int slot, long? expectedSequence = null)
     {
         ValidateSlot(slot);
-        var offset = (long)slot * SlotBytes;
-        var end = offset + SlotBytes;
-        var timestamp = new DateTime(view.ReadInt64(offset), DateTimeKind.Utc); offset += 8;
+        var sequence = Sequence(view, slot);
+        if (sequence == 0 || (sequence & 1) != 0 || (expectedSequence is { } expected && expected != sequence))
+            throw new InvalidDataException("Detector frame slot was overwritten or is being written.");
+        var offset = (long)slot * SlotBytes + sizeof(long);
+        var end = (long)(slot + 1) * SlotBytes;
+        var ticks = view.ReadInt64(offset); offset += 8;
+        if (ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
+            throw new InvalidDataException("Detector timestamp is invalid.");
+        var timestamp = new DateTime(ticks, DateTimeKind.Utc);
         var images = new GrayDetectorImage?[4];
         for (var index = 0; index < images.Length; index++)
         {
@@ -122,8 +135,29 @@ internal static class DetectorFrameCodec
             view.ReadArray(offset, pixels, 0, length); offset += length;
             images[index] = new GrayDetectorImage(width, height, pixels);
         }
+        if (Sequence(view, slot) != sequence)
+            throw new InvalidDataException("Detector frame changed while being read.");
         ValidateMask(images[2]!, images[3]);
         return new DetectorFrameSnapshot(timestamp, images[0]!, images[1]!, images[2]!, images[3]);
+    }
+
+    // Aligned atomic operations supply cross-process ordering for the shared
+    // slot. A reader publishes nothing until its copied snapshot is stable.
+    private static unsafe long Sequence(MemoryMappedViewAccessor view, int slot, bool increment = false)
+    {
+        ValidateSlot(slot);
+        if (view.Capacity < (long)(slot + 1) * SlotBytes)
+            throw new InvalidDataException("Detector shared-memory mapping is truncated.");
+        byte* pointer = null;
+        view.SafeMemoryMappedViewHandle.AcquirePointer(ref pointer);
+        try
+        {
+            ref var value = ref System.Runtime.CompilerServices.Unsafe.AsRef<long>(pointer + view.PointerOffset + (long)slot * SlotBytes);
+            // A full fence also prevents copied pixel reads crossing the final check.
+            Thread.MemoryBarrier();
+            return increment ? Interlocked.Increment(ref value) : Volatile.Read(ref value);
+        }
+        finally { view.SafeMemoryMappedViewHandle.ReleasePointer(); }
     }
 
     private static void ValidateSlot(int slot)
@@ -243,8 +277,8 @@ internal sealed class DetectorHostClient : IAsyncDisposable
                 var pipe = _pipe;
                 if (pipe?.IsConnected != true) continue;
                 var slot = _slot++ % DetectorHostProtocol.FrameSlotCount;
-                DetectorFrameCodec.Write(_view, slot, frame);
-                try { await SendAsync("frame", new { slot }, _shutdown.Token).ConfigureAwait(false); }
+                var sequence = DetectorFrameCodec.Write(_view, slot, frame);
+                try { await SendAsync("frame", new { slot, sequence }, _shutdown.Token).ConfigureAwait(false); }
                 catch (Exception error) when (error is IOException or ObjectDisposedException) { }
             }
         }
@@ -351,7 +385,16 @@ internal static class DetectorHostRuntime
                     detector.ApplyPolicy(true, policy.EnabledEventIds);
                     break;
                 case "frame":
-                    detector?.Offer(DetectorFrameCodec.Read(view, message.Payload.GetProperty("slot").GetInt32()));
+                    try
+                    {
+                        detector?.Offer(DetectorFrameCodec.Read(view, message.Payload.GetProperty("slot").GetInt32(),
+                            message.Payload.GetProperty("sequence").GetInt64()));
+                    }
+                    catch (InvalidDataException)
+                    {
+                        // The bounded publisher may recycle a slot while this
+                        // host is busy. Drop that frame, never crash/quarantine.
+                    }
                     break;
                 case "shutdown":
                     if (detector is not null) await detector.DisposeAsync().ConfigureAwait(false);

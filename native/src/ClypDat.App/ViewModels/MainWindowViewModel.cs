@@ -14,6 +14,8 @@ using ClypDat.App.Services;
 using ClypDat.Capture.Abstractions;
 using ClypDat.Core.Settings;
 
+using System.Text.Json;
+
 namespace ClypDat.App.ViewModels;
 
 public enum EditorSidebarSection
@@ -5309,6 +5311,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void SaveSettings()
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            Dispatcher.UIThread.Post(SaveSettings);
+            return;
+        }
         if (!AppSettingsStore.Save(Settings))
             AppLog.Error($"Settings persistence failed: {AppSettingsStore.LastSaveError}");
         RecordingSettingsSaved?.Invoke();
@@ -5316,12 +5323,18 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public async Task RenameAllClipsAsync()
     {
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            await Dispatcher.UIThread.InvokeAsync(RenameAllClipsAsync);
+            return;
+        }
         if (!CanRenameAllClips) return;
         IsRenamingAllClips = true;
         RenameAllClipsStatus = "Renaming library files...";
         try
         {
-            var result = await Task.Run(() => RenameLibraryFiles());
+            var settingsSnapshot = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(Settings))!;
+            var result = await Task.Run(() => RenameLibraryFiles(settingsSnapshot));
             foreach (var (oldPath, newPath) in result.MovedPaths)
             {
                 var oldKey = ClipEditKey(oldPath);
@@ -5338,7 +5351,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private (int Renamed, int Skipped, int Failed, List<(string OldPath, string NewPath)> MovedPaths) RenameLibraryFiles()
+    private (int Renamed, int Skipped, int Failed, List<(string OldPath, string NewPath)> MovedPaths) RenameLibraryFiles(AppSettings settings)
     {
         var movedPaths = new List<(string OldPath, string NewPath)>();
         var renamed = 0;
@@ -5347,7 +5360,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         string[] paths;
         try
         {
-            paths = Directory.EnumerateFiles(Settings.LibraryFolder, "*.*", SearchOption.AllDirectories)
+            paths = Directory.EnumerateFiles(settings.LibraryFolder, "*.*", SearchOption.AllDirectories)
                 .Where(MediaProbeService.IsVideoFile)
                 .ToArray();
         }
@@ -5363,13 +5376,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (fileOperation is null) { skipped++; continue; }
             try
             {
-                var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(sourcePath), Settings.LibraryFolder);
-                var info = ClipInfoSidecar.Load(Settings.LibraryFolder, sourcePath);
+                var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(sourcePath), settings.LibraryFolder);
+                var info = ClipInfoSidecar.Load(settings.LibraryFolder, sourcePath);
                 var title = info?.FileTitle ?? card.GameNameLabel;
                 var game = info?.GameDisplayName ?? card.GameFilterKey;
                 var timestamp = info?.CapturedAt?.LocalDateTime ?? File.GetCreationTime(sourcePath);
-                var directory = Path.GetDirectoryName(sourcePath) ?? Settings.LibraryFolder;
-                var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(sourcePath), Settings.ClipFileNameScheme, Settings.CustomClipFileNameTemplate, game);
+                var directory = Path.GetDirectoryName(sourcePath) ?? settings.LibraryFolder;
+                var fileName = ClipFileNaming.BuildFileName(title, timestamp, Path.GetExtension(sourcePath), settings.ClipFileNameScheme, settings.CustomClipFileNameTemplate, game);
                 var targetPath = Path.Combine(directory, fileName);
                 if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase))
                 {
@@ -5380,9 +5393,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 targetPath = ClipFileNaming.BuildUniquePath(directory, fileName);
                 // Store naming metadata before moving so future scheme changes do
                 // not have to reverse-engineer a user-defined template.
-                ClipInfoSidecar.Save(Settings.LibraryFolder, sourcePath, (info ?? new ClipInfo(game, null)) with { GameDisplayName = game, FileTitle = title, CapturedAt = timestamp });
+                ClipInfoSidecar.Save(settings.LibraryFolder, sourcePath, (info ?? new ClipInfo(game, null)) with { GameDisplayName = game, FileTitle = title, CapturedAt = timestamp });
                 File.Move(sourcePath, targetPath);
-                MoveClipSidecars(sourcePath, targetPath);
+                LibraryLayout.MoveSidecars(settings.LibraryFolder, sourcePath, targetPath);
                 _mediaProbe.MoveCacheFor(sourcePath, targetPath);
                 movedPaths.Add((sourcePath, targetPath));
                 renamed++;
@@ -7395,7 +7408,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                         _selectedSpotifyAlbum = info.SpotifyAlbum;
                         _selectedSpotifyDurationMs = info.SpotifyDurationMs;
                         _selectedSpotifyProgressMs = info.SpotifyProgressMs;
-                        _selectedSpotifyArtPath = info.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(library, clipPath);
+                        _selectedSpotifyArtPath = SpotifyCoverArtStore.TrustedArtPath(library, clipPath, info.SpotifyArtPath) ?? SpotifyCoverArtStore.Existing(library, clipPath);
                     }
                     // A prior burn may have completed before its sidecar was
                     // written. Never clear provenance already found by ffprobe.
@@ -7446,13 +7459,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string XboxConnectionStatus => EffectiveXboxSnapshot.Error ?? (EffectiveXboxSnapshot.IsConnected ? "Connected" : "Not connected");
     public string XboxCurrentTitle => EffectiveXboxSnapshot.CurrentTitle ?? "No active Xbox game";
     public bool XboxIsConnected => EffectiveXboxSnapshot.IsConnected;
-    public string ClypDatAccountStatus => _clypDatAccount.IsAuthenticated
+    public string ClypDatAccountStatus => _clypDatAccount.ConnectionCode is not null
+        ? "Compare the pairing code in your browser, then approve linking."
+        : _clypDatAccount.IsAuthenticated
         ? _clypDatSnapshot.IsConnected ? "Connected" : "Connected. No Xbox account linked."
         : (_clypDatSnapshot.ServerUnavailable ? null : _clypDatSnapshot.Error) ?? (_clypDatAccountSetupStarted
             ? "After signing in, click Link account here."
             : "Create or sign in first, then link your account here.");
     public string ClypDatXboxStatus => _clypDatSnapshot.IsConnected ? "Linked through ClypDat" : "No Xbox account linked.";
     public bool ClypDatAccountIsConnected => _clypDatAccount.IsAuthenticated;
+    public string ClypDatPairingCode => _clypDatAccount.ConnectionCode ?? string.Empty;
+    public bool ClypDatPairingCodeVisible => _clypDatAccount.ConnectionCode is not null;
     public bool ClypDatXboxIsLinked => _clypDatSnapshot.IsConnected;
     public string DiscordAccountStatus => _clypDatSnapshot.DiscordConnected ? "Connected" : "Not connected";
     public bool DiscordAccountIsConnected => _clypDatSnapshot.DiscordConnected;
@@ -7591,9 +7608,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         finally { ClypDatLinkBusy = false; }
     }
 
-    public void SignOutClypDatAccount()
+    public async Task SignOutClypDatAccountAsync()
     {
-        _clypDatAccount.Disconnect();
+        if (!await _clypDatAccount.RevokeAndDisconnectAsync()) return;
         _clypDatAccountSetupStarted = false;
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
@@ -7682,6 +7699,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
         OnPropertyChanged(nameof(HasAccountsToAdd));
         OnPropertyChanged(nameof(HasLinkedAccounts));
+        OnPropertyChanged(nameof(ClypDatPairingCode));
+        OnPropertyChanged(nameof(ClypDatPairingCodeVisible));
         OnPropertyChanged(nameof(ClypDatAccountError));
         OnPropertyChanged(nameof(ClypDatAccountHasError));
         OnPropertyChanged(nameof(ClypDatServerUnavailable));
@@ -9075,7 +9094,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedSpotifyAlbum = clipInfo?.SpotifyAlbum;
         _selectedSpotifyDurationMs = clipInfo?.SpotifyDurationMs;
         _selectedSpotifyProgressMs = clipInfo?.SpotifyProgressMs;
-        _selectedSpotifyArtPath = clipInfo?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
+        // Sidecar-supplied: confined to the artwork archive (see SpotifyCoverArtStore).
+        _selectedSpotifyArtPath = SpotifyCoverArtStore.TrustedArtPath(Settings.LibraryFolder, media.Path, clipInfo?.SpotifyArtPath) ?? SpotifyCoverArtStore.Existing(Settings.LibraryFolder, media.Path);
         _selectedSpotifyOverlayBurned = media.SpotifyOverlayBurned || clipInfo?.SpotifyOverlayBurned == true;
         _selectedOverlayManifestRecorded = clipInfo?.OverlayManifest is not null;
         _selectedOverlayManifest = ClipOverlayManifest.ForPlayback(clipInfo?.OverlayManifest ?? ClipOverlayManifest.Empty, media.Duration.TotalSeconds);

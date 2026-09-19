@@ -9,31 +9,8 @@ workflow:
 
 variables:
   GIT_DEPTH: "0"
-  RELEASE_DESCRIPTION: |
-    # What's New
-    - GPU-backed Library clip previews with card-sized rendering and fixed 60 FPS playback.
-    - Faster hover previews with short warm-session reuse.
-    - Selectable active-application audio tracks for replay capture.
-    - Modernized recording audio controls and clearer track selection.
-    - Higher replay-quality bitrate targets.
-    - Improved high-FPS replay capture and 120 FPS preview handling.
-    - Refreshed Library loading tiles, filters, startup cache, and storage updates.
-    - Improved editor timeline, trim controls, playback seeking, and A/V synchronization.
-    - Improved H.264 probing, replay qualification, and startup encoder validation.
-    - GitLab release includes ZIP, Portable EXE, Setup EXE, and MSI downloads.
-
-    # Fixes
-    - Prevent per-card GPU preview allocation from exploding RAM, handles, and threads.
-    - Fix preview cleanup stalls caused by FFmpeg sessions waiting on unread pipes.
-    - Keep software fallback and GPU device-loss recovery safe during preview changes.
-    - Preserve selected replay frame rate during encoder and capture load.
-    - Recreate the capture worker safely after configuration changes.
-    - Stabilize DXGI/WGC capture transport cadence and cursor composition.
-    - Correct application-audio track mapping and recording audio alignment.
-    - Keep Library card loading responsive while clips and thumbnails are restored.
-    - Fix editor seek timing and synchronized audio/video resume behavior.
-    - Improve quality guidance for resolution, frame rate, bitrate, and RAM cost.
-    - Make local publishing replace and launch the updated build reliably.
+  # Set reviewed notes when manually publishing this exact release.
+  RELEASE_DESCRIPTION: ""
 
 build_windows_installer:
   stage: build
@@ -56,88 +33,27 @@ build_windows_installer:
       if ($LASTEXITCODE -ne 0) { Write-Error "Could not check out pinned Avalonia commit $avaloniaCommit."; exit 1 }
       git -C $avaloniaRoot submodule update --init --recursive
       if ($LASTEXITCODE -ne 0) { Write-Error 'Could not initialize Avalonia submodules.'; exit 1 }
-      $msbuild = Join-Path $PWD '.dotnet\sdk\10.0.302\MSBuild.exe'
-      $dotnetHost = Join-Path $PWD '.dotnet\dotnet.exe'
-      if (-not (Test-Path $msbuild)) { Write-Error "MSBuild was not found: $msbuild"; exit 1 }
-      if (-not (Test-Path $dotnetHost)) { Write-Error "dotnet host was not found: $dotnetHost"; exit 1 }
-      $packageFeed = Join-Path $avaloniaRoot 'artifacts\nuget'
-      $nugetPackages = Join-Path $env:TEMP ("clypdat-nuget-" + $env:CI_PIPELINE_ID)
-      if (Test-Path -LiteralPath $nugetPackages) { Remove-Item -LiteralPath $nugetPackages -Recurse -Force }
-      New-Item -ItemType Directory -Path $nugetPackages -Force | Out-Null
-      $env:NUGET_PACKAGES = $nugetPackages
-      $previousDotNetHostPath = $env:DOTNET_HOST_PATH
-      $previousDotNetRoot = $env:DOTNET_ROOT
-      $previousDotNetRootX64 = $env:DOTNET_ROOT_X64
-      $previousPath = $env:PATH
-      $env:DOTNET_HOST_PATH = $dotnetHost
-      $env:DOTNET_ROOT = Join-Path $PWD '.dotnet'
-      $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
-      $env:PATH = "$($env:DOTNET_ROOT);$previousPath"
-      & $msbuild (Join-Path $avaloniaRoot 'build\ClypDat.Win32Packages.proj') /t:Pack `
-        /p:Configuration=Release `
-        /p:AvsSkipBuildingLegacyTargetFrameworks=True `
-        /p:IncludeLinuxSkia=false `
-        /p:IncludeWasmSkia=false `
-        /p:ForcePackAvaloniaNative=true `
-        "/p:ClypDatPackageVersion=$avaloniaVersion" "/p:ClypDatPackageOutput=$packageFeed" /nologo
-      $packageBuildExitCode = $LASTEXITCODE
-      $env:DOTNET_HOST_PATH = $previousDotNetHostPath
-      $env:DOTNET_ROOT = $previousDotNetRoot
-      $env:DOTNET_ROOT_X64 = $previousDotNetRootX64
-      $env:PATH = $previousPath
-      if ($packageBuildExitCode -ne 0) { Write-Error 'Could not build pinned Avalonia packages.'; exit 1 }
-      $avaloniaPackagePath = Join-Path $packageFeed "Avalonia.$avaloniaVersion.nupkg"
-      if (-not (Test-Path -LiteralPath $avaloniaPackagePath)) { Write-Error "Avalonia package feed was not created: $packageFeed"; exit 1 }
-
-      # The pinned Avalonia pack graph does not include build-task and
-      # generator outputs in Avalonia.nupkg. Add them, matching build.ps1's
-      # stable-package repair path, before the app restore consumes the feed.
-      $buildTasksProject = Join-Path $avaloniaRoot 'src\Avalonia.Build.Tasks\Avalonia.Build.Tasks.csproj'
-      $buildTasksOutput = Join-Path $avaloniaRoot 'src\Avalonia.Build.Tasks\bin\Release\netstandard2.0'
-      & $dotnetHost build $buildTasksProject -c Release -f netstandard2.0 /nologo
-      if ($LASTEXITCODE -ne 0) { Write-Error 'Could not build Avalonia build tasks.'; exit 1 }
-
-      $generatorProject = Join-Path $avaloniaRoot 'src\tools\Avalonia.Generators\Avalonia.Generators.csproj'
-      $generatorOutput = Join-Path $avaloniaRoot 'src\tools\Avalonia.Generators\bin\Release\netstandard2.0\Avalonia.Generators.dll'
-      & $dotnetHost build $generatorProject -c Release -f netstandard2.0 /nologo
-      if ($LASTEXITCODE -ne 0) { Write-Error 'Could not build Avalonia generators.'; exit 1 }
-
-      Add-Type -AssemblyName System.IO.Compression
-      Add-Type -AssemblyName System.IO.Compression.FileSystem
-      function Add-PackageFile {
-        param([string]$PackagePath, [string]$SourcePath, [string]$EntryName)
-        if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "Package source file was not found: $SourcePath" }
-        $archive = [System.IO.Compression.ZipFile]::Open($PackagePath, [System.IO.Compression.ZipArchiveMode]::Update)
-        try {
-          foreach ($existingEntry in @($archive.Entries | Where-Object { $_.FullName -eq $EntryName })) { $existingEntry.Delete() }
-          $entry = $archive.CreateEntry($EntryName, [System.IO.Compression.CompressionLevel]::Optimal)
-          $input = [System.IO.File]::OpenRead($SourcePath)
-          $output = $entry.Open()
-          try { $input.CopyTo($output) } finally { $output.Dispose(); $input.Dispose() }
-        }
-        finally { $archive.Dispose() }
-      }
-
-      foreach ($taskFile in @(Get-ChildItem -LiteralPath $buildTasksOutput -File)) {
-        Add-PackageFile $avaloniaPackagePath $taskFile.FullName "tools/netstandard2.0/$($taskFile.Name)"
-      }
-      Add-PackageFile $avaloniaPackagePath $generatorOutput 'analyzers/dotnet/cs/Avalonia.Generators.dll'
-
-      $archive = [System.IO.Compression.ZipFile]::OpenRead($avaloniaPackagePath)
-      try {
-        if (@($archive.Entries | Where-Object { $_.FullName -eq 'tools/netstandard2.0/Avalonia.Build.Tasks.dll' }).Count -ne 1) { throw 'Avalonia package is missing Avalonia.Build.Tasks.dll.' }
-        if (@($archive.Entries | Where-Object { $_.FullName -eq 'analyzers/dotnet/cs/Avalonia.Generators.dll' }).Count -ne 1) { throw 'Avalonia package is missing Avalonia.Generators.dll.' }
-      }
-      finally { $archive.Dispose() }
+      $env:NUGET_PACKAGES = Join-Path $env:TEMP ("clypdat-nuget-" + $env:CI_PIPELINE_ID)
+      .\eng\Build-ReleaseAvaloniaPackages.ps1 -AvaloniaRoot $avaloniaRoot
+    # CLYPDAT_TEST_GPU stays unset: shared runners have no GPU, and the physical
+    # D3D11 tests skip themselves without it.
+    - >-
+      .\dotnet.ps1 test native\tests\ClypDat.App.Tests\ClypDat.App.Tests.csproj
+      -c Release -p:Platform=x64 --nologo
     - >-
       .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj
       -c Release -r win-x64 --self-contained true -p:Platform=x64
       -p:Version=$version -o native\publish\win-x64-folder --nologo
     - .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
-    - >-
-      choco install nsis -y --no-progress --requirechecksums
-    - >-
-      choco install wixtoolset 7zip -y --no-progress --requirechecksums
+    - |
+      foreach ($tool in @(
+        @{ Name = 'nsis'; Version = '3.12.0' },
+        @{ Name = 'wixtoolset'; Version = '3.14.1.20250415' },
+        @{ Name = '7zip'; Version = '26.3.0' }
+      )) {
+        choco upgrade $tool.Name --version $tool.Version --allow-downgrade -y --no-progress --requirechecksums
+        if ($LASTEXITCODE -ne 0) { throw "Pinned $($tool.Name) installation failed." }
+      }
     - |
       if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS was not installed." }
       if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) { throw "7-Zip was not installed." }
@@ -196,8 +112,16 @@ build_windows_installer:
       - ClypDat.msi
     expire_in: 1 year
 
+# Manual on purpose. The release manifest is signed offline and this pipeline
+# cannot produce it, and ClypDat's updater reads GitLab releases as an update
+# source. Publishing automatically put a GitLab release ahead of its signed
+# manifest. Before running this job, download this pipeline's artifacts, sign
+# them with eng\Sign-ReleaseManifest.ps1, and pass the two outputs as base64 in
+# the RELEASE_MANIFEST_B64 and RELEASE_SIGNATURE_B64 job variables. The GitHub
+# release's manifest does not fit here: it covers GitHub's build, not these bytes.
 publish_gitlab_release:
   stage: release
+  when: manual
   tags:
     - saas-windows-medium-amd64
   needs:
@@ -205,8 +129,26 @@ publish_gitlab_release:
       artifacts: true
   script:
     - |
+      if ([string]::IsNullOrWhiteSpace($env:RELEASE_DESCRIPTION)) { throw 'Provide reviewed release notes in RELEASE_DESCRIPTION.' }
       $packageBase = "$env:CI_API_V4_URL/projects/$env:CI_PROJECT_ID/packages/generic/clypdat/$env:CI_COMMIT_TAG"
       $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi")
+      if ([string]::IsNullOrWhiteSpace($env:RELEASE_MANIFEST_B64) -or [string]::IsNullOrWhiteSpace($env:RELEASE_SIGNATURE_B64)) {
+        throw 'A signed release manifest and signature are required before publishing, including for legacy clients.'
+      }
+      [IO.File]::WriteAllBytes((Join-Path $PWD 'ClypDat-Release.manifest.json'), [Convert]::FromBase64String($env:RELEASE_MANIFEST_B64.Trim()))
+      [IO.File]::WriteAllBytes((Join-Path $PWD 'ClypDat-Release.manifest.sig'), [Convert]::FromBase64String($env:RELEASE_SIGNATURE_B64.Trim()))
+      $releaseManifest = .\eng\Read-VerifiedReleaseManifest.ps1 -ManifestPath ClypDat-Release.manifest.json -SignaturePath ClypDat-Release.manifest.sig -Tag $env:CI_COMMIT_TAG
+      foreach ($asset in $assets) {
+        $entries = @($releaseManifest.assets | Where-Object { $_.name -ceq $asset })
+        if ($entries.Count -ne 1) { throw "Signed release manifest must cover $asset exactly once." }
+        $entry = $entries[0]
+        if ((Get-Item -LiteralPath $asset).Length -ne $entry.size -or
+            (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant() -ne ([string]$entry.sha256).ToLowerInvariant()) {
+          throw "Signed release manifest does not match $asset from this pipeline."
+        }
+      }
+      $signedAssets = @('ClypDat-Release.manifest.json', 'ClypDat-Release.manifest.sig')
+      $assets += $signedAssets
       foreach ($asset in $assets) {
         $packageUrl = "$packageBase/$asset"
         curl.exe --fail --show-error --header "JOB-TOKEN: $env:CI_JOB_TOKEN" --upload-file $asset $packageUrl
@@ -219,6 +161,9 @@ publish_gitlab_release:
         @{ name = 'ClypDat-Setup.exe'; url = "$packageBase/ClypDat-Setup.exe"; direct_asset_path = '/ClypDat-Setup.exe'; link_type = 'package' },
         @{ name = 'ClypDat.msi'; url = "$packageBase/ClypDat.msi"; direct_asset_path = '/ClypDat.msi'; link_type = 'package' }
       )
+      foreach ($signedAsset in $signedAssets) {
+        $releaseLinks += @{ name = $signedAsset; url = "$packageBase/$signedAsset"; direct_asset_path = "/$signedAsset"; link_type = 'other' }
+      }
       $releasePayload = @{
         tag_name = $env:CI_COMMIT_TAG
         name = "ClypDat $env:CI_COMMIT_TAG"

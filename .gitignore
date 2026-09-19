@@ -45,6 +45,13 @@ yarn-error.log*
 *.keystore
 *.mobileprovision
 
+# Local worktrees, logs, and leftover tool output
+/.local/
+/.pr8-test/
+/web/
+/ClypDat/logs/
+/native/gsr/
+
 # OS/editor files
 .DS_Store
 Thumbs.db
@@ -58,7 +65,6 @@ Desktop.ini
 
 # Local screenshots and generated media
 /native/artifacts/
-/native/tests/
 /native/video-output-native/build/
 Screenshot *.png
 *.tmp
@@ -74,7 +80,6 @@ builder-debug.yml
 builder-effective-config.yaml
 AGENTS.md
 CLAUDE.md
-.gitlab-ci.yml
 
 # dotnet.ps1 and global.json are NOT ignored on purpose: .github/workflows/release.yml
 # runs ".\dotnet.ps1 --info" to bootstrap the pinned SDK, and global.json is what pins

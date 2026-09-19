@@ -34,7 +34,7 @@ public sealed record ClipOverlayManifest(
         {
             var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(libraryRoot)) + Path.DirectorySeparatorChar;
             var path = Path.GetFullPath(Path.Combine(root, assetPath));
-            return path.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? path : null;
+            return LibraryPathGuard.IsWithin(root, path) ? path : null;
         }
         catch (Exception) { return null; }
     }
@@ -129,7 +129,7 @@ public sealed record ClipOverlayManifest(
             .Select(cap => new CustomKeyCap(cap.Code, cap.Label, cap.Units)).ToArray()).ToArray();
     }
 
-    /// <summary>Returns only references which are safe to delete from this library.</summary>
+    /// <summary>Existing confined references; some may be shared by other clips.</summary>
     public static IEnumerable<string> ExistingAssetPaths(string libraryRoot, ClipOverlayManifest? manifest)
     {
         foreach (var layer in new[] { manifest?.Camera, manifest?.Peripherals })
@@ -145,6 +145,18 @@ public sealed record ClipOverlayManifest(
                 if (path is not null && File.Exists(path)) yield return path;
             }
         }
+    }
+
+    /// <summary>Only the input index and camera segments owned by this clip may be deleted.</summary>
+    public static IEnumerable<string> ExistingOwnedAssetPaths(string libraryRoot, string clipPath, ClipOverlayManifest? manifest)
+    {
+        var camera = Path.GetFullPath(LibraryLayout.SidecarPath(libraryRoot, clipPath, ".camera")) + Path.DirectorySeparatorChar;
+        var input = Path.GetFullPath(LibraryLayout.SidecarPath(libraryRoot, clipPath, ".input.json"));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var path in ExistingAssetPaths(libraryRoot, manifest))
+            if (string.Equals(path, input, comparison)
+                || path.StartsWith(camera, comparison))
+                yield return path;
     }
 }
 

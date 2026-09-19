@@ -23,13 +23,22 @@ internal static class SpotifyTimelineSidecar
         try
         {
             var path = PathFor(libraryRoot, clipPath);
-            if (!File.Exists(path) || new FileInfo(path).Length > 512 * 1024) return null;
+            if (!LibraryPathGuard.IsWithin(libraryRoot, path) || !File.Exists(path) || new FileInfo(path).Length > 512 * 1024) return null;
             var value = JsonSerializer.Deserialize<SpotifyTimeline>(File.ReadAllText(path));
             return value is { Version: SpotifyTimeline.CurrentVersion, Samples: not null } &&
                 value.Samples.All(item => double.IsFinite(item.OffsetSeconds) && item.OffsetSeconds >= 0 && double.IsFinite(item.ProgressRate) && item.ProgressRate >= 0)
-                ? value with { Samples = value.Samples.OrderBy(item => item.OffsetSeconds).ToArray() } : null;
+                ? value with { Samples = value.Samples.OrderBy(item => item.OffsetSeconds).Select(item => Confine(libraryRoot, clipPath, item)).ToArray() } : null;
         }
         catch (Exception error) { AppLog.Error("Spotify timeline read failed.", error); return null; }
+    }
+
+    // The sidecar is untrusted input (see SpotifyCoverArtStore.IsArchivedArtPath):
+    // an art path outside the archive, or a URL off Spotify's CDN, is dropped.
+    private static SpotifyTimelineSample Confine(string libraryRoot, string clipPath, SpotifyTimelineSample sample)
+    {
+        var artPath = SpotifyCoverArtStore.TrustedArtPath(libraryRoot, clipPath, sample.ArtPath);
+        var artUrl = SpotifyCoverArtStore.IsTrustedArtUrl(sample.ArtUrl) ? sample.ArtUrl : null;
+        return artPath == sample.ArtPath && artUrl == sample.ArtUrl ? sample : sample with { ArtPath = artPath, ArtUrl = artUrl };
     }
 
     public static void Save(string libraryRoot, string clipPath, IEnumerable<SpotifyTimelineSample> samples)
@@ -37,6 +46,7 @@ internal static class SpotifyTimelineSidecar
         try
         {
             var path = PathFor(libraryRoot, clipPath);
+            if (!LibraryPathGuard.IsWithin(libraryRoot, path)) throw new InvalidDataException("Spotify metadata crosses a filesystem link.");
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             var ordered = samples.Where(item => double.IsFinite(item.OffsetSeconds) && item.OffsetSeconds >= 0)
                 .OrderBy(item => item.OffsetSeconds).TakeLast(4096).ToArray();
@@ -79,11 +89,15 @@ internal static class SpotifyTimelineSidecar
 
     public static void Delete(string libraryRoot, string clipPath)
     {
-        try { var path = PathFor(libraryRoot, clipPath); if (File.Exists(path)) File.Delete(path); } catch { }
+        try { var path = PathFor(libraryRoot, clipPath); if (LibraryPathGuard.IsWithin(libraryRoot, path) && File.Exists(path)) File.Delete(path); } catch { }
         foreach (var suffix in new[] { ".cover.jpg", ".source.json" })
-            try { File.Delete(LibraryLayout.SidecarPath(libraryRoot, clipPath, suffix)); } catch { }
-        var art = LibraryLayout.SidecarPath(libraryRoot, clipPath, ".spotify-art");
-        try { if (Directory.Exists(art)) Directory.Delete(art, true); } catch { }
+            try { var path = LibraryLayout.SidecarPath(libraryRoot, clipPath, suffix); if (LibraryPathGuard.IsWithin(libraryRoot, path)) File.Delete(path); } catch { }
+        try
+        {
+            var art = LibraryLayout.SidecarPath(libraryRoot, clipPath, ".spotify-art");
+            if (LibraryPathGuard.IsWithin(libraryRoot, art) && Directory.Exists(art)) Directory.Delete(art, true);
+        }
+        catch { }
     }
 
     public static void Copy(string root, string source, string destination, double? start = null, double? end = null, double speed = 1)
@@ -91,9 +105,9 @@ internal static class SpotifyTimelineSidecar
         var timeline = Load(root, source);
         if (timeline is null)
         {
-            var art = ClipInfoSidecar.Load(root, source)?.SpotifyArtPath ?? SpotifyCoverArtStore.Existing(root, source);
+            var art = SpotifyCoverArtStore.TrustedArtPath(root, source, ClipInfoSidecar.Load(root, source)?.SpotifyArtPath) ?? SpotifyCoverArtStore.Existing(root, source);
             var target = SpotifyCoverArtStore.PathFor(root, destination);
-            if (art is not null && File.Exists(art) && !string.Equals(art, target, StringComparison.OrdinalIgnoreCase))
+            if (art is not null && LibraryPathGuard.IsWithin(root, target) && File.Exists(art) && !string.Equals(art, target, StringComparison.OrdinalIgnoreCase))
             { Directory.CreateDirectory(Path.GetDirectoryName(target)!); File.Copy(art, target, true); }
             return;
         }
@@ -106,6 +120,7 @@ internal static class SpotifyTimelineSidecar
             if (old.StartsWith(SpotifyCoverArtStore.ArchiveRoot(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             { paths[old] = old; continue; }
             var target = Path.Combine(folder, Path.GetFileName(old));
+            if (!LibraryPathGuard.IsWithin(root, target)) continue;
             Directory.CreateDirectory(folder);
             if (!string.Equals(old, target, StringComparison.OrdinalIgnoreCase)) File.Copy(old, target, true);
             paths[old] = target;

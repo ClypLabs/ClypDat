@@ -71,6 +71,8 @@ public static class LibraryLayout
     public static void EnsureClipInfoRoot(string libraryRoot)
     {
         var directory = ClipInfoRoot(libraryRoot);
+        if (!LibraryPathGuard.IsWithin(libraryRoot, directory))
+            throw new InvalidDataException("The clip metadata directory crosses a filesystem link.");
         Directory.CreateDirectory(directory);
         try { new DirectoryInfo(directory).Attributes |= FileAttributes.Hidden; }
         catch { /* Hidden is cosmetic; metadata storage still works without it. */ }
@@ -87,10 +89,20 @@ public static class LibraryLayout
 
     public static void MoveSidecars(string libraryRoot, string oldVideoPath, string newVideoPath)
     {
-        SpotifyTimelineSidecar.Copy(libraryRoot, oldVideoPath, newVideoPath);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (string.Equals(Path.GetFullPath(oldVideoPath), Path.GetFullPath(newVideoPath), comparison)) return;
+        // Copy writes a new timeline only when the source has one. Remove the
+        // destination's orphan first so a clip with no music cannot adopt it.
+        var destinationTimeline = SpotifyTimelineSidecar.PathFor(libraryRoot, newVideoPath);
+        if (!LibraryPathGuard.IsWithin(libraryRoot, destinationTimeline))
+            throw new InvalidDataException("Destination metadata crosses a filesystem link.");
+        if (File.Exists(destinationTimeline)) File.Delete(destinationTimeline);
+        var moves = new List<(string Source, string Destination)>();
         foreach (var suffix in new[] { ".info.json", ".json", ".paused.json", ".cover.jpg", ".source.json" })
         {
             var newPath = SidecarPath(libraryRoot, newVideoPath, suffix);
+            if (!LibraryPathGuard.IsWithin(libraryRoot, newPath))
+                throw new InvalidDataException("Destination metadata crosses a filesystem link.");
             var candidates = new[]
             {
                 SidecarPath(libraryRoot, oldVideoPath, suffix),
@@ -98,19 +110,23 @@ public static class LibraryLayout
                 suffix == ".paused.json" ? LegacyAdjacentPausedPath(oldVideoPath) : string.Empty
             };
 
-            foreach (var oldPath in candidates.Where(File.Exists))
+            var sourcePaths = candidates.Where(path => LibraryPathGuard.IsWithin(libraryRoot, path) && File.Exists(path)).ToArray();
+            if (sourcePaths.Length == 0)
             {
-                if (!File.Exists(newPath))
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(newPath)!);
-                    File.Move(oldPath, newPath);
-                }
-                else if (!string.Equals(oldPath, newPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    File.Delete(oldPath);
-                }
-                break;
+                foreach (var stale in new[] { newPath, LegacySidecarPath(newVideoPath, suffix),
+                    suffix == ".paused.json" ? LegacyAdjacentPausedPath(newVideoPath) : string.Empty })
+                    if (LibraryPathGuard.IsWithin(libraryRoot, stale) && File.Exists(stale)) File.Delete(stale);
             }
+            if (sourcePaths.Length > 0) moves.Add((sourcePaths[0], newPath));
+        }
+        // Copy needs the source info still present. Clear stale metadata first,
+        // then let it create the destination's own timeline and cover.
+        SpotifyTimelineSidecar.Copy(libraryRoot, oldVideoPath, newVideoPath);
+        foreach (var (source, destination) in moves)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            // Live metadata wins; a failed move preserves its source.
+            File.Move(source, destination, overwrite: true);
         }
         var info = ClipInfoSidecar.Load(libraryRoot, newVideoPath);
         if (info is not null)

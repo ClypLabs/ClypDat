@@ -1459,8 +1459,14 @@ public sealed class AudioCapturePipeline : IDisposable
         }
     }
 
-    public static async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken)
-        => await RunProcessAsync(fileName, args, null, cancellationToken).ConfigureAwait(false);
+    // Upper bound on any one ffmpeg run. Saves are serialised behind a single
+    // gate, so an ffmpeg wedged on a dead network share used to block every
+    // later save until the app restarted. Generous on purpose: a legitimate
+    // run that gets here has already gone badly wrong.
+    public static readonly TimeSpan DefaultProcessTimeout = TimeSpan.FromMinutes(10);
+
+    public static async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(string fileName, IEnumerable<string> args, CancellationToken cancellationToken, TimeSpan? timeout = null)
+        => await RunProcessAsync(fileName, args, null, cancellationToken, timeout).ConfigureAwait(false);
 
     /// <summary>
     /// When <paramref name="position"/> is supplied the caller is expected to
@@ -1469,15 +1475,41 @@ public sealed class AudioCapturePipeline : IDisposable
     /// buffered to the end.
     /// </summary>
     public static async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(
-        string fileName, IEnumerable<string> args, IProgress<double>? position, CancellationToken cancellationToken)
+        string fileName, IEnumerable<string> args, IProgress<double>? position, CancellationToken cancellationToken, TimeSpan? timeout = null)
     {
+        var limit = timeout ?? DefaultProcessTimeout;
+        if (limit <= TimeSpan.Zero || limit.TotalMilliseconds > uint.MaxValue - 1)
+            throw new ArgumentOutOfRangeException(nameof(timeout));
         using var process = StartProcess(fileName, args);
-        var outputTask = position is null
-            ? process.StandardOutput.ReadToEndAsync(cancellationToken)
-            : ReadPositionAsync(process.StandardOutput, position, cancellationToken);
-        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        return (process.ExitCode, await outputTask, await errorTask);
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(limit);
+        var token = timeoutSource.Token;
+        try
+        {
+            var outputTask = position is null
+                ? process.StandardOutput.ReadToEndAsync(token)
+                : ReadPositionAsync(process.StandardOutput, position, token);
+            var errorTask = process.StandardError.ReadToEndAsync(token);
+            await process.WaitForExitAsync(token);
+            return (process.ExitCode, await outputTask, await errorTask);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"{fileName} stopped responding and was ended after {limit.TotalMinutes:0.#} minutes.");
+        }
+        finally
+        {
+            // Cancelled or timed out: the process must not outlive the call,
+            // or it keeps its output file (and any network handle) open.
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // Already exiting, or access denied - nothing more to do.
+            }
+        }
     }
 
     private static async Task<string> ReadPositionAsync(StreamReader stdout, IProgress<double> position, CancellationToken token)

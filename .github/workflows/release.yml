@@ -21,15 +21,27 @@ on:
         description: "Display version for manually dispatched releases"
         required: false
 
+# Build code (NuGet/MSBuild targets, the fork build, choco packages) runs in a
+# job whose token can only read. Only the final upload job can write releases,
+# and it runs nothing but gh. Neither checkout persists its token into .git.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
+    env:
+      NUGET_PACKAGES: ${{ runner.temp }}/clypdat-release-nuget
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
 
       # ClypDat consumes its patched Avalonia packages from the sibling fork.
       # A release runner is a clean checkout, so it must build that local feed
@@ -41,6 +53,7 @@ jobs:
           repository: ClypLabs/clypdat-avalonia
           path: clypdat-avalonia
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Build pinned Avalonia packages
         shell: pwsh
@@ -51,9 +64,7 @@ jobs:
           $commit = $pin.SelectSingleNode('//ClypDatAvaloniaStableCommit').InnerText.Trim()
           git -C $forkRoot checkout --detach $commit
           if ($LASTEXITCODE -ne 0) { throw "Could not check out pinned Avalonia commit $commit." }
-          # The fork package closure includes Avalonia.Controls.Media. `local`
-          # selects that exact closure while keeping this tag checkout intact.
-          .\build.ps1 local
+          .\eng\Build-ReleaseAvaloniaPackages.ps1 -AvaloniaRoot $forkRoot
 
       # Untrusted values reach PowerShell through env: only. Interpolating
       # ${{ inputs.* }} directly into a run: block splices the caller's text into
@@ -84,11 +95,12 @@ jobs:
         run: .\dotnet.ps1 --info
 
       - name: Publish ClypDat.App
-        run: >
-          .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj
-          -c Release -r win-x64 --self-contained true -p:Platform=x64
-          -p:Version=${{ steps.version.outputs.version }}
-          -o native\publish\win-x64-folder --nologo
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 "-p:Version=$env:VERSION" -o native\publish\win-x64-folder --nologo
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
 
       - name: Verify self-contained publish
         shell: pwsh
@@ -112,18 +124,21 @@ jobs:
             "C:\Program Files\7-Zip\7z.exe"
           )
 
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-            choco install nsis wixtoolset 7zip -y --no-progress --requirechecksums
-            if (($requiredTools | Where-Object { -not (Test-Path $_) }).Count -eq 0) {
-              exit 0
-            }
-
-            if ($attempt -lt 3) {
+          # Versions from successful release run 35196416795.
+          $tools = @(
+            @{ Name = 'nsis'; Version = '3.12.0' },
+            @{ Name = 'wixtoolset'; Version = '3.14.1.20250415' },
+            @{ Name = '7zip'; Version = '26.3.0' }
+          )
+          foreach ($tool in $tools) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              choco upgrade $tool.Name --version $tool.Version --allow-downgrade -y --no-progress --requirechecksums
+              if ($LASTEXITCODE -eq 0) { break }
+              if ($attempt -eq 3) { throw "Could not install pinned $($tool.Name) $($tool.Version)." }
               Start-Sleep -Seconds (10 * $attempt)
             }
           }
-
-          throw "Packaging tools were not installed after three attempts."
+          if (($requiredTools | Where-Object { -not (Test-Path $_) }).Count -ne 0) { throw 'Packaging tools are missing.' }
 
       - name: Build portable exe (7-Zip self-extracting archive)
         shell: pwsh
@@ -141,13 +156,12 @@ jobs:
           cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z ClypDat-Portable.exe
 
       - name: Build NSIS installer
-        run: >
-          & "C:\Program Files (x86)\NSIS\makensis.exe"
-          /DCLYPDAT_VERSION=${{ steps.version.outputs.version }}
-          /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder
-          /DCLYPDAT_OUTPUT_FILE=..\ClypDat-Setup.exe
-          installer\ClypDat.nsi
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DCLYPDAT_VERSION=$env:VERSION" /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder /DCLYPDAT_OUTPUT_FILE=..\ClypDat-Setup.exe installer\ClypDat.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis.exe failed with exit code $LASTEXITCODE" }
 
       - name: Verify NSIS installer icon
         shell: pwsh
@@ -172,8 +186,10 @@ jobs:
 
       - name: Harvest publish folder for MSI
         shell: pwsh
+        env:
+          WIX_BIN: ${{ steps.wix.outputs.bin }}
         run: |
-          $wixBin = "${{ steps.wix.outputs.bin }}"
+          $wixBin = $env:WIX_BIN
           $heatArgs = @(
             "dir", "native\publish\win-x64-folder",
             "-cg", "AppFiles", "-dr", "INSTALLFOLDER", "-srd", "-sreg", "-gg", "-g1", "-sfrag",
@@ -185,10 +201,13 @@ jobs:
 
       - name: Build MSI
         shell: pwsh
+        env:
+          WIX_BIN: ${{ steps.wix.outputs.bin }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $wixBin = "${{ steps.wix.outputs.bin }}"
+          $wixBin = $env:WIX_BIN
           $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
-          $version = "${{ steps.version.outputs.version }}"
+          $version = $env:VERSION
 
           $candleArgs = @(
             "-arch", "x64",
@@ -211,6 +230,31 @@ jobs:
           & "$wixBin\light.exe" @lightArgs
           if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
 
+      - name: Upload release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-assets
+          path: |
+            ClypDat-win-x64.zip
+            ClypDat-Portable.exe
+            ClypDat-Setup.exe
+            ClypDat.msi
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+  upload:
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-assets
+          path: release-assets
+
       # Create a draft rather than publishing an incomplete release. GitHub immutable
       # releases cannot accept assets after publication, while ClypDat's updater refuses
       # a release until its signed manifest is present. The offline signer uploads both
@@ -229,11 +273,17 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
         shell: pwsh
         run: |
-          $tag = "${{ steps.version.outputs.tag }}"
-           gh release create $tag `
-             ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
-             --title "ClypDat $tag" `
-             --generate-notes `
-             --draft
+          $tag = $env:TAG
+          if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { throw "Unexpected tag '$tag' from build job." }
+          Set-Location release-assets
+          gh release create $tag `
+            ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
+            --title "ClypDat $tag" `
+            --generate-notes `
+            --verify-tag `
+            --draft
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }

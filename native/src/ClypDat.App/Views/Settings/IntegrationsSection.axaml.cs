@@ -30,9 +30,9 @@ public sealed partial class IntegrationsSection : UserControl
     {
         if (DataContext is MainWindowViewModel vm) vm.OpenClypDatAccount();
     }
-    private void UnlinkClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private async void UnlinkClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm) vm.SignOutClypDatAccount();
+        if (DataContext is MainWindowViewModel vm) await vm.SignOutClypDatAccountAsync();
     }
     private async void UnlinkClypDatXboxButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

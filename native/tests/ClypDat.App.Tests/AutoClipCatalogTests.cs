@@ -157,8 +157,10 @@ public sealed class AutoClipCatalogTests
         // replay duration rather than retained media timing.
         // older install is rejected rather than answering without it.
         // 11 carries the overlay recording mode (editable layers or burned in).
-        Assert.Equal(11, CaptureWorkerProtocol.Version);
-        Assert.Equal(2, DetectorHostProtocol.Version);
+        // 12 adds live Full Session state and closed-file events.
+        Assert.Equal(12, CaptureWorkerProtocol.Version);
+        // 3 adds the per-slot sequence to reject torn or recycled detector frames.
+        Assert.Equal(3, DetectorHostProtocol.Version);
         Assert.Equal(3, DetectorHostProtocol.FrameSlotCount);
         Assert.Equal(10, DetectorHostProtocol.MaximumFramesPerSecond);
         Assert.Equal(512L * 1024 * 1024, DetectorHostProtocol.MaximumWorkingSetBytes);

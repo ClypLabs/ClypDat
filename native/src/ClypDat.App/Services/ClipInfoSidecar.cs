@@ -109,6 +109,7 @@ public static class ClipInfoSidecar
         try
         {
             var sidecarPath = SidecarPath(libraryRoot, clipPath);
+            if (!LibraryPathGuard.IsWithin(libraryRoot, sidecarPath)) throw new InvalidDataException("Clip metadata crosses a filesystem link.");
             Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
             File.WriteAllText(sidecarPath, JsonSerializer.Serialize(info, SerializerOptions));
         }
@@ -137,11 +138,13 @@ public static class ClipInfoSidecar
 
     public static ClipInfo? Load(string libraryRoot, string clipPath)
     {
-        var path = SidecarPath(libraryRoot, clipPath);
-        if (!File.Exists(path)) path = LibraryLayout.LegacySidecarPath(clipPath, ".info.json");
-        if (!File.Exists(path)) return null;
+        string? path = null;
         try
         {
+            path = SidecarPath(libraryRoot, clipPath);
+            if (!LibraryPathGuard.IsWithin(libraryRoot, path)) return null;
+            if (!File.Exists(path)) path = LibraryLayout.LegacySidecarPath(clipPath, ".info.json");
+            if (!LibraryPathGuard.IsWithin(libraryRoot, path) || !File.Exists(path)) return null;
             var json = ReadBounded(path);
             return json is null ? null : JsonSerializer.Deserialize<ClipInfo>(json);
         }
@@ -165,14 +168,14 @@ public static class ClipInfoSidecar
             // One corrupt/locked asset must not prevent attempts for other
             // owned assets. Distinct also covers an input index shared through
             // AssetPath and InputIndexPath in older captures.
-            foreach (var asset in ClipOverlayManifest.ExistingAssetPaths(libraryRoot, Load(libraryRoot, clipPath)?.OverlayManifest)
+            foreach (var asset in ClipOverlayManifest.ExistingOwnedAssetPaths(libraryRoot, clipPath, Load(libraryRoot, clipPath)?.OverlayManifest)
                          .Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 try { File.Delete(asset); }
                 catch (Exception error) { AppLog.Error($"Overlay asset delete failed: {asset}", error); }
             }
             var paths = new[] { SidecarPath(libraryRoot, clipPath), LibraryLayout.LegacySidecarPath(clipPath, ".info.json") };
-            foreach (var path in paths.Where(File.Exists)) File.Delete(path);
+            foreach (var path in paths.Where(path => LibraryPathGuard.IsWithin(libraryRoot, path) && File.Exists(path))) File.Delete(path);
         }
         catch (Exception error)
         {

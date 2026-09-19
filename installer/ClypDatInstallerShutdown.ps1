@@ -7,9 +7,27 @@ $eventPrefix = 'ClypDat-Recorder-UpdateShutdownRequest-9F3D2A61-'
 $appProductName = 'ClypDat'
 $recorderProductName = 'ClypDat Recorder'
 
-function Get-ProcessPath {
-    param([System.Diagnostics.Process] $Process)
+# NSIS runs this under 32-bit Windows PowerShell, where Process.MainModule
+# throws for every 64-bit process - so ClypDat was never found and its files
+# were overwritten while still locked. Win32_Process.ExecutablePath has no
+# bitness restriction.
+function Get-ProcessPathMap {
+    $map = @{}
+    try
+    {
+        foreach ($entry in @(Get-CimInstance Win32_Process -ErrorAction Stop))
+        {
+            if (-not [string]::IsNullOrWhiteSpace($entry.ExecutablePath)) { $map[[int]$entry.ProcessId] = $entry.ExecutablePath }
+        }
+    }
+    catch { throw "Could not enumerate processes safely: $($_.Exception.Message)" }
+    return $map
+}
 
+function Get-ProcessPath {
+    param([System.Diagnostics.Process] $Process, [hashtable] $PathMap)
+
+    if ($null -ne $PathMap -and $PathMap.ContainsKey([int]$Process.Id)) { return $PathMap[[int]$Process.Id] }
     try { return $Process.MainModule.FileName }
     catch { return $null }
 }
@@ -38,10 +56,11 @@ function Test-ClypDatExecutable {
 
 function Get-OwnedProcesses {
     $owned = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
+    $pathMap = Get-ProcessPathMap
 
     foreach ($process in Get-Process -ErrorAction SilentlyContinue)
     {
-        $path = Get-ProcessPath $process
+        $path = Get-ProcessPath $process $pathMap
         if (Test-ClypDatExecutable $path)
         {
             $owned.Add($process)
@@ -103,8 +122,9 @@ if ($remaining.Count -gt 0)
 $locked = Get-OwnedProcesses
 if ($locked.Count -gt 0)
 {
+    $pathMap = Get-ProcessPathMap
     $details = $locked | ForEach-Object {
-        $path = Get-ProcessPath $_
+        $path = Get-ProcessPath $_ $pathMap
         "PID $($_.Id) ($path)"
     }
     Write-Error ("Verified ClypDat processes remain: " + ($details -join '; '))

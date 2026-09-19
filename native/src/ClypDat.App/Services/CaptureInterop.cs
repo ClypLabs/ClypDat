@@ -72,7 +72,17 @@ internal static unsafe class CaptureInterop
     {
         using var dxgiDevice = device.QueryInterface<Vortice.DXGI.IDXGIDevice>();
         CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.NativePointer, out var winrtPointer);
-        return WinRT.MarshalInterface<IDirect3DDevice>.FromAbi(winrtPointer);
+        try
+        {
+            // FromAbi borrows: it takes its own reference for the RCW (QueryInterface
+            // plus ComWrappers) and leaves the caller's out reference untouched, so
+            // that one is released here or it leaks a device per capture start.
+            return WinRT.MarshalInterface<IDirect3DDevice>.FromAbi(winrtPointer);
+        }
+        finally
+        {
+            if (winrtPointer != IntPtr.Zero) Marshal.Release(winrtPointer);
+        }
     }
 
     public static Vortice.Direct3D11.ID3D11Texture2D GetTexture(IDirect3DSurface surface)
@@ -136,7 +146,15 @@ internal static unsafe class CaptureInterop
         IntPtr itemPointer;
         var hr = fn(factory, handle, &itemIid, &itemPointer);
         Marshal.ThrowExceptionForHR(hr);
-        return WinRT.MarshalInterface<GraphicsCaptureItem>.FromAbi(itemPointer);
+        try
+        {
+            // Borrowing, as in CreateDirect3DDevice: release the out reference.
+            return WinRT.MarshalInterface<GraphicsCaptureItem>.FromAbi(itemPointer);
+        }
+        finally
+        {
+            if (itemPointer != IntPtr.Zero) Marshal.Release(itemPointer);
+        }
     }
 
     private static IntPtr GetActivationFactoryPointer(string classId, Guid iid)

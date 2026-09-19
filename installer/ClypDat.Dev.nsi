@@ -42,7 +42,12 @@ VIAddVersionKey "FileDescription" "ClypDat Dev Channel Setup"
 
 Section "ClypDat Dev" SecMain
   SetOutPath "$INSTDIR"
-  File /r "${CLYPDAT_SOURCE_DIR}\*.*"
+  File "${CLYPDAT_SOURCE_DIR}\ClypDat-Dev.exe"
+  File "${CLYPDAT_SOURCE_DIR}\License.txt"
+  ; The launcher and updater share this data-root versions directory.
+  SetOutPath "$LOCALAPPDATA\ClypDat-Dev\versions\${CLYPDAT_BUILD_ID}"
+  File /r "${CLYPDAT_SOURCE_DIR}\versions\${CLYPDAT_BUILD_ID}\*.*"
+  SetOutPath "$INSTDIR"
   WriteRegStr HKCU "Software\ClypDat-Dev" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\ClypDat Dev"
@@ -57,6 +62,24 @@ Section "ClypDat Dev" SecMain
 SectionEnd
 
 Section "Uninstall"
+  ; $INSTDIR comes from MUI_PAGE_DIRECTORY, so the user can point the install at any
+  ; folder - and this recursive delete would then take that whole folder with it.
+  ; Same guard as ClypDat.nsi: only remove a directory that actually looks like ours.
+  StrCpy $0 "$INSTDIR" "" -12
+  ${If} $INSTDIR == ""
+  ${OrIf} $INSTDIR == "$PROGRAMFILES64"
+  ${OrIf} $INSTDIR == "$PROGRAMFILES"
+  ${OrIf} $INSTDIR == "$WINDIR"
+  ${OrIf} $INSTDIR == "$SYSDIR"
+  ${OrIf} $INSTDIR == "$DESKTOP"
+  ${OrIf} $INSTDIR == "$DOCUMENTS"
+  ${OrIf} $INSTDIR == "$LOCALAPPDATA"
+  ${OrIf} $INSTDIR == "$APPDATA"
+  ${OrIf} $INSTDIR == "$PROFILE"
+  ${OrIf} $0 != "\ClypDat-Dev"
+    MessageBox MB_ICONSTOP "Refusing to uninstall from $INSTDIR - it is not a ClypDat Dev install directory. Remove the folder by hand if you are sure."
+    Abort
+  ${EndIf}
   RMDir /r "$INSTDIR"
   Delete "$SMPROGRAMS\ClypDat Dev\ClypDat Dev.lnk"
   Delete "$SMPROGRAMS\ClypDat Dev\Uninstall ClypDat Dev.lnk"

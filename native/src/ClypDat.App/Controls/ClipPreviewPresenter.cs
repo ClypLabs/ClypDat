@@ -466,8 +466,19 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
     {
         if (_slots.Count != 0 && _slots[0].Size != size) await DisposeSlotsAsync();
         while (_slots.Count < 3) _slots.Add(CreateSlot(size));
-        var slot = _slots[_nextSlot++ % _slots.Count];
-        await slot.LastPresent.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var index = _nextSlot++ % _slots.Count;
+        var slot = _slots[index];
+        try { await slot.LastPresent.WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch when (slot.LastPresent.IsFaulted || slot.LastPresent.IsCanceled)
+        {
+            // A failed present can strand the keyed mutex. Reusing the same
+            // texture only repeats that failure, so replace the entire slot.
+            cancellationToken.ThrowIfCancellationRequested();
+            var replacement = CreateSlot(size);
+            _slots[index] = replacement;
+            await slot.DisposeAsync().ConfigureAwait(false);
+            slot = replacement;
+        }
         return slot;
     }
 
@@ -554,9 +565,12 @@ internal sealed class GpuClipPreviewAdapter : IClipPreviewPresenter
             try { await LastPresent.ConfigureAwait(false); } catch { }
             // Imported is a composition object, so releasing it belongs on the
             // UI thread even when the teardown was started off it.
-            await Dispatcher.UIThread.InvokeAsync(async () => await Imported.DisposeAsync());
-            Mutex.Dispose();
-            Texture.Dispose();
+            try { await Dispatcher.UIThread.InvokeAsync(async () => await Imported.DisposeAsync()); }
+            finally
+            {
+                Mutex.Dispose();
+                Texture.Dispose();
+            }
         }
     }
 }

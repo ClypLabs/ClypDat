@@ -20,8 +20,11 @@ on:
         required: true
         type: string
 
+# Each job widens only what it needs: build runs third-party build code with a
+# read-only token and no signing key; sign holds the key but runs no build code;
+# publish holds the write token but neither the key nor any build tooling.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: clypdat-dev-channel
@@ -29,9 +32,21 @@ concurrency:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/master'
     runs-on: windows-latest
+    env:
+      NUGET_PACKAGES: ${{ runner.temp }}/clypdat-dev-nuget
+    permissions:
+      contents: read
+    outputs:
+      build_id: ${{ steps.publish.outputs.build_id }}
+      clypdat_commit: ${{ steps.publish.outputs.clypdat_commit }}
+      avalonia_commit: ${{ steps.publish.outputs.avalonia_commit }}
+      package_version: ${{ steps.publish.outputs.package_version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # Dispatch inputs are attacker-controlled for anyone who can trigger this
       # workflow. Validate their shape once, here, in a step that holds no secrets -
@@ -45,10 +60,39 @@ jobs:
           AVALONIA_RUN_ID: ${{ inputs.avalonia_run_id }}
           ARTIFACT_NAME: ${{ inputs.artifact_name }}
         run: |
-          if ($env:AVALONIA_COMMIT -notmatch '^[0-9a-f]{40}$') { throw "avalonia_commit must be a full 40-character git SHA." }
-          if ($env:PACKAGE_VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$') { throw "package_version has an unexpected shape." }
-          if ($env:AVALONIA_RUN_ID -notmatch '^[0-9]+$') { throw "avalonia_run_id must be numeric." }
-          if ($env:ARTIFACT_NAME -notmatch '^[0-9A-Za-z._-]{1,128}$') { throw "artifact_name has an unexpected shape." }
+          if ($env:AVALONIA_COMMIT -notmatch '\A[0-9a-f]{40}\z') { throw "avalonia_commit must be a full 40-character git SHA." }
+          if ($env:PACKAGE_VERSION -notmatch '\A[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?\z') { throw "package_version has an unexpected shape." }
+          if ($env:AVALONIA_RUN_ID -notmatch '\A[0-9]+\z') { throw "avalonia_run_id must be numeric." }
+          if ($env:ARTIFACT_NAME -cne "avalonia-packages-$env:AVALONIA_COMMIT") { throw "artifact_name does not match the pinned package workflow output." }
+
+      # A run ID alone proves nothing about where the artifact came from: any
+      # workflow run in the fork (a branch, a PR, a different workflow) produces
+      # downloadable artifacts. Require the run to be the package workflow,
+      # triggered by a push to main, at exactly the requested commit.
+      - name: Verify Avalonia run provenance
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.CLYPDAT_CI_CROSSREPO }}
+          AVALONIA_COMMIT: ${{ inputs.avalonia_commit }}
+          AVALONIA_RUN_ID: ${{ inputs.avalonia_run_id }}
+        run: |
+          $deadline = [DateTimeOffset]::UtcNow.AddMinutes(5)
+          do {
+            $json = gh api "repos/ClypLabs/clypdat-avalonia/actions/runs/$env:AVALONIA_RUN_ID"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not read Avalonia run.' }
+            $run = $json | ConvertFrom-Json
+            if ($run.status -eq 'completed') { break }
+            if ([DateTimeOffset]::UtcNow -ge $deadline) { throw 'Avalonia package run did not finish in time.' }
+            Start-Sleep -Seconds 5
+          } while ($true)
+          if ($LASTEXITCODE -ne 0) { throw "Could not read Avalonia run $env:AVALONIA_RUN_ID." }
+          $run = $json | ConvertFrom-Json
+          if ($run.repository.full_name -ne 'ClypLabs/clypdat-avalonia') { throw "Avalonia run belongs to '$($run.repository.full_name)'." }
+          if ($run.event -ne 'push') { throw "Avalonia run event is '$($run.event)', expected 'push'." }
+          if ($run.head_branch -ne 'main') { throw "Avalonia run branch is '$($run.head_branch)', expected 'main'." }
+          if ($run.head_sha -ne $env:AVALONIA_COMMIT) { throw "Avalonia run commit $($run.head_sha) does not match $env:AVALONIA_COMMIT." }
+          if ($run.path -ne '.github/workflows/clypdat-packages.yml') { throw "Avalonia run workflow is '$($run.path)', expected '.github/workflows/clypdat-packages.yml'." }
+          if ($run.conclusion -ne 'success') { throw "Avalonia run conclusion is '$($run.conclusion)', expected 'success'." }
 
       - name: Download exact Avalonia package artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -65,16 +109,22 @@ jobs:
           AVALONIA_COMMIT: ${{ inputs.avalonia_commit }}
           PACKAGE_VERSION: ${{ inputs.package_version }}
         run: |
-          Expand-Archive -LiteralPath (Get-ChildItem avalonia-artifact -Filter *.zip | Select-Object -First 1).FullName -DestinationPath avalonia-packages
+          $archives = @(Get-ChildItem avalonia-artifact -Filter *.zip)
+          if ($archives.Count -ne 1) { throw 'Expected exactly one Avalonia package archive.' }
+          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath avalonia-packages
           $manifest = Get-Content avalonia-packages/manifest.json -Raw | ConvertFrom-Json
           if ($manifest.commit -ne $env:AVALONIA_COMMIT) { throw "Avalonia artifact commit mismatch." }
           if ($manifest.packageVersion -ne $env:PACKAGE_VERSION) { throw "Avalonia artifact package version mismatch." }
+          if ($manifest.schema -ne 1 -or $manifest.repository -cne 'ClypLabs/clypdat-avalonia' -or @($manifest.packages).Count -eq 0) { throw 'Invalid Avalonia package manifest.' }
+          $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
           foreach ($package in $manifest.packages) {
+            if ($package.name -notmatch '\AAvalonia[A-Za-z0-9._-]+\.nupkg\z' -or -not $names.Add($package.name)) { throw 'Invalid or duplicate Avalonia package filename.' }
             $path = Join-Path avalonia-packages $package.name
-            if (-not (Test-Path $path)) { throw "Missing package $($package.name)." }
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing package $($package.name)." }
             if ((Get-Item $path).Length -ne $package.size) { throw "Package size mismatch for $($package.name)." }
             if ((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $package.sha256) { throw "Package hash mismatch for $($package.name)." }
           }
+          if (@(Get-ChildItem avalonia-packages -Filter *.nupkg -File -Recurse).Count -ne $names.Count) { throw 'Archive contains unlisted packages.' }
 
       - name: Bootstrap repo-local .NET SDK
         shell: pwsh
@@ -82,15 +132,25 @@ jobs:
 
       - name: Install NSIS
         shell: pwsh
-        run: choco install nsis -y --no-progress --requirechecksums
+        run: |
+          choco upgrade nsis --version 3.12.0 --allow-downgrade -y --no-progress --requirechecksums
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned NSIS installation failed.' }
 
+      # CLYPDAT_TEST_GPU stays unset: hosted runners have no GPU, and the
+      # physical D3D11 tests skip themselves without it.
       - name: Build and test current ClypDat master
         shell: pwsh
         env:
           PACKAGE_VERSION: ${{ inputs.package_version }}
         run: |
-          .\dotnet.ps1 restore native\src\ClypDat.App\ClypDat.App.csproj --configfile NuGet.Dev.Config -r win-x64 -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION
+          .\dotnet.ps1 restore native\src\ClypDat.App\ClypDat.App.csproj --configfile NuGet.Dev.Config -p:Platform=x64 -p:ClypDatChannel=Dev -r win-x64 -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed with exit code $LASTEXITCODE" }
           .\dotnet.ps1 build native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --no-restore -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "dotnet build failed with exit code $LASTEXITCODE" }
+          .\dotnet.ps1 restore native\tests\ClypDat.App.Tests\ClypDat.App.Tests.csproj --configfile NuGet.Dev.Config -p:Platform=x64 -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "dotnet restore (tests) failed with exit code $LASTEXITCODE" }
+          .\dotnet.ps1 test native\tests\ClypDat.App.Tests\ClypDat.App.Tests.csproj -c Release --no-restore -p:Platform=x64 -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION --nologo
+          if ($LASTEXITCODE -ne 0) { throw "dotnet test failed with exit code $LASTEXITCODE" }
 
       - name: Publish self-contained Dev application
         id: publish
@@ -104,56 +164,156 @@ jobs:
           $buildId = "$clypdat-$($avalonia.Substring(0, 7))"
           $payload = Join-Path $pwd "dev-payload\$buildId"
           New-Item -ItemType Directory -Force $payload | Out-Null
-          .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION -o $payload --nologo
+          .\dotnet.ps1 publish native\src\ClypDat.App\ClypDat.App.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:ClypDatChannel=Dev -p:ClypDatAvaloniaPackageVersion=$env:PACKAGE_VERSION -o $payload --no-restore --nologo
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed with exit code $LASTEXITCODE" }
           .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory $payload
           "build_id=$buildId" >> $env:GITHUB_OUTPUT
           "clypdat_commit=$clypdat" >> $env:GITHUB_OUTPUT
           "avalonia_commit=$avalonia" >> $env:GITHUB_OUTPUT
+          "package_version=$env:PACKAGE_VERSION" >> $env:GITHUB_OUTPUT
 
-      - name: Create signed manifest and Dev installer payload
+      - name: Package Dev archive and installer
         shell: pwsh
         env:
-          CLYPDAT_DEV_SIGNING_PRIVATE_KEY: ${{ secrets.CLYPDAT_DEV_SIGNING_PRIVATE_KEY }}
-          PACKAGE_VERSION: ${{ inputs.package_version }}
           BUILD_ID: ${{ steps.publish.outputs.build_id }}
-          CLYPDAT_COMMIT: ${{ steps.publish.outputs.clypdat_commit }}
-          AVALONIA_COMMIT: ${{ steps.publish.outputs.avalonia_commit }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:CLYPDAT_DEV_SIGNING_PRIVATE_KEY)) { throw "CLYPDAT_DEV_SIGNING_PRIVATE_KEY is not configured." }
           $buildId = $env:BUILD_ID
           $payload = Join-Path $pwd "dev-payload\$buildId"
-          Compress-Archive -Path "$payload\*" -DestinationPath ClypDat-Dev.zip
-          $archive = Get-Item ClypDat-Dev.zip
-          $hash = (Get-FileHash $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          $manifest = [ordered]@{
-            schema = 1; buildId = $buildId; clypDatCommit = $env:CLYPDAT_COMMIT; avaloniaCommit = $env:AVALONIA_COMMIT;
-            avaloniaPackageVersion = $env:PACKAGE_VERSION; buildIdSource = $buildId; buildNumber = [long]$env:GITHUB_RUN_NUMBER;
-            archiveSize = $archive.Length; archiveSha256 = $hash; createdUtc = [DateTimeOffset]::UtcNow.ToString("O")
-          }
-          $manifestBytes = [Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 4 -Compress))
-          [IO.File]::WriteAllBytes("ClypDat-Dev.manifest.json", $manifestBytes)
-          $rsa = [Security.Cryptography.RSA]::Create(); $rsa.ImportFromPem($env:CLYPDAT_DEV_SIGNING_PRIVATE_KEY)
-          $signature = $rsa.SignData($manifestBytes, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pss)
-          # [Text.Encoding]::UTF8 emits a BOM, which is not valid base64 and does not
-          # survive as whitespace on the reading side. The signature is plain ASCII.
-          [IO.File]::WriteAllBytes("ClypDat-Dev.manifest.sig", [Text.Encoding]::ASCII.GetBytes([Convert]::ToBase64String($signature)))
+          New-Item -ItemType Directory -Force dev-archive, dev-setup | Out-Null
+          Compress-Archive -Path "$payload\*" -DestinationPath dev-archive\ClypDat-Dev.zip
           $launcher = Join-Path $pwd "dev-launcher"
           .\dotnet.ps1 publish native\src\ClypDat.DevLauncher\ClypDat.DevLauncher.csproj -c Release -r win-x64 --self-contained true -o $launcher --nologo
+          if ($LASTEXITCODE -ne 0) { throw "DevLauncher publish failed with exit code $LASTEXITCODE" }
           $installerSource = Join-Path $pwd "dev-installer"
           New-Item -ItemType Directory -Force "$installerSource\versions\$buildId" | Out-Null
           Copy-Item "$launcher\ClypDat-Dev.exe" $installerSource
           Copy-Item "$payload\*" "$installerSource\versions\$buildId" -Recurse -Force
           Copy-Item "installer\License.txt" $installerSource
-          & "C:\Program Files (x86)\NSIS\makensis.exe" /DCLYPDAT_VERSION=0.0.0 /DCLYPDAT_BUILD_ID=$buildId /DCLYPDAT_SOURCE_DIR=$installerSource /DCLYPDAT_OUTPUT_FILE=$pwd\ClypDat-Dev-Setup.exe installer\ClypDat.Dev.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" /DCLYPDAT_VERSION=0.0.0 /DCLYPDAT_BUILD_ID=$buildId /DCLYPDAT_SOURCE_DIR=$installerSource /DCLYPDAT_OUTPUT_FILE=$pwd\dev-setup\ClypDat-Dev-Setup.exe installer\ClypDat.Dev.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis.exe failed with exit code $LASTEXITCODE" }
-          .\eng\Test-InstallerIcon.ps1 -InstallerPath .\ClypDat-Dev-Setup.exe -IconPath .\assets\clypdat-icon.ico
+          .\eng\Test-InstallerIcon.ps1 -InstallerPath .\dev-setup\ClypDat-Dev-Setup.exe -IconPath .\assets\clypdat-icon.ico
+
+      - name: Upload Dev archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dev-archive
+          path: dev-archive/ClypDat-Dev.zip
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+      - name: Upload Dev installer
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dev-installer
+          path: dev-setup/ClypDat-Dev-Setup.exe
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  # Holds CLYPDAT_DEV_SIGNING_PRIVATE_KEY. It checks out nothing and runs no
+  # restore, build, or packaging tool: it only hashes the archive the build job
+  # produced and signs a manifest describing it. The dev-signing environment
+  # gates the secret behind its protection rules.
+  sign:
+    if: github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: windows-latest
+    environment: dev-signing
+    permissions:
+      contents: read
+    steps:
+      - name: Download Dev archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dev-archive
+          path: dev-archive
+
+      - name: Create signed Dev manifest
+        shell: pwsh -NoProfile -NonInteractive -Command ". '{0}'"
+        env:
+          CLYPDAT_DEV_SIGNING_PRIVATE_KEY: ${{ secrets.CLYPDAT_DEV_SIGNING_PRIVATE_KEY }}
+          BUILD_ID: ${{ needs.build.outputs.build_id }}
+          EXPECTED_CLYPDAT_COMMIT: ${{ github.sha }}
+          EXPECTED_AVALONIA_COMMIT: ${{ inputs.avalonia_commit }}
+          CLYPDAT_COMMIT: ${{ needs.build.outputs.clypdat_commit }}
+          AVALONIA_COMMIT: ${{ needs.build.outputs.avalonia_commit }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:CLYPDAT_DEV_SIGNING_PRIVATE_KEY)) { throw "CLYPDAT_DEV_SIGNING_PRIVATE_KEY is not configured." }
+          if ($env:CLYPDAT_COMMIT -notmatch '\A[0-9a-f]{40}\z') { throw "Unexpected ClypDat commit from build job." }
+          if ($env:AVALONIA_COMMIT -notmatch '\A[0-9a-f]{40}\z') { throw "Unexpected Avalonia commit from build job." }
+          if ($env:CLYPDAT_COMMIT -cne $env:EXPECTED_CLYPDAT_COMMIT -or $env:AVALONIA_COMMIT -cne $env:EXPECTED_AVALONIA_COMMIT) { throw 'Build identity does not match the approved workflow run.' }
+          if ($env:BUILD_ID -ne "$($env:CLYPDAT_COMMIT)-$($env:AVALONIA_COMMIT.Substring(0, 7))") { throw "Unexpected build ID from build job." }
+          if ($env:PACKAGE_VERSION -notmatch '\A[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?\z') { throw "Unexpected package version from build job." }
+          $archive = Get-Item -LiteralPath (Join-Path $pwd 'dev-archive\ClypDat-Dev.zip')
+          $hash = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $manifest = [ordered]@{
+            schema = 1; buildId = $env:BUILD_ID; clypDatCommit = $env:CLYPDAT_COMMIT; avaloniaCommit = $env:AVALONIA_COMMIT;
+            avaloniaPackageVersion = $env:PACKAGE_VERSION; buildIdSource = $env:BUILD_ID; buildNumber = [long]$env:GITHUB_RUN_NUMBER;
+            archiveSize = $archive.Length; archiveSha256 = $hash; createdUtc = [DateTimeOffset]::UtcNow.ToString("O")
+          }
+          $manifestBytes = [Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 4 -Compress))
+          New-Item -ItemType Directory -Force dev-manifest | Out-Null
+          [IO.File]::WriteAllBytes((Join-Path $pwd 'dev-manifest\ClypDat-Dev.manifest.json'), $manifestBytes)
+          $rsa = [Security.Cryptography.RSA]::Create()
+          try {
+            $rsa.ImportFromPem($env:CLYPDAT_DEV_SIGNING_PRIVATE_KEY)
+            $signature = $rsa.SignData($manifestBytes, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pss)
+          }
+          finally { $rsa.Dispose() }
+          # [Text.Encoding]::UTF8 emits a BOM, which is not valid base64 and does not
+          # survive as whitespace on the reading side. The signature is plain ASCII.
+          [IO.File]::WriteAllBytes((Join-Path $pwd 'dev-manifest\ClypDat-Dev.manifest.sig'), [Text.Encoding]::ASCII.GetBytes([Convert]::ToBase64String($signature)))
+
+      - name: Upload signed Dev manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dev-manifest
+          path: |
+            dev-manifest/ClypDat-Dev.manifest.json
+            dev-manifest/ClypDat-Dev.manifest.sig
+          if-no-files-found: error
+          retention-days: 1
+
+  # Holds the write token, but no signing key and no checkout or build tooling.
+  publish:
+    if: github.ref == 'refs/heads/master'
+    needs: [build, sign]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Dev archive
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dev-archive
+          path: dev-release
+
+      - name: Download Dev installer
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dev-installer
+          path: dev-release
+
+      - name: Download signed Dev manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dev-manifest
+          path: dev-release
 
       - name: Publish moving signed Dev prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
         shell: pwsh
         run: |
+          Set-Location dev-release
           gh release view dev 2>$null
           if ($LASTEXITCODE -ne 0) { gh release create dev --prerelease --title "ClypDat Dev channel" --notes "Automated signed Dev builds." }
           gh release upload dev ClypDat-Dev.zip ClypDat-Dev.manifest.json ClypDat-Dev.manifest.sig ClypDat-Dev-Setup.exe --clobber
-          gh release edit dev --target "${{ github.sha }}" --prerelease --title "ClypDat Dev channel"
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed with exit code $LASTEXITCODE" }
+          gh release edit dev --target $env:TARGET_SHA --prerelease --title "ClypDat Dev channel"
+          if ($LASTEXITCODE -ne 0) { throw "gh release edit failed with exit code $LASTEXITCODE" }

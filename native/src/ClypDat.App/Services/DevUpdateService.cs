@@ -43,7 +43,8 @@ public static class DevUpdateService
         var manifestBytes = await GetTrustedAssetAsync(client, manifestAsset.DownloadUrl, MaximumManifestBytes, cancellationToken);
         var signatureBytes = await GetTrustedAssetAsync(client, signatureAsset.DownloadUrl, MaximumSignatureBytes, cancellationToken);
         var manifest = DevPackageVerifier.VerifyManifest(manifestBytes, signatureBytes);
-        if (manifest.BuildIdSource != $"{manifest.ClypDatCommit}-{manifest.AvaloniaCommit[..7]}")
+        if (manifest.BuildId != manifest.BuildIdSource ||
+            manifest.BuildIdSource != $"{manifest.ClypDatCommit}-{manifest.AvaloniaCommit[..7]}")
             throw new InvalidDataException("Dev manifest build identity is inconsistent.");
 
         var root = AppDataPaths.Root;

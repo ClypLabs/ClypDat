@@ -1,6 +1,10 @@
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32.SafeHandles;
 
 namespace ClypDat.App.Services;
 
@@ -282,7 +286,13 @@ internal static class DiscordRichPresenceService
         for (var index = 0; index <= MaxPipeIndex; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var pipe = new NamedPipeClientStream(".", $"discord-ipc-{index}", PipeDirection.InOut, PipeOptions.Asynchronous);
+            // The discord-ipc-N namespace is machine-wide, so whoever created the
+            // pipe first owns it. Identification lets the server learn who we
+            // are but never act as us, and the owner check below refuses a pipe
+            // that another account (a service, another session) got to first.
+            var pipe = OperatingSystem.IsWindows()
+                ? new NamedPipeClientStream(".", $"discord-ipc-{index}", PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification)
+                : new NamedPipeClientStream(".", $"discord-ipc-{index}", PipeDirection.InOut, PipeOptions.Asynchronous);
             try
             {
                 // Short timeout per index: a missing pipe should fail fast so
@@ -296,6 +306,13 @@ internal static class DiscordRichPresenceService
             }
             catch
             {
+                pipe.Dispose();
+                continue;
+            }
+
+            if (OperatingSystem.IsWindows() && !IsPipeServerCurrentUser(pipe))
+            {
+                AppLog.Error($"Discord Rich Presence: discord-ipc-{index} is not owned by the signed-in user; skipping it.");
                 pipe.Dispose();
                 continue;
             }
@@ -330,6 +347,56 @@ internal static class DiscordRichPresenceService
 
         return null;
     }
+
+    // True only when the process serving the pipe runs as the same user SID as
+    // this one. Any failure to find out counts as "not ours".
+    [SupportedOSPlatform("windows")]
+    private static bool IsPipeServerCurrentUser(NamedPipeClientStream pipe)
+    {
+        try
+        {
+            if (!GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var serverProcessId)) return false;
+            var process = OpenProcess(ProcessQueryLimitedInformation, false, serverProcessId);
+            if (process == IntPtr.Zero) return false;
+            try
+            {
+                if (!OpenProcessToken(process, TokenQuery, out var token)) return false;
+                try
+                {
+                    using var server = new WindowsIdentity(token);
+                    using var current = WindowsIdentity.GetCurrent();
+                    return server.User is not null && server.User.Equals(current.User);
+                }
+                finally
+                {
+                    CloseHandle(token);
+                }
+            }
+            finally
+            {
+                CloseHandle(process);
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private const uint ProcessQueryLimitedInformation = 0x1000;
+    private const uint TokenQuery = 0x0008;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint serverProcessId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint desiredAccess, bool inheritHandle, uint processId);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(IntPtr process, uint desiredAccess, out IntPtr token);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
 
     /// <summary>
     /// Returns true when the pump stopped because the presence identity

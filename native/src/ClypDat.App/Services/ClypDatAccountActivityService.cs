@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,8 +15,21 @@ namespace ClypDat.App.Services;
 internal sealed class ClypDatAccountActivityService : IDisposable
 {
     private const string BaseUrl = "https://www.clypdat.xyz/";
-    private readonly HttpClient _http = new() { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(20) };
-    private readonly string _cachePath = Path.Combine(AppDataPaths.Root, "clypdat-account.bin");
+    private readonly HttpClient _http;
+    private readonly string _cachePath;
+    private readonly CancellationTokenSource _lifetime = new();
+
+    public ClypDatAccountActivityService() : this(
+        new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(20) },
+        Path.Combine(AppDataPaths.Root, "clypdat-account.bin")) { }
+
+    internal ClypDatAccountActivityService(HttpClient http, string cachePath)
+    {
+        _http = http;
+        _cachePath = cachePath;
+    }
+
+    public string? ConnectionCode { get; private set; }
     // The watch is front-loaded: linking finishes seconds after the browser
     // opens, and every refresh while an Xbox account is linked costs the server
     // a Microsoft token refresh and a presence call. Two seconds for the first
@@ -117,19 +131,14 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         {
             _token = await RunBrowserHandoffAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (BrowserHandoffTimedOutException timedOut)
-        {
-            // The local listener gave up without ever seeing a matching
-            // request - most often because the browser detoured through a
-            // sign-in that took longer than the window. The webapp already
-            // minted the token server-side when the session was found; claim
-            // it instead of making the user notice and click Link again.
-            try { _token = await PollClaimAsync(timedOut.State, cancellationToken).ConfigureAwait(false); }
-            catch (Exception error) { return Fail(error); }
-        }
         catch (Exception error)
         {
             return Fail(error);
+        }
+        finally
+        {
+            ConnectionCode = null;
+            Changed?.Invoke(this, _snapshot);
         }
 
         try
@@ -169,6 +178,29 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         TryDeleteCache();
         _snapshot = XboxActivitySnapshot.Disconnected;
         Changed?.Invoke(this, _snapshot);
+    }
+
+    public async Task<bool> RevokeAndDisconnectAsync(CancellationToken cancellationToken = default)
+    {
+        if (_token is { } token)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/revoke");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
+                using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                if (response.StatusCode != HttpStatusCode.Unauthorized) response.EnsureSuccessStatusCode();
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("ClypDat account: server sign-out failed.", error);
+                _snapshot = _snapshot with { Error = "Couldn't sign out this PC on the server. Check your connection and try again.", ServerUnavailable = false };
+                Changed?.Invoke(this, _snapshot);
+                return false;
+            }
+        }
+        Disconnect();
+        return true;
     }
 
     public async Task<bool> DisconnectXboxAsync(CancellationToken cancellationToken = default)
@@ -408,21 +440,33 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         _ = ReportSpotifyStatusAsync(inApp, cancellationToken);
     }
 
-    // Was 5 minutes. A round trip that detours through signing in (Discord's
-    // consent screen, 2FA) can take longer, and the loop below now absorbs a
-    // stray request instead of failing on one - so the window can afford to
-    // be generous; PollClaimAsync below is the real backstop past this anyway.
-    private static readonly TimeSpan HandoffWindow = TimeSpan.FromMinutes(10);
+    // Keep the loopback listener open through sign-in and the consent click.
+    private static readonly TimeSpan HandoffWindow = TimeSpan.FromMinutes(20);
+
+    internal static string PairingCode(string state)
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"clypdat-desktop-connect:{state}"));
+        return string.Concat(digest.Take(3).Select(value => alphabet[value % alphabet.Length])) + "-"
+            + string.Concat(digest.Skip(3).Take(3).Select(value => alphabet[value % alphabet.Length]));
+    }
+
+    internal static string CodeChallenge(string verifier) => Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
 
     private async Task<DesktopToken> RunBrowserHandoffAsync(CancellationToken cancellationToken)
     {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        cancellationToken = linked.Token;
         var port = GetFreePort();
         var redirectUri = $"http://127.0.0.1:{port}/callback/";
         var state = Base64Url(RandomNumberGenerator.GetBytes(24));
+        var verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
         using var listener = new HttpListener();
         listener.Prefixes.Add(redirectUri);
         listener.Start();
-        var url = $"{BaseUrl}api/desktop/connect?redirect_uri={Uri.EscapeDataString(redirectUri)}&state={Uri.EscapeDataString(state)}";
+        ConnectionCode = PairingCode(state);
+        Changed?.Invoke(this, _snapshot);
+        var url = $"{BaseUrl}api/desktop/connect?redirect_uri={Uri.EscapeDataString(redirectUri)}&state={Uri.EscapeDataString(state)}&code_challenge={CodeChallenge(verifier)}&code_challenge_method=S256";
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
         var deadline = DateTimeOffset.UtcNow.Add(HandoffWindow);
@@ -433,13 +477,13 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         while (true)
         {
             var remaining = deadline - DateTimeOffset.UtcNow;
-            if (remaining <= TimeSpan.Zero) throw new BrowserHandoffTimedOutException(state);
+            if (remaining <= TimeSpan.Zero) throw new TimeoutException("ClypDat sign-in timed out. Press Link again.");
 
             HttpListenerContext context;
             try { context = await listener.GetContextAsync().WaitAsync(remaining, cancellationToken).ConfigureAwait(false); }
-            catch (TimeoutException) { throw new BrowserHandoffTimedOutException(state); }
+            catch (TimeoutException) { throw new TimeoutException("ClypDat sign-in timed out. Press Link again."); }
 
-            if (!string.Equals(context.Request.QueryString["state"], state, StringComparison.Ordinal))
+            if (context.Request.HttpMethod != "GET" || !string.Equals(context.Request.QueryString["state"], state, StringComparison.Ordinal))
             {
                 context.Response.StatusCode = (int)HttpStatusCode.NoContent;
                 context.Response.Close();
@@ -452,14 +496,16 @@ internal sealed class ClypDatAccountActivityService : IDisposable
                 if (string.Equals(error, "login-required", StringComparison.Ordinal))
                     throw new InvalidOperationException("ClypDat sign-in required. Open clypdat.xyz/account, sign in, then retry here.");
                 if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException("ClypDat sign-in was not completed.");
-                var accessToken = context.Request.QueryString["token"];
-                if (string.IsNullOrWhiteSpace(accessToken)) throw new InvalidOperationException("ClypDat sign-in returned no token.");
-                var expiresIn = int.TryParse(context.Request.QueryString["expires_in"], out var seconds) ? seconds : 60 * 60 * 24 * 30;
+                var code = context.Request.QueryString["code"];
+                if (string.IsNullOrWhiteSpace(code)) throw new InvalidOperationException("ClypDat sign-in returned no link code.");
+                var token = await ExchangeCodeAsync(code, verifier, cancellationToken).ConfigureAwait(false);
                 var body = BrowserCallbackPage.Success(BrowserCallbackService.ClypDat);
+                context.Response.Headers["Cache-Control"] = "no-store";
+                context.Response.Headers["Referrer-Policy"] = "no-referrer";
                 context.Response.ContentType = "text/html; charset=utf-8";
                 context.Response.ContentLength64 = body.Length;
                 await context.Response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
-                return new DesktopToken(accessToken, DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, expiresIn)));
+                return token;
             }
             finally
             {
@@ -468,39 +514,17 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
     }
 
-    private static readonly TimeSpan ClaimPollWindow = TimeSpan.FromMinutes(10);
-    private static readonly TimeSpan ClaimPollInterval = TimeSpan.FromSeconds(5);
-
-    /// <summary>
-    /// Falls back to asking the server directly for the token it minted for
-    /// this attempt's <paramref name="state"/>, for when the local listener's
-    /// window ran out before the browser ever made it back to localhost -
-    /// /api/desktop/connect stashes the token there the moment a session is
-    /// found, specifically so a slow or interrupted round trip is not lost.
-    /// </summary>
-    private async Task<DesktopToken> PollClaimAsync(string state, CancellationToken cancellationToken)
+    private async Task<DesktopToken> ExchangeCodeAsync(string code, string verifier, CancellationToken cancellationToken)
     {
-        var deadline = DateTimeOffset.UtcNow.Add(ClaimPollWindow);
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            await Task.Delay(ClaimPollInterval, cancellationToken).ConfigureAwait(false);
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"api/desktop/connect/claim?state={Uri.EscapeDataString(state)}");
-            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.NotFound) continue;
-            if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ClypDat connect claim rejected the request ({(int)response.StatusCode}).", null, response.StatusCode);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var claim = JsonSerializer.Deserialize<ClaimResponse>(body) ?? throw new InvalidOperationException("ClypDat connect claim returned no data.");
-            return new DesktopToken(claim.Token, DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, claim.ExpiresIn)));
-        }
-        throw new InvalidOperationException("ClypDat sign-in was not completed in time. Sign in through the browser and try again.");
+        using var response = await _http.PostAsJsonAsync("api/desktop/token", new { code, code_verifier = verifier }, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var token = await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken).ConfigureAwait(false);
+        if (token is null || string.IsNullOrWhiteSpace(token.Token) || token.ExpiresIn <= 0 || token.ExpiresIn > 60 * 60 * 24 * 30)
+            throw new InvalidOperationException("ClypDat sign-in returned an invalid token.");
+        return new DesktopToken(token.Token, DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn));
     }
 
-    private sealed class BrowserHandoffTimedOutException(string state) : Exception
-    {
-        public string State { get; } = state;
-    }
-
-    private sealed class ClaimResponse
+    private sealed class TokenResponse
     {
         [JsonPropertyName("token")] public string Token { get; set; } = string.Empty;
         [JsonPropertyName("expires_in")] public int ExpiresIn { get; set; }
@@ -527,9 +551,24 @@ internal sealed class ClypDatAccountActivityService : IDisposable
 
     private void SaveToken(DesktopToken token)
     {
-        Directory.CreateDirectory(AppDataPaths.Root);
+        Directory.CreateDirectory(Path.GetDirectoryName(_cachePath)!);
+        var temporary = _cachePath + ".tmp-" + Guid.NewGuid().ToString("N");
         var bytes = JsonSerializer.SerializeToUtf8Bytes(token);
-        File.WriteAllBytes(_cachePath, ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser));
+        try
+        {
+            var encrypted = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(encrypted);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, _cachePath, overwrite: true);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            try { File.Delete(temporary); } catch { }
+        }
     }
 
     private const string ServerProblemMessage = "Couldn't reach clypdat.xyz. Check your connection, or the status page for an outage.";
@@ -567,7 +606,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     }
     private static DateTimeOffset ParseTimestamp(string? value) => DateTimeOffset.TryParse(value, out var parsed) ? parsed : DateTimeOffset.UtcNow;
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    public void Dispose() { _pollCts?.Cancel(); _pollCts?.Dispose(); _pollWake.Dispose(); _http.Dispose(); }
+    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); _pollCts?.Cancel(); _pollCts?.Dispose(); _pollWake.Dispose(); _http.Dispose(); }
 
     private sealed record DesktopToken(string AccessToken, DateTimeOffset ExpiresAt);
     private sealed class ActivityResponse

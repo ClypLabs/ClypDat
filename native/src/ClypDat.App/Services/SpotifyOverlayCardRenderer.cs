@@ -115,6 +115,7 @@ internal sealed class SpotifyCardFrames : IDisposable
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length is <= 0 or > SpotifyCoverArtStore.MaximumBytes) return null;
             image = Avalonia.Media.Imaging.Bitmap.DecodeToWidth(stream, 512);
             artwork = new Artwork(image, SpotifyCoverPalette.FromBitmap(image).CreateBrush());
         }

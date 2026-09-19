@@ -42,13 +42,13 @@ public sealed class ClipOverlayManifestTests
     {
         var root = Path.Combine(Path.GetTempPath(), "clypdat-overlay-test", Guid.NewGuid().ToString("N"));
         var clip = Path.Combine(root, "Clips", "Game", "clip.mp4");
-        var asset = Path.Combine(root, ".clipinfo", "overlays", "camera.mp4");
+        var asset = Path.Combine(LibraryLayout.SidecarPath(root, clip, ".camera"), "camera.mp4");
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(asset)!);
             File.WriteAllBytes(asset, []);
             ClipInfoSidecar.Save(root, clip, new ClipInfo(null, null, OverlayManifest: new ClipOverlayManifest(
-                ClipOverlayManifest.CurrentVersion, new ClipOverlayLayer("Camera", true, AssetPath: ".clipinfo/overlays/camera.mp4"))));
+                ClipOverlayManifest.CurrentVersion, new ClipOverlayLayer("Camera", true, AssetPath: Path.GetRelativePath(root, asset)))));
 
             ClipInfoSidecar.Delete(root, clip);
 
@@ -62,15 +62,15 @@ public sealed class ClipOverlayManifestTests
     {
         var root = Path.Combine(Path.GetTempPath(), "clypdat-overlay-test", Guid.NewGuid().ToString("N"));
         var clip = Path.Combine(root, "Clips", "Game", "clip.mp4");
-        var first = Path.Combine(root, ".clipinfo", "overlays", "0.mp4");
-        var second = Path.Combine(root, ".clipinfo", "overlays", "1.mp4");
+        var first = Path.Combine(LibraryLayout.SidecarPath(root, clip, ".camera"), "0.mp4");
+        var second = Path.Combine(LibraryLayout.SidecarPath(root, clip, ".camera"), "1.mp4");
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(first)!);
             File.WriteAllBytes(first, []); File.WriteAllBytes(second, []);
             var layer = new ClipOverlayLayer("Camera", true, Assets: [
-                new ClipOverlayAsset(".clipinfo/overlays/0.mp4", 0, 2),
-                new ClipOverlayAsset(".clipinfo/overlays/1.mp4", 2, 4)]);
+                new ClipOverlayAsset(Path.GetRelativePath(root, first), 0, 2),
+                new ClipOverlayAsset(Path.GetRelativePath(root, second), 2, 4)]);
             Assert.True(ClipOverlayManifest.IsUsable(root, layer));
             File.Delete(second);
             Assert.False(ClipOverlayManifest.IsUsable(root, layer));

@@ -295,6 +295,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // so payload recycling has to wait for it - see BorrowWindowUnderLock.
     private int _borrowedWindowDepth;
     private readonly List<byte[]> _deferredPayloadReturns = new();
+    private long _deferredPayloadBytes;
+    // A save that stalls (ffmpeg wedged on a dead network share) keeps the
+    // window borrowed, and every packet trimmed meanwhile would pile up here
+    // for the pool. Past this much, trimmed payloads are simply dropped for
+    // the GC instead of being kept for reuse.
+    private const long MaxDeferredPayloadBytes = 256L * 1024 * 1024;
     private long _sendRefusedEagainCount;
     private long _sendFailedOtherCount;
     private long _packetsOutCount;
@@ -617,6 +623,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // releasing while the remux is still copying splices frames from a later moment
         // of the recording into the saved clip.
         Task<long>? remuxTask = null;
+        // The remux is the only reader of the borrowed payloads, so the window
+        // goes back as soon as it has finished rather than after the final mux
+        // - a stalled mux must not pin the ring's recycling for its duration.
+        var windowReleased = false;
         Interlocked.Increment(ref _savesInFlight);
         try
         {
@@ -807,6 +817,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // The mux is the first stage that needs the video file, so this is
             // where the concurrent remux gets collected. Usually already done.
             var remuxMs = await remuxTask;
+            windowReleased = true;
+            ReleaseBorrowedWindow();
             var remuxWaitMs = saveTimer.ElapsedMilliseconds - tracksStartMs - tracksMs;
 
             var muxStartMs = saveTimer.ElapsedMilliseconds;
@@ -822,7 +834,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             }
             muxArgs.AddRange(new[] { "-movflags", "+faststart" });
             muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Native")}", outputPath });
-            var result = await AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, cancellationToken);
+            // Bounded so a wedged mux cannot hold the save gate forever; scaled
+            // with the clip so a long save to a slow drive still has room.
+            var muxTimeout = AudioCapturePipeline.DefaultProcessTimeout + TimeSpan.FromSeconds(videoDurationSeconds * 2);
+            var result = await AudioCapturePipeline.RunProcessAsync("ffmpeg", muxArgs, cancellationToken, muxTimeout);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg mux failed." : result.Error);
@@ -875,7 +890,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // cannot await, so defer the release onto the task instead of blocking a
             // possibly UI-bound continuation.
             var pendingRemux = remuxTask;
-            if (pendingRemux is not null && !pendingRemux.IsCompleted)
+            if (windowReleased)
+            {
+                // Already handed back once the remux finished.
+            }
+            else if (pendingRemux is not null && !pendingRemux.IsCompleted)
             {
                 _ = pendingRemux.ContinueWith(_ => ReleaseBorrowedWindow(), TaskScheduler.Default);
             }
@@ -5013,8 +5032,14 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var packet = _packets[i];
             _ringBufferBytes -= packet.Length;
             _ringBufferCapacityBytes -= packet.Data.Length;
-            if (_borrowedWindowDepth > 0) _deferredPayloadReturns.Add(packet.Data);
-            else _packetPayloads.Return(packet.Data);
+            if (_borrowedWindowDepth == 0) _packetPayloads.Return(packet.Data);
+            else if (packet.Data.Length <= MaxDeferredPayloadBytes - _deferredPayloadBytes)
+            {
+                _deferredPayloadReturns.Add(packet.Data);
+                _deferredPayloadBytes += packet.Data.Length;
+            }
+            // Otherwise the array is never handed back to the pool, so the save
+            // still holding it cannot see it re-rented; the GC reclaims it.
         }
     }
 
@@ -5029,6 +5054,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             foreach (var payload in _deferredPayloadReturns) _packetPayloads.Return(payload);
             _deferredPayloadReturns.Clear();
+            _deferredPayloadBytes = 0;
         }
     }
 

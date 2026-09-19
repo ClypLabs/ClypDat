@@ -50,7 +50,7 @@ public sealed class DetectorHostTests
         Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Write(view, 0, frame));
         frame = frame with { ThirdMask = Image(5, 4, 4) };
         DetectorFrameCodec.Write(view, 0, frame);
-        const int maskHeader = 8 + 13 + 13 + 12 + 20;
+        const int maskHeader = 16 + 13 + 13 + 12 + 20;
         view.Write(maskHeader, 4); view.Write(maskHeader + 4, 5);
         Assert.Throws<InvalidDataException>(() => DetectorFrameCodec.Read(view, 0));
         view.Write(maskHeader, 0); view.Write(maskHeader + 4, 0); // A partial null marker is invalid.
@@ -82,7 +82,7 @@ public sealed class DetectorHostTests
 
     [Theory]
     [InlineData(1)]
-    [InlineData(3)]
+    [InlineData(2)]
     public async Task WireRejectsIncompatibleProtocol(int version)
     {
         using var stream = new MemoryStream();
