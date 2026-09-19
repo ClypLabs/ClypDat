@@ -23,7 +23,7 @@
     </StackPanel>
     <Border Classes="settingsCard">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="VIDEO OVERLAYS" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}" />
+        <TextBlock Classes="settingsCardLabel" Text="Video overlays" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsGameScoped, ElementName=VideoOverlaysRoot}">
           <TextBlock Classes="settingsRowTitle" Text="Video Overlays" VerticalAlignment="Center" />
           <Button Grid.Column="1" Classes="linkButton" Content="Remove" Click="RemoveGameOverlays_OnClick" />
@@ -44,7 +44,7 @@
         </Grid>
         <Border Classes="settingsDivider" />
         <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" TextWrapping="Wrap" />
-        <TextBlock Classes="settingsCardLabel" Margin="0,6,0,0" Text="VIDEO OVERLAY PREVIEW" />
+        <TextBlock Classes="settingsCardLabel" Margin="0,6,0,0" Text="Video overlay preview" />
         <!-- One window per corner, seeded into editable clips. A corner used to be drawn twice - a fixed picker card over the
              in. A corner used to be drawn twice - a fixed picker card over the
              canvas plus a free-floating layer inside it - so the same camera
@@ -110,7 +110,7 @@
         <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsCardLabel" Text="CUSTOM KEYS" />
+            <TextBlock Classes="settingsCardLabel" Text="Custom keys" />
             <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
                        Text="Show only the keys you care about. Chosen keys are drawn packed together, not spread across a full board." />
           </StackPanel>

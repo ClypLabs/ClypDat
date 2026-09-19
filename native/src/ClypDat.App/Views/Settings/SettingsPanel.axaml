@@ -7,7 +7,7 @@
              x:Class="ClypDat.App.Views.Settings.SettingsPanel"
              x:DataType="vm:MainWindowViewModel">
   <Border Background="{StaticResource PanelBgBrush}">
-    <Grid ColumnDefinitions="240,*,Auto" RowDefinitions="Auto,*">
+    <Grid ColumnDefinitions="224,*,Auto" RowDefinitions="Auto,*">
       <Border Grid.Column="0" Grid.RowSpan="2" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="0,0,1,0">
         <Grid RowDefinitions="Auto,*">
           <TextBox Grid.Row="0" x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="16,24,16,16" VerticalContentAlignment="Center">
@@ -101,7 +101,7 @@
       </Border>
 
       <ScrollViewer x:Name="SettingsScrollViewer" Grid.Column="1" Grid.Row="1" Classes="settingsScroll">
-        <StackPanel Margin="{StaticResource PagePadding}" Spacing="24">
+        <StackPanel x:Name="SettingsContent" Margin="24" Spacing="20" MaxWidth="960" HorizontalAlignment="Stretch">
 
           <settings:ReplayBufferSection />
           <settings:VideoOverlaysSection />
@@ -121,57 +121,59 @@
         </StackPanel>
       </ScrollViewer>
 
-      <Border Grid.Column="2" Grid.RowSpan="2" Width="280" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1,0,0,0" IsVisible="{Binding IsStatusAreaVisible}">
-        <ScrollViewer>
-          <StackPanel Margin="22,28,22,20">
-            <TextBlock Classes="settingsSectionLabel" Text="STATUS" Margin="0,0,0,4" />
-            <Border Classes="settingsDivider" Margin="0,10,0,14" />
+      <Panel x:Name="SettingsStatusHost" Grid.Column="2" Grid.RowSpan="2">
+        <Border Width="224" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1,0,0,0" IsVisible="{Binding IsStatusAreaVisible}">
+          <ScrollViewer>
+            <StackPanel Margin="20,24,20,20">
+              <TextBlock Classes="settingsSectionLabel" Text="STATUS" Margin="0,0,0,4" />
+              <Border Classes="settingsDivider" Margin="0,10,0,14" />
 
-            <StackPanel Spacing="2" Margin="0,0,0,16">
-            <TextBlock Classes="settingsCardLabel" Text="Replay Buffer" />
-              <TextBlock Text="{Binding RecorderStatus}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
+              <StackPanel Spacing="2" Margin="0,0,0,16">
+              <TextBlock Classes="metadata" Text="Replay Buffer" />
+                <TextBlock Text="{Binding RecorderStatus}" Foreground="{StaticResource TextBrush}" FontWeight="Medium" FontSize="14" />
+              </StackPanel>
+
+              <StackPanel Spacing="2" Margin="0,0,0,16">
+                <TextBlock Classes="metadata" Text="Save hotkey" />
+                <TextBlock Text="{Binding HotkeyDisplay}" Foreground="{StaticResource TextBrush}" FontWeight="Medium" FontSize="14" />
+              </StackPanel>
+
+              <Border Classes="settingsDivider" Margin="0,0,0,16" />
+
+              <StackPanel Spacing="2" Margin="0,0,0,16">
+                <TextBlock Classes="metadata" Text="Replay length" />
+                <TextBlock Text="{Binding SelectedReplayDurationPreset.Label}" Foreground="{StaticResource TextBrush}" FontWeight="Medium" FontSize="14" />
+              </StackPanel>
+
+              <StackPanel Spacing="2" Margin="0,0,0,16">
+                <TextBlock Classes="metadata" Text="Resolution / FPS" />
+                <TextBlock Foreground="{StaticResource TextBrush}" FontWeight="Medium" FontSize="14">
+                  <Run Text="{Binding SelectedReplayResolution.Label}" /><Run Text=" @ " /><Run Text="{Binding SelectedReplayFrameRate}" /><Run Text="fps" />
+                </TextBlock>
+              </StackPanel>
+
+              <StackPanel Spacing="2" Margin="0,0,0,16">
+                <TextBlock Classes="metadata" Text="Bitrate" />
+                <TextBlock Foreground="{StaticResource TextBrush}" FontWeight="Medium" FontSize="14">
+                  <Run Text="{Binding SelectedReplayBitrateOption}" /><Run Text="bps" />
+                </TextBlock>
+              </StackPanel>
+
+              <StackPanel Spacing="2" Margin="0,0,0,16">
+                <TextBlock Classes="metadata" Text="Codec" />
+                <TextBlock Text="{Binding SelectedReplayVideoCodec.Label}" Foreground="{StaticResource TextBrush}" FontWeight="Medium" FontSize="14" />
+              </StackPanel>
+
+              <Border Classes="settingsDivider" Margin="0,0,0,16" />
+
+              <StackPanel Spacing="2">
+                <TextBlock Classes="metadata" Text="Library folder" />
+                <TextBlock Text="{Binding LibraryLocationText}" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" TextWrapping="Wrap" />
+              </StackPanel>
             </StackPanel>
-
-            <StackPanel Spacing="2" Margin="0,0,0,16">
-              <TextBlock Classes="settingsCardLabel" Text="Save hotkey" />
-              <TextBlock Text="{Binding HotkeyDisplay}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
-            </StackPanel>
-
-            <Border Classes="settingsDivider" Margin="0,0,0,16" />
-
-            <StackPanel Spacing="2" Margin="0,0,0,16">
-              <TextBlock Classes="settingsCardLabel" Text="Replay length" />
-              <TextBlock Text="{Binding SelectedReplayDurationPreset.Label}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
-            </StackPanel>
-
-            <StackPanel Spacing="2" Margin="0,0,0,16">
-              <TextBlock Classes="settingsCardLabel" Text="Resolution / FPS" />
-              <TextBlock Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16">
-                <Run Text="{Binding SelectedReplayResolution.Label}" /><Run Text=" @ " /><Run Text="{Binding SelectedReplayFrameRate}" /><Run Text="fps" />
-              </TextBlock>
-            </StackPanel>
-
-            <StackPanel Spacing="2" Margin="0,0,0,16">
-              <TextBlock Classes="settingsCardLabel" Text="Bitrate" />
-              <TextBlock Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16">
-                <Run Text="{Binding SelectedReplayBitrateOption}" /><Run Text="bps" />
-              </TextBlock>
-            </StackPanel>
-
-            <StackPanel Spacing="2" Margin="0,0,0,16">
-              <TextBlock Classes="settingsCardLabel" Text="Codec" />
-              <TextBlock Text="{Binding SelectedReplayVideoCodec.Label}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
-            </StackPanel>
-
-            <Border Classes="settingsDivider" Margin="0,0,0,16" />
-
-            <StackPanel Spacing="2">
-              <TextBlock Classes="settingsCardLabel" Text="Library folder" />
-              <TextBlock Text="{Binding LibraryLocationText}" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" TextWrapping="Wrap" />
-            </StackPanel>
-          </StackPanel>
-        </ScrollViewer>
-      </Border>
+          </ScrollViewer>
+        </Border>
+      </Panel>
     </Grid>
   </Border>
 </UserControl>

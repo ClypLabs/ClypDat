@@ -22,7 +22,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Add a running game|Or browse for an executable|Add Games}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="ADD GAMES" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Add games" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Add a running game}">
           <TextBlock Classes="settingsRowTitle" Text="Add a Running Game" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
@@ -45,7 +45,7 @@
 
     <Border Classes="settingsCard">
       <StackPanel Spacing="8">
-        <TextBlock Classes="settingsCardLabel" Text="GAME FOLDERS" />
+        <TextBlock Classes="settingsCardLabel" Text="Game folders" />
         <TextBlock Classes="settingsRowDescSm" Text="Scan folders you choose. Known standalone games are added automatically; uncertain engine applications need review." />
         <Grid ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8">
           <Button Content="Add folder" Click="AddGameFolderButton_OnClick" />
@@ -67,7 +67,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Game icons|Game Icons}">
       <StackPanel Spacing="10">
-        <TextBlock Classes="settingsCardLabel" Text="GAME ICONS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Game icons" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <StackPanel Spacing="2">
           <TextBlock Classes="settingsRowTitle" Text="Game Icons" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <TextBlock Classes="settingsRowDescSm" Text="Sidebar artwork is found automatically and then kept forever, so a wrong or missing icon stays that way. Refreshing throws the cached images away and looks every game up again." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -131,7 +131,7 @@
     <Border IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Excluded from detection}">
       <Border Classes="settingsCard" IsVisible="{Binding HasIgnoredGameExecutables}">
         <StackPanel Spacing="10">
-          <TextBlock Classes="settingsCardLabel" Text="EXCLUDED GAMES" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <TextBlock Classes="settingsCardLabel" Text="Excluded games" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <StackPanel Spacing="2">
           <TextBlock Classes="settingsRowTitle" Text="Excluded from Detection" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
             <TextBlock Classes="settingsRowDescSm" Text="Apps you told ClypDat not to treat as games (click the detected game in the header, or Remove a row below, to add one)." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />

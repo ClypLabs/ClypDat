@@ -297,7 +297,7 @@ public sealed partial class App : Application
 
     internal void ApplyFontFamily(string? fontFamilyName)
     {
-        var name = string.IsNullOrWhiteSpace(fontFamilyName) ? "Inter" : fontFamilyName.Trim();
+        var name = string.IsNullOrWhiteSpace(fontFamilyName) ? "Segoe UI Variable" : fontFamilyName.Trim();
         FontFamily fontFamily;
 
         try
@@ -319,6 +319,11 @@ public sealed partial class App : Application
         if (string.Equals(name, "Inter", StringComparison.OrdinalIgnoreCase))
             return new FontFamily("fonts:Inter#Inter, $Default");
 
+        if (string.Equals(name, "Segoe UI Variable", StringComparison.OrdinalIgnoreCase))
+            // Variable families are exposed differently by Windows and Skia.
+            // Load the installed font file through the same collection used
+            // for user-supplied font filenames, avoiding a silent Inter fallback.
+            name = "SegUIVar.ttf";
         var collection = GetWindowsFontCollection();
         var family = collection?.FirstOrDefault(candidate =>
             string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));

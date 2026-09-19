@@ -39,7 +39,7 @@
                mixing them in made their permanently disabled toggles read as
                broken controls. -->
           <StackPanel Spacing="7">
-            <TextBlock Classes="settingsCardLabel" Text="DEDICATED TRACKS" />
+            <TextBlock Classes="settingsCardLabel" Text="Dedicated tracks" />
             <Border Classes="audioProcessList">
               <StackPanel Spacing="0">
                 <Border Classes="audioProcessRow enabledRow">
@@ -79,7 +79,7 @@
           </StackPanel>
 
           <StackPanel Spacing="7">
-            <TextBlock Classes="settingsCardLabel" Text="APP TRACKS" />
+            <TextBlock Classes="settingsCardLabel" Text="App tracks" />
             <Border Classes="audioProcessList">
               <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
                 <ItemsControl.ItemTemplate>
@@ -111,7 +111,7 @@
           </StackPanel>
         </StackPanel>
 
-        <TextBlock Classes="settingsCardLabel" Text="AUDIO SOURCES" IsVisible="False" />
+        <TextBlock Classes="settingsCardLabel" Text="Audio sources" IsVisible="False" />
         <StackPanel Spacing="6" IsVisible="False">
           <Grid ColumnDefinitions="*,Auto">
             <TextBlock Classes="settingsRowTitle" Text="Chat Audio App" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />

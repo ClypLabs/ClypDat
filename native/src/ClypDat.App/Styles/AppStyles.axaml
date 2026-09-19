@@ -190,7 +190,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
     <Setter Property="Padding" Value="12,8" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontWeight" Value="Medium" />
     <!-- Fluent paints pointer states inside its own square template. Keep every
          ordinary button's surface in this border so hover/pressed colours obey
          the button's CornerRadius as well. More-specific button templates below
@@ -1384,7 +1384,7 @@
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="12" />
-    <Setter Property="Padding" Value="{StaticResource CardPadding}" />
+    <Setter Property="Padding" Value="20" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -1800,7 +1800,7 @@
     <Setter Property="Background" Value="{StaticResource Surface_1C2733}" />
   </Style>
   <Style Selector="Button.settingsNavButton">
-    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="MinHeight" Value="36" />
     <!-- Not Transparent (#00FFFFFF - white at zero alpha): the BrushTransition
          below interpolates RGB as well as alpha, so unhovering flashed white
          on the way back out. Zero-alpha version of the hover color, so only
@@ -1812,7 +1812,7 @@
     <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
     <Setter Property="Padding" Value="12,8" />
     <Setter Property="Margin" Value="0,0,0,3" />
-    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
     <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
@@ -2504,7 +2504,7 @@
   <Style Selector="TextBlock.settingsCardLabel">
     <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="FontSize" Value="{StaticResource SectionFontSize}" />
+    <Setter Property="FontSize" Value="14" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="LetterSpacing" Value="0" />
   </Style>
@@ -2537,7 +2537,7 @@
     <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontWeight" Value="Medium" />
   </Style>
   <Style Selector="TextBlock.settingsRowDesc">
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
@@ -2551,7 +2551,7 @@
     <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
-    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontWeight" Value="Medium" />
   </Style>
   <Style Selector="TextBlock.settingsRowDescSm">
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />

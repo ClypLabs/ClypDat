@@ -19,7 +19,7 @@
     </StackPanel>
     <Border Classes="settingsCard">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="DISCORD" />
+        <TextBlock Classes="settingsCardLabel" Text="Discord" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
           <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Discord Rich Presence" />

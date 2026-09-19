@@ -10,6 +10,7 @@ public sealed partial class SettingsPanel : UserControl
     public SettingsPanel()
     {
         InitializeComponent();
+        SizeChanged += (_, _) => SettingsStatusHost.IsVisible = Bounds.Width >= 1120;
     }
 
     // Settings markup lives here, but the handlers still belong to

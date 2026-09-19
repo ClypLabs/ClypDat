@@ -23,6 +23,21 @@ public sealed class StudioAppearanceTests
     };
 
     [Fact]
+    public void SegoeUiVariableResolvesInstalledTextFamilyAndKeepsInterSelectable() => Run(() =>
+    {
+        var app = (ClypDat.App.App)Application.Current!;
+        var previous = app.Resources["ClypDatFontFamily"];
+        try
+        {
+            app.ApplyFontFamily("Segoe UI Variable");
+            Assert.Contains("Segoe UI Variable", new Typeface(AppThemeService.FontFamily).GlyphTypeface.FamilyName);
+            app.ApplyFontFamily("Inter");
+            Assert.Contains("Inter", new Typeface(AppThemeService.FontFamily).GlyphTypeface.FamilyName);
+        }
+        finally { app.Resources["ClypDatFontFamily"] = previous; }
+    });
+
+    [Fact]
     public void PaletteSwitchingPreservesBrushesAndReadableLabels() => Run(() =>
     {
         var app = Application.Current!;
@@ -60,7 +75,7 @@ public sealed class StudioAppearanceTests
         var originalFont = app.Resources["ClypDatFontFamily"];
         try
         {
-            foreach (var font in new[] { "fonts:Inter#Inter, $Default", "Courier New" })
+            foreach (var font in new[] { "Segoe UI Variable", "Inter", "Courier New" })
             foreach (var theme in Presets)
             {
                 app.Resources["ClypDatFontFamily"] = new FontFamily(font);
@@ -117,6 +132,8 @@ public sealed class StudioAppearanceTests
                 var panel = window.FindControl<ClypDat.App.Views.Settings.SettingsPanel>("SettingsPanelView")!;
                 Assert.InRange(panel.Bounds.Right, 1, size.Width);
                 Assert.True(panel.Bounds.Height > 0, section);
+                Assert.True(panel.FindControl<StackPanel>("SettingsContent")!.Bounds.Width <= 960);
+                Assert.Equal(panel.Bounds.Width >= 1120, panel.FindControl<Panel>("SettingsStatusHost")!.IsVisible);
             }
             SetView(model, "IsSettingsVisible", false);
             SetView(model, "IsEditorVisible", true);

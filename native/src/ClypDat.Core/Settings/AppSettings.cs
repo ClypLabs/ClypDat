@@ -37,9 +37,9 @@ public sealed class AppSettings
     // custom:<guid>, so renaming a set cannot break the active selection.
     public List<CustomKeyboardLayout> CustomKeyboardLayouts { get; set; } = new();
     public List<string> RecentThemeColors { get; set; } = new();
-    // Inter is bundled with ClypDat, so the default remains available even
-    // when the user has no matching system font installed.
-    public string FontFamilyName { get; set; } = "Inter";
+    // Windows uses Segoe UI Variable; bundled Inter remains the fallback
+    // when the selected system family is unavailable.
+    public string FontFamilyName { get; set; } = "Segoe UI Variable";
     // 0 = no limit, same convention as FullSessionQuotaGb. A soft target the
     // sidebar's storage ring fills against and warns past - nothing deletes
     // clips to enforce it.

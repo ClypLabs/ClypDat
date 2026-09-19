@@ -27,7 +27,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Auto Capture Events}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="AUTO CAPTURE" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Auto capture" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
           <StackPanel Spacing="2">
             <TextBlock Classes="settingsRowTitle" Text="Auto Capture Events" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />

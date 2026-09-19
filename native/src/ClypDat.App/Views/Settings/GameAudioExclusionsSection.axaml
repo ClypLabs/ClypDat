@@ -22,7 +22,7 @@
 
     <Border Classes="settingsCard">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="EXCLUDED APPS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Excluded apps" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
           <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
           <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />

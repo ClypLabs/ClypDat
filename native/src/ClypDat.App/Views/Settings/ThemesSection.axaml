@@ -23,7 +23,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Themes|System|ClypDat Blue|Berry|Violet|Emerald|Rose|Amber'}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="PRESET THEMES" />
+        <TextBlock Classes="settingsCardLabel" Text="Preset themes" />
         <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding ThemeOptions}"
                  SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}">
           <ListBox.ItemsPanel>
@@ -48,7 +48,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Light|Light mode|Light themes|Light Blue|Light Berry|Light Violet|Light Emerald|Light Rose|Light Amber'}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="LIGHT THEMES" />
+        <TextBlock Classes="settingsCardLabel" Text="Light themes" />
         <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding LightThemeOptions}"
                  SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}">
           <ListBox.ItemsPanel>
@@ -73,7 +73,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Accent|Accent colour|Windows accent|System accent'}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
+        <TextBlock Classes="settingsCardLabel" Text="Accent colour" />
         <!-- Dimmed and disabled under a custom theme: the theme's own accent is
              what gets painted either way, so leaving the toggle live would be
              offering a choice that changes nothing. -->
@@ -95,7 +95,7 @@
       <StackPanel Spacing="16">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="4">
-            <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEMES" />
+            <TextBlock Classes="settingsCardLabel" Text="Custom themes" />
             <TextBlock Classes="settingsRowDesc" Text="Save base and accent pairs. Click one to switch to it. They stay local to ClypDat." />
           </StackPanel>
           <Button Grid.Column="1" Classes="primaryButton" Padding="16,9" Content="New theme" Click="NewCustomThemeButton_OnClick" VerticalAlignment="Center" />
@@ -127,13 +127,13 @@
     <Border Classes="settingsCard" HorizontalAlignment="Center" IsVisible="{Binding IsThemeEditorOpen}">
       <StackPanel Spacing="16">
         <StackPanel Orientation="Horizontal" Spacing="16">
-          <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" VerticalAlignment="Center" />
+          <TextBlock Classes="settingsCardLabel" Text="Custom theme editor" VerticalAlignment="Center" />
           <TextBox Classes="settingsInput" Width="240" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />
         </StackPanel>
         <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16">
           <Border Grid.Column="0" Classes="providerSetting" Padding="14">
             <StackPanel Spacing="10">
-              <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
+              <TextBlock Classes="settingsCardLabel" Text="Base colour" />
               <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
                 <!-- Bound on HsvColor, not Color. Dragging into pure black or
                      pure white throws the hue away in RGB, so the hue slider
@@ -177,7 +177,7 @@
           </Border>
           <Border Grid.Column="1" Classes="providerSetting" Padding="14">
             <StackPanel Spacing="10">
-              <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
+              <TextBlock Classes="settingsCardLabel" Text="Accent colour" />
               <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
                 <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8" />
                 <cp:ColorSlider Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
@@ -236,10 +236,10 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="TYPOGRAPHY" /><TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Inter restores ClypDat's default." /><!-- Committed when the box is left, not per keystroke. Bound the other
+    <Border Classes="settingsCard"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="Typography" /><TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Segoe UI Variable restores the default. Inter is also available." /><!-- Committed when the box is left, not per keystroke. Bound the other
              way, every prefix of a font name was a font name: typing "Consolas"
              saved settings and repainted the whole window eight times, through
              seven families that do not exist and land on the fallback. -->
-        <TextBox Classes="settingsInput" Text="{Binding AppFontFamilyName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" PlaceholderText="Inter" /></StackPanel></Border>
+        <TextBox Classes="settingsInput" Text="{Binding AppFontFamilyName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" PlaceholderText="Segoe UI Variable" /></StackPanel></Border>
   </StackPanel>
 </UserControl>

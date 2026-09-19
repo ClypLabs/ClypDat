@@ -11,7 +11,7 @@ internal static class LibraryCardLayoutCalculator
     internal const double HorizontalMargin = CardLeftInset + CardRightInset;
     private const double MinimumContentWidth = 320;
     private const double MinimumCardWidth = 220;
-    private const double ScaledCardTargetWidth = 400;
+    private const double ScaledCardTargetWidth = 320;
     private const double SafetyReserve = 1;
 
     internal static double SlotWidth(double cardWidth) => cardWidth + HorizontalMargin;
@@ -22,8 +22,10 @@ internal static class LibraryCardLayoutCalculator
         // Keep thresholds based on unreserved width. Reserve one DIP only
         // after choosing columns, preventing fractional-scale overflow.
         var columns = scaleWithWindow
-            ? Math.Clamp((int)Math.Floor(contentWidth / ScaledCardTargetWidth), 2, 10)
+            ? Math.Clamp((int)Math.Ceiling(contentWidth / ScaledCardTargetWidth), 1, 10)
             : 3;
+        if (scaleWithWindow)
+            columns = Math.Min(columns, Math.Max(1, (int)Math.Floor(contentWidth / SlotWidth(MinimumCardWidth))));
         var width = Math.Max(MinimumCardWidth,
             Math.Floor((contentWidth - SafetyReserve) / columns) - HorizontalMargin);
 

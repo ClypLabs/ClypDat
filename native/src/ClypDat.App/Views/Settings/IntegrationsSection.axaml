@@ -42,7 +42,7 @@
 
     <Border Classes="settingsCard">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="CLYPDAT ACCOUNT" />
+        <TextBlock Classes="settingsCardLabel" Text="ClypDat account" />
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
           <!-- The Discord picture when the account has Discord linked; the
                ClypDat mark otherwise, including while the picture downloads. -->
@@ -107,7 +107,7 @@
     <StackPanel Spacing="20" IsVisible="{Binding ClypDatAccountIsConnected}">
       <Border Classes="settingsCard" IsVisible="{Binding HasAccountsToAdd}">
         <StackPanel Spacing="16">
-          <TextBlock Classes="settingsCardLabel" Text="ADD AN ACCOUNT" />
+          <TextBlock Classes="settingsCardLabel" Text="Add an account" />
           <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Add Discord, optional Xbox activity, or Spotify. Discord and Xbox open clypdat.xyz in your browser; Spotify signs in with Spotify itself." />
           <StackPanel Spacing="10">
             <Border Classes="providerRow" IsVisible="{Binding DiscordAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}">
@@ -168,7 +168,7 @@
 
       <Border Classes="settingsCard" IsVisible="{Binding HasLinkedAccounts}">
         <StackPanel Spacing="16">
-          <TextBlock Classes="settingsCardLabel" Text="CONNECTED" />
+          <TextBlock Classes="settingsCardLabel" Text="Connected" />
           <TextBlock Classes="settingsRowDescSm" Text="Unlink here. Refresh after changing anything on clypdat.xyz in your browser." />
           <Border Classes="settingsNotice" IsVisible="{Binding ClypDatAccountHasError}">
             <TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountError}" TextWrapping="Wrap" />

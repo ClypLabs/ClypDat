@@ -44,7 +44,7 @@
       </StackPanel>
       <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Strip emoji from titles|Copy instead of move|Import Options}">
         <StackPanel Spacing="20">
-          <TextBlock Classes="settingsCardLabel" Text="IMPORT OPTIONS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <TextBlock Classes="settingsCardLabel" Text="Import options" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Strip emoji from titles}">
             <TextBlock Text="Strip Emoji from Titles" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
             <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportStripEmoji}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
@@ -62,7 +62,7 @@
 
       <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scan for Medal clips|Scan}">
         <StackPanel Spacing="16">
-          <TextBlock Classes="settingsCardLabel" Text="SCAN" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <TextBlock Classes="settingsCardLabel" Text="Scan" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
             <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Scan for Medal Clips" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -129,7 +129,7 @@
       </Border>
       <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scan for SteelSeries clips|Scan}">
         <StackPanel Spacing="16">
-          <TextBlock Classes="settingsCardLabel" Text="SCAN" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <TextBlock Classes="settingsCardLabel" Text="Scan" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
             <StackPanel Spacing="2" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Scan for SteelSeries Clips" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />

@@ -82,7 +82,7 @@
 
     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Install updates while loading|Updates}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="UPDATES" />
+        <TextBlock Classes="settingsCardLabel" Text="Updates" />
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="2">
         <TextBlock Classes="settingsRowTitle" Text="Check for Updates" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -110,7 +110,7 @@
 
     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=View on GitHub|Source and Licenses}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="SOURCE AND LICENSES" />
+        <TextBlock Classes="settingsCardLabel" Text="Source and licenses" />
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="2">
             <TextBlock Classes="settingsRowTitle" Text="View on GitHub" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -123,7 +123,7 @@
 
     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Log folder|Diagnostics}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="DIAGNOSTICS" />
+        <TextBlock Classes="settingsCardLabel" Text="Diagnostics" />
         <Grid ColumnDefinitions="*,Auto,Auto">
           <StackPanel Spacing="2">
         <TextBlock Classes="settingsRowTitle" Text="Log Folder" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -137,7 +137,7 @@
 
     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Setup walkthrough|Get Started}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="GET STARTED" />
+        <TextBlock Classes="settingsCardLabel" Text="Get started" />
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="2">
         <TextBlock Classes="settingsRowTitle" Text="Setup Walkthrough" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -150,7 +150,7 @@
 
     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Credit|Contributor|Arashii|iPixelGalaxy|Spikerko|Corpsehusk|Logo Artist}">
       <StackPanel Spacing="10">
-        <TextBlock Classes="settingsCardLabel" Text="CREDIT" Margin="0,0,0,4" />
+        <TextBlock Classes="settingsCardLabel" Text="Credit" Margin="0,0,0,4" />
         <TextBlock Classes="settingsRowDesc" Text="People who contributed to ClypDat." />
         <controls:ResponsiveUniformGrid MinimumItemWidth="212" MaximumColumns="4">
           <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Stormanzanii" ToolTip.Tip="Open Arashii's GitHub profile" Click="CreditCard_OnClick">
@@ -212,7 +212,7 @@
 
     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="10" Padding="18">
       <StackPanel Spacing="10">
-        <TextBlock Classes="settingsCardLabel" Text="LICENSES" Margin="0,0,0,4" />
+        <TextBlock Classes="settingsCardLabel" Text="Licenses" Margin="0,0,0,4" />
 
         <ItemsControl ItemsSource="{Binding ThirdPartyLicenseEntries}">
           <ItemsControl.ItemsPanel>

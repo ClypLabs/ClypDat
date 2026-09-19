@@ -20,16 +20,16 @@
 
     <Border Classes="settingsCard">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="APP FONT" />
+        <TextBlock Classes="settingsCardLabel" Text="App font" />
         <Grid ColumnDefinitions="*,300" ColumnSpacing="24">
           <StackPanel Spacing="3" VerticalAlignment="Center">
             <TextBlock Classes="settingsRowTitle" Text="Font family name" />
-            <TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Inter restores ClypDat's default." />
+            <TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Segoe UI Variable restores the default. Inter is also available." />
           </StackPanel>
           <TextBox Grid.Column="1"
                    Classes="settingsInput"
                    Text="{Binding AppFontFamilyName, Mode=TwoWay}"
-                   PlaceholderText="Inter"
+                   PlaceholderText="Segoe UI Variable"
                    VerticalContentAlignment="Center"
                    AutomationProperties.Name="Font family name" />
         </Grid>

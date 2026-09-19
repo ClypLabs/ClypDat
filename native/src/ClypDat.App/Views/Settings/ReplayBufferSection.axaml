@@ -26,7 +26,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Save hotkey|Hotkey}">
       <StackPanel Spacing="10">
-        <TextBlock Classes="settingsCardLabel" Text="HOTKEY" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16">
           <StackPanel Spacing="6">
             <TextBlock Classes="settingsRowTitle" Text="Save Hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -43,7 +43,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length|Recording}">
       <StackPanel Spacing="20">
-        <TextBlock Classes="settingsCardLabel" Text="RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Recording" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length}">
           <TextBlock Classes="settingsRowTitle" Text="Replay Length" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
@@ -59,7 +59,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording quality|Resolution|Frame rate|FPS|Bitrate|Codec|Encoder|Quality|Encoding}">
       <StackPanel Spacing="11">
-        <TextBlock Classes="settingsCardLabel" Text="RECORDING QUALITY" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Recording quality" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <StackPanel Spacing="4">
           <TextBlock Classes="settingsRowTitle" Text="Quality" />
           <TextBlock Text="Customize clip quality. Higher settings use more resources and storage." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
@@ -180,7 +180,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|File Format|MKV|MP4|Storage limit|Custom limit|Full Session Recording}">
       <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="FULL SESSION RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Full session recording" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording}">
           <StackPanel Spacing="2">
             <TextBlock Classes="settingsRowTitle" Text="Full Session Recording" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />

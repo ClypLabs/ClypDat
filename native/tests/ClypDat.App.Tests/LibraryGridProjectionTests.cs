@@ -8,6 +8,21 @@ namespace ClypDat.App.Tests;
 
 public sealed class LibraryGridProjectionTests
 {
+    [Theory]
+    [InlineData(320, 1)]
+    [InlineData(960, 3)]
+    [InlineData(1280, 4)]
+    [InlineData(1800, 6)]
+    [InlineData(2560, 8)]
+    public void AdaptiveCardsStayCompactAndFitViewport(double viewport, int columns)
+    {
+        var layout = LibraryCardLayoutCalculator.Calculate(viewport, scaleWithWindow: true);
+        Assert.Equal(columns, layout.Columns);
+        Assert.InRange(layout.Width, 220, 296);
+        Assert.True(LibraryCardLayoutCalculator.SlotWidth(layout.Width) * columns <= viewport);
+        Assert.Equal(layout.Width * 9d / 16d, layout.ImageHeight);
+    }
+
     [Fact]
     public void CalculateLayout_PreservesFractionalSixteenByNineImageHeight()
     {

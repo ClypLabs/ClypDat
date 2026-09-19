@@ -22,7 +22,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip save notifications|Hide overlays from screen capture|Show new clips when a game closes|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position|Overlays}">
       <StackPanel Spacing="20">
-        <TextBlock Classes="settingsCardLabel" Text="OVERLAYS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Overlays" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip save notifications}">
             <TextBlock Classes="settingsRowTitle" Text="Show Clip Save Notifications" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
@@ -111,7 +111,7 @@
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Play clip saved sound|Sound volume|Sound}">
       <StackPanel Spacing="20">
-        <TextBlock Classes="settingsCardLabel" Text="SOUND" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsCardLabel" Text="Sound" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Play clip saved sound}">
           <TextBlock Classes="settingsRowTitle" Text="Play Clip Saved Sound" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlaySound}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />

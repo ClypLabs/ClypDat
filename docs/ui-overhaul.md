@@ -12,8 +12,9 @@ colours. The existing colour ramp remains available for specialized graphics.
 dialog, typography, focus, error, and compact Editor rules. `DialogComposition`
 owns utility-window chrome while callers retain modal results and cancellation.
 
-Library has a larger heading and search toolbar. Settings use larger page and
-card headings, readable descriptions, and spacing in multiples of four. Editor
+Library uses compact adaptive cards with a larger heading and search toolbar.
+Settings have a capped content width, sentence-case card headings, quieter
+labels, and a status sidebar that hides below 1120 logical pixels. Editor
 headers take less vertical space. Timeline labels use the selected font.
 Menus, sharing, updater windows, onboarding, notifications, splash, and browser
 sign-in completion pages use the same surface and typography conventions.
@@ -46,3 +47,20 @@ particularly native video playback/fullscreen composition and popup placement
 across monitors. Offscreen assertions verify geometry and rendering contracts;
 they do not establish the visual quality of a live desktop session. Updater
 downloads and installation were not triggered by the UI fixtures.
+
+## Density and font refinement
+
+Adaptive library slots target 320 logical pixels and preserve 16:9 thumbnails.
+The fixed three-column preference is unchanged. Card footers use less padding.
+Settings content is capped at 960 logical pixels; navigation and status columns
+use 224 pixels. General settings have tighter spacing and a compact process
+priority picker.
+
+New defaults use Segoe UI Variable on Windows, with bundled Inter as fallback.
+The resolver loads `SegUIVar.ttf` to avoid differences in variable-family names
+between Windows and Skia. Existing saved custom fonts remain honored; Inter
+remains selectable. Font checks resolve actual glyph families, and dialog
+fixtures exercise Segoe UI Variable, Inter, and a custom monospaced font.
+
+The refinement passed 43 relevant font, appearance, layout, settings, and
+overlay checks. Earlier full-suite results above precede this refinement.
