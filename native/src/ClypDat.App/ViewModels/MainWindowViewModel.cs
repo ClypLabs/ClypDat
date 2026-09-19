@@ -3972,6 +3972,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string FullSessionFormatRecommendation => FullSessionFormatSelection.Recommendation;
     public string FullSessionFormatWarning => FullSessionFormatSelection.Warning;
     public void UseMkv() => SelectedFullSessionFormat = "MKV";
+    public void IgnoreFullSessionMp4Warning() => FullSessionFormatSelection.IgnoreWarning();
+    public void HideFullSessionMp4Warning() => FullSessionFormatSelection.HideWarningPermanently();
 
     // Gb = -1 is the "Custom" sentinel: the actual number comes from the
     // CustomFullSessionQuotaGb text field shown while it's selected.

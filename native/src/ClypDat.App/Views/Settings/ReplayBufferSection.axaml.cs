@@ -16,6 +16,8 @@ public sealed partial class ReplayBufferSection : UserControl
     // MainWindow - their bodies reach all over its state. These forward
     // to the owning window rather than duplicating any of it.
     private void UseMkv_OnClick(object? sender, RoutedEventArgs e) => (DataContext as MainWindowViewModel)?.UseMkv();
+    private void IgnoreFullSessionMp4Warning_OnClick(object? sender, RoutedEventArgs e) => (DataContext as MainWindowViewModel)?.IgnoreFullSessionMp4Warning();
+    private void HideFullSessionMp4Warning_OnClick(object? sender, RoutedEventArgs e) => (DataContext as MainWindowViewModel)?.HideFullSessionMp4Warning();
 
     private MainWindow? Owner => TopLevel.GetTopLevel(this) as MainWindow;
 

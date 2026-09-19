@@ -199,14 +199,27 @@
               <TextBlock Classes="settingsRowTitleSm" Text="File Format" />
               <TextBlock Classes="settingsRowDescSm" Text="Uses Recording Quality settings. Format changes apply to the next Full Session." TextWrapping="Wrap" />
             </StackPanel>
-            <ComboBox Grid.Column="1" Classes="settingsInput" Width="190" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
+            <ComboBox Grid.Column="1" Classes="settingsInput" Width="220" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
           </Grid>
           <TextBlock Classes="settingsRowDescSm" Text="{Binding FullSessionFormatRecommendation}" TextWrapping="Wrap" IsVisible="{Binding !IsFullSessionMp4}" />
-          <Border Background="#24FFB547" BorderBrush="#FFB547" BorderThickness="1" CornerRadius="6" Padding="12" IsVisible="{Binding IsFullSessionMp4}">
-            <StackPanel Spacing="8">
-              <TextBlock Text="{Binding FullSessionFormatWarning}" Foreground="#FFB547" TextWrapping="Wrap" />
-              <Button Content="Use MKV" Click="UseMkv_OnClick" HorizontalAlignment="Left" />
-            </StackPanel>
+          <Border Classes="settingsNotice" IsVisible="{Binding FullSessionFormatSelection.IsWarningVisible}">
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+              <PathIcon Classes="cautionIcon" />
+              <StackPanel Grid.Column="1" Spacing="4">
+                <TextBlock FontSize="12" TextWrapping="Wrap">
+                  <Run Text="MP4 notice: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
+                  <Run Text="{Binding FullSessionFormatWarning}" Foreground="{StaticResource TextStrongBrush}" />
+                </TextBlock>
+                <TextBlock Text="• MP4 writes fragments periodically, so completed footage can remain playable after a crash." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+                <TextBlock Text="• MKV writes video and separate audio tracks during capture." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+                <TextBlock Text="• Choose MKV when recovery after an unexpected stop matters." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+                <WrapPanel Margin="0,4,0,0">
+                  <Button Classes="primaryButton" Content="Use MKV" Click="UseMkv_OnClick" Margin="0,0,8,0" />
+                  <Button Content="Ignore" Click="IgnoreFullSessionMp4Warning_OnClick" Margin="0,0,8,0" />
+                  <Button Content="Don't Show Again" Click="HideFullSessionMp4Warning_OnClick" />
+                </WrapPanel>
+              </StackPanel>
+            </Grid>
           </Border>
           <Border Classes="settingsDivider" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
           <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Storage limit}">
@@ -229,16 +242,6 @@
               <TextBlock Classes="settingsRowDesc" Grid.Column="2" Text="GB" VerticalAlignment="Center" />
             </Grid>
           </Border>
-          <!-- A drawn triangle, not a glyph: the "?" this used to
-               start with was a warning character that did not survive
-               an encoding round-trip, and any character-based icon can
-               lose that bet again on a machine whose font lacks it. -->
-          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6" Margin="0,4,0,0">
-            <PathIcon Classes="cautionIcon" />
-            <TextBlock Grid.Column="1"
-                       Text="Finalizing a long session (muxing the whole thing) can take real time and heavy CPU/disk use, more so at higher quality/fps or longer sessions - other apps (Discord, Spotify, etc.) may stutter or freeze until it finishes."
-                       Foreground="{StaticResource CautionBrush}" FontSize="11" FontWeight="Bold" TextWrapping="Wrap" />
-          </Grid>
         </StackPanel>
       </StackPanel>
     </Border>

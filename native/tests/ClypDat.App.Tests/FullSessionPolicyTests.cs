@@ -71,6 +71,24 @@ public sealed class FullSessionPolicyTests
         Assert.Equal("MKV", settings.FullSessionContainer);
     }
 
+    [Fact]
+    public void Mp4WarningCanBeIgnoredOrHiddenPermanently()
+    {
+        var settings = new AppSettings { FullSessionContainer = "MP4" }; var saves = 0;
+        var selection = new FullSessionFormatViewModel(settings, () => saves++);
+        Assert.True(selection.IsWarningVisible);
+        selection.IgnoreWarning();
+        Assert.False(selection.IsWarningVisible);
+        Assert.False(settings.HideFullSessionMp4Warning);
+
+        var restartedSelection = new FullSessionFormatViewModel(settings, () => saves++);
+        Assert.True(restartedSelection.IsWarningVisible);
+        restartedSelection.HideWarningPermanently();
+        Assert.True(settings.HideFullSessionMp4Warning);
+        Assert.False(restartedSelection.IsWarningVisible);
+        Assert.Equal(1, saves);
+    }
+
     [Theory]
     [InlineData("{}", "MKV")]
     [InlineData("{\"FullSessionContainer\":\"MP4\"}", "MP4")]

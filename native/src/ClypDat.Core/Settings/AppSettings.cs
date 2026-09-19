@@ -331,6 +331,9 @@ public sealed class AppSettings
     }
     public bool FullSessionRecordingEnabled { get; set; }
     public string FullSessionRecordingFolder { get; set; } = string.Empty;
+    // Persistent opt-out for the MP4 crash-recovery notice. The format remains
+    // selectable; this only suppresses the reminder.
+    public bool HideFullSessionMp4Warning { get; set; }
     // Ignored compatibility data; Recording Quality owns the live codec.
     public string FullSessionVideoCodec { get; set; } = "H.264";
     // 0 = unlimited. When set, the oldest ClypDat session recordings are deleted
