@@ -660,7 +660,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         get => Settings.FontFamilyName;
         set
         {
-            var name = string.IsNullOrWhiteSpace(value) ? "Segoe UI Variable" : value.Trim();
+            var name = string.IsNullOrWhiteSpace(value) ? "Inter" : value.Trim();
             if (string.Equals(Settings.FontFamilyName, name, StringComparison.Ordinal)) return;
             Settings.FontFamilyName = name;
             SaveSettings();

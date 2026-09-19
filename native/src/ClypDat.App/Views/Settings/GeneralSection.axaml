@@ -82,7 +82,7 @@
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="24" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scale clips with window size|Layout}">
           <StackPanel Spacing="2">
             <TextBlock Classes="settingsRowTitle" Text="Scale Clips with Window Size" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDesc" Text="Keep cards compact and fit more columns as the window grows. Turn off for a fixed three-column layout." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Fit more columns as the window grows. Turn off for a fixed three-column layout." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding ScaleClipsWithWindow}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>

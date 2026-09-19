@@ -1111,7 +1111,7 @@
                             </Border>
 
                             <Border Grid.Row="1" Background="{StaticResource SurfaceRaisedBrush}">
-                                <Grid ColumnDefinitions="*,Auto" Margin="12,10,12,10">
+                                <Grid ColumnDefinitions="*,Auto" Margin="16,13,16,13">
                                 <StackPanel Grid.Column="0" Spacing="6">
                                  <Border Classes="clipGameFilter"
                                          BorderThickness="1"
@@ -1136,8 +1136,8 @@
                                   <TextBlock Classes="editableTitle"
                                              Text="{Binding TileMainLabel}"
                                              Foreground="{StaticResource TextStrongBrush}"
-                                             FontSize="13"
-                                             FontWeight="SemiBold"
+                                             FontSize="15"
+                                             FontWeight="Bold"
                                              TextTrimming="CharacterEllipsis"
                                              Cursor="Hand"
                                              HorizontalAlignment="Left"
