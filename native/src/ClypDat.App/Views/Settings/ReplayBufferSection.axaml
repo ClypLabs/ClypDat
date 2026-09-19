@@ -206,13 +206,7 @@
             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
               <PathIcon Classes="cautionIcon" />
               <StackPanel Grid.Column="1" Spacing="4">
-                <TextBlock FontSize="12" TextWrapping="Wrap">
-                  <Run Text="MP4 notice: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
-                  <Run Text="{Binding FullSessionFormatWarning}" Foreground="{StaticResource TextStrongBrush}" />
-                </TextBlock>
-                <TextBlock Text="• A crash or power loss can leave the recording incomplete." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-                <TextBlock Text="• Recent footage or audio can be missing after an unexpected stop." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-                <TextBlock Text="• The recording can require repair or fail to open in some players." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding FullSessionFormatWarning}" Foreground="{StaticResource TextStrongBrush}" FontSize="12" TextWrapping="Wrap" />
                 <WrapPanel Margin="0,4,0,0">
                   <Button Classes="primaryButton" Content="Use MKV" Click="UseMkv_OnClick" Margin="0,0,8,0" />
                   <Button Content="Ignore" Click="IgnoreFullSessionMp4Warning_OnClick" Margin="0,0,8,0" />
