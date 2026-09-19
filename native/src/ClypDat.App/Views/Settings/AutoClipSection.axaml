@@ -98,7 +98,7 @@
                           <!-- A one-event group still carries its catalog group ID for
                                capture scheduling, but it has nothing to expand in the
                                settings UI. Show its event directly. -->
-                          <CheckBox Classes="autoClipEvent" Margin="22,0,0,6"
+                          <CheckBox Classes="autoClipEvent" Margin="22,0,0,0"
                                     IsVisible="{Binding IsSingleEvent}"
                                     Content="{Binding SingleEvent.Name}"
                                     IsChecked="{Binding SingleEvent.IsEnabled}" />
