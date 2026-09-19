@@ -313,7 +313,11 @@ internal static class AppThemeService
         SetBrush(application, "AccentHoverBrush", Blend(accent, appBackground, 0.84));
 
         ApplyFluentAccent(application, accent, appBackground);
-        SetBrush(application, "AccentForegroundBrush", BestForeground(accent));
+        // Emerald's preset green buttons use white labels in both variants.
+        var emeraldAccent = !isCustom && !useSystemAccent
+            && (string.Equals(preset, "Emerald", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(preset, "Light Emerald", StringComparison.OrdinalIgnoreCase));
+        SetBrush(application, "AccentForegroundBrush", emeraldAccent ? Colors.White : BestForeground(accent));
         ApplyLogo(application, isCustom ? customLight : transform.IsLight);
     }
 
