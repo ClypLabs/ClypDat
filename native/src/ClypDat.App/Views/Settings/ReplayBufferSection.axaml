@@ -210,9 +210,9 @@
                   <Run Text="MP4 notice: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
                   <Run Text="{Binding FullSessionFormatWarning}" Foreground="{StaticResource TextStrongBrush}" />
                 </TextBlock>
-                <TextBlock Text="• MP4 writes fragments periodically, so completed footage can remain playable after a crash." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-                <TextBlock Text="• MKV writes video and separate audio tracks during capture." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-                <TextBlock Text="• Choose MKV when recovery after an unexpected stop matters." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+                <TextBlock Text="• A crash or power loss can leave the recording incomplete." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+                <TextBlock Text="• Recent footage or audio can be missing after an unexpected stop." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+                <TextBlock Text="• The recording can require repair or fail to open in some players." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
                 <WrapPanel Margin="0,4,0,0">
                   <Button Classes="primaryButton" Content="Use MKV" Click="UseMkv_OnClick" Margin="0,0,8,0" />
                   <Button Content="Ignore" Click="IgnoreFullSessionMp4Warning_OnClick" Margin="0,0,8,0" />
