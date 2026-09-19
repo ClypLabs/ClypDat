@@ -10,7 +10,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Fonts">
+  <StackPanel Spacing="20" Tag="Fonts">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Fonts" />
@@ -19,7 +19,7 @@
     </StackPanel>
 
     <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="APP FONT" />
         <Grid ColumnDefinitions="*,300" ColumnSpacing="24">
           <StackPanel Spacing="3" VerticalAlignment="Center">

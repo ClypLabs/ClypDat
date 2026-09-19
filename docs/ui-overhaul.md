@@ -1,0 +1,48 @@
+# Desktop studio appearance
+
+`ui-overhaul` introduces graphite surfaces, explicit light surfaces, shared
+typography and spacing, and common dialog composition. Preset names, Windows
+accent selection, custom theme files, saved settings, commands, and recording
+overlay formats remain compatible.
+
+`Styles/Tokens.axaml` contains the appearance values. `AppThemeService` updates
+brush instances in place; light presets use explicit page, panel, and control
+colours. The existing colour ramp remains available for specialized graphics.
+`AppStyles.axaml` styles existing controls; `StudioStyles.axaml` contains shared
+dialog, typography, focus, error, and compact Editor rules. `DialogComposition`
+owns utility-window chrome while callers retain modal results and cancellation.
+
+Library has a larger heading and search toolbar. Settings use larger page and
+card headings, readable descriptions, and spacing in multiples of four. Editor
+headers take less vertical space. Timeline labels use the selected font.
+Menus, sharing, updater windows, onboarding, notifications, splash, and browser
+sign-in completion pages use the same surface and typography conventions.
+
+## Validation
+
+- Solution build passed with `./dotnet.ps1 build native/ClypDat.Native.sln -p:Platform=x64`.
+  The default AnyCPU configuration is rejected by ScreenRecorderLib. Seven
+  existing deprecation warnings remain.
+- Full managed App suite: 890 passed, 2 skipped, 1 failed. The failure is
+  `AutoClipCatalogTests.ProtocolVersionsAndDetectorTransportLimitsArePinned`:
+  it expects capture protocol 11 while the implementation declares 12. Both
+  values were verified on the starting `master` commit, `4639bb12`.
+- After final presentation changes, 59 targeted tests passed, including
+  `StudioAppearanceTests`, onboarding and notification rendering, sharing,
+  release notes, update presentation, keyboard rendering, and recording/export
+  overlay layout.
+- Appearance fixtures cover all 12 presets, four custom themes, Inter and
+  Courier New, mutable brush identity, text contrast, long dialog labels,
+  populated/loading Library states, all Settings sections, Editor dimensions,
+  modal actions, and export cancellation. Dialog content renders offscreen at
+  100%, 150%, and 200%; main layouts exercise minimum and larger window sizes.
+- Test setup selects an isolated product folder before app initialization,
+  uses fixture library paths, and disables recording.
+
+## Visual review
+
+No screen or window screenshots were taken. Final appearance needs user review,
+particularly native video playback/fullscreen composition and popup placement
+across monitors. Offscreen assertions verify geometry and rendering contracts;
+they do not establish the visual quality of a live desktop session. Updater
+downloads and installation were not triggered by the UI fixtures.

@@ -10,7 +10,7 @@
     <Binding Path="SelectedSettingsSection" Converter="{x:Static conv:ObjectConverters.Equal}" ConverterParameter="Import Clips" />
   </UserControl.IsVisible>
   <StackPanel>
-    <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsImportSourcePickerVisible}">
+    <StackPanel Spacing="20" Tag="Import Clips" IsVisible="{Binding IsImportSourcePickerVisible}">
       <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
       <StackPanel Spacing="4">
         <TextBlock Classes="settingsSectionTitle" Text="Import Clips" />
@@ -35,7 +35,7 @@
       </Grid>
     </StackPanel>
 
-    <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsMedalImportPageVisible}">
+    <StackPanel Spacing="20" Tag="Import Clips" IsVisible="{Binding IsMedalImportPageVisible}">
       <Button Content="← Import Sources" Classes="linkButton" Click="BackToImportSourcesButton_OnClick" HorizontalAlignment="Left" Padding="0" />
       <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
       <StackPanel Spacing="4">
@@ -43,7 +43,7 @@
         <TextBlock Classes="settingsSectionDesc" Text="Finds clips Medal has recorded locally and copies (or moves) them into your ClypDat library, keeping Medal's own clip titles." />
       </StackPanel>
       <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Strip emoji from titles|Copy instead of move|Import Options}">
-        <StackPanel Spacing="18">
+        <StackPanel Spacing="20">
           <TextBlock Classes="settingsCardLabel" Text="IMPORT OPTIONS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Strip emoji from titles}">
             <TextBlock Text="Strip Emoji from Titles" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -77,7 +77,7 @@
           </StackPanel>
           <TextBlock Classes="settingsRowDesc" Text="{Binding MedalImportStatusText}" IsVisible="{Binding ShowMedalImportStatusText}" />
 
-          <StackPanel Spacing="14" IsVisible="{Binding MedalScanned}">
+          <StackPanel Spacing="16" IsVisible="{Binding MedalScanned}">
             <Border Classes="settingsDivider" />
 
             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" Margin="12,0,0,0">
@@ -111,7 +111,7 @@
       </Border>
     </StackPanel>
 
-    <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsSteelSeriesImportPageVisible}">
+    <StackPanel Spacing="20" Tag="Import Clips" IsVisible="{Binding IsSteelSeriesImportPageVisible}">
       <Button Content="← Import Sources" Classes="linkButton" Click="BackToImportSourcesButton_OnClick" HorizontalAlignment="Left" Padding="0" />
       <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
       <StackPanel Spacing="4">
@@ -142,7 +142,7 @@
             <TextBlock Classes="settingsRowDesc" Text="{Binding SteelSeriesImportStatusText}" />
           </StackPanel>
           <TextBlock Classes="settingsRowDesc" Text="{Binding SteelSeriesImportStatusText}" IsVisible="{Binding ShowSteelSeriesImportStatusText}" />
-          <StackPanel Spacing="14" IsVisible="{Binding SteelSeriesScanned}">
+          <StackPanel Spacing="16" IsVisible="{Binding SteelSeriesScanned}">
             <Border Classes="settingsDivider" />
             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" Margin="12,0,0,0">
               <CheckBox IsThreeState="True" IsChecked="{Binding SteelSeriesImportSelectionState, Mode=OneWay}" IsEnabled="{Binding CanToggleSteelSeriesImportSelection}" Click="ToggleSteelSeriesImportSelection_OnClick" ToolTip.Tip="Select or deselect all SteelSeries clips" VerticalAlignment="Center" />

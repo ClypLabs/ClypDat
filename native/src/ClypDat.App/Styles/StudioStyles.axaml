@@ -1,0 +1,93 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Style Selector="Window, PopupRoot, OverlayPopupHost">
+    <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+  </Style>
+  <Style Selector="TextBlock.pageTitle">
+    <Setter Property="FontSize" Value="{StaticResource PageFontSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextStrongBrush}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <Style Selector="TextBlock.metadata">
+    <Setter Property="FontSize" Value="{StaticResource MetadataFontSize}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSubtleBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style Selector="Button.settingsNavButton /template/ ContentPresenter TextBlock">
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <Style Selector="Button:not(ToggleSwitch):pressed">
+    <Setter Property="Background" Value="{DynamicResource EdgeStrongBrush}" />
+  </Style>
+  <Style Selector="Button.primaryButton:not(ToggleSwitch):pressed">
+    <Setter Property="Background" Value="{DynamicResource AccentBrushHover}" />
+  </Style>
+  <Style Selector="Button:focus-visible, RadioButton:focus-visible, ComboBox:focus-visible">
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <Style Selector="TextBox:error /template/ Border#PART_BorderElement">
+    <Setter Property="BorderBrush" Value="{DynamicResource DangerBrush}" />
+  </Style>
+  <Style Selector="TextBox:disabled, ComboBox:disabled, RadioButton:disabled">
+    <Setter Property="Opacity" Value="0.5" />
+  </Style>
+  <Style Selector="Border.dialogShell">
+    <Setter Property="Background" Value="{DynamicResource PanelBgBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource EdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource DialogRadius}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <Style Selector="Border.dialogHeader">
+    <Setter Property="Background" Value="{DynamicResource PanelBgBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="CornerRadius" Value="15,15,0,0" />
+    <Setter Property="MinHeight" Value="56" />
+  </Style>
+  <Style Selector="TextBlock.dialogTitle">
+    <Setter Property="FontSize" Value="{StaticResource SectionFontSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextStrongBrush}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="24,16,16,16" />
+  </Style>
+  <Style Selector="StackPanel.dialogBody">
+    <Setter Property="Margin" Value="{StaticResource DialogPadding}" />
+    <Setter Property="Spacing" Value="16" />
+  </Style>
+  <Style Selector="StackPanel.dialogActions">
+    <Setter Property="Orientation" Value="Horizontal" />
+    <Setter Property="HorizontalAlignment" Value="Right" />
+    <Setter Property="Spacing" Value="8" />
+    <Setter Property="Margin" Value="0,8,0,0" />
+  </Style>
+  <Style Selector="StackPanel.dialogActions Button">
+    <Setter Property="MinHeight" Value="{StaticResource ControlHeight}" />
+    <Setter Property="MinWidth" Value="104" />
+  </Style>
+  <Style Selector="Border.editorInspector ComboBox.settingsInput, Border.editorInspector TextBox.settingsInput">
+    <Setter Property="MinHeight" Value="{StaticResource CompactControlHeight}" />
+    <Setter Property="Padding" Value="8,4" />
+  </Style>
+  <Style Selector="Border.libraryClipCardSurface">
+    <Setter Property="BorderBrush" Value="{DynamicResource EdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.libraryClipCardSurface:pointerover">
+    <Setter Property="BorderBrush" Value="{DynamicResource EdgeStrongBrush}" />
+  </Style>
+  <Style Selector="MenuItem">
+    <Setter Property="MinHeight" Value="{StaticResource ControlHeight}" />
+    <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
+  </Style>
+</Styles>

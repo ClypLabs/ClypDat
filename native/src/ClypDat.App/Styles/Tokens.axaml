@@ -1,37 +1,40 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <!-- The settings UI used to carry 42 distinct hex values inline - six greys
-       for muted text, five for surfaces, three for dividers - so nothing lined
-       up. These are that palette collapsed into one ramp. Same dark family, far
-       fewer steps.
-
-       The surface and line tokens below are the System theme's values;
-       AppThemeService recolours them in place for every other preset. Text
-       tokens are deliberately left out of that - they stay fixed across themes
-       for readability. Accent brushes live in App.axaml because they are
-       derived from the live accent rather than authored here. -->
+  <!-- Shared studio palette. AppThemeService mutates these brushes in place. -->
 
   <!-- Surfaces, darkest to lightest -->
-  <SolidColorBrush x:Key="AppBgBrush" Color="#0D1116" />
-  <SolidColorBrush x:Key="PanelBgBrush" Color="#101820" />
-  <SolidColorBrush x:Key="SurfaceBrush" Color="#141D24" />
-  <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#1A242E" />
-  <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#22303D" />
+  <SolidColorBrush x:Key="AppBgBrush" Color="#101216" />
+  <SolidColorBrush x:Key="PanelBgBrush" Color="#171A20" />
+  <SolidColorBrush x:Key="SurfaceBrush" Color="#1B1F26" />
+  <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="#20242C" />
+  <SolidColorBrush x:Key="SurfaceHoverBrush" Color="#2A303A" />
 
   <!-- Lines -->
-  <SolidColorBrush x:Key="EdgeBrush" Color="#232F3A" />
-  <SolidColorBrush x:Key="EdgeStrongBrush" Color="#2C3B48" />
-  <SolidColorBrush x:Key="DividerBrush" Color="#1B242D" />
+  <SolidColorBrush x:Key="EdgeBrush" Color="#2B313B" />
+  <SolidColorBrush x:Key="EdgeStrongBrush" Color="#414A58" />
+  <SolidColorBrush x:Key="DividerBrush" Color="#242A33" />
 
-  <!-- Text, brightest to dimmest -->
-  <SolidColorBrush x:Key="TextStrongBrush" Color="#EDF4FB" />
-  <SolidColorBrush x:Key="TextBrush" Color="#D2DEEC" />
-  <SolidColorBrush x:Key="TextSubtleBrush" Color="#9FB2C6" />
-  <SolidColorBrush x:Key="TextMutedBrush" Color="#6B7C8C" />
-  <SolidColorBrush x:Key="LabelBrush" Color="#5C6D7E" />
+  <!-- Text, brightest to dimmest; metadata keeps readable contrast. -->
+  <SolidColorBrush x:Key="TextStrongBrush" Color="#F1F3F7" />
+  <SolidColorBrush x:Key="TextBrush" Color="#D8DDE6" />
+  <SolidColorBrush x:Key="TextSubtleBrush" Color="#ABB4C2" />
+  <SolidColorBrush x:Key="TextMutedBrush" Color="#949FAF" />
+  <SolidColorBrush x:Key="LabelBrush" Color="#949FAF" />
 
   <!-- Semantic -->
   <SolidColorBrush x:Key="LinkBrush" Color="#78B8FF" />
   <SolidColorBrush x:Key="CautionBrush" Color="#E5A00D" />
   <SolidColorBrush x:Key="DangerBrush" Color="#D85E61" />
+  <x:Double x:Key="BodyFontSize">13</x:Double>
+  <x:Double x:Key="MetadataFontSize">12</x:Double>
+  <x:Double x:Key="SectionFontSize">16</x:Double>
+  <x:Double x:Key="PageFontSize">24</x:Double>
+  <x:Double x:Key="ControlHeight">36</x:Double>
+  <x:Double x:Key="CompactControlHeight">32</x:Double>
+  <CornerRadius x:Key="ControlRadius">8</CornerRadius>
+  <CornerRadius x:Key="CardRadius">12</CornerRadius>
+  <CornerRadius x:Key="DialogRadius">16</CornerRadius>
+  <Thickness x:Key="PagePadding">32,24,32,32</Thickness>
+  <Thickness x:Key="CardPadding">24</Thickness>
+  <Thickness x:Key="DialogPadding">24</Thickness>
 </ResourceDictionary>

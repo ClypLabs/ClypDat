@@ -12,7 +12,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Audio">
+  <StackPanel Spacing="20" Tag="Audio">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Recording Audio" />
@@ -21,8 +21,8 @@
     </StackPanel>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
-      <StackPanel Spacing="18">
-        <StackPanel Spacing="14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
+      <StackPanel Spacing="20">
+        <StackPanel Spacing="16" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
           <!-- No card title here: the section heading directly above already
                says "Recording Audio", so repeating it inside the card left two
                identical titles stacked a few pixels apart. -->
@@ -155,7 +155,7 @@
     </Border>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Microphone}">
-      <StackPanel Spacing="18">
+      <StackPanel Spacing="20">
         <StackPanel Spacing="6">
           <Grid ColumnDefinitions="*,Auto">
             <TextBlock Classes="settingsRowTitle" Text="Microphone" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />

@@ -213,7 +213,7 @@ public sealed class ClipOverlayCardRendererTests
                 Assert.NotNull(pills);
                 Assert.NotNull(qualityPresets);
                 Assert.Equal(640, dialog.Width);
-                Assert.Equal(500, dialog.Height);
+                Assert.Equal(520, dialog.Height);
                 Assert.True(dialog.Bounds.Width <= available.Width, $"Dialog overflows width at {scaling:0}% scale.");
                 Assert.True(dialog.Bounds.Height <= available.Height, $"Dialog overflows height at {scaling:0}% scale.");
 

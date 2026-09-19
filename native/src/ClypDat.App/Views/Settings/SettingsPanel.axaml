@@ -10,7 +10,7 @@
     <Grid ColumnDefinitions="240,*,Auto" RowDefinitions="Auto,*">
       <Border Grid.Column="0" Grid.RowSpan="2" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="0,0,1,0">
         <Grid RowDefinitions="Auto,*">
-          <TextBox Grid.Row="0" x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="14,18,16,14" VerticalContentAlignment="Center">
+          <TextBox Grid.Row="0" x:Name="SettingsSearchBox" Classes="settingsInput appSearchBox" Text="{Binding SettingsSearchText}" PlaceholderText="Search settings" Margin="16,24,16,16" VerticalContentAlignment="Center">
             <TextBox.InnerLeftContent>
               <Canvas Width="16" Height="16" Margin="10,0,2,0" VerticalAlignment="Center">
                 <Ellipse Canvas.Left="0" Canvas.Top="0" Width="11" Height="11" Stroke="{StaticResource TextMutedBrush}" StrokeThickness="1.6" />
@@ -29,7 +29,7 @@
             </TextBox.InnerRightContent>
           </TextBox>
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-          <StackPanel Margin="0,0,16,24" Spacing="2">
+          <StackPanel Margin="0,0,16,24" Spacing="4">
           <TextBlock Classes="settingsSectionLabel" Text="GENERAL" Margin="22,0,0,14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter='General|Game Detection|Import Clips|Connected Accounts'}" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=General}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=General}" Tag="General" Content="General" Click="SettingsNavButton_OnClick" />
           <Button Classes="settingsNavButton" Classes.active="{Binding SelectedSettingsSection, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Game Detection}" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchMatchConverter.Instance}, ConverterParameter=Game Detection}" Tag="Game Detection" Content="Game Detection" Click="SettingsNavButton_OnClick" />
@@ -101,7 +101,7 @@
       </Border>
 
       <ScrollViewer x:Name="SettingsScrollViewer" Grid.Column="1" Grid.Row="1" Classes="settingsScroll">
-        <StackPanel Margin="36,28,36,40" Spacing="22">
+        <StackPanel Margin="{StaticResource PagePadding}" Spacing="24">
 
           <settings:ReplayBufferSection />
           <settings:VideoOverlaysSection />

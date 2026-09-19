@@ -3759,7 +3759,7 @@ public sealed partial class MainWindow : Window
 
         var picture = new Panel
         {
-            Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
+            Background = AppThemeService.Brush("SurfaceBrush", "#1B1F26"),
             Height = previewHeight,
             Children = { thumbnail, preview }
         };
@@ -3797,14 +3797,14 @@ public sealed partial class MainWindow : Window
                 new PathIcon
                 {
                     Data = Geometry.Parse("M12,20c-4.41,0-8-3.59-8-8s3.59-8,8-8s8,3.59,8,8S16.41,20,12,20z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"),
-                    Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
+                    Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"),
                     Width = 12,
                     Height = 12
                 },
                 new TextBlock
                 {
                     Text = entry.Clip.RelativeDateLabel,
-                    Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
+                    Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"),
                     FontSize = 12,
                     FontWeight = Avalonia.Media.FontWeight.SemiBold
                 }
@@ -3820,7 +3820,7 @@ public sealed partial class MainWindow : Window
                 new TextBlock
                 {
                     Text = entry.Clip.TileTopLabel,
-                    Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
+                    Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"),
                     FontSize = 12,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
@@ -3828,7 +3828,7 @@ public sealed partial class MainWindow : Window
                 new TextBlock
                 {
                     Text = entry.Clip.TileMainLabel,
-                    Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+                    Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"),
                     FontSize = 15,
                     FontWeight = Avalonia.Media.FontWeight.Bold,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
@@ -3856,7 +3856,7 @@ public sealed partial class MainWindow : Window
 
         var card = new Border
         {
-            Background = AppThemeService.Brush("Surface_24303A", "#24303A"),
+            Background = AppThemeService.Brush("SurfaceBrush", "#1B1F26"),
             CornerRadius = new CornerRadius(12),
             BoxShadow = Avalonia.Media.BoxShadows.Parse("0 6 18 -6 #66000000"),
             Child = new Border
@@ -4724,7 +4724,7 @@ public sealed partial class MainWindow : Window
             Classes = { "inlineTitleEdit" },
             FontSize = 15,
             FontWeight = Avalonia.Media.FontWeight.Bold,
-            Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+            Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(6, 2),
             // Fluent's TextBox defaults to a much taller MinHeight (~32px)
@@ -7519,8 +7519,9 @@ public sealed partial class MainWindow : Window
 
         var buttons = new StackPanel
         {
+            Classes = { "dialogActions" },
             Orientation = Orientation.Horizontal,
-            Spacing = 10,
+            Spacing = 8,
             HorizontalAlignment = HorizontalAlignment.Right,
             Children = { cancel, rename }
         };
@@ -7528,7 +7529,7 @@ public sealed partial class MainWindow : Window
         body.Children.Add(new TextBlock
         {
             Text = heading,
-            Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+            Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"),
             FontWeight = Avalonia.Media.FontWeight.Bold,
             FontSize = 18
         });
@@ -7600,56 +7601,15 @@ public sealed partial class MainWindow : Window
         var clips = ViewModel.GetAudioOnlyClips();
         if (clips.Count == 0) return;
 
-        var window = new Window
-        {
-            Width = 540,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            ShowInTaskbar = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brushes.Transparent,
-            WindowDecorations = WindowDecorations.None,
-            ExtendClientAreaToDecorationsHint = true,
-            ExtendClientAreaTitleBarHeightHint = -1,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent }
-        };
-        var card = new Border
-        {
-            Background = AppThemeService.Brush("Surface_111920", "#111920"),
-            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            ClipToBounds = true
-        };
-        var layout = new DockPanel { LastChildFill = true };
-        card.Child = layout;
+        var (window, body) = DialogComposition.Create("Audio-only clips");
+        window.Width = 540;
+        var card = (Border)window.Content!;
         window.Opened += (_, _) => WindowTransparencyFallback.ApplyIfNeeded(window, card.Background, brush => card.Background = brush, "audio-only-clips");
-        var header = new Grid { Height = 56, ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Background = AppThemeService.Brush("Surface_0C1319", "#0C1319") };
-        var title = new TextBlock
-        {
-            Text = "AUDIO-ONLY CLIPS",
-            Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"),
-            FontSize = 17,
-            FontWeight = FontWeight.Bold,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            IsHitTestVisible = false
-        };
-        Grid.SetColumnSpan(title, 3);
-        header.Children.Add(title);
-        var close = new Button { Classes = { "dialogClose" }, Content = "✕", Width = 52, Height = 56, FontSize = 14, CornerRadius = new CornerRadius(0, 11, 0, 0), HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
-        Grid.SetColumn(close, 2);
-        header.Children.Add(close);
-        DockPanel.SetDock(header, Dock.Top);
-        layout.Children.Add(header);
-        var body = new StackPanel { Margin = new Thickness(28, 24, 28, 28), Spacing = 18 };
-        layout.Children.Add(body);
-        window.Content = card;
 
         body.Children.Add(new TextBlock
         {
             Text = $"Found {clips.Count} audio-only MP4 {(clips.Count == 1 ? "clip" : "clips")}",
-            Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+            Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"),
             FontSize = 16,
             FontWeight = Avalonia.Media.FontWeight.SemiBold,
             TextWrapping = TextWrapping.Wrap
@@ -7657,7 +7617,7 @@ public sealed partial class MainWindow : Window
         body.Children.Add(new TextBlock
         {
             Text = "These files have audio but no video, so they cannot have thumbnails or timeline previews. ClypDat will skip visual generation for them.",
-            Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+            Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"),
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap
         });
@@ -7666,7 +7626,7 @@ public sealed partial class MainWindow : Window
             Background = AppThemeService.Brush("Surface_15222D", "#15222D"),
             CornerRadius = new CornerRadius(8),
             Padding = new Thickness(14, 12),
-            Child = new TextBlock { Text = "Delete permanently removes source files. Don't ask again keeps files and suppresses this notice.", Foreground = AppThemeService.Brush("Text_93A6B8", "#93A6B8"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
+            Child = new TextBlock { Text = "Delete permanently removes source files. Don't ask again keeps files and suppresses this notice.", Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"), FontSize = 12, TextWrapping = TextWrapping.Wrap }
         });
 
         var delete = new Button { Content = "Delete", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "deleteButton" } };
@@ -7676,7 +7636,6 @@ public sealed partial class MainWindow : Window
         delete.Click += (_, _) => { choice = "delete"; window.Close(); };
         ignore.Click += (_, _) => { choice = "ignore"; window.Close(); };
         later.Click += (_, _) => { choice = "later"; window.Close(); };
-        close.Click += (_, _) => window.Close();
         body.Children.Add(new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -7969,15 +7928,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static Border CreateRoundedDialogShell(Control content) => new()
-    {
-        Background = AppThemeService.Brush("Surface_111920", "#111920"),
-        BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
-        BorderThickness = new Avalonia.Thickness(1),
-        CornerRadius = new Avalonia.CornerRadius(12),
-        ClipToBounds = true,
-        Child = content
-    };
+    private static Border CreateRoundedDialogShell(Control content) => DialogComposition.Shell(content);
 
     private Window CreateUpdateDialog(AppUpdateInfo update)
     {
@@ -8004,7 +7955,7 @@ public sealed partial class MainWindow : Window
         // 2px down: TextBlock's cap height sits visually higher than the icon's
         // optical center at this size, reading as misaligned despite both being
         // VerticalAlignment=Center.
-        var titleText = new TextBlock { Text = "Update available", Foreground = AppThemeService.Brush("Text_B9C6D4", "#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleText = new TextBlock { Text = "Update available", Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"), FontSize = 16, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
         CancellationTokenSource? downloadCts = null;
@@ -8014,7 +7965,7 @@ public sealed partial class MainWindow : Window
         // hover actually paint instead of only flashing on pointer-exit (see
         // AppStyles.axaml). Width/Height stay local: this dialog's 40px
         // titlebar is shorter than the main window's 48px chrome row.
-        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
+        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 15, 0, 0) };
         // downloadCts is null until Update Now starts one - X used to just
         // close the window while DownloadAndRestartAsync kept running
         // undisturbed in the background (nothing was ever cancelling it), so
@@ -8033,22 +7984,21 @@ public sealed partial class MainWindow : Window
         titleBar.Children.Add(closeButton);
         var roundedTitleBar = new Border
         {
-            Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
-            CornerRadius = new Avalonia.CornerRadius(11, 11, 0, 0),
+            Classes = { "dialogHeader" },
             Child = titleBar
         };
 
         var statusText = new TextBlock
         {
             Text = string.Empty,
-            Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+            Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"),
             FontSize = 12,
             IsVisible = false
         };
         var etaText = new TextBlock
         {
             Text = string.Empty,
-            Foreground = AppThemeService.Brush("Text_5C6D7E", "#5C6D7E"),
+            Foreground = AppThemeService.Brush("TextMutedBrush", "#949FAF"),
             FontSize = 12,
             IsVisible = false
         };
@@ -8174,7 +8124,7 @@ public sealed partial class MainWindow : Window
                         new TextBlock
                         {
                             Text = $"{FormatVersion(update.CurrentVersion)}  →  {FormatVersion(update.LatestVersion)}",
-                            Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+                            Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"),
                             FontWeight = Avalonia.Media.FontWeight.Bold,
                             FontSize = 20
                         },
@@ -8197,7 +8147,7 @@ public sealed partial class MainWindow : Window
                 new TextBlock
                 {
                     Text = "Ready to download. Your clips and settings stay in place.",
-                    Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+                    Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"),
                     FontSize = 13
                 }
             }
@@ -8281,7 +8231,7 @@ public sealed partial class MainWindow : Window
                 new TextBlock
                 {
                     Text = title,
-                    Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+                    Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"),
                     FontWeight = Avalonia.Media.FontWeight.Bold,
                     FontSize = 14,
                     VerticalAlignment = VerticalAlignment.Center
@@ -8289,7 +8239,7 @@ public sealed partial class MainWindow : Window
                 new TextBlock
                 {
                     Text = notes.Count.ToString(),
-                    Foreground = AppThemeService.Brush("Text_5C6D7E", "#5C6D7E"),
+                    Foreground = AppThemeService.Brush("TextMutedBrush", "#949FAF"),
                     FontSize = 12,
                     VerticalAlignment = VerticalAlignment.Center,
                     IsVisible = notes.Count > 0
@@ -8303,7 +8253,7 @@ public sealed partial class MainWindow : Window
             list.Children.Add(new TextBlock
             {
                 Text = "Nothing here this update.",
-                Foreground = AppThemeService.Brush("Text_5C6D7E", "#5C6D7E"),
+                Foreground = AppThemeService.Brush("TextMutedBrush", "#949FAF"),
                 FontSize = 12,
                 FontStyle = Avalonia.Media.FontStyle.Italic
             });
@@ -8333,7 +8283,7 @@ public sealed partial class MainWindow : Window
         DockPanel.SetDock(header, Dock.Top);
         return new Border
         {
-            Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
+            Background = AppThemeService.Brush("AppBgBrush", "#101216"),
             BorderBrush = AppThemeService.Brush("Surface_1E2A34", "#1E2A34"),
             BorderThickness = new Avalonia.Thickness(1),
             CornerRadius = new Avalonia.CornerRadius(8),
@@ -8391,18 +8341,17 @@ public sealed partial class MainWindow : Window
             Height = 48
         };
         var titleIcon = new Image { Source = AppThemeService.CurrentLogo(large: false), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-        var titleText = new TextBlock { Text = "You're up to date", Foreground = AppThemeService.Brush("Text_B9C6D4", "#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleText = new TextBlock { Text = "You're up to date", Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"), FontSize = 16, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
-        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
+        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 15, 0, 0) };
         closeButton.Click += (_, _) => window.Close();
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(titleLeft);
         titleBar.Children.Add(closeButton);
         var roundedTitleBar = new Border
         {
-            Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
-            CornerRadius = new Avalonia.CornerRadius(11, 11, 0, 0),
+            Classes = { "dialogHeader" },
             Child = titleBar
         };
 
@@ -8429,7 +8378,7 @@ public sealed partial class MainWindow : Window
                         new TextBlock
                         {
                             Text = $"ClypDat {FormatVersion(AppUpdateService.CurrentVersion)}",
-                            Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+                            Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"),
                             FontWeight = Avalonia.Media.FontWeight.Bold,
                             FontSize = 20
                         },
@@ -8452,7 +8401,7 @@ public sealed partial class MainWindow : Window
                 new TextBlock
                 {
                     Text = "You're running the latest version. Here's what it brought:",
-                    Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+                    Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"),
                     FontSize = 13
                 }
             }
@@ -9891,9 +9840,9 @@ public sealed partial class MainWindow : Window
         // Bumped a point and lightened from the original #5C6D7E/#8C98A7 -
         // both read as too dim/small against the bar's dark scrim, especially
         // over a bright part of the video underneath.
-        var timeText = new TextBlock { Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"), FontSize = 14, FontWeight = FontWeight.Bold, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        var timeText = new TextBlock { Foreground = AppThemeService.Brush("TextStrongBrush", "#F1F3F7"), FontSize = 14, FontWeight = FontWeight.Bold, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         timeText.Bind(TextBlock.TextProperty, new Binding("CurrentTimeLabel"));
-        var slashText = new TextBlock { Text = " / ", Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        var slashText = new TextBlock { Text = " / ", Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         var durationText = new TextBlock { Foreground = AppThemeService.Brush("Text_B7C4D2", "#B7C4D2"), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         durationText.Bind(TextBlock.TextProperty, new Binding("DurationLabel"));
 
@@ -10733,11 +10682,11 @@ public sealed partial class MainWindow : Window
     {
         var (window, body) = CreateChromelessDialog(titleBarLabel);
 
-        var statusText = new TextBlock { Text = heading, Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"), FontSize = 13 };
+        var statusText = new TextBlock { Text = heading, Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"), FontSize = 13 };
         // Fixed-width slot for the live percentage so its digit count changing
         // (4% -> 45% -> 100%) can never shift the divider/ETA sitting after it.
-        var percentText = new TextBlock { Text = string.Empty, Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"), FontSize = 13, Width = 38, Margin = new Avalonia.Thickness(5, 0, 0, 0) };
-        var etaText = new TextBlock { Text = string.Empty, Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"), FontSize = 13, IsVisible = false };
+        var percentText = new TextBlock { Text = string.Empty, Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"), FontSize = 13, Width = 38, Margin = new Avalonia.Thickness(5, 0, 0, 0) };
+        var etaText = new TextBlock { Text = string.Empty, Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"), FontSize = 13, IsVisible = false };
         var progressBar = new ProgressBar
         {
             Minimum = 0,
@@ -10746,7 +10695,7 @@ public sealed partial class MainWindow : Window
             CornerRadius = new Avalonia.CornerRadius(3),
             IsIndeterminate = true
         };
-        var cancelButton = new Button { Content = "Cancel", Width = 100, Height = 34, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+        var cancelButton = new Button { Content = "Cancel", MinWidth = 104, Height = 36, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
         cancelButton.Click += (_, _) =>
         {
             cancelButton.IsEnabled = false;
@@ -10754,17 +10703,10 @@ public sealed partial class MainWindow : Window
             onCancel();
         };
 
-        body.Children.Add(new TextBlock
-        {
-            Text = titleBarLabel,
-            Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
-            FontWeight = Avalonia.Media.FontWeight.Bold,
-            FontSize = 18
-        });
         // Status and ETA share one line ("Exporting clip... 45% | Estimated:
         // 12s") - the divider tracks the ETA's own visibility so it only shows
         // once there's an estimate to divide from.
-        var divider = new Border { Width = 1, Height = 14, Background = Avalonia.Media.Brush.Parse("#26FFFFFF"), Margin = new Avalonia.Thickness(10, 0), VerticalAlignment = VerticalAlignment.Center };
+        var divider = new Border { Width = 1, Height = 14, Background = AppThemeService.Brush("DividerBrush", "#242A33"), Margin = new Avalonia.Thickness(10, 0), VerticalAlignment = VerticalAlignment.Center };
         divider.Bind(IsVisibleProperty, etaText.GetObservable(IsVisibleProperty));
 
         body.Children.Add(progressBar);
@@ -10773,7 +10715,7 @@ public sealed partial class MainWindow : Window
             Orientation = Orientation.Horizontal,
             Children = { statusText, percentText, divider, etaText }
         });
-        body.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { cancelButton } });
+        body.Children.Add(new StackPanel { Classes = { "dialogActions" }, Children = { cancelButton } });
 
         return (window, progressBar, statusText, percentText, etaText);
     }
@@ -10798,92 +10740,12 @@ public sealed partial class MainWindow : Window
     // of the app's own dark, chromeless windows (see CreateUpdateDialog). This
     // gives every popup the same opaque rounded card and centered chrome as
     // the Share popup - no native title bar, movement, or square corners.
-    private static (Window Window, Panel Body) CreateChromelessDialog(string titleBarLabel, bool centerTitle = true)
-    {
-        var window = new Window
-        {
-            Width = 420,
-            SizeToContent = SizeToContent.Height,
-            CanResize = false,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Background = Avalonia.Media.Brushes.Transparent,
-            WindowDecorations = WindowDecorations.None,
-            ExtendClientAreaToDecorationsHint = true,
-            ExtendClientAreaTitleBarHeightHint = -1,
-            TransparencyLevelHint = new[] { Avalonia.Controls.WindowTransparencyLevel.Transparent }
-        };
-
-        var titleBar = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Height = 56
-        };
-        // Centred: the shouty all-caps banner the progress and share dialogs
-        // still use. Left: a normal window title, which is what a confirm gets
-        // now that it no longer repeats the same string as a body heading
-        // directly underneath.
-        var titleText = new TextBlock
-        {
-            Text = centerTitle ? titleBarLabel.ToUpperInvariant() : titleBarLabel,
-            Foreground = AppThemeService.Brush("Text_D8E4F2", "#D8E4F2"),
-            FontSize = centerTitle ? 17 : 15,
-            FontWeight = centerTitle ? Avalonia.Media.FontWeight.Bold : Avalonia.Media.FontWeight.SemiBold,
-            HorizontalAlignment = centerTitle ? HorizontalAlignment.Center : HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = centerTitle ? new Avalonia.Thickness(-2, 0, 0, 0) : new Avalonia.Thickness(20, 0, 0, 0),
-            IsHitTestVisible = false
-        };
-        if (centerTitle) Grid.SetColumnSpan(titleText, 3);
-        titleBar.Children.Add(titleText);
-
-        var closeButton = new Button
-        {
-            Classes = { "dialogClose" },
-            Content = "✕",
-            Width = 52,
-            Height = 56,
-            Margin = new Avalonia.Thickness(0),
-            FontSize = 12,
-            CornerRadius = new CornerRadius(0, 11, 0, 0),
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center
-        };
-        closeButton.Click += (_, _) => window.Close();
-        Grid.SetColumn(closeButton, 2);
-        titleBar.Children.Add(closeButton);
-
-        var body = new StackPanel { Margin = new Avalonia.Thickness(28, 24, 28, 28), Spacing = 24 };
-
-        var header = new Border
-        {
-            Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
-            CornerRadius = new CornerRadius(11, 11, 0, 0),
-            Child = titleBar
-        };
-        var layout = new DockPanel { LastChildFill = true, Children = { header, body } };
-        var shell = new Border
-        {
-            Background = AppThemeService.Brush("Surface_111920", "#111920"),
-            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
-            BorderThickness = new Avalonia.Thickness(1),
-            CornerRadius = new CornerRadius(12),
-            ClipToBounds = true,
-            Child = layout
-        };
-        window.Content = shell;
-        DockPanel.SetDock(header, Dock.Top);
-
-        window.KeyDown += (_, keyArgs) =>
-        {
-            if (keyArgs.Key == Key.Escape) window.Close();
-        };
-
-        return (window, body);
-    }
+    private static (Window Window, Panel Body) CreateChromelessDialog(string titleBarLabel)
+        => DialogComposition.Create(titleBarLabel);
 
     private static Window CreateDialog(string title, string message, bool showCancel, string confirmLabel = "Delete", bool destructive = true, Control? content = null)
     {
-        var (window, body) = CreateChromelessDialog(title, centerTitle: false);
+        var (window, body) = CreateChromelessDialog(title);
         // The heading used to be repeated here at 18px directly under the
         // title bar's copy of the same string, so every confirm read
         // "SAVE TRIM?" above "Save trim?". The title bar keeps it.
@@ -10913,8 +10775,9 @@ public sealed partial class MainWindow : Window
 
         var buttons = new StackPanel
         {
+            Classes = { "dialogActions" },
             Orientation = Orientation.Horizontal,
-            Spacing = 10,
+            Spacing = 8,
             Margin = new Avalonia.Thickness(0, 8, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Right
         };
@@ -10931,7 +10794,7 @@ public sealed partial class MainWindow : Window
         body.Children.Add(new TextBlock
         {
             Text = message,
-            Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+            Foreground = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2"),
             FontSize = 13,
             LineHeight = 19,
             TextWrapping = Avalonia.Media.TextWrapping.Wrap
@@ -10967,7 +10830,7 @@ public sealed partial class MainWindow : Window
             var name = new TextBlock
             {
                 Text = label,
-                Foreground = AppThemeService.Brush("Text_6B7C8C", "#6B7C8C"),
+                Foreground = AppThemeService.Brush("TextMutedBrush", "#949FAF"),
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -10977,7 +10840,7 @@ public sealed partial class MainWindow : Window
             var text = new TextBlock
             {
                 Text = value,
-                Foreground = AppThemeService.Brush("Text_D2DEEC", "#D2DEEC"),
+                Foreground = AppThemeService.Brush("TextBrush", "#D8DDE6"),
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center
             };
@@ -11010,7 +10873,7 @@ public sealed partial class MainWindow : Window
             stack.Children.Add(new Border
             {
                 Height = 1,
-                Background = AppThemeService.Brush("Surface_232F3A", "#232F3A")
+                Background = AppThemeService.Brush("EdgeBrush", "#2B313B")
             });
         }
 
@@ -11018,8 +10881,8 @@ public sealed partial class MainWindow : Window
 
         return new Border
         {
-            Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
-            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
+            Background = AppThemeService.Brush("AppBgBrush", "#101216"),
+            BorderBrush = AppThemeService.Brush("EdgeBrush", "#2B313B"),
             BorderThickness = new Avalonia.Thickness(1),
             CornerRadius = new CornerRadius(10),
             Padding = new Avalonia.Thickness(16, 14),

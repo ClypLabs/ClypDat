@@ -61,6 +61,17 @@ internal static class AvaloniaTestThread
             {
                 try
                 {
+                    // Configure before app setup: startup services and view models must
+                    // never read the developer's library or arm their recorder.
+                    ClypDat.Core.Settings.AppDataPaths.ConfigureProductFolder("ClypDat-UiTests-" + Environment.ProcessId);
+                    var library = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "Library");
+                    Directory.CreateDirectory(library);
+                    ClypDat.Core.Settings.AppSettingsStore.Save(new ClypDat.Core.Settings.AppSettings
+                    {
+                        LibraryFolder = library,
+                        ReplayBufferEnabled = false,
+                        HasSeenOnboarding = true
+                    });
                     AppBuilder.Configure<ClypDat.App.App>().UsePlatformDetect().WithInterFont().SetupWithoutStarting();
                 }
                 catch (Exception error)

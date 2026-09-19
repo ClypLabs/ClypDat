@@ -12,7 +12,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Replay Buffer">
+  <StackPanel Spacing="20" Tag="Replay Buffer">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Replay Buffer" />
@@ -42,7 +42,7 @@
     </Border>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length|Recording}">
-      <StackPanel Spacing="18">
+      <StackPanel Spacing="20">
         <TextBlock Classes="settingsCardLabel" Text="RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length}">
           <TextBlock Classes="settingsRowTitle" Text="Replay Length" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -179,7 +179,7 @@
     </Border>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|File Format|MKV|MP4|Storage limit|Custom limit|Full Session Recording}">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="FULL SESSION RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording}">
           <StackPanel Spacing="2">

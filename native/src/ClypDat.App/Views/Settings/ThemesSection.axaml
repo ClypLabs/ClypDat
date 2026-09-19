@@ -13,7 +13,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Appearance">
+  <StackPanel Spacing="20" Tag="Appearance">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Appearance" />
@@ -22,7 +22,7 @@
     </StackPanel>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Themes|System|ClypDat Blue|Berry|Violet|Emerald|Rose|Amber'}">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="PRESET THEMES" />
         <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding ThemeOptions}"
                  SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}">
@@ -47,7 +47,7 @@
     </Border>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Light|Light mode|Light themes|Light Blue|Light Berry|Light Violet|Light Emerald|Light Rose|Light Amber'}">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="LIGHT THEMES" />
         <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding LightThemeOptions}"
                  SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}">
@@ -72,7 +72,7 @@
     </Border>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Accent|Accent colour|Windows accent|System accent'}">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
         <!-- Dimmed and disabled under a custom theme: the theme's own accent is
              what gets painted either way, so leaving the toggle live would be
@@ -125,7 +125,7 @@
          stops where its content does and centres in the column, rather than
          trailing several hundred pixels of empty card off one side. -->
     <Border Classes="settingsCard" HorizontalAlignment="Center" IsVisible="{Binding IsThemeEditorOpen}">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <StackPanel Orientation="Horizontal" Spacing="16">
           <TextBlock Classes="settingsCardLabel" Text="CUSTOM THEME EDITOR" VerticalAlignment="Center" />
           <TextBox Classes="settingsInput" Width="240" Text="{Binding ThemeEditorName, Mode=TwoWay}" PlaceholderText="Theme name" />

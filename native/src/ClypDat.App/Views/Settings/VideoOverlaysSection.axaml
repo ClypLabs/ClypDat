@@ -15,14 +15,14 @@
       </Grid>
     </DataTemplate>
   </UserControl.Resources>
-  <StackPanel Spacing="18" Tag="Video Overlays">
+  <StackPanel Spacing="20" Tag="Video Overlays">
     <StackPanel Spacing="4" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}">
       <TextBlock Classes="settingsSectionTitle" Text="Video Overlays" />
       <TextBlock Classes="settingsSectionDesc" Text="Selected sources are captured as editable layers until export. Camera audio is never recorded." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
     <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="VIDEO OVERLAYS" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsGameScoped, ElementName=VideoOverlaysRoot}">
           <TextBlock Classes="settingsRowTitle" Text="Video Overlays" VerticalAlignment="Center" />

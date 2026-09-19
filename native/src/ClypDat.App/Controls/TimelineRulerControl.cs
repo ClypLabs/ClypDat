@@ -40,15 +40,15 @@ public sealed class TimelineRulerControl : Control
         context.FillRectangle(Brushes.Transparent, new Rect(0, 0, width, height));
 
         var bottom = height - 1;
-        var line = new Pen(AppThemeService.Brush("Surface_2C3944", "#2C3944"), 1);
+        var line = new Pen(AppThemeService.Brush("EdgeStrongBrush", "#414A58"), 1);
         context.DrawLine(line, new Point(0, bottom), new Point(width, bottom));
 
         var seconds = Duration.TotalSeconds;
         if (seconds <= 0) return;
 
-        var minorPen = new Pen(AppThemeService.Brush("Surface_40505D", "#40505D"), 1);
-        var majorPen = new Pen(AppThemeService.Brush("Surface_566672", "#566672"), 1);
-        var textBrush = AppThemeService.Brush("Semantic_A8CFFF", "#A8CFFF");
+        var minorPen = new Pen(AppThemeService.Brush("EdgeStrongBrush", "#414A58"), 1);
+        var majorPen = new Pen(AppThemeService.Brush("EdgeStrongBrush", "#414A58"), 1);
+        var textBrush = AppThemeService.Brush("TextSubtleBrush", "#ABB4C2");
 
         // Adaptive tick density: the old fixed 5s/10s grid put a labelled
         // major tick every 10 SECONDS regardless of clip length - fine for a
@@ -105,8 +105,8 @@ public sealed class TimelineRulerControl : Control
             label,
             System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
-            Typeface.Default,
-            11,
+            new Typeface(AppThemeService.FontFamily),
+            12,
             textBrush);
         var labelX = Math.Clamp(x - formatted.Width / 2, 0, Math.Max(0, width - formatted.Width));
         context.DrawText(formatted, new Point(labelX, 0));

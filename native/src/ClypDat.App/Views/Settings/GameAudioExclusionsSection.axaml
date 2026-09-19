@@ -12,7 +12,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Game Audio Exclusions">
+  <StackPanel Spacing="20" Tag="Game Audio Exclusions">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Game Audio Exclusions" />
@@ -21,7 +21,7 @@
     </StackPanel>
 
     <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="EXCLUDED APPS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
           <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />

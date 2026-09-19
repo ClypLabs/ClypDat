@@ -21,7 +21,7 @@
        Delete. A game starts with NO groups enabled: adding a game
        means "I want to customise this one", not "change how it
        records right now". -->
-  <StackPanel Spacing="18" Tag="Custom Game Settings">
+  <StackPanel Spacing="20" Tag="Custom Game Settings">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Custom Game Settings" />
@@ -138,7 +138,7 @@
          HasSelectedCustomGame resolve against the tab rather than
          against the window's view model. -->
     <ContentControl IsVisible="{Binding HasSelectedCustomGame}" HorizontalAlignment="Stretch">
-    <StackPanel Spacing="18" DataContext="{Binding SelectedCustomGameTab}">
+    <StackPanel Spacing="20" DataContext="{Binding SelectedCustomGameTab}">
       <!-- Recording Mode. The one group a newly added game starts
            with, and the only three-way choice here - it is not a
            toggle because "record clips by hotkey", "record the whole

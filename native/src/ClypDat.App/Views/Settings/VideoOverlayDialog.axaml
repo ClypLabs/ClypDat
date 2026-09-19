@@ -22,13 +22,13 @@
       </Grid>
     </DataTemplate>
   </Window.Resources>
-  <Border CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True">
+  <Border Classes="dialogShell">
     <DockPanel LastChildFill="True">
-      <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0" PointerPressed="TitleBar_OnPointerPressed">
+      <Border DockPanel.Dock="Top" Classes="dialogHeader" PointerPressed="TitleBar_OnPointerPressed">
         <Grid ColumnDefinitions="Auto,*,Auto" Height="56">
           <StackPanel Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
             <Ellipse Width="10" Height="10" Fill="{StaticResource AccentBrush}" VerticalAlignment="Center" />
-            <TextBlock Text="VIDEO OVERLAYS" Foreground="{StaticResource Text_D8E4F2}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
+            <TextBlock Text="Video overlays" Foreground="{StaticResource TextBrush}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
           </StackPanel>
           <Button Grid.Column="2" Classes="dialogClose" Content="✕" Click="Done_OnClick" Width="52" Height="56" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
         </Grid>
@@ -48,7 +48,7 @@
           <Border CornerRadius="8" ClipToBounds="True" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" Width="518" Height="291" HorizontalAlignment="Left">
             <Panel>
               <Border Background="{StaticResource Surface_18232D}" CornerRadius="7" />
-              <Border Background="{StaticResource Surface_0C1319}" Height="98" VerticalAlignment="Bottom" Opacity="0.55" CornerRadius="0,0,7,7" />
+              <Border Background="{StaticResource AppBgBrush}" Height="98" VerticalAlignment="Bottom" Opacity="0.55" CornerRadius="0,0,7,7" />
               <Border Background="{StaticResource AccentBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75" HorizontalAlignment="Center" VerticalAlignment="Center" />
               <Canvas Name="PreviewCanvas" Background="Transparent" PointerMoved="PreviewCanvas_OnPointerMoved" PointerReleased="PreviewCanvas_OnPointerReleased" PointerCaptureLost="PreviewCanvas_OnPointerCaptureLost">
                 <Border Name="CameraLayer" Classes="videoOverlayLayer" Canvas.Left="{Binding CameraLeft}" Canvas.Top="{Binding CameraTop}" Width="{Binding CameraWidth}" Height="{Binding CameraHeight}" IsVisible="{Binding HasCamera}" PointerPressed="Layer_OnPointerPressed" Tag="Camera">

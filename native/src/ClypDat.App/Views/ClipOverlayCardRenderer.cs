@@ -24,10 +24,10 @@ internal static class ClipOverlayCardRenderer
     private const double TitleSize = 17, DetailSize = 13, ChipTextSize = 13;
     private const double TitleMaxWidth = 340;
     private const double RowGap = 7;
-    private const double ChipPadX = 7, ChipPadTop = 2, ChipPadBottom = 3, ChipRadius = 4;
+    private const double ChipPadX = 7, ChipPadTop = 2, ChipPadBottom = 3, ChipRadius = 8;
     private const double ChipSpacing = 6, TrailingGap = 2;
     private const double MinWidth = 220, MaxWidth = 380, MinHeight = 58;
-    private const double CardRadius = 8;
+    private const double CardRadius = 12;
     private const double FillOpacity = 1;
 
     public static unsafe ClipOverlayFrame Render(ClipOverlayPresentation presentation)

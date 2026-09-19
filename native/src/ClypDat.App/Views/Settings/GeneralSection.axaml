@@ -12,7 +12,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="General">
+  <StackPanel Spacing="20" Tag="General">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="General" />
@@ -21,7 +21,7 @@
     </StackPanel>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Launch ClypDat on Windows boot|Start minimized on boot|Process priority|Automatically Focus ClypDat|Game exit|Startup'}">
-      <StackPanel Spacing="18">
+      <StackPanel Spacing="20">
         <TextBlock Classes="settingsCardLabel" Text="STARTUP" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Launch ClypDat on Windows boot|Startup}">
           <StackPanel Spacing="2">
@@ -63,7 +63,7 @@
     </Border>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Video preview|Combine sidebar filters|Layout'}">
-      <StackPanel Spacing="18">
+      <StackPanel Spacing="20">
         <TextBlock Classes="settingsCardLabel" Text="LAYOUT" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel|Layout}">
           <StackPanel Spacing="2">

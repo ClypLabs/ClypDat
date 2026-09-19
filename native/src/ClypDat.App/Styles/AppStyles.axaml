@@ -72,7 +72,7 @@
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
   </Style>
   <Style Selector="ScrollViewer.listScroll">
     <Setter Property="MaxHeight" Value="288" />
@@ -90,7 +90,7 @@
     <Setter Property="Margin" Value="0,4,3,4" />
   </Style>
   <Style Selector="Thumb.scrollThumb">
-    <Setter Property="Background" Value="{StaticResource Surface_1E2A35}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="{TemplateBinding Background}" CornerRadius="5" />
@@ -98,10 +98,10 @@
     </Setter>
   </Style>
   <Style Selector="Thumb.scrollThumb:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_283744}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="Thumb.scrollThumb:pressed">
-    <Setter Property="Background" Value="{StaticResource Surface_324255}" />
+    <Setter Property="Background" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
 
   <!-- Volume mute toggle (per-track lanes AND the master volume controls) -
@@ -114,16 +114,16 @@
        right next to it in both playbars, not a circle - reads as part of the
        same button row instead of a mismatched shape. -->
   <Style Selector="Border.muteToggle">
-    <Setter Property="Background" Value="{StaticResource Surface_24313C}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.1" />
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
   <Style Selector="Border.muteToggle:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_2E3F4E}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
 
   <Style Selector="Button.deleteButton">
@@ -154,8 +154,8 @@
        the exclusive-choice behaviour, retemplated to a filled pill instead
        of a dot-and-label so a row of them reads as one connected control. -->
   <Style Selector="RadioButton.sizePill">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_93A6B8}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="FontSize" Value="13" />
     <Setter Property="Padding" Value="11,10" />
@@ -176,18 +176,20 @@
   </Style>
   <Style Selector="RadioButton.sizePill:checked">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentForegroundBrush}" />
   </Style>
   <Style Selector="RadioButton.sizePill:pointerover:not(:checked)">
-    <Setter Property="Background" Value="{StaticResource Surface_26333F}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="Button:not(ToggleSwitch)">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_D8E4F2}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Padding" Value="12,7" />
+    <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
+    <Setter Property="Padding" Value="12,8" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <!-- Fluent paints pointer states inside its own square template. Keep every
          ordinary button's surface in this border so hover/pressed colours obey
@@ -217,7 +219,7 @@
     </Setter>
   </Style>
   <Style Selector="Button:not(ToggleSwitch):pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="Button:not(ToggleSwitch):disabled">
     <Setter Property="Opacity" Value="0.48" />
@@ -226,7 +228,7 @@
     <Setter Property="Width" Value="34" />
     <Setter Property="Height" Value="32" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="Background" Value="{StaticResource Surface_24313C}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="FontSize" Value="15" />
@@ -235,7 +237,7 @@
     <Setter Property="Width" Value="38" />
     <Setter Property="Height" Value="38" />
     <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Background" Value="{StaticResource Surface_2B3642}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>
@@ -346,9 +348,9 @@
   </Style>
   <Style Selector="Button.primaryButton">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentForegroundBrush}" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="7" />
+    <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
     <Setter Property="FontWeight" Value="Bold" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
   </Style>
@@ -418,7 +420,7 @@
   <Style Selector="Button.customGameTab.active">
     <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="Button.customGameTab.active:not(ToggleSwitch):pointerover">
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
@@ -581,11 +583,11 @@
     </Setter>
   </Style>
   <Style Selector="Button.linkButton:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="Button.linkButton:pointerover PathIcon">
-    <Setter Property="Foreground" Value="{StaticResource Text_D2DEEC}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
   <Style Selector="Button.brandButton">
     <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
@@ -609,7 +611,7 @@
     </Setter>
   </Style>
   <Style Selector="Button.brandButton:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
   </Style>
   <Style Selector="Button.gameFilterBadge">
     <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
@@ -635,13 +637,13 @@
     </Setter>
   </Style>
   <Style Selector="Button.gameFilterBadge:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
   </Style>
   <Style Selector="Button.gameFilterBadge:pointerover TextBlock">
-    <Setter Property="Foreground" Value="{StaticResource Text_D2DEEC}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
   <Style Selector="Button.gameFilterBadge:pointerover PathIcon">
-    <Setter Property="Foreground" Value="{StaticResource Text_D2DEEC}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
   <!-- Per-card date-header "select whole day" checkbox - hidden (zero width,
        transparent, non-hit-testable) until hovering the date row itself,
@@ -765,18 +767,18 @@
     <Style.Resources>
       <Thickness x:Key="MenuFlyoutScrollerMargin">0</Thickness>
     </Style.Resources>
-    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="MinWidth" Value="180" />
   </Style>
   <Style Selector="ContextMenu">
-    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="Padding" Value="5" />
     <Setter Property="MinWidth" Value="160" />
@@ -790,11 +792,11 @@
        radius as the menus and flyouts below, just tighter and lighter since
        a tooltip is a passing label rather than a panel. -->
   <Style Selector="ToolTip">
-    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="7" />
-    <Setter Property="Foreground" Value="{StaticResource Text_D2DEEC}" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="FontSize" Value="12" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Padding" Value="10,6" />
@@ -809,10 +811,10 @@
        back to Fluent's default light-themed chrome unless styled to match -
        used by the Game Filters / Clip Type Filters checklist dropdowns. -->
   <Style Selector="FlyoutPresenter">
-    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="Padding" Value="6" />
     <Setter Property="MinWidth" Value="160" />
@@ -824,14 +826,14 @@
   </Style>
   <Style Selector="MenuItem">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="Foreground" Value="{StaticResource Text_B8C7D8}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="FontSize" Value="13" />
     <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Padding" Value="11,7" />
   </Style>
   <Style Selector="MenuItem:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_D8E4F2}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
   <Style Selector="Button.clipShareIconButton">
     <Setter Property="Background" Value="{StaticResource Surface_2A3844}" />
@@ -853,22 +855,22 @@
     <Setter Property="CornerRadius" Value="10" />
   </Style>
   <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
-    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <!-- Change Game opens a separately hosted Flyout, which takes pointer
        capture from its trigger row. Keep the trigger's hover treatment while
        that child menu is open, matching a normal nested MenuItem. -->
   <Style Selector="MenuItem.changeGameMenuItem.changeGameMenuItemOpen">
-    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_D8E4F2}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
   <Style Selector="MenuItem.changeGameMenuItem.changeGameMenuItemOpen /template/ Border#PART_LayoutRoot">
-    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="Button.replayButton">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="Foreground" Value="{StaticResource Text_9FB0C3}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2C3B48}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="FontWeight" Value="Bold" />
@@ -885,12 +887,12 @@
   <Style Selector="Button.dialogClose">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="0,11,0,0" />
-    <Setter Property="Foreground" Value="{StaticResource Text_8EA1B6}" />
+    <Setter Property="CornerRadius" Value="0,15,0,0" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
   </Style>
   <Style Selector="Button.dialogClose:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_263544}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <!-- The hover fill is painted by Fluent's own ContentPresenter, which takes
        its corner radius from the template rather than from the setter above -
@@ -965,7 +967,7 @@
     <Setter Property="FontWeight" Value="Bold" />
   </Style>
   <Style Selector="StackPanel.replayFlyout Border.replayFlyoutCard">
-    <Setter Property="Background" Value="{StaticResource Surface_15212B}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_263846}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="12" />
@@ -981,7 +983,7 @@
   </Style>
   <Style Selector="StackPanel.replayFlyout ComboBox.settingsInput">
     <Setter Property="Background" Value="{StaticResource Surface_1B2934}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_D8E4F2}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_304352}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
@@ -999,7 +1001,7 @@
   </Style>
   <Style Selector="StackPanel.replayFlyout Button.replayFlyoutInput">
     <Setter Property="Background" Value="{StaticResource Surface_1B2934}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_D8E4F2}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_304352}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
@@ -1031,11 +1033,11 @@
   <!-- Small setting groups used by first-run setup. The low-contrast card
        separates choices without turning the walkthrough into a settings page. -->
   <Style Selector="Border.onboardingSettingCard">
-    <Setter Property="Background" Value="{StaticResource Surface_15212B}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2B4050}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="9" />
-    <Setter Property="Padding" Value="15" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
+    <Setter Property="Padding" Value="16" />
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards">
     <Setter Property="Background" Value="Transparent" />
@@ -1047,8 +1049,8 @@
     <Setter Property="MinHeight" Value="76" />
     <Setter Property="Margin" Value="5" />
     <Setter Property="Padding" Value="10" />
-    <Setter Property="Background" Value="{StaticResource Surface_111920}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
+    <Setter Property="Background" Value="{StaticResource PanelBgBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_405668}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
@@ -1061,7 +1063,7 @@
     <Setter Property="Background" Value="{StaticResource Surface_223341}" />
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected">
-    <Setter Property="Background" Value="{StaticResource Surface_303840}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="BorderThickness" Value="2" />
   </Style>
@@ -1070,7 +1072,7 @@
     <Setter Property="BorderThickness" Value="2" />
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{StaticResource Surface_303840}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <!-- Custom title-bar min/maximize/close buttons - replace Windows' own
@@ -1086,7 +1088,7 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="CornerRadius" Value="12" />
     <Setter Property="Background" Value="{StaticResource Surface_EE141D24}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_232F3A}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -1169,15 +1171,15 @@
     </Setter>
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.1" />
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
   <Style Selector="Button.windowChromeButton PathIcon">
-    <Setter Property="Foreground" Value="{StaticResource Text_8EA1B6}" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
   </Style>
   <Style Selector="Button.windowChromeButton:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2A36}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
   </Style>
   <Style Selector="Button.windowChromeButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="{StaticResource Text_F5F9FF}" />
@@ -1231,10 +1233,10 @@
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
     <Setter Property="Padding" Value="13,8" />
-    <Setter Property="FontSize" Value="14" />
-    <Setter Property="MinHeight" Value="38" />
+    <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
+    <Setter Property="MinHeight" Value="{StaticResource ControlHeight}" />
   </Style>
   <!-- MinHeight is taller than one line plus its padding, and Fluent leaves the
        slack at the bottom, so the text sat a couple of pixels high in every
@@ -1278,14 +1280,14 @@
   </Style>
 
   <Style Selector="TextBox.appSearchBox">
-    <Setter Property="MinHeight" Value="34" />
-    <Setter Property="Height" Value="34" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="Height" Value="36" />
     <Setter Property="FontSize" Value="13" />
-    <Setter Property="CornerRadius" Value="17" />
+    <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
     <Setter Property="Padding" Value="6,0" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_243240}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
   </Style>
   <Style Selector="TextBox.appSearchBox:pointerover /template/ Border#PART_BorderElement">
     <Setter Property="Background" Value="{StaticResource Surface_18232D}" />
@@ -1307,16 +1309,16 @@
     look instead of flashing to Fluent's default look on hover/focus.
   -->
   <Style Selector="TextBox.inlineTitleEdit /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
+    <Setter Property="Background" Value="{StaticResource AppBgBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_22303A}" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
   <Style Selector="TextBox.inlineTitleEdit:pointerover /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
+    <Setter Property="Background" Value="{StaticResource AppBgBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_324454}" />
   </Style>
   <Style Selector="TextBox.inlineTitleEdit:focus /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
+    <Setter Property="Background" Value="{StaticResource AppBgBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_4C6478}" />
     <Setter Property="BorderThickness" Value="1" />
   </Style>
@@ -1359,16 +1361,16 @@
   </Style>
 
   <Style Selector="TextBox.inlineTitleEdit /template/ TextBlock#PART_Watermark">
-    <Setter Property="Foreground" Value="{StaticResource Text_5C6D7E}" />
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
   </Style>
   <Style Selector="TextBox.inlineTitleEdit:focus /template/ TextBlock#PART_Watermark, TextBox.inlineTitleEdit:pointerover /template/ TextBlock#PART_Watermark">
-    <Setter Property="Foreground" Value="{StaticResource Text_5C6D7E}" />
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
   </Style>
   <!-- Replaces the old pencil-icon affordance - hovering the clip title
        itself now signals it's clickable to rename. -->
   <Style Selector="TextBlock.editableTitle:pointerover">
     <Setter Property="TextDecorations" Value="Underline" />
-    <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="Border.clipGameFilter">
     <Setter Property="Background" Value="Transparent" />
@@ -1382,7 +1384,7 @@
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="12" />
-    <Setter Property="Padding" Value="20" />
+    <Setter Property="Padding" Value="{StaticResource CardPadding}" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -1393,8 +1395,8 @@
   <!-- The page is a long column of near-identical cards; lifting the one under
        the pointer is what tells you which row your click will land in. -->
   <Style Selector="Border.settingsCard:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_16212B}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2A3947}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
   <Style Selector="ComboBox.settingsInput /template/ Border#PopupBorder">
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
@@ -1470,8 +1472,9 @@
        dimmed and inert so it reads as a roadmap entry rather than a broken
        control. -->
   <Style Selector="TextBlock.editorCardLabel">
-    <Setter Property="Foreground" Value="{StaticResource Semantic_9EC6F0}" />
-    <Setter Property="FontSize" Value="11" />
+    <Setter Property="LetterSpacing" Value="0" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
+    <Setter Property="FontSize" Value="{StaticResource MetadataFontSize}" />
     <Setter Property="FontWeight" Value="Bold" />
   </Style>
   <Style Selector="Border.editorInspectorCard.effectPending">
@@ -1479,7 +1482,7 @@
     <Setter Property="IsHitTestVisible" Value="False" />
   </Style>
   <Style Selector="Border.comingSoonTag">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2B38}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_31546A}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="5" />
@@ -1613,11 +1616,11 @@
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
   <Style Selector="Button.volumeReset:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_22303D}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="Button.volumeReset:pressed">
-    <Setter Property="Background" Value="{StaticResource Surface_2A3947}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="Button.volumeReset PathIcon">
     <Setter Property="Width" Value="13" />
@@ -1676,22 +1679,22 @@
     <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_22303D}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected">
-    <Setter Property="Background" Value="{StaticResource Surface_303840}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_39434C}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{StaticResource Surface_303840}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{StaticResource Surface_39434C}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
 
   <!-- Theme swatch grid. Each item is already a fully-drawn preview tile, so the
@@ -1797,6 +1800,7 @@
     <Setter Property="Background" Value="{StaticResource Surface_1C2733}" />
   </Style>
   <Style Selector="Button.settingsNavButton">
+    <Setter Property="MinHeight" Value="40" />
     <!-- Not Transparent (#00FFFFFF - white at zero alpha): the BrushTransition
          below interpolates RGB as well as alpha, so unhovering flashed white
          on the way back out. Zero-alpha version of the hover color, so only
@@ -1805,16 +1809,16 @@
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
     <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="CornerRadius" Value="0,8,8,0" />
-    <Setter Property="Padding" Value="18,8,12,8" />
+    <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
+    <Setter Property="Padding" Value="12,8" />
     <Setter Property="Margin" Value="0,0,0,3" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
-    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.1" />
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
@@ -1886,7 +1890,7 @@
          doesn't interpolate through white on unhover (see settingsNavButton). -->
     <Setter Property="Background" Value="{StaticResource Surface_0026323D}" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="22" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
     <Setter Property="Width" Value="44" />
     <Setter Property="Height" Value="44" />
     <Setter Property="Padding" Value="0" />
@@ -1914,8 +1918,8 @@
     </Setter>
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.13" />
-        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.13" />
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
@@ -1957,7 +1961,7 @@
   </Style>
   <Style Selector="Border.railFolderGroup.expanded">
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Background" Value="{StaticResource Surface_141D24}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
   </Style>
   <!-- The storage button is the one rail button that isn't a bare 30px glyph:
        it holds the ring AND the used/limit caption, so it drops the fixed
@@ -1976,10 +1980,10 @@
   </Style>
 
   <Style Selector="Button.railIconButton PathIcon">
-    <Setter Property="Foreground" Value="{StaticResource Text_8C98A7}" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Foreground" Duration="0:0:0.13" />
+        <BrushTransition Property="Foreground" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
@@ -1999,15 +2003,15 @@
          This is the same accent the selection tints use (so it follows the
          Windows colour), mixed much further down into the rail so hover and
          selected stay clearly different. -->
-    <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="Button.railIconButton:pointerover PathIcon">
-    <Setter Property="Foreground" Value="{StaticResource Text_D8E4F2}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
   <!-- Folder tiles retain their brighter idle tint, distinct from loose
        game icons and from the darker hover highlight. -->
   <Style Selector="Button.railFolderHeader">
-    <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
   </Style>
   <!-- Expanded, the outline capsule (Border.railFolderGroup.expanded) already
        carries its own accent border/background around the whole group - the
@@ -2044,7 +2048,7 @@
     <Setter Property="Background" Value="{StaticResource AccentGameHoverBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge">
-    <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
   </Style>
   <Style Selector="Button.railIconButton:pointerover Border.gameInitialBadge">
     <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
@@ -2058,10 +2062,10 @@
   <!-- Folder glyph badges never own hover feedback; the larger folder header
        handles it. Empty, collapsed folders retain their normal neutral glyph. -->
   <Style Selector="Button.railFolderHeader Border.gameInitialBadge">
-    <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
   </Style>
   <Style Selector="Button.railFolderHeader:pointerover Border.gameInitialBadge">
-    <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
   </Style>
   <!-- When open, the folder glyph replaces its closed mosaic. Its squircle
        stays bright while the larger folder header owns hover feedback. -->
@@ -2072,10 +2076,10 @@
     <Setter Property="Background" Value="{StaticResource AccentFolderBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge TextBlock">
-    <Setter Property="Foreground" Value="{StaticResource Text_B8C7D8}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
   <Style Selector="Button.railIconButton Border.gameInitialBadge PathIcon">
-    <Setter Property="Foreground" Value="{StaticResource Text_B8C7D8}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
 
   <!-- Change Game's flyout is a plain StackPanel of these instead of
@@ -2094,11 +2098,11 @@
     <Setter Property="Padding" Value="9,6" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
-    <Setter Property="Foreground" Value="{StaticResource Text_D8E4F2}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     <Setter Property="FontSize" Value="12.5" />
   </Style>
   <Style Selector="Button.flyoutMenuItem:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge TextBlock">
     <Setter Property="Foreground" Value="#FFFFFF" />
@@ -2149,7 +2153,7 @@
     </Setter>
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.13" />
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
@@ -2160,7 +2164,7 @@
     <Setter Property="Background" Value="{StaticResource AccentHoverBrush}" />
   </Style>
   <Style Selector="Button.editorRailButton:pointerover PathIcon">
-    <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <Style Selector="Button.editorRailButton.active">
     <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
@@ -2178,75 +2182,75 @@
     <Setter Property="Padding" Value="0" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Background" Value="{StaticResource Surface_00101820}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_B8C7D8}" />
+    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
   </Style>
   <Style Selector="Button.editorToolsClose:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_263C4C}" />
-    <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
   </Style>
   <!-- Editor timeline and inspector share one quiet, layered surface. The
        clip name and trim range stay visible while scrubbing, so controls do
        not need to carry that context themselves. -->
   <Style Selector="Border.editorTimelinePanel">
-    <Setter Property="Background" Value="{StaticResource Surface_111A22}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2A3A48}" />
+    <Setter Property="Background" Value="{StaticResource PanelBgBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
   </Style>
   <Style Selector="Border.editorTimelineHeader">
-    <Setter Property="Background" Value="{StaticResource Surface_14202A}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_345066}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
     <Setter Property="Padding" Value="16,8" />
   </Style>
   <Style Selector="TextBlock.editorTimelineEyebrow">
-    <Setter Property="Foreground" Value="{StaticResource Text_7FA5C7}" />
-    <Setter Property="FontSize" Value="10" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
+    <Setter Property="FontSize" Value="{StaticResource MetadataFontSize}" />
     <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="LetterSpacing" Value="1" />
+    <Setter Property="LetterSpacing" Value="0" />
   </Style>
   <Style Selector="TextBlock.editorTimelineTitle">
-    <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
-    <Setter Property="FontSize" Value="17" />
-    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+    <Setter Property="FontSize" Value="{StaticResource SectionFontSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="Border.editorTimelineTime">
-    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_283A48}" />
+    <Setter Property="Background" Value="{StaticResource AppBgBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="Padding" Value="12,7" />
   </Style>
   <Style Selector="Border.editorTrackCard">
-    <Setter Property="Background" Value="{StaticResource Surface_16222C}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2B4050}" />
-    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
   </Style>
   <Style Selector="Border.editorInspector">
-    <Setter Property="Background" Value="{StaticResource Surface_111920}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_30404D}" />
+    <Setter Property="Background" Value="{StaticResource PanelBgBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1,0,0,0" />
   </Style>
   <Style Selector="Border.editorInspectorHeader">
-    <Setter Property="Background" Value="{StaticResource Surface_14202A}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_345066}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="0,0,0,1" />
   </Style>
   <Style Selector="TextBlock.editorInspectorTitle">
-    <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
-    <Setter Property="FontSize" Value="18" />
-    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+    <Setter Property="FontSize" Value="{StaticResource SectionFontSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="TextBlock.editorInspectorQuality">
-    <Setter Property="Foreground" Value="{StaticResource Semantic_9EC6F0}" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="FontSize" Value="13" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="Border.editorInspectorCard">
-    <Setter Property="Background" Value="{StaticResource Surface_17232D}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_2D4252}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
     <Setter Property="Padding" Value="16" />
   </Style>
   <!-- The Info section's EFFECTS card when something is actually on. It has to
@@ -2269,7 +2273,7 @@
        caption underneath is what it produces, which is the part they would
        otherwise have to work out from the aspect and the source. -->
   <Style Selector="Border.effectChip">
-    <Setter Property="Background" Value="{StaticResource Surface_101C25}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource Semantic_2F5B45}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
@@ -2277,18 +2281,18 @@
     <Setter Property="Margin" Value="0,0,7,7" />
   </Style>
   <Style Selector="TextBlock.effectChipValue">
-    <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="FontSize" Value="15" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="TextBlock.effectChipCaption">
-    <Setter Property="Foreground" Value="{StaticResource Text_7E93A6}" />
+    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
     <Setter Property="FontSize" Value="10.5" />
     <Setter Property="Margin" Value="0,2,0,0" />
   </Style>
   <Style Selector="Border.editorInspectorActions">
-    <Setter Property="Background" Value="{StaticResource Surface_101820}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_263743}" />
+    <Setter Property="Background" Value="{StaticResource PanelBgBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
     <Setter Property="Padding" Value="16" />
   </Style>
@@ -2374,12 +2378,12 @@
     <Setter Property="Width" Value="16" />
     <Setter Property="Height" Value="16" />
     <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Background" Value="{StaticResource Text_EEF4FF}" />
+    <Setter Property="Background" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="BorderThickness" Value="2" />
     <Setter Property="Transitions">
       <Transitions>
-        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" />
+        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
@@ -2389,7 +2393,7 @@
     <Setter Property="RenderTransform" Value="scale(1.15)" />
   </Style>
   <Style Selector="Slider.volumeSlider /template/ Thumb:pressed">
-    <Setter Property="Background" Value="{StaticResource Text_EAF0FF}" />
+    <Setter Property="Background" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="RenderTransform" Value="scale(1.05)" />
   </Style>
@@ -2418,7 +2422,7 @@
     <Setter Property="Width" Value="22" />
     <Setter Property="Height" Value="22" />
     <Setter Property="CornerRadius" Value="11" />
-    <Setter Property="Background" Value="{StaticResource Text_EEF4FF}" />
+    <Setter Property="Background" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
   </Style>
   <!-- Fluent's own :pointerover and :pressed states repoint both rail segments
@@ -2440,7 +2444,7 @@
     <Setter Property="Background" Value="{Binding Background, RelativeSource={RelativeSource AncestorType=Slider}}" />
   </Style>
   <Style Selector="Slider.volumeSlider.editorTrackVolumeSlider /template/ Thumb">
-    <Setter Property="Background" Value="{StaticResource Text_EEF4FF}" />
+    <Setter Property="Background" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
   </Style>
   <Style Selector="Slider.volumeSlider.editorTrackVolumeSlider:pointerover /template/ Thumb">
@@ -2448,7 +2452,7 @@
     <Setter Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
   </Style>
   <Style Selector="Slider.volumeSlider.editorTrackVolumeSlider:pressed /template/ Thumb">
-    <Setter Property="Background" Value="{StaticResource Text_EAF0FF}" />
+    <Setter Property="Background" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderBrush" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Slider}}" />
   </Style>
   <Style Selector="Slider.volumeSlider.editorTrackVolumeSlider:pointerover /template/ RepeatButton#PART_DecreaseButton">
@@ -2498,10 +2502,11 @@
 
   <!-- The all-caps label at the top of a card. -->
   <Style Selector="TextBlock.settingsCardLabel">
-    <Setter Property="Foreground" Value="{StaticResource LabelBrush}" />
-    <Setter Property="FontSize" Value="11" />
-    <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="LetterSpacing" Value="0.7" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
+    <Setter Property="FontSize" Value="{StaticResource SectionFontSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0" />
   </Style>
 
   <!-- The name of the section you are looking at. This used to be another
@@ -2509,7 +2514,7 @@
        the page had no visible top. -->
   <Style Selector="TextBlock.settingsSectionTitle">
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="FontSize" Value="22" />
+    <Setter Property="FontSize" Value="{StaticResource PageFontSize}" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
@@ -2529,28 +2534,30 @@
   <!-- A row: its name, then what it does underneath. SemiBold rather than
        Bold - at 15px Bold is what made the page read as heavy and dated. -->
   <Style Selector="TextBlock.settingsRowTitle">
+    <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="TextBlock.settingsRowDesc">
-    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
-    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
+    <Setter Property="FontSize" Value="{StaticResource MetadataFontSize}" />
     <Setter Property="TextWrapping" Value="Wrap" />
-    <Setter Property="LineHeight" Value="17" />
+    <Setter Property="LineHeight" Value="18" />
   </Style>
 
   <!-- The smaller scale, for rows nested inside an already-titled group. -->
   <Style Selector="TextBlock.settingsRowTitleSm">
+    <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="TextBlock.settingsRowDescSm">
-    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
-    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
+    <Setter Property="FontSize" Value="{StaticResource MetadataFontSize}" />
     <Setter Property="TextWrapping" Value="Wrap" />
-    <Setter Property="LineHeight" Value="16" />
+    <Setter Property="LineHeight" Value="18" />
   </Style>
 
   <!-- Performance notes and other inline cautions. An amber left bar rather
@@ -2562,7 +2569,7 @@
     <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource CautionBrush}" />
     <Setter Property="BorderThickness" Value="3,0,0,0" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
     <Setter Property="Padding" Value="16,13" />
   </Style>
   <!-- The sticky variant spans the panel edge to edge, so it drops the
@@ -2595,7 +2602,7 @@
     <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="CornerRadius" Value="{StaticResource CardRadius}" />
     <Setter Property="Padding" Value="14,12" />
     <Setter Property="Transitions">
       <Transitions>
@@ -2644,7 +2651,7 @@
        body text. At 11px a green sentence sitting where a description belongs
        reads as a description that happens to be green; a pill reads as state. -->
   <Style Selector="Border.statusPill">
-    <Setter Property="Background" Value="{StaticResource Surface_1D2B38}" />
+    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="20" />
@@ -2810,7 +2817,7 @@
   <!-- Keyboard focus still needs a ring of its own: the scale on hover is a
        pointer affordance and says nothing about where focus is. -->
   <Style Selector="Button.timelineMarker:focus-visible">
-    <Setter Property="BorderBrush" Value="{StaticResource Text_F2F6FB}" />
+    <Setter Property="BorderBrush" Value="{StaticResource TextStrongBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="13" />
   </Style>

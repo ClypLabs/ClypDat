@@ -32,7 +32,7 @@
     </MultiBinding>
   </UserControl.IsVisible>
 
-  <StackPanel Spacing="18" Tag="Connected Accounts">
+  <StackPanel Spacing="20" Tag="Connected Accounts">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Connected Accounts" />
@@ -41,9 +41,9 @@
     </StackPanel>
 
     <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="CLYPDAT ACCOUNT" />
-        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
           <!-- The Discord picture when the account has Discord linked; the
                ClypDat mark otherwise, including while the picture downloads. -->
           <Panel VerticalAlignment="Center">
@@ -104,9 +104,9 @@
       </StackPanel>
     </Border>
 
-    <StackPanel Spacing="18" IsVisible="{Binding ClypDatAccountIsConnected}">
+    <StackPanel Spacing="20" IsVisible="{Binding ClypDatAccountIsConnected}">
       <Border Classes="settingsCard" IsVisible="{Binding HasAccountsToAdd}">
-        <StackPanel Spacing="14">
+        <StackPanel Spacing="16">
           <TextBlock Classes="settingsCardLabel" Text="ADD AN ACCOUNT" />
           <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Add Discord, optional Xbox activity, or Spotify. Discord and Xbox open clypdat.xyz in your browser; Spotify signs in with Spotify itself." />
           <StackPanel Spacing="10">
@@ -167,7 +167,7 @@
       </Border>
 
       <Border Classes="settingsCard" IsVisible="{Binding HasLinkedAccounts}">
-        <StackPanel Spacing="14">
+        <StackPanel Spacing="16">
           <TextBlock Classes="settingsCardLabel" Text="CONNECTED" />
           <TextBlock Classes="settingsRowDescSm" Text="Unlink here. Refresh after changing anything on clypdat.xyz in your browser." />
           <Border Classes="settingsNotice" IsVisible="{Binding ClypDatAccountHasError}">

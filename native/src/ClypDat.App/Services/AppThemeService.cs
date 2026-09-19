@@ -22,7 +22,7 @@ public sealed record ThemeOption(
     IBrush AccentBrush,
     IBrush LabelTextBrush);
 
-/// <summary>Owns ClypDat's mutable dark-theme resource palette.</summary>
+/// <summary>Owns the mutable appearance palette for presets and custom themes.</summary>
 internal static class AppThemeService
 {
     // Every themed colour in the app - the named tokens in Tokens.axaml and the
@@ -203,25 +203,24 @@ internal static class AppThemeService
     private static readonly string[] LightPresetOrder =
         { "Light", "Light Blue", "Light Berry", "Light Emerald", "Light Rose", "Light Amber" };
 
-    // The System source values for the named tokens, with the role each is
-    // recoloured under. System itself is the identity transform, so its rendering
-    // is byte-for-byte what the app shipped before themes existed.
+    // Studio source values match Tokens.axaml. Preset transforms preserve their
+    // hue identities; light presets use explicit layers in RecolorToken.
     private static readonly (string Key, Color Source, ColorRole Role)[] NamedTokens =
     {
-        ("AppBgBrush", Color.Parse("#0D1116"), ColorRole.Surface),
-        ("PanelBgBrush", Color.Parse("#101820"), ColorRole.Surface),
-        ("SurfaceBrush", Color.Parse("#141D24"), ColorRole.Surface),
-        ("SurfaceRaisedBrush", Color.Parse("#1A242E"), ColorRole.Surface),
-        ("SurfaceHoverBrush", Color.Parse("#22303D"), ColorRole.Surface),
-        ("EdgeBrush", Color.Parse("#232F3A"), ColorRole.Surface),
-        ("EdgeStrongBrush", Color.Parse("#2C3B48"), ColorRole.Surface),
-        ("DividerBrush", Color.Parse("#1B242D"), ColorRole.Surface),
+        ("AppBgBrush", Color.Parse("#101216"), ColorRole.Surface),
+        ("PanelBgBrush", Color.Parse("#171A20"), ColorRole.Surface),
+        ("SurfaceBrush", Color.Parse("#1B1F26"), ColorRole.Surface),
+        ("SurfaceRaisedBrush", Color.Parse("#20242C"), ColorRole.Surface),
+        ("SurfaceHoverBrush", Color.Parse("#2A303A"), ColorRole.Surface),
+        ("EdgeBrush", Color.Parse("#2B313B"), ColorRole.Surface),
+        ("EdgeStrongBrush", Color.Parse("#414A58"), ColorRole.Surface),
+        ("DividerBrush", Color.Parse("#242A33"), ColorRole.Surface),
 
-        ("TextStrongBrush", Color.Parse("#EDF4FB"), ColorRole.Text),
-        ("TextBrush", Color.Parse("#D2DEEC"), ColorRole.Text),
-        ("TextSubtleBrush", Color.Parse("#9FB2C6"), ColorRole.Text),
-        ("TextMutedBrush", Color.Parse("#6B7C8C"), ColorRole.Text),
-        ("LabelBrush", Color.Parse("#5C6D7E"), ColorRole.Text),
+        ("TextStrongBrush", Color.Parse("#F1F3F7"), ColorRole.Text),
+        ("TextBrush", Color.Parse("#D8DDE6"), ColorRole.Text),
+        ("TextSubtleBrush", Color.Parse("#ABB4C2"), ColorRole.Text),
+        ("TextMutedBrush", Color.Parse("#949FAF"), ColorRole.Text),
+        ("LabelBrush", Color.Parse("#949FAF"), ColorRole.Text),
 
         ("LinkBrush", Color.Parse("#78B8FF"), ColorRole.Semantic),
         ("CautionBrush", Color.Parse("#E5A00D"), ColorRole.Semantic),
@@ -241,6 +240,10 @@ internal static class AppThemeService
         ("Text_", ColorRole.Text, false),
         ("Semantic_", ColorRole.Semantic, false)
     };
+
+    internal static FontFamily FontFamily =>
+        Application.Current?.TryFindResource("ClypDatFontFamily", out var resource) == true && resource is FontFamily family
+            ? family : Avalonia.Media.FontFamily.Default;
 
     public static IReadOnlyList<ThemeOption> Options { get; } = new[]
     {
@@ -283,7 +286,7 @@ internal static class AppThemeService
         // legible against are the same colour, and it is this one.
         var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor)) : (default, false);
         var accent = isCustom ? AdjustAccent(Color.Parse(customTheme!.AccentColor), customBase) : useSystemAccent ? systemAccent : PresetAccent(preset);
-        var appBackground = isCustom ? customBase : Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
+        var appBackground = isCustom ? customBase : RecolorToken("AppBgBrush", NamedTokens[0].Source, ColorRole.Surface, transform);
 
         // FluentTheme swaps its whole control-theme resource set on this. Without
         // it every control we have not re-templated - TextBox, ComboBox popups,
@@ -292,7 +295,7 @@ internal static class AppThemeService
 
         foreach (var (key, source, role) in NamedTokens)
         {
-            SetBrush(application, key, isCustom ? RecolorCustom(source, role, customBase, customLight) : Recolor(source, role, transform));
+            SetBrush(application, key, isCustom ? RecolorCustom(source, role, customBase, customLight) : RecolorToken(key, source, role, transform));
         }
         ApplyRamp(application, transform, isCustom ? customBase : null, customLight);
 
@@ -509,8 +512,8 @@ internal static class AppThemeService
         var text = NamedTokens.First(token => token.Key == "TextBrush");
         return new ThemeOption(
             id, id,
-            new SolidColorBrush(Recolor(NamedTokens[0].Source, ColorRole.Surface, transform)),
-            new SolidColorBrush(Recolor(NamedTokens[2].Source, ColorRole.Surface, transform)),
+            new SolidColorBrush(RecolorToken("AppBgBrush", NamedTokens[0].Source, ColorRole.Surface, transform)),
+            new SolidColorBrush(RecolorToken("SurfaceBrush", NamedTokens[2].Source, ColorRole.Surface, transform)),
             new SolidColorBrush(PresetAccent(id)),
             new SolidColorBrush(Recolor(text.Source, ColorRole.Text, transform)));
     }
@@ -557,6 +560,26 @@ internal static class AppThemeService
 
         brush = null!;
         return false;
+    }
+
+    private static Color RecolorToken(string key, Color source, ColorRole role, ThemeTransform transform)
+    {
+        if (!transform.IsLight || role != ColorRole.Surface) return Recolor(source, role, transform);
+        var light = key switch
+        {
+            "AppBgBrush" => "#F5F6F8",
+            "PanelBgBrush" or "SurfaceBrush" => "#FFFFFF",
+            "SurfaceRaisedBrush" => "#EBEEF2",
+            "SurfaceHoverBrush" => "#E1E6ED",
+            "EdgeBrush" => "#D6DCE5",
+            "EdgeStrongBrush" => "#B3BDCB",
+            "DividerBrush" => "#E6EAF0",
+            _ => null
+        };
+        if (light is null) return Recolor(source, role, transform);
+        var color = Color.Parse(light);
+        var (_, saturation, lightness) = ToHsl(color);
+        return transform.Hue == 209 ? color : FromHsl(transform.Hue, saturation, lightness, color.A);
     }
 
     private static Color Recolor(Color source, ColorRole role, ThemeTransform transform)

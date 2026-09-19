@@ -12,7 +12,7 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Auto-Clip">
+  <StackPanel Spacing="20" Tag="Auto-Clip">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Auto-Clipping" />
@@ -26,7 +26,7 @@
     </StackPanel>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Auto Capture Events}">
-      <StackPanel Spacing="14">
+      <StackPanel Spacing="16">
         <TextBlock Classes="settingsCardLabel" Text="AUTO CAPTURE" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
           <StackPanel Spacing="2">
@@ -78,7 +78,7 @@
                 <!-- Greys out with the switch above it, so what that switch
                      governs is not left to guesswork. -->
                 <StackPanel Spacing="0" IsEnabled="{Binding IsEnabled}">
-                  <StackPanel Spacing="14" IsVisible="{Binding IsCs2}">
+                  <StackPanel Spacing="16" IsVisible="{Binding IsCs2}">
                     <Border Classes="settingsDivider" Margin="0,12,0,0" />
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                       <StackPanel Spacing="2">

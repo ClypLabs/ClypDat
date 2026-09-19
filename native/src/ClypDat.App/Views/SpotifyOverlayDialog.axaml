@@ -19,13 +19,13 @@
     <SolidColorBrush x:Key="OverlayPreviewCardBrush" Color="#B3000000" />
   </Window.Resources>
 
-  <Border CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True">
+  <Border Classes="dialogShell">
     <DockPanel LastChildFill="True">
-      <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0" PointerPressed="TitleBar_OnPointerPressed">
+      <Border DockPanel.Dock="Top" Classes="dialogHeader" PointerPressed="TitleBar_OnPointerPressed">
         <Grid ColumnDefinitions="Auto,*,Auto" Height="56">
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
             <Ellipse Width="10" Height="10" Fill="{StaticResource SpotifyDialogBrush}" VerticalAlignment="Center" />
-            <TextBlock Text="SPOTIFY OVERLAY" Foreground="{StaticResource Text_D8E4F2}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
+            <TextBlock Text="Spotify overlay" Foreground="{StaticResource TextBrush}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
           </StackPanel>
           <!-- Fills the corner, hover and all. Width and height are the
                header's, so the fill meets both edges instead of leaving a strip
@@ -66,7 +66,7 @@
                    radius, so a square fill inside a rounded frame paints
                    straight over the rounded corners. -->
               <Border Background="{StaticResource Surface_18232D}" CornerRadius="7" />
-              <Border Background="{StaticResource Surface_0C1319}" Height="98" VerticalAlignment="Bottom" Opacity="0.55" CornerRadius="0,0,7,7" />
+              <Border Background="{StaticResource AppBgBrush}" Height="98" VerticalAlignment="Bottom" Opacity="0.55" CornerRadius="0,0,7,7" />
               <Border Background="{StaticResource SpotifyDialogBrush}" Opacity="0.10" Width="150" Height="150" CornerRadius="75"
                       HorizontalAlignment="Center" VerticalAlignment="Center" />
 

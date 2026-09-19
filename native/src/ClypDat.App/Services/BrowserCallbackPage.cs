@@ -12,11 +12,11 @@ internal enum BrowserCallbackService
 /// <summary>
 /// The page the browser lands on when a sign-in hands back to the app's
 /// loopback listener. It is the last thing the user sees of the flow, and they
-/// arrive at it straight from clypdat.xyz - so it wears the website's look
+/// arrive at it straight from clypdat.xyz - so it wears the desktop's look
 /// (colours, type, card and wash) rather than a one-off style of its own.
 /// Everything is inline: the listener answers one request and stops, so there
-/// is nothing to serve a stylesheet or image from afterwards. The two web fonts
-/// are the only fetch, and the fallback stack stands in if they do not load.
+/// is nothing to serve a stylesheet or image from afterwards. The web font
+/// is the only fetch, and the fallback stack stands in if they do not load.
 /// </summary>
 internal static class BrowserCallbackPage
 {
@@ -32,11 +32,11 @@ internal static class BrowserCallbackPage
           <title>__NAME__ connected</title>
           <link rel="preconnect" href="https://fonts.googleapis.com">
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&amp;family=Geist:wght@400;500;600&amp;display=swap">
+          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;display=swap">
           <style>
             :root {
               color-scheme: dark;
-              --background: #0a0d11;
+              --background: #101216;
               --foreground: #e9eef4;
               --display: #f4f7fa;
               --muted: #a1a1aa;
@@ -53,7 +53,7 @@ internal static class BrowserCallbackPage
               place-items: center;
               padding: 48px 20px;
               color: var(--foreground);
-              font: 15px/1.6 Geist, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+              font: 13px/1.6 Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
               -webkit-font-smoothing: antialiased;
             }
 
@@ -106,9 +106,9 @@ internal static class BrowserCallbackPage
               overflow: hidden;
               text-align: center;
               border: 1px solid rgb(255 255 255 / 0.1);
-              border-radius: 24px;
-              background: rgb(255 255 255 / 0.04);
-              box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.3);
+              border-radius: 16px;
+              background: #171a20;
+              box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.3);
             }
             .card::before {
               content: "";
@@ -155,8 +155,8 @@ internal static class BrowserCallbackPage
             h1 {
               margin: 10px 0 0;
               color: var(--display);
-              font-family: "Bricolage Grotesque", Geist, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
-              font-size: 30px;
+              font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+              font-size: 24px;
               font-weight: 600;
               line-height: 1.15;
               letter-spacing: -0.025em;

@@ -183,12 +183,13 @@ public sealed class TimelineLaneControl : Control
         var label = !CanEditOverlay ? "Spotify overlay · Part of video"
             : !IsOverlayVisible ? "Spotify overlay · Hidden"
             : "Spotify overlay · Move and resize in preview";
-        if (_cachedOverlayLabelKey != label)
+        var cacheKey = $"{AppThemeService.FontFamily}|{label}";
+        if (_cachedOverlayLabelKey != cacheKey)
         {
-            _cachedOverlayLabelKey = label;
+            _cachedOverlayLabelKey = cacheKey;
             _cachedOverlayLabel = new FormattedText(label,
                 System.Globalization.CultureInfo.InvariantCulture,
-                FlowDirection.LeftToRight, Typeface.Default, 12, OverlayInk);
+                FlowDirection.LeftToRight, new Typeface(AppThemeService.FontFamily), 12, OverlayInk);
         }
 
         using (context.PushClip(rect.Deflate(1)))

@@ -13,6 +13,7 @@
            them from the live accent (Windows accent, or the preset's own when
            Settings > Themes has the Windows accent switched off). The values
            below are the startup fallback for the System preset. -->
+      <SolidColorBrush x:Key="AccentForegroundBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="AccentBrush" Color="#5864E8" />
       <SolidColorBrush x:Key="AccentBrushHover" Color="#6D77F0" />
       <!-- Sidebar selection tints, derived from the accent above. -->
@@ -49,6 +50,7 @@
       <Setter Property="FontFamily" Value="{DynamicResource ClypDatFontFamily}" />
     </Style>
     <StyleInclude Source="avares://ClypDat/Styles/AppStyles.axaml" />
+    <StyleInclude Source="avares://ClypDat/Styles/StudioStyles.axaml" />
     <!-- Some display fonts draw italic/extended glyph ink beyond their
          reported advance width. Allow that ink to overflow without changing
          text measurement, alignment, or parent control sizes. -->

@@ -312,7 +312,7 @@ public sealed class TimelineMarkersControl : Canvas
             row.Click += FlyoutRow_OnClick;
             panel.Children.Add(row);
         }
-        _flyout = new Popup { PlacementTarget = this, Placement = PlacementMode.Top, IsLightDismissEnabled = true, HorizontalOffset = group.CenterX - 120, VerticalOffset = -4, Child = new Border { Background = AppThemeService.Brush("SurfaceBrush", "#1B2731"), BorderBrush = AppThemeService.Brush("EdgeStrongBrush", "#425466"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(4), Child = scroll } };
+        _flyout = new Popup { PlacementTarget = this, Placement = PlacementMode.Top, IsLightDismissEnabled = true, HorizontalOffset = group.CenterX - 120, VerticalOffset = -4, Child = new Border { Background = AppThemeService.Brush("SurfaceBrush", "#1B2731"), BorderBrush = AppThemeService.Brush("EdgeStrongBrush", "#425466"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12), Padding = new Thickness(8), Child = scroll } };
         _flyout.Opened += (_, _) => { };
         _flyout.IsOpen = true;
     }
