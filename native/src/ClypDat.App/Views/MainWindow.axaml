@@ -973,6 +973,9 @@
                                    VerticalAlignment="Center" />
                       </StackPanel>
                     </Border>
+                    <!-- Hover/selection stroke below owns the card outline.
+                         An outer border would inset it and give the two
+                         rounded contours different centres. -->
                     <Border x:Name="LibraryClipCardSurface"
                             Classes="libraryClipCardSurface"
                             Background="{StaticResource SurfaceBrush}"

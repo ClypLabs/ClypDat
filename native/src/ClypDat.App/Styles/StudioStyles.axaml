@@ -80,18 +80,6 @@
     <Setter Property="MinHeight" Value="{StaticResource CompactControlHeight}" />
     <Setter Property="Padding" Value="8,4" />
   </Style>
-  <Style Selector="Border.libraryClipCardSurface">
-    <Setter Property="BorderBrush" Value="{DynamicResource EdgeBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="Transitions">
-      <Transitions>
-        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
-      </Transitions>
-    </Setter>
-  </Style>
-  <Style Selector="Border.libraryClipCardSurface:pointerover">
-    <Setter Property="BorderBrush" Value="{DynamicResource EdgeStrongBrush}" />
-  </Style>
   <Style Selector="MenuItem">
     <Setter Property="MinHeight" Value="{StaticResource ControlHeight}" />
     <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />

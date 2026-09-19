@@ -149,7 +149,25 @@ public sealed class StudioAppearanceTests
     });
 
     [Fact]
-    public void LibraryCardsKeepThumbnailsAndBusyLabelsInsideTheirBounds() => Run(() =>
+    public void SplashUsesOneNativeWindowContour() => Run(() =>
+    {
+        var splash = new SplashWindow();
+        try
+        {
+            Assert.DoesNotContain(WindowTransparencyLevel.Transparent, splash.TransparencyLevelHint);
+            var client = Assert.IsType<Border>(splash.Content);
+            // An opaque client fills the native DWM contour. A second rounded
+            // client stroke leaves a differently curved line inside that frame.
+            Assert.Equal(default(Thickness), client.BorderThickness);
+            Assert.Equal(default(CornerRadius), client.CornerRadius);
+        }
+        finally { splash.Close(); }
+    });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LibraryCardsKeepThumbnailsAndBusyLabelsInsideTheirBounds(bool selected) => Run(() =>
     {
         var model = new MainWindowViewModel { IsOnboardingVisible = false };
         var window = new MainWindow { DataContext = model };
@@ -158,6 +176,11 @@ public sealed class StudioAppearanceTests
             $"Fixture clip {index} with a long descriptive title", Path.Combine(root, $"fixture-{index}.mp4"),
             DateTimeOffset.UtcNow.AddMinutes(-index), TimeSpan.FromSeconds(45), 1024, string.Empty,
             Array.Empty<MediaTrackInfo>(), 1920, 1080, 60), root)).ToArray();
+        foreach (var clip in clips)
+        {
+            clip.IsHovered = !selected;
+            clip.IsSelected = selected;
+        }
         clips[0].BusyOverlayText = "Preparing clip";
         clips[1].BusyOverlayText = "Clip unavailable";
         var items = window.FindControl<ItemsControl>("LibraryItemsControl")!;
@@ -173,6 +196,14 @@ public sealed class StudioAppearanceTests
             Assert.True(thumbnail.Bounds.Width <= card.Bounds.Width);
             Assert.InRange(thumbnail.Bounds.Width / thumbnail.Bounds.Height, 1.76, 1.79);
             Assert.Equal(new CornerRadius(12), card.CornerRadius);
+        }
+        foreach (var card in cards)
+        {
+            var outline = Assert.Single(card.GetVisualDescendants().OfType<Border>()
+                .Where(border => border.ZIndex == 10 && border.IsVisible));
+            Assert.Equal(new Point(0, 0), outline.TranslatePoint(default, card)!.Value);
+            Assert.Equal(card.Bounds.Size, outline.Bounds.Size);
+            Assert.Equal(card.CornerRadius, outline.CornerRadius);
         }
         SetView(model, "IsInitialLibraryLoadComplete", false);
         Layout(window, new Size(1032, 669));

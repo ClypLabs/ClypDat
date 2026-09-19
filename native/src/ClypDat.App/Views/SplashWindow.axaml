@@ -14,8 +14,9 @@
        which is the surface that keeps losing its device on this hardware. The
        soft corners come from DWM rounding the composited frame instead (see
        StartupWindowPresentation.TryRoundCorners), which costs nothing and is
-       what every other Windows 11 window uses. -->
-  <Border BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="16">
+       what every other Windows 11 window uses. Keep the client borderless:
+       an additional rounded stroke would disagree with DWM's frame contour. -->
+  <Border>
     <Grid RowDefinitions="*,Auto">
 
       <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="14" Margin="0,14,0,0">
