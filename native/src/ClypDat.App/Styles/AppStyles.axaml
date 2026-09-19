@@ -1800,6 +1800,7 @@
     <Setter Property="Background" Value="{StaticResource Surface_1C2733}" />
   </Style>
   <Style Selector="Button.settingsNavButton">
+    <Setter Property="Height" Value="36" />
     <Setter Property="MinHeight" Value="36" />
     <!-- Not Transparent (#00FFFFFF - white at zero alpha): the BrushTransition
          below interpolates RGB as well as alpha, so unhovering flashed white
@@ -1810,11 +1811,13 @@
     <Setter Property="BorderThickness" Value="2,0,0,0" />
     <Setter Property="BorderBrush" Value="Transparent" />
     <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
-    <Setter Property="Padding" Value="12,8" />
-    <Setter Property="Margin" Value="0,0,0,3" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="Margin" Value="0" />
     <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="ToolTip.Tip" Value="{ReflectionBinding Content, RelativeSource={RelativeSource Self}}" />
     <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
     <Setter Property="Transitions">
       <Transitions>
@@ -1823,7 +1826,8 @@
     </Setter>
   </Style>
   <Style Selector="Button.settingsNavButton TextBlock">
-    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
   <Style Selector="Button.settingsNavButton:pointerover">
     <Setter Property="Background" Value="{StaticResource Surface_182029}" />

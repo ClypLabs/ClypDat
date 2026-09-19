@@ -12,7 +12,7 @@ colours. The existing colour ramp remains available for specialized graphics.
 dialog, typography, focus, error, and compact Editor rules. `DialogComposition`
 owns utility-window chrome while callers retain modal results and cancellation.
 
-Library retains the original adaptive card sizes with a larger heading and search toolbar.
+Library retains the original adaptive card sizes and compact heading/search toolbar.
 Settings have a capped content width, sentence-case card headings, quieter
 labels, and a status sidebar that hides below 1120 logical pixels. Editor
 headers take less vertical space. Timeline labels use the selected font.
@@ -56,9 +56,20 @@ column count. The fixed three-column option is unchanged. Card footers retain
 the original padding and 15-pixel bold titles. Custom font choices remain
 supported.
 
+The Library toolbar also matches that baseline: 52 pixels high, a 15-pixel bold
+heading, 20-pixel horizontal margins, and a 240-pixel search field.
+
 Settings retains its narrower content and sidebar, sentence-case headings,
 tighter General layout, and compact process priority picker. Content is capped
-at 960 logical pixels; navigation and status columns use 224 pixels. The status
+at 960 logical pixels; navigation uses 224 pixels and status uses 280. The status
 sidebar hides below 1120 logical pixels.
 
 The restoration passed 37 focused appearance, layout, settings, and overlay checks.
+
+Settings navigation uses 36-pixel rows, 2-pixel row gaps, and 16-pixel group
+gaps. Group headings and item labels share the same inset. Search results hide
+empty groups together; long labels truncate with their full text in a tooltip.
+
+The Status panel restores pre-overhaul master width, padding, and typography:
+280 pixels wide, 16-pixel bold values, and 11-pixel bold labels. Font family
+continues to follow the saved app font, with bundled Inter as the default.

@@ -15,8 +15,20 @@
     <Setter Property="Foreground" Value="{DynamicResource TextSubtleBrush}" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
+  <Style Selector="TextBlock.settingsStatusLabel">
+    <Setter Property="Foreground" Value="{StaticResource LabelBrush}" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="0.7" />
+  </Style>
+  <Style Selector="TextBlock.settingsNavSectionLabel">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+  </Style>
   <Style Selector="Button.settingsNavButton /template/ ContentPresenter TextBlock">
-    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
   <Style Selector="Button:not(ToggleSwitch):pressed">
     <Setter Property="Background" Value="{DynamicResource EdgeStrongBrush}" />

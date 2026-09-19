@@ -800,11 +800,11 @@
                rule against the cards - rather than as two controls floating in
                the content's own padding, which is where both used to live. -->
           <Border DockPanel.Dock="Top"
-                  MinHeight="72"
+                  Height="52"
                   Background="{StaticResource AppBgBrush}"
                   BorderBrush="{StaticResource EdgeBrush}"
                   BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="*,24,280" Margin="24,12">
+            <Grid ColumnDefinitions="Auto,*,240" Margin="20,0">
               <!-- Matches date headers: hover reveals select-all checkbox and
                    moves the Clips heading right. Selection stays scoped to
                    clips currently shown by Library filters. -->
@@ -820,7 +820,9 @@
                             ToolTip.Tip="Select visible clips"
                             VerticalAlignment="Center" />
                   <TextBlock Text="{Binding LibraryTitle}"
-                             Classes="pageTitle"
+                             Foreground="{StaticResource TextStrongBrush}"
+                             FontSize="15"
+                             FontWeight="Bold"
                              VerticalAlignment="Center" />
                 </StackPanel>
               </Border>
