@@ -93,26 +93,10 @@ public sealed class ClipCardViewModel : ViewModelBase
     // rotation sixty times a second behind a hidden layer.
     public string? BusyOverlayContent => IsBusyOverlayVisible ? BusyOverlayText : null;
 
-    // Kept apart from IsHydrated deliberately. IsHydrated is derived from Media
-    // ("the probe reached this card") and round-trips through the library cache;
-    // this is an external signal from the capture worker that must never be
-    // cached, or a restart would resurrect a locked card. The two also need
-    // different sentences - "still loading its info" versus "still adding audio".
-    private bool _isFinalizing;
-    public bool IsFinalizing
-    {
-        get => _isFinalizing;
-        internal set
-        {
-            if (!SetProperty(ref _isFinalizing, value)) return;
-            OnPropertyChanged(nameof(IsOpenable));
-        }
-    }
-
     public bool IsSpotifyProcessing => SpotifyProcessingPaths.IsProcessing(Path);
     public string? SpotifyProcessingText => IsSpotifyProcessing ? "Adding Spotify overlay\u2026" : null;
     public bool IsSpotifyOverlayFailed => SpotifyProcessingPaths.Failed(Path);
-    public bool IsOpenable => IsHydrated && !IsFinalizing && !IsSpotifyProcessing;
+    public bool IsOpenable => IsHydrated && !RecordingFileOwnership.IsActive(Path) && !IsSpotifyProcessing;
 
     internal void RefreshSpotifyProcessing()
     {

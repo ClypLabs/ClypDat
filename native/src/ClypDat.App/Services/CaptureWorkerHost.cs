@@ -125,7 +125,7 @@ internal static class CaptureWorkerHost
                 case "start":
                     Lifecycle.Request(true);
                     await StartCaptureIfAvailableAsync(cancellationToken);
-                    await ReplyAsync(client, message, new CaptureWorkerStartAck(true, _buffer?.IsRecording == true), cancellationToken);
+                    await ReplyAsync(client, message, new CaptureWorkerStartAck(true, _buffer?.IsRecording == true, FullSession: GetHealth().FullSession), cancellationToken);
                     break;
                 case "stop":
                     Lifecycle.Request(false);
@@ -142,6 +142,10 @@ internal static class CaptureWorkerHost
                     break;
                 case "hotkey":
                     SetHotkey(message.Payload.GetProperty("hotkey").GetString() ?? string.Empty);
+                    await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
+                    break;
+                case "full-session-container":
+                    if (_config is not null) _config = _config with { FullSessionContainer = ClypDat.Core.Settings.FullSessionFormat.Normalize(message.Payload.GetProperty("container").GetString()) };
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     break;
                 case "full-session-hotkey":
@@ -183,11 +187,9 @@ internal static class CaptureWorkerHost
                     await ReplyAsync(client, message, new CaptureWorkerAck(true), cancellationToken);
                     Shutdown.Cancel();
                     await StopCaptureAfterSavesAsync(CancellationToken.None);
-                    // Returning here ends the worker process, which kills any
-                    // ffmpeg still muxing a session's audio - losing it for
-                    // good. Nothing awaited that task before.
-                    if (_buffer is IFullSessionFinalizeReporter pending)
-                        await pending.WaitForBackgroundFinalizeAsync(TimeSpan.FromMinutes(5));
+                    // Drain live mux workers before ending the capture process.
+                    if (_buffer is IFullSessionRecorderLifecycle pending)
+                        await pending.WaitForFullSessionCloseAsync(TimeSpan.FromMinutes(5));
                     return;
                 default:
                     await ReplyAsync(client, message, new CaptureWorkerAck(false, $"Unknown command '{message.Type}'."), cancellationToken);
@@ -224,8 +226,8 @@ internal static class CaptureWorkerHost
                     if (_buffer is IVideoOverlaySettingsReceiver overlays)
                         overlays.SetVideoOverlaySettings(_videoOverlays);
                     _buffer.RecordingStopped += (_, _) => _ = SendEventAsync("recording-stopped", new { });
-                    if (_buffer is IFullSessionFinalizeReporter finalizes)
-                        finalizes.FullSessionFinalizeChanged += (_, active) => _ = SendEventAsync("full-session-finalize", active);
+                    if (_buffer is IFullSessionRecorderLifecycle finalizes)
+                        finalizes.FullSessionClosed += (_, path) => _ = SendEventAsync("full-session-closed", path);
                     AttachDetectorFrameSource(_buffer);
                     if (_buffer is IReplayCaptureDiagnostics diagnostics)
                         diagnostics.HealthChanged += (_, health) => _ = SendEventAsync("health", health with { Storage = Storage.Health });
@@ -250,8 +252,7 @@ internal static class CaptureWorkerHost
                     _buffer?.IsRecording == true,
                     ConfigIdentity(_config),
                     GetHealth(),
-                    DrainUnacknowledgedSaves(UnacknowledgedSaves),
-                    NativeReplayBuffer.ActiveFinalizeSnapshot());
+                    DrainUnacknowledgedSaves(UnacknowledgedSaves));
                 await ReplyAsync(client, message, response, cancellationToken);
             }
             finally { SaveGate.Release(); }

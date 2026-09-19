@@ -441,6 +441,7 @@ public sealed partial class MainWindow : Window
                 ViewModel.RecordingOverlayPreviewRequested += (_, _) =>
                     ShowGameDetectedNotification(ViewModel.ActiveGameDetection.IsDetected
                         ? ViewModel.ActiveGameDetection.DisplayName : "Your game", preview: true);
+                ViewModel.RecordingSettingsSaved += ApplySavedRecordingSettings;
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.ActiveGameDetection)) _ = UpdateVideoOverlaySettingsAsync();
@@ -449,6 +450,9 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName is nameof(MainWindowViewModel.AutoClippingEnabled)
                         or nameof(MainWindowViewModel.DiscordRichPresenceEnabled)
                         or nameof(MainWindowViewModel.DiscordRichPresenceShowMatchDetails)) UpdateAutoClipStates();
+                    if (e.PropertyName == nameof(MainWindowViewModel.SelectedFullSessionFormat) && _replayBuffer is IReplayCaptureWorkerControl formatWorker)
+                        _ = formatWorker.UpdateFullSessionContainerAsync(ViewModel.Settings.FullSessionContainer);
+                    if (e.PropertyName == nameof(MainWindowViewModel.FullSessionRecordingEnabled) && !_applyingWorkerSessionToggle) ScheduleReplayRestart();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayBufferEnabled)) _ = ApplyReplayBufferEnabledAsync();
                     if (e.PropertyName == nameof(MainWindowViewModel.ReplayAdaptiveFrameRateEnabled))
                     {
@@ -624,7 +628,7 @@ public sealed partial class MainWindow : Window
                 workerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
                 workerEvents.AutoClipDetected -= Worker_AutoClipDetected;
                 workerEvents.AutoClipStatusChanged -= Worker_AutoClipStatusChanged;
-                workerEvents.FullSessionFinalizeChanged -= Worker_FullSessionFinalizeChanged;
+                workerEvents.FullSessionClosed -= Worker_FullSessionClosed;
             }
             _replayBuffer?.Dispose();
             _clipOverlayCoordinator?.Dispose();
@@ -958,7 +962,7 @@ public sealed partial class MainWindow : Window
             workerEvents.FullSessionRecordingToggled += Worker_FullSessionRecordingToggled;
             workerEvents.AutoClipDetected += Worker_AutoClipDetected;
             workerEvents.AutoClipStatusChanged += Worker_AutoClipStatusChanged;
-            workerEvents.FullSessionFinalizeChanged += Worker_FullSessionFinalizeChanged;
+            workerEvents.FullSessionClosed += Worker_FullSessionClosed;
         }
     }
 
@@ -1026,12 +1030,12 @@ public sealed partial class MainWindow : Window
         foreach (var buffer in _autoClipEscalation.Values) buffer.Reset();
     }
 
-    private void Worker_FullSessionFinalizeChanged(object? sender, IReadOnlyList<FullSessionFinalizeProgress> active)
+    private void Worker_FullSessionClosed(object? sender, string path)
     {
         Dispatcher.UIThread.Post(() =>
         {
             if (!ReferenceEquals(_replayBuffer, sender)) return;
-            ViewModel?.ApplySessionFinalizes(active);
+            if (ViewModel is not null) _ = ViewModel.RecordingClosedAsync(path);
         });
     }
 
@@ -1136,6 +1140,7 @@ public sealed partial class MainWindow : Window
             await ProcessSavedClipAsync(clip.Path, retry: true);
     }
 
+    private bool _applyingWorkerSessionToggle;
     private void Worker_FullSessionRecordingToggled(object? sender, bool enabled)
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -1144,11 +1149,19 @@ public sealed partial class MainWindow : Window
             return;
         }
         if (!ReferenceEquals(_replayBuffer, sender)) return;
+        _applyingWorkerSessionToggle = true;
+        try
+        {
+            ViewModel?.ApplyFullSessionToggle(enabled);
+            if (_activeReplayConfigSnapshot is { } config) _activeReplayConfigSnapshot = config with { FullSessionRecordingEnabled = enabled };
+        }
+        finally { _applyingWorkerSessionToggle = false; }
         ShowClipNotification("full-session-hotkey",
             enabled ? "Full Session Recording Started" : "Full Session Recording Stopped",
             playSound: false);
     }
 
+    private string _lastFullSessionFailure = string.Empty;
     private void EncoderTuning_OnHealthChanged(object? sender, ReplayCaptureHealth health)
     {
         if (!Dispatcher.UIThread.CheckAccess())
@@ -1161,6 +1174,16 @@ public sealed partial class MainWindow : Window
         ViewModel?.UpdateReplayStorageHealth(health.Storage);
         ViewModel?.UpdateReplayEncoderHealth(health);
         if (ViewModel is null) return;
+        if (health.FullSession.State == FullSessionState.Failed)
+        {
+            var failure = health.FullSession.OutputPath + "|" + health.FullSession.Failure;
+            if (_lastFullSessionFailure != failure)
+            {
+                _lastFullSessionFailure = failure;
+                ShowClipNotification("full-session-failure", $"Full Session stopped: {health.FullSession.Failure}", playSound: false);
+            }
+        }
+        else _lastFullSessionFailure = string.Empty;
         if (health.State == ReplayCaptureState.Recovering)
         {
             // Proxy keeps IsRecording logically true while worker reconnects.
@@ -1253,7 +1276,7 @@ public sealed partial class MainWindow : Window
             oldWorkerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
             oldWorkerEvents.AutoClipDetected -= Worker_AutoClipDetected;
             oldWorkerEvents.AutoClipStatusChanged -= Worker_AutoClipStatusChanged;
-            oldWorkerEvents.FullSessionFinalizeChanged -= Worker_FullSessionFinalizeChanged;
+            oldWorkerEvents.FullSessionClosed -= Worker_FullSessionClosed;
         }
         _replayBuffer.Dispose();
         _replayConfigSnapshot = config;
@@ -2936,11 +2959,22 @@ public sealed partial class MainWindow : Window
         if (_activeReplayConfigSnapshot is { } snapshot && RuntimeSettingsDiffer(snapshot, desired)) ScheduleReplayRestart();
     }
 
+    private void ApplySavedRecordingSettings()
+    {
+        if (!Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(ApplySavedRecordingSettings); return; }
+        if (_applyingWorkerSessionToggle || ViewModel is null || _activeReplayConfigSnapshot is not { } active) return;
+        if (ViewModel.IsReplayRecording && RuntimeSettingsDiffer(active, ViewModel.CreateReplayConfig())) ScheduleReplayRestart();
+    }
+
     private static bool RuntimeSettingsDiffer(ReplayBufferConfig active, ReplayBufferConfig desired) =>
         active.DurationSeconds != desired.DurationSeconds || active.MaxHeight != desired.MaxHeight || active.FrameRate != desired.FrameRate ||
         active.BitrateMbps != desired.BitrateMbps || !string.Equals(active.VideoCodec, desired.VideoCodec, StringComparison.Ordinal) ||
         !string.Equals(active.EncoderMode, desired.EncoderMode, StringComparison.Ordinal) || !string.Equals(active.FrameRateMode, desired.FrameRateMode, StringComparison.Ordinal) ||
         active.FullSessionRecordingEnabled != desired.FullSessionRecordingEnabled ||
+        !string.Equals(active.MicrophoneChannelMode, desired.MicrophoneChannelMode, StringComparison.Ordinal) ||
+        !active.MicrophoneDeviceIds.SequenceEqual(desired.MicrophoneDeviceIds, StringComparer.OrdinalIgnoreCase) ||
+        !active.ChatAudioProcessNames.SequenceEqual(desired.ChatAudioProcessNames, StringComparer.OrdinalIgnoreCase) ||
+        !active.GameAudioExcludedProcesses.SequenceEqual(desired.GameAudioExcludedProcesses, StringComparer.OrdinalIgnoreCase) ||
         active.GameAudioVolumePercent != desired.GameAudioVolumePercent || active.MicrophoneVolumePercent != desired.MicrophoneVolumePercent ||
         active.MicrophoneNoiseSuppressionEnabled != desired.MicrophoneNoiseSuppressionEnabled || active.MicrophoneNoiseGateThresholdDb != desired.MicrophoneNoiseGateThresholdDb ||
         !AudioProcessesEqual(active.AdditionalAudioProcesses, desired.AdditionalAudioProcesses);
@@ -4941,11 +4975,8 @@ public sealed partial class MainWindow : Window
 
     private void RequestLibraryHoverPreview(Control control, ClipCardViewModel clip)
     {
-        // Correctness, not just presentation: a session's audio mux finishes by
-        // renaming over this exact path, and LibVLC holding a read handle makes
-        // that File.Move fail - a hover would turn a locked card into a session
-        // that permanently lost its audio.
-        if (clip.IsFinalizing) return;
+        // A live recording owns this file until its mux worker closes it.
+        if (RecordingFileOwnership.IsActive(clip.Path)) return;
         var presenter = control.GetVisualDescendants().OfType<ClipPreviewPresenter>().FirstOrDefault();
         // Decode at the size this card actually paints at, not the clip's own
         // resolution - see ClipHoverPreviewController's class comment.

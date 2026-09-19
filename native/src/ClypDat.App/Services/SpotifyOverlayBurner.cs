@@ -17,6 +17,7 @@ internal static class SpotifyOverlayBurner
 
     public static async Task<SpotifyOverlayOutcome> BurnAsync(string clipPath, string cardPath, string? position, CancellationToken token = default, IReadOnlyList<string>? preferredCodec = null, SpotifyOverlayBounds? bounds = null)
     {
+        if (RecordingFileOwnership.IsActive(clipPath)) return SpotifyOverlayOutcome.Skipped;
         if (!FfmpegPathResolver.IsAvailable || !File.Exists(clipPath) || !File.Exists(cardPath)) return SpotifyOverlayOutcome.Failed;
         var folder = Path.Combine(Path.GetDirectoryName(clipPath)!, ".clypdat-overlay-" + Guid.NewGuid().ToString("N"));
         var output = Path.Combine(folder, "burned" + Path.GetExtension(clipPath));
@@ -114,7 +115,10 @@ internal static class SpotifyOverlayBurner
             foreach (var tag in values.EnumerateObject()) tags[tag.Name] = tag.Value.GetString() ?? "";
         var streams = json.RootElement.GetProperty("streams").EnumerateArray().ToArray();
         var audio = streams.Where(s => s.GetProperty("codec_type").GetString() == "audio")
-            .Select(s => string.Join(":", new[] { "codec_name", "sample_rate", "channels" }.Select(k => s.TryGetProperty(k, out var v) ? v.ToString() : ""))).ToArray();
+            .Select(s => string.Join(":", new[] { "codec_name", "sample_rate", "channels" }.Select(k => s.TryGetProperty(k, out var v) ? v.ToString() : "")) + ":" +
+                (s.TryGetProperty("tags", out var streamTags) ? string.Join("|", streamTags.EnumerateObject()
+                    .Where(t => t.Name.Equals("title", StringComparison.OrdinalIgnoreCase) || t.Name.Equals("handler_name", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Select(t => t.Value.GetString())) : "")).ToArray();
         return new(double.Parse(format.GetProperty("duration").GetString()!, CultureInfo.InvariantCulture), audio,
             tags.TryGetValue(BurnMarker, out var marker) && marker == "1", tags,
             streams.Any(s => s.GetProperty("codec_type").GetString() == "video"));
@@ -142,7 +146,7 @@ internal static class SpotifyOverlayBurner
         args.Add("-filter_complex"); args.Add(graph);
         args.Add("-map"); args.Add("[video]"); args.Add("-map"); args.Add("0:a?"); args.Add("-map_metadata"); args.Add("0");
         foreach (var item in codec) args.Add(item);
-        args.Add("-c:a"); args.Add("copy"); args.Add("-shortest"); args.Add("-movflags"); args.Add("+faststart+use_metadata_tags"); args.Add("-metadata"); args.Add(BurnMarker + "=1"); args.Add(output);
+        args.Add("-c:a"); args.Add("copy"); args.Add("-shortest"); MediaContainerOptions.AddFinalizedOptions(args, output); args.Add("-metadata"); args.Add(BurnMarker + "=1"); args.Add(output);
         process.Start();
         var stderr = process.StandardError.ReadToEndAsync();
         var stdout = process.StandardOutput.ReadToEndAsync();

@@ -26,6 +26,7 @@ public sealed record ActiveAudioProcess(string Name, int ProcessId, string Execu
 [SupportedOSPlatform("windows")]
 public sealed class AudioCapturePipeline : IDisposable
 {
+    internal event Action<LiveAudioPacket>? LiveAudio;
     private readonly string _bufferFolder;
     private readonly object _lock = new();
     // Serialises the per-capture WAV snapshot copies (see
@@ -33,11 +34,8 @@ public sealed class AudioCapturePipeline : IDisposable
     // save may have in flight at once (see RunGatedProcessAsync). Static so
     // the limits hold across pipelines rather than per instance.
     //
-    // The cap matters most for a Full Session finalize: its window is chunked
-    // into 60s segments, so building every segment of every track at once -
-    // which is what an unbounded Task.WhenAll does - meant hundreds of
-    // concurrent ffmpeg processes for a multi-hour session. Two keeps the
-    // overlap that makes saves quick without letting the machine fall over.
+    // Replay saves can span many source files and segments. Two FFmpeg
+    // workers bound concurrent snapshot reads and aligned-track assembly.
     private static readonly SemaphoreSlim SourceSnapshotGate = new(1, 1);
     private static readonly SemaphoreSlim FfmpegGate = new(2, 2);
     private readonly List<ReplayAudioCapture> _audioCaptures = new();
@@ -66,9 +64,6 @@ public sealed class AudioCapturePipeline : IDisposable
         StartAudioCaptures(config, generation);
     }
 
-    // deleteCaptureFiles: false when a background full-session finalize still
-    // needs the raw WAVs - the finalize job takes ownership (via the
-    // CaptureSetSnapshot it was handed) and deletes them itself when done.
     public void Stop(bool deleteCaptureFiles = true)
     {
         _routes.Stop(() =>
@@ -92,20 +87,6 @@ public sealed class AudioCapturePipeline : IDisposable
                 _audioCaptures.Clear();
             }
         });
-    }
-
-    // Opaque handle over the current capture set, for a background finalize
-    // that must keep building tracks after Stop() has cleared the live list.
-    public sealed class CaptureSetSnapshot
-    {
-        internal CaptureSetSnapshot(ReplayAudioCapture[] captures) => Captures = captures;
-        internal ReplayAudioCapture[] Captures { get; }
-        public IReadOnlyList<string> FilePaths => Captures.Select(capture => capture.Path).ToArray();
-    }
-
-    public CaptureSetSnapshot SnapshotCaptures()
-    {
-        lock (_lock) return new CaptureSetSnapshot(_audioCaptures.ToArray());
     }
 
     public void PruneOlderThan(DateTime cutoffUtc)
@@ -133,18 +114,10 @@ public sealed class AudioCapturePipeline : IDisposable
         ReplayBufferConfig config,
         List<string> snapshots,
         CancellationToken cancellationToken,
-        CaptureSetSnapshot? capturesOverride = null,
         AudioSnapshotPurpose snapshotPurpose = AudioSnapshotPurpose.InteractiveReplay)
     {
         ReplayAudioCapture[] captures;
-        if (capturesOverride is not null)
-        {
-            captures = capturesOverride.Captures;
-        }
-        else
-        {
-            lock (_lock) captures = _audioCaptures.ToArray();
-        }
+        lock (_lock) captures = _audioCaptures.ToArray();
 
         // Shared across every track/segment of this one save - see
         // GetOrCreateSourceSnapshotAsync for why this must be per-save, not
@@ -342,7 +315,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new WasapiLoopbackCapture(device);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title), path, title, kind, null, MonotonicClock.UtcNow, sourceKey));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title, kind, sourceKey), path, title, kind, null, MonotonicClock.UtcNow, sourceKey));
         AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}.");
     }
 
@@ -351,7 +324,7 @@ public sealed class AudioCapturePipeline : IDisposable
         var path = Path.Combine(_bufferFolder, $"{AudioKindPrefix(kind)}_{processId}_{Guid.NewGuid():N}.wav");
         TryDelete(path);
         var capture = new ProcessLoopbackWaveIn(processId, mode);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title), path, title, kind, processId, MonotonicClock.UtcNow, sourceKey));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title, kind, sourceKey), path, title, kind, processId, MonotonicClock.UtcNow, sourceKey));
         AppLog.Debug($"Audio capture started: {title}, pid={processId}, mode={mode}.");
     }
 
@@ -368,33 +341,24 @@ public sealed class AudioCapturePipeline : IDisposable
             config.MicrophoneNoiseSuppressionEnabled,
             config.MicrophoneNoiseGateThresholdDb,
             device.FriendlyName);
-        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title), path, title, AudioCaptureKind.Microphone, null, MonotonicClock.UtcNow, sourceKey, device.ID));
+        lock (_lock) _audioCaptures.Add(new ReplayAudioCapture(StartSession(capture, path, title, AudioCaptureKind.Microphone, sourceKey), path, title, AudioCaptureKind.Microphone, null, MonotonicClock.UtcNow, sourceKey, device.ID));
         AppLog.Debug($"Audio capture started: {title}, device={device.FriendlyName}, denoise={config.MicrophoneNoiseSuppressionEnabled}.");
     }
 
-    // Full Session needs disk (a recording that can run for hours can't
-    // reasonably live entirely in RAM, and losing it to a crash would be far
-    // worse than the disk-write cost) - the plain replay-buffer window is
-    // capped at 20 minutes and only needs to survive until the next save, so
-    // it goes to RAM instead: no continuous disk writes for the common case
-    // (recording armed, nothing saved yet), which used to run the whole time
-    // the buffer was armed regardless of whether anything was ever saved.
-    // `path` is still passed through even for the in-memory case - nothing
-    // is ever written there, but ReplayAudioCapture.Path is also used as a
-    // plain nominal identifier elsewhere (logging, TryDelete no-ops).
-    // Reverted to always-disk. RAM-backed capture (StartInMemory below) was
-    // the suspected cause of a severe, rapidly-repeating managed-heap churn -
-    // managedMb swinging from ~200MB to 2-3GB within seconds, driving
-    // frequent multi-second blocking GC pauses that showed up as capture
-    // stutter/freezing - after the video ring buffer was conclusively ruled
-    // out as the source (its own byte total stayed flat at ~80-95MB across
-    // the exact same window the managed heap was swinging wildly). Left the
-    // RAM infrastructure (StartInMemory/TrimMemoryCaptures/IsMemoryBacked)
-    // in place rather than ripping it out - IsMemoryBacked is always false
-    // now so it's all inert, but easy to flip back if disk turns out not to
-    // be the fix after all.
-    private AudioCaptureSession StartSession(IWaveIn capture, string path, string title)
+    // Replay keeps rotating raw WAVs on disk. The separate live tap supplies
+    // Full Session; it never extends raw-audio retention. Memory-backed replay
+    // remains disabled because large rotating buffers caused long GC pauses.
+    private AudioCaptureSession StartSession(IWaveIn capture, string path, string title, AudioCaptureKind kind, string sourceKey)
     {
+        var sourceId = Guid.NewGuid();
+        capture.DataAvailable += (_, packet) =>
+        {
+            if (packet.BytesRecorded <= 0) return;
+            var start = (packet as TimestampedWaveInEventArgs)?.PacketStartUtc
+                ?? MonotonicClock.UtcNow - TimeSpan.FromSeconds((double)packet.BytesRecorded / capture.WaveFormat.AverageBytesPerSecond);
+            // Subscribers must copy before returning; WASAPI owns the buffer.
+            LiveAudio?.Invoke(new LiveAudioPacket(kind, sourceKey, sourceId, capture.WaveFormat, packet.Buffer, packet.BytesRecorded, start));
+        };
         return AudioCaptureSession.Start(capture, path, title);
     }
 

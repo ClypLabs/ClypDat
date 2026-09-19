@@ -16,6 +16,10 @@
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Replay Buffer" />
+      <StackPanel Orientation="Horizontal" Spacing="7" ToolTip.Tip="{Binding RecordingDetail}" AutomationProperties.HelpText="{Binding RecordingDetail}">
+        <Ellipse Width="7" Height="7" Fill="{Binding RecordingDotColor}" Opacity="{Binding RecordingDotOpacity}" IsVisible="{Binding RecordingDotVisible}" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding RecorderStatus}" />
+      </StackPanel>
       <TextBlock Classes="settingsSectionDesc" Text="Control how ClypDat records in the background and which capture backend it uses." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
@@ -174,7 +178,7 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|Session codec|Finalize in background|Storage limit|Custom limit|Full Session Recording}">
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|File Format|MKV|MP4|Storage limit|Custom limit|Full Session Recording}">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="FULL SESSION RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording}">
@@ -184,27 +188,26 @@
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionRecordingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
-        <StackPanel Spacing="6" IsVisible="{Binding FullSessionRecordingEnabled}">
+        <StackPanel Spacing="6">
           <StackPanel Spacing="2" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Destination folder}">
             <TextBlock Classes="settingsRowTitleSm" Text="Destination Folder" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
             <TextBlock Classes="settingsRowDesc" Text="{Binding FullSessionRecordingFolderDisplay}" TextTrimming="CharacterEllipsis" />
           </StackPanel>
           <Border Classes="settingsDivider" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
-          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Session codec}">
+          <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitleSm" Text="Session Codec" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              <TextBlock Classes="settingsRowDescSm" Text="H.264 saves instantly. AV1 re-encodes on your GPU when the session ends - smaller files, longer finalize." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              <TextBlock Classes="settingsRowTitleSm" Text="File Format" />
+              <TextBlock Classes="settingsRowDescSm" Text="Uses Recording Quality settings. Format changes apply to the next Full Session." TextWrapping="Wrap" />
             </StackPanel>
-            <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" ItemsSource="{Binding FullSessionCodecs}" SelectedItem="{Binding SelectedFullSessionCodec}" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" Classes="settingsInput" Width="190" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
           </Grid>
-          <Border Classes="settingsDivider" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
-          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Finalize in background}">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitleSm" Text="Finalize in Background" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              <TextBlock Classes="settingsRowDescSm" Text="On: the session video appears the moment recording stops, and audio tracks attach quietly afterward (file is briefly video-only). Off: everything is processed before the file appears." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <TextBlock Classes="settingsRowDescSm" Text="{Binding FullSessionFormatRecommendation}" TextWrapping="Wrap" IsVisible="{Binding !IsFullSessionMp4}" />
+          <Border Background="#24FFB547" BorderBrush="#FFB547" BorderThickness="1" CornerRadius="6" Padding="12" IsVisible="{Binding IsFullSessionMp4}">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{Binding FullSessionFormatWarning}" Foreground="#FFB547" TextWrapping="Wrap" />
+              <Button Content="Use MKV" Click="UseMkv_OnClick" HorizontalAlignment="Left" />
             </StackPanel>
-            <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionBackgroundFinalize}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-          </Grid>
+          </Border>
           <Border Classes="settingsDivider" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
           <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Storage limit}">
             <StackPanel Spacing="2" VerticalAlignment="Center">

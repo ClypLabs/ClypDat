@@ -23,13 +23,14 @@ public sealed unsafe class ReplayGpuEncodeTests(ITestOutputHelper output)
         using var ownedDevice = device;
         using var ownedContext = context;
         using var session = new ReplaySessionLifetime(CancellationToken.None);
+        var root = Path.Combine(AppContext.BaseDirectory, "full-session-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
         var config = new ReplayBufferConfig(60, height, frameRate, 0, 0, width, height,
-            "", "", [], [], "", [], "Synthetic", "synthetic.exe", "", "");
-        using var buffer = new NativeReplayBuffer(() => config);
+            "", "", [], [], "", [], "Synthetic", "synthetic.exe", "", "", LibraryFolder: root, FullSessionRecordingEnabled: true, FullSessionRecordingFolder: Path.Combine(root, "VODs"));
+        var savedSessions = 0;
+        using var buffer = new NativeReplayBuffer(() => config, _ => Interlocked.Increment(ref savedSessions));
         var pools = new (nint DeviceRef, nint FramesRef)[2];
         var codecs = new nint[2];
-        var path = Path.Combine(Path.GetTempPath(), $"clypdat-synthetic-{Guid.NewGuid():N}.mp4");
-        AVFormatContext* format = null;
         var packet = ffmpeg.av_packet_alloc();
         using var queue = new BlockingCollection<NativeReplayBuffer.EncodeJob>(12);
         Thread? encoder = null;
@@ -46,17 +47,9 @@ public sealed unsafe class ReplayGpuEncodeTests(ITestOutputHelper output)
                 Assert.True(hardware, name);
                 codecs[i] = (nint)codec;
             }
-            Assert.True(ffmpeg.avformat_alloc_output_context2(&format, null, "mp4", path) >= 0);
-            var stream = ffmpeg.avformat_new_stream(format, null);
-            var firstCodec = (AVCodecContext*)codecs[0];
-            stream->time_base = firstCodec->time_base;
-            Assert.True(ffmpeg.avcodec_parameters_from_context(stream->codecpar, firstCodec) >= 0);
-            Assert.True(ffmpeg.avio_open(&format->pb, path, ffmpeg.AVIO_FLAG_WRITE) >= 0);
-            Assert.True(ffmpeg.avformat_write_header(format, null) >= 0);
+            buffer.StartFullSession(config, (AVCodecContext*)codecs[0]);
             var packetPtr = (nint)packet;
-            var formatPtr = (nint)format;
-            var streamPtr = (nint)stream;
-            encoder = new Thread(() => buffer.EncodeLoop(queue, codecs[0], packetPtr, formatPtr, streamPtr,
+            encoder = new Thread(() => buffer.EncodeLoop(queue, codecs[0], packetPtr,
                 new ReplayLatencyHistogram(), new ReplayLatencyHistogram(), session.NativeGate)) { IsBackground = true };
             encoder.Start();
             // Generated NV12 only. Never acquires desktop/window pixels.
@@ -101,19 +94,28 @@ public sealed unsafe class ReplayGpuEncodeTests(ITestOutputHelper output)
                 output.WriteLine($"Synthetic D3D11/NVENC: {frameCount} frames, encoder swap, {throughput:0.0} FPS throughput.");
                 Assert.True(throughput >= frameRate, $"Throughput {throughput:0.0} below configured {frameRate} FPS.");
             }
-            Assert.True(ffmpeg.av_write_trailer(format) >= 0);
-            ffmpeg.avio_closep(&format->pb);
-            ffmpeg.avformat_free_context(format);
-            format = null;
-            AVFormatContext* input = null;
-            Assert.True(ffmpeg.avformat_open_input(&input, path, null, null) >= 0);
-            try
+            buffer.CloseFullSession();
+            buffer.WaitForFullSessionCloseAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+            var paths = Directory.GetFiles(config.FullSessionRecordingFolder, "*.mkv");
+            Assert.Equal(2, paths.Length);
+            Assert.Equal(2, savedSessions);
+            var count = 0;
+            foreach (var path in paths)
             {
-                var count = 0;
-                while (ffmpeg.av_read_frame(input, packet) >= 0) { count++; ffmpeg.av_packet_unref(packet); }
-                Assert.Equal(frameCount, count);
+                FullSessionRecorderTests.Run(FfmpegPathResolver.FfmpegPath, "-v", "error", "-xerror", "-i", path, "-map", "0", "-f", "null", "-");
+                AVFormatContext* input = null;
+                Assert.True(ffmpeg.avformat_open_input(&input, path, null, null) >= 0);
+                try
+                {
+                    while (ffmpeg.av_read_frame(input, packet) >= 0)
+                    {
+                        if (packet->stream_index == 0) count++;
+                        ffmpeg.av_packet_unref(packet);
+                    }
+                }
+                finally { ffmpeg.avformat_close_input(&input); }
             }
-            finally { ffmpeg.avformat_close_input(&input); }
+            Assert.Equal(frameCount, count);
         }
         finally
         {
@@ -122,7 +124,6 @@ public sealed unsafe class ReplayGpuEncodeTests(ITestOutputHelper output)
             {
                 while (queue.TryTake(out var abandoned)) { var frame = (AVFrame*)abandoned.FramePtr; if (frame is not null) ffmpeg.av_frame_free(&frame); }
                 ffmpeg.av_packet_free(&packet);
-                if (format is not null) { ffmpeg.avio_closep(&format->pb); ffmpeg.avformat_free_context(format); }
                 foreach (var pointer in codecs) { var codec = (AVCodecContext*)pointer; if (codec is not null) ffmpeg.avcodec_free_context(&codec); }
                 foreach (var pool in pools)
                 {
@@ -130,7 +131,9 @@ public sealed unsafe class ReplayGpuEncodeTests(ITestOutputHelper output)
                     if (frames is not null) ffmpeg.av_buffer_unref(&frames);
                     if (hardware is not null) ffmpeg.av_buffer_unref(&hardware);
                 }
-                File.Delete(path);
+                buffer.CloseFullSession();
+                buffer.WaitForFullSessionCloseAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+                Directory.Delete(root, true);
             }
         }
     }

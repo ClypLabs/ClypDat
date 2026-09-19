@@ -154,6 +154,8 @@ public static class ClipInfoSidecar
 
     public static void Delete(string libraryRoot, string clipPath)
     {
+        RecordingFileOwnership.ThrowIfActive(clipPath);
+        try { File.Delete(FullSessionRecovery.Marker(clipPath)); } catch (IOException) { }
         SpotifyTimelineSidecar.Delete(libraryRoot, clipPath);
         try
         {

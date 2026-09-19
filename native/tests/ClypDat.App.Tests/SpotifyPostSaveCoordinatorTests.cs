@@ -78,7 +78,6 @@ public sealed class SpotifyPostSaveCoordinatorTests
         var retry = coordinator.RunAsync(path, null, true, () => Task.CompletedTask, _ => finishRetry.Task);
         var recreated = Card();
         Assert.True(recreated.IsSpotifyProcessing);
-        Assert.False(recreated.IsFinalizing);
         Assert.False(recreated.IsOpenable);
         finishRetry.SetResult(SpotifyOverlayOutcome.Completed);
         await retry;

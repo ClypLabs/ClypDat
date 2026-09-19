@@ -192,7 +192,7 @@ internal static class CustomGameSettingsResolver
             MicrophoneNoiseSuppressionEnabled: settings.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseGateThresholdDb: settings.MicrophoneNoiseGateThresholdDb,
             FullSessionRecordingEnabled: recordingEnabled && fullSession,
-            FullSessionVideoCodec: settings.FullSessionVideoCodec,
+            FullSessionVideoCodec: quality?.ReplayVideoCodec ?? settings.ReplayVideoCodec,
             FullSessionQuotaGb: settings.FullSessionQuotaGb,
             AppliedGroups: DescribeAppliedGroups(mode, quality, replay, audio));
     }

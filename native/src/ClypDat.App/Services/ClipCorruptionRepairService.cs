@@ -45,7 +45,7 @@ public sealed class ClipCorruptionRepairService
     /// </summary>
     public static async Task<bool> IsCorruptAsync(string clipPath, CancellationToken token)
     {
-        if (!FfmpegPathResolver.IsAvailable || !File.Exists(clipPath)) return false;
+        if (RecordingFileOwnership.IsActive(clipPath) || !FfmpegPathResolver.IsAvailable || !File.Exists(clipPath)) return false;
         var (errors, frames) = await DecodeProbeAsync(clipPath, InspectFrames, token).ConfigureAwait(false);
         // Decoder errors are the whole signal. An earlier version also required
         // tonal spread, on the theory that the broken decode is flat grey - but
@@ -68,6 +68,7 @@ public sealed class ClipCorruptionRepairService
     /// </summary>
     public static async Task<RepairResult> RepairAsync(string clipPath, IProgress<double>? progress, CancellationToken token)
     {
+        if (RecordingFileOwnership.IsActive(clipPath)) return new RepairResult(RepairStatus.Skipped, "recording active");
         if (!FfmpegPathResolver.IsAvailable) return new RepairResult(RepairStatus.Skipped, "ffmpeg unavailable");
         if (!File.Exists(clipPath)) return new RepairResult(RepairStatus.Skipped, "file missing");
 
@@ -84,7 +85,7 @@ public sealed class ClipCorruptionRepairService
         Directory.CreateDirectory(workFolder);
         var rawPath = Path.Combine(workFolder, "raw.h264");
         var candidatePath = Path.Combine(workFolder, "candidate.h264");
-        var rebuiltPath = Path.Combine(workFolder, "rebuilt.mp4");
+        var rebuiltPath = Path.Combine(workFolder, "rebuilt" + Path.GetExtension(clipPath));
         try
         {
             progress?.Report(0);
@@ -149,7 +150,7 @@ public sealed class ClipCorruptionRepairService
                 progress?.Report(SearchDone);
                 await RunAsync(FfmpegPathResolver.FfmpegPath,
                     $"-v error -y -fflags +genpts -r {frameRate} -f h264 -i \"{candidatePath}\" -i \"{clipPath}\" " +
-                    $"-map 0:v:0 -map 1:a? -c copy -movflags +faststart -map_metadata 1 \"{rebuiltPath}\"", token,
+                    $"-map 0:v:0 -map 1:a? -c copy {MediaContainerOptions.RemuxOptions(rebuiltPath)} -map_metadata 1 \"{rebuiltPath}\"", token,
                     position: Band(progress, SearchDone, RemuxDone, durationSeconds))
                     .ConfigureAwait(false);
                 if (!File.Exists(rebuiltPath) || new FileInfo(rebuiltPath).Length == 0) continue;

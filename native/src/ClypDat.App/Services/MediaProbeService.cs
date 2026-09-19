@@ -69,6 +69,7 @@ public sealed class MediaProbeService
 
     public static bool IsVideoFile(string path)
     {
+        if (RecordingFileOwnership.IsActive(path)) return false;
         if (!VideoExtensions.Contains(Path.GetExtension(path))) return false;
 
         // Anything under a dot-folder is ClypDat's own bookkeeping, not library
@@ -152,6 +153,8 @@ public sealed class MediaProbeService
 
     public async Task<MediaDurationProbeResult> ProbeDurationAsync(string filePath, CancellationToken cancellationToken = default)
     {
+        await FullSessionRecovery.RecoverAsync(filePath, cancellationToken).ConfigureAwait(false);
+        RecordingFileOwnership.ThrowIfActive(filePath);
         var result = await RunProcessAsync("ffprobe", new[]
         {
             "-v", "error",
@@ -193,6 +196,8 @@ public sealed class MediaProbeService
     // generation - see HydrateLibraryClipsAsync for why that split matters.
     public async Task<MediaFileInfo> ProbeMetadataAsync(string filePath)
     {
+        await FullSessionRecovery.RecoverAsync(filePath).ConfigureAwait(false);
+        RecordingFileOwnership.ThrowIfActive(filePath);
         using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
         if (processingRead is null) return CreateLibraryStub(filePath);
         var info = new FileInfo(filePath);
@@ -256,10 +261,9 @@ public sealed class MediaProbeService
                 if (format.TryGetProperty("tags", out var provenanceTags))
                     spotifyOverlayBurned = provenanceTags.EnumerateObject().Any(tag =>
                         tag.Name.Equals(SpotifyOverlayBurner.BurnMarker, StringComparison.OrdinalIgnoreCase) && tag.Value.GetString() == "1");
-                if (format.TryGetProperty("tags", out var formatTags) &&
-                    formatTags.TryGetProperty("comment", out var commentTag))
+                if (format.TryGetProperty("tags", out var formatTags))
                 {
-                    var comment = commentTag.GetString() ?? string.Empty;
+                    var comment = GetString(formatTags, "comment");
                     var prefixes = new[]
                     {
                         ClipMetadataTagger.BackendTagKey + "=",
@@ -1524,7 +1528,11 @@ public sealed class MediaProbeService
 
     private static string GetString(JsonElement element, string property)
     {
-        return element.TryGetProperty(property, out var value) ? value.ToString() : string.Empty;
+        if (element.TryGetProperty(property, out var value)) return value.ToString();
+        if (element.ValueKind == JsonValueKind.Object)
+            foreach (var pair in element.EnumerateObject())
+                if (string.Equals(pair.Name, property, StringComparison.OrdinalIgnoreCase)) return pair.Value.ToString();
+        return string.Empty;
     }
 
     private static int GetInt(JsonElement element, string property)

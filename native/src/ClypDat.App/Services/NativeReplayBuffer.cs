@@ -61,7 +61,7 @@ namespace ClypDat.App.Services;
 // AudioCapturePipeline - the same Game/Chat/Microphone routing, WASAPI capture, and mux
 // logic WindowsReplayBuffer uses, via its own independent instance.
 [SupportedOSPlatform("windows10.0.17763.0")]
-public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource, IFullSessionFinalizeReporter, IVideoOverlaySettingsReceiver
+public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IDetectorFrameSource, IFullSessionRecorderLifecycle, IVideoOverlaySettingsReceiver
 {
     // cursorCompositingActive refuses the direct path outright, and that is the
     // whole point of it. The direct Blt runs on the capture thread; the cursor
@@ -171,50 +171,76 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
     private CancellationTokenSource? _captureCts;
     private Task? _captureTask;
-    private Task? _backgroundFinalize;
+    private int _fullSessionGeneration;
+    private FullSessionRecorder? _fullSession;
+    private FullSessionStatus _fullSessionStatus = new(FullSessionState.Off);
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Task> _closingSessions = new();
+    private ReplayBufferConfig? _fullSessionConfig;
     // Read from the capture thread on every sampled frame, written from the
     // worker's policy handler.
     private DetectorRegionSet? _detectorRegions;
     public void SetDetectorRegions(DetectorRegionSet? regions) => Volatile.Write(ref _detectorRegions, regions);
-    public event EventHandler<IReadOnlyList<FullSessionFinalizeProgress>>? FullSessionFinalizeChanged;
-    // Keyed by the visible library path, which is also the library card's key.
-    // A dictionary rather than a single "current" because the full-session
-    // hotkey stop-then-starts, so two finalizes can overlap.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, FullSessionFinalizeProgress> ActiveFinalizes =
-        new(StringComparer.OrdinalIgnoreCase);
+    public event EventHandler<string>? FullSessionClosed;
 
-    internal static IReadOnlyList<FullSessionFinalizeProgress> ActiveFinalizeSnapshot() => ActiveFinalizes.Values.ToArray();
+    public Task WaitForFullSessionCloseAsync(TimeSpan timeout) => Task.WhenAll(_closingSessions.ToArray()).WaitAsync(timeout);
 
-    private void PublishFinalize(FullSessionFinalizeProgress progress)
+    internal unsafe void StartFullSession(ReplayBufferConfig config, AVCodecContext* codec)
     {
-        ActiveFinalizes[progress.Path] = progress;
-        FullSessionFinalizeChanged?.Invoke(this, ActiveFinalizeSnapshot());
+        if (!config.FullSessionRecordingEnabled || string.IsNullOrWhiteSpace(config.FullSessionRecordingFolder)) return;
+        _fullSessionConfig = config;
+        var generation = Interlocked.Increment(ref _fullSessionGeneration);
+        try
+        {
+            _fullSession = new FullSessionRecorder(config, codec, status =>
+            {
+                if (generation != Volatile.Read(ref _fullSessionGeneration)) return;
+                if (_health.State == ReplayCaptureState.Stopping && status.State is FullSessionState.Starting or FullSessionState.Recording)
+                    status = status with { State = FullSessionState.Stopping };
+                Volatile.Write(ref _fullSessionStatus, status);
+                HealthChanged?.Invoke(this, GetHealthSnapshot());
+            });
+            var recorder = _fullSession;
+            _audio.LiveAudio += recorder.EnqueueAudio;
+            _ = recorder.Completion.ContinueWith(_ =>
+            {
+                if (recorder.Status.State == FullSessionState.Failed) CloseFullSession(recorder);
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+        catch (Exception error)
+        {
+            _fullSessionStatus = new(FullSessionState.Failed, Failure: error.Message);
+            SetHealth(_health);
+            AppLog.Error("Full Session start failed; replay recording continues.", error);
+        }
     }
 
-    private void ClearFinalize(string path)
+    internal void CloseFullSession(FullSessionRecorder? expected = null)
     {
-        ActiveFinalizes.TryRemove(path, out _);
-        FullSessionFinalizeChanged?.Invoke(this, ActiveFinalizeSnapshot());
+        var recorder = expected is null ? Interlocked.Exchange(ref _fullSession, null)
+            : Interlocked.CompareExchange(ref _fullSession, null, expected);
+        if (recorder is null || (expected is not null && !ReferenceEquals(recorder, expected))) return;
+        var config = recorder.Configuration;
+        _audio.LiveAudio -= recorder.EnqueueAudio;
+        var pauseEvents = GetOrderedPauseEvents();
+        var end = MonotonicClock.UtcNow;
+        recorder.Complete();
+        _closingSessions.Enqueue(Task.Run(async () =>
+        {
+            await recorder.Completion.ConfigureAwait(false);
+            try
+            {
+                if (recorder.StartUtc is { } start)
+                {
+                    WritePausedRangesSidecar(config.LibraryFolder, recorder.OutputPath, ComputePausedRangesSeconds(pauseEvents, start, end));
+                    _recordFullSession((end - start).TotalSeconds);
+                }
+                EnforceFullSessionQuota(config);
+            }
+            catch (Exception error) { AppLog.Error("Full Session metadata finalization failed.", error); }
+            FullSessionClosed?.Invoke(this, recorder.OutputPath);
+        }));
     }
 
-    /// <summary>
-    /// Shutdown used to end the worker process the moment StopAsync returned,
-    /// killing ffmpeg mid-mux and losing that session's audio for good - the
-    /// background task was never awaited anywhere.
-    /// </summary>
-    public async Task WaitForBackgroundFinalizeAsync(TimeSpan timeout)
-    {
-        var pending = _backgroundFinalize;
-        if (pending is null || pending.IsCompleted) return;
-        AppLog.Info("Full session: waiting for the background audio mux before shutting down.");
-        var completed = await Task.WhenAny(pending, Task.Delay(timeout)).ConfigureAwait(false);
-        if (!ReferenceEquals(completed, pending))
-            AppLog.Error($"Full session: background mux did not finish within {timeout.TotalMinutes:F0} minutes; shutting down anyway.");
-    }
-    // Guards StartAsync's orphan-WAV sweep across the app: a background
-    // finalize still owns capture WAVs after its session stopped, and a new
-    // session starting meanwhile must not sweep them out from under it.
-    private static int _activeBackgroundFinalizes;
     private volatile bool _sessionActive;
     private volatile bool _nativeShutdownIncomplete;
     private AVRational _timeBase = new() { num = 1, den = 1_000_000 };
@@ -227,10 +253,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // RingPacket.Generation; only ever appended to, and only under _bufferLock.
     private readonly List<EncoderGenerationInfo> _encoderGenerations = new();
     private int _encoderGeneration;
-    // Codec family only (H.264 vs AV1), used to pick the full-session export
-    // pass. Failover never crosses families, so this stays valid across a swap;
-    // the per-generation codec id used for muxing lives in _encoderGenerations.
-    private AVCodecID _videoCodecId = AVCodecID.AV_CODEC_ID_H264;
     // Set by the encode thread when it binds a replacement encoder, consumed by
     // the pacing thread on its next frame.
     private int _forceKeyframeRequested;
@@ -291,8 +313,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     private DateTime? _lastDegradedUtc;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Native");
 
+    private readonly Action<double> _recordFullSession;
     public NativeReplayBuffer(Func<ReplayBufferConfig> configProvider)
+        : this(configProvider, seconds => ClipStatsReporter.Record(ClipStatKind.FullSession, seconds)) { }
+
+    internal NativeReplayBuffer(Func<ReplayBufferConfig> configProvider, Action<double> recordFullSession)
     {
+        _recordFullSession = recordFullSession;
         _configProvider = configProvider;
         _bufferFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "native-replay-buffer");
         _audio = new AudioCapturePipeline(_bufferFolder);
@@ -333,10 +360,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     public event EventHandler<ReplayCaptureHealth>? HealthChanged;
     public event EventHandler<DetectorFrameSnapshot>? DetectorFrameAvailable;
 
-    public ReplayCaptureHealth GetHealthSnapshot() => _health;
+    public ReplayCaptureHealth GetHealthSnapshot() => _health with { FullSession = Volatile.Read(ref _fullSessionStatus) };
 
     private void SetHealth(ReplayCaptureHealth health)
     {
+        health = health with { FullSession = Volatile.Read(ref _fullSessionStatus) };
         _health = health;
         HealthChanged?.Invoke(this, health);
     }
@@ -425,14 +453,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         if (_sessionActive) return Task.CompletedTask;
 
         Directory.CreateDirectory(_bufferFolder);
-        if (Volatile.Read(ref _activeBackgroundFinalizes) == 0)
-        {
-            CleanupOldFiles();
-        }
-        else
-        {
-            AppLog.Info("Native replay start: skipping orphan-WAV sweep, a background session finalize still owns capture files.");
-        }
+        CleanupOldFiles();
+        Interlocked.Increment(ref _fullSessionGeneration);
+        _fullSessionStatus = new(_configProvider().FullSessionRecordingEnabled ? FullSessionState.Starting : FullSessionState.Off);
+        while (_closingSessions.TryDequeue(out _)) { }
 
         var config = _configProvider();
         var configuredFrameRate = Math.Clamp(config.FrameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
@@ -523,45 +547,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             AudioCapturePipeline.TryDelete(file);
         }
 
-        RemoveOrphanedSessionTempVideos();
-    }
-
-    /// <summary>
-    /// A full session records to a temp file that background finalize then
-    /// MOVES onto the library path, so the finalize deliberately does not delete
-    /// it. If the app dies mid-session nothing ever does either, and these are
-    /// whole recordings - gigabytes each, accumulating forever.
-    /// </summary>
-    private static void RemoveOrphanedSessionTempVideos()
-    {
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(Path.GetTempPath(), "clypdat-full-session-video-*.mp4"))
-            {
-                try
-                {
-                    // Age alone is not enough - a session can legitimately run
-                    // for hours. An exclusive open is the reliable test for
-                    // "nothing is recording into this any more".
-                    if (DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < TimeSpan.FromHours(1)) continue;
-                    using (var probe = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None)) { }
-                    File.Delete(file);
-                    AppLog.Info($"Full session: removed an orphaned session temp video ({file}).");
-                }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-                {
-                    // Still being written, or not ours to touch.
-                }
-            }
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
-        {
-        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         _sessionActive = false;
+        if (_fullSessionStatus.State is FullSessionState.Recording or FullSessionState.Starting)
+        {
+            _fullSessionStatus = _fullSessionStatus with { State = FullSessionState.Stopping };
+        }
+        SetHealth(_health with { State = ReplayCaptureState.Stopping, UpdatedUtc = DateTime.UtcNow });
         _captureCts?.Cancel();
         if (_captureTask is not null)
         {
@@ -572,10 +567,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
         if (_nativeShutdownIncomplete) return;
 
-        // When a background finalize is running it took a snapshot of the
-        // capture set and deletes the WAVs itself once the session file is
-        // complete - deleting them here would yank them out from under it.
-        _audio.Stop(deleteCaptureFiles: _backgroundFinalize is null || _backgroundFinalize.IsCompleted);
+        // Live session audio no longer retains replay WAV files.
+        _audio.Stop(deleteCaptureFiles: true);
         _overlayCapture.Stop();
         lock (_bufferLock)
         {
@@ -589,6 +582,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             _recoveryHealthyWindows = 0;
         }
         _packetPayloads.Deactivate();
+        SetHealth(_health with { State = ReplayCaptureState.Stopped, UpdatedUtc = DateTime.UtcNow });
     }
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null, Guid? saveId = null)
@@ -762,9 +756,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // One giant segment spanning the whole saved window let audio/video
             // clock drift (real hardware sample clocks are never exactly
             // 48000.000000Hz) accumulate uncorrected across the entire clip -
-            // FinalizeFullSessionRecording already chunks its (much longer)
-            // window into 60s segments with a periodic resync for exactly this
-            // reason, but a regular clip save at the default 60s replay length
+            // a regular clip save at the default 60s replay length
             // is long enough to hit the same drift, just less obviously since
             // it's usually the ONLY segment. Chunking here the same way fixes it
             // for any configured replay length, not just multi-hour sessions.
@@ -1073,8 +1065,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         AVFrame* frame = null;
         AVFrame* cleanFrame = null;
         AVPacket* packet = null;
-        AVFormatContext* fullSessionFormatContext = null;
-        AVStream* fullSessionStream = null;
         // Encode (avcodec_send_frame/receive_packet, both of which can block on
         // NVENC for a while under real GPU contention - see EncodeLoop) runs on
         // its own thread so a slow encode call never blocks AcquireNextFrame on
@@ -1119,13 +1109,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         // Encoders retired by a mid-session swap (see EncodeJob). Freed only
         // after the encode thread has joined - it may still be inside one.
         var retiredCodecContexts = new List<nint>();
-        var fullSessionTempVideoPath = string.Empty;
-        var fullSessionFinalOutputPath = string.Empty;
-        var fullSessionStartUtc = MonotonicClock.UtcNow;
-        // Real wall-clock twin of fullSessionStartUtc, only for the sidecar's
-        // user-facing CreatedAt - all alignment math stays on MonotonicClock.
-        var fullSessionStartWallUtc = DateTime.UtcNow;
-        var fullSessionGameDisplayName = string.Empty;
+
         var timerResolutionRaised = TimeBeginPeriod(1) == 0;
         // The capture loop has one frame interval to acquire, scale and hand
         // off each frame, and a missed one is a permanent hole in the clip.
@@ -1291,7 +1275,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             bool hardwareFramesActive;
             codecContext = CreateEncoder(config, outputWidth, outputHeight, hwFramesRef, device, out codecTimeBase, out encoderName, out hardwareFramesActive);
             _timeBase = codecTimeBase;
-            _videoCodecId = codecContext->codec_id;
             if (!hardwareFramesActive) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
             requiresDistinctAmfSoftwareFrame = !hardwareFramesActive && encoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
             initializationNativeAccess.Dispose();
@@ -1456,7 +1439,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // capture keeps encoding through this (re-submitting the last good
             // frame, see below) instead of stopping, so the ring buffer/full
             // session recording never has a real gap; SaveReplayAsync/
-            // FinalizeFullSessionRecording read _pauseEvents to tell the editor
+            // Full Session close reads _pauseEvents to tell the editor
             // which parts of a saved clip were frozen like this.
             var isPaused = false;
             // Whether a real (non-occluded) frame has ever been captured yet.
@@ -1886,28 +1869,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (hasCapturedRealFrame && consecutiveOverloadWindows >= ReplayEncoderFailoverPolicy.RequiredOverloadWindows &&
                         !string.IsNullOrEmpty(activeEncoderCandidate.Name))
                     {
-                        if (fullSessionFormatContext is not null)
-                        {
-                            // One continuously-written MP4 cannot change codec
-                            // parameter sets mid-track. Protect full-session
-                            // integrity by reducing cadence; replay-window mode
-                            // can swap safely because packets and extradata are
-                            // tagged per encoder generation.
-                            var lower = NextLowerReplayFrameRate(activeFrameRate);
-                            if (Volatile.Read(ref _frameRateProtectionEnabled) != 0 && lower < activeFrameRate)
-                            {
-                                Interlocked.Exchange(ref _requestedFrameRate, lower);
-                                Interlocked.Exchange(ref _frameRateProtectionActive, 1);
-                                AppLog.Info($"Native capture: full-session encoder congestion requested {activeFrameRate}->{lower} FPS; encoder remains fixed to keep the MP4 track valid.");
-                            }
-                            else
-                            {
-                                AppLog.Info("Native capture: full-session encoder congestion persists at minimum protected cadence; preserving current MP4 encoder.");
-                            }
-                            consecutiveOverloadWindows = 0;
-                        }
-                        else
-                        {
+
                             var switched = false;
                             foreach (var candidate in ReplayEncoderFailoverPolicy.CandidatesAfter(
                                          config.VideoCodec, config.EncoderMode, activeEncoderCandidate, attemptedEncoderCandidates))
@@ -1945,7 +1907,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         retiredCodecContexts.Add((nint)codecContext);
                                         codecContext = replacement;
                                         _timeBase = replacementTimeBase;
-                                        _videoCodecId = replacement->codec_id;
                                         encoderName = replacementName;
                                         hardwareFramesActive = replacementHardware;
                                         requiresDistinctAmfSoftwareFrame = !replacementHardware && replacementName.Contains("amf", StringComparison.OrdinalIgnoreCase);
@@ -1988,7 +1949,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     AppLog.Info("Native capture: every remaining hardware encoder candidate was exhausted; keeping current encoder at the minimum protected cadence.");
                                 }
                             }
-                        }
+
                     }
                     // A stall is worse than an overload and reads nothing like one:
                     // no frames arrive at all, so nothing gets dropped and the queue
@@ -3235,7 +3196,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
                     codecContext = qualifiedEncoder;
                     _timeBase = qualifiedTimeBase;
-                    _videoCodecId = codecContext->codec_id;
                     hardwareFramesActive = qualifiedHardwareFrames;
                     encoderName = qualifiedEncoderName;
                     activeEncoderCandidate = ResolveEncoderCandidate(config, encoderName, qualifiedHardwareFrames);
@@ -3243,20 +3203,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     requiresDistinctAmfSoftwareFrame = !qualifiedHardwareFrames && qualifiedEncoderName.Contains("amf", StringComparison.OrdinalIgnoreCase);
                     if (!qualifiedHardwareFrames) ReleaseHardwareFrames(ref hwDeviceRef, ref hwFramesRef);
                     qualificationNativeAccess.Dispose();
-                    if (codecContext is not null && InitFullSessionWriter(config, codecContext, out fullSessionFormatContext, out fullSessionStream, out fullSessionTempVideoPath, out fullSessionFinalOutputPath))
-                    {
-                        fullSessionStartUtc = MonotonicClock.UtcNow;
-                        fullSessionStartWallUtc = DateTime.UtcNow;
-                        fullSessionGameDisplayName = config.GameDisplayName;
-                    }
+                    StartFullSession(config, codecContext);
 
                     packet = ffmpeg.av_packet_alloc();
                     if (packet is null) throw new InvalidOperationException("Native replay could not allocate its encoder packet.");
                     var encodeCodecContextPtr = (nint)codecContext;
                     var encodePacketPtr = (nint)packet;
-                    var encodeFullSessionFormatContextPtr = (nint)fullSessionFormatContext;
-                    var encodeFullSessionStreamPtr = (nint)fullSessionStream;
-                    encodeThread = new Thread(() => EncodeLoop(encodeQueue!, encodeCodecContextPtr, encodePacketPtr, encodeFullSessionFormatContextPtr, encodeFullSessionStreamPtr, submissionLatency, outputLatency, nativeGate))
+                    encodeThread = new Thread(() => EncodeLoop(encodeQueue!, encodeCodecContextPtr, encodePacketPtr, submissionLatency, outputLatency, nativeGate))
                     {
                         IsBackground = true,
                         Name = "ClypDat-NativeEncode"
@@ -3286,17 +3239,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // the catch-up gate below doesn't treat that entire wait as a
                     // pacing gap to fill with duplicate frames.
                     lastEncodedAt = stopwatch.Elapsed;
-                    if (fullSessionFormatContext is not null)
-                    {
-                        // Full Session's muxed audio window is requested starting
-                        // at fullSessionStartUtc (see FinalizeFullSessionRecording)
-                        // - it was set at buffer-arm time above, before the window
-                        // ever had focus. Re-anchor it to this, the actual first
-                        // recorded video frame, so audio isn't muxed several
-                        // seconds ahead of where the video track now starts.
-                        fullSessionStartUtc = MonotonicClock.UtcNow;
-                        fullSessionStartWallUtc = DateTime.UtcNow;
-                    }
+
                     AppLog.Info("Native capture: first foreground frame captured, recording started.");
                 }
 
@@ -3972,18 +3915,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // 200ms wait and this wants to run about once a second
                     // regardless of whether the desktop is producing anything.
                     lastRingTrim = stopwatch.Elapsed;
-                    TrimRingBuffer(fullSessionFormatContext is not null ? fullSessionStartUtc : (DateTime?)null);
-                    // Audio captures ended mid-session (e.g. a route change when the
-                    // game/chat app/mic changes - see AudioCapturePipeline.
-                    // StopStaleAudioCaptures) only get their file handle closed, not
-                    // deleted; without this the raw WAV files pile up on disk for the
-                    // entire lifetime of a long-running session instead of being
-                    // cleaned up as soon as they're no longer needed. While a full
-                    // session is recording, never prune past its start - its finalize
-                    // muxes audio from session start, including captures that ended
-                    // mid-session (4GiB WAV rollovers, route changes).
+                    TrimRingBuffer(_fullSession?.StartUtc);
+                    // Raw audio belongs only to replay retention; live Full
+                    // Session audio has already been queued to its mux worker.
                     var audioCutoffUtc = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5);
-                    if (fullSessionFormatContext is not null && fullSessionStartUtc < audioCutoffUtc) audioCutoffUtc = fullSessionStartUtc;
                     _audio.PruneOlderThan(audioCutoffUtc);
                 }
             }
@@ -4065,71 +4000,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (packet is not null) { var p = packet; ffmpeg.av_packet_free(&p); }
                 if (swsContext is not null) ffmpeg.sws_freeContext(swsContext);
             }
-            FinalizeFullSessionWriter(fullSessionFormatContext);
-            if (!string.IsNullOrEmpty(fullSessionTempVideoPath))
-            {
-                var finalizeConfig = _configProvider();
-                if (finalizeConfig.FullSessionBackgroundFinalize)
-                {
-                    // Snapshot the capture set NOW - StopAsync clears the live
-                    // list (without deleting files, see its comment) the
-                    // moment this loop returns.
-                    var captureSnapshot = _audio.SnapshotCaptures();
-                    var startUtc = fullSessionStartUtc;
-                    var startWallUtc = fullSessionStartWallUtc;
-                    var tempPath = fullSessionTempVideoPath;
-                    var finalPath = fullSessionFinalOutputPath;
-                    var gameName = fullSessionGameDisplayName;
-
-                    // Make the session visible IMMEDIATELY as a video-only
-                    // file; the background job then muxes audio into it via a
-                    // swap. If the move fails (cross-volume oddity), the job
-                    // just works from the temp file like the synchronous path.
-                    var videoPath = tempPath;
-                    try
-                    {
-                        File.Move(tempPath, finalPath);
-                        videoPath = finalPath;
-                        var immediateGameName = !string.IsNullOrWhiteSpace(gameName) && !string.Equals(gameName, "No game detected", StringComparison.OrdinalIgnoreCase)
-                            ? gameName
-                            : finalizeConfig.GameDisplayName;
-                        ClipInfoSidecar.Save(finalizeConfig.LibraryFolder, finalPath, new ClipInfo(immediateGameName, null, $"Session - {immediateGameName}", startWallUtc, CaptureSource: finalizeConfig.CaptureSource));
-                        AppLog.Info($"Full session video available immediately (audio attaching in background): {finalPath}.");
-                        // Locked from the same instant the card becomes visible,
-                        // so the library can never offer the silent file.
-                        PublishFinalize(new FullSessionFinalizeProgress(
-                            finalPath,
-                            Math.Max(1, (MonotonicClock.UtcNow - startUtc).TotalSeconds),
-                            0,
-                            false,
-                            DateTime.UtcNow));
-                    }
-                    catch (Exception error)
-                    {
-                        AppLog.Error("Full session immediate video move failed; background finalize will produce the file instead.", error);
-                    }
-
-                    Interlocked.Increment(ref _activeBackgroundFinalizes);
-                    var capturedVideoPath = videoPath;
-                    _backgroundFinalize = Task.Run(() =>
-                    {
-                        try
-                        {
-                            FinalizeFullSessionRecording(finalizeConfig, startUtc, startWallUtc, capturedVideoPath, finalPath, gameName, captureSnapshot);
-                        }
-                        finally
-                        {
-                            foreach (var path in captureSnapshot.FilePaths) AudioCapturePipeline.TryDelete(path);
-                            Interlocked.Decrement(ref _activeBackgroundFinalizes);
-                            AppLog.Info($"Full session background finalize complete: final={finalPath}.");
-                        }
-                    });
-                }
-                else
-                {
-                    FinalizeFullSessionRecording(finalizeConfig, fullSessionStartUtc, fullSessionStartWallUtc, fullSessionTempVideoPath, fullSessionFinalOutputPath, fullSessionGameDisplayName);
-                }
-            }
+            // Stop the sources while the live tap is still attached, so their
+            // held-back final packet and denoiser output enter the mux queue.
+            _audio.Stop(deleteCaptureFiles: true);
+            CloseFullSession();
+            Task.WhenAll(_closingSessions.ToArray()).GetAwaiter().GetResult();
             if (pacingThreadStopped && codecContext is not null) { var c = codecContext; ffmpeg.avcodec_free_context(&c); }
             // Encoders replaced mid-session (device rebuild). Safe only here:
             // the encode thread has already been joined above, so nothing can
@@ -4841,7 +4716,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     }
 
     // Runs avcodec_send_frame/receive_packet (and so DrainToRingBuffer, and the
-    // full-session mux write inside it) on its own thread, decoupled from
+    // packet enqueue inside it) on its own thread, decoupled from
     // CaptureLoop's AcquireNextFrame loop. Existed as a single synchronous call
     // inline in CaptureLoop originally - fine when NVENC keeps up, but a real
     // GPU-contention stall there (confirmed via avgEncodeMs spiking 20x+ baseline
@@ -4849,15 +4724,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // AcquireNextFrame right along with it, since it was the same thread. This
     // loop owns codecContext/packet/pendingFrameWallClocks exclusively from here
     // on - CaptureLoop never touches them again after starting this thread.
-    internal unsafe void EncodeLoop(BlockingCollection<EncodeJob> queue, nint codecContextPtr, nint packetPtr, nint fullSessionFormatContextPtr, nint fullSessionStreamPtr, ReplayLatencyHistogram submissionLatency, ReplayLatencyHistogram outputLatency, object nativeGate)
+    internal unsafe void EncodeLoop(BlockingCollection<EncodeJob> queue, nint codecContextPtr, nint packetPtr, ReplayLatencyHistogram submissionLatency, ReplayLatencyHistogram outputLatency, object nativeGate)
     {
         // Same reasoning as the capture loop: this thread owns the encoder, and
         // a stall here backs the queue up until frames start being dropped.
         using var encodeMmcss = MmcssScope.Capture("native encode thread");
         var codecContext = (AVCodecContext*)codecContextPtr;
         var packet = (AVPacket*)packetPtr;
-        var fullSessionFormatContext = (AVFormatContext*)fullSessionFormatContextPtr;
-        var fullSessionStream = (AVStream*)fullSessionStreamPtr;
         // Some hardware encoders accept a frame before they emit its packet.
         // Keeping only its timestamp meant the reusable capture frame could be
         // overwritten while AMF still read it. Retain frame ownership through
@@ -4879,7 +4752,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (job.SwapCodecContext != 0)
                     {
                         lock (nativeGate) ffmpeg.avcodec_send_frame(codecContext, null);
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames, nativeGate);
+                        DrainToRingBuffer(codecContext, packet, pendingFrames, nativeGate);
                         pendingFrames.ReleaseAll();
                         Volatile.Write(ref _pendingEncoderFrames, 0);
                         codecContext = (AVCodecContext*)job.SwapCodecContext;
@@ -4893,15 +4766,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         // GOP away and BorrowWindowUnderLock has to discard that
                         // much more history to keep the clip decodable.
                         Interlocked.Exchange(ref _forceKeyframeRequested, 1);
-                        if (fullSessionFormatContext is not null)
+                        if (_fullSession is not null)
                         {
-                            // The full-session file is one continuous track whose
-                            // header was already written from the outgoing
-                            // encoder's parameter sets, and it cannot be cut back
-                            // the way a replay window can. ClipRepairSweep repairs
-                            // it after the fact; say so here so the log explains
-                            // the repair when it happens.
-                            AppLog.Info("Native capture: encoder replaced mid-session - the full-session recording spans two encoders and will be repaired on the next library scan.");
+                            var sessionConfig = _fullSessionConfig!;
+                            CloseFullSession();
+                            StartFullSession(sessionConfig, codecContext);
                         }
                     }
 
@@ -4923,7 +4792,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     while (sendResult == ffmpeg.AVERROR(ffmpeg.EAGAIN))
                     {
                         Interlocked.Increment(ref _sendRefusedEagainCount);
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames, nativeGate);
+                        DrainToRingBuffer(codecContext, packet, pendingFrames, nativeGate);
                         lock (nativeGate) sendResult = ffmpeg.avcodec_send_frame(codecContext, jobFrame);
                     }
                     Interlocked.Add(ref _encodeInputMicrosAccum, (long)(sendTimer.Elapsed.TotalMilliseconds * 1000));
@@ -4935,7 +4804,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         accepted = true;
                         Volatile.Write(ref _pendingEncoderFrames, pendingFrames.Count);
                         UpdatePeak(ref _peakPendingEncoderFrames, pendingFrames.PeakCount);
-                        DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames, nativeGate, outputLatency);
+                        DrainToRingBuffer(codecContext, packet, pendingFrames, nativeGate, outputLatency);
                     }
                     else
                     {
@@ -4952,7 +4821,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // loop exited) - flush whatever's still buffered inside the encoder
             // itself, same as the original inline flush used to.
             lock (nativeGate) ffmpeg.avcodec_send_frame(codecContext, null);
-            DrainToRingBuffer(codecContext, packet, fullSessionFormatContext, fullSessionStream, pendingFrames, nativeGate, outputLatency);
+            DrainToRingBuffer(codecContext, packet, pendingFrames, nativeGate, outputLatency);
         }
         catch (Exception error)
         {
@@ -4967,7 +4836,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, AVFormatContext* fullSessionFormatContext, AVStream* fullSessionStream, EncoderFrameLifetimeQueue pendingFrames, object nativeGate, ReplayLatencyHistogram? outputLatency = null)
+    private unsafe void DrainToRingBuffer(AVCodecContext* codecContext, AVPacket* packet, EncoderFrameLifetimeQueue pendingFrames, object nativeGate, ReplayLatencyHistogram? outputLatency = null)
     {
         while (true)
         {
@@ -5037,17 +4906,16 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             Interlocked.Add(ref _ringInsertMicrosAccum, (long)(insertTimer.Elapsed.TotalMilliseconds * 1000));
             Interlocked.Increment(ref _ringInsertCountAccum);
 
-            if (fullSessionFormatContext is not null)
+            if (_fullSession is { } sessionRecorder && isKeyframe)
             {
-                var clonedPacket = ffmpeg.av_packet_clone(packet);
-                if (clonedPacket is not null)
+                var current = _configProvider();
+                if (!SessionAudioTrack.FromConfig(_fullSessionConfig!).SequenceEqual(SessionAudioTrack.FromConfig(current)))
                 {
-                    clonedPacket->stream_index = fullSessionStream->index;
-                    ffmpeg.av_interleaved_write_frame(fullSessionFormatContext, clonedPacket);
-                    var cp = clonedPacket;
-                    ffmpeg.av_packet_free(&cp);
+                    CloseFullSession();
+                    StartFullSession(current, codecContext);
                 }
             }
+            _fullSession?.EnqueueVideo(packet, realWallClockUtc);
 
             }
             finally
@@ -5059,310 +4927,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    // Writes to a temp path during the session (not the user's chosen folder directly) -
-    // final output only gets the audio-muxed file once the session ends, via
-    // FinalizeFullSessionRecording. The video itself is written incrementally as
-    // packets arrive (no separate encode pass), same as the ring buffer.
-    private static unsafe bool InitFullSessionWriter(ReplayBufferConfig config, AVCodecContext* codecContext, out AVFormatContext* resultFormatContext, out AVStream* resultStream, out string tempVideoPath, out string finalOutputPath)
-    {
-        resultFormatContext = null;
-        resultStream = null;
-        tempVideoPath = string.Empty;
-        finalOutputPath = string.Empty;
-        if (!config.FullSessionRecordingEnabled || string.IsNullOrWhiteSpace(config.FullSessionRecordingFolder)) return false;
-
-        try
-        {
-            Directory.CreateDirectory(config.FullSessionRecordingFolder);
-            var sessionLabel = string.IsNullOrWhiteSpace(config.GameDisplayName) ? "Session" : $"Session - {config.GameDisplayName}";
-            finalOutputPath = ClipFileNaming.BuildUniquePath(config.FullSessionRecordingFolder, ClipFileNaming.BuildFileName(sessionLabel, DateTime.Now, "mp4", config.ClipFileNameScheme, config.CustomClipFileNameTemplate, config.GameDisplayName));
-            tempVideoPath = Path.Combine(Path.GetTempPath(), $"clypdat-full-session-video-{Guid.NewGuid():N}.mp4");
-
-            AVFormatContext* formatContext = null;
-            ffmpeg.avformat_alloc_output_context2(&formatContext, null, "mp4", tempVideoPath);
-            if (formatContext is null) return false;
-
-            var stream = ffmpeg.avformat_new_stream(formatContext, null);
-            if (stream is null)
-            {
-                ffmpeg.avformat_free_context(formatContext);
-                return false;
-            }
-
-            if (ffmpeg.avcodec_parameters_from_context(stream->codecpar, codecContext) < 0)
-            {
-                ffmpeg.avformat_free_context(formatContext);
-                return false;
-            }
-            stream->time_base = codecContext->time_base;
-            // On the zero-copy path the encoder's pix_fmt is AV_PIX_FMT_D3D11 -
-            // an opaque hardware handle format that describes how frames get IN,
-            // not what the stream contains. Copying it verbatim into the muxed
-            // stream would advertise something no reader can make sense of; the
-            // pixels are, and always were, NV12.
-            if (codecContext->pix_fmt == AVPixelFormat.AV_PIX_FMT_D3D11)
-            {
-                stream->codecpar->format = (int)AVPixelFormat.AV_PIX_FMT_NV12;
-            }
-
-            if ((formatContext->oformat->flags & ffmpeg.AVFMT_NOFILE) == 0)
-            {
-                AVIOContext* ioContext;
-                if (ffmpeg.avio_open(&ioContext, tempVideoPath, ffmpeg.AVIO_FLAG_WRITE) < 0)
-                {
-                    ffmpeg.avformat_free_context(formatContext);
-                    return false;
-                }
-                formatContext->pb = ioContext;
-            }
-
-            if (ffmpeg.avformat_write_header(formatContext, null) < 0)
-            {
-                ffmpeg.avformat_free_context(formatContext);
-                return false;
-            }
-
-            AppLog.Info($"Native full session recording started: temp={tempVideoPath}, final={finalOutputPath}.");
-            resultFormatContext = formatContext;
-            resultStream = stream;
-            return true;
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Full session recording init failed", error);
-            return false;
-        }
-    }
-
-    private static unsafe void FinalizeFullSessionWriter(AVFormatContext* formatContext)
-    {
-        if (formatContext is null) return;
-        try
-        {
-            ffmpeg.av_write_trailer(formatContext);
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Full session recording finalize failed", error);
-        }
-        finally
-        {
-            if ((formatContext->oformat->flags & ffmpeg.AVFMT_NOFILE) == 0 && formatContext->pb is not null)
-            {
-                ffmpeg.avio_closep(&formatContext->pb);
-            }
-
-            ffmpeg.avformat_free_context(formatContext);
-        }
-    }
-
-    // Runs once, after the temp video is fully written and closed - builds Game/Chat/
-    // Microphone tracks for the whole session's wall-clock window (same AudioCapturePipeline
-    // used for clip saves, already running the whole time regardless) and muxes them
-    // against the temp video into the user's chosen folder. -c:v copy keeps this fast
-    // even for a multi-hour session.
-    // sessionStartUtc is on the MonotonicClock timeline (audio/pause alignment);
-    // sessionStartWallUtc is the real wall-clock start, used only for the
-    // sidecar's user-facing CreatedAt.
-    private void FinalizeFullSessionRecording(ReplayBufferConfig config, DateTime sessionStartUtc, DateTime sessionStartWallUtc, string tempVideoPath, string finalOutputPath, string sessionGameDisplayName = "", AudioCapturePipeline.CaptureSetSnapshot? capturesOverride = null)
-    {
-        if (string.IsNullOrEmpty(tempVideoPath) || string.IsNullOrEmpty(finalOutputPath)) return;
-
-        // The game the session was RECORDED from, not whatever detection says
-        // at finalize time - the session usually ends precisely because the
-        // game closed, so the fresh config here reads "No game detected" and
-        // that's what the library tile showed. Start-time identity wins;
-        // finalize-time only fills in if the session began before any game
-        // was detected.
-        var gameDisplayName = !string.IsNullOrWhiteSpace(sessionGameDisplayName) && !string.Equals(sessionGameDisplayName, "No game detected", StringComparison.OrdinalIgnoreCase)
-            ? sessionGameDisplayName
-            : config.GameDisplayName;
-
-        var snapshots = new List<string>();
-        // Sibling of the final file so the swap below stays a rename rather than
-        // a multi-GB copy, and a dot-folder so MediaProbeService.IsVideoFile
-        // hides it - ffmpeg's output used to be a ".mp4.muxing.mp4" sitting in
-        // the library, which the watcher happily turned into a second card for
-        // the whole mux. Deliberately NOT the ".clypdat-repair-" prefix:
-        // ClipRepairSweep deletes those with no age check and would delete a
-        // live mux out from under ffmpeg.
-        var workFolder = Path.Combine(Path.GetDirectoryName(finalOutputPath) ?? string.Empty, $".clypdat-mux-{Guid.NewGuid():N}");
-        // Read by the clip counter in the finally below.
-        var sessionSeconds = 0d;
-        try
-        {
-            var sessionEndUtc = MonotonicClock.UtcNow;
-            var durationSeconds = Math.Max(1, (sessionEndUtc - sessionStartUtc).TotalSeconds);
-            sessionSeconds = durationSeconds;
-            WritePausedRangesSidecar(config.LibraryFolder, finalOutputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), sessionStartUtc, sessionEndUtc));
-            // One giant segment spanning the whole session let audio/video clock
-            // drift (real hardware sample clocks are never exactly 48000.000000Hz)
-            // accumulate uncorrected for the entire recording - fine for the first
-            // minute or two, audibly desynced well before a long session ends.
-            // Regular replay clips never hit this because WindowsReplayBuffer
-            // segments and independently re-anchors audio every ~60s; chunking the
-            // session the same way here gets the same periodic resync instead of
-            // one uncorrected multi-hour window.
-            const double SegmentChunkSeconds = 60;
-            var segmentWindows = new List<(DateTime StartUtc, double DurationSeconds)>();
-            var chunkStartUtc = sessionStartUtc;
-            var remainingSeconds = durationSeconds;
-            while (remainingSeconds > 0)
-            {
-                var chunkSeconds = Math.Min(SegmentChunkSeconds, remainingSeconds);
-                // See SaveReplayAsync - a runt tail segment costs an ffmpeg
-                // process per track for a fraction of a second of audio.
-                if (remainingSeconds - chunkSeconds < SegmentChunkSeconds / 2)
-                {
-                    chunkSeconds = remainingSeconds;
-                }
-
-                segmentWindows.Add((chunkStartUtc, chunkSeconds));
-                chunkStartUtc += TimeSpan.FromSeconds(chunkSeconds);
-                remainingSeconds -= chunkSeconds;
-            }
-
-            var tracks = _audio
-                .BuildAlignedTracksAsync(segmentWindows, config, snapshots, CancellationToken.None, capturesOverride, AudioSnapshotPurpose.BackgroundArchive)
-                .GetAwaiter().GetResult();
-
-            // Staged in both modes. Background finalize has already moved the
-            // video-only file onto the final path and ffmpeg cannot write its
-            // own input; synchronous finalize would otherwise create the final
-            // library path at t=0 and grow it for minutes, which is a card for
-            // a file with no moov atom. Same name inside the folder so ffmpeg
-            // still picks the mp4 muxer from the extension.
-            Directory.CreateDirectory(workFolder);
-            var muxOutputPath = Path.Combine(workFolder, Path.GetFileName(finalOutputPath));
-
-            List<string> BuildMuxArgs(string[] videoCodecArgs)
-            {
-                var muxArgs = new List<string> { "-y", "-progress", "pipe:1", "-nostats", "-i", tempVideoPath };
-                foreach (var track in tracks) muxArgs.AddRange(new[] { "-i", track.Path });
-                muxArgs.AddRange(new[] { "-map", "0:v" });
-                for (var i = 0; i < tracks.Count; i++) muxArgs.AddRange(new[] { "-map", $"{i + 1}:a" });
-                muxArgs.AddRange(videoCodecArgs);
-                muxArgs.AddRange(new[] { "-c:a", "aac", "-b:a", "192k" });
-                for (var i = 0; i < tracks.Count; i++)
-                {
-                    muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"handler_name={tracks[i].Label}" });
-                    muxArgs.AddRange(new[] { $"-metadata:s:a:{i}", $"title={tracks[i].Label}" });
-                }
-                // +faststart moves the moov index to the front of the file.
-                // Costs one extra file rewrite at finalize, but without it
-                // every later reader (LibVLC, ffmpeg chunk/waveform/thumbnail
-                // extraction) must first seek to the END of a multi-GB file to
-                // find the index - painless locally, a seek storm over a
-                // network drive that made long sessions stutter/fail in the
-                // editor while plain VLC (single reader, patient) coped.
-                muxArgs.AddRange(new[] { "-movflags", "+faststart" });
-                muxArgs.AddRange(new[] { "-metadata", $"comment={ClipMetadataTagger.BuildCommentValue("Native Full Session")}", muxOutputPath });
-                return muxArgs;
-            }
-
-            // Copy only when requested session codec matches rolling encoder.
-            // Auto replay can produce AV1, so a H.264 full-session request must
-            // re-encode instead of silently writing an AV1 file under H.264
-            // setting. AV1 re-encode still uses hardware only; failed hardware
-            // conversion falls back to source stream copy.
-            //
-            // Vendor comes from ExportEncoderProbe, the same cached NVENC ->
-            // AMF -> QSV detection the export and share paths use, rather than
-            // assuming NVENC. Hardcoding it meant an AMD or Intel machine ran a
-            // guaranteed-to-fail ffmpeg pass and then silently kept the larger
-            // stream-copy file - the smaller-file feature simply never worked
-            // off NVIDIA, and nothing said so.
-            var sourceCodec = _videoCodecId == AVCodecID.AV_CODEC_ID_AV1 ? "AV1" : "H.264";
-            var targetCodec = config.FullSessionVideoCodec switch
-            {
-                "AV1" => "AV1",
-                "H.265" => "H.265",
-                _ => "H.264"
-            };
-            var targetFamily = targetCodec == "AV1" ? ExportEncoderProbe.Av1Family : ExportEncoderProbe.Family;
-            var codecArgs = (sourceCodec, targetCodec, targetFamily) switch
-            {
-                (var source, var target, _) when source == target => new[] { "-c:v", "copy" },
-                (_, "H.264", "nvenc") => new[] { "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "20", "-b:v", "0" },
-                (_, "H.264", "amf") => new[] { "-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "20", "-qp_p", "20" },
-                (_, "H.264", "qsv") => new[] { "-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "20" },
-                (_, "H.264", null) => new[] { "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20" },
-                (_, "H.265", "nvenc") => new[] { "-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0" },
-                (_, "H.265", "amf") => new[] { "-c:v", "hevc_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "24", "-qp_p", "24" },
-                (_, "H.265", "qsv") => new[] { "-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "24" },
-                (_, "AV1", "nvenc") => new[] { "-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "32", "-b:v", "0" },
-                (_, "AV1", "amf") => new[] { "-c:v", "av1_amf", "-quality", "balanced", "-rc", "cqp", "-qp_i", "32", "-qp_p", "32" },
-                (_, "AV1", "qsv") => new[] { "-c:v", "av1_qsv", "-preset", "medium", "-global_quality", "32" },
-                _ => new[] { "-c:v", "copy" }
-            };
-            // ffmpeg emits a progress block roughly twice a second; every one
-            // crosses a process boundary and lands on the UI thread, so only
-            // forward a change once a second.
-            var startedUtc = DateTime.UtcNow;
-            var lastPublishUtc = DateTime.MinValue;
-            IProgress<double> MuxProgress(bool reencoding) => new Progress<double>(seconds =>
-            {
-                var now = DateTime.UtcNow;
-                if (now - lastPublishUtc < TimeSpan.FromSeconds(1)) return;
-                lastPublishUtc = now;
-                PublishFinalize(new FullSessionFinalizeProgress(finalOutputPath, durationSeconds, seconds, reencoding, startedUtc));
-            });
-
-            var reencodes = codecArgs[1] != "copy";
-            var result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(codecArgs), MuxProgress(reencodes), CancellationToken.None).GetAwaiter().GetResult();
-            if (result.ExitCode != 0 && reencodes)
-            {
-                AppLog.Error($"Full session {config.FullSessionVideoCodec} re-encode failed, retrying as stream copy: {result.Error}");
-                // The bar restarts from zero on the retry, so restart its clock
-                // too rather than letting the estimate inherit the failed pass.
-                startedUtc = DateTime.UtcNow;
-                lastPublishUtc = DateTime.MinValue;
-                result = AudioCapturePipeline.RunProcessAsync("ffmpeg", BuildMuxArgs(new[] { "-c:v", "copy" }), MuxProgress(false), CancellationToken.None).GetAwaiter().GetResult();
-            }
-            if (result.ExitCode != 0)
-            {
-                AppLog.Error($"Full session recording final mux failed: {result.Error} (video-only session file kept)");
-            }
-            else
-            {
-                File.Move(muxOutputPath, finalOutputPath, overwrite: true);
-                ClipInfoSidecar.Save(config.LibraryFolder, finalOutputPath, new ClipInfo(gameDisplayName, null, $"Session - {gameDisplayName}", sessionStartWallUtc, CaptureSource: config.CaptureSource));
-                AppLog.Info($"Native full session recording saved: path={finalOutputPath}, codec={config.FullSessionVideoCodec}.");
-                EnforceFullSessionQuota(config);
-            }
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Full session recording finalize/mux failed", error);
-        }
-        finally
-        {
-            // Counted here because both finalize modes end here, and only when
-            // a session file actually ended up in the library - a failed mux
-            // in background mode still leaves its video-only file.
-            if (File.Exists(finalOutputPath)) ClipStatsReporter.Record(ClipStatKind.FullSession, sessionSeconds);
-            // The one place every exit route passes through, so a card can
-            // never be left locked - success, failed mux and thrown alike.
-            ClearFinalize(finalOutputPath);
-            // Covers the failed mux, the partial output and the swapped-away
-            // success alike - after the rename the folder is simply empty.
-            try { if (Directory.Exists(workFolder)) Directory.Delete(workFolder, recursive: true); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-            // In-place mode the "temp" IS the final file - never delete it.
-            if (!string.Equals(tempVideoPath, finalOutputPath, StringComparison.OrdinalIgnoreCase))
-            {
-                AudioCapturePipeline.TryDelete(tempVideoPath);
-            }
-            foreach (var snapshot in snapshots) AudioCapturePipeline.TryDelete(snapshot);
-        }
-    }
-
     // Deletes the oldest ClypDat-recorded session files (identified by their own
     // sidecar's "... Full Session" FileTitle - never touches clips or files
     // ClypDat didn't write) until the library's VODs tree fits the configured
     // quota again. Runs after each successful session save; the just-saved
     // file is always kept even if it alone exceeds the quota.
-    private static void EnforceFullSessionQuota(ReplayBufferConfig config)
+    internal static void EnforceFullSessionQuota(ReplayBufferConfig config)
     {
         if (config.FullSessionQuotaGb <= 0 || string.IsNullOrWhiteSpace(config.LibraryFolder)) return;
         try
@@ -5385,6 +4955,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             var sessions = Directory.EnumerateFiles(vodsRoot, "*.*", vodsEnumeration)
                 .Where(path => Path.GetFullPath(path).StartsWith(vodsFullRoot, StringComparison.OrdinalIgnoreCase))
                 .Where(MediaProbeService.IsVideoFile)
+                .Where(path => !File.Exists(FullSessionRecovery.Marker(path)))
                 .Where(path =>
                 {
                     // New sessions title as "Session - {game}"; pre-existing
@@ -5406,6 +4977,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 var victim = sessions[i];
                 try
                 {
+                    RecordingFileOwnership.ThrowIfActive(victim.FullName);
                     File.Delete(victim.FullName);
                     ClipInfoSidecar.Delete(config.LibraryFolder, victim.FullName);
                     ClipEditSidecar.Delete(config.LibraryFolder, victim.FullName);

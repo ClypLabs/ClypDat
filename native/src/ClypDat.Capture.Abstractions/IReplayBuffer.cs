@@ -15,7 +15,8 @@ public enum ReplayCaptureState
     Stopped,
     // Worker process or its IPC channel vanished. The proxy keeps replay
     // logically armed while it reconnects or starts a replacement worker.
-    Recovering
+    Recovering,
+    Stopping
 }
 
 public enum ReplayCaptureStartupPhase
@@ -110,6 +111,7 @@ public sealed record ReplayCaptureHealth(
     string LastFailure,
     DateTime UpdatedUtc)
 {
+    public FullSessionStatus FullSession { get; init; } = new(FullSessionState.Off);
     public long TotalDroppedFrames { get; init; }
     public int PeakQueueDepth { get; init; }
     public DateTime? LastDegradedUtc { get; init; }
@@ -228,35 +230,16 @@ public sealed record AutoClipDetectorEvent(string GameId, string EventId, string
     double Confidence, DateTime TimestampUtc, int LeadSeconds, int TailSeconds, DateTime? StreakStartUtc = null);
 public sealed record AutoClipDetectorStatus(string GameId, string Status);
 
-/// <summary>
-/// A full session whose audio is still being muxed in. The video is already on
-/// <see cref="Path"/> and visible in the library, but opening it would play a
-/// silent file, so the card stays locked until this clears.
-/// </summary>
-public sealed record FullSessionFinalizeProgress(
-    string Path,
-    double SessionSeconds,
-    double MuxedSeconds,
-    bool Reencoding,
-    DateTime StartedUtc);
-
-public interface IFullSessionFinalizeReporter
+/// <summary>Live session completion, after file handles have closed.</summary>
+public interface IFullSessionRecorderLifecycle
 {
-    /// <summary>
-    /// Every in-flight finalize, re-sent in full on each change. A snapshot
-    /// rather than deltas so a card can never be stranded mid-encode: whatever
-    /// empties the worker's table - completion, failure, a lost pipe - empties
-    /// the library's copy with it, and there is no reconciliation to drift.
-    /// </summary>
-    event EventHandler<IReadOnlyList<FullSessionFinalizeProgress>>? FullSessionFinalizeChanged;
-
-    /// <summary>Awaits any background mux so shutdown cannot kill ffmpeg and lose the audio.</summary>
-    Task WaitForBackgroundFinalizeAsync(TimeSpan timeout);
+    event EventHandler<string>? FullSessionClosed;
+    Task WaitForFullSessionCloseAsync(TimeSpan timeout);
 }
 
 public interface IReplayCaptureWorkerEvents
 {
-    event EventHandler<IReadOnlyList<FullSessionFinalizeProgress>>? FullSessionFinalizeChanged;
+    event EventHandler<string>? FullSessionClosed;
     event EventHandler? RecordingStateChanged;
     event EventHandler<ReplaySaveStarted>? SaveStarted;
     event EventHandler<ReplaySaveCompleted>? SaveCompleted;
@@ -269,6 +252,7 @@ public interface IReplayCaptureWorkerControl
 {
     Task ShutdownWorkerAsync(CancellationToken cancellationToken = default);
     Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default);
+    Task UpdateFullSessionContainerAsync(string container, CancellationToken cancellationToken = default);
     Task UpdateFullSessionHotkeyAsync(string hotkey, CancellationToken cancellationToken = default);
     Task UpdateClipGameNameAsync(string gameDisplayName, CancellationToken cancellationToken = default);
     Task UpdateAutoClipPolicyAsync(string? gameId, bool enabled, IReadOnlyList<string> enabledEventIds,
@@ -314,3 +298,6 @@ public interface IReplayBuffer : IDisposable
     // Backends that can't tell the difference simply never report it.
     bool LastSaveVideoWasFrozen => false;
 }
+
+public enum FullSessionState { Off, Starting, Recording, Stopping, Completed, Failed }
+public sealed record FullSessionStatus(FullSessionState State, string OutputPath = "", string Failure = "");

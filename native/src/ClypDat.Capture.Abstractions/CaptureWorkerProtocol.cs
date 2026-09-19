@@ -6,6 +6,7 @@ namespace ClypDat.Capture.Abstractions;
 
 public static class CaptureWorkerProtocol
 {
+    // 12 adds live Full Session state and closed-file events; retires background finalize progress.
     // 9 writes clip-relative input v2 and camera source mappings.  This must
     // reject a worker from an older install: it could otherwise write UTC
     // input timestamps and nominal two-second camera ranges into a v5 clip.
@@ -20,7 +21,7 @@ public static class CaptureWorkerProtocol
     // start intent without claiming that recording is active. A worker left over from an
     // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
     // the proxy's read loop already routes into recovery.
-    public const int Version = 11;
+    public const int Version = 12;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 
@@ -50,16 +51,13 @@ public sealed record CaptureWorkerEnvelope(
     JsonElement Payload);
 
 public sealed record CaptureWorkerAck(bool Accepted, string Error = "");
-public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "");
+public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "", FullSessionStatus? FullSession = null);
 public sealed record CaptureWorkerHandshake(int Version, string ClientId);
 public sealed record CaptureWorkerAttachResponse(
     bool Recording,
     string ConfigIdentity,
     ReplayCaptureHealth Health,
-    IReadOnlyList<CaptureWorkerSaveResult> UnacknowledgedSaves,
-    // Lets an app that restarted while the worker kept running re-lock the cards
-    // for sessions still being muxed, instead of offering a silent video.
-    IReadOnlyList<FullSessionFinalizeProgress>? ActiveFinalizes = null);
+    IReadOnlyList<CaptureWorkerSaveResult> UnacknowledgedSaves);
 public sealed record CaptureWorkerSaveResult(
     string Path,
     string? Title,

@@ -98,6 +98,7 @@ public static class AppSettingsStore
                 ? Math.Clamp(settings.MicrophoneNoiseGateThresholdDb, -100, -25)
                 : -100;
             settings.CustomGameSettings ??= new Dictionary<string, CustomGameProfile>(StringComparer.OrdinalIgnoreCase);
+            settings.FullSessionContainer = FullSessionFormat.Normalize(settings.FullSessionContainer);
             if (string.IsNullOrWhiteSpace(settings.FullSessionHotkey)) settings.FullSessionHotkey = "F8";
             // A hand-edited or partially-written profile must not be able to
             // push an out-of-range value into a recording - these are the same

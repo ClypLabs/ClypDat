@@ -323,17 +323,20 @@ public sealed class AppSettings
     // backend's continuous encoder can also write the whole session to disk
     // alongside the rolling replay buffer, separate from clip saves. Native only
     // for now; Legacy would need its own, larger wiring.
+    private string _fullSessionContainer = "MKV";
+    public string FullSessionContainer
+    {
+        get => _fullSessionContainer;
+        set => _fullSessionContainer = FullSessionFormat.Normalize(value);
+    }
     public bool FullSessionRecordingEnabled { get; set; }
     public string FullSessionRecordingFolder { get; set; } = string.Empty;
-    // H.264 = mux the already-encoded stream as-is (fast, bigger file);
-    // AV1 re-encodes at finalize time via NVENC for smaller session files.
+    // Ignored compatibility data; Recording Quality owns the live codec.
     public string FullSessionVideoCodec { get; set; } = "H.264";
     // 0 = unlimited. When set, the oldest ClypDat session recordings are deleted
     // after each save until the session folder fits the quota again.
     public int FullSessionQuotaGb { get; set; }
-    // On: session video lands on disk the moment recording stops; audio
-    // tracks are attached by a background job afterward (file is briefly
-    // video-only). Off: the whole mux runs before the session file appears.
+    // Ignored compatibility data; Full Session always writes audio live.
     public bool FullSessionBackgroundFinalize { get; set; } = true;
 }
 

@@ -6,8 +6,10 @@ namespace ClypDat.App.Tests;
 
 public sealed class SpotifyOverlayBurnerTests
 {
-    [Fact]
-    public async Task ReleasedPlaybackHandleAllowsRealBurnReplacement()
+    [Theory]
+    [InlineData("mp4")]
+    [InlineData("mkv")]
+    public async Task ReleasedPlaybackHandleAllowsRealBurnReplacement(string container)
     {
         FfmpegPathResolver.EnsureBundledFfmpeg();
         Assert.True(FfmpegPathResolver.IsAvailable);
@@ -15,7 +17,7 @@ public sealed class SpotifyOverlayBurnerTests
         Directory.CreateDirectory(folder);
         try
         {
-            var clip = Path.Combine(folder, "clip.mp4");
+            var clip = Path.Combine(folder, "clip." + container);
             var card = Path.Combine(folder, "card.png");
             await Run("-f", "lavfi", "-i", "color=black:s=320x180:r=25:d=1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-map", "0:v", "-map", "1:a", "-map", "1:a", "-map", "1:a", "-map", "1:a", "-t", "1", "-c:v", "libx264", "-c:a", "aac", "-metadata", "comment=CLYPDAT_CAPTURE_BACKEND=test", "-metadata", "title=It's 音", "-movflags", "use_metadata_tags", clip);
             await Run("-f", "lavfi", "-i", "color=red:s=80x40", "-frames:v", "1", card);
@@ -35,6 +37,7 @@ public sealed class SpotifyOverlayBurnerTests
             var installed = await SpotifyOverlayBurner.InspectAsync(clip);
             Assert.True(SpotifyOverlayBurner.IsValidReplacement(original, installed));
             Assert.Equal(4, installed.Audio.Length);
+            Assert.Equal(original.Audio, installed.Audio);
             Assert.Equal(created, File.GetCreationTimeUtc(clip));
             Assert.Equal("It's 音", installed.Tags["title"]);
             Assert.Equal(SpotifyOverlayOutcome.Skipped, await SpotifyOverlayBurner.BurnAsync(clip, card, "Top Left"));

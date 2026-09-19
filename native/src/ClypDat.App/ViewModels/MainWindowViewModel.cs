@@ -1197,12 +1197,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // elsewhere on the page.
     private ClipRepairSweep.Progress _clipRepairProgress;
     private DispatcherTimer? _clipRepairTicker;
-    // Keyed by library path. A dictionary rather than a single "current"
-    // because the full-session hotkey stop-then-starts, so two sessions can be
-    // finalizing at once.
-    private readonly Dictionary<string, FullSessionFinalizeProgress> _sessionFinalizes = new(StringComparer.OrdinalIgnoreCase);
-    private DispatcherTimer? _sessionFinalizeTicker;
-
     public string SelectionSummary
     {
         get
@@ -1264,10 +1258,39 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         Dispatcher.UIThread.Post(RequestMissingGameIcons);
     }
 
+    private ReplayCaptureHealth _recordingHealth = ReplayCaptureHealth.Unknown("Native");
+    private RecordingPresentation _recordingPresentation = new("Off", "Recording is off.");
+    private DispatcherTimer? _recordingFlashTimer;
+    private bool _recordingDotBright = true;
+    public string RecordingDetail => _recordingPresentation.Detail;
+    public string RecordingDotColor => _recordingPresentation.DotColor;
+    public bool RecordingDotVisible => _recordingPresentation.DotColor != "Transparent";
+    public double RecordingDotOpacity => !_recordingPresentation.Flash || _recordingDotBright ? 1 : 0.15;
+    private void RefreshRecordingPresentation()
+    {
+        _recordingPresentation = RecordingPresentation.Resolve(_recordingHealth, IsReplayRecording, ReplayBufferEnabled,
+            _recorderStatus.Contains("Saving Session", StringComparison.Ordinal) || _recorderStatus.Contains("Stopping", StringComparison.Ordinal));
+        if (_recordingPresentation.Flash)
+        {
+            if (_recordingFlashTimer is null)
+            {
+                _recordingFlashTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+                _recordingFlashTimer.Tick += (_, _) => { _recordingDotBright = !_recordingDotBright; OnPropertyChanged(nameof(RecordingDotOpacity)); };
+            }
+            _recordingFlashTimer.Start();
+        }
+        else { _recordingFlashTimer?.Stop(); _recordingDotBright = true; }
+        OnPropertyChanged(nameof(RecorderStatus));
+        OnPropertyChanged(nameof(RecordingDetail));
+        OnPropertyChanged(nameof(RecordingDotColor));
+        OnPropertyChanged(nameof(RecordingDotVisible));
+        OnPropertyChanged(nameof(RecordingDotOpacity));
+    }
+
     public string RecorderStatus
     {
-        get => _recorderStatus;
-        set => SetProperty(ref _recorderStatus, value);
+        get => _recordingPresentation.Label;
+        set { _recorderStatus = value; RefreshRecordingPresentation(); }
     }
 
     public string ActiveGame
@@ -1292,6 +1315,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshRecordingPresentation();
             OnPropertyChanged(nameof(HotkeyDisplay));
             UpdateDiscordPresence();
         }
@@ -1698,6 +1722,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateDiscordPresence();
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshRecordingPresentation();
             SaveSettings();
         }
     }
@@ -1733,6 +1758,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshRecordingPresentation();
             SaveSettings();
         }
     }
@@ -1745,6 +1771,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedDesktopMonitor, value) || value is null) return;
             Settings.ReplayDesktopMonitorDeviceName = value.DeviceName;
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshRecordingPresentation();
             SaveSettings();
         }
     }
@@ -1773,6 +1800,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshRecordingPresentation();
             SaveSettings();
         }
     }
@@ -1791,6 +1819,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         OnPropertyChanged(nameof(SelectedDesktopMonitor));
         OnPropertyChanged(nameof(ReplayBufferStateSummary));
+        RefreshRecordingPresentation();
     }
 
     public ReplayDurationPreset? SelectedReplayDurationPreset
@@ -2261,6 +2290,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void UpdateReplayEncoderHealth(ReplayCaptureHealth health)
     {
+        _recordingHealth = health;
+        RefreshRecordingPresentation();
         if (!string.IsNullOrWhiteSpace(health.Encoder))
         {
             _activeReplayEncoder = health.Encoder;
@@ -2282,6 +2313,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void ClearReplayEncoderHealth()
     {
+        _recordingHealth = ReplayCaptureHealth.Unknown("Native");
+        RefreshRecordingPresentation();
         _replayFrameRateDisplaySmoother.Reset();
         _activeReplayEncoder = string.Empty;
         _activeReplayAdapter = string.Empty;
@@ -3887,6 +3920,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _selectedGameProcess, value);
     }
 
+    public void ApplyFullSessionToggle(bool enabled)
+    {
+        var key = IsEffectiveDesktopCapture ? null : string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
+        var profile = CustomGameSettingsResolver.FindActive(Settings, key, CustomGameSettingsResolver.RecordingModeGroup);
+        if (profile is not null)
+        {
+            profile.RecordingMode = enabled ? CustomGameSettingsResolver.FullSessionMode : CustomGameSettingsResolver.ManualMode;
+            RebuildCustomGameTabs();
+        }
+        else Settings.FullSessionRecordingEnabled = enabled;
+        SaveSettings();
+        OnPropertyChanged(nameof(FullSessionRecordingEnabled));
+        RefreshRecordingPresentation();
+    }
+
     public bool FullSessionRecordingEnabled
     {
         get => Settings.FullSessionRecordingEnabled;
@@ -3907,32 +3955,23 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string FullSessionRecordingFolderDisplay =>
         string.IsNullOrWhiteSpace(FullSessionRecordingFolder) ? "Choose a library folder" : FullSessionRecordingFolder;
 
-    public bool FullSessionBackgroundFinalize
+    private FullSessionFormatViewModel? _fullSessionFormatSelection;
+    public FullSessionFormatViewModel FullSessionFormatSelection => _fullSessionFormatSelection ??= new(Settings, SaveSettings);
+    public IReadOnlyList<string> FullSessionFormats => FullSessionFormatSelection.Formats;
+    public string SelectedFullSessionFormat
     {
-        get => Settings.FullSessionBackgroundFinalize;
+        get => FullSessionFormatSelection.Selected;
         set
         {
-            Settings.FullSessionBackgroundFinalize = value;
+            FullSessionFormatSelection.Selected = value;
             OnPropertyChanged();
-            SaveSettings();
+            OnPropertyChanged(nameof(IsFullSessionMp4));
         }
     }
-
-
-    // H.265 dropped for the same reason as the export list above - a saved
-    // setting naming it falls through to H.264 via SelectedFullSessionCodec.
-    public IReadOnlyList<string> FullSessionCodecs { get; } = new[] { "H.264 (fastest)", "AV1 (smallest)" };
-
-    public string SelectedFullSessionCodec
-    {
-        get => FullSessionCodecs.FirstOrDefault(option => option.StartsWith(Settings.FullSessionVideoCodec, StringComparison.OrdinalIgnoreCase)) ?? FullSessionCodecs[0];
-        set
-        {
-            Settings.FullSessionVideoCodec = value.Split(' ')[0];
-            OnPropertyChanged();
-            SaveSettings();
-        }
-    }
+    public bool IsFullSessionMp4 => FullSessionFormatSelection.IsMp4;
+    public string FullSessionFormatRecommendation => FullSessionFormatSelection.Recommendation;
+    public string FullSessionFormatWarning => FullSessionFormatSelection.Warning;
+    public void UseMkv() => SelectedFullSessionFormat = "MKV";
 
     // Gb = -1 is the "Custom" sentinel: the actual number comes from the
     // CustomFullSessionQuotaGb text field shown while it's selected.
@@ -5264,10 +5303,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return Task.CompletedTask;
     }
 
+    public event Action? RecordingSettingsSaved;
+
     public void SaveSettings()
     {
         if (!AppSettingsStore.Save(Settings))
             AppLog.Error($"Settings persistence failed: {AppSettingsStore.LastSaveError}");
+        RecordingSettingsSaved?.Invoke();
     }
 
     public async Task RenameAllClipsAsync()
@@ -5691,7 +5733,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 // Never clear a finalize overlay: the two share one surface and
                 // a session mid-mux outranks a repair that is not running.
-                if (clip.IsBusyOverlayVisible && !clip.IsFinalizing) clip.BusyOverlayText = string.Empty;
+                if (clip.IsBusyOverlayVisible) clip.BusyOverlayText = string.Empty;
             }
             return;
         }
@@ -5741,7 +5783,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 clip.BusyOverlayText = "Corrupted clip found\nqueued for repair";
             }
-            else if (clip.IsBusyOverlayVisible && !clip.IsFinalizing)
+            else if (clip.IsBusyOverlayVisible)
             {
                 clip.BusyOverlayText = string.Empty;
             }
@@ -5752,111 +5794,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             : $"{(int)Math.Round(value.TotalMinutes)} min";
     }
 
-    /// <summary>
-    /// Replaces the whole set of finalizing sessions from the worker's snapshot.
-    /// Whole-set rather than deltas so a card cannot be stranded locked: an
-    /// empty list - a completed mux, a failed one, a lost pipe - unlocks
-    /// everything, and there is no reconciliation to drift.
-    /// </summary>
-    public void ApplySessionFinalizes(IReadOnlyList<FullSessionFinalizeProgress> active)
-    {
-        var finished = _sessionFinalizes.Keys.Where(path => !active.Any(entry => string.Equals(entry.Path, path, StringComparison.OrdinalIgnoreCase))).ToArray();
-        _sessionFinalizes.Clear();
-        foreach (var entry in active) _sessionFinalizes[entry.Path] = entry;
-        ApplySessionFinalizeProgress();
-
-        // The file the card points at was just replaced by one with audio in
-        // it, and the swap is a rename the watcher reports as a change to a
-        // path it already knows - re-probe so the card's tracks and duration
-        // come from the finished file rather than the video-only one.
-        foreach (var path in finished)
-        {
-            if (!File.Exists(path)) continue;
-            _ = AddOrUpdateLibraryClipAsync(path);
-        }
-    }
-
-    internal void ApplySessionFinalizeProgress()
-    {
-        var active = _sessionFinalizes.Count > 0;
-        if (active && _sessionFinalizeTicker is null)
-        {
-            _sessionFinalizeTicker = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-            _sessionFinalizeTicker.Tick += (_, _) => ApplySessionFinalizeProgress();
-            _sessionFinalizeTicker.Start();
-        }
-        else if (!active && _sessionFinalizeTicker is not null)
-        {
-            _sessionFinalizeTicker.Stop();
-            _sessionFinalizeTicker = null;
-        }
-
-        // A worker that is alive but wedged emits no progress and no terminal
-        // event, which neither the snapshot nor pipe loss would ever clear.
-        if (active)
-        {
-            var stale = _sessionFinalizes
-                .Where(entry => DateTime.UtcNow - entry.Value.StartedUtc > TimeSpan.FromMinutes(2) && entry.Value.MuxedSeconds <= 0)
-                .Select(entry => entry.Key)
-                .ToArray();
-            foreach (var path in stale)
-            {
-                AppLog.Error($"Full session finalize reported no progress for two minutes; unlocking '{path}'.");
-                _sessionFinalizes.Remove(path);
-            }
-        }
-
-        foreach (var clip in AllClips)
-        {
-            if (!_sessionFinalizes.TryGetValue(clip.Path, out var entry))
-            {
-                if (!clip.IsFinalizing) continue;
-                clip.IsFinalizing = false;
-                if (clip.IsBusyOverlayVisible) clip.BusyOverlayText = string.Empty;
-                continue;
-            }
-
-            clip.IsFinalizing = true;
-            clip.BusyOverlayText = DescribeFinalize(entry);
-        }
-    }
-
-    internal static string DescribeFinalize(FullSessionFinalizeProgress entry)
-    {
-        // ffmpeg's own position only covers the encode; "+faststart" then
-        // rewrites the whole file to move the index to the front. Leaving that
-        // tail out would park the tile at "99% - 1s left" and read as hung.
-        const double EncodeShareOfWork = 0.85;
-        var fraction = entry.SessionSeconds > 0
-            ? Math.Clamp(entry.MuxedSeconds / entry.SessionSeconds, 0, 1) * EncodeShareOfWork
-            : 0;
-
-        // Below a twentieth through, extrapolating from elapsed time is noise -
-        // same threshold the repair overlay uses - so say what is happening
-        // without inventing a countdown.
-        if (fraction < 0.05) return "Adding session audio\nstarting…";
-
-        var elapsed = DateTime.UtcNow - entry.StartedUtc;
-        if (elapsed < TimeSpan.Zero) elapsed = TimeSpan.Zero;
-        var remaining = TimeSpan.FromSeconds(elapsed.TotalSeconds / fraction) - elapsed;
-        // Never count below a second: an overrun showing "0s" reads as stuck.
-        if (remaining < TimeSpan.FromSeconds(1)) remaining = TimeSpan.FromSeconds(1);
-        var percent = (int)Math.Clamp(Math.Round(fraction * 100), 0, 99);
-        var eta = remaining.TotalSeconds < 60
-            ? $"{Math.Max(1, (int)Math.Round(remaining.TotalSeconds))}s"
-            : $"{(int)Math.Round(remaining.TotalMinutes)} min";
-        return $"Adding session audio\n{percent}% - ~{eta} left";
-    }
-
-    internal bool IsSessionFinalizing(string path) => _sessionFinalizes.ContainsKey(path);
-
-    private string SessionFinalizeWaitMessage(string path)
-    {
-        if (!_sessionFinalizes.TryGetValue(path, out var entry)) return "Still adding this session's audio - try again in a moment.";
-        // Reuses the tile's own wording so the banner and the card agree.
-        var detail = DescribeFinalize(entry).Replace('\n', ' ');
-        return $"Still adding this session's audio ({detail.Split(new[] { " - " }, StringSplitOptions.None).LastOrDefault() ?? "in progress"}).";
-    }
+    public Task RecordingClosedAsync(string path) => AddOrUpdateLibraryClipAsync(path);
 
     private async Task MigrateLibraryLayoutAsync()
     {
@@ -6184,6 +6122,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _recordingFlashTimer?.Stop();
         _steamGames.Changed -= SteamClassificationChanged;
         _xboxActivity.Changed -= XboxActivityChanged;
         _xboxActivity.Dispose();
@@ -6251,8 +6190,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // A full session's video lands in the library before its audio is
             // muxed in, so "not hydrated" and "still encoding" are different
             // waits and deserve different sentences.
-            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…" : clip.IsFinalizing
-                ? SessionFinalizeWaitMessage(clip.Path)
+            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…"
                 : "Still loading this clip's info - try again in a moment.";
             _clipNotReadyMessageTimer.Stop();
             _clipNotReadyMessageTimer.Start();
@@ -6286,8 +6224,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // A full session's video lands in the library before its audio is
             // muxed in, so "not hydrated" and "still encoding" are different
             // waits and deserve different sentences.
-            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…" : clip.IsFinalizing
-                ? SessionFinalizeWaitMessage(clip.Path)
+            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…"
                 : "Still loading this clip's info - try again in a moment.";
             _clipNotReadyMessageTimer.Stop();
             _clipNotReadyMessageTimer.Start();
@@ -6473,6 +6410,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // marks self-adds with, just for the delete side of the same
             // "don't redundantly react to our own change" pattern.
             _recentlySelfAddedPaths[clip.Path] = DateTime.UtcNow;
+            RecordingFileOwnership.ThrowIfActive(clip.Path);
             await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
             _mediaProbe.DeleteCacheFor(clip.Path);
             ClipEditSidecar.Delete(Settings.LibraryFolder, clip.Path);
@@ -6509,7 +6447,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         _recentlySelfAddedPaths[clip.Path] = DateTime.UtcNow;
         // Throws on failure, so nothing below this line is committed.
-        await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
+        RecordingFileOwnership.ThrowIfActive(clip.Path);
+            await FileRetry.RunAsync(() => File.Delete(clip.Path), $"Delete clip {clip.Path}");
 
         if (!string.IsNullOrWhiteSpace(medalImportKey))
         {
@@ -8481,9 +8420,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             GameWindowHandle: desktopCapture ? IntPtr.Zero : ActiveGameDetection.WindowHandle,
             FullSessionRecordingEnabled: effective.FullSessionRecordingEnabled,
             FullSessionRecordingFolder: LibraryLayout.VodDirectory(Settings.LibraryFolder, desktopCapture ? "Desktop Capture" : ActiveGameDetection.DisplayName),
-            FullSessionVideoCodec: effective.FullSessionVideoCodec,
+            FullSessionContainer: FullSessionFormat.Normalize(Settings.FullSessionContainer),
             FullSessionQuotaGb: effective.FullSessionQuotaGb,
-            FullSessionBackgroundFinalize: Settings.FullSessionBackgroundFinalize,
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
@@ -8552,6 +8490,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // either, for the same reason.
     public IReadOnlyList<string> BuildTrimArguments(string outputPath, bool useHardwareEncoder = true)
     {
+        RecordingFileOwnership.ThrowIfActive(SelectedVideoPath);
         var startSeconds = Math.Max(0, TrimStart.TotalSeconds);
         var end = TrimEnd > TrimStart ? TrimEnd : Duration;
         var durationSeconds = Math.Max(0.1, (end - TrimStart).TotalSeconds);
@@ -8591,8 +8530,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         args.AddRange(BuildExportCodecArguments(useHardwareEncoder));
         args.AddRange(new[] { "-c:a", "aac", "-b:a", "192k" });
-        args.Add("-movflags");
-        args.Add("+faststart+use_metadata_tags");
+        MediaContainerOptions.AddFinalizedOptions(args, outputPath);
         args.AddRange(new[] { "-map_metadata", "0" });
         args.Add(outputPath);
         return args;
@@ -8636,8 +8574,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             args.AddRange(new[] { "-c:a", "aac" });
         }
 
-        args.Add("-movflags");
-        args.Add("+faststart+use_metadata_tags");
+        MediaContainerOptions.AddFinalizedOptions(args, outputPath);
         args.AddRange(new[] { "-map_metadata", "0" });
         AppendOverlayBurnMarkers(args, overlays);
         args.Add(outputPath);
@@ -8923,8 +8860,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         args.AddRange(new[] { "-c:a", "aac", "-b:a", $"{ShareAudioBps / 1000}k" });
 
-        args.Add("-movflags");
-        args.Add("+faststart+use_metadata_tags");
+        MediaContainerOptions.AddFinalizedOptions(args, outputPath);
         args.AddRange(new[] { "-map_metadata", "0" });
         AppendOverlayBurnMarkers(args, overlays);
         args.Add(outputPath);

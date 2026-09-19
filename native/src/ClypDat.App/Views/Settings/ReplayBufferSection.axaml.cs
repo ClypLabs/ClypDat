@@ -15,6 +15,8 @@ public sealed partial class ReplayBufferSection : UserControl
     // Settings markup lives here, but the handlers still belong to
     // MainWindow - their bodies reach all over its state. These forward
     // to the owning window rather than duplicating any of it.
+    private void UseMkv_OnClick(object? sender, RoutedEventArgs e) => (DataContext as MainWindowViewModel)?.UseMkv();
+
     private MainWindow? Owner => TopLevel.GetTopLevel(this) as MainWindow;
 
     private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
