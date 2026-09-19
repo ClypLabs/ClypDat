@@ -61,14 +61,17 @@ heading, 20-pixel horizontal margins, and a 240-pixel search field.
 
 Settings retains its narrower content and sidebar, sentence-case headings,
 tighter General layout, and compact process priority picker. Content is capped
-at 960 logical pixels; navigation uses 224 pixels and status uses 280. The status
+at 960 logical pixels; navigation uses 240 pixels and status uses 280. The status
 sidebar hides below 1120 logical pixels.
 
 The restoration passed 37 focused appearance, layout, settings, and overlay checks.
 
-Settings navigation uses 36-pixel rows, 2-pixel row gaps, and 16-pixel group
-gaps. Group headings and item labels share the same inset. Search results hide
-empty groups together; long labels truncate with their full text in a tooltip.
+Settings navigation restores pre-overhaul master sizing: a 240-pixel column,
+13.5-pixel item text, and the original button padding and margins. Category
+dividers use the shared subtle separator colour and fit inside the heading
+spacing. Uppercase category labels match the existing Settings labels. Headings
+and item labels share the
+same inset, empty search groups hide together, and navigation has no tooltips.
 
 The Status panel restores pre-overhaul master width, padding, and typography:
 280 pixels wide, 16-pixel bold values, and 11-pixel bold labels. Font family

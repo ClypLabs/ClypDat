@@ -1800,8 +1800,6 @@
     <Setter Property="Background" Value="{StaticResource Surface_1C2733}" />
   </Style>
   <Style Selector="Button.settingsNavButton">
-    <Setter Property="Height" Value="36" />
-    <Setter Property="MinHeight" Value="36" />
     <!-- Not Transparent (#00FFFFFF - white at zero alpha): the BrushTransition
          below interpolates RGB as well as alpha, so unhovering flashed white
          on the way back out. Zero-alpha version of the hover color, so only
@@ -1810,24 +1808,21 @@
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
     <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="CornerRadius" Value="{StaticResource ControlRadius}" />
-    <Setter Property="Padding" Value="10,0" />
-    <Setter Property="Margin" Value="0" />
-    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="CornerRadius" Value="0,8,8,0" />
+    <Setter Property="Padding" Value="18,8,12,8" />
+    <Setter Property="Margin" Value="0,0,0,3" />
+    <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
-    <Setter Property="VerticalContentAlignment" Value="Center" />
-    <Setter Property="ToolTip.Tip" Value="{ReflectionBinding Content, RelativeSource={RelativeSource Self}}" />
-    <Setter Property="FontSize" Value="{StaticResource BodyFontSize}" />
+    <Setter Property="FontSize" Value="13.5" />
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <BrushTransition Property="Background" Duration="0:0:0.1" />
       </Transitions>
     </Setter>
   </Style>
   <Style Selector="Button.settingsNavButton TextBlock">
-    <Setter Property="TextWrapping" Value="NoWrap" />
-    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
   <Style Selector="Button.settingsNavButton:pointerover">
     <Setter Property="Background" Value="{StaticResource Surface_182029}" />
