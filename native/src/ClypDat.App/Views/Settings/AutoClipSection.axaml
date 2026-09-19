@@ -94,7 +94,15 @@
                   <ItemsControl ItemsSource="{Binding Groups}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <StackPanel Spacing="2" Margin="0,0,0,6">
+                        <StackPanel>
+                          <!-- A one-event group still carries its catalog group ID for
+                               capture scheduling, but it has nothing to expand in the
+                               settings UI. Show its event directly. -->
+                          <CheckBox Classes="autoClipEvent" Margin="22,0,0,6"
+                                    IsVisible="{Binding IsSingleEvent}"
+                                    Content="{Binding SingleEvent.Name}"
+                                    IsChecked="{Binding SingleEvent.IsEnabled}" />
+                          <StackPanel Spacing="2" Margin="0,0,0,6" IsVisible="{Binding !IsSingleEvent}">
                           <!-- Same two-target arrangement as the game row: the
                                tri-state box turns the whole group on or off,
                                the rest of the row expands it. -->
@@ -126,6 +134,7 @@
                               </DataTemplate>
                             </ItemsControl.ItemTemplate>
                           </ItemsControl>
+                          </StackPanel>
                         </StackPanel>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>

@@ -2,7 +2,12 @@ param(
     [Parameter(Position = 0, HelpMessage = 'Optional target: local, branch, or commit hash.')]
     [string]$Target,
 
-    [switch]$Launch
+    [switch]$Launch,
+
+    # Build and verify the Avalonia package feed, then stop. CI uses this so a
+    # release runner never publishes to, stops processes in, or launches from
+    # the local install directory.
+    [switch]$PackagesOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -805,6 +810,11 @@ try {
     }
 
     Ensure-StableAvaloniaPackages -UseLocalAvalonia:($Target -eq 'local')
+
+    if ($PackagesOnly) {
+        Write-Host 'Avalonia packages are ready; skipping local publish (-PackagesOnly).'
+        return
+    }
 
     $installParent = Split-Path -Parent $installDirectory
     New-Item -ItemType Directory -Path $installParent -Force | Out-Null

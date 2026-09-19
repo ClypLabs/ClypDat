@@ -142,6 +142,8 @@ public sealed class AutoClipGroupViewModel : ViewModelBase
     }
     public string Name { get; }
     public ObservableCollection<AutoClipEventViewModel> Events { get; }
+    public bool IsSingleEvent => Events.Count == 1;
+    public AutoClipEventViewModel? SingleEvent => IsSingleEvent ? Events[0] : null;
     private bool _isExpanded;
     public bool IsExpanded { get => _isExpanded; set => SetProperty(ref _isExpanded, value); }
     public void ToggleExpanded() => IsExpanded = !IsExpanded;
