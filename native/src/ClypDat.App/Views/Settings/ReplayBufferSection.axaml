@@ -199,7 +199,7 @@
               <TextBlock Classes="settingsRowTitleSm" Text="File Format" />
               <TextBlock Classes="settingsRowDescSm" Text="Uses Recording Quality settings. Format changes apply to the next Full Session." TextWrapping="Wrap" />
             </StackPanel>
-            <ComboBox Grid.Column="1" Classes="settingsInput" Width="220" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
+            <ComboBox Grid.Column="1" Classes="settingsInput compact" Width="190" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
           </Grid>
           <TextBlock Classes="settingsRowDescSm" Text="{Binding FullSessionFormatRecommendation}" TextWrapping="Wrap" IsVisible="{Binding !IsFullSessionMp4}" />
           <Border Classes="settingsNotice" IsVisible="{Binding FullSessionFormatSelection.IsWarningVisible}">
