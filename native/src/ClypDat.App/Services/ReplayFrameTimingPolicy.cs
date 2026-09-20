@@ -28,6 +28,25 @@ public static class ReplayFrameTimingPolicy
     public static int EncodeQueueCapacity(int frameRate) =>
         Math.Clamp((int)Math.Ceiling(Math.Clamp(frameRate, MinimumFrameRate, MaximumFrameRate) / 8.0), 4, 15);
 
+    // How long the last frame of a saved clip may be held. VFR stretches it to
+    // cover the moment the save was requested, which is right for the sub-frame
+    // gap it was meant for - but when the ring's newest frame is already old
+    // (485ms measured), the clip ends on a visible freeze and reports a duration
+    // longer than the motion in it.
+    public const int MaximumFinalHoldFrames = 2;
+
+    /// <summary>
+    /// Duration for the final packet of a saved window, which has no successor
+    /// to measure against. CFR keeps its preceding cadence; VFR holds the image
+    /// until the save moment, capped so the clip cannot end on a long freeze.
+    /// </summary>
+    public static long FinalPacketDurationMicroseconds(bool variableFrameTiming, long previousDurationMicroseconds, long holdMicroseconds)
+    {
+        var cadence = Math.Max(1, previousDurationMicroseconds);
+        if (!variableFrameTiming) return cadence;
+        return Math.Clamp(holdMicroseconds, 1, cadence * MaximumFinalHoldFrames);
+    }
+
     public static long RealPtsMicroseconds(TimeSpan elapsed, long previousPts) =>
         Math.Max(previousPts + 1, (long)Math.Round(Math.Max(0, elapsed.TotalMilliseconds) * 1_000));
 

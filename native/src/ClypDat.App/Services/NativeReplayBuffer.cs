@@ -5457,13 +5457,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     Marshal.Copy(ringPacket.Data, 0, (IntPtr)packet->data, ringPacket.Length);
                     packet->pts = packet->dts = ringPacket.PtsMs - basePts;
                     // Explicit, because variable-frame-rate packets can be far
-                    // apart. The final VFR packet holds its image until the
-                    // requested save moment; CFR retains its preceding cadence.
+                    // apart. The final packet has no successor to measure
+                    // against - see FinalPacketDurationMicroseconds for what
+                    // each timing mode holds it for.
                     packet->duration = i + 1 < window.Length
                         ? window[i + 1].PtsMs - ringPacket.PtsMs
-                        : variableFrameTiming
-                            ? Math.Max(1, (long)Math.Round((requestedEndUtc - ringPacket.WallClockUtc).TotalMilliseconds * 1_000))
-                            : Math.Max(1, lastPacketDuration);
+                        : ReplayFrameTimingPolicy.FinalPacketDurationMicroseconds(
+                            variableFrameTiming,
+                            lastPacketDuration,
+                            (long)Math.Round((requestedEndUtc - ringPacket.WallClockUtc).TotalMilliseconds * 1_000));
                     lastPacketDuration = packet->duration;
                     packet->stream_index = stream->index;
                     if (ringPacket.IsKeyframe) packet->flags |= ffmpeg.AV_PKT_FLAG_KEY;
