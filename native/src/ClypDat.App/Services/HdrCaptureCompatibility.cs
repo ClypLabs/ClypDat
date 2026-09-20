@@ -28,8 +28,7 @@ internal static class HdrCaptureCompatibility
                     if (output.Description.Monitor != monitor) continue;
                     using var output6 = output.QueryInterface<IDXGIOutput6>();
                     var description = output6.Description1;
-                    // DXGI_COLOR_SPACE_RGB_{FULL,STUDIO}_G2084_NONE_P2020.
-                    var isHdr = (int)description.ColorSpace is 12 or 13;
+                    var isHdr = IsHdrColorSpace(description.ColorSpace);
                     Set(isHdr ? "Unavailable" : "SDR display");
                     return;
                 }
@@ -41,6 +40,18 @@ internal static class HdrCaptureCompatibility
             Set("Unavailable");
         }
     }
+
+    // Windows desktop HDR commonly exposes linear scRGB (G10) rather than
+    // PQ/HDR10. Both carry HDR headroom and require SDR conversion before the
+    // existing BT.709 encoder path.
+    internal static bool IsHdrColorSpace(ColorSpaceType colorSpace) => (int)colorSpace switch
+    {
+        1 => true, // RGB_FULL_G10_NONE_P709 (scRGB)
+        12 or 13 or 14 or 16 => true, // ST.2084/PQ
+        18 or 19 => true, // HLG
+        25 => true, // RGB_FULL_G10_NONE_P2020
+        _ => false
+    };
 
     private static void Set(string status)
     {
