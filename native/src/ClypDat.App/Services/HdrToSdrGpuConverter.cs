@@ -40,9 +40,11 @@ internal sealed class HdrToSdrGpuConverter : IDisposable
         using var sourceSurface = source.QueryInterface<IDXGISurface>();
         using var outputSurface = _output!.QueryInterface<IDXGISurface>();
         using var sourceBitmap = _context.CreateBitmapFromDxgiSurface(sourceSurface,
-            new BitmapProperties1(new PixelFormat(Format.R16G16B16A16_Float, Vortice.DCommon.AlphaMode.Premultiplied), 96, 96, BitmapOptions.CannotDraw));
+            // WGC's desktop surface has no meaningful alpha. Premultiplied
+            // alpha treats its undefined/zero alpha as transparent black.
+            new BitmapProperties1(new PixelFormat(Format.R16G16B16A16_Float, Vortice.DCommon.AlphaMode.Ignore), 96, 96, BitmapOptions.CannotDraw));
         using var outputBitmap = _context.CreateBitmapFromDxgiSurface(outputSurface,
-            new BitmapProperties1(new PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied), 96, 96, BitmapOptions.Target));
+            new BitmapProperties1(new PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore), 96, 96, BitmapOptions.Target));
         _toneMap.SetInput(0, sourceBitmap, true);
         _context.Target = outputBitmap;
         _context.BeginDraw();
