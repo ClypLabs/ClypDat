@@ -75,7 +75,11 @@ public sealed partial class MainWindow
         var gamePane = BuildGamePane(model);
         var desktopPane = new StackPanel { Spacing = 14 };
         var tiles = new List<(Button Button, DesktopMonitorOption Monitor)>();
-        var tileRow = new WrapPanel { Orientation = Orientation.Horizontal };
+        var tileRow = new WrapPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
 
         foreach (var monitor in model.DesktopMonitors)
         {
@@ -370,7 +374,7 @@ public sealed partial class MainWindow
         {
             Classes = { "monitorTile" },
             Width = 312,
-            Margin = new Thickness(0, 0, 10, 10),
+            Margin = new Thickness(5, 0, 5, 10),
             BorderThickness = new Thickness(1),
             Content = new StackPanel { Spacing = 8, Children = { preview, heading, details } }
         };
