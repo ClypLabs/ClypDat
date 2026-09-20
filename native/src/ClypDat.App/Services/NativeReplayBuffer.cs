@@ -2734,7 +2734,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                         // Same screen->crop conversion the CPU path does, then scaled
                                         // into output pixels so the readback side can draw straight
                                         // into the NV12 frame without needing the crop rect.
-                                        if (config.CaptureCursor && GetCursorPos(out var gpuCursor))
+                                        // SourceDrawsCursor: WGC already composited it into this
+                                        // frame. Leaving the position unset is what stops all three
+                                        // consumers (video-processor stream and both NV12 draws)
+                                        // from adding a second one.
+                                        if (config.CaptureCursor && !SourceDrawsCursor() && GetCursorPos(out var gpuCursor))
                                         {
                                             var cropX = gpuCursor.X - desktopBounds.Left - cropLeft;
                                             var cropY = gpuCursor.Y - desktopBounds.Top - cropTop;
@@ -2837,7 +2841,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     stageStopwatch.Restart();
                                     try
                                     {
-                                        if (config.CaptureCursor && GetCursorPos(out var cursor))
+                                        if (config.CaptureCursor && !SourceDrawsCursor() && GetCursorPos(out var cursor))
                                         {
                                             DrawDesktopCursor((byte*)mapped.DataPointer, (int)mapped.RowPitch, captureWidth, captureHeight,
                                                 cursor.X - desktopBounds.Left - cropLeft,
@@ -3406,6 +3410,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
             void ConfigureCursorStream()
             {
+                // WGC bakes the cursor into its own frames when the session asked
+                // it to, so compositing the overlay as well draws two. The overlay
+                // stays allocated: it is what the zero-copy encode path is
+                // qualified against, and a DXGI source needs it immediately if
+                // recovery switches back.
+                if (SourceDrawsCursor()) { DisableCursorStream(); return; }
                 if (gpuCursorAvailable && cursorInputView is not null)
                 {
                     var cursorVisible = ConfigureGpuCursorBounds(videoContext!, videoProcessor!, contentBounds, cursorOutputX, cursorOutputY);
@@ -3424,6 +3434,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // since disposed. The driver is handed the whole stream array, so
             // clear the pointer as well as the flag and never count a stream
             // that has none.
+            // Whether the active capture source already drew the cursor. Checked per
+            // frame rather than cached: a session can swap DXGI for WGC mid-flight.
+            bool SourceDrawsCursor() => wgcCapture?.CursorCaptureApplied == true;
+
             void DisableCursorStream()
             {
                 bltStreams[1].Enable = false;

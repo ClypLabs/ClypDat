@@ -255,6 +255,14 @@
                         SelectedValueBinding="{Binding Value}"
                         SelectedValue="{Binding ReplayEncoderMode}" />
             </StackPanel>
+            <StackPanel Margin="0,0,12,10" Spacing="3">
+              <TextBlock Text="Frame timing" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <ComboBox Classes="settingsInput" Width="192"
+                        ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayFrameTimingModes}"
+                        DisplayMemberBinding="{Binding Label}"
+                        SelectedValueBinding="{Binding Value}"
+                        SelectedValue="{Binding ReplayFrameRateMode}" />
+            </StackPanel>
           </WrapPanel>
         </StackPanel>
       </Border>

@@ -60,7 +60,13 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         }
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
         {
-            try { _session.IsCursorCaptureEnabled = captureCursor; }
+            try
+            {
+                _session.IsCursorCaptureEnabled = captureCursor;
+                // WGC composites the cursor into the frame itself. Whoever consumes
+                // this source must not draw a second one - see CursorCaptureApplied.
+                CursorCaptureApplied = captureCursor;
+            }
             catch (Exception error) { AppLog.Info($"Native capture: WGC cursor setting unavailable; using system default ({error.Message})."); }
         }
         TrySetTargetFrameRate(frameRate);
@@ -77,6 +83,13 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     public static WindowGraphicsCaptureSource CreateForMonitor(ID3D11Device device, object d3dLock, nint monitorHandle, bool captureCursor, int frameRate) =>
         new(device, d3dLock, CaptureInterop.CreateItemForMonitor(monitorHandle), captureCursor, frameRate,
             DisplayRefreshService.GetRefreshHz(monitorHandle));
+
+    /// <summary>
+    /// True when this session asked Windows to draw the cursor into the captured
+    /// frames and Windows accepted. Consumers that composite their own cursor
+    /// must skip it, or every frame carries two.
+    /// </summary>
+    public bool CursorCaptureApplied { get; }
 
     public (int Width, int Height) ContentSize { get { lock (_stateLock) return (_contentSize.Width, _contentSize.Height); } }
     public string CaptureMode => "Windows Graphics Capture";
