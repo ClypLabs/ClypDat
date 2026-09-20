@@ -83,6 +83,7 @@ public sealed class EditorSeekCoordinatorTests
 
         await Task.Delay(20);
         Assert.Equal(0, transport.AudioStarts);
+        Assert.True(transport.Presented);
         Assert.True(transport.IsPaused);
         preparation.SetResult(new AudioPreparationResult(1, 0, false));
         var result = await startup;
@@ -110,6 +111,13 @@ public sealed class EditorSeekCoordinatorTests
         private readonly bool _videoRolls;
         private readonly Task<AudioPreparationResult> _preparation;
         private TimeSpan _position;
+        public bool CanReusePresentedFrame(TimeSpan target) => false;
+        public bool Presented { get; private set; }
+        public Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token)
+        {
+            Presented = true;
+            return Task.FromResult(current());
+        }
         public RecoveryTransport(bool videoRolls = true)
             : this(Task.FromResult(new AudioPreparationResult(1, 0, false)), videoRolls) { }
 
@@ -137,6 +145,7 @@ public sealed class EditorSeekCoordinatorTests
         public void CommitPaused(TimeSpan position) => IsPaused = true;
         public void CommitPlaying(TimeSpan position, string seekId)
         {
+            Assert.True(Presented);
             AudioStarts++;
             IsPaused = false;
             if (_videoRolls) _position += TimeSpan.FromMilliseconds(25);

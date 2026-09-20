@@ -306,17 +306,17 @@ int cdvo_submit(uint64_t token, const cdvo_state *s) {
         (s->generation == c->state.clock.generation &&
          s->revision < c->state.clock.revision))
       return 0;
-    if (s->generation != c->state.clock.generation) {
-      c->images.clear();
+    // A seek invalidates pictures, not clip artwork. Revision zero is a
+    // transport barrier; retain images until the complete scene commits.
+    if (s->generation != c->state.clock.generation)
       c->pending_images.clear();
-    }
     auto images = c->images;
     for (auto &item : c->pending_images)
       images[item.first] = item.second;
     for (auto &a : next.artwork)
       if (!images.contains(a.id))
         return 0;
-    std::erase_if(images, [&](auto &item) {
+    if (s->revision != 0) std::erase_if(images, [&](auto &item) {
       return std::none_of(next.artwork.begin(), next.artwork.end(),
                           [&](auto &a) { return a.id == item.first; });
     });

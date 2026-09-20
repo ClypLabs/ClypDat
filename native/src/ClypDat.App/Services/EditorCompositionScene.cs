@@ -11,7 +11,7 @@ namespace ClypDat.App.Services;
 internal sealed class EditorCompositionScene
 {
     private NativeVideoOutput? _output;
-    private ulong _generation, _nextId = 4;
+    private ulong _nextId = 4;
     private long _cameraRevision = -1, _spotifyRevision = -1;
     private string? _keyboardKey;
     // The overlay window may be hidden while a dialog covers the editor or
@@ -24,9 +24,9 @@ internal sealed class EditorCompositionScene
     internal void Update(NativeVideoOutput output, MainWindowViewModel model, TimeSpan time, long anchorMicroseconds,
         OverlaySceneControl? captured = null, SpotifyCardPreview? spotify = null, double displayWidth = 0, double displayHeight = 0)
     {
-        if (_output != output || _generation != output.Generation)
+        if (_output != output)
         {
-            _output = output; _generation = output.Generation;
+            _output = output;
             _texts.Clear(); _cameraRevision = _spotifyRevision = -1; _keyboardKey = null;
             _cameraBounds = _keyboardBounds = _spotifyBounds = null;
         }

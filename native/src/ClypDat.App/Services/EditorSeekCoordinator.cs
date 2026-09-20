@@ -25,7 +25,8 @@ internal sealed class EditorSeekCoordinator
         EditorSeekResult Fail(string reason) { if (isCurrent()) { transport.StopAudio(); transport.PauseVideo(); } transport.LogError($"seek={seekId} failed: reason={reason}, totalMs={clock.ElapsedMilliseconds}, recovery={recovery}."); return EditorSeekResult.FailedResult; }
         if (!isCurrent()) return Terminal("superseded", EditorSeekResult.SupersededResult);
         transport.LogDebug($"seek={seekId} request: target={target.TotalSeconds:0.###}s, resume={resume}, rate={transport.PlaybackRate:0.###}x, video={transport.VideoState}, tracks={transport.AudioTrackCount}, network={transport.IsNetworkSource}.");
-        var preparation = transport.PrepareAudioAsync(target, seekId);
+        transport.StopAudio();
+        var preparation = transport.PrepareAudioAsync(target, seekId, cancellationToken);
         try
         {
             for (var reset = 0; reset < 2; reset++)
@@ -42,7 +43,7 @@ internal sealed class EditorSeekCoordinator
                 }
                 if (!resume)
                 {
-                    await preparation.ConfigureAwait(false);
+                    await preparation.WaitAsync(cancellationToken).ConfigureAwait(false);
                     if (!isCurrent()) return Terminal("superseded", EditorSeekResult.SupersededResult);
                     transport.CommitPaused(landed.Value);
                     transport.LogDebug($"seek={seekId} commit: mode=paused, audioAnchor={landed.Value.TotalSeconds:0.###}s, video={transport.VideoState}, wasapi=stopped, bufferMs=120.");
@@ -89,9 +90,9 @@ internal sealed class EditorSeekCoordinator
         var preparation = transport.PrepareAudioAsync(target, startId, cancellationToken);
         try
         {
-            var landed = await LandAsync(transport, target, startId, isCurrent, cancellationToken).ConfigureAwait(false);
+            var landed = transport.CanReusePresentedFrame(target) ? target : await LandAsync(transport, target, startId, isCurrent, cancellationToken).ConfigureAwait(false);
             if (landed is null) return !isCurrent() ? EditorPlaybackStartResult.SupersededResult : EditorPlaybackStartResult.FailedResult;
-            var ready = await preparation.ConfigureAwait(false);
+            var ready = await preparation.WaitAsync(cancellationToken).ConfigureAwait(false);
             if (!isCurrent()) return EditorPlaybackStartResult.SupersededResult;
             if (ready.ReadyTracks > 0) transport.CommitPlaying(landed.Value, startId);
             else transport.CommitVideoOnly();
@@ -109,7 +110,20 @@ internal sealed class EditorSeekCoordinator
 
     private async Task<TimeSpan?> LandAsync(IEditorSeekTransport transport, TimeSpan target, string id, Func<bool> current, CancellationToken token)
     {
-        for (var attempt = 1; attempt <= 2; attempt++) { if (!current()) return null; var clock = Stopwatch.StartNew(); transport.PauseVideo(); if (!await WaitUntilAsync(() => transport.IsPaused, current, token).ConfigureAwait(false)) continue; transport.WritePosition(target); if (!await WaitUntilAsync(() => Math.Abs((transport.Position-target).TotalMilliseconds)<=PositionTolerance.TotalMilliseconds, current, token).ConfigureAwait(false)) continue; var landed=transport.Position; transport.LogDebug($"seek={id} video-landed: attempt={attempt}, requested={target.TotalSeconds:0.###}s, observed={landed.TotalSeconds:0.###}s, landingMs={clock.ElapsedMilliseconds}, deltaMs={(landed-target).TotalMilliseconds:0}."); return landed; } return null;
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            token.ThrowIfCancellationRequested();
+            if (!current()) return null;
+            var clock = Stopwatch.StartNew();
+            transport.PauseVideo();
+            if (!await WaitUntilAsync(() => transport.IsPaused, current, token).ConfigureAwait(false)) continue;
+            transport.WritePosition(target);
+            if (!await transport.PresentAsync(target, current, token).ConfigureAwait(false)) continue;
+            if (!current()) return null;
+            transport.LogDebug($"seek={id} video-presented: attempt={attempt}, requested={target.TotalSeconds:0.###}s, presentationMs={clock.ElapsedMilliseconds}.");
+            return target;
+        }
+        return null;
     }
     private async Task<AudioPreparationResult> WaitPreparationAsync(Task<AudioPreparationResult> task, Func<bool> current, CancellationToken token) { var done=await Task.WhenAny(task, Task.Delay(AudioReadyBudget, token)).ConfigureAwait(false); token.ThrowIfCancellationRequested(); return !current() ? AudioPreparationResult.PendingResult : done == task ? await task.ConfigureAwait(false) : AudioPreparationResult.PendingResult; }
     private async Task StartDeferredAsync(IEditorSeekTransport transport, Task<AudioPreparationResult> task, TimeSpan target, string id, Func<bool> current) { try { var result=await task.ConfigureAwait(false); if (!current() || result.ReadyTracks==0) return; var anchor=transport.Position; transport.StartDeferredAudio(anchor, id); transport.LogDebug($"seek={id} deferred-audio-start: target={target.TotalSeconds:0.###}s, anchor={anchor.TotalSeconds:0.###}s, ready={result.ReadyTracks}, failed={result.FailedTracks}."); } catch (Exception error) { transport.LogError($"seek={id} deferred-audio failed: {error.Message}"); } }
@@ -117,7 +131,7 @@ internal sealed class EditorSeekCoordinator
 }
 
 internal interface IEditorSeekTransport
-{ bool IsPaused { get; } TimeSpan Position { get; } int AudioTrackCount { get; } double PlaybackRate { get; } string VideoState { get; } bool IsNetworkSource { get; } Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default); void StopAudio(); void PauseVideo(); void ResetVideo(); void WritePosition(TimeSpan target); void CommitPaused(TimeSpan position); void CommitPlaying(TimeSpan position, string seekId); void CommitVideoOnly(); void StartDeferredAudio(TimeSpan position, string seekId); void LogDebug(string line); void LogInfo(string line); void LogError(string line); }
+{ bool CanReusePresentedFrame(TimeSpan target); Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token); bool IsPaused { get; } TimeSpan Position { get; } int AudioTrackCount { get; } double PlaybackRate { get; } string VideoState { get; } bool IsNetworkSource { get; } Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default); void StopAudio(); void PauseVideo(); void ResetVideo(); void WritePosition(TimeSpan target); void CommitPaused(TimeSpan position); void CommitPlaying(TimeSpan position, string seekId); void CommitVideoOnly(); void StartDeferredAudio(TimeSpan position, string seekId); void LogDebug(string line); void LogInfo(string line); void LogError(string line); }
 internal readonly record struct AudioPreparationResult(int ReadyTracks, int FailedTracks, bool Pending) { public static AudioPreparationResult PendingResult => new(0, 0, true); }
 internal readonly record struct EditorSeekResult(bool Succeeded, bool Resumed, bool Superseded, TimeSpan Landed, TimeSpan AudioAnchor) { public static EditorSeekResult FailedResult => new(false,false,false,default,default); public static EditorSeekResult SupersededResult => new(false,false,true,default,default); }
 internal readonly record struct EditorPlaybackStartResult(bool Succeeded, bool Superseded, TimeSpan Landed, AudioPreparationResult Audio) { public static EditorPlaybackStartResult FailedResult => new(false, false, default, default); public static EditorPlaybackStartResult SupersededResult => new(false, true, default, default); }

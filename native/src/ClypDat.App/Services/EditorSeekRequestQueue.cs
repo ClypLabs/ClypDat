@@ -2,14 +2,12 @@ namespace ClypDat.App.Services;
 
 internal sealed class EditorSeekRequestQueue
 {
-    internal static readonly TimeSpan PreviewInterval = TimeSpan.FromMilliseconds(100);
-    internal static readonly TimeSpan FinalQuietPeriod = TimeSpan.FromMilliseconds(100);
     private readonly object _sync = new();
     private TimeSpan? _preview;
     private bool _finalSeekPending;
     private long _finalSeekGeneration;
     private long _generation;
-    private DateTimeOffset? _lastPreviewWrite;
+    private long _activeGeneration;
     private int _previewWritesSinceFinal;
     private int _previewRequestsSinceFinal;
     private int _suppressedStaleParksSinceFinal;
@@ -47,17 +45,14 @@ internal sealed class EditorSeekRequestQueue
             _suppressedStaleParksSinceFinal = 0;
             _generation++;
             _finalSeekGeneration = _generation;
-            var quietUntil = _lastPreviewWrite is { } lastWrite
-                ? lastWrite + FinalQuietPeriod
-                : now;
+            _activeGeneration = 0;
             var request = new EditorFinalSeekRequest(
                 _finalSeekGeneration,
                 _previewRequestsSinceFinal,
                 _previewWritesSinceFinal,
-                quietUntil > now ? quietUntil - now : TimeSpan.Zero);
+                TimeSpan.Zero);
             _previewRequestsSinceFinal = 0;
             _previewWritesSinceFinal = 0;
-            _lastPreviewWrite = null;
             return request;
         }
     }
@@ -84,17 +79,10 @@ internal sealed class EditorSeekRequestQueue
                 return false;
             }
 
-            if (_lastPreviewWrite is { } lastWrite && now - lastWrite < PreviewInterval)
-            {
-                target = default;
-                generation = 0;
-                delay = PreviewInterval - (now - lastWrite);
-                return false;
-            }
-
             target = _preview.Value;
             _preview = null;
             generation = _generation;
+            _activeGeneration = generation;
             delay = TimeSpan.Zero;
             return true;
         }
@@ -113,7 +101,6 @@ internal sealed class EditorSeekRequestQueue
         lock (_sync)
         {
             if (_finalSeekPending || generation != _generation) return;
-            _lastPreviewWrite = now;
             _previewWritesSinceFinal++;
         }
     }
@@ -123,7 +110,7 @@ internal sealed class EditorSeekRequestQueue
     public PreviewTransportLease? TryAcquirePreviewTransport(long generation, bool parking = false)
     {
         Monitor.Enter(_sync);
-        if (!_finalSeekPending && generation != 0 && generation == _generation)
+        if (!_finalSeekPending && generation != 0 && (generation == _activeGeneration || generation == _generation))
         {
             return new PreviewTransportLease(this);
         }
@@ -145,7 +132,7 @@ internal sealed class EditorSeekRequestQueue
 
     public bool IsCurrent(long generation)
     {
-        lock (_sync) return !_finalSeekPending && generation == _generation;
+        lock (_sync) return !_finalSeekPending && generation != 0 && (generation == _activeGeneration || generation == _generation);
     }
 
     internal static TimeSpan Normalize(TimeSpan target) =>
@@ -163,7 +150,6 @@ internal sealed class EditorSeekRequestQueue
         public void MarkWritten(DateTimeOffset now)
         {
             var owner = _owner ?? throw new ObjectDisposedException(nameof(PreviewTransportLease));
-            owner._lastPreviewWrite = now;
             owner._previewWritesSinceFinal++;
         }
 

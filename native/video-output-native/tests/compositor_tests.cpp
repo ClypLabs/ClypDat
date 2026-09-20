@@ -195,12 +195,20 @@ int main() {
     state.artwork_count = 0;
     state.artwork = nullptr;
     state.generation++;
-    state.revision++;
-    require(cdvo_submit(token, &state) != 0, "seek generation");
+    state.revision = 0;
+    require(cdvo_submit(token, &state) != 0, "seek barrier");
     require(cdvo_compose(renderer, rtv.Get(), &viewport, 0) == 0,
             "reject picture prepared before seek");
+    // Recommit the unchanged art after transport's revision-zero barrier. It
+    // must reuse its GPU resource; a seek must not require a duplicate upload.
+    state.revision = 1;
+    state.artwork_count = 1;
+    state.artwork = &art;
+    require(cdvo_submit(token, &state) != 0, "retain artwork across seek");
     state.generation--;
     require(cdvo_submit(token, &state) == 0, "reject obsolete state");
+    state.artwork_count = 0;
+    state.artwork = nullptr;
     cdvo_status status{sizeof(cdvo_status), CDVO_ABI};
     require(cdvo_query(token, &status) != 0 && !status.failed,
             "status handshake");

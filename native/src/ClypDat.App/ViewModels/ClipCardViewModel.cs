@@ -18,6 +18,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     private ClipEditSettings? _clipEdit;
     private bool _isVod;
     private bool _isPreviewVisible;
+    private bool _isPreviewRealized;
+    private bool _previewImageDirty = true;
+    private int _loadedPreviewWidth;
     private string _busyOverlayText = string.Empty;
     private CancellationTokenSource? _previewLoadCts;
     private int _previewLoadVersion;
@@ -389,7 +392,7 @@ public sealed class ClipCardViewModel : ViewModelBase
         {
             if (!SetProperty(ref _previewImagePath, value)) return;
             CancelPreviewLoad();
-            ClearPreviewImage();
+            _previewImageDirty = true;
             if (_isPreviewVisible) SetPreviewImage(value);
         }
     }
@@ -431,23 +434,24 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     // Called from MainWindow's realized-row diff. Decodes on row entry and
     // releases on row exit, bounding live thumbnails to viewport + overscan.
-    public void SetPreviewVisible(bool visible)
-    {
-        if (_isPreviewVisible == visible) return;
-        _isPreviewVisible = visible;
+    public void SetPreviewVisible(bool visible) => SetPreviewLifecycle(visible, visible);
 
-        if (visible)
+    // Realized but inactive cards hold their bitmap while the Library is hidden.
+    // Only viewport/overscan cards receive this state from the window.
+    internal void SetPreviewLifecycle(bool realized, bool active)
+    {
+        _isPreviewRealized = realized;
+        _isPreviewVisible = realized && active;
+        if (!_isPreviewVisible) CancelPreviewLoad();
+        if (!realized)
+        {
+            PreviewImage = null;
+            _loadedPreviewWidth = 0;
+        }
+        else if (_isPreviewVisible && (_previewImageDirty || PreviewImage is null ||
+                     _loadedPreviewWidth != Volatile.Read(ref _previewDecodeWidth)))
         {
             SetPreviewImage(_previewImagePath);
-        }
-        else
-        {
-            CancelPreviewLoad();
-            // Just an unbind. The bitmap stays alive in CardThumbnailCache so
-            // scrolling back finds it decoded, and cache eviction goes through
-            // DeferredBitmapDisposal rather than freeing pixels the compositor
-            // may still be drawing.
-            PreviewImage = null;
         }
     }
 
@@ -461,6 +465,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         // The bytes at this path changed, so the cached decode of them is
         // wrong - without this the card would keep serving the pre-edit image
         // out of CardThumbnailCache forever.
+        CancelPreviewLoad();
+        _previewImageDirty = true;
         CardThumbnailCache.Invalidate(_previewImagePath);
         if (_isPreviewVisible) SetPreviewImage(_previewImagePath);
     }
@@ -667,6 +673,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         if (cached is not null)
         {
             PreviewImage = cached;
+            _loadedPreviewWidth = width;
+            _previewImageDirty = false;
             return;
         }
 
@@ -684,10 +692,6 @@ public sealed class ClipCardViewModel : ViewModelBase
         previous.Cancel();
         previous.Dispose();
     }
-
-    // Bitmaps belong to CardThumbnailCache, so unbinding one is just dropping
-    // a reference - never a Dispose.
-    private void ClearPreviewImage() => PreviewImage = null;
 
     private async Task LoadPreviewImageAsync(string path, int width, int version, CancellationToken cancellationToken)
     {
@@ -721,20 +725,18 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     private void ApplyLoadedPreview(Bitmap bitmap, string path, int width, int version, CancellationToken cancellationToken)
     {
-        // Cache it even when this card no longer wants it: the decode is
-        // already paid for, and the usual reason it is unwanted is that the
-        // card scrolled past, which is exactly what gets scrolled back to.
-        var shared = CardThumbnailCache.Store(path, width, bitmap);
-
         if (cancellationToken.IsCancellationRequested
             || version != _previewLoadVersion
-            || !_isPreviewVisible
+            || !_isPreviewRealized || !_isPreviewVisible
             || !string.Equals(path, _previewImagePath, StringComparison.Ordinal))
         {
+            DeferredBitmapDisposal.ReleaseReferenceAfterRender(bitmap);
             return;
         }
 
-        PreviewImage = shared;
+        PreviewImage = CardThumbnailCache.Store(path, width, bitmap);
+        _loadedPreviewWidth = width;
+        _previewImageDirty = false;
     }
 
     private static Bitmap DecodePreview(string path, int width)

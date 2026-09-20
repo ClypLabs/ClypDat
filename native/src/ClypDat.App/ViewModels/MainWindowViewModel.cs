@@ -730,7 +730,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public IReadOnlyList<ClipCardViewModel> GetAudioOnlyClips() => AllClips
         .Where(clip => !clip.Media.HasVideo && clip.Media.Tracks.Count > 0)
         .ToArray();
-    public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; }
+    public ObservableCollection<TrackLaneViewModel> TimelineTracks { get; private set; }
     public int TimelineTrackCount => Math.Max(1, TimelineTracks.Count);
     // Timeline panel has 12px/10px vertical padding, a 58px header plus 10px
     // gap, a 34px ruler, then fixed lane heights plus separators. The outer
@@ -9055,7 +9055,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Answered BEFORE SelectedVideoPath is overwritten one line down.
         // HydrateSelectedMediaAsync, HydrateOpenClipAsync and
         // AddOrUpdateLibraryClipAsync all re-enter here for the clip that is
-        // ALREADY open, and TimelineTracks.Clear() below throws away peaks that
+        // ALREADY open, and rebuilding the lanes below throws away peaks that
         // are already painted - so a waveform that had finished drawing visibly
         // blanked and refilled for no reason the user could see.
         var isSameClipRebuild = string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase);
@@ -9142,7 +9142,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 .Where(track => track.IsAudio && track.WaveformPeaks.Count > 0)
                 .ToDictionary(track => track.StreamIndex, track => track.WaveformPeaks)
             : null;
-        TimelineTracks.Clear();
+        var nextTimelineTracks = new ObservableCollection<TrackLaneViewModel>();
 
         var hasVideo = false;
         var audioIndex = 0;
@@ -9169,16 +9169,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // through Game Audio, Chat/Discord, and Microphone; compact only when
         // a fourth audio stream such as Spotify is present.
         var compactAudioLanes = timelineAudioTrackCount > 3;
-        // Filmstrip starts empty and is filled in by StartFilmstripLoad below.
-        // Decoding it here meant a ~2844x160 JPEG decode on the UI thread on
-        // every single open, blocking the editor from appearing - and for no
-        // gain, since EnsureFilmstripAsync short-circuits on an existing file,
-        // so the cached strip still lands about a dispatcher hop later.
-        Avalonia.Media.Imaging.Bitmap? filmstrip = null;
-        // Unlike the filmstrip this costs nothing to apply here - it is a
-        // double[] out of a dictionary, not a 2844x160 JPEG decode - so peaks
-        // are applied SYNCHRONOUSLY rather than a dispatcher hop later. That
-        // hop is exactly the empty first frame this exists to remove.
+        // Memory-cache lookup only. Missing strips decode asynchronously.
+        Services.BitmapCache.TryGet(media.FilmstripPath, out var filmstrip);
         _mediaProbe.TryGetCachedWaveforms(media, out var cachedPeaks);
         foreach (var track in media.Tracks)
         {
@@ -9219,14 +9211,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 if (cachedPeaks.TryGetValue(track.Index, out var peaks)) lane.WaveformPeaks = peaks;
                 else if (carriedPeaks is not null && carriedPeaks.TryGetValue(track.Index, out var carried)) lane.WaveformPeaks = carried;
             }
-            TimelineTracks.Add(lane);
+            nextTimelineTracks.Add(lane);
             if (track.Type == "audio") audioIndex++;
         }
 
         if (!hasVideo)
         {
-            TimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { Filmstrip = filmstrip });
+            nextTimelineTracks.Insert(0, new TrackLaneViewModel(0, "Video", "video", "#05C7B7", false) { Filmstrip = filmstrip });
         }
+
+        TimelineTracks = nextTimelineTracks;
+        OnPropertyChanged(nameof(TimelineTracks));
 
         RefreshSelectedSpotifyOverlayLane();
 

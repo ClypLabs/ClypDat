@@ -121,7 +121,6 @@ public sealed partial class MainWindow : Window
     // cancel/supersede a still-in-flight seek when a newer one arrives, so a
     // throttle here just caps how often that cancel-and-restart happens rather
     // than needing any new synchronization of its own.
-    private readonly Stopwatch _timelineScrubThrottle = new();
     // VLC reloads a logo image synchronously inside its video filter. Keep crop
     // input live, but never turn a slider's pointer-move flood into a matching
     // flood of full-resolution PNG encodes and filter reloads.
@@ -149,7 +148,6 @@ public sealed partial class MainWindow : Window
     // for this to pace around, so it can do its actual job of capping the
     // update rate at roughly one per displayed frame. It was 120ms, then 60ms,
     // both chosen to sit above a seek cost that no longer exists.
-    private static readonly TimeSpan TimelineScrubMinInterval = TimeSpan.FromMilliseconds(33);
     private IReplayBuffer? _replayBuffer;
     private bool _workerCrashMessageShown;
     private ReplayBufferConfig? _replayConfigSnapshot;
@@ -395,6 +393,7 @@ public sealed partial class MainWindow : Window
             // Only known once there is a visual root - thumbnails decode to
             // card pixels, not card DIPs.
             ViewModel?.SetCardRenderScaling(RenderScaling);
+            UpdateRealizedLibraryClips();
             ClearLibraryResizeAnchor();
             LibraryScrollViewer.Offset = default;
             InitializeReplayServices();
@@ -2158,6 +2157,7 @@ public sealed partial class MainWindow : Window
             ViewModel?.UpdateCardLayout(LibraryCardLayoutCalculator.Calculate(
                 LibraryScrollViewer.Bounds.Width, ViewModel.ScaleClipsWithWindow));
         CompleteLibraryLayoutPass();
+        UpdateRealizedLibraryClips();
         TryCompleteLibraryReturnTiming();
         TryCompleteInitialLibraryLayout();
         QueueDateScrubberRebuild();
@@ -2182,12 +2182,45 @@ public sealed partial class MainWindow : Window
         UpdateRealizedLibraryClips();
     }
 
+    private bool _libraryThumbnailsSuspended;
+    private bool _libraryThumbnailResumePending;
+
     private void UpdateRealizedLibraryClips()
     {
-        HashSet<ClipCardViewModel> next = ViewModel?.IsLibraryVisible == true
-            ? _realizedLibraryRows.Where(row => row.IsRealized && ViewModel.LibraryRows.Contains(row))
-                .SelectMany(row => row.ProjectedClips).ToHashSet()
-            : [];
+        if (ViewModel?.IsLibraryVisible != true)
+        {
+            _libraryThumbnailsSuspended = true;
+            foreach (var clip in _activeLibraryClips.ToArray())
+            {
+                var retained = ViewModel?.AllClips.Contains(clip) == true && clip.IsVisibleInLibrary;
+                clip.SetPreviewLifecycle(retained, active: false);
+                _clipHoverPreview.StopIfActive(clip, "library suspended");
+                CancelEditorHoverWarmup(clip.Path);
+                if (!retained) _activeLibraryClips.Remove(clip);
+            }
+            return;
+        }
+        if (_libraryThumbnailsSuspended)
+        {
+            // Keep the previous viewport until return layout restores its scroll
+            // anchor. Container clearing/preparation can arrive during navigation.
+            foreach (var clip in _activeLibraryClips) clip.SetPreviewLifecycle(true, active: true);
+            if (!_libraryThumbnailResumePending)
+            {
+                _libraryThumbnailResumePending = true;
+                RequestAnimationFrame(_ =>
+                {
+                    _libraryThumbnailResumePending = false;
+                    if (ViewModel?.IsLibraryVisible != true) return;
+                    _libraryThumbnailsSuspended = false;
+                    UpdateRealizedLibraryClips();
+                });
+            }
+            return;
+        }
+        HashSet<ClipCardViewModel> next = _realizedLibraryRows
+            .Where(row => row.IsRealized && ViewModel.LibraryRows.Contains(row))
+            .SelectMany(row => row.ProjectedClips).ToHashSet();
         foreach (var clip in _activeLibraryClips.Except(next).ToArray())
         {
             _clipHoverPreview.StopIfActive(clip, "row unrealized");
@@ -2195,9 +2228,9 @@ public sealed partial class MainWindow : Window
             clip.SetPreviewVisible(false);
             _activeLibraryClips.Remove(clip);
         }
-        foreach (var clip in next.Except(_activeLibraryClips))
+        foreach (var clip in next)
         {
-            clip.SetPreviewVisible(true);
+            clip.SetPreviewLifecycle(true, active: true);
             _activeLibraryClips.Add(clip);
         }
     }
@@ -5120,23 +5153,26 @@ public sealed partial class MainWindow : Window
         _spotifyPreviewDirty = true;
         warmup.MarkPlayerAttached();
 
-        void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
+        session.PublishSceneAsync = position =>
         {
-            if (session.VideoPlayer.VoutCount == 0) return;
-            session.VideoPlayer.TimeChanged -= OnTimeChanged;
-            warmup.MarkFirstFrameReady();
-            Dispatcher.UIThread.Post(() =>
+            session.Composition?.Submit([], [], position, 0);
+            return Task.CompletedTask;
+        };
+        async Task PrepareWarmFrameAsync()
+        {
+            try
             {
-                if (!warmup.Cancellation.IsCancellationRequested && !warmup.Claimed && ReferenceEquals(_editorHoverWarmup, warmup))
+                var result = await session.SeekAsync(warmup.Start, cancellationToken: warmup.Cancellation.Token);
+                if (result.Outcome == PlaybackSeekOutcome.Completed && !warmup.Cancellation.IsCancellationRequested)
                 {
-                    session.Pause();
+                    warmup.MarkFirstFrameReady();
                     AppLog.Debug($"Editor hover warm-up frame ready: {Path.GetFileName(warmup.Path)}.");
                 }
-            });
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception error) { AppLog.Error("Editor warm frame failed", error); }
         }
-
-        session.VideoPlayer.TimeChanged += OnTimeChanged;
-        session.PlayFrom(warmup.Start);
+        _ = PrepareWarmFrameAsync();
         _ = PauseWarmEditorOutputAfterAsync(warmup, session);
     }
 
@@ -6628,7 +6664,6 @@ public sealed partial class MainWindow : Window
         _endedAtTrimBoundary = false;
         BeginTimelineGesture(e);
         UpdateTimelineFromPointer(e, TimelineDragMode.Playhead);
-        _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
@@ -6643,7 +6678,6 @@ public sealed partial class MainWindow : Window
         _endedAtTrimBoundary = false;
         BeginTimelineGesture(e, pauseNow: true);
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimStart);
-        _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
@@ -6658,7 +6692,6 @@ public sealed partial class MainWindow : Window
         _endedAtTrimBoundary = false;
         BeginTimelineGesture(e, pauseNow: true);
         UpdateTimelineFromPointer(e, TimelineDragMode.TrimEnd);
-        _timelineScrubThrottle.Restart();
         e.Pointer.Capture(TimelineSurface);
         e.Handled = true;
     }
@@ -6720,13 +6753,7 @@ public sealed partial class MainWindow : Window
         // video dead until release. Silent throughout - SeekPreview does no
         // audio work at all - and PointerReleased below issues the real,
         // resume-aware seek once the user lets go.
-        if (_timelineScrubThrottle.Elapsed < TimelineScrubMinInterval) return;
-        _timelineScrubThrottle.Restart();
         _endedAtTrimBoundary = false;
-        _playback?.PrefetchAudioAt(ViewModel.CurrentTime);
-        // Keep the audio chunk for wherever this is heading extracting while the
-        // drag is still going, so the resume on release has real samples to play
-        // instead of the silence ChunkedAudioReader emits for a cold chunk.
         _playback?.SeekPreview(ViewModel.CurrentTime);
     }
 
@@ -8705,6 +8732,20 @@ public sealed partial class MainWindow : Window
             playback.SetMasterVolume(openingVolume);
             _playback = playback;
             var openingComposition = playback.Composition;
+            playback.PublishSceneAsync = async position =>
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (cancellationToken.IsCancellationRequested || _playback != playback || playback.Composition != openingComposition) return;
+                    UpdateNativeComposition(openingViewModel, position);
+                });
+            };
+            playback.NextRenderAsync = async token =>
+            {
+                var rendered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Dispatcher.UIThread.Post(() => RequestAnimationFrame(_ => rendered.TrySetResult()));
+                await rendered.Task.WaitAsync(token).ConfigureAwait(false);
+            };
             _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
             ViewModel.IsRecordingPausedAtCurrentTime = false;
             // Redundant with StopEditorPlayback's own Hide() above, but closes
@@ -8724,19 +8765,7 @@ public sealed partial class MainWindow : Window
             if (cancellationToken.IsCancellationRequested) return;
 
             ViewModel.IsEditorVideoLoading = true;
-            // Playing fires on the state transition alone, not on an actual
-            // decoded frame reaching the screen - fine the first time (a fresh
-            // PlaybackSession's own engine-startup latency happens to cover the
-            // gap), but on every open after that the session/vout are already
-            // warm, so Playing can fire before the NEW clip's first real frame
-            // is ready and the placeholder drops early onto a black video view.
-            // TimeChanged only fires once the position actually advances, which
-            // requires real decode progress - same signal SeekAndWaitAsync uses
-            // to confirm a seek has actually landed, not just been requested.
-            // Scoped to this one load attempt (not a persistent subscription
-            // on the reused PlaybackSession) so a superseded/cancelled open's
-            // late-firing event can't wrongly clear a NEWER open's loading
-            // flag - the cancellation check below guards that.
+            // Reveal only a complete scene presented by this output generation.
             var videoReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var firstFrameClock = System.Diagnostics.Stopwatch.StartNew();
             void ConfirmVideoReady(string source)
@@ -8765,35 +8794,26 @@ public sealed partial class MainWindow : Window
                     if (!cancellationToken.IsCancellationRequested) playback.ReapplyCropMaskImage();
                 });
             }
-            void OnTimeChanged(object? _, MediaPlayerTimeChangedEventArgs __)
-            {
-                // TimeChanged alone only proves the position advanced, not that
-                // a picture exists to show - revealing the VideoView on the very
-                // first tick could swap the thumbnail for a black native surface
-                // for a beat. Require the compositor to confirm a complete
-                // picture from the current seek generation before revealing it.
-                if (playback.VideoPlayer.VoutCount == 0 || !ReferenceEquals(playback.Composition, openingComposition) ||
-                    openingComposition?.HasPresentedPicture != true) return;
-                playback.VideoPlayer.TimeChanged -= OnTimeChanged;
-                playback.VideoPlayer.Vout -= OnVout;
-                // Time from play request to first decoded frame - the primary
-                // "how slow is this clip's storage" number for network-drive
-                // diagnosis (pairs with the "Editor video load: network=..."
-                // line logged at LoadVideo).
-                AppLog.Debug($"Editor first frame after {firstFrameClock.ElapsedMilliseconds}ms (total from click {openClock.ElapsedMilliseconds}ms).");
-                ConfirmVideoReady("first frame");
-            }
-            playback.VideoPlayer.TimeChanged += OnTimeChanged;
             playback.VideoPlayer.Vout += OnVout;
-            // A reused player can still emit callbacks after a newer click has
-            // cancelled this request. Remove this request's handlers at the
-            // cancellation boundary rather than letting a later clip consume
-            // them. Register invokes immediately when cancellation won a race.
-            using var eventCleanup = cancellationToken.Register(() =>
+            using var eventCleanup = cancellationToken.Register(() => playback.VideoPlayer.Vout -= OnVout);
+            async Task ObserveFirstPresentationAsync()
             {
-                playback.VideoPlayer.TimeChanged -= OnTimeChanged;
-                playback.VideoPlayer.Vout -= OnVout;
-            });
+                try
+                {
+                    if (await PresentationWaiter.WaitAsync(
+                        () => openingComposition?.HasPresentedPicture == true,
+                        () => ReferenceEquals(playback.Composition, openingComposition), cancellationToken,
+                        TimeSpan.FromSeconds(5)))
+                    {
+                        AppLog.Debug($"Editor first presentation: prepareMs={firstFrameClock.ElapsedMilliseconds}, clickMs={openClock.ElapsedMilliseconds}.");
+                        ConfirmVideoReady("native presentation");
+                    }
+                }
+                catch (OperationCanceledException) { }
+                finally { playback.VideoPlayer.Vout -= OnVout; }
+            }
+            _ = ObserveFirstPresentationAsync();
+            _ = RevealEditorVideoIfStalledAsync(videoReady.Task, playback, openingComposition, openingViewModel, openingPath, cancellationToken);
 
             // A claimed hover player already rendered a frame through this
             // exact HWND, then paused. Reveal it immediately; PlayFrom below
@@ -8817,9 +8837,15 @@ public sealed partial class MainWindow : Window
             // rather than after coordinated transport commits.
             if (!resumeWarmFrame) ApplyEditorEffectPreview();
             var startPosition = resumeWarmFrame ? playback.Position : openingPosition;
-            await LoadEditorAudioAsync(playback, openingPath, videoCodec, audioTracks, cancellationToken, foregroundScope);
-            if (cancellationToken.IsCancellationRequested || _playback != playback) return;
-            var startup = await playback.StartCoordinatedAsync(startPosition, cancellationToken);
+            var audioSetup = LoadEditorAudioAsync(playback, openingPath, videoCodec, audioTracks, cancellationToken, foregroundScope);
+            RequestAnimationFrame(_ =>
+            {
+                if (cancellationToken.IsCancellationRequested) return;
+                UpdateTimelineChrome();
+                AppLog.Debug($"Editor layout/timeline ready: clickMs={openClock.ElapsedMilliseconds}.");
+            });
+            var startup = await playback.StartCoordinatedAsync(startPosition, cancellationToken, audioSetup, resumeWarmFrame);
+            AppLog.Debug($"Editor synchronized audio/video ready: clickMs={openClock.ElapsedMilliseconds}.");
             if (!startup.Succeeded) return;
             // StartCoordinatedAsync ends its seek generation. Submit the
             // selected clip's scene immediately afterwards, before any screen
@@ -8830,20 +8856,14 @@ public sealed partial class MainWindow : Window
             _endedAtTrimBoundary = false;
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
-            await Task.Delay(200, cancellationToken);
+
             if (playback.Duration > TimeSpan.Zero && IsPlausibleDuration(playback.Duration, ViewModel.Duration))
             {
                 ViewModel.SetDuration(playback.Duration);
             }
             UpdateTimelineChrome();
 
-            // Backstop for the Vout gate in OnTimeChanged. If libvlc never
-            // brings a video output up - a file whose video stream won't decode,
-            // a vout that failed to create - nothing would ever clear the
-            // loading flag and the editor would sit on the thumbnail forever.
-            // Reveal anyway rather than stay stuck; a black surface is at least
-            // honest about the clip not playing.
-            _ = RevealEditorVideoIfStalledAsync(videoReady.Task, playback, openingComposition, openingViewModel, openingPath, cancellationToken);
+
         }
         catch (OperationCanceledException)
         {
@@ -10424,7 +10444,7 @@ public sealed partial class MainWindow : Window
         // seek, not after it - a cold chunk reads as silence (see
         // ChunkedAudioReader.Read), which would look exactly like the audio
         // lagging the picture in even though both were released together.
-        _playback?.PrefetchAudioAt(time);
+        // Accepted transport targets own audio preparation.
         var seekResult = PlaybackSeekResult.Failed;
         if (_playback is not null)
         {

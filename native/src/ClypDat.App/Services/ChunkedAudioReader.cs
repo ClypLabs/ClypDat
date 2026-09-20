@@ -26,6 +26,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     private const long MaximumChunkPcmBytes = 128L * 1024 * 1024;
 
     private const int ChunkSeconds = 30;
+    private int _lastPrefetchedChunk = -1;
     private const int SampleRate = 48000;
     private const int Channels = 2;
     private const long ChunkFrames = (long)ChunkSeconds * SampleRate;
@@ -117,6 +118,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     public void Prefetch(TimeSpan time)
     {
         var chunkIndex = (int)(Math.Max(0, time.TotalSeconds) / ChunkSeconds);
+        if (Interlocked.Exchange(ref _lastPrefetchedChunk, chunkIndex) == chunkIndex) return;
         ScheduleExtraction(chunkIndex, priority: true);
         ScheduleExtraction(chunkIndex + 1, priority: false);
         ScheduleExtraction(chunkIndex - 1, priority: false);

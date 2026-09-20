@@ -97,6 +97,22 @@ public sealed class PlaybackSession : IDisposable
     private EventHandler<MediaPlayerTimeChangedEventArgs>? _overlayClockHandler;
     private long _overlayClockGeneration;
     private Task? _previewWorker;
+    private bool _previewAudioPaused;
+    internal Func<TimeSpan, Task>? PublishSceneAsync { get; set; }
+    internal Func<CancellationToken, Task>? NextRenderAsync { get; set; }
+    internal bool PreviewWorkerRunning { get { lock (_previewLock) return _previewWorker is not null; } }
+
+    private async Task<bool> PresentSeekAsync(TimeSpan target, Func<bool> current, CancellationToken token)
+    {
+        var output = Composition;
+        if (output is null || !current()) return false;
+        FreezeOverlayClock(target);
+        if (PublishSceneAsync is { } publish) await publish(target).WaitAsync(token).ConfigureAwait(false);
+        else output.Submit([], [], target, 0);
+        return await PresentationWaiter.WaitAsync(() => output.HasPresentedPicture,
+            () => !_disposed && ReferenceEquals(Composition, output) && current(), token).ConfigureAwait(false);
+    }
+
     private readonly List<Task> _seekTasks = new();
     private EventHandler<MediaPlayerTimeChangedEventArgs>? _audioDriftHandler;
     private long _audioAnchorDevicePosition;
@@ -514,7 +530,7 @@ public sealed class PlaybackSession : IDisposable
         PlayFrom(Position);
     }
 
-    internal async Task<EditorPlaybackStartResult> StartCoordinatedAsync(TimeSpan time, CancellationToken cancellationToken = default)
+    internal async Task<EditorPlaybackStartResult> StartCoordinatedAsync(TimeSpan time, CancellationToken cancellationToken = default, Task? audioSetup = null, bool reusePresentedFrame = false)
     {
         var generation = Interlocked.Increment(ref _seekVersion);
         Interlocked.Increment(ref _playVersion);
@@ -522,17 +538,17 @@ public sealed class PlaybackSession : IDisposable
         _shouldPlay = true;
         ResetSlowRateMonitor();
         _lastRequestedPosition = time < TimeSpan.Zero ? TimeSpan.Zero : time;
-        BeginOverlaySeek(_lastRequestedPosition);
+        _isSeeking = true;
         ForceVideoSilent();
         await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var startId = $"{GetHashCode():x}:{generation}";
-            var result = await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken).ConfigureAwait(false);
+            var result = await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation, audioSetup, reusePresentedFrame), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken).ConfigureAwait(false);
             if (result.Succeeded) ResumeOverlayClock(result.Landed);
             return result;
         }
-        finally { _seekLock.Release(); }
+        finally { _isSeeking = false; _seekLock.Release(); }
     }
 
     public void PlayFrom(TimeSpan time)
@@ -669,158 +685,75 @@ public sealed class PlaybackSession : IDisposable
         DisposeAudio();
     }
 
-    // Scrub/keyboard-repeat seeking: queue a video-only preview and return,
-    // with no confirmation wait and no audio work at all.
-    //
-    // These used to go through SeekAsync like any other seek, which made them
-    // as slow as the slowest thing in that method. Two costs dominated. First,
-    // serialization: every scrub tick queued behind _seekLock waiting on the
-    // previous tick's settle confirmation, so the picture trailed the cursor by
-    // the confirmation time rather than by the UI's own throttle. Second, and
-    // worse, audio: SeekAsync repositions the ChunkedAudioReaders, and setting
-    // CurrentTime on one closes its open chunk and prefetches three more - so a
-    // drag across a three-track clip was firing off ffmpeg chunk extractions by
-    // the dozen, competing with the video decode the user is actually watching,
-    // to reposition audio that is stopped for the whole drag anyway.
-    //
-    // Audio is repositioned once, by the real SeekAsync the caller issues when
-    // the drag/key-repeat ends. The preview worker keeps video paused between
-    // writes; it only starts the pipeline around a position write when LibVLC
-    // needs that transition to present a newly landed frame.
+    // Pointer feedback stays on the UI thread. One decoder request runs to
+    // presentation; later pointer targets replace only the pending request.
     public void SeekPreview(TimeSpan time)
     {
-        var milliseconds = Math.Max(0, (long)time.TotalMilliseconds);
-        var target = TimeSpan.FromMilliseconds(milliseconds);
-        // A final seek has already claimed transport. Ignored preview input
-        // must not increment _seekVersion and falsely supersede that final seek.
-        if (!_previewRequests.TryQueuePreview(target)) return;
+        if (_disposed || !_previewRequests.TryQueuePreview(time)) return;
         Interlocked.Increment(ref _seekVersion);
-        _lastRequestedPosition = target;
-        BeginOverlaySeek(target);
-        try
+        _lastRequestedPosition = EditorSeekRequestQueue.Normalize(time);
+        lock (_previewLock)
         {
-            // One worker owns all preview writes. New drag positions replace a
-            // pending target; an active GOP decode finishes before final seek
-            // can acquire the same lock.
-            lock (_previewLock)
-            {
-                if (_disposed) return;
-                if (_previewWorker is null) _previewWorker = Task.Run(PreviewSeekWorkerAsync);
-            }
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Editor preview seek failed", error);
+            if (!_disposed && _previewWorker is null) _previewWorker = Task.Run(PreviewSeekWorkerAsync);
         }
     }
 
     private async Task PreviewSeekWorkerAsync()
     {
-        long lastPreviewGeneration = 0;
         try
         {
-            while (true)
+            while (!_disposed && _previewRequests.HasPendingPreview())
             {
-                // Dispose() releases the media player and the LibVLC instance. Every
-                // VideoPlayer touch below is a call into native libvlc, so bail out
-                // the moment disposal starts rather than racing it.
-                if (_disposed)
-                {
-                    lock (_previewLock) _previewWorker = null;
-                    return;
-                }
-
-                if (!_previewRequests.TryTakePreview(DateTimeOffset.UtcNow, out var target, out var generation, out var delay))
-                {
-                    if (delay > TimeSpan.Zero)
-                    {
-                        await Task.Delay(delay).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    // Keep a preview decode alive only while pointer updates
-                    // are arriving. This gives LibVLC time to present the
-                    // landed frame, then parks video when the mouse stops.
-                    if (await WaitForPreviewActivityAsync().ConfigureAwait(false)) continue;
-
-                    await _seekLock.WaitAsync().ConfigureAwait(false);
-                    try
-                    {
-                        using var previewLease = _previewRequests.TryAcquirePreviewTransport(lastPreviewGeneration, parking: true);
-                        if (previewLease is null) continue;
-                        lock (_transportLock)
-                        {
-                            if (_disposed)
-                            {
-                                lock (_previewLock) _previewWorker = null;
-                                return;
-                            }
-
-                            VideoPlayer.SetPause(true);
-                        }
-                    }
-                    finally
-                    {
-                        _seekLock.Release();
-                    }
-
-                    lock (_previewLock)
-                    {
-                        // Queueing can race the worker's empty check. Keep
-                        // this worker alive when a target arrived before it
-                        // acquired the lifecycle lock; otherwise that target
-                        // would sit forever with no writer.
-                        if (_previewRequests.HasPendingPreview()) continue;
-                        _previewWorker = null;
-                        return;
-                    }
-                }
-
-                await _seekLock.WaitAsync().ConfigureAwait(false);
+                if (NextRenderAsync is { } nextRender) await nextRender(_disposeCts.Token).ConfigureAwait(false);
+                if (!_previewRequests.TryTakePreview(out var target, out var generation)) break;
+                await _seekLock.WaitAsync(_disposeCts.Token).ConfigureAwait(false);
                 try
                 {
-                    using var previewLease = _previewRequests.TryAcquirePreviewTransport(generation);
-                    if (previewLease is null) continue;
-                    if (_disposed) return;
-                    lock (_transportLock)
+                    // Never hold a Monitor lease across await.
+                    using (var lease = _previewRequests.TryAcquirePreviewTransport(generation))
                     {
-                        if (_disposed) return;
-                        // Preview writes intentionally do not settle or touch
-                        // audio. Video is parked by the idle branch above;
-                        // the next final seek owns pause/land/roll.
-                        ForceVideoSilent();
-                        _audioOutput?.Stop();
-                        if (IsEnded || VideoPlayer.State == VLCState.Stopped)
+                        if (lease is null || _disposed) continue;
+                        lock (_transportLock)
                         {
-                            VideoPlayer.Stop();
-                            _ended = false;
-                            Composition?.BindPlayer(VideoPlayer);
-                            VideoPlayer.Play();
-                        }
-                        else if (!VideoPlayer.IsPlaying)
-                        {
-                            // Resume the already-initialized paused decoder.
-                            // Play() here can rebuild its output path between
-                            // drag preview writes, producing the black flash
-                            // that a single click seek never has.
+                            if (!_previewAudioPaused)
+                            {
+                                StopAudioClockMonitoring();
+                                _audioOutput?.Stop();
+                                _previewAudioPaused = true;
+                            }
+                            ForceVideoSilent();
+                            if (IsEnded || VideoPlayer.State == VLCState.Stopped)
+                            {
+                                VideoPlayer.Stop();
+                                _ended = false;
+                                Composition?.BindPlayer(VideoPlayer);
+                                VideoPlayer.Play();
+                            }
+                            BeginOverlaySeek(target);
+                            VideoPlayer.Time = (long)target.TotalMilliseconds;
+                            Composition?.EndSeek(target);
                             VideoPlayer.SetPause(false);
+                            lease.MarkWritten(DateTimeOffset.UtcNow);
                         }
-                        VideoPlayer.Time = (long)target.TotalMilliseconds;
-                        Composition?.EndSeek(target);
-                        previewLease.MarkWritten(DateTimeOffset.UtcNow);
-                        lastPreviewGeneration = generation;
+                        PrefetchAudioAt(target);
                     }
+                    await PresentSeekAsync(target, () => _previewRequests.IsCurrent(generation), _disposeCts.Token).ConfigureAwait(false);
+                    using var park = _previewRequests.TryAcquirePreviewTransport(generation, parking: true);
+                    if (park is not null && !_disposed)
+                        lock (_transportLock) VideoPlayer.SetPause(true);
                 }
-                finally
-                {
-                    _seekLock.Release();
-                }
+                finally { _seekLock.Release(); }
             }
         }
-        catch (Exception error)
+        catch (OperationCanceledException) when (_disposed) { }
+        catch (Exception error) { AppLog.Error("Editor preview seek worker failed", error); }
+        finally
         {
-            lock (_previewLock) _previewWorker = null;
-            AppLog.Error("Editor preview seek worker failed", error);
+            lock (_previewLock)
+            {
+                _previewWorker = null;
+                if (!_disposed && _previewRequests.HasPendingPreview()) _previewWorker = Task.Run(PreviewSeekWorkerAsync);
+            }
         }
     }
 
@@ -875,15 +808,9 @@ public sealed class PlaybackSession : IDisposable
         _shouldPlay = resumePlayback;
         ResetSlowRateMonitor();
         _lastRequestedPosition = requested;
-        BeginOverlaySeek(requested);
+        _previewAudioPaused = false;
         try
         {
-            if (finalRequest.QuietPeriod > TimeSpan.Zero)
-            {
-                AppLog.Debug($"Editor seek waiting for preview quiet period: waitMs={finalRequest.QuietPeriod.TotalMilliseconds:0}, previewWrites={finalRequest.PreviewWriteCount}, generation={seekVersion}.");
-                await Task.Delay(finalRequest.QuietPeriod, cancellationToken).ConfigureAwait(false);
-            }
-
             var seekId = $"{GetHashCode():x}:{seekVersion}";
             var result = await _seekCoordinator.SeekAsync(
                 new PlaybackSeekTransport(this, seekVersion),
@@ -904,8 +831,7 @@ public sealed class PlaybackSession : IDisposable
             }
 
             _lastRequestedPosition = result.Landed;
-            if (result.Resumed) ResumeOverlayClock(result.Landed);
-            else FreezeOverlayClock(result.Landed);
+            // Clock and scene were committed before resume monitoring.
             AppLog.Debug($"Editor seek end: requested={requested.TotalSeconds:0.###}s, landed={result.Landed.TotalSeconds:0.###}s, audioAnchor={result.AudioAnchor.TotalSeconds:0.###}s, rollConfirmed={result.Resumed}, state={VideoPlayer.State}, resume={resumePlayback}, generation={seekVersion}.");
             return PlaybackSeekResult.Completed(result.Resumed);
         }
@@ -1266,24 +1192,6 @@ public sealed class PlaybackSession : IDisposable
         }
     }
 
-    private async Task<bool> WaitForPreviewActivityAsync()
-    {
-        var clock = Stopwatch.StartNew();
-        // Pointer events are not clockwork: a drag can have a 50ms+ gap while
-        // still held (GC, compositor, crossing another control). Waiting only
-        // 50ms parked LibVLC mid-gesture, then next preview had to wake it.
-        // Cover one 100ms preview cadence plus margin; final seek owns its
-        // own 100ms quiet period and will still settle the decoder promptly.
-        var grace = EditorSeekRequestQueue.PreviewInterval + TimeSpan.FromMilliseconds(50);
-        while (clock.Elapsed < grace)
-        {
-            if (_previewRequests.HasPendingPreview()) return true;
-            await Task.Delay(TimeSpan.FromMilliseconds(10)).ConfigureAwait(false);
-        }
-
-        return _previewRequests.HasPendingPreview();
-    }
-
     private void StartAudioAt(TimeSpan anchor, long generation)
     {
         if (_audioOutput is null) return;
@@ -1363,9 +1271,12 @@ public sealed class PlaybackSession : IDisposable
         _audioDriftHandler = null;
     }
 
-    private sealed class PlaybackSeekTransport(PlaybackSession session, long generation) : IEditorSeekTransport
+    private sealed class PlaybackSeekTransport(PlaybackSession session, long generation, Task? audioSetup = null, bool reusePresentedFrame = false) : IEditorSeekTransport
     {
         private TimeSpan _audioAnchor;
+        public bool CanReusePresentedFrame(TimeSpan target) => reusePresentedFrame && IsPaused &&
+            Math.Abs((Position - target).TotalMilliseconds) <= 150 && session.Composition?.HasPresentedPicture == true;
+        public Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token) => session.PresentSeekAsync(target, current, token);
 
         public bool IsPaused => session.VideoPlayer.State == VLCState.Paused;
         public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, session.VideoPlayer.Time));
@@ -1377,6 +1288,7 @@ public sealed class PlaybackSession : IDisposable
         public async Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default)
         {
             var clock = Stopwatch.StartNew();
+            if (audioSetup is not null) await audioSetup.WaitAsync(cancellationToken).ConfigureAwait(false);
             var readers = session._audioSources.Values.Select(source => source.Reader).ToArray();
             if (readers.Length == 0) return new AudioPreparationResult(0, 0, false);
             var results = await Task.WhenAll(readers.Select(async reader =>
@@ -1425,7 +1337,12 @@ public sealed class PlaybackSession : IDisposable
 
         public void WritePosition(TimeSpan target)
         {
-            lock (session._transportLock) session.VideoPlayer.Time = (long)target.TotalMilliseconds;
+            lock (session._transportLock)
+            {
+                session.BeginOverlaySeek(target);
+                session.VideoPlayer.Time = (long)target.TotalMilliseconds;
+                session.Composition?.EndSeek(target);
+            }
         }
 
         public void ResetVideo()
@@ -1460,13 +1377,14 @@ public sealed class PlaybackSession : IDisposable
                 session.SeekAudio(position);
                 _audioAnchor = position;
                 session.VideoPlayer.SetPause(false);
+                session.ResumeOverlayClock(position);
                 session.StartAudioAt(_audioAnchor, generation);
             }
         }
 
         public void CommitVideoOnly()
         {
-            lock (session._transportLock) session.VideoPlayer.SetPause(false);
+            lock (session._transportLock) { session.VideoPlayer.SetPause(false); session.ResumeOverlayClock(session._lastRequestedPosition); }
         }
 
         public void StartDeferredAudio(TimeSpan position, string seekId)

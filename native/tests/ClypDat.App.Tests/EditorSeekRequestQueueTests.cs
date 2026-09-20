@@ -6,6 +6,19 @@ namespace ClypDat.App.Tests;
 public sealed class EditorSeekRequestQueueTests
 {
     [Fact]
+    public void CompletedPreview_AllowsNextTargetWithoutFixedDelay()
+    {
+        var queue = new EditorSeekRequestQueue();
+        var now = DateTimeOffset.UtcNow;
+        var generation = queue.QueuePreview(TimeSpan.FromSeconds(1));
+        queue.MarkPreviewWritten(generation, now);
+        queue.QueuePreview(TimeSpan.FromSeconds(2));
+        Assert.True(queue.TryTakePreview(now, out var target, out _, out _));
+        Assert.Equal(TimeSpan.FromSeconds(2), target);
+        Assert.Equal(TimeSpan.Zero, queue.BeginFinalSeek(now).QuietPeriod);
+    }
+
+    [Fact]
     public void PreviewGeneration_CanParkBeforeFinalSeek()
     {
         var queue = new EditorSeekRequestQueue();
