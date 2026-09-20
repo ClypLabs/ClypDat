@@ -1,4 +1,5 @@
 using ClypDat.App.Services;
+using ClypDat.Capture.Abstractions;
 using Vortice.DXGI;
 using Xunit;
 
@@ -22,4 +23,29 @@ public sealed class HdrCaptureCompatibilityTests
     [InlineData(17)]
     public void DoesNotDetectSdrColorSpaces(int value) =>
         Assert.False(HdrCaptureCompatibility.IsHdrColorSpace((ColorSpaceType)value));
+
+    [Theory]
+    [InlineData(ReplayHdrCompatibilityStatus.Unavailable, true, "Unavailable")]
+    [InlineData(ReplayHdrCompatibilityStatus.SdrDisplay, true, "SDR display")]
+    [InlineData(ReplayHdrCompatibilityStatus.ConversionActive, true, "HDR conversion active")]
+    [InlineData(ReplayHdrCompatibilityStatus.SdrDisplay, false, "Off")]
+    public void PresentsWorkerHdrStatus(ReplayHdrCompatibilityStatus status, bool enabled, string expected) =>
+        Assert.Equal(expected, HdrCompatibilityPresentation.Resolve(status, enabled));
+
+    [Fact]
+    public void MissingWorkerHdrStatusStaysUnavailableAfterSerialization()
+    {
+        var received = System.Text.Json.JsonSerializer.Deserialize<ReplayCaptureHealth>("{}")!;
+
+        Assert.Equal(ReplayHdrCompatibilityStatus.Unavailable, received.HdrCompatibilityStatus);
+        Assert.Equal("Unavailable", HdrCompatibilityPresentation.Resolve(received.HdrCompatibilityStatus, true));
+    }
+
+    [Fact]
+    public void ClearedOrReconnectedHealthDoesNotRetainSdrStatus()
+    {
+        var cleared = ReplayCaptureHealth.Unknown("Worker");
+
+        Assert.Equal("Unavailable", HdrCompatibilityPresentation.Resolve(cleared.HdrCompatibilityStatus, true));
+    }
 }

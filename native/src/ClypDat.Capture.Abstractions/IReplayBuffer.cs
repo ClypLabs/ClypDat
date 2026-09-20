@@ -93,6 +93,13 @@ public enum ReplayPipelineRecoveryAction
     RestartWorker
 }
 
+public enum ReplayHdrCompatibilityStatus
+{
+    Unavailable,
+    SdrDisplay,
+    ConversionActive
+}
+
 // Keep capture health separate from IReplayBuffer. Old/third-party backends can
 // remain valid while callers opt into richer diagnostics where available.
 public sealed record ReplayCaptureHealth(
@@ -183,6 +190,8 @@ public sealed record ReplayCaptureHealth(
     public int SurfaceCapacity { get; init; }
     public string AdapterLuid { get; init; } = string.Empty;
     public string FatalCategory { get; init; } = string.Empty;
+    // Missing status from an older worker must not be mistaken for SDR.
+    public ReplayHdrCompatibilityStatus HdrCompatibilityStatus { get; init; } = ReplayHdrCompatibilityStatus.Unavailable;
 
     // WGC cadence remains separate from InputFrameRate so support bundles can
     // distinguish compositor cadence without parsing debug logs.

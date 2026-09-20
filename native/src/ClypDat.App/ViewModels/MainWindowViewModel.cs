@@ -2354,9 +2354,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // Runtime capture updates this when it detects an HDR output. Until then
-    // SDR is the safe, truthful state for the existing BGRA capture path.
-    public string ReplayHdrCompatibilityStatus => !Settings.ReplayHdrCompatibilityEnabled ? "Off" : HdrCaptureCompatibility.Status;
+    public string ReplayHdrCompatibilityStatus => HdrCompatibilityPresentation.Resolve(
+        _recordingHealth.HdrCompatibilityStatus, Settings.ReplayHdrCompatibilityEnabled);
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -2433,6 +2432,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
         OnPropertyChanged(nameof(IsReplayArming));
         OnPropertyChanged(nameof(IsReplayReady));
+        OnPropertyChanged(nameof(ReplayHdrCompatibilityStatus));
     }
 
     public void MarkReplayBufferRestarted()

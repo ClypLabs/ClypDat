@@ -58,6 +58,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        ResetHealth();
         CancelRecovery(resetFailures: true);
         _fatalHealthPolicy.Reset();
         Interlocked.Exchange(ref _fatalHealthRecoveryUsed, 0);
@@ -87,6 +88,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         CancelRecovery(false);
         if (_pipe?.IsConnected == true) try { Accept(await SendAsync<CaptureWorkerAck>("stop", new { }, cancellationToken), "stop capture"); } catch (IOException) { }
         SetRecording(false);
+        ResetHealth();
     }
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null, Guid? saveId = null)
@@ -379,11 +381,12 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private void RecoveryHealth(int attempt, int count, int? exitCode, DateTime? retry, bool breaker, ReplayRecoveryStopReason stopReason, string failure) => PublishHealth(_health with { State = breaker ? ReplayCaptureState.Failed : ReplayCaptureState.Recovering, RecoveryAttempt = attempt, RecentWorkerFailureCount = count, LastWorkerExitCode = exitCode, NextWorkerRetryUtc = retry, WorkerCrashLoopDetected = stopReason == ReplayRecoveryStopReason.WorkerCrashLoop, RecoveryStopReason = stopReason, LastFailure = failure, UpdatedUtc = DateTime.UtcNow });
     private void SetRecording(bool value) { if (_isRecording == value) return; _isRecording = value; RecordingStateChanged?.Invoke(this, EventArgs.Empty); }
     private void PublishHealth(ReplayCaptureHealth health) { _health = health; HealthChanged?.Invoke(this, health); }
+    private void ResetHealth() => PublishHealth(ReplayCaptureHealth.Unknown("Worker"));
     private void FailPending() { lock (_pending) foreach (var item in _pending.Values) item.TrySetException(new IOException("Capture worker connection closed.")); }
     private int? ExitCode(Process? process = null) { try { return (process ?? _process) is { HasExited: true } item ? item.ExitCode : null; } catch { return null; } }
     private void KillWorker() { var process = _process; if (process is null) return; try { if (!process.HasExited) process.Kill(true); } catch { } try { process.Dispose(); } catch { } if (ReferenceEquals(_process, process)) _process = null; Disconnect(); }
     private void CancelRecovery(bool resetFailures) { lock (_gate) { _recoveryCancellation?.Cancel(); if (resetFailures) _failures.Clear(); } }
-    private void Disconnect() { try { _pipe?.Dispose(); } catch { } _pipe = null; }
+    private void Disconnect() { try { _pipe?.Dispose(); } catch { } _pipe = null; ResetHealth(); }
 }
 
 internal static class CaptureWorkerExecutable

@@ -1,3 +1,4 @@
+using ClypDat.Capture.Abstractions;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 
@@ -8,13 +9,8 @@ namespace ClypDat.App.Services;
 // sampled with the recorder's existing one-second target check.
 internal static class HdrCaptureCompatibility
 {
-    private static string _status = "SDR display";
-
-    public static string Status => Volatile.Read(ref _status);
-
-    public static void Refresh(ID3D11Device device, nint monitor, bool enabled)
+    public static ReplayHdrCompatibilityStatus Detect(ID3D11Device device, nint monitor)
     {
-        if (!enabled) { Set("Off"); return; }
         try
         {
             using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
@@ -29,15 +25,14 @@ internal static class HdrCaptureCompatibility
                     using var output6 = output.QueryInterface<IDXGIOutput6>();
                     var description = output6.Description1;
                     var isHdr = IsHdrColorSpace(description.ColorSpace);
-                    Set(isHdr ? "Unavailable" : "SDR display");
-                    return;
+                    return isHdr ? ReplayHdrCompatibilityStatus.Unavailable : ReplayHdrCompatibilityStatus.SdrDisplay;
                 }
             }
-            Set("Unavailable");
+            return ReplayHdrCompatibilityStatus.Unavailable;
         }
         catch
         {
-            Set("Unavailable");
+            return ReplayHdrCompatibilityStatus.Unavailable;
         }
     }
 
@@ -53,10 +48,4 @@ internal static class HdrCaptureCompatibility
         _ => false
     };
 
-    private static void Set(string status)
-    {
-        var previous = Interlocked.Exchange(ref _status, status);
-        if (!string.Equals(previous, status, StringComparison.Ordinal))
-            AppLog.Info($"Native capture: HDR compatibility status: {status}.");
-    }
 }

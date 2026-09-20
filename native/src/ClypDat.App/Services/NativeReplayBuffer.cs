@@ -562,7 +562,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         {
             _fullSessionStatus = _fullSessionStatus with { State = FullSessionState.Stopping };
         }
-        SetHealth(_health with { State = ReplayCaptureState.Stopping, UpdatedUtc = DateTime.UtcNow });
+        SetHealth(_health with
+        {
+            State = ReplayCaptureState.Stopping,
+            HdrCompatibilityStatus = ReplayHdrCompatibilityStatus.Unavailable,
+            UpdatedUtc = DateTime.UtcNow
+        });
         _captureCts?.Cancel();
         if (_captureTask is not null)
         {
@@ -588,7 +593,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             _recoveryHealthyWindows = 0;
         }
         _packetPayloads.Deactivate();
-        SetHealth(_health with { State = ReplayCaptureState.Stopped, UpdatedUtc = DateTime.UtcNow });
+        SetHealth(_health with
+        {
+            State = ReplayCaptureState.Stopped,
+            HdrCompatibilityStatus = ReplayHdrCompatibilityStatus.Unavailable,
+            UpdatedUtc = DateTime.UtcNow
+        });
     }
 
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default, string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null, Guid? saveId = null)
@@ -1161,7 +1171,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
-            HdrCaptureCompatibility.Refresh(device, targetMonitor, config.ReplayHdrCompatibilityEnabled);
+            var hdrCompatibilityStatus = HdrCaptureCompatibility.Detect(device, targetMonitor);
             Vortice.RawRect desktopBounds;
             // WGC captures the selected window directly, avoiding DXGI desktop
             // composition cadence. Keep DXGI only as an explicit diagnostic
@@ -1376,7 +1386,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 FrameRateProtectionActive = false,
                 StartupPhase = ReplayCaptureStartupPhase.WaitingForForeground,
                 ProcessingGpuPriority = processingGpuPriority,
-                AcquisitionGpuPriority = dxgiCapture?.AppliedGpuPriority
+                AcquisitionGpuPriority = dxgiCapture?.AppliedGpuPriority,
+                HdrCompatibilityStatus = hdrCompatibilityStatus
             });
             ready.TrySetResult();
 
@@ -2162,7 +2173,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         PipelineRecoveryAction = pipelineAction,
                         EncoderSubmissionStalled = encoderSubmissionStalled,
                         ProcessingGpuPriority = processingGpuPriority,
-                        AcquisitionGpuPriority = dxgiCapture?.AppliedGpuPriority
+                        AcquisitionGpuPriority = dxgiCapture?.AppliedGpuPriority,
+                        HdrCompatibilityStatus = hdrCompatibilityStatus
                     });
                     copyMapMs = 0;
                     scaleMs = 0;
@@ -2198,7 +2210,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (stopwatch.Elapsed - lastTargetRefresh >= TimeSpan.FromSeconds(1))
                 {
                     lastTargetRefresh = stopwatch.Elapsed;
-                    HdrCaptureCompatibility.Refresh(device, ResolveTargetMonitor(targetHandle, config), config.ReplayHdrCompatibilityEnabled);
+                    hdrCompatibilityStatus = HdrCaptureCompatibility.Detect(device, ResolveTargetMonitor(targetHandle, config));
                     var freshHandle = ResolveTargetWindow(_configProvider());
                     if (freshHandle != targetHandle)
                     {
