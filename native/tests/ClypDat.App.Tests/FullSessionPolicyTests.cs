@@ -125,8 +125,8 @@ public sealed class FullSessionPolicyTests
     [Theory]
     [InlineData(FullSessionState.Off, false, "Recording", true, "#F04452")]
     [InlineData(FullSessionState.Recording, false, "Full Session Recording", true, "#F04452")]
-    [InlineData(FullSessionState.Recording, true, "Full Session Recording", false, "#FFB547")]
-    [InlineData(FullSessionState.Off, true, "Recording", false, "#FFB547")]
+    [InlineData(FullSessionState.Recording, true, "Full Session Recording", true, "#F04452")]
+    [InlineData(FullSessionState.Off, true, "Recording", true, "#F04452")]
     [InlineData(FullSessionState.Starting, false, "Starting", false, "Transparent")]
     [InlineData(FullSessionState.Stopping, false, "Stopping", false, "Transparent")]
     [InlineData(FullSessionState.Failed, false, "Recording", true, "#F04452")]
@@ -143,10 +143,12 @@ public sealed class FullSessionPolicyTests
         if (state == FullSessionState.Failed) Assert.Contains("disk full", presentation.Detail);
     }
 
-    [Fact]
-    public void NonCaptureStatesNeverFlash()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NonCaptureStatesNeverFlash(bool paused)
     {
-        var health = ReplayCaptureHealth.Unknown("test") with { State = ReplayCaptureState.Healthy, FullSession = new(FullSessionState.Recording) };
+        var health = ReplayCaptureHealth.Unknown("test") with { State = ReplayCaptureState.Healthy, FullSession = new(FullSessionState.Recording), CapturePaused = paused };
         Assert.False(RecordingPresentation.Resolve(health, true, false).Flash);
         Assert.False(RecordingPresentation.Resolve(health, false, true).Flash);
         Assert.False(RecordingPresentation.Resolve(health with { State = ReplayCaptureState.Recovering }, true, true).Flash);

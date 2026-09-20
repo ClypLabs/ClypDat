@@ -15,7 +15,8 @@ internal sealed record RecordingPresentation(string Label, string Detail, string
             return new("Starting", "Starting recording.");
         if (health.State == ReplayCaptureState.Failed) return new("Waiting", health.LastFailure);
         var label = health.FullSession.State == FullSessionState.Recording ? "Full Session Recording" : "Recording";
-        if (health.CapturePaused) return new(label, "Paused: game is not in the foreground. Audio continues.", "#FFB547");
+        // Pausing video does not end the recording session; keep its red pulse.
+        if (health.CapturePaused) return new(label, "Paused: game is not in the foreground. Audio continues.", "#F04452", true);
         return new(label, health.FullSession.State == FullSessionState.Failed ? $"Full Session failed: {health.FullSession.Failure} Replay recording continues." : label, "#F04452", true);
     }
 }

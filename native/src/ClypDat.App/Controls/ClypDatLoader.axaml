@@ -26,7 +26,7 @@
                  StrokeDashArray="9.774,6.516" StrokeLineCap="Round"
                  Opacity="0.9" />
       </Panel>
-      <Image Canvas.Left="56" Canvas.Top="56" Width="192" Height="192"
+      <Image Canvas.Left="24" Canvas.Top="24" Width="256" Height="256"
              Source="{DynamicResource AppLogoLarge}" Stretch="Uniform"
              RenderOptions.BitmapInterpolationMode="HighQuality" />
     </Canvas>

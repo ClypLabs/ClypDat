@@ -1,4 +1,4 @@
-// Package Silver Outline; keep themed in-app tiles separate from desktop icons.
+// Package Silver Outline for web branding; every in-app mark stays unframed.
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -92,9 +92,9 @@ async function main() {
     transparentFrames.push(icon);
     const themed = await sharp(Buffer.from(svg)).resize(size, size).png(pngOptions).toBuffer();
     frames.push(themed);
-    fs.writeFileSync(path.join(app, `assets/clypdat-icon-${size}.png`), themed);
-    if (size === 256) fs.writeFileSync(path.join(app, 'assets/clypdat-icon.png'), themed);
-    if ([24, 32, 256].includes(size)) await sharp(themed).negate({ alpha: false }).png(pngOptions).toFile(path.join(app, `assets/clypdat-icon-${size}-light.png`));
+    fs.writeFileSync(path.join(app, `assets/clypdat-icon-${size}.png`), icon);
+    if (size === 256) fs.writeFileSync(path.join(app, 'assets/clypdat-icon.png'), icon);
+    if ([24, 32, 256].includes(size)) await sharp(icon).negate({ alpha: false }).png(pngOptions).toFile(path.join(app, `assets/clypdat-icon-${size}-light.png`));
   }
   const windowsIcon = ico(transparentFrames);
   fs.writeFileSync(path.join(app, 'assets/clypdat-icon.ico'), windowsIcon);
@@ -113,7 +113,7 @@ async function main() {
   fs.writeFileSync(path.join(web, 'public/bimi/clypdat.svg'), bimi);
   assert.ok(Buffer.byteLength(bimi) < 32768);
 
-  const loader = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="304" height="304" viewBox="0 0 304 304"><title>ClypDat loader</title><g fill="none"><animateTransform attributeName="transform" type="rotate" from="0 152 152" to="360 152 152" dur="1.6s" repeatCount="indefinite"/><circle cx="152" cy="152" r="140" stroke="#000000" stroke-opacity="0.5" stroke-width="15" stroke-dasharray="87.965 58.643"/><circle cx="152" cy="152" r="140" stroke="#FFFFFF" stroke-opacity="0.9" stroke-width="9" stroke-dasharray="87.965 58.643"/></g><image x="56" y="56" width="192" height="192" xlink:href="data:image/png;base64,${avatar.toString('base64')}"/></svg>\n`;
+  const loader = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="304" height="304" viewBox="0 0 304 304"><title>ClypDat loader</title><g fill="none"><animateTransform attributeName="transform" type="rotate" from="0 152 152" to="360 152 152" dur="1.6s" repeatCount="indefinite"/><circle cx="152" cy="152" r="140" stroke="#000000" stroke-opacity="0.5" stroke-width="15" stroke-dasharray="87.965 58.643"/><circle cx="152" cy="152" r="140" stroke="#FFFFFF" stroke-opacity="0.9" stroke-width="9" stroke-dasharray="87.965 58.643"/></g><image x="24" y="24" width="256" height="256" xlink:href="data:image/png;base64,${transparentFrames.at(-1).toString('base64')}"/></svg>\n`;
   fs.writeFileSync(path.join(app, 'assets/clypdat-loader.svg'), loader);
   // SVG renderers premultiply alpha; allow its one-level rounding only.
   for (const background of ['#000000', '#ffffff']) {
