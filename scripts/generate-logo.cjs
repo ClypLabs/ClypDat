@@ -4,6 +4,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const app = path.resolve(__dirname, '..');
 const web = path.resolve(app, '../clypdat-webapp');
+const classicLoaderCommit = '7bdfbac8';
 const nextPackage = path.dirname(require.resolve('next/package.json', { paths: [web] }));
 const sharp = require(require.resolve('sharp', { paths: [nextPackage] }));
 const markSource = path.join(app, 'assets/branding/clypdat-mark.png');
@@ -79,6 +80,9 @@ async function main() {
   assert.match(svg, /stroke="#bec2c7" stroke-width="9"/);
   assert.match(svg, /fill="#17191c"/);
   fs.writeFileSync(path.join(web, 'public/logo.png'), avatar);
+  // Header uses a tight transparent crop. The square source master has generous
+  // alpha padding intended for icon canvases, which reads as a tile at 18px.
+  await sharp(cropped).resize({ width: 768 }).png(pngOptions).toFile(path.join(web, 'public/logo-mark.png'));
   fs.writeFileSync(path.join(app, 'assets/clypdat-logo.svg'), svg);
   fs.writeFileSync(path.join(web, 'public/logo.svg'), svg);
 
@@ -113,7 +117,10 @@ async function main() {
   fs.writeFileSync(path.join(web, 'public/bimi/clypdat.svg'), bimi);
   assert.ok(Buffer.byteLength(bimi) < 32768);
 
-  const loader = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="304" height="304" viewBox="0 0 304 304"><title>ClypDat loader</title><g fill="none"><animateTransform attributeName="transform" type="rotate" from="0 152 152" to="360 152 152" dur="1.6s" repeatCount="indefinite"/><circle cx="152" cy="152" r="140" stroke="#000000" stroke-opacity="0.5" stroke-width="15" stroke-dasharray="87.965 58.643"/><circle cx="152" cy="152" r="140" stroke="#FFFFFF" stroke-opacity="0.9" stroke-width="9" stroke-dasharray="87.965 58.643"/></g><image x="24" y="24" width="256" height="256" xlink:href="data:image/png;base64,${transparentFrames.at(-1).toString('base64')}"/></svg>\n`;
+  const { execFileSync } = require('node:child_process');
+  const loader = execFileSync('git', ['show', `${classicLoaderCommit}:assets/clypdat-loader.svg`], { cwd: app });
+  assert.match(loader.toString(), /id="mark-outer"/);
+  assert.match(loader.toString(), /id="mark-inner"/);
   fs.writeFileSync(path.join(app, 'assets/clypdat-loader.svg'), loader);
   // SVG renderers premultiply alpha; allow its one-level rounding only.
   for (const background of ['#000000', '#ffffff']) {

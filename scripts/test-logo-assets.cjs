@@ -36,9 +36,10 @@ test('light-theme marks keep alpha and invert only RGB', async () => {
   }
 });
 
-test('loader uses the bare in-app mark, not the Silver Outline avatar', () => {
+test('loader preserves the animated classic hexagon mark', () => {
   const loader = asset('clypdat-loader.svg').toString();
-  const embedded = loader.match(/xlink:href="data:image\/png;base64,([^"]+)"/);
-  assert.ok(embedded);
-  assert.ok(Buffer.from(embedded[1], 'base64').equals(asset('clypdat-icon-256.png')));
+  assert.match(loader, /id="mark-outer"/);
+  assert.match(loader, /id="mark-inner"/);
+  assert.match(loader, /from="0 128 128" to="360 128 128"/);
+  assert.match(loader, /from="360 128 128" to="0 128 128"/);
 });
