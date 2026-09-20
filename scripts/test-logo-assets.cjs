@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 
 const app = path.resolve(__dirname, '..');
@@ -8,6 +9,12 @@ const web = path.resolve(app, '../clypdat-webapp');
 const nextPackage = path.dirname(require.resolve('next/package.json', { paths: [web] }));
 const sharp = require(require.resolve('sharp', { paths: [nextPackage] }));
 const asset = name => fs.readFileSync(path.join(app, 'assets', name));
+
+test('approved mark preserves the original heavy white band', () => {
+  const approved = execFileSync('git', ['show', '91f1c3ec:assets/branding/clypdat-mark.png'], { cwd: app });
+  const master = fs.readFileSync(path.join(app, 'assets/branding/clypdat-mark.png'));
+  assert.ok(master.equals(approved));
+});
 
 test('every in-app dark mark matches the unframed transparent desktop symbol', async () => {
   const ico = asset('clypdat-icon.ico');

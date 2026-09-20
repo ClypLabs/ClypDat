@@ -1,6 +1,6 @@
 # Logo masters
 
-Silver Outline is the selected identity: a charcoal tile with a thin, solid silver frame (not the thicker Silver Edge gradient). The centered mark has wider white-tip spacing while its black outline stays connected.
+Silver Outline is the selected identity: a charcoal tile with a thin, solid silver frame (not the thicker Silver Edge gradient). The mark retains its heavy off-white band for legibility at icon sizes.
 
 - `clypdat-mark.png`: the 1254px transparent symbol master; preserve its contours.
 - `clypdat-avatar.svg` and `clypdat-avatar.png`: the approved centered frame and its 768px render.
