@@ -10,13 +10,13 @@ using System.Numerics;
 namespace ClypDat.App.Controls;
 
 /// <summary>
-/// The selected app logo inside an orbiting loading ring. The ring and glow
-/// are driven by Avalonia's composition renderer so their motion
+/// Original ClypDat hexagons inside an orbiting loading ring. The ring, mark,
+/// and glow are driven by Avalonia's composition renderer so their motion
 /// remains alive while the UI thread constructs and lays out the main window.
 ///
-/// Scales inside a Viewbox. The ring follows <c>Foreground</c>; the logo follows
-/// the app's theme and classic-logo preference through AppLogoLarge.
-/// <c>assets/clypdat-loader.svg</c> is the same mark for non-Avalonia surfaces.
+/// Scales inside a Viewbox. The ring and mark follow <c>Foreground</c>.
+/// <c>assets/clypdat-loader.svg</c> uses the same classic loading mark outside
+/// Avalonia.
 /// </summary>
 public sealed partial class ClypDatLoader : UserControl
 {
@@ -44,6 +44,8 @@ public sealed partial class ClypDatLoader : UserControl
         StopAnimation(Glow, "Opacity");
         StopAnimation(Glow, "Scale");
         StopAnimation(Ring, "RotationAngle");
+        StopAnimation(MarkOuter, "RotationAngle");
+        StopAnimation(MarkInner, "RotationAngle");
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -54,6 +56,8 @@ public sealed partial class ClypDatLoader : UserControl
 
         _animationsStarted = true;
         StartRotation(Ring, TimeSpan.FromSeconds(1.6), 0, TwoPi);
+        StartRotation(MarkOuter, TimeSpan.FromSeconds(6), 0, TwoPi);
+        StartRotation(MarkInner, TimeSpan.FromSeconds(4.5), TwoPi, 0);
         StartGlow();
     }
 

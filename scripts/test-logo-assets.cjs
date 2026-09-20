@@ -42,4 +42,12 @@ test('loader preserves the animated classic hexagon mark', () => {
   assert.match(loader, /id="mark-inner"/);
   assert.match(loader, /from="0 128 128" to="360 128 128"/);
   assert.match(loader, /from="360 128 128" to="0 128 128"/);
+
+  const avaloniaLoader = fs.readFileSync(path.join(app, 'native/src/ClypDat.App/Controls/ClypDatLoader.axaml'), 'utf8');
+  const avaloniaCode = fs.readFileSync(path.join(app, 'native/src/ClypDat.App/Controls/ClypDatLoader.axaml.cs'), 'utf8');
+  assert.match(avaloniaLoader, /x:Name="MarkOuter"/);
+  assert.match(avaloniaLoader, /x:Name="MarkInner"/);
+  assert.doesNotMatch(avaloniaLoader, /AppLogoLarge/);
+  assert.match(avaloniaCode, /StartRotation\(MarkOuter, TimeSpan\.FromSeconds\(6\), 0, TwoPi\)/);
+  assert.match(avaloniaCode, /StartRotation\(MarkInner, TimeSpan\.FromSeconds\(4\.5\), TwoPi, 0\)/);
 });

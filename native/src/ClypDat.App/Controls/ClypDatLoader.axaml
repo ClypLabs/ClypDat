@@ -3,8 +3,8 @@
              x:Class="ClypDat.App.Controls.ClypDatLoader"
              x:CompileBindings="False"
              Foreground="#FFFFFF">
-  <!-- Keep the selected logo still while the existing loading ring rotates.
-       AppLogoLarge follows both the theme and the classic-logo preference. -->
+  <!-- Loading motion keeps its original counter-rotating hexagon mark. It is
+       independent from normal in-app branding, which uses the transparent mark. -->
   <Viewbox Stretch="Uniform">
     <Canvas Width="304" Height="304">
       <Ellipse x:Name="Glow" Canvas.Left="22" Canvas.Top="22" Width="260" Height="260"
@@ -26,9 +26,18 @@
                  StrokeDashArray="9.774,6.516" StrokeLineCap="Round"
                  Opacity="0.9" />
       </Panel>
-      <Image Canvas.Left="24" Canvas.Top="24" Width="256" Height="256"
-             Source="{DynamicResource AppLogoLarge}" Stretch="Uniform"
-             RenderOptions.BitmapInterpolationMode="HighQuality" />
+      <Canvas x:Name="MarkOuter" Width="304" Height="304">
+        <Path Data="M152,49 L242,101 V203 L152,255 L62,203 V101 Z"
+              Stroke="#000000" StrokeThickness="33" StrokeJoin="Round" />
+        <Path Data="M152,49 L242,101 V203 L152,255 L62,203 V101 Z"
+              Stroke="{Binding $parent[UserControl].Foreground}" StrokeThickness="25" StrokeJoin="Round" />
+      </Canvas>
+      <Canvas x:Name="MarkInner" Width="304" Height="304">
+        <Path Data="M152,102 L192,125 V179 L152,202 L112,179 V125 Z"
+              Stroke="#000000" StrokeThickness="21" StrokeJoin="Round" />
+        <Path Data="M152,102 L192,125 V179 L152,202 L112,179 V125 Z"
+              Stroke="{Binding $parent[UserControl].Foreground}" StrokeThickness="15" StrokeJoin="Round" />
+      </Canvas>
     </Canvas>
   </Viewbox>
 </UserControl>
