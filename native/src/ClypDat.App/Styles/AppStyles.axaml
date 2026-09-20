@@ -2179,6 +2179,12 @@
   <Style Selector="Button.railIconButton.boxedRailFooterButton">
     <Setter Property="CornerRadius" Value="12" />
   </Style>
+  <!-- All Clips is the library's home tile, not a glyph filter - it carries a
+       square 3x3 grid mark and sits above square game artwork, so it takes the
+       same rounded-square surface as the footer destinations. -->
+  <Style Selector="Button.railIconButton.boxedRailButton">
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
   <!-- Game rows hold square artwork, so their hover/active backdrop is a
        rounded square too - a circular one around a square icon reads as a
        mismatch. Section rows keep the circle, which suits their glyphs. -->
