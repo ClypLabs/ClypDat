@@ -826,7 +826,9 @@
        two controls, and it borrows the same keycap look so the key reads as a
        key in both places. -->
   <Style Selector="FlyoutPresenter.hotkeyChipFlyoutPresenter">
-    <Setter Property="Width" Value="330" />
+    <Setter Property="Width" Value="380" />
+    <Setter Property="Padding" Value="18" />
+    <Setter Property="CornerRadius" Value="14" />
     <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
     <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
   </Style>
@@ -845,9 +847,19 @@
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="StackPanel.hotkeyChipFlyout TextBlock.hotkeyChipTitle">
-    <Setter Property="Foreground" Value="{StaticResource Text_8C9CAF}" />
-    <Setter Property="FontSize" Value="11" />
+    <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
+    <Setter Property="FontSize" Value="18" />
     <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="StackPanel.hotkeyChipFlyout Border.hotkeyChipCard">
+    <Setter Property="Background" Value="{StaticResource Surface_15212B}" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="14" />
+  </Style>
+  <Style Selector="StackPanel.hotkeyChipFlyout TextBlock.hotkeyChipLabel">
+    <Setter Property="Foreground" Value="{StaticResource Text_D7E2EF}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="StackPanel.hotkeyChipFlyout TextBlock.hotkeyChipHint">
     <Setter Property="Foreground" Value="{StaticResource Text_8EA1B6}" />
@@ -865,14 +877,26 @@
     <Setter Property="Foreground" Value="{StaticResource Text_D7E2EF}" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="Height" Value="36" />
-    <Setter Property="MinWidth" Value="112" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinWidth" Value="100" />
     <Setter Property="Padding" Value="12,5" />
   </Style>
   <Style Selector="StackPanel.hotkeyChipFlyout ComboBox.settingsInput">
     <Setter Property="MinHeight" Value="36" />
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="FontSize" Value="13" />
+  </Style>
+  <!-- Transparent has white RGB channels. Avoid the global brush transition,
+       which flashes pale while interpolating from transparent to a dark fill. -->
+  <Style Selector="Button.replayRow, Button.replayStatusButton, Button.hotkeyChipKeycap, Button.hotkeyChipLink, Button.sourceTab, Button.monitorTile, Button.sourceCancel">
+    <Setter Property="Transitions" Value="{x:Null}" />
+  </Style>
+  <Style Selector="StackPanel.hotkeyChipFlyout Button.hotkeyChipKeycap:pointerover, StackPanel.hotkeyChipFlyout Button.hotkeyChipLink:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_223341}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+  </Style>
+  <Style Selector="StackPanel.replayFlyout Button.replayRow:pressed, StackPanel.replayFlyout Button.replayStatusButton:pressed, StackPanel.hotkeyChipFlyout Button.hotkeyChipKeycap:pressed, StackPanel.hotkeyChipFlyout Button.hotkeyChipLink:pressed">
+    <Setter Property="Background" Value="{StaticResource Surface_263846}" />
   </Style>
   <Style Selector="MenuItem">
     <Setter Property="Background" Value="Transparent" />
@@ -1075,23 +1099,24 @@
     <Setter Property="MinWidth" Value="112" />
     <Setter Property="Padding" Value="12,5" />
   </Style>
-  <!-- Capture-source chooser. The tabs are buttons rather than a TabControl for
-       the same reason the rest of the app avoids one, and the active tab is
-       marked by an accent underline instead of a filled block. -->
+  <!-- Capture-source choices share the selected display card's accent outline. -->
   <Style Selector="Button.sourceTab">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="0,0,0,2" />
-    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Background" Value="{StaticResource Surface_15212B}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_263846}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="16,12" />
     <Setter Property="Foreground" Value="{StaticResource Text_8C9CAF}" />
     <Setter Property="FontSize" Value="15" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Cursor" Value="Hand" />
   </Style>
   <Style Selector="Button.sourceTab:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_1B2934}" />
     <Setter Property="Foreground" Value="{StaticResource Text_D7E2EF}" />
   </Style>
   <Style Selector="Button.sourceTab.sourceTabActive">
+    <Setter Property="Background" Value="{StaticResource Surface_1B2934}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="{StaticResource Text_EDF4FB}" />
   </Style>
@@ -1101,9 +1126,24 @@
     <Setter Property="Padding" Value="8" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_263846}" />
   </Style>
   <Style Selector="Button.monitorTile:pointerover">
     <Setter Property="Background" Value="{StaticResource Surface_1B2934}" />
+  </Style>
+  <Style Selector="Button.monitorTile.selected">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="Background" Value="{StaticResource Surface_1B2934}" />
+  </Style>
+  <Style Selector="Button.monitorTile TextBlock.sourceSelection">
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+  </Style>
+  <Style Selector="Button.monitorTile.selected TextBlock.sourceSelection">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="Button.sourceCancel:pointerover, Button.sourceTab:pressed, Button.monitorTile:pressed">
+    <Setter Property="Background" Value="{StaticResource Surface_223341}" />
   </Style>
   <!-- Replay flyout rows. The value carries the meaning, so the label is muted
        and the value is not; the trailing glyph says where a click goes - a cog

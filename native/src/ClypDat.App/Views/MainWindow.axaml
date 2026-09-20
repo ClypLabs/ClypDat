@@ -68,7 +68,7 @@
               ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,3*"
               Margin="18,0,0,0"
               VerticalAlignment="Center">
-          <Button Grid.Column="0" Classes="replayButton" Classes.recording="{Binding IsReplayRecording}"
+          <Button x:Name="ReplayHeaderButton" Grid.Column="0" Classes="replayButton" Classes.recording="{Binding IsReplayRecording}"
                   ToolTip.Tip="{Binding RecordingDetail}" AutomationProperties.Name="{Binding RecorderStatus}" AutomationProperties.HelpText="{Binding RecordingDetail}">
             <Button.Content>
               <StackPanel Orientation="Horizontal" Spacing="7">
@@ -135,92 +135,14 @@
                           </Grid>
                         </Button>
 
-                        <Button Classes="replayRow" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <Button Classes="replayRow" Click="OpenReplayQualitySettingsButton_OnClick" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                           <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
                             <PathIcon Grid.Column="0" Classes="replayRowIcon"
                                       Data="M12,2L14.4,8.4L21,9.2L16.2,13.6L17.6,20L12,16.6L6.4,20L7.8,13.6L3,9.2L9.6,8.4L12,2Z" />
                             <TextBlock Grid.Column="1" Text="Quality" Classes="replayRowLabel" />
                             <TextBlock Grid.Column="2" Text="{Binding ReplayQualitySummary}" Classes="replayRowValue" TextTrimming="CharacterEllipsis" />
-                            <PathIcon Grid.Column="3" Classes="replayRowCog"
-                                      Data="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z" />
+                            <PathIcon Grid.Column="3" Classes="replayRowChevron" Data="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z" />
                           </Grid>
-                          <Button.Flyout>
-                            <Flyout Placement="Left" FlyoutPresenterClasses="replayChooserPresenter">
-                              <StackPanel Classes="replayChooser" Spacing="10">
-                                <TextBlock Classes="replayChooserTitle" Text="Quality" />
-                                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
-                                  <StackPanel Grid.Column="0" Spacing="4">
-                                    <TextBlock Classes="flyoutLabel" Text="Resolution" />
-                                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}" HorizontalAlignment="Stretch">
-                                      <ComboBox.SelectionBoxItemTemplate>
-                                        <DataTemplate>
-                                          <TextBlock Text="{Binding Height, StringFormat={}{0}p}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" />
-                                        </DataTemplate>
-                                      </ComboBox.SelectionBoxItemTemplate>
-                                      <ComboBox.ItemTemplate>
-                                        <DataTemplate>
-                                          <TextBlock Text="{Binding Height, StringFormat={}{0}p}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" />
-                                        </DataTemplate>
-                                      </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                  </StackPanel>
-                                  <StackPanel Grid.Column="1" Spacing="4">
-                                    <TextBlock Classes="flyoutLabel" Text="Frame rate" />
-                                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}" HorizontalAlignment="Stretch">
-                                      <ComboBox.ItemTemplate>
-                                        <DataTemplate>
-                                          <TextBlock Text="{Binding StringFormat={}{0} fps}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" />
-                                        </DataTemplate>
-                                      </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                  </StackPanel>
-                                  <StackPanel Grid.Column="2" Spacing="4">
-                                    <TextBlock Classes="flyoutLabel" Text="Bitrate" />
-                                    <ComboBox Classes="settingsInput" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}" HorizontalAlignment="Stretch">
-                                      <ComboBox.ItemTemplate>
-                                        <DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate>
-                                      </ComboBox.ItemTemplate>
-                                    </ComboBox>
-                                  </StackPanel>
-                                </Grid>
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                  <TextBlock Classes="replayBitrateRecommendation" Text="{Binding ReplayBitrateRecommendationText}" />
-                                  <Button Classes="linkButton replayBitrateRecommendationButton"
-                                          Content="{Binding ReplayBitrateRecommendationActionText}"
-                                          IsVisible="{Binding ReplayBitrateRecommendationNeedsApply}"
-                                          Click="ApplyReplayBitrateRecommendationButton_OnClick" />
-                                </StackPanel>
-                                <Border Classes="replayFlyoutRestartNotice" IsVisible="{Binding ReplayQualityRestartRequired}">
-                                  <TextBlock Text="Restarting the buffer to apply the new quality..." Classes="replayFlyoutWarning" />
-                                </Border>
-                              </StackPanel>
-                            </Flyout>
-                          </Button.Flyout>
-                        </Button>
-
-                        <Button Classes="replayRow" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                          <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10">
-                            <PathIcon Grid.Column="0" Classes="replayRowIcon"
-                                      Data="M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4M12.5,7V12.25L17,14.92L16.25,16.15L11,13V7H12.5Z" />
-                            <TextBlock Grid.Column="1" Text="Buffer length" Classes="replayRowLabel" />
-                            <TextBlock Grid.Column="2" Text="{Binding ReplayDurationSummary}" Classes="replayRowValue" />
-                            <PathIcon Grid.Column="3" Classes="replayRowCog"
-                                      Data="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z" />
-                          </Grid>
-                          <Button.Flyout>
-                            <Flyout Placement="Left" FlyoutPresenterClasses="replayChooserPresenter">
-                              <StackPanel Classes="replayChooser" Spacing="10">
-                                <TextBlock Classes="replayChooserTitle" Text="Buffer length" />
-                                <TextBlock Classes="replayChooserHint" TextWrapping="Wrap"
-                                           Text="How much of the past the hotkey saves." />
-                                <ListBox Classes="replayChooserList" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
-                                  <ListBox.ItemTemplate>
-                                    <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
-                                  </ListBox.ItemTemplate>
-                                </ListBox>
-                              </StackPanel>
-                            </Flyout>
-                          </Button.Flyout>
                         </Button>
 
                         <Grid Classes="replayRowStatic" ColumnDefinitions="Auto,Auto,*" ColumnSpacing="10">
@@ -237,15 +159,6 @@
                           </ComboBox>
                         </Grid>
 
-                        <Grid Classes="replayRowStatic" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                          <PathIcon Grid.Column="0" Classes="replayRowIcon"
-                                    Data="M19,10H17V8H19M19,13H17V11H19M16,10H14V8H16M16,13H14V11H16M16,17H8V15H16M7,10H5V8H7M7,13H5V11H7M8,11H10V13H8M8,8H10V10H8M11,11H13V13H11M11,8H13V10H11M20,5H4C2.89,5 2,5.89 2,7V17A2,2 0 0,0 4,19H20A2,2 0 0,0 22,17V7C22,5.89 21.1,5 20,5Z" />
-                          <TextBlock Grid.Column="1" Text="Save hotkey" Classes="replayRowLabel" />
-                          <Button Grid.Column="2" Classes="replayFlyoutInput hotkeyKeycap" Click="HotkeyCaptureButton_OnClick"
-                                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                            <TextBlock Text="{Binding HotkeyDisplay}" TextAlignment="Center" VerticalAlignment="Center" />
-                          </Button>
-                        </Grid>
                       </StackPanel>
                     </Border>
 
@@ -263,34 +176,53 @@
           <!-- The save hotkey used to be plain text here. It is the setting
                users reach for most, so the chip opens its own small popover
                rather than making them walk into Settings for one keystroke. -->
-          <Button Grid.Column="2" Classes="headerHotkeyChip" Margin="10,0,0,0" VerticalAlignment="Center"
+          <Button x:Name="ClipsHeaderButton" Grid.Column="2" Classes="headerHotkeyChip" Margin="10,0,0,0" VerticalAlignment="Center"
                   ToolTip.Tip="Change the save hotkey or clip length">
             <TextBlock Text="{Binding HotkeyDisplay}" VerticalAlignment="Center" />
             <Button.Flyout>
               <Flyout Placement="BottomEdgeAlignedLeft" VerticalOffset="7" FlyoutPresenterClasses="hotkeyChipFlyoutPresenter">
-                <StackPanel Classes="hotkeyChipFlyout" Spacing="10">
-                  <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Text="CLIPS" Classes="hotkeyChipTitle" VerticalAlignment="Center" />
-                    <Button Grid.Column="1" Classes="linkButton hotkeyChipLink" Click="OpenReplaySettingsButton_OnClick" Padding="6,2">
-                      <StackPanel Orientation="Horizontal" Spacing="5">
+                <StackPanel Classes="hotkeyChipFlyout" Spacing="16">
+                  <StackPanel Spacing="4">
+                    <TextBlock Text="Save a clip" Classes="hotkeyChipTitle" />
+                    <TextBlock Classes="hotkeyChipHint" TextWrapping="Wrap"
+                               Text="Keep the moment with a single shortcut." />
+                  </StackPanel>
+                  <Border Classes="hotkeyChipCard">
+                    <StackPanel Spacing="14">
+                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                        <StackPanel Spacing="3" VerticalAlignment="Center">
+                          <TextBlock Text="Save shortcut" Classes="hotkeyChipLabel" />
+                          <TextBlock Text="Click to change" Classes="hotkeyChipHint" />
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="hotkeyChipKeycap" Click="HotkeyCaptureButton_OnClick"
+                                AutomationProperties.Name="Change save shortcut"
+                                HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                          <TextBlock Text="{Binding HotkeyDisplay}" TextAlignment="Center" VerticalAlignment="Center" />
+                        </Button>
+                      </Grid>
+                      <Border Height="1" Background="{StaticResource Surface_263846}" />
+                      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                        <TextBlock Text="Clip length" Classes="hotkeyChipLabel" VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="144"
+                                  AutomationProperties.Name="Clip length"
+                                  ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
+                          <ComboBox.ItemTemplate>
+                            <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
+                          </ComboBox.ItemTemplate>
+                        </ComboBox>
+                      </Grid>
+                    </StackPanel>
+                  </Border>
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <TextBlock Classes="hotkeyChipHint" Text="Saved when you press the shortcut."
+                               TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Classes="linkButton hotkeyChipLink" Click="OpenReplaySettingsButton_OnClick"
+                            Padding="8,6" ToolTip.Tip="Open hotkey settings">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="Manage hotkeys" VerticalAlignment="Center" />
-                        <TextBlock Text="›" FontSize="16" VerticalAlignment="Center" Margin="0,-4,0,0" />
+                        <PathIcon Width="10" Height="10" Data="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z" />
                       </StackPanel>
                     </Button>
-                  </Grid>
-                  <TextBlock Classes="hotkeyChipHint" TextWrapping="Wrap"
-                             Text="The buffer records continuously and uses no disk space until you save a clip." />
-                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                    <Button Classes="hotkeyChipKeycap" Click="HotkeyCaptureButton_OnClick"
-                            HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                      <TextBlock Text="{Binding HotkeyDisplay}" TextAlignment="Center" VerticalAlignment="Center" />
-                    </Button>
-                    <ComboBox Grid.Column="1" Classes="settingsInput" HorizontalAlignment="Stretch"
-                              ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
-                      <ComboBox.ItemTemplate>
-                        <DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate>
-                      </ComboBox.ItemTemplate>
-                    </ComboBox>
                   </Grid>
                 </StackPanel>
               </Flyout>

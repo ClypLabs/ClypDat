@@ -30,6 +30,8 @@ public sealed partial class MainWindow
             return;
         }
 
+        CloseHeaderFlyouts();
+        model.SettingsSearchText = string.Empty;
         model.SelectSettingsSection("Game Detection");
         model.OpenSettings();
     }
@@ -39,6 +41,7 @@ public sealed partial class MainWindow
         try
         {
             if (ViewModel is null) return;
+            CloseHeaderFlyouts();
             // Displays come and go while the app is running; the collection is
             // otherwise only built once, in the view model's constructor.
             ViewModel.RefreshDesktopMonitors();
@@ -54,16 +57,20 @@ public sealed partial class MainWindow
     {
         if (ViewModel is not { } model) return;
 
-        var (window, body) = CreateChromelessDialog("Capture source");
-        window.Width = 680;
-        if (body is StackPanel bodyStack) bodyStack.Spacing = 18;
+        var (window, body) = CreateChromelessDialog("Capture source", centerTitle: false);
+        window.Width = 720;
+        if (body is StackPanel bodyStack)
+        {
+            bodyStack.Spacing = 20;
+            bodyStack.Margin = new Thickness(24, 16, 24, 24);
+        }
 
         var startedOnDesktop = model.IsDesktopCapture;
         var selectedMonitor = model.SelectedDesktopMonitor ?? model.DesktopMonitors.FirstOrDefault();
         var desktopChosen = startedOnDesktop;
 
-        var gameTab = CreateSourceTab("Game");
-        var desktopTab = CreateSourceTab("Desktop");
+        var gameTab = CreateSourceTab("Game", "Follow the active game");
+        var desktopTab = CreateSourceTab("Desktop", "Record a display");
 
         var gamePane = BuildGamePane(model);
         var desktopPane = new StackPanel { Spacing = 14 };
@@ -83,11 +90,7 @@ public sealed partial class MainWindow
             {
                 var isSelected = selectedMonitor is not null &&
                                  string.Equals(monitor.DeviceName, selectedMonitor.DeviceName, StringComparison.OrdinalIgnoreCase);
-                // The ring is an accent brush, not a fixed colour, so it follows
-                // whatever theme the app is wearing.
-                button.BorderBrush = isSelected
-                    ? AppThemeService.Brush("AccentBrush", "#5864E8")
-                    : AppThemeService.Brush("Surface_263846", "#263846");
+                button.Classes.Set("selected", isSelected);
             }
         }
 
@@ -103,9 +106,21 @@ public sealed partial class MainWindow
         }
 
         PaintTiles();
-        desktopPane.Children.Add(tileRow);
+        desktopPane.Children.Add(new TextBlock
+        {
+            Text = "Choose a display",
+            FontSize = 13,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = AppThemeService.Brush("Text_D7E2EF", "#D7E2EF")
+        });
+        desktopPane.Children.Add(new ScrollViewer
+        {
+            MaxHeight = 300,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            Content = tileRow
+        });
         desktopPane.Children.Add(BuildDesktopToggles(model));
-        desktopPane.Children.Add(BuildNotice("Desktop capture records everything on this display, including anything you would rather not share."));
+        desktopPane.Children.Add(BuildNotice("Everything visible on this display will be recorded, including notifications."));
 
         void PaintTabs()
         {
@@ -119,29 +134,30 @@ public sealed partial class MainWindow
         desktopTab.Click += (_, _) => { desktopChosen = true; PaintTabs(); };
         PaintTabs();
 
-        var tabStrip = new StackPanel
+        var tabStrip = new Grid
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Spacing = 8,
+            ColumnDefinitions = new ColumnDefinitions("*,*"),
+            ColumnSpacing = 8,
             Children = { gameTab, desktopTab }
         };
+        Grid.SetColumn(desktopTab, 1);
 
         var apply = new Button
         {
             Classes = { "primaryButton" },
             Content = "Use this source",
             MinWidth = 150,
-            Height = 36,
+            Height = 40,
             Padding = new Thickness(16, 0),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center
         };
         var close = new Button
         {
+            Classes = { "sourceCancel" },
             Content = "Close",
             Width = 100,
-            Height = 36,
+            Height = 40,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center
         };
@@ -163,10 +179,23 @@ public sealed partial class MainWindow
 
         if (body is StackPanel stack)
         {
+            stack.Children.Add(new TextBlock
+            {
+                Text = "What would you like to record?",
+                FontSize = 20,
+                FontWeight = FontWeight.SemiBold,
+                Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB")
+            });
             stack.Children.Add(tabStrip);
             stack.Children.Add(gamePane);
             stack.Children.Add(desktopPane);
-            stack.Children.Add(footer);
+            stack.Children.Add(new Border
+            {
+                BorderBrush = AppThemeService.Brush("Surface_263846", "#263846"),
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(0, 16, 0, 0),
+                Child = footer
+            });
         }
 
         using var previews = new CancellationTokenSource();
@@ -176,13 +205,26 @@ public sealed partial class MainWindow
         await ShowModalDialogAsync<object?>(window);
     }
 
-    private static Button CreateSourceTab(string label) => new()
+    private static Button CreateSourceTab(string label, string description) => new()
     {
         Classes = { "sourceTab" },
-        Content = label,
-        MinWidth = 130,
-        Height = 38,
-        HorizontalContentAlignment = HorizontalAlignment.Center,
+        Content = new StackPanel
+        {
+            Spacing = 4,
+            Children =
+            {
+                new TextBlock { Text = label, FontSize = 14, FontWeight = FontWeight.SemiBold },
+                new TextBlock
+                {
+                    Text = description,
+                    FontSize = 12,
+                    FontWeight = FontWeight.Normal,
+                    Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6")
+                }
+            }
+        },
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Left,
         VerticalContentAlignment = VerticalAlignment.Center
     };
 
@@ -210,25 +252,69 @@ public sealed partial class MainWindow
             HorizontalAlignment = HorizontalAlignment.Center,
             MaxWidth = 420
         });
-        return panel;
+        return new Border
+        {
+            Background = AppThemeService.Brush("Surface_15212B", "#15212B"),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(24),
+            Child = panel
+        };
     }
 
     private static Control BuildDesktopToggles(ViewModels.MainWindowViewModel model)
     {
-        var cursor = new CheckBox { Content = "Capture cursor", IsChecked = model.ReplayDesktopCaptureCursor };
+        var cursor = new ToggleSwitch { OnContent = null, OffContent = null, IsChecked = model.ReplayDesktopCaptureCursor };
         cursor.IsCheckedChanged += (_, _) => model.ReplayDesktopCaptureCursor = cursor.IsChecked == true;
 
-        var switchToGames = new CheckBox { Content = "Switch to game capture when a game is detected", IsChecked = model.ReplayAutoSwitchToGameCapture };
+        var switchToGames = new ToggleSwitch { OnContent = null, OffContent = null, IsChecked = model.ReplayAutoSwitchToGameCapture };
         switchToGames.IsCheckedChanged += (_, _) => model.ReplayAutoSwitchToGameCapture = switchToGames.IsChecked == true;
 
-        return new StackPanel { Spacing = 8, Children = { cursor, switchToGames } };
+        static Control Row(string title, string description, ToggleSwitch toggle)
+        {
+            var text = new StackPanel
+            {
+                Spacing = 3,
+                Children =
+                {
+                    new TextBlock { Text = title, FontSize = 13, FontWeight = FontWeight.SemiBold },
+                    new TextBlock
+                    {
+                        Text = description, FontSize = 12, TextWrapping = TextWrapping.Wrap,
+                        Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6")
+                    }
+                }
+            };
+            Avalonia.Automation.AutomationProperties.SetName(toggle, title);
+            toggle.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(toggle, 1);
+            return new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+                ColumnSpacing = 16,
+                Children = { text, toggle }
+            };
+        }
+
+        return new Border
+        {
+            Background = AppThemeService.Brush("Surface_15212B", "#15212B"),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(16),
+            Child = new StackPanel
+            {
+                Spacing = 16,
+                Children =
+                {
+                    Row("Capture cursor", "Include the pointer in your clips.", cursor),
+                    Row("Auto-switch to game", "Use game capture when a game is detected.", switchToGames)
+                }
+            }
+        };
     }
 
     private static Control BuildNotice(string text) => new Border
     {
         Background = AppThemeService.Brush("Surface_15212B", "#15212B"),
-        BorderBrush = AppThemeService.Brush("Surface_263846", "#263846"),
-        BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(10),
         Padding = new Thickness(12, 10),
         Child = new TextBlock
@@ -245,27 +331,48 @@ public sealed partial class MainWindow
         var preview = new Border
         {
             Name = "PreviewHost",
-            Height = 150,
+            Height = 144,
             CornerRadius = new CornerRadius(8),
             ClipToBounds = true,
             Background = AppThemeService.Brush("Surface_0C1319", "#0C1319")
         };
         var label = new TextBlock
         {
-            Text = monitor.Label,
+            Text = monitor.Label.Split('—')[0].Trim(),
             Foreground = AppThemeService.Brush("Text_D7E2EF", "#D7E2EF"),
-            FontSize = 12,
+            FontSize = 13,
             FontWeight = FontWeight.SemiBold,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
 
+        var selected = new TextBlock
+        {
+            Classes = { "sourceSelection" },
+            Text = "Selected",
+            FontSize = 11,
+            FontWeight = FontWeight.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(selected, 1);
+        var heading = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            ColumnSpacing = 8,
+            Children = { label, selected }
+        };
+        var details = new TextBlock
+        {
+            Text = $"{monitor.Width} × {monitor.Height}" + (monitor.IsPrimary ? " · Primary display" : ""),
+            FontSize = 11,
+            Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6")
+        };
         return new Button
         {
             Classes = { "monitorTile" },
-            Width = 288,
-            Margin = new Thickness(0, 0, 12, 12),
-            BorderThickness = new Thickness(2),
-            Content = new StackPanel { Spacing = 8, Children = { preview, label } }
+            Width = 312,
+            Margin = new Thickness(0, 0, 10, 10),
+            BorderThickness = new Thickness(1),
+            Content = new StackPanel { Spacing = 8, Children = { preview, heading, details } }
         };
     }
 
@@ -284,7 +391,7 @@ public sealed partial class MainWindow
             if (frame is null || cancellationToken.IsCancellationRequested) continue;
             if (button.Content is StackPanel { Children: [Border host, ..] })
             {
-                host.Child = new Image { Source = frame, Stretch = Stretch.UniformToFill };
+                host.Child = new Image { Source = frame, Stretch = Stretch.Uniform };
             }
         }
     }

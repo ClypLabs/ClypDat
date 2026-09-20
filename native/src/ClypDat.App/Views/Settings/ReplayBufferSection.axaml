@@ -57,7 +57,7 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording quality|Resolution|Frame rate|FPS|Bitrate|Codec|Encoder|Quality|Encoding}">
+    <Border x:Name="RecordingQualityCard" Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording quality|Resolution|Frame rate|FPS|Bitrate|Codec|Encoder|Quality|Encoding}">
       <StackPanel Spacing="11">
         <TextBlock Classes="settingsCardLabel" Text="RECORDING QUALITY" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <StackPanel Spacing="4">

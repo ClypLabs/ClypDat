@@ -2827,9 +2827,36 @@ public sealed partial class MainWindow : Window
     private async void OpenReplaySettingsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        CloseHeaderFlyouts();
+        ViewModel.SettingsSearchText = string.Empty;
         ViewModel.SelectSettingsSection("Replay Buffer");
         ViewModel.OpenSettings();
+        SettingsPanelView.ScrollViewer.Offset = default;
         await ViewModel.RefreshOpenProcessesAsync();
+    }
+
+    private void CloseHeaderFlyouts()
+    {
+        ReplayHeaderButton.Flyout?.Hide();
+        ClipsHeaderButton.Flyout?.Hide();
+    }
+
+    private void OpenReplayQualitySettingsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        CloseHeaderFlyouts();
+        ViewModel.SettingsSearchText = string.Empty;
+        ViewModel.SelectSettingsSection("Replay Buffer");
+        ViewModel.OpenSettings();
+        Dispatcher.UIThread.Post(() =>
+        {
+            var target = SettingsPanelView.ScrollViewer.GetVisualDescendants()
+                .OfType<Border>()
+                .FirstOrDefault(border => border.Name == "RecordingQualityCard");
+            var scroll = SettingsPanelView.ScrollViewer;
+            if (target?.TranslatePoint(default, scroll) is { } position)
+                scroll.Offset = new Vector(0, scroll.Offset.Y + position.Y);
+        }, DispatcherPriority.Loaded);
     }
 
     internal void ApplyReplayBitrateRecommendationButton_OnClick(object? sender, RoutedEventArgs e)
