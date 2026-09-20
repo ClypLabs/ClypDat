@@ -10,14 +10,14 @@
 </head>
 <body>
   <header><div><h1>ClypDat live icon watch</h1><p>Current app artwork: thick white strokes, separated tips, connected black joins.</p></div><div id="status">Loading current export…</div></header>
-  <div class="note">Selected for web branding: Silver Outline (thin solid silver frame). App logos, About, overlays, taskbar and tray use the transparent mark. The loader keeps its classic spinning hexagons.</div>
+  <div class="note">Selected for web branding: Silver Edge (bright-silver-to-steel gradient frame). App logos, About, overlays, taskbar and tray use the transparent mark. The loader keeps its classic spinning hexagons.</div>
   <div class="controls"><label>Preview surface <select id="surface"><option value="#23272c">Dark gray</option><option value="#0b0c0e">Near black</option><option value="#a7adb5">Light gray</option><option value="#eceef0">Off-white</option><option value="#138dbb">Taskbar blue</option></select></label><button id="refresh">Refresh now</button><span class="badge">Auto-refresh: every 4 seconds</span></div>
   <h2>Current artwork</h2><p>Current app mark beside the older thick-stroke reference. Both tip gaps stay visible while the white bands retain their weight.</p>
   <div class="compare" id="comparison"></div>
   <h2>Backgrounds & borders</h2><p id="treatment-note">Every treatment below uses the current app master.</p>
   <div class="grid" id="treatments"></div>
   <h2>Reference</h2><img class="reference" src="references/border-reference.png" alt="User reference: thin warm border around a dark square icon"><p>The reference informs the restrained outer frame, not the symbol itself.</p>
-  <div class="folder-links"><a href="current/clypdat-mark.png">Current transparent master</a><a href="current/clypdat-avatar.svg">Current Silver Outline avatar</a><a href="exports/clypdat-avatar-github.png">GitHub export (under 1 MB)</a><a href="experiments/gap-and-neutral/comparison.png" target="_blank">Earlier study PNG (3×)</a><a href="experiments/gap-and-neutral/comparison.svg" target="_blank">Earlier study SVG</a><a href="archive/earlier-experiments/index.html">Earlier experiments</a><a href="README.md">Folder guide</a></div>
+  <div class="folder-links"><a href="current/clypdat-mark.png">Current transparent master</a><a href="current/clypdat-avatar.svg">Current Silver Edge avatar</a><a href="exports/clypdat-avatar-github.png">GitHub export (under 1 MB)</a><a href="experiments/gap-and-neutral/comparison.png" target="_blank">Earlier study PNG (3×)</a><a href="experiments/gap-and-neutral/comparison.svg" target="_blank">Earlier study SVG</a><a href="archive/earlier-experiments/index.html">Earlier experiments</a><a href="README.md">Folder guide</a></div>
   <footer>Sizes are CSS pixels. Previews use vector frames and the full-resolution mark, so display scaling does not stretch tiny PNGs. Small PNG downloads remain in the sizes folder.</footer>
   <script>
     const current='current/clypdat-mark.png';
@@ -26,7 +26,7 @@
     function icon(source,style,size,kind){const el=document.createElement('div');el.className='icon '+style;el.style.setProperty('--s',size+'px');const img=new Image();img.alt='';img.src=source;img.dataset.kind=kind;el.append(img);return el;}
     function card(title,description,style,source,kind){const el=document.createElement('article');el.className='card';const heading=document.createElement('h3');heading.textContent=title;const note=document.createElement('p');note.textContent=description;const large=document.createElement('div');large.className='large';large.append(icon(source,style,184,kind));const sizes=document.createElement('div');sizes.className='sizes';for(const n of [16,24,32,48,64]){const sample=document.createElement('div');sample.className='sample';sample.append(icon(source,style,n,kind),document.createTextNode(n+' px'));sizes.append(sample);}el.append(heading,note,large,sizes);return el;}
     const comparison=document.querySelector('#comparison');const currentCard=card('Current · thick strokes + tip gaps','Applied app artwork. Both black joins remain connected.','bare',current,'current');comparison.append(currentCard,card('Earlier · tighter tips','Original thick-stroke reference, before the gap correction.','bare',reference,'reference'));
-    for(const [style,title,description] of styles){const el=card(title+(style==='silver'?' · Selected':''),description,style,current,'treatment');el.dataset.style=style;if(style==='silver')el.style.borderColor='#bec2c7';document.querySelector('#treatments').append(el);}
+    for(const [style,title,description] of styles){const el=card(title+(style==='silver-edge'?' · Selected':''),description,style,current,'treatment');el.dataset.style=style;if(style==='silver-edge')el.style.borderColor='#bec2c7';document.querySelector('#treatments').append(el);}
     let ready=false;
     function refresh(){
       const probe=new Image();const stamp=Date.now();

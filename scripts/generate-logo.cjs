@@ -1,4 +1,4 @@
-// Package Silver Outline for web branding; every in-app mark stays unframed.
+// Package Silver Edge for web branding; every in-app mark stays unframed.
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -9,7 +9,6 @@ const classicLoaderCommit = '7bdfbac8';
 const nextPackage = path.dirname(require.resolve('next/package.json', { paths: [web] }));
 const sharp = require(require.resolve('sharp', { paths: [nextPackage] }));
 const markSource = path.join(app, 'assets/branding/clypdat-mark.png');
-const avatarSvgSource = path.join(app, 'assets/branding/clypdat-avatar.svg');
 const sizes = [16, 24, 32, 48, 64, 128, 256];
 const pngOptions = { compressionLevel: 9, adaptiveFiltering: true };
 
@@ -78,12 +77,15 @@ async function main() {
   }
   const crop = { left: Math.max(0, left - 2), top: Math.max(0, top - 2), width: Math.min(info.width, right + 3) - Math.max(0, left - 2), height: Math.min(info.height, bottom + 3) - Math.max(0, top - 2) };
   const cropped = await sharp(markSource).extract(crop).png(pngOptions).toBuffer();
-  let svg = fs.readFileSync(avatarSvgSource, 'utf8');
-  svg = svg.replace(/(xlink:href="data:image\/png;base64,)[^"]+/, `$1${mark.toString('base64')}`);
+  const framedSize = 488;
+  const framedX = (256 - (left + right + 1) / 2 * framedSize / info.width).toFixed(6);
+  const framedY = (256 - (top + bottom + 1) / 2 * framedSize / info.height).toFixed(6);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="768" height="768" viewBox="0 0 512 512"><title>ClypDat — Silver Edge</title><defs><linearGradient id="silver-edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef2f6"/><stop offset="1" stop-color="#7f8b97"/></linearGradient></defs><rect x="9" y="9" width="494" height="494" rx="83" fill="#17191c" stroke="url(#silver-edge)" stroke-width="18"/><image x="${framedX}" y="${framedY}" width="${framedSize}" height="${framedSize}" xlink:href="data:image/png;base64,${mark.toString('base64')}"/></svg>`;
   const avatar = await sharp(Buffer.from(svg)).png(pngOptions).toBuffer();
   fs.writeFileSync(path.join(app, 'assets/branding/clypdat-avatar.svg'), svg);
   fs.writeFileSync(path.join(app, 'assets/branding/clypdat-avatar.png'), avatar);
-  assert.match(svg, /stroke="#bec2c7" stroke-width="9"/);
+  assert.match(svg, /<linearGradient id="silver-edge"/);
+  assert.match(svg, /stroke="url\(#silver-edge\)" stroke-width="18"/);
   assert.match(svg, /fill="#17191c"/);
   fs.writeFileSync(path.join(web, 'public/logo.png'), avatar);
   // Header uses a tight transparent crop. The square source master has generous
@@ -119,7 +121,8 @@ async function main() {
   const dy = attribute('y') / 2;
   const bimiPath = loops => loops.map(points => points.map(([x,y], i) => `${i ? 'L' : 'M'}${(x * scale + dx).toFixed(2)} ${(y * scale + dy).toFixed(2)}`).join('') + 'Z').join('');
   const outline = traceWhite(data, info.width, info.height, false);
-  const bimi = `<svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny-ps" width="256" height="256" viewBox="0 0 256 256"><title>ClypDat</title><desc>Silver Outline logo</desc><rect width="256" height="256" fill="#17191c"/><rect x="2.25" y="2.25" width="251.5" height="251.5" rx="43.75" fill="#17191c" stroke="#bec2c7" stroke-width="4.5"/><path fill="#000000" fill-rule="evenodd" d="${bimiPath(outline)}"/><path fill="#FCFCFC" fill-rule="evenodd" d="${bimiPath(contours)}"/></svg>\n`;
+  // Tiny PS permits no gradient URL references; retain a solid steel fallback.
+  const bimi = `<svg xmlns="http://www.w3.org/2000/svg" version="1.2" baseProfile="tiny-ps" width="256" height="256" viewBox="0 0 256 256"><title>ClypDat</title><desc>Silver Edge logo</desc><rect width="256" height="256" fill="#17191c"/><rect x="2.25" y="2.25" width="251.5" height="251.5" rx="43.75" fill="#17191c" stroke="#9da7b1" stroke-width="9"/><path fill="#000000" fill-rule="evenodd" d="${bimiPath(outline)}"/><path fill="#FCFCFC" fill-rule="evenodd" d="${bimiPath(contours)}"/></svg>\n`;
   fs.writeFileSync(path.join(web, 'public/bimi/clypdat.svg'), bimi);
   assert.ok(Buffer.byteLength(bimi) < 32768);
 
@@ -150,6 +153,6 @@ async function main() {
     assert.equal(data[Math.floor(info.width / 2) * 4 + 3], 0, 'Desktop icon must not have a tile background');
   }
   const watch = await require('./sync-logo-watch.cjs').syncLogoWatch();
-  console.log(JSON.stringify({ style: 'Silver Outline', desktop: 'transparent', crop, icoSizes: sizes, bimiBytes: Buffer.byteLength(bimi), watch }, null, 2));
+  console.log(JSON.stringify({ style: 'Silver Edge', desktop: 'transparent', crop, icoSizes: sizes, bimiBytes: Buffer.byteLength(bimi), watch }, null, 2));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
