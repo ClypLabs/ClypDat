@@ -1162,19 +1162,25 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
             Vortice.RawRect desktopBounds;
-            // CLYPDAT_FORCE_WGC=1 starts the session on Windows Graphics Capture
-            // instead of DXGI Desktop Duplication, so the two acquisition backends
-            // can be compared on the same machine and settings. Everything
-            // downstream already handles a WGC source - WGC is the existing one-way
-            // recovery path - so this only changes which source starts.
-            var forceWgc = Environment.GetEnvironmentVariable("CLYPDAT_FORCE_WGC") == "1";
-            if (forceWgc)
+            // WGC captures the selected window directly, avoiding DXGI desktop
+            // composition cadence. Keep DXGI only as an explicit diagnostic
+            // override while WGC is validated across real games and monitors.
+            var useWgc = Environment.GetEnvironmentVariable("CLYPDAT_FORCE_DXGI") != "1";
+            if (useWgc)
             {
-                wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, targetMonitor, config.CaptureCursor, config.FrameRate);
-                activeGameFrameSource = wgcCapture;
-                var forcedSize = wgcCapture.ContentSize;
-                desktopBounds = new Vortice.RawRect(0, 0, forcedSize.Width, forcedSize.Height);
-                AppLog.Info($"Native capture: CLYPDAT_FORCE_WGC=1; using Windows Graphics Capture for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
+                try
+                {
+                    wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, targetMonitor, config.CaptureCursor, config.FrameRate);
+                    activeGameFrameSource = wgcCapture;
+                    var forcedSize = wgcCapture.ContentSize;
+                    desktopBounds = new Vortice.RawRect(0, 0, forcedSize.Width, forcedSize.Height);
+                    AppLog.Info($"Native capture: using Windows Graphics Capture for {(isMonitorMode ? "desktop" : $"game window 0x{targetHandle:X}")}.");
+                }
+                catch (Exception error)
+                {
+                    AppLog.Error("Native capture: WGC initialization failed; falling back to DXGI Desktop Duplication.", error);
+                    duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds, nativeGate);
+                }
             }
             else
             {
@@ -1821,8 +1827,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // be set once in the source's constructor and never revisited,
                     // so a session that started at 30 FPS stayed capped near 30
                     // after climbing back to 60.
-                    if (wgcCapture is not null && wgcCapture.ConfiguredFrameRate != activeFrameRate)
-                        wgcCapture.TrySetTargetFrameRate(activeFrameRate);
+                    if (wgcCapture is not null)
+                    {
+                        // The grid moves too: a window dragged to another display,
+                        // or a mode change, leaves the interval derived on the old
+                        // refresh rate. A 60Hz-derived request lands on a 240Hz
+                        // display as two ticks, which is the 120 FPS ceiling this
+                        // policy exists to avoid.
+                        var sourceRefreshHz = isMonitorMode
+                            ? DisplayRefreshService.GetRefreshHz(targetMonitor)
+                            : DisplayRefreshService.GetRefreshHzForWindow(targetHandle);
+                        var gridMoved = sourceRefreshHz > 0 && Math.Abs(wgcCapture.DisplayRefreshHz - sourceRefreshHz) > 0.5;
+                        if (gridMoved || wgcCapture.ConfiguredFrameRate != activeFrameRate)
+                            wgcCapture.TrySetTargetFrameRate(activeFrameRate, sourceRefreshHz > 0 ? sourceRefreshHz : null);
+                    }
 
                     var usingWgcSource = wgcCapture is not null;
                     var targetForeground = isMonitorMode || IsWindowForegroundAndVisible(targetHandle);
@@ -2074,7 +2092,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         const string recoveryGuidance = "Automatic hardware profile is already active; reduce capture resolution or frame rate.";
                         AppLog.Info($"Native capture: overload - dropped {droppedSinceLog} frame(s) in the last {diagElapsed:0.0}s, queue {encodeQueue.Count}/{encodeQueueCapacity}, avgInputMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.0}, avgOutputMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.0}, avgScaleMs={scaleMs / n:0.0}. {recoveryGuidance}");
                     }
-                    var activeCaptureMode = wgcCapture is null ? dxgiCapture?.CaptureMode ?? "Game Capture" : forceWgc ? "Windows Graphics Capture (forced)" : "Windows Graphics Capture (recovery)";
+                    var activeCaptureMode = wgcCapture is null ? dxgiCapture?.CaptureMode ?? "Game Capture" : useWgc ? "Windows Graphics Capture" : "Windows Graphics Capture (recovery)";
                     SetHealth(new ReplayCaptureHealth("Native", activeCaptureMode,
                         pipelineAction == ReplayPipelineRecoveryAction.SwitchToWgc ? ReplayCaptureState.Recovering :
                         packetlessProcessingStall || overloaded || isStalled || transportDegraded || sourceStarved ? ReplayCaptureState.Degraded :
@@ -2198,7 +2216,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             DisposeDuplication();
                             try
                             {
-                                if (forceWgc)
+                                if (useWgc)
                                 {
                                     // Target changed under a forced-WGC session: rebuild the WGC
                                     // source instead of dropping back onto duplication, which
@@ -2207,7 +2225,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     activeGameFrameSource = wgcCapture;
                                     var forcedSize = wgcCapture.ContentSize;
                                     desktopBounds = new Vortice.RawRect(0, 0, forcedSize.Width, forcedSize.Height);
-                                    AppLog.Info("Native capture: CLYPDAT_FORCE_WGC=1; WGC source replaced for the new target.");
+                                    AppLog.Info("Native capture: WGC source replaced for the new target.");
                                 }
                                 else
                                 {
@@ -2215,9 +2233,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     AppLog.Info("Native capture: DXGI duplication replaced for the new target.");
                                 }
                             }
-                            catch (Exception error) when (forceWgc)
+                            catch (Exception error) when (useWgc)
                             {
-                                AppLog.Error("Native capture: forced WGC source could not start for the new target; retrying.", error);
+                                AppLog.Error("Native capture: WGC source could not start for the new target; falling back to DXGI Desktop Duplication.", error);
+                                try
+                                {
+                                    duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds, nativeGate);
+                                    AppLog.Info("Native capture: DXGI duplication replaced WGC for the new target.");
+                                }
+                                catch (Exception fallbackError)
+                                {
+                                    AppLog.Error("Native capture: DXGI fallback source could not start for the new target; retrying.", fallbackError);
+                                }
                             }
                             catch (Exception error) when (!isMonitorMode)
                             {
@@ -2295,13 +2322,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     Thread.Sleep(50);
                     try
                     {
-                        if (forceWgc)
+                        if (useWgc)
                         {
                             wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, targetMonitor, config.CaptureCursor, activeFrameRate);
                             activeGameFrameSource = wgcCapture;
                             var forcedSize = wgcCapture.ContentSize;
                             desktopBounds = new Vortice.RawRect(0, 0, forcedSize.Width, forcedSize.Height);
-                            AppLog.Info("Native capture: CLYPDAT_FORCE_WGC=1; WGC source recreated after prior failure.");
+                            AppLog.Info("Native capture: WGC source recreated after prior failure.");
                         }
                         else
                         {
@@ -2311,8 +2338,20 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     }
                     catch (Exception error)
                     {
-                        AppLog.Error("Native capture: duplication recreate retry failed.", error);
-                        if (!isMonitorMode)
+                        AppLog.Error($"Native capture: {(useWgc ? "WGC" : "DXGI duplication")} recreate retry failed.", error);
+                        if (useWgc)
+                        {
+                            try
+                            {
+                                duplication = CreateDuplicationFor(device, targetHandle, config, out desktopBounds, nativeGate);
+                                AppLog.Info("Native capture: WGC recovery failed; using DXGI Desktop Duplication.");
+                            }
+                            catch (Exception dxgiError)
+                            {
+                                AppLog.Error("Native capture: DXGI fallback source could not start.", dxgiError);
+                            }
+                        }
+                        else if (!isMonitorMode)
                         {
                             try
                             {
@@ -4645,9 +4684,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // The output a given target resolves to. Kept separate from
     // CreateDuplicationFor so the capture loop can ask "would this target need a
     // different duplication?" without building one to find out.
-    // Forced-WGC (CLYPDAT_FORCE_WGC=1) source for whichever target the session
-    // resolved: a window item when a game window is selected, a monitor item for
-    // desktop capture.
+    // WGC source for whichever target the session resolved: a window item when a
+    // game window is selected, a monitor item for desktop capture.
     private static WindowGraphicsCaptureSource CreateForcedWgcSource(
         ID3D11Device device, object nativeGate, nint targetHandle, nint targetMonitor, bool captureCursor, int frameRate) =>
         targetHandle != 0

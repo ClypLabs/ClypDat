@@ -257,11 +257,16 @@
             </StackPanel>
             <StackPanel Margin="0,0,12,10" Spacing="3">
               <TextBlock Text="Frame timing" Foreground="{StaticResource TextBrush}" FontSize="12" />
+              <!-- Same split as the global Frame Timing control: the list carries
+                   the full label, the closed box only the value, so "CFR
+                   (Recommended)" is not clipped by the box's width. -->
               <ComboBox Classes="settingsInput" Width="192"
                         ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayFrameTimingModes}"
-                        DisplayMemberBinding="{Binding Label}"
                         SelectedValueBinding="{Binding Value}"
-                        SelectedValue="{Binding ReplayFrameRateMode}" />
+                        SelectedValue="{Binding ReplayFrameRateMode}">
+                <ComboBox.ItemTemplate><DataTemplate><TextBlock MinWidth="150" Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                <ComboBox.SelectionBoxItemTemplate><DataTemplate><TextBlock Text="{Binding Value}" /></DataTemplate></ComboBox.SelectionBoxItemTemplate>
+              </ComboBox>
             </StackPanel>
           </WrapPanel>
         </StackPanel>

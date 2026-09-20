@@ -87,6 +87,18 @@ public sealed class WgcMinimumUpdateIntervalPolicyTests
     }
 
     [Fact]
+    public void DeliveryFloor_SameTargetOnADifferentDisplay_NeedsRederiving()
+    {
+        // Why the interval is re-derived when a captured window moves between
+        // displays: the 60Hz answer, applied unchanged on a 240Hz panel, rounds
+        // up to two ticks - the 120 FPS ceiling this policy exists to avoid.
+        var sixtyHzRequest = WgcMinimumUpdateIntervalPolicy.FromFrameRate(90, 60);
+
+        Assert.Equal(2 * 1000d / 240, WgcMinimumUpdateIntervalPolicy.DeliveryFloor(sixtyHzRequest, 240).TotalMilliseconds, 3);
+        Assert.Equal(1000d / 240, FloorMs(90, 240), 3);
+    }
+
+    [Fact]
     public void DeliveryFloor_UnknownRefresh_LeavesTheRequestAlone()
     {
         var requested = TimeSpan.FromMilliseconds(5);

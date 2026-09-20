@@ -40,8 +40,9 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     private WgcMinimumUpdateIntervalResult _minimumUpdateInterval;
     // Frames leave the frame pool on composition ticks, so the requested
     // minimum update interval has to be expressed on that grid - see
-    // WgcMinimumUpdateIntervalPolicy.
-    private readonly double _displayRefreshHz;
+    // WgcMinimumUpdateIntervalPolicy. Not readonly: a window dragged to another
+    // display, or a mode change, moves the grid under a live session.
+    private double _displayRefreshHz;
 
     private WindowGraphicsCaptureSource(ID3D11Device device, object d3dLock, GraphicsCaptureItem item, bool captureCursor, int frameRate, double displayRefreshHz)
     {
@@ -80,9 +81,7 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         new(device, d3dLock, CaptureInterop.CreateItemForWindow(windowHandle), captureCursor, frameRate,
             DisplayRefreshService.GetRefreshHzForWindow(windowHandle));
 
-    // Monitor-backed item, for desktop capture. Only the forced-WGC backend
-    // comparison path uses this: DXGI Desktop Duplication remains the default
-    // monitor source, and WGC recovery is window-only.
+    // Monitor-backed WGC item for desktop capture.
     public static WindowGraphicsCaptureSource CreateForMonitor(ID3D11Device device, object d3dLock, nint monitorHandle, bool captureCursor, int frameRate) =>
         new(device, d3dLock, CaptureInterop.CreateItemForMonitor(monitorHandle), captureCursor, frameRate,
             DisplayRefreshService.GetRefreshHz(monitorHandle));
@@ -128,24 +127,38 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     /// </summary>
     public int ConfiguredFrameRate { get; private set; }
 
-    public bool TrySetTargetFrameRate(int frameRate)
+    /// <summary>The display grid the current interval was derived from.</summary>
+    public double DisplayRefreshHz { get { lock (_stateLock) return _displayRefreshHz; } }
+
+    public bool TrySetTargetFrameRate(int frameRate) => TrySetTargetFrameRate(frameRate, null);
+
+    /// <param name="displayRefreshHz">
+    /// The grid to derive the interval on, for a window that has moved to
+    /// another display or a display whose mode changed. Null keeps the current
+    /// one; a non-positive value is ignored rather than trusted, since failing
+    /// to read the refresh rate must not throw away a good one.
+    /// </param>
+    public bool TrySetTargetFrameRate(int frameRate, double? displayRefreshHz)
     {
         WgcMinimumUpdateIntervalResult result;
+        double refreshHz;
         lock (_stateLock)
         {
             if (_disposed || _session is null) return false;
-            result = CaptureInterop.TrySetMinimumUpdateInterval(_session, frameRate, _displayRefreshHz);
+            if (displayRefreshHz is { } fresh && double.IsFinite(fresh) && fresh > 0) _displayRefreshHz = fresh;
+            refreshHz = _displayRefreshHz;
+            result = CaptureInterop.TrySetMinimumUpdateInterval(_session, frameRate, refreshHz);
             _minimumUpdateInterval = result;
             ConfiguredFrameRate = frameRate;
         }
 
         var requestedMs = result.Requested.TotalMilliseconds;
-        var grid = _displayRefreshHz > 0 ? $"{_displayRefreshHz:0.##}Hz display ({1000d / _displayRefreshHz:0.###}ms grid)" : "unknown display refresh";
+        var grid = refreshHz > 0 ? $"{refreshHz:0.##}Hz display ({1000d / refreshHz:0.###}ms grid)" : "unknown display refresh";
         // Neither the requested nor the applied value is what governs delivery:
         // WGC releases frames on composition ticks, so the request is rounded up
         // to one. That rounded value is the real ceiling on the source rate, and
         // it is the number worth reading when the source runs under the game.
-        var floor = WgcMinimumUpdateIntervalPolicy.DeliveryFloor(result.Applied ?? result.Requested, _displayRefreshHz);
+        var floor = WgcMinimumUpdateIntervalPolicy.DeliveryFloor(result.Applied ?? result.Requested, refreshHz);
         var ceiling = floor > TimeSpan.Zero ? $", floor={floor.TotalMilliseconds:0.###}ms ({1000d / floor.TotalMilliseconds:0.#} FPS ceiling)" : string.Empty;
         if (!result.InterfaceAvailable)
             AppLog.Info($"Native capture: WGC MinUpdateInterval unavailable; requested={requestedMs:0.###}ms for {frameRate} FPS on a {grid}.");

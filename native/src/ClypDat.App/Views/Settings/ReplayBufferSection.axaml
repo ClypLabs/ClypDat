@@ -139,7 +139,10 @@
             </ComboBox>
           </StackPanel>
         </WrapPanel>
-        <StackPanel Spacing="2">
+        <!-- Same cancellation as the bitrate hint below: the encoder/codec
+             columns carry a 10px bottom margin for wrapped rows, which leaks out
+             of the last row and stacks on this panel's 11px spacing. -->
+        <StackPanel Spacing="2" Margin="0,-10,0,0">
           <TextBlock Text="{Binding ReplayEncoderModeStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
           <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
           <Border Classes="settingsNotice" Margin="0,6,0,0" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
