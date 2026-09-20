@@ -79,7 +79,7 @@
           <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" Margin="0,4,0,4">
             <StackPanel Spacing="2" VerticalAlignment="Center">
               <TextBlock Classes="settingsRowTitle" Text="Dynamic background" />
-              <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="400"
+              <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" MaxWidth="400" HorizontalAlignment="Left" TextAlignment="Left"
                          Text="Gently animate colours from the song cover. Turn off for a still gradient in the same colours." />
             </StackPanel>
             <ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayDynamicBackground}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
