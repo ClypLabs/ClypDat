@@ -2339,7 +2339,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}|{string.Join(',', Settings.AdditionalAudioProcesses.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value}"))}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}|{Settings.ReplayHdrCompatibilityEnabled}|{string.Join(',', Settings.AdditionalAudioProcesses.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value}"))}";
+
+    public bool ReplayHdrCompatibilityEnabled
+    {
+        get => Settings.ReplayHdrCompatibilityEnabled;
+        set
+        {
+            if (Settings.ReplayHdrCompatibilityEnabled == value) return;
+            Settings.ReplayHdrCompatibilityEnabled = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ReplayHdrCompatibilityStatus));
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    // Runtime capture updates this when it detects an HDR output. Until then
+    // SDR is the safe, truthful state for the existing BGRA capture path.
+    public string ReplayHdrCompatibilityStatus => !Settings.ReplayHdrCompatibilityEnabled ? "Off" : HdrCaptureCompatibility.Status;
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -2395,6 +2412,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
         OnPropertyChanged(nameof(IsReplayArming));
         OnPropertyChanged(nameof(IsReplayReady));
+        OnPropertyChanged(nameof(ReplayHdrCompatibilityStatus));
     }
 
     public void ClearReplayEncoderHealth()
@@ -8508,7 +8526,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneChannelMode: Settings.MicrophoneChannelMode,
             MicrophoneNoiseSuppressionEnabled: effective.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseGateThresholdDb: effective.MicrophoneNoiseGateThresholdDb,
-            AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled);
+            AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled,
+            ReplayHdrCompatibilityEnabled: Settings.ReplayHdrCompatibilityEnabled);
     }
 
     public void SetDuration(TimeSpan duration)

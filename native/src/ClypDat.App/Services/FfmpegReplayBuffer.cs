@@ -830,7 +830,8 @@ public sealed record ReplayBufferConfig(
     double MicrophoneNoiseGateThresholdDb = -100,
     bool AdaptiveFrameRateProtectionEnabled = false,
     string FullSessionHotkey = "F8",
-    string FullSessionContainer = "MKV");
+    string FullSessionContainer = "MKV",
+    bool ReplayHdrCompatibilityEnabled = true);
 
 internal enum AudioSnapshotPurpose
 {

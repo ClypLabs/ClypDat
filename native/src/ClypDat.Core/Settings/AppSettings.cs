@@ -71,6 +71,10 @@ public sealed class AppSettings
     // Sustained encoder overload may lower live target FPS, then restore it
     // after recovery. Users can disable this protection.
     public bool ReplayAdaptiveFrameRateEnabled { get; set; }
+    // HDR desktops need an explicit SDR conversion before the replay's BT.709
+    // encoder path.  Default-on also applies to old settings files because a
+    // missing JSON property uses this initializer.
+    public bool ReplayHdrCompatibilityEnabled { get; set; } = true;
     // VFR follows the capture clock and avoids spending encoder work on
     // duplicate frames. CFR remains available for applications that require
     // a fixed frame grid.

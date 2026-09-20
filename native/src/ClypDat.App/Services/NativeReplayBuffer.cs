@@ -1161,6 +1161,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
+            HdrCaptureCompatibility.Refresh(device, targetMonitor, config.ReplayHdrCompatibilityEnabled);
             Vortice.RawRect desktopBounds;
             // WGC captures the selected window directly, avoiding DXGI desktop
             // composition cadence. Keep DXGI only as an explicit diagnostic
@@ -2197,6 +2198,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (stopwatch.Elapsed - lastTargetRefresh >= TimeSpan.FromSeconds(1))
                 {
                     lastTargetRefresh = stopwatch.Elapsed;
+                    HdrCaptureCompatibility.Refresh(device, ResolveTargetMonitor(targetHandle, config), config.ReplayHdrCompatibilityEnabled);
                     var freshHandle = ResolveTargetWindow(_configProvider());
                     if (freshHandle != targetHandle)
                     {
