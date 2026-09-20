@@ -35,12 +35,17 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     private long _resizeEvents;
     private TimeSpan _lastSourceTimestamp;
     private WgcMinimumUpdateIntervalResult _minimumUpdateInterval;
+    // Frames leave the frame pool on composition ticks, so the requested
+    // minimum update interval has to be expressed on that grid - see
+    // WgcMinimumUpdateIntervalPolicy.
+    private readonly double _displayRefreshHz;
 
-    private WindowGraphicsCaptureSource(ID3D11Device device, object d3dLock, GraphicsCaptureItem item, bool captureCursor, int frameRate)
+    private WindowGraphicsCaptureSource(ID3D11Device device, object d3dLock, GraphicsCaptureItem item, bool captureCursor, int frameRate, double displayRefreshHz)
     {
         _device = device;
         _d3dLock = d3dLock;
         _item = item;
+        _displayRefreshHz = displayRefreshHz;
         _contentSize = item.Size;
         if (_contentSize.Width < 1 || _contentSize.Height < 1) throw new InvalidOperationException("WGC reported an empty window size.");
         _direct3DDevice = CaptureInterop.CreateDirect3DDevice(device);
@@ -63,13 +68,15 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     }
 
     public static WindowGraphicsCaptureSource Create(ID3D11Device device, object d3dLock, nint windowHandle, bool captureCursor, int frameRate) =>
-        new(device, d3dLock, CaptureInterop.CreateItemForWindow(windowHandle), captureCursor, frameRate);
+        new(device, d3dLock, CaptureInterop.CreateItemForWindow(windowHandle), captureCursor, frameRate,
+            DisplayRefreshService.GetRefreshHzForWindow(windowHandle));
 
     // Monitor-backed item, for desktop capture. Only the forced-WGC backend
     // comparison path uses this: DXGI Desktop Duplication remains the default
     // monitor source, and WGC recovery is window-only.
     public static WindowGraphicsCaptureSource CreateForMonitor(ID3D11Device device, object d3dLock, nint monitorHandle, bool captureCursor, int frameRate) =>
-        new(device, d3dLock, CaptureInterop.CreateItemForMonitor(monitorHandle), captureCursor, frameRate);
+        new(device, d3dLock, CaptureInterop.CreateItemForMonitor(monitorHandle), captureCursor, frameRate,
+            DisplayRefreshService.GetRefreshHz(monitorHandle));
 
     public (int Width, int Height) ContentSize { get { lock (_stateLock) return (_contentSize.Width, _contentSize.Height); } }
     public string CaptureMode => "Windows Graphics Capture";
@@ -104,17 +111,18 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         lock (_stateLock)
         {
             if (_disposed || _session is null) return false;
-            result = CaptureInterop.TrySetMinimumUpdateInterval(_session, frameRate);
+            result = CaptureInterop.TrySetMinimumUpdateInterval(_session, frameRate, _displayRefreshHz);
             _minimumUpdateInterval = result;
         }
 
         var requestedMs = result.Requested.TotalMilliseconds;
+        var grid = _displayRefreshHz > 0 ? $"{_displayRefreshHz:0.##}Hz display ({1000d / _displayRefreshHz:0.###}ms grid)" : "unknown display refresh";
         if (!result.InterfaceAvailable)
-            AppLog.Info($"Native capture: WGC MinUpdateInterval unavailable; requested={requestedMs:0.###}ms.");
+            AppLog.Info($"Native capture: WGC MinUpdateInterval unavailable; requested={requestedMs:0.###}ms for {frameRate} FPS on a {grid}.");
         else if (result.Applied is not null)
-            AppLog.Info($"Native capture: WGC MinUpdateInterval requested={requestedMs:0.###}ms, applied={result.Applied.Value.TotalMilliseconds:0.###}ms.");
+            AppLog.Info($"Native capture: WGC MinUpdateInterval requested={requestedMs:0.###}ms, applied={result.Applied.Value.TotalMilliseconds:0.###}ms for {frameRate} FPS on a {grid}.");
         else
-            AppLog.Info($"Native capture: WGC MinUpdateInterval request failed; requested={requestedMs:0.###}ms ({result.Failure}).");
+            AppLog.Info($"Native capture: WGC MinUpdateInterval request failed; requested={requestedMs:0.###}ms for {frameRate} FPS on a {grid} ({result.Failure}).");
         return result.Applied is not null;
     }
 

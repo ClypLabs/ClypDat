@@ -1715,12 +1715,39 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var dxgiLeaseDuration = TimeSpan.Zero;
                     var wgcTelemetry = wgcCapture?.GetTelemetrySnapshot();
                     var dxgiTelemetry = dxgiCapture?.GetTelemetrySnapshot();
+                    // Everything needed to tell "WGC is not producing" apart from
+                    // "we are not keeping up with WGC": the source gap is the
+                    // cadence WGC itself chose, and it is the number that exposes a
+                    // minimum-update-interval quantised onto the display's
+                    // composition grid (see WgcMinimumUpdateIntervalPolicy).
+                    var wgcDiagnostics = string.Empty;
                     if (wgcTelemetry is not null)
                     {
                         var current = wgcTelemetry.Value;
-                        wgcCallbackCount = current.CallbackArrivals >= previousWgcTelemetry.CallbackArrivals
-                            ? current.CallbackArrivals - previousWgcTelemetry.CallbackArrivals
+                        var previous = previousWgcTelemetry;
+                        wgcCallbackCount = current.CallbackArrivals >= previous.CallbackArrivals
+                            ? current.CallbackArrivals - previous.CallbackArrivals
                             : current.CallbackArrivals;
+                        var gapCount = current.SourceTimestampGapCount >= previous.SourceTimestampGapCount
+                            ? current.SourceTimestampGapCount - previous.SourceTimestampGapCount
+                            : current.SourceTimestampGapCount;
+                        var gapTotal = current.SourceTimestampGapTotal >= previous.SourceTimestampGapTotal
+                            ? current.SourceTimestampGapTotal - previous.SourceTimestampGapTotal
+                            : current.SourceTimestampGapTotal;
+                        var callbackTotal = current.CallbackDurationTotal >= previous.CallbackDurationTotal
+                            ? current.CallbackDurationTotal - previous.CallbackDurationTotal
+                            : current.CallbackDurationTotal;
+                        var gpuLockTotal = current.GpuLockWaitTotal >= previous.GpuLockWaitTotal
+                            ? current.GpuLockWaitTotal - previous.GpuLockWaitTotal
+                            : current.GpuLockWaitTotal;
+                        var overwritten = current.OverwrittenFrames >= previous.OverwrittenFrames
+                            ? current.OverwrittenFrames - previous.OverwrittenFrames
+                            : current.OverwrittenFrames;
+                        var avgGapMs = gapCount > 0 ? gapTotal.TotalMilliseconds / gapCount : 0;
+                        var avgCallbackMs = wgcCallbackCount > 0 ? callbackTotal.TotalMilliseconds / wgcCallbackCount : 0;
+                        var avgGpuLockMs = wgcCallbackCount > 0 ? gpuLockTotal.TotalMilliseconds / wgcCallbackCount : 0;
+                        var interval = current.MinimumUpdateInterval;
+                        wgcDiagnostics = $", wgcSourceGapAvgMs={avgGapMs:0.00}, wgcSourceGapMaxMs={current.SourceTimestampGapMaximum.TotalMilliseconds:0.00}, wgcCallbackAvgMs={avgCallbackMs:0.00}, wgcGpuLockAvgMs={avgGpuLockMs:0.00}, wgcOverwritten={overwritten}, wgcMinIntervalMs={(interval.Applied?.TotalMilliseconds ?? interval.Requested.TotalMilliseconds):0.###}{(interval.Applied is null ? " (not applied)" : string.Empty)}";
                         previousWgcTelemetry = current;
                         inputFrameCount = (int)Math.Min(int.MaxValue, wgcCallbackCount);
                     }
@@ -1796,7 +1823,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         sourceFrameRate, freshTransportRate, processingP95Ms, 1000.0 / activeFrameRate,
                         missedPacingSinceLog, encodeQueue.Count, encodeQueueCapacity, submissionP95Ms,
                         outputLatencyP95Ms, outputShortfall);
-                    AppLog.Debug($"Native capture throughput: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, queueDepth={encodeQueue.Count}, queueCapacity={encodeQueueCapacity}, droppedFrames={droppedSinceLog}, stage={bottleneckStage}, pacingMisses={missedPacingSinceLog}, pacingP95Ms={pacingP95Ms:0.00}, pacingMaxMs={pacingMaxMs:0.00}, queueReplacements={queueReplacementsSinceLog}, processingP95Ms={processingP95Ms:0.00}, processingMaxMs={processingMaxMs:0.00}, submissionP95Ms={submissionP95Ms:0.00}, submissionMaxMs={submissionMaxMs:0.00}, outputLatencyP95Ms={outputLatencyP95Ms:0.00}, outputLatencyMaxMs={outputLatencyMaxMs:0.00}.");
+                    AppLog.Debug($"Native capture throughput: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, queueDepth={encodeQueue.Count}, queueCapacity={encodeQueueCapacity}, droppedFrames={droppedSinceLog}, stage={bottleneckStage}, pacingMisses={missedPacingSinceLog}, pacingP95Ms={pacingP95Ms:0.00}, pacingMaxMs={pacingMaxMs:0.00}, queueReplacements={queueReplacementsSinceLog}, processingP95Ms={processingP95Ms:0.00}, processingMaxMs={processingMaxMs:0.00}, submissionP95Ms={submissionP95Ms:0.00}, submissionMaxMs={submissionMaxMs:0.00}, outputLatencyP95Ms={outputLatencyP95Ms:0.00}, outputLatencyMaxMs={outputLatencyMaxMs:0.00}{wgcDiagnostics}.");
                     var encoderSubmissionStalled = encoderPressure && outputFrameRate < activeFrameRate * 0.5;
                     var sourceRecoverySample = new ReplayCaptureHealth("Native", "DXGI", ReplayCaptureState.Degraded,
                         activeFrameRate, inputFrameCount / diagElapsed, freshTransportRate, outputFrameRate, 0, droppedSinceLog,

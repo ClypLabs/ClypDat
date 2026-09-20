@@ -115,15 +115,15 @@ internal static unsafe class CaptureInterop
         }
     }
 
-    public static WgcMinimumUpdateIntervalResult TrySetMinimumUpdateInterval(GraphicsCaptureSession session, int frameRate)
+    public static WgcMinimumUpdateIntervalResult TrySetMinimumUpdateInterval(GraphicsCaptureSession session, int frameRate, double displayRefreshHz = 0)
     {
-        var requested = WgcMinimumUpdateIntervalPolicy.FromFrameRate(frameRate);
+        var requested = WgcMinimumUpdateIntervalPolicy.FromFrameRate(frameRate, displayRefreshHz);
         // MinUpdateInterval is projected by the current Windows SDK.  Do not
         // query the optional IGraphicsCaptureSession5 by hand: that path
         // requires marshaling a WinRT object through classic COM and fails on
         // current projections even when WGC itself is healthy.
         if (!ApiInformation.IsPropertyPresent("Windows.Graphics.Capture.GraphicsCaptureSession", "MinUpdateInterval"))
-            return WgcMinimumUpdateIntervalPolicy.Unsupported(frameRate);
+            return WgcMinimumUpdateIntervalPolicy.Unsupported(frameRate, displayRefreshHz);
 
         try
         {
