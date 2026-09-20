@@ -35,7 +35,7 @@ jobs:
     if: github.ref == 'refs/heads/master'
     runs-on: windows-latest
     env:
-      NUGET_PACKAGES: ${{ runner.temp }}/clypdat-dev-nuget
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/dev
     permissions:
       contents: read
     outputs:

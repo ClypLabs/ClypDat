@@ -31,7 +31,7 @@ jobs:
   build:
     runs-on: windows-latest
     env:
-      NUGET_PACKAGES: ${{ runner.temp }}/clypdat-release-nuget
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/release
     permissions:
       contents: read
     outputs:
