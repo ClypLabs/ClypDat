@@ -12,11 +12,4 @@ public sealed class TimelineSeekResumePolicyTests
             requestedResume: false,
             inFlightSeekWantsResume: true));
     }
-
-    [Fact]
-    public void FailedPlayingSeek_ContinuesPlayback()
-    {
-        Assert.True(TimelineSeekResumePolicy.ShouldContinueAfterSeekFailure(resumePlayback: true));
-        Assert.False(TimelineSeekResumePolicy.ShouldContinueAfterSeekFailure(resumePlayback: false));
-    }
 }

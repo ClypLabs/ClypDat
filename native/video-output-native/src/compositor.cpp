@@ -123,7 +123,7 @@ struct Renderer {
            next_picture = 0;
   int64_t date = 0;
   int64_t pending_date = 0;
-  bool valid = false, pending_valid = false;
+  bool valid = false, pending_valid = false, composed_pending = false;
   Renderer(std::shared_ptr<Context> c, ID3D11Device *d, ID3D11DeviceContext *i)
       : context(std::move(c)), device(d), immediate(i) {
     auto compile = [&](const char *entry, const char *target) {
@@ -459,9 +459,13 @@ int cdvo_needs_redraw(void *renderer) {
     return 0;
   auto &r = *static_cast<Renderer *>(renderer);
   std::lock_guard lock(r.context->mutex);
-  return r.context->state.clock.rate == 0 && r.valid && r.context->dirty &&
+  const auto generation = r.context->state.clock.generation;
+  // A seek can decode its landing picture before Avalonia commits its scene.
+  // Keep that texture and let the first paused redraw present it after commit.
+  return r.context->state.clock.rate == 0 && r.context->dirty &&
          !r.context->closed && !r.context->status.failed &&
-         r.generation == r.context->state.clock.generation;
+         ((r.valid && r.generation == generation) ||
+          (r.pending_valid && r.pending_generation == generation));
 }
 
 int cdvo_compose(void *renderer, ID3D11RenderTargetView *output,
@@ -472,11 +476,16 @@ int cdvo_compose(void *renderer, ID3D11RenderTargetView *output,
   try {
     State state;
     std::unordered_map<uint64_t, std::shared_ptr<const Image>> images;
-    const auto generation = redraw ? r.generation : r.pending_generation;
-    const auto date = redraw ? r.date : r.pending_date;
+    const auto scene_generation = r.context->state.clock.generation;
+    const auto use_pending = !redraw ||
+                             ((!r.valid || r.generation != scene_generation) &&
+                              r.pending_valid &&
+                              r.pending_generation == scene_generation);
+    const auto generation = use_pending ? r.pending_generation : r.generation;
+    const auto date = use_pending ? r.pending_date : r.date;
     {
       std::lock_guard lock(r.context->mutex);
-      if (!(redraw ? r.valid : r.pending_valid) || r.context->closed ||
+      if (!(use_pending ? r.pending_valid : r.valid) || r.context->closed ||
           r.context->status.failed || r.context->state.clock.revision == 0 ||
           generation != r.context->state.clock.generation)
         return 0;
@@ -493,8 +502,8 @@ int cdvo_compose(void *renderer, ID3D11RenderTargetView *output,
     const D3D11_RECT all{0, 0, LONG(r.width), LONG(r.height)};
     Constants c{};
     r.immediate->CopyResource(r.scene.texture.Get(),
-                              redraw ? r.retained.texture.Get()
-                                     : r.pending.texture.Get());
+                              use_pending ? r.pending.texture.Get()
+                                          : r.retained.texture.Get());
     auto drawArt = [&](uint32_t layer) {
       for (auto &a : state.artwork)
         if (a.layer == layer && active(a.start, a.end, time)) {
@@ -563,6 +572,7 @@ int cdvo_compose(void *renderer, ID3D11RenderTargetView *output,
       if (generation != r.context->state.clock.generation)
         return 0;
       r.composed_revision = state.clock.revision;
+      r.composed_pending = use_pending;
       if (redraw) {
         r.context->status.redraws++;
         r.context->status.revision = state.clock.revision;
@@ -580,12 +590,14 @@ void cdvo_presented(void *renderer) {
   if (!renderer)
     return;
   auto &r = *static_cast<Renderer *>(renderer);
-  std::swap(r.pending, r.retained);
-  r.valid = true;
-  r.pending_valid = false;
-  r.generation = r.pending_generation;
-  r.date = r.pending_date;
-  r.picture = r.pending_picture;
+  if (r.composed_pending) {
+    std::swap(r.pending, r.retained);
+    r.valid = true;
+    r.pending_valid = false;
+    r.generation = r.pending_generation;
+    r.date = r.pending_date;
+    r.picture = r.pending_picture;
+  }
   r.revision = r.composed_revision;
   std::lock_guard lock(r.context->mutex);
   r.context->status.generation = r.generation;

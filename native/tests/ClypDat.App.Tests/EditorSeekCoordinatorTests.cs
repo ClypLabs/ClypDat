@@ -49,6 +49,27 @@ public sealed class EditorSeekCoordinatorTests
     }
 
     [Fact]
+    public async Task ExhaustedLandingRecovery_LeavesTransportPaused()
+    {
+        var transport = new RecoveryTransport(presents: false);
+        var coordinator = new EditorSeekCoordinator(
+            pollInterval: TimeSpan.FromMilliseconds(1),
+            attemptTimeout: TimeSpan.FromMilliseconds(4));
+
+        var result = await coordinator.SeekAsync(
+            transport,
+            TimeSpan.FromSeconds(10),
+            resume: true,
+            seekId: "test",
+            isCurrent: () => true,
+            CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.True(transport.IsPaused);
+        Assert.Equal(0, transport.AudioStarts);
+    }
+
+    [Fact]
     public async Task Resume_DeferredAudioAfterVideoRoll_StartsOnce()
     {
         var preparation = new TaskCompletionSource<AudioPreparationResult>();
@@ -109,22 +130,24 @@ public sealed class EditorSeekCoordinatorTests
     private sealed class RecoveryTransport : IEditorSeekTransport
     {
         private readonly bool _videoRolls;
+        private readonly bool _presents;
         private readonly Task<AudioPreparationResult> _preparation;
         private TimeSpan _position;
         public bool CanReusePresentedFrame(TimeSpan target) => false;
         public bool Presented { get; private set; }
         public Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token)
         {
-            Presented = true;
-            return Task.FromResult(current());
+            Presented = _presents;
+            return Task.FromResult(_presents && current());
         }
-        public RecoveryTransport(bool videoRolls = true)
-            : this(Task.FromResult(new AudioPreparationResult(1, 0, false)), videoRolls) { }
+        public RecoveryTransport(bool videoRolls = true, bool presents = true)
+            : this(Task.FromResult(new AudioPreparationResult(1, 0, false)), videoRolls, presents) { }
 
-        public RecoveryTransport(Task<AudioPreparationResult> preparation, bool videoRolls = true)
+        public RecoveryTransport(Task<AudioPreparationResult> preparation, bool videoRolls = true, bool presents = true)
         {
             _preparation = preparation;
             _videoRolls = videoRolls;
+            _presents = presents;
         }
 
         public bool IsPaused { get; private set; }

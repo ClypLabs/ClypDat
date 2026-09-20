@@ -96,8 +96,9 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
         lock (_gate)
         {
             if (!_seeking || _token == 0) return;
-            // Invalidate pictures prepared while the seek was still landing.
-            BeginSeek(position);
+            // BeginSeek already published this transport barrier. Completing it
+            // must keep that generation: VLC can prepare the landing picture
+            // before Avalonia publishes the complete scene.
             _seeking = false;
         }
     }

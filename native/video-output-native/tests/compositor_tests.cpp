@@ -197,8 +197,26 @@ int main() {
     state.generation++;
     state.revision = 0;
     require(cdvo_submit(token, &state) != 0, "seek barrier");
+    auto landed = cdvo_begin_picture(renderer, width, height, 10000000);
+    require(landed != nullptr, "retain landing picture before scene");
+    ++frames;
+    immediate->ClearRenderTargetView(landed, futureColor);
     require(cdvo_compose(renderer, rtv.Get(), &viewport, 0) == 0,
             "reject picture prepared before seek");
+    // Scene publication can lag decoder output. The accepted seek generation
+    // must retain its landing texture and present it while transport is paused.
+    state.revision = 1;
+    state.artwork_count = 1;
+    state.artwork = &art;
+    require(cdvo_submit(token, &state) != 0, "commit delayed seek scene");
+    require(cdvo_needs_redraw(renderer) != 0, "delayed seek requests redraw");
+    require(cdvo_compose(renderer, rtv.Get(), &viewport, 1) != 0,
+            "present retained landing picture after scene");
+    cdvo_presented(renderer);
+    cdvo_status status{sizeof(cdvo_status), CDVO_ABI};
+    require(cdvo_query(token, &status) != 0 &&
+                status.presented_picture == status.decoded_picture,
+            "delayed scene presents current landing picture");
     // Recommit the unchanged art after transport's revision-zero barrier. It
     // must reuse its GPU resource; a seek must not require a duplicate upload.
     state.revision = 1;
@@ -209,11 +227,10 @@ int main() {
     require(cdvo_submit(token, &state) == 0, "reject obsolete state");
     state.artwork_count = 0;
     state.artwork = nullptr;
-    cdvo_status status{sizeof(cdvo_status), CDVO_ABI};
     require(cdvo_query(token, &status) != 0 && !status.failed,
             "status handshake");
     require(status.decoded_picture == frames &&
-                status.presented_picture == frames - 1 &&
+                status.presented_picture == frames &&
                 status.width == width && status.height == height,
             "status frame identity and original dimensions");
     cdvo_fail(renderer, "Injected device failure");

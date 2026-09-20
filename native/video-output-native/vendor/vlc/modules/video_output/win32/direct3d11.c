@@ -1011,7 +1011,8 @@ static void Manage(vout_display_t *vd)
         }
             DXGI_PRESENT_PARAMETERS parameters = {0};
             HRESULT hr = IDXGISwapChain1_Present1(sys->dxgiswapChain, 0, 0, &parameters);
-            if (FAILED(hr)) cdvo_fail(sys->compositor, "Paused redraw failed. Reopen the clip.");
+            if (SUCCEEDED(hr)) cdvo_presented(sys->compositor);
+            else cdvo_fail(sys->compositor, "Paused redraw failed. Reopen the clip.");
         }
         d3d11_device_unlock(&sys->d3d_dev);
     }
