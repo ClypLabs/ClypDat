@@ -178,7 +178,7 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|File Format|MKV|MP4|Storage limit|Custom limit|Full Session Recording}">
+    <Border Classes="settingsCard" Padding="20,20,20,8" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|File Format|MKV|MP4|Storage limit|Custom limit|Full Session Recording}">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="FULL SESSION RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording}">
