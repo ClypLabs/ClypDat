@@ -888,7 +888,7 @@
   </Style>
   <!-- Transparent has white RGB channels. Avoid the global brush transition,
        which flashes pale while interpolating from transparent to a dark fill. -->
-  <Style Selector="Button.replayRow, Button.replayStatusButton, Button.hotkeyChipKeycap, Button.hotkeyChipLink, Button.sourceTab, Button.monitorTile, Button.sourceCancel">
+  <Style Selector="Button.replayRow, Button.replayStatusButton, Button.hotkeyChipKeycap, Button.hotkeyChipLink, Button.sourceTab, Button.monitorTile, Button.sourceCancel, Button.dialogClose">
     <Setter Property="Transitions" Value="{x:Null}" />
   </Style>
   <Style Selector="StackPanel.hotkeyChipFlyout Button.hotkeyChipKeycap:pointerover, StackPanel.hotkeyChipFlyout Button.hotkeyChipLink:pointerover">

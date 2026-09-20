@@ -1749,7 +1749,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         : IsDesktopCapture ? "Desktop" : "Game";
 
     public string ReplayQualitySummary =>
-        $"{Settings.ReplayMaxHeight}p {Settings.ReplayFrameRate} {Settings.ReplayBitrateMbps}M";
+        $"{Settings.ReplayMaxHeight}p@{Settings.ReplayFrameRate} {Settings.ReplayBitrateMbps}M";
 
     public string ReplayDurationSummary => SelectedReplayDurationPreset?.Label ?? string.Empty;
 
