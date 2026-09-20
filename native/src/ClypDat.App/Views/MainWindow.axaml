@@ -69,7 +69,7 @@
               Margin="18,0,0,0"
               VerticalAlignment="Center">
           <Button x:Name="ReplayHeaderButton" Grid.Column="0" Classes="replayButton" Classes.recording="{Binding IsReplayRecording}"
-                  ToolTip.Tip="{Binding RecordingDetail}" AutomationProperties.Name="{Binding RecorderStatus}" AutomationProperties.HelpText="{Binding RecordingDetail}">
+                  AutomationProperties.Name="{Binding RecorderStatus}" AutomationProperties.HelpText="{Binding RecordingDetail}">
             <Button.Content>
               <StackPanel Orientation="Horizontal" Spacing="7">
                 <Ellipse Width="7" Height="7" Fill="{Binding RecordingDotColor}" Opacity="{Binding RecordingDotOpacity}" IsVisible="{Binding RecordingDotVisible}" VerticalAlignment="Center" />
@@ -95,7 +95,7 @@
                         <ToggleSwitch Grid.Column="2" IsChecked="{Binding ReplayBufferEnabled}"
                                       OnContent="{x:Null}" OffContent="{x:Null}"
                                       VerticalAlignment="Center"
-                                      ToolTip.Tip="Turn the replay buffer on or off" />
+                                      AutomationProperties.Name="Turn the replay buffer on or off" />
                       </Grid>
                     </Border>
 
@@ -104,7 +104,7 @@
                     <Border Classes="replayStatusCard">
                       <Button Classes="replayStatusButton" Click="ReplayStatusCard_OnClick"
                               HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                              ToolTip.Tip="Detection options">
+                              AutomationProperties.Name="Detection options">
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
                           <Border Grid.Column="0" Classes="replayStatusArt" IsVisible="{Binding HasDetectedGame}">
                             <Image Source="{Binding ActiveGameIcon}" Stretch="UniformToFill" />
@@ -153,7 +153,7 @@
                                     ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}">
                             <ComboBox.ItemTemplate>
                               <DataTemplate>
-                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" />
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                               </DataTemplate>
                             </ComboBox.ItemTemplate>
                           </ComboBox>
@@ -177,7 +177,7 @@
                users reach for most, so the chip opens its own small popover
                rather than making them walk into Settings for one keystroke. -->
           <Button x:Name="ClipsHeaderButton" Grid.Column="2" Classes="headerHotkeyChip" Margin="10,0,0,0" VerticalAlignment="Center"
-                  ToolTip.Tip="Change the save hotkey or clip length">
+                  AutomationProperties.Name="Change the save hotkey or clip length">
             <TextBlock Text="{Binding HotkeyDisplay}" VerticalAlignment="Center" />
             <Button.Flyout>
               <Flyout Placement="BottomEdgeAlignedLeft" VerticalOffset="7" FlyoutPresenterClasses="hotkeyChipFlyoutPresenter">
@@ -217,7 +217,7 @@
                     <TextBlock Classes="hotkeyChipHint" Text="Saved when you press the shortcut."
                                TextWrapping="Wrap" VerticalAlignment="Center" />
                     <Button Grid.Column="1" Classes="linkButton hotkeyChipLink" Click="OpenReplaySettingsButton_OnClick"
-                            Padding="8,6" ToolTip.Tip="Open hotkey settings">
+                            Padding="8,6">
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="Manage hotkeys" VerticalAlignment="Center" />
                         <PathIcon Width="10" Height="10" Data="M8.59,16.58L13.17,12L8.59,7.41L10,6L16,12L10,18L8.59,16.58Z" />
@@ -229,7 +229,7 @@
             </Button.Flyout>
           </Button>
           <Border Grid.Column="3" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" />
-          <Button Grid.Column="4" Classes="linkButton" Click="ActiveGameButton_OnClick" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" ToolTip.Tip="Click for detection options">
+          <Button Grid.Column="4" Classes="linkButton" Click="ActiveGameButton_OnClick" IsVisible="{Binding ShowLibraryStatus}" Margin="10,0,0,0" AutomationProperties.HelpText="Detection options">
             <TextBlock Text="{Binding ActiveGame}" Foreground="{StaticResource Text_BDD4EE}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="220" />
           </Button>
           <Border Grid.Column="5" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding HasSelection}" Margin="10,0,0,0" />
