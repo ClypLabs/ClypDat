@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 
 const app = path.resolve(__dirname, '..');
@@ -10,10 +9,50 @@ const nextPackage = path.dirname(require.resolve('next/package.json', { paths: [
 const sharp = require(require.resolve('sharp', { paths: [nextPackage] }));
 const asset = name => fs.readFileSync(path.join(app, 'assets', name));
 
-test('approved mark preserves the original heavy white band', () => {
-  const approved = execFileSync('git', ['show', '91f1c3ec:assets/branding/clypdat-mark.png'], { cwd: app });
-  const master = fs.readFileSync(path.join(app, 'assets/branding/clypdat-mark.png'));
-  assert.ok(master.equals(approved));
+test('master combines heavy white bands, visible tip gaps and connected black joins', async () => {
+  const { data, info } = await sharp(asset('branding/clypdat-mark.png')).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  assert.deepEqual([info.width, info.height], [1254, 1254]);
+  const whiteRuns = y => {
+    const runs = [];
+    let start = -1;
+    for (let x = 0; x <= info.width; x++) {
+      const i = (y * info.width + x) * 4;
+      const white = x < info.width && data[i + 3] > 127 && Math.min(data[i], data[i + 1], data[i + 2]) > 220;
+      if (white && start < 0) start = x;
+      if (!white && start >= 0) { runs.push([start, x]); start = -1; }
+    }
+    return runs;
+  };
+  // Original master measured 104 / 96 / 101px at this midline. The rejected
+  // narrow version measured 99 / 92 / 97px. Keep original weight within 3px.
+  const bands = whiteRuns(600);
+  assert.equal(bands.length, 3);
+  bands.forEach(([start, end], i) => assert.ok(Math.abs(end - start - [104, 96, 101][i]) <= 3, 'White bands must retain their original weight'));
+  for (const y of [380, 820]) {
+    const runs = whiteRuns(y);
+    assert.equal(runs.length, 2);
+    const gap = runs[1][0] - runs[0][1];
+    assert.ok(gap >= 45 && gap <= 70, 'Both white tips need a visible, modest gap');
+  }
+  // Flood the transparent exterior. Neither inner hole may be reachable;
+  // otherwise a black bridge was cut while widening the white-to-white gap.
+  const visited = new Uint8Array(info.width * info.height);
+  const queue = new Int32Array(visited.length);
+  let head = 0, tail = 1;
+  visited[0] = 1;
+  while (head < tail) {
+    const p = queue[head++], x = p % info.width, y = Math.floor(p / info.width);
+    for (const q of [x > 0 ? p - 1 : -1, x < info.width - 1 ? p + 1 : -1, y > 0 ? p - info.width : -1, y < info.height - 1 ? p + info.width : -1]) {
+      if (q < 0 || visited[q] || data[q * 4 + 3] >= 128) continue;
+      visited[q] = 1;
+      queue[tail++] = q;
+    }
+  }
+  for (const x of [350, 900]) {
+    const p = 600 * info.width + x;
+    assert.equal(data[p * 4 + 3], 0, 'Inner holes must remain transparent');
+    assert.equal(visited[p], 0, 'Black joins must enclose both inner holes');
+  }
 });
 
 test('every in-app dark mark matches the unframed transparent desktop symbol', async () => {

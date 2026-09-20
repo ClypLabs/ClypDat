@@ -1,8 +1,8 @@
 # Logo masters
 
-Silver Outline is the selected identity: a charcoal tile with a thin, solid silver frame (not the thicker Silver Edge gradient). The mark retains its heavy off-white band for legibility at icon sizes.
+Silver Outline is the selected identity: a charcoal tile with a thin, solid silver frame (not the thicker Silver Edge gradient). The mark combines the original heavy off-white band with visible dark separation at both rounded tips. Its black outline stays connected across both joins.
 
-- `clypdat-mark.png`: the 1254px transparent symbol master; preserve its contours.
+- `clypdat-mark.png`: the 1254px transparent symbol master; preserve its contours, white stroke weight, and both tip gaps. The exporter reads this file without replacing it from Git history. See `clypdat-mark-edit.md` for the edit prompt and measured checks.
 - `clypdat-avatar.svg` and `clypdat-avatar.png`: the approved centered frame and its 768px render.
 - `assets/clypdat-icon*.png`: unframed transparent in-app marks, including the header, About page, overlay controls, and notifications. RGB-inverted light-theme variants retain exactly the same alpha. Never use the Silver Outline tile on these surfaces.
 - `assets/clypdat-icon.ico`: the same unframed transparent symbol in 16, 24, 32, 48, 64, 128, and 256px frames for the executable, taskbar, and system tray.

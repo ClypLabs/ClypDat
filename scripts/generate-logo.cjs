@@ -6,7 +6,6 @@ const { execFileSync } = require('node:child_process');
 const app = path.resolve(__dirname, '..');
 const web = path.resolve(app, '../clypdat-webapp');
 const classicLoaderCommit = '7bdfbac8';
-const thickMarkCommit = '91f1c3ec';
 const nextPackage = path.dirname(require.resolve('next/package.json', { paths: [web] }));
 const sharp = require(require.resolve('sharp', { paths: [nextPackage] }));
 const markSource = path.join(app, 'assets/branding/clypdat-mark.png');
@@ -69,10 +68,9 @@ function traceWhite(data, width, height, whiteOnly = true) {
 }
 
 async function main() {
-  // The first approved mark keeps the heavy white band legible at icon sizes.
-  // Do not replace it with the later thin-stroke gap experiment.
-  const thickMark = execFileSync('git', ['show', `${thickMarkCommit}:assets/branding/clypdat-mark.png`], { cwd: app });
-  fs.writeFileSync(markSource, thickMark);
+  // Export the checked-in master: heavy white bands with separated round tips.
+  // Restoring a historical master here would silently erase the corrected gaps.
+  const mark = fs.readFileSync(markSource);
   const { data, info } = await sharp(markSource).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let left = info.width, top = info.height, right = 0, bottom = 0;
   for (let y = 0; y < info.height; y++) for (let x = 0; x < info.width; x++) if (data[(y * info.width + x) * 4 + 3] > 16) {
@@ -81,7 +79,7 @@ async function main() {
   const crop = { left: Math.max(0, left - 2), top: Math.max(0, top - 2), width: Math.min(info.width, right + 3) - Math.max(0, left - 2), height: Math.min(info.height, bottom + 3) - Math.max(0, top - 2) };
   const cropped = await sharp(markSource).extract(crop).png(pngOptions).toBuffer();
   let svg = fs.readFileSync(avatarSvgSource, 'utf8');
-  svg = svg.replace(/(xlink:href="data:image\/png;base64,)[^"]+/, `$1${thickMark.toString('base64')}`);
+  svg = svg.replace(/(xlink:href="data:image\/png;base64,)[^"]+/, `$1${mark.toString('base64')}`);
   const avatar = await sharp(Buffer.from(svg)).png(pngOptions).toBuffer();
   fs.writeFileSync(path.join(app, 'assets/branding/clypdat-avatar.svg'), svg);
   fs.writeFileSync(path.join(app, 'assets/branding/clypdat-avatar.png'), avatar);
