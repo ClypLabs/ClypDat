@@ -20,6 +20,7 @@ public sealed partial class App : Application
     private static readonly Uri SelectedWindowsFontCollectionKey = new("fonts:ClypDatSelectedWindowsFont");
     private static IFontCollection? _windowsFontCollection;
     private static string? _windowsFontsPath;
+    private static string[]? _windowsFontFiles;
     private TrayIcon? _trayIcon;
     private MainWindow? _mainWindow;
     private ServerTrayMenuRenderer? _serverTrayMenuRenderer;
@@ -298,46 +299,66 @@ public sealed partial class App : Application
     internal void ApplyFontFamily(string? fontFamilyName)
     {
         var name = string.IsNullOrWhiteSpace(fontFamilyName) ? "Inter" : fontFamilyName.Trim();
-        FontFamily fontFamily;
-
-        try
+        if (!TryResolveFontFamily(name, out var fontFamily))
         {
-            fontFamily = ResolveFontFamily(name);
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Font family '{name}' could not be applied; using Inter.", error);
-            fontFamily = new FontFamily("fonts:Inter#Inter, $Default");
+            AppLog.Info($"Font family '{name}' is not installed; using Inter.");
+            fontFamily = InterFontFamily();
         }
 
         Resources["ClypDatFontFamily"] = fontFamily;
         if (_mainWindow is not null) _mainWindow.FontFamily = fontFamily;
     }
 
-    private static FontFamily ResolveFontFamily(string name)
+    /// <summary>
+    /// Resolves a family name or a font filename, and answers false rather than
+    /// quietly substituting Inter when neither matches.
+    /// </summary>
+    /// <remarks>
+    /// The settings font box applies on every keystroke, so it needs to know
+    /// whether what has been typed so far is a real font: every prefix of a
+    /// name ("C", "Co", "Con"...) reaches here, and only the ones that resolve
+    /// may repaint the window.
+    /// </remarks>
+    internal static bool TryResolveFontFamily(string? fontFamilyName, out FontFamily fontFamily)
     {
-        if (string.Equals(name, "Inter", StringComparison.OrdinalIgnoreCase))
-            return new FontFamily("fonts:Inter#Inter, $Default");
+        var name = string.IsNullOrWhiteSpace(fontFamilyName) ? "Inter" : fontFamilyName.Trim();
+        fontFamily = InterFontFamily();
 
-        var collection = GetWindowsFontCollection();
-        var family = collection?.FirstOrDefault(candidate =>
-            string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
-        if (family is not null)
-            return new FontFamily($"{WindowsFontCollectionKey}#{family.Name}, $Default");
-
-        var file = FindWindowsFontFile(name);
-        if (file is null) return new FontFamily("fonts:Inter#Inter, $Default");
-
-        var selected = new InstalledFontCollection(SelectedWindowsFontCollectionKey, new Uri(file));
-        if (selected.Count == 0)
+        try
         {
-            ((IFontCollection)selected).Dispose();
-            return new FontFamily("fonts:Inter#Inter, $Default");
-        }
+            if (string.Equals(name, "Inter", StringComparison.OrdinalIgnoreCase)) return true;
 
-        FontManager.Current.AddFontCollection(selected);
-        return new FontFamily($"{SelectedWindowsFontCollectionKey}#{selected[0].Name}, $Default");
+            var collection = GetWindowsFontCollection();
+            var family = collection?.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (family is not null)
+            {
+                fontFamily = new FontFamily($"{WindowsFontCollectionKey}#{family.Name}, $Default");
+                return true;
+            }
+
+            var file = FindWindowsFontFile(name);
+            if (file is null) return false;
+
+            var selected = new InstalledFontCollection(SelectedWindowsFontCollectionKey, new Uri(file));
+            if (selected.Count == 0)
+            {
+                ((IFontCollection)selected).Dispose();
+                return false;
+            }
+
+            FontManager.Current.AddFontCollection(selected);
+            fontFamily = new FontFamily($"{SelectedWindowsFontCollectionKey}#{selected[0].Name}, $Default");
+            return true;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Font family '{name}' could not be resolved.", error);
+            return false;
+        }
     }
+
+    private static FontFamily InterFontFamily() => new("fonts:Inter#Inter, $Default");
 
     private static IFontCollection? GetWindowsFontCollection()
     {
@@ -358,17 +379,26 @@ public sealed partial class App : Application
 
     private static string? FindWindowsFontFile(string name)
     {
-        _ = GetWindowsFontCollection();
-        if (_windowsFontsPath is null) return null;
+        // Cached because the settings font box resolves on every keystroke, and
+        // this used to enumerate the whole Fonts folder for each one.
+        var files = _windowsFontFiles;
+        if (files is null)
+        {
+            _ = GetWindowsFontCollection();
+            if (_windowsFontsPath is null) return null;
 
-        return Directory.EnumerateFiles(_windowsFontsPath)
-            .Where(path => Path.GetExtension(path) is { } extension &&
-                           (extension.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
-                            extension.Equals(".otf", StringComparison.OrdinalIgnoreCase) ||
-                            extension.Equals(".ttc", StringComparison.OrdinalIgnoreCase)))
-            .FirstOrDefault(path =>
-                string.Equals(Path.GetFileName(path), name, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(Path.GetFileNameWithoutExtension(path), name, StringComparison.OrdinalIgnoreCase));
+            files = Directory.EnumerateFiles(_windowsFontsPath)
+                .Where(path => Path.GetExtension(path) is { } extension &&
+                               (extension.Equals(".ttf", StringComparison.OrdinalIgnoreCase) ||
+                                extension.Equals(".otf", StringComparison.OrdinalIgnoreCase) ||
+                                extension.Equals(".ttc", StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+            _windowsFontFiles = files;
+        }
+
+        return files.FirstOrDefault(path =>
+            string.Equals(Path.GetFileName(path), name, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(Path.GetFileNameWithoutExtension(path), name, StringComparison.OrdinalIgnoreCase));
     }
 
     private void InitializeTrayIcon()

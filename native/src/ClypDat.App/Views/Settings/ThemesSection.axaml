@@ -236,10 +236,12 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="TYPOGRAPHY" /><TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Inter restores ClypDat's default." /><!-- Committed when the box is left, not per keystroke. Bound the other
-             way, every prefix of a font name was a font name: typing "Consolas"
-             saved settings and repainted the whole window eight times, through
-             seven families that do not exist and land on the fallback. -->
-        <TextBox Classes="settingsInput" Text="{Binding AppFontFamilyName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" PlaceholderText="Inter" /></StackPanel></Border>
+    <Border Classes="settingsCard"><StackPanel Spacing="10"><TextBlock Classes="settingsCardLabel" Text="TYPOGRAPHY" /><TextBlock Classes="settingsRowDesc" Text="Type a family name or font filename from C:\Windows\Fonts. Inter restores ClypDat's default." /><!-- Bound per keystroke, because the font should appear as soon as its
+             name is typed. What makes that safe is the setter, not the trigger:
+             every prefix of a name arrives here ("C", "Co", "Con"...), and only
+             the ones naming a font that exists are applied or saved. Binding
+             straight through used to repaint the whole window eight times on
+             the way to "Consolas", through seven families that do not exist. -->
+        <TextBox Classes="settingsInput" Text="{Binding AppFontFamilyName, Mode=TwoWay}" PlaceholderText="Inter" LostFocus="AppFontFamilyBox_OnLostFocus" /></StackPanel></Border>
   </StackPanel>
 </UserControl>

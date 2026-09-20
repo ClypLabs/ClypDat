@@ -26,5 +26,8 @@ public sealed partial class ThemesSection : UserControl
     // an ancestor walk would be the only thing in it that needs reading twice.
     private void BaseRecentThemeColorButton_OnClick(object? sender, RoutedEventArgs e) { if ((sender as Control)?.Tag is string color) ViewModel?.UseRecentBaseColor(color); }
     private void AccentRecentThemeColorButton_OnClick(object? sender, RoutedEventArgs e) { if ((sender as Control)?.Tag is string color) ViewModel?.UseRecentAccentColor(color); }
+    // The font applies while typing; its write to disk waits for a pause. Leaving
+    // the box is the end of typing, so anything still pending is written now.
+    private void AppFontFamilyBox_OnLostFocus(object? sender, RoutedEventArgs e) => ViewModel?.FlushAppFontFamilySave();
 
 }

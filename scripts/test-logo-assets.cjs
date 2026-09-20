@@ -55,18 +55,39 @@ test('master combines heavy white bands, visible tip gaps and connected black jo
   }
 });
 
-test('every in-app dark mark matches the unframed transparent desktop symbol', async () => {
+// Two different jobs, two different treatments. The desktop icon is drawn on
+// the user's taskbar and tray, where a transparent symbol reads as a floating
+// shape, so it carries the Silver Edge tile. In-app marks sit on ClypDat's own
+// surfaces, which already supply a background, so they stay unframed.
+test('desktop icon carries the Silver Edge tile at every frame size', async () => {
   const ico = asset('clypdat-icon.ico');
   const sizes = [16, 24, 32, 48, 64, 128, 256];
   assert.equal(ico.readUInt16LE(4), sizes.length);
+  const svg = asset('clypdat-logo.svg');
   for (let index = 0; index < sizes.length; index++) {
     const size = sizes[index];
     const offset = ico.readUInt32LE(6 + index * 16 + 12);
     const length = ico.readUInt32LE(6 + index * 16 + 8);
+    const frame = ico.subarray(offset, offset + length);
+    // Byte-identical to the framed render the web favicon is built from, so
+    // the two icons cannot drift apart as the mark changes.
+    const framed = await sharp(svg).resize(size, size).png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer();
+    assert.ok(framed.equals(frame), `${size}px desktop icon must be the framed Silver Edge render`);
+    const { data, info } = await sharp(frame).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const centre = (Math.floor(info.height / 2) * info.width + Math.floor(info.width / 2)) * 4;
+    assert.equal(data[centre + 3], 255, `${size}px desktop icon must be opaque where the tile sits`);
+  }
+  assert.ok(asset('clypdat-icon.ico').equals(fs.readFileSync(path.join(web, 'app/favicon.ico'))));
+});
+
+test('every in-app dark mark stays an unframed transparent symbol', async () => {
+  for (const size of [16, 24, 32, 48, 64, 128, 256]) {
     const icon = asset(`clypdat-icon-${size}.png`);
-    assert.ok(icon.equals(ico.subarray(offset, offset + length)), `${size}px in-app logo must not contain a tile or frame`);
     const { data, info } = await sharp(icon).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-    assert.equal(data[Math.floor(info.width / 2) * 4 + 3], 0);
+    assert.deepEqual([info.width, info.height], [size, size]);
+    // Row 0 is above the mark's bounding box at every size: a tile or frame
+    // would make it opaque.
+    assert.equal(data[Math.floor(info.width / 2) * 4 + 3], 0, `${size}px in-app logo must not contain a tile or frame`);
   }
   assert.ok(asset('clypdat-icon.png').equals(asset('clypdat-icon-256.png')));
 });

@@ -69,6 +69,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private FileSystemWatcher? _libraryWatcher;
     private DispatcherTimer? _libraryFolderRetryTimer;
     private readonly DispatcherTimer _libraryRefreshDebounce;
+    // Typing in the font box resolves per keystroke; persisting waits for a pause.
+    private readonly DispatcherTimer _appFontFamilySave = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    private string? _appFontFamilyDraft;
     private readonly DispatcherTimer _clipNotReadyMessageTimer;
     private readonly DispatcherTimer _libraryCacheWriteTimer;
     private readonly DispatcherTimer _relativeDateRefreshTimer;
@@ -402,6 +405,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(CpuEncoderHardwareWarningVisible))),
             TaskScheduler.Default);
         RefreshDesktopMonitors();
+        _appFontFamilySave.Tick += (_, _) => FlushAppFontFamilySave();
         _libraryRefreshDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
         _libraryRefreshDebounce.Tick += async (_, _) =>
         {
@@ -657,19 +661,49 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
 
+    /// <summary>
+    /// The font box applies while the user types, but only once what they have
+    /// typed names a font that exists.
+    /// </summary>
+    /// <remarks>
+    /// Every keystroke arrives here, including every prefix of a name - "C",
+    /// "Co", "Con" on the way to "Consolas". Binding those straight through is
+    /// what this used to do, and it saved settings and repainted the window
+    /// once per prefix, through families that do not exist. The draft field
+    /// holds whatever has been typed so the box is never fought over, while the
+    /// font, the settings object and the disk are only touched when the name
+    /// resolves.
+    /// </remarks>
     public string AppFontFamilyName
     {
-        get => Settings.FontFamilyName;
+        get => _appFontFamilyDraft ?? Settings.FontFamilyName;
         set
         {
-            var name = string.IsNullOrWhiteSpace(value) ? "Inter" : value.Trim();
+            var typed = value ?? string.Empty;
+            if (string.Equals(AppFontFamilyName, typed, StringComparison.Ordinal)) return;
+            _appFontFamilyDraft = typed;
+            OnPropertyChanged();
+
+            var name = string.IsNullOrWhiteSpace(typed) ? "Inter" : typed.Trim();
+            if (!ClypDat.App.App.TryResolveFontFamily(name, out _)) return;
             if (string.Equals(Settings.FontFamilyName, name, StringComparison.Ordinal)) return;
+
             Settings.FontFamilyName = name;
-            SaveSettings();
             (Application.Current as ClypDat.App.App)?.ApplyFontFamily(name);
             RaiseSpotifyOverlayPreviewChanged();
-            OnPropertyChanged();
+            // SaveSettings writes the whole settings file plus a backup, so it
+            // waits for a pause in typing rather than running per keystroke.
+            _appFontFamilySave.Stop();
+            _appFontFamilySave.Start();
         }
+    }
+
+    /// <summary>Writes a pending font change now, so leaving the box cannot lose it.</summary>
+    public void FlushAppFontFamilySave()
+    {
+        if (!_appFontFamilySave.IsEnabled) return;
+        _appFontFamilySave.Stop();
+        SaveSettings();
     }
 
     public string StartupRegistrationError

@@ -1,4 +1,5 @@
-// Package Silver Edge for web branding; every in-app mark stays unframed.
+// Package Silver Edge for web branding and the desktop icon (taskbar, tray,
+// installer); every in-app mark stays unframed.
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -108,9 +109,13 @@ async function main() {
     if (size === 256) fs.writeFileSync(path.join(app, 'assets/clypdat-icon.png'), icon);
     if ([24, 32, 256].includes(size)) await sharp(icon).negate({ alpha: false }).png(pngOptions).toFile(path.join(app, `assets/clypdat-icon-${size}-light.png`));
   }
-  const windowsIcon = ico(transparentFrames);
+  // The desktop icon is framed: taskbar and tray render it against whatever
+  // the user's taskbar colour is, where a transparent mark reads as a floating
+  // shape rather than an application. In-app marks stay unframed - they sit on
+  // ClypDat's own surfaces, which already supply the tile.
+  const windowsIcon = ico(frames);
   fs.writeFileSync(path.join(app, 'assets/clypdat-icon.ico'), windowsIcon);
-  fs.writeFileSync(path.join(web, 'app/favicon.ico'), ico(frames));
+  fs.writeFileSync(path.join(web, 'app/favicon.ico'), windowsIcon);
   await sharp(Buffer.from(svg)).resize(512, 512).png(pngOptions).toFile(path.join(web, 'public/icon.png'));
 
   const contours = traceWhite(data, info.width, info.height);

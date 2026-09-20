@@ -98,7 +98,10 @@
           </StackPanel>
         </WrapPanel>
 
-        <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsCustomReplayQuality}">
+        <!-- Negative top margin cancels the 10px bottom margin the combo-box
+             columns above carry to separate wrapped rows, which otherwise leaks
+             out of the last row and stacks on this panel's 11px spacing. -->
+        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,-10,0,0" IsVisible="{Binding IsCustomReplayQuality}">
           <TextBlock Classes="replayBitrateRecommendation" Text="{Binding ReplayBitrateRecommendationText}" />
           <Button Classes="linkButton replayBitrateRecommendationButton"
                   Content="{Binding ReplayBitrateRecommendationActionText}"
