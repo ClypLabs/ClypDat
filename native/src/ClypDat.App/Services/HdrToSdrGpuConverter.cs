@@ -42,16 +42,23 @@ internal sealed class HdrToSdrGpuConverter : IDisposable
         using var sourceBitmap = _context.CreateBitmapFromDxgiSurface(sourceSurface,
             // WGC's desktop surface has no meaningful alpha. Premultiplied
             // alpha treats its undefined/zero alpha as transparent black.
-            new BitmapProperties1(new PixelFormat(Format.R16G16B16A16_Float, Vortice.DCommon.AlphaMode.Ignore), 96, 96, BitmapOptions.CannotDraw));
+            new BitmapProperties1(new PixelFormat(Format.R16G16B16A16_Float, Vortice.DCommon.AlphaMode.Ignore), 96, 96, BitmapOptions.None));
         using var outputBitmap = _context.CreateBitmapFromDxgiSurface(outputSurface,
             new BitmapProperties1(new PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore), 96, 96, BitmapOptions.Target));
-        _toneMap.SetInput(0, sourceBitmap, true);
-        _context.Target = outputBitmap;
-        _context.BeginDraw();
-        _context.DrawImage(_toneMap);
-        _context.EndDraw();
-        _context.Target = null;
-        return _output;
+        try
+        {
+            _toneMap.SetInput(0, sourceBitmap, true);
+            _context.Target = outputBitmap;
+            _context.BeginDraw();
+            _context.DrawImage(_toneMap);
+            _context.EndDraw().CheckError();
+            return _output;
+        }
+        finally
+        {
+            _context.Target = null;
+            _toneMap.SetInput(0, null!, true);
+        }
     }
 
     private void EnsureOutput(int width, int height)
