@@ -9,34 +9,58 @@ internal readonly record struct WgcMinimumUpdateIntervalResult(
 internal static class WgcMinimumUpdateIntervalPolicy
 {
     // WGC does not deliver a frame the instant the requested interval elapses:
-    // frames only leave the frame pool on a composition tick, so the interval
-    // is effectively rounded UP to a whole number of refresh periods. Asking
-    // for the exact target frame period is therefore the worst thing to ask
-    // for whenever the display refreshes faster than the capture target and is
-    // not an exact multiple of it: at 240Hz (4.167ms) a requested 11.111ms
-    // (90 FPS) lands between two and three refreshes, so every frame waits for
-    // the third - 12.5ms, 80 FPS, and the 90 FPS target can never be met.
+    // frames only leave the frame pool on a composition tick, so whatever is
+    // requested is rounded UP to a whole number of refresh periods. That
+    // rounded-up value - see DeliveryFloor - is the real minimum spacing
+    // between captured frames, and it is a ceiling on the source rate.
     //
-    // So request the LARGEST whole number of refresh periods that still fits
-    // inside the target frame period, minus half a period of jitter margin.
-    // At 240Hz/90 FPS that is 6.25ms: frames arrive every second refresh
-    // (120 FPS) and the pacing gate downsamples to the 90 FPS target, which is
-    // what DXGI Desktop Duplication was already doing.
+    // The ceiling must therefore stay clear of the rate the game actually
+    // presents at, not merely clear of the capture target. Asking for the
+    // largest grid that fits inside the target frame period put it exactly
+    // there: at 240Hz a 90 FPS target asked for 6.25ms, which rounds up to two
+    // ticks, so no frame could arrive sooner than 8.333ms - a 120 FPS ceiling,
+    // landing on the present rate of a 120 FPS game. Every present that ran a
+    // fraction early then waited a whole extra tick (12.5ms, 80 FPS pace), and
+    // the source read 100-110 FPS instead of 120. Measured over 2224
+    // diagnostic windows, the average source gap never once fell below 8.23ms,
+    // and the median window had 61% of its presents pushed a tick late.
+    //
+    // So pick the COARSEST grid that still leaves the ceiling comfortably above
+    // the target. The interval is only here to stop an uncapped source doing
+    // hundreds of full-resolution copies a second for a 30 or 60 FPS
+    // recording; it is not meant to pace anything near the target itself.
+    private const double SourceHeadroom = 1.5;
     private const double QuantizationTolerance = 1e-6;
 
     public static TimeSpan FromFrameRate(int frameRate, double displayRefreshHz = 0)
     {
-        var targetPeriodSeconds = 1d / Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
-        // Unknown refresh rate: ask for the target period, which is what this
-        // did before the refresh rate was available. Over-delivery is the only
-        // safe direction to be wrong in, but so is not guessing a grid.
-        if (!double.IsFinite(displayRefreshHz) || displayRefreshHz <= 0) return TimeSpan.FromSeconds(targetPeriodSeconds);
+        var target = Math.Clamp(frameRate, ReplayFrameTimingPolicy.MinimumFrameRate, ReplayFrameTimingPolicy.MaximumFrameRate);
+        var targetPeriodSeconds = 1d / target;
+        // Unknown refresh rate: ask for half the target period. With no grid to
+        // reason about, under-asking is the safe direction - whatever this
+        // rounds up to on the display's real grid still cannot delay a source
+        // running at the target rate.
+        if (!double.IsFinite(displayRefreshHz) || displayRefreshHz <= 0) return TimeSpan.FromSeconds(targetPeriodSeconds / 2);
 
         var refreshPeriodSeconds = 1d / displayRefreshHz;
-        // A display slower than the capture target cannot feed it either way;
-        // one refresh period is then the finest grid there is.
-        var periodsPerFrame = Math.Max(1, (int)Math.Floor(targetPeriodSeconds / refreshPeriodSeconds + QuantizationTolerance));
+        // A display that cannot outrun the target by the headroom factor gets
+        // the finest grid there is: one refresh period, i.e. no throttle at all.
+        var periodsPerFrame = Math.Max(1, (int)Math.Floor(displayRefreshHz / (target * SourceHeadroom) + QuantizationTolerance));
         return TimeSpan.FromSeconds(refreshPeriodSeconds * (periodsPerFrame - 0.5));
+    }
+
+    /// <summary>
+    /// The spacing WGC will actually enforce for a requested interval: the
+    /// request rounded up to a whole number of composition ticks. This, not the
+    /// requested or the echoed-back applied value, is what caps the source rate.
+    /// </summary>
+    public static TimeSpan DeliveryFloor(TimeSpan requested, double displayRefreshHz)
+    {
+        if (!double.IsFinite(displayRefreshHz) || displayRefreshHz <= 0 || requested <= TimeSpan.Zero) return requested;
+
+        var refreshPeriodSeconds = 1d / displayRefreshHz;
+        var ticks = Math.Max(1, (int)Math.Ceiling(requested.TotalSeconds / refreshPeriodSeconds - QuantizationTolerance));
+        return TimeSpan.FromSeconds(refreshPeriodSeconds * ticks);
     }
 
     public static WgcMinimumUpdateIntervalResult Unsupported(int frameRate, double displayRefreshHz = 0) =>

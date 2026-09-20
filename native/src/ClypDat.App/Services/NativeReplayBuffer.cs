@@ -1728,6 +1728,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         wgcCallbackCount = current.CallbackArrivals >= previous.CallbackArrivals
                             ? current.CallbackArrivals - previous.CallbackArrivals
                             : current.CallbackArrivals;
+                        // Frames, not callbacks: one callback drains everything the
+                        // pool has queued, so counting callbacks under-reports the
+                        // source whenever the callback thread was held up.
+                        var wgcDeliveredCount = current.FramesDelivered >= previous.FramesDelivered
+                            ? current.FramesDelivered - previous.FramesDelivered
+                            : current.FramesDelivered;
                         var gapCount = current.SourceTimestampGapCount >= previous.SourceTimestampGapCount
                             ? current.SourceTimestampGapCount - previous.SourceTimestampGapCount
                             : current.SourceTimestampGapCount;
@@ -1747,9 +1753,9 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         var avgCallbackMs = wgcCallbackCount > 0 ? callbackTotal.TotalMilliseconds / wgcCallbackCount : 0;
                         var avgGpuLockMs = wgcCallbackCount > 0 ? gpuLockTotal.TotalMilliseconds / wgcCallbackCount : 0;
                         var interval = current.MinimumUpdateInterval;
-                        wgcDiagnostics = $", wgcSourceGapAvgMs={avgGapMs:0.00}, wgcSourceGapMaxMs={current.SourceTimestampGapMaximum.TotalMilliseconds:0.00}, wgcCallbackAvgMs={avgCallbackMs:0.00}, wgcGpuLockAvgMs={avgGpuLockMs:0.00}, wgcOverwritten={overwritten}, wgcMinIntervalMs={(interval.Applied?.TotalMilliseconds ?? interval.Requested.TotalMilliseconds):0.###}{(interval.Applied is null ? " (not applied)" : string.Empty)}";
+                        wgcDiagnostics = $", wgcSourceGapAvgMs={avgGapMs:0.00}, wgcSourceGapMaxMs={current.SourceTimestampGapMaximum.TotalMilliseconds:0.00}, wgcCallbackAvgMs={avgCallbackMs:0.00}, wgcGpuLockAvgMs={avgGpuLockMs:0.00}, wgcOverwritten={overwritten}, wgcCallbacks={wgcCallbackCount}, wgcMinIntervalMs={(interval.Applied?.TotalMilliseconds ?? interval.Requested.TotalMilliseconds):0.###}{(interval.Applied is null ? " (not applied)" : string.Empty)}";
                         previousWgcTelemetry = current;
-                        inputFrameCount = (int)Math.Min(int.MaxValue, wgcCallbackCount);
+                        inputFrameCount = (int)Math.Min(int.MaxValue, wgcDeliveredCount);
                     }
                     else if (dxgiTelemetry is not null)
                     {
@@ -1809,6 +1815,15 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // keeps the foreground requirement - including the host's
                     // background-game pause, which exists to stop the watchdog
                     // blaming the source for it.
+                    // The interval is derived from the target frame rate, and the
+                    // target moves: adaptive cadence lowers it under load, encoder
+                    // failover lowers it again, and both raise it back. It used to
+                    // be set once in the source's constructor and never revisited,
+                    // so a session that started at 30 FPS stayed capped near 30
+                    // after climbing back to 60.
+                    if (wgcCapture is not null && wgcCapture.ConfiguredFrameRate != activeFrameRate)
+                        wgcCapture.TrySetTargetFrameRate(activeFrameRate);
+
                     var usingWgcSource = wgcCapture is not null;
                     var targetForeground = isMonitorMode || IsWindowForegroundAndVisible(targetHandle);
                     var targetCapturable = isMonitorMode || IsWindowCapturableWhileBackgrounded(targetHandle);

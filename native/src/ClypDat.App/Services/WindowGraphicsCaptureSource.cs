@@ -27,6 +27,9 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     private string? _failure;
     private bool _disposed;
     private long _callbackArrivals;
+    // Frames actually taken out of the pool, which is not the same as callbacks:
+    // one callback drains everything queued. The source rate is frames.
+    private long _framesDelivered;
     private long _callbackDurationTicks;
     private long _gpuLockWaitTicks;
     private long _sourceTimestampGapTicks;
@@ -105,6 +108,7 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
             var signal = _frameSignal.Snapshot;
             return new WindowGraphicsCaptureTelemetry(
                 _callbackArrivals,
+                _framesDelivered,
                 signal.Published,
                 signal.Taken,
                 signal.Overwritten,
@@ -118,6 +122,12 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         }
     }
 
+    /// <summary>
+    /// The frame rate the current minimum update interval was derived from, so a
+    /// session whose target moves can tell that its interval is now stale.
+    /// </summary>
+    public int ConfiguredFrameRate { get; private set; }
+
     public bool TrySetTargetFrameRate(int frameRate)
     {
         WgcMinimumUpdateIntervalResult result;
@@ -126,14 +136,21 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
             if (_disposed || _session is null) return false;
             result = CaptureInterop.TrySetMinimumUpdateInterval(_session, frameRate, _displayRefreshHz);
             _minimumUpdateInterval = result;
+            ConfiguredFrameRate = frameRate;
         }
 
         var requestedMs = result.Requested.TotalMilliseconds;
         var grid = _displayRefreshHz > 0 ? $"{_displayRefreshHz:0.##}Hz display ({1000d / _displayRefreshHz:0.###}ms grid)" : "unknown display refresh";
+        // Neither the requested nor the applied value is what governs delivery:
+        // WGC releases frames on composition ticks, so the request is rounded up
+        // to one. That rounded value is the real ceiling on the source rate, and
+        // it is the number worth reading when the source runs under the game.
+        var floor = WgcMinimumUpdateIntervalPolicy.DeliveryFloor(result.Applied ?? result.Requested, _displayRefreshHz);
+        var ceiling = floor > TimeSpan.Zero ? $", floor={floor.TotalMilliseconds:0.###}ms ({1000d / floor.TotalMilliseconds:0.#} FPS ceiling)" : string.Empty;
         if (!result.InterfaceAvailable)
             AppLog.Info($"Native capture: WGC MinUpdateInterval unavailable; requested={requestedMs:0.###}ms for {frameRate} FPS on a {grid}.");
         else if (result.Applied is not null)
-            AppLog.Info($"Native capture: WGC MinUpdateInterval requested={requestedMs:0.###}ms, applied={result.Applied.Value.TotalMilliseconds:0.###}ms for {frameRate} FPS on a {grid}.");
+            AppLog.Info($"Native capture: WGC MinUpdateInterval requested={requestedMs:0.###}ms, applied={result.Applied.Value.TotalMilliseconds:0.###}ms{ceiling} for {frameRate} FPS on a {grid}.");
         else
             AppLog.Info($"Native capture: WGC MinUpdateInterval request failed; requested={requestedMs:0.###}ms for {frameRate} FPS on a {grid} ({result.Failure}).");
         return result.Applied is not null;
@@ -172,6 +189,7 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
                 var candidate = sender.TryGetNextFrame();
                 if (candidate is null) break;
                 burstFrames++;
+                Interlocked.Increment(ref _framesDelivered);
                 newest?.Dispose();
                 newest = candidate;
             }
@@ -302,6 +320,7 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
 
 internal readonly record struct WindowGraphicsCaptureTelemetry(
     long CallbackArrivals,
+    long FramesDelivered,
     long PublishedFrames,
     long TakenFrames,
     long OverwrittenFrames,
