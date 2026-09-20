@@ -97,7 +97,7 @@ internal static class BrowserCallbackPage
               font-weight: 600;
               letter-spacing: -0.02em;
             }
-            .brand svg { width: 32px; height: 18px; }
+            .brand svg { width: 32px; height: 32px; }
 
             .card {
               position: relative;
