@@ -1797,8 +1797,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         ? string.Empty
                         : $", dxgiSourcePresents={dxgiTelemetry.Value.SourceFrames}, dxgiAcquired={dxgiAcquiredCount}, dxgiTransported={dxgiTransportedCount}, dxgiPublished={dxgiTelemetry.Value.PublishedFrames}, dxgiTaken={dxgiTelemetry.Value.TakenFrames}, dxgiOverwritten={dxgiSlotOverwrites}, dxgiBusySlotSkips={dxgiBusySlotSkips}, dxgiAllBusyDrops={dxgiAllBusyDrops}, dxgiReleaseLagFrames={dxgiTelemetry.Value.ReleaseLagFrames}, dxgiSlots={dxgiTelemetry.Value.SlotCount}, dxgiAcquireMs={(dxgiAcquiredCount == 0 ? 0 : dxgiAcquireDuration.TotalMilliseconds / dxgiAcquiredCount):0.00}, dxgiProducerMs={dxgiProducerDuration.TotalMilliseconds:0.0}, dxgiLeaseMs={dxgiLeaseDuration.TotalMilliseconds:0.00}, dxgiAccumulatedPresents={dxgiTelemetry.Value.AccumulatedPresents}, dxgiZeroPresentSkips={dxgiTelemetry.Value.ZeroPresentFrames}, dxgiPointerUpdates={dxgiTelemetry.Value.PointerUpdates}, dxgiPointerTransported={dxgiPointerTransportedCount}";
                     var outputFrameRate = packetsOutSinceLog / diagElapsed;
-                    var foregroundForDiagnostics = isMonitorMode || IsWindowForegroundAndVisible(targetHandle);
-                    var capturePaused = Volatile.Read(ref _capturePaused) != 0 || (!isMonitorMode && !foregroundForDiagnostics);
+                    // WGC captures the window itself, so a window sitting behind
+                    // another one keeps producing frames and the capture never
+                    // stopped - reporting a pause only replaced the live capture
+                    // numbers in the UI with a "replay paused" notice while frames
+                    // were still being recorded. A minimised window does stop
+                    // producing, and that is still a pause.
+                    //
+                    // DXGI Desktop Duplication captures the composed desktop, where
+                    // a backgrounded game genuinely has nothing to contribute, so it
+                    // keeps the foreground requirement - including the host's
+                    // background-game pause, which exists to stop the watchdog
+                    // blaming the source for it.
+                    var usingWgcSource = wgcCapture is not null;
+                    var targetForeground = isMonitorMode || IsWindowForegroundAndVisible(targetHandle);
+                    var targetCapturable = isMonitorMode || IsWindowCapturableWhileBackgrounded(targetHandle);
+                    var capturePaused = CapturePausePolicy.IsPaused(
+                        Volatile.Read(ref _capturePaused) != 0, isMonitorMode, usingWgcSource, targetForeground, targetCapturable);
+                    // What the DXGI source-starvation policy below reads: a source
+                    // that is not producing because nothing is on screen is not a
+                    // source failure.
+                    var foregroundForDiagnostics = usingWgcSource ? targetCapturable : targetForeground;
                     if (packetsOutSinceLog > 0) encoderHasProducedPacket = true;
                     if (d3dDebugActive) { lock (nativeGate) DrainD3DDebugMessages(device); }
                     AppLog.Debug($"Native capture diag: encodePath={(hardwareFramesActive ? "D3D11 zero-copy" : "System memory")}, inputFps={inputFrameCount / diagElapsed:0.0}, freshFps={framesProcessedSinceLog / diagElapsed:0.0}, outputFps={outputFrameRate:0.0}, avgCopyReadbackMs={copyMapMs / n:0.00}, framesSeen={framesSeen}, pointerFramesSeen={pointerFramesSeenSinceLog}, framesEncoded={framesEncoded}, ringPackets={ringPacketCount}, ringSpanSeconds={ringSpanSeconds:0.0}, ringBufferMb={ringBufferMb}, ringCapacityMb={ringCapacityMb}, packetPoolMb={poolRetainedMb}, sendFrameMs={inputMicrosSinceLog / 1000.0 / inputCountSinceLog:0.00}, packetReceiveMs={outputMicrosSinceLog / 1000.0 / outputCountSinceLog:0.00}, packetCopyMs={packetCopyMicrosSinceLog / 1000.0 / packetCopyCountSinceLog:0.00}, ringInsertMs={ringInsertMicrosSinceLog / 1000.0 / ringInsertCountSinceLog:0.00}, avgScaleMs={scaleMs / n:0.00}, avgQueueMs={encodeMs / n:0.00}, queueDepth={encodeQueue.Count}, pendingEncoderFrames={Volatile.Read(ref _pendingEncoderFrames)}, peakPendingEncoderFrames={Volatile.Read(ref _peakPendingEncoderFrames)}, droppedFrames={droppedSinceLog}, padsSkipped={padsSkippedSinceLog}, framesQueuedSinceLog={framesEncodedSinceLog}, packetsOut={packetsOutSinceLog}, rollingOutputFps={outputFrameRate:0.0}, sendEagain={eagainSinceLog}, sendFailed={sendFailedSinceLog}, avgWaitMs={waitMs / m:0.00}, avgGetFrameMs={getFrameMs / m:0.00}, avgPreAcquireMs={preAcquireMs / m:0.00}, maxPreAcquireMs={preAcquireMaxMs:0.00}, maxFrameStalenessMs={frameStalenessMaxMs:0.00}, iterations={iterationsSinceLog}, cropCopies={cropCopies}, cropCopiesSkipped={cropCopiesSkipped}, zeroPresentSkips={zeroPresentSkips}, avgAccumulatedFrames={(double)accumulatedFramesSum / realFrameCount:0.00}, maxAccumulatedFrames={accumulatedFramesMax}, avgPresentGapMs={presentGapSumMs / presentGapDenom:0.00}, maxPresentGapMs={presentGapMaxMs:0.00}, managedMb={managedMb}, gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}{wgcTelemetryText}{dxgiTelemetryText}.");
@@ -4780,6 +4799,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // frame" signal available without walking the full z-order.
     private static bool IsWindowForegroundAndVisible(nint handle) =>
         IsWindow(handle) && !IsIconic(handle) && GetForegroundWindow() == handle;
+
+    // What WGC needs to keep delivering frames: the window still exists and is
+    // not minimised. Focus is irrelevant to it.
+    private static bool IsWindowCapturableWhileBackgrounded(nint handle) =>
+        IsWindow(handle) && !IsIconic(handle);
 
     private static nint ResolveTargetWindow(ReplayBufferConfig config)
     {
