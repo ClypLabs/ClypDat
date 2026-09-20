@@ -571,19 +571,41 @@ internal static class CaptureWorkerHost
         try { await SendAsync(client, type, Guid.Empty, payload, CancellationToken.None); }
         catch (IOException) { }
         catch (ObjectDisposedException) { }
+        catch (OperationCanceledException) { }
     }
 
     private static async Task SendAsync(Stream stream, string type, Guid requestId, object payload, CancellationToken cancellationToken)
     {
-        await WriteGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await CaptureWorkerPipe.WriteAsync(stream, type, requestId, payload, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            WriteGate.Release();
-        }
+        // Every message the worker sends shares WriteGate, and a named pipe write
+        // only completes once the client drains it. A client that stops reading -
+        // a UI being restarted underneath a live worker is the common way - used
+        // to leave this waiting on CancellationToken.None with the gate held, so
+        // the worker kept capturing while every reply it owed (handshake, start,
+        // stop, save, clip name) queued behind a write that could never finish.
+        // From outside that looks like one thing only: "The operation has timed
+        // out", on everything, until the worker is killed. Bound the write and
+        // drop a client that overruns it - RunLoopAsync then accepts the next one.
+        await PipeWriteGuard.WriteAsync(
+            WriteGate,
+            ClientWriteBudget,
+            token => CaptureWorkerPipe.WriteAsync(stream, type, requestId, payload, token),
+            () => DropStalledClient(stream),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    // Long enough for any real message on a healthy pipe, and shorter than the
+    // client's own request timeout so the UI gets an error rather than a hang.
+    private static readonly TimeSpan ClientWriteBudget = TimeSpan.FromSeconds(3);
+
+    private static void DropStalledClient(Stream stream)
+    {
+        if (!ReferenceEquals(_client, stream)) return;
+        _client = null;
+        CaptureWorkerLog.Info("Client stopped reading its pipe; dropping it and waiting for a new connection.");
+        // Disposing is what unblocks the client loop's pending read, which returns
+        // RunLoopAsync to WaitForConnectionAsync for the replacement UI.
+        try { stream.Dispose(); }
+        catch (Exception error) { CaptureWorkerLog.Info($"Stalled client disposal failed: {error.Message}"); }
     }
 
     private static void ApplyWorkerPriority()
