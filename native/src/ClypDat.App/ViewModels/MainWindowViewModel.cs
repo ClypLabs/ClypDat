@@ -1317,6 +1317,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshReplayRowSummaries();
             RefreshRecordingPresentation();
             OnPropertyChanged(nameof(HotkeyDisplay));
             UpdateDiscordPresence();
@@ -1724,6 +1725,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateDiscordPresence();
             OnPropertyChanged();
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshReplayRowSummaries();
             RefreshRecordingPresentation();
             SaveSettings();
         }
@@ -1738,6 +1740,47 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string EffectiveReplayCaptureSource => IsAutomaticGameCapture
         ? $"Game Capture — automatic: {ActiveGameDetection.DisplayName}"
         : IsDesktopCapture ? "Desktop Capture" : "Game Capture";
+
+    // Row values for the replay flyout. They are deliberately shorter than the
+    // strings the old dropdowns showed - a row has one line to say what the
+    // buffer is set to, and the chooser behind it carries the detail.
+    public string ReplayCaptureSourceSummary => IsAutomaticGameCapture
+        ? "Game (automatic)"
+        : IsDesktopCapture ? "Desktop" : "Game";
+
+    public string ReplayQualitySummary =>
+        $"{Settings.ReplayMaxHeight}p {Settings.ReplayFrameRate} {Settings.ReplayBitrateMbps}M";
+
+    public string ReplayDurationSummary => SelectedReplayDurationPreset?.Label ?? string.Empty;
+
+    public bool HasDetectedGame => ActiveGameDetection.IsDetected;
+
+    public Bitmap? ActiveGameIcon => ActiveGameDetection.IsDetected
+        ? GameIconService.TryLoad(ActiveGameDetection.DisplayName)
+        : null;
+
+    public string ReplayStatusTitle => ActiveGameDetection.IsDetected
+        ? ActiveGameDetection.DisplayName
+        : "Waiting for a game";
+
+    public string ReplayStatusDetail => ActiveGameDetection.IsDetected
+        ? IsEffectiveDesktopCapture
+            ? SelectedDesktopMonitor?.Label ?? "Recording this display"
+            : "Recording this game"
+        : "Click for detection options";
+
+    // Every row value is derived, so the rows have to be told when any of the
+    // settings underneath them move.
+    private void RefreshReplayRowSummaries()
+    {
+        OnPropertyChanged(nameof(ReplayCaptureSourceSummary));
+        OnPropertyChanged(nameof(ReplayQualitySummary));
+        OnPropertyChanged(nameof(ReplayDurationSummary));
+        OnPropertyChanged(nameof(HasDetectedGame));
+        OnPropertyChanged(nameof(ActiveGameIcon));
+        OnPropertyChanged(nameof(ReplayStatusTitle));
+        OnPropertyChanged(nameof(ReplayStatusDetail));
+    }
 
     public string ReplayBufferStateSummary => ReplayBufferEnabled
         ? IsAutomaticGameCapture
@@ -1760,6 +1803,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshReplayRowSummaries();
             RefreshRecordingPresentation();
             SaveSettings();
         }
@@ -1773,6 +1817,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (!SetProperty(ref _selectedDesktopMonitor, value) || value is null) return;
             Settings.ReplayDesktopMonitorDeviceName = value.DeviceName;
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshReplayRowSummaries();
             RefreshRecordingPresentation();
             SaveSettings();
         }
@@ -1802,6 +1847,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEffectiveDesktopCapture));
             OnPropertyChanged(nameof(EffectiveReplayCaptureSource));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
+            RefreshReplayRowSummaries();
             RefreshRecordingPresentation();
             SaveSettings();
         }
@@ -1821,6 +1867,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         OnPropertyChanged(nameof(SelectedDesktopMonitor));
         OnPropertyChanged(nameof(ReplayBufferStateSummary));
+        RefreshReplayRowSummaries();
         RefreshRecordingPresentation();
     }
 
@@ -2266,6 +2313,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                                         (Settings.ReplayMaxHeight != _activeReplayMaxHeight ||
                                          Settings.ReplayFrameRate != _activeReplayFrameRate ||
                                          EncoderSignature != _activeReplayEncoderSignature);
+        // Every quality setter runs through here, so it is the one place the
+        // flyout's Quality row needs to be refreshed from.
+        RefreshReplayRowSummaries();
     }
 
     public bool ReplayQualityRestartRequired
@@ -4332,8 +4382,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ActiveCropRect));
         OnPropertyChanged(nameof(ExportDuration));
         OnPropertyChanged(nameof(ExportLengthLabel));
-        OnPropertyChanged(nameof(SpotifyOverlaySizePercent));
-        OnPropertyChanged(nameof(SpotifyOverlaySizeLabel));
         if (_suppressClipEditSave) return;
         SaveSelectedClipEditState();
     }
@@ -4545,31 +4593,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public double SpotifyOverlaySizePercent
-    {
-        get
-        {
-            var width = Math.Max(1, ActiveCropRect?.Width ?? SelectedSourceWidth);
-            var height = Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight);
-            return SpotifyOverlayLayout.Resolve(width, height, Settings.SpotifyOverlayPosition, SpotifyOverlayTransform).Width * 100.0 / width;
-        }
-        set
-        {
-            if (!HasEditableSpotifyOverlay || !double.IsFinite(value)) return;
-            var width = Math.Max(1, ActiveCropRect?.Width ?? SelectedSourceWidth);
-            var height = Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight);
-            var current = SpotifyOverlayLayout.Resolve(width, height, Settings.SpotifyOverlayPosition, SpotifyOverlayTransform);
-            var targetWidth = Math.Clamp(value, 5, 100) / 100.0;
-            var targetHeight = targetWidth * width * SpotifyOverlayCardRenderer.SourceHeight / SpotifyOverlayCardRenderer.SourceWidth / height;
-            SetSpotifyOverlayTransform(new(
-                (current.X + current.Width / 2.0) / width - targetWidth / 2,
-                (current.Y + current.Height / 2.0) / height - targetHeight / 2,
-                targetWidth));
-        }
-    }
-
-    public string SpotifyOverlaySizeLabel => $"{SpotifyOverlaySizePercent:0}% of video width";
-
     public double SpotifyOverlayRotationDegrees
     {
         get => SpotifyOverlayTransform?.RotationDegrees ?? 0;
@@ -4593,8 +4616,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var height = Math.Max(1, ActiveCropRect?.Height ?? SelectedSourceHeight);
         var normalized = SpotifyOverlayLayout.Normalize(width, height, transform);
         if (!SetProperty(ref _spotifyOverlayTransform, normalized, nameof(SpotifyOverlayTransform))) return;
-        OnPropertyChanged(nameof(SpotifyOverlaySizePercent));
-        OnPropertyChanged(nameof(SpotifyOverlaySizeLabel));
         OnPropertyChanged(nameof(SpotifyOverlayRotationDegrees));
         if (persist) CommitSpotifyOverlayTransform();
     }
@@ -4624,8 +4645,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(HasEditableSpotifyOverlay));
         OnPropertyChanged(nameof(SpotifyOverlayLayerVisible));
         OnPropertyChanged(nameof(SpotifyOverlayTransform));
-        OnPropertyChanged(nameof(SpotifyOverlaySizePercent));
-        OnPropertyChanged(nameof(SpotifyOverlaySizeLabel));
         OnPropertyChanged(nameof(SpotifyOverlayRotationDegrees));
         OnPropertyChanged(nameof(IsSpotifyOverlaySelected));
         RefreshSpotifyOverlayLaneState();
@@ -4703,16 +4722,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public VideoOverlayTransform? PeripheralOverlayTransform => _peripheralOverlayTransform;
     public ClipOverlayLayer? SelectedOverlayManifestCamera() => _selectedOverlayManifest.Camera;
     public ClipOverlayLayer? SelectedOverlayManifestPeripherals() => _selectedOverlayManifest.Peripherals;
-    public double CameraOverlaySizePercent { get => OverlaySizePercent(CameraOverlayTransform, _selectedOverlayManifest.Camera); set => ResizeCapturedOverlay("Camera", value); }
-    public double PeripheralOverlaySizePercent { get => OverlaySizePercent(PeripheralOverlayTransform, _selectedOverlayManifest.Peripherals); set => ResizeCapturedOverlay("Peripherals", value); }
-    public string CameraOverlaySizeLabel => $"{CameraOverlaySizePercent:0}% of video width";
-    public string PeripheralOverlaySizeLabel => $"{PeripheralOverlaySizePercent:0}% of video width";
     public void SetCameraOverlayTransform(VideoOverlayTransform transform, bool persist = true) => SetCapturedOverlayTransform("Camera", transform, persist);
     public void SetPeripheralOverlayTransform(VideoOverlayTransform transform, bool persist = true) => SetCapturedOverlayTransform("Peripherals", transform, persist);
     public void ResetCameraOverlayTransform() => ResetCapturedOverlayTransform("Camera");
     public void ResetPeripheralOverlayTransform() => ResetCapturedOverlayTransform("Peripherals");
-    private double OverlaySizePercent(VideoOverlayTransform? transform, ClipOverlayLayer? layer) => transform is null || layer is null ? 0 : transform.Width * 100;
-    private void ResizeCapturedOverlay(string name, double percent) { if (!double.IsFinite(percent)) return; var transform = name == "Camera" ? _cameraOverlayTransform : _peripheralOverlayTransform; if (transform is not null) SetCapturedOverlayTransform(name, transform with { Width = Math.Clamp(percent, 5, 100) / 100 }, true); }
     private readonly HashSet<string> _pendingGameOverlayLayers = [];
     private void SetCapturedOverlayTransform(string name, VideoOverlayTransform transform, bool persist)
     {
@@ -4746,8 +4759,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(CameraOverlayStatus)); OnPropertyChanged(nameof(PeripheralOverlayStatus));
         OnPropertyChanged(nameof(CameraOverlayLayerVisible)); OnPropertyChanged(nameof(PeripheralOverlayLayerVisible));
         OnPropertyChanged(nameof(CameraOverlayTransform)); OnPropertyChanged(nameof(PeripheralOverlayTransform));
-        OnPropertyChanged(nameof(CameraOverlaySizePercent)); OnPropertyChanged(nameof(PeripheralOverlaySizePercent));
-        OnPropertyChanged(nameof(CameraOverlaySizeLabel)); OnPropertyChanged(nameof(PeripheralOverlaySizeLabel));
         // A layer that stopped being usable cannot stay selected, or its handles
         // outlive the thing they were drawn around.
         if (!HasCameraOverlayLayer) IsCameraOverlaySelected = false;
