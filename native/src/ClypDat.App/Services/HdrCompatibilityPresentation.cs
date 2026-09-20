@@ -8,7 +8,9 @@ internal static class HdrCompatibilityPresentation
         !enabled ? "Off" : status switch
         {
             ReplayHdrCompatibilityStatus.SdrDisplay => "SDR display",
+            ReplayHdrCompatibilityStatus.PreparingConversion => "Preparing SDR conversion",
             ReplayHdrCompatibilityStatus.ConversionActive => "HDR conversion active",
-            _ => "Unavailable"
+            ReplayHdrCompatibilityStatus.ConversionFailed => "HDR conversion failed",
+            _ => "HDR status unknown"
         };
 }

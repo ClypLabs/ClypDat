@@ -43,17 +43,19 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     // WgcMinimumUpdateIntervalPolicy. Not readonly: a window dragged to another
     // display, or a mode change, moves the grid under a live session.
     private double _displayRefreshHz;
+    private readonly DirectXPixelFormat _pixelFormat;
 
-    private WindowGraphicsCaptureSource(ID3D11Device device, object d3dLock, GraphicsCaptureItem item, bool captureCursor, int frameRate, double displayRefreshHz)
+    private WindowGraphicsCaptureSource(ID3D11Device device, object d3dLock, GraphicsCaptureItem item, bool captureCursor, int frameRate, double displayRefreshHz, bool captureHdr)
     {
         _device = device;
         _d3dLock = d3dLock;
         _item = item;
         _displayRefreshHz = displayRefreshHz;
+        _pixelFormat = captureHdr ? DirectXPixelFormat.R16G16B16A16Float : DirectXPixelFormat.B8G8R8A8UIntNormalized;
         _contentSize = item.Size;
         if (_contentSize.Width < 1 || _contentSize.Height < 1) throw new InvalidOperationException("WGC reported an empty window size.");
         _direct3DDevice = CaptureInterop.CreateDirect3DDevice(device);
-        _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_direct3DDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, FramePoolBufferCount, _contentSize);
+        _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(_direct3DDevice, _pixelFormat, FramePoolBufferCount, _contentSize);
         _framePool.FrameArrived += FramePool_FrameArrived;
         _item.Closed += CaptureItem_Closed;
         _session = _framePool.CreateCaptureSession(item);
@@ -77,14 +79,14 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
         _session.StartCapture();
     }
 
-    public static WindowGraphicsCaptureSource Create(ID3D11Device device, object d3dLock, nint windowHandle, bool captureCursor, int frameRate) =>
+    public static WindowGraphicsCaptureSource Create(ID3D11Device device, object d3dLock, nint windowHandle, bool captureCursor, int frameRate, bool captureHdr = false) =>
         new(device, d3dLock, CaptureInterop.CreateItemForWindow(windowHandle), captureCursor, frameRate,
-            DisplayRefreshService.GetRefreshHzForWindow(windowHandle));
+            DisplayRefreshService.GetRefreshHzForWindow(windowHandle), captureHdr);
 
     // Monitor-backed WGC item for desktop capture.
-    public static WindowGraphicsCaptureSource CreateForMonitor(ID3D11Device device, object d3dLock, nint monitorHandle, bool captureCursor, int frameRate) =>
+    public static WindowGraphicsCaptureSource CreateForMonitor(ID3D11Device device, object d3dLock, nint monitorHandle, bool captureCursor, int frameRate, bool captureHdr = false) =>
         new(device, d3dLock, CaptureInterop.CreateItemForMonitor(monitorHandle), captureCursor, frameRate,
-            DisplayRefreshService.GetRefreshHz(monitorHandle));
+            DisplayRefreshService.GetRefreshHz(monitorHandle), captureHdr);
 
     /// <summary>
     /// True when this session asked Windows to draw the cursor into the captured
@@ -263,7 +265,7 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
             if (recreatePool)
             {
                 lock (_stateLock)
-                    if (!_disposed) _framePool?.Recreate(_direct3DDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, FramePoolBufferCount, _contentSize);
+                    if (!_disposed) _framePool?.Recreate(_direct3DDevice, _pixelFormat, FramePoolBufferCount, _contentSize);
             }
         }
         catch (Exception error)
@@ -296,8 +298,8 @@ internal sealed class WindowGraphicsCaptureSource : IGameFrameSource, IDisposabl
     private ID3D11Texture2D CreateOwnedTexture(int width, int height) => _device.CreateTexture2D(new Texture2DDescription
     {
         Width = (uint)width, Height = (uint)height, MipLevels = 1, ArraySize = 1,
-        Format = Format.B8G8R8A8_UNorm, SampleDescription = new SampleDescription(1, 0),
-        Usage = ResourceUsage.Default, BindFlags = BindFlags.None, CPUAccessFlags = CpuAccessFlags.None
+        Format = _pixelFormat == DirectXPixelFormat.R16G16B16A16Float ? Format.R16G16B16A16_Float : Format.B8G8R8A8_UNorm, SampleDescription = new SampleDescription(1, 0),
+        Usage = ResourceUsage.Default, BindFlags = BindFlags.ShaderResource, CPUAccessFlags = CpuAccessFlags.None
     });
 
     public void Dispose()

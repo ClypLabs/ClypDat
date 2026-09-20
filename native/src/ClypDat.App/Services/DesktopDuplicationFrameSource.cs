@@ -245,7 +245,7 @@ internal sealed class DesktopDuplicationFrameSource : IGameFrameSource, IDisposa
     {
         if (slot.CaptureTexture is not null && slot.CaptureTexture.Description.Width == description.Width && slot.CaptureTexture.Description.Height == description.Height && slot.CaptureTexture.Description.Format == description.Format) return;
         slot.Dispose();
-        slot.CaptureTexture = _device.CreateTexture2D(new Texture2DDescription { Width = description.Width, Height = description.Height, MipLevels = 1, ArraySize = 1, Format = description.Format, SampleDescription = description.SampleDescription, Usage = ResourceUsage.Default, BindFlags = BindFlags.None, CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.None });
+        slot.CaptureTexture = _device.CreateTexture2D(new Texture2DDescription { Width = description.Width, Height = description.Height, MipLevels = 1, ArraySize = 1, Format = description.Format, SampleDescription = description.SampleDescription, Usage = ResourceUsage.Default, BindFlags = BindFlags.ShaderResource, CPUAccessFlags = CpuAccessFlags.None, MiscFlags = ResourceOptionFlags.None });
         slot.ProcessingTexture = slot.CaptureTexture.QueryInterface<ID3D11Texture2D>();
         slot.Generation = ++_generation;
     }

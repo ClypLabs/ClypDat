@@ -9,7 +9,12 @@ namespace ClypDat.App.Services;
 // sampled with the recorder's existing one-second target check.
 internal static class HdrCaptureCompatibility
 {
-    public static ReplayHdrCompatibilityStatus Detect(ID3D11Device device, nint monitor)
+    internal readonly record struct DisplayProfile(bool IsHdr, float SdrWhiteLevelNits, float PeakLuminanceNits)
+    {
+        public static DisplayProfile Unknown => new(false, 80, 1000);
+    }
+
+    public static DisplayProfile GetDisplayProfile(ID3D11Device device, nint monitor)
     {
         try
         {
@@ -24,16 +29,25 @@ internal static class HdrCaptureCompatibility
                     if (output.Description.Monitor != monitor) continue;
                     using var output6 = output.QueryInterface<IDXGIOutput6>();
                     var description = output6.Description1;
-                    var isHdr = IsHdrColorSpace(description.ColorSpace);
-                    return isHdr ? ReplayHdrCompatibilityStatus.Unavailable : ReplayHdrCompatibilityStatus.SdrDisplay;
+                    // DXGI Output6 exposes active colour space and peak, but not
+                    // Windows' per-display SDR white slider. Keep conversion
+                    // deterministic until DisplayConfig metadata is available.
+                    const float white = 80f;
+                    var peak = description.MaxLuminance <= 0 ? 1000f : description.MaxLuminance;
+                    AppLog.Info("Native capture: HDR SDR white level unavailable; assuming 80 nits.");
+                    if (description.MaxLuminance <= 0) AppLog.Info("Native capture: HDR peak luminance unavailable; assuming 1000 nits.");
+                    return new DisplayProfile(IsHdrColorSpace(description.ColorSpace), white, peak);
                 }
             }
-            return ReplayHdrCompatibilityStatus.Unavailable;
         }
-        catch
-        {
-            return ReplayHdrCompatibilityStatus.Unavailable;
-        }
+        catch { }
+        return DisplayProfile.Unknown;
+    }
+
+    public static ReplayHdrCompatibilityStatus Detect(ID3D11Device device, nint monitor)
+    {
+        var profile = GetDisplayProfile(device, monitor);
+        return profile.IsHdr ? ReplayHdrCompatibilityStatus.PreparingConversion : ReplayHdrCompatibilityStatus.SdrDisplay;
     }
 
     // Windows desktop HDR commonly exposes linear scRGB (G10) rather than

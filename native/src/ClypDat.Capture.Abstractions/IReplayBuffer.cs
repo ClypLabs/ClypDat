@@ -97,7 +97,9 @@ public enum ReplayHdrCompatibilityStatus
 {
     Unavailable,
     SdrDisplay,
-    ConversionActive
+    ConversionActive,
+    PreparingConversion,
+    ConversionFailed
 }
 
 // Keep capture health separate from IReplayBuffer. Old/third-party backends can

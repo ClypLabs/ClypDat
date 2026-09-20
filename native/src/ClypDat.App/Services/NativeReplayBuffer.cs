@@ -991,6 +991,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
         ID3D11Device? device = null;
         ID3D11Texture2D? staging = null;
+        HdrToSdrGpuConverter? hdrConverter = null;
         IDXGIOutputDuplication? duplication = null;
         DesktopDuplicationFrameSource? dxgiCapture = null;
         WindowGraphicsCaptureSource? wgcCapture = null;
@@ -1171,7 +1172,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // once-a-second target recheck in the loop for why the window handle
             // alone is the wrong thing to compare against.
             var targetMonitor = ResolveTargetMonitor(targetHandle, config);
-            var hdrCompatibilityStatus = HdrCaptureCompatibility.Detect(device, targetMonitor);
+            var hdrProfile = HdrCaptureCompatibility.GetDisplayProfile(device, targetMonitor);
+            var hdrConversionRequired = config.ReplayHdrCompatibilityEnabled && hdrProfile.IsHdr;
+            var hdrCompatibilityStatus = hdrConversionRequired
+                ? ReplayHdrCompatibilityStatus.PreparingConversion
+                : hdrProfile.IsHdr ? ReplayHdrCompatibilityStatus.Unavailable : ReplayHdrCompatibilityStatus.SdrDisplay;
+            var hdrConversionFailures = 0;
             Vortice.RawRect desktopBounds;
             // WGC captures the selected window directly, avoiding DXGI desktop
             // composition cadence. Keep DXGI only as an explicit diagnostic
@@ -1181,7 +1187,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 try
                 {
-                    wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, targetMonitor, config.CaptureCursor, config.FrameRate);
+                    wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, targetMonitor, config.CaptureCursor, config.FrameRate, hdrConversionRequired);
                     activeGameFrameSource = wgcCapture;
                     var forcedSize = wgcCapture.ContentSize;
                     desktopBounds = new Vortice.RawRect(0, 0, forcedSize.Width, forcedSize.Height);
@@ -1207,7 +1213,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 catch (Exception error) when (!isMonitorMode)
                 {
                     AppLog.Error("Native capture: DXGI initialization failed; using bounded WGC recovery source.", error);
-                    wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, config.FrameRate);
+                    wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, config.FrameRate, hdrConversionRequired);
                     activeGameFrameSource = wgcCapture;
                     var size = wgcCapture.ContentSize;
                     desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
@@ -1930,7 +1936,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         try
                         {
-                            var fallback = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate);
+                            var fallback = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate, hdrConversionRequired);
                             dxgiCapture!.Dispose();
                             dxgiCapture = null;
                             wgcCapture = fallback;
@@ -1972,7 +1978,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         try
                         {
-                            var fallback = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate);
+                            var fallback = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate, hdrConversionRequired);
                             dxgiCapture.Dispose();
                             dxgiCapture = null;
                             wgcCapture = fallback;
@@ -2210,7 +2216,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (stopwatch.Elapsed - lastTargetRefresh >= TimeSpan.FromSeconds(1))
                 {
                     lastTargetRefresh = stopwatch.Elapsed;
-                    hdrCompatibilityStatus = HdrCaptureCompatibility.Detect(device, ResolveTargetMonitor(targetHandle, config));
+                    // Do not overwrite active/failed conversion health with the
+                    // display probe. A new source/device starts a new session;
+                    // this session keeps its last conversion outcome.
+                    if (!hdrConversionRequired)
+                        hdrCompatibilityStatus = HdrCaptureCompatibility.Detect(device, ResolveTargetMonitor(targetHandle, config));
                     var freshHandle = ResolveTargetWindow(_configProvider());
                     if (freshHandle != targetHandle)
                     {
@@ -2235,7 +2245,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                                     // Target changed under a forced-WGC session: rebuild the WGC
                                     // source instead of dropping back onto duplication, which
                                     // would silently end the backend comparison mid-session.
-                                    wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, freshMonitor, config.CaptureCursor, activeFrameRate);
+                                    wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, freshMonitor, config.CaptureCursor, activeFrameRate, hdrConversionRequired);
                                     activeGameFrameSource = wgcCapture;
                                     var forcedSize = wgcCapture.ContentSize;
                                     desktopBounds = new Vortice.RawRect(0, 0, forcedSize.Width, forcedSize.Height);
@@ -2263,7 +2273,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             catch (Exception error) when (!isMonitorMode)
                             {
                                 AppLog.Error("Native capture: DXGI target replacement failed; using bounded WGC recovery source.", error);
-                                wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate);
+                                wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate, hdrConversionRequired);
                                 activeGameFrameSource = wgcCapture;
                                 var size = wgcCapture.ContentSize;
                                 desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
@@ -2338,7 +2348,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         if (useWgc)
                         {
-                            wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, targetMonitor, config.CaptureCursor, activeFrameRate);
+                            wgcCapture = CreateForcedWgcSource(device, nativeGate, targetHandle, targetMonitor, config.CaptureCursor, activeFrameRate, hdrConversionRequired);
                             activeGameFrameSource = wgcCapture;
                             var forcedSize = wgcCapture.ContentSize;
                             desktopBounds = new Vortice.RawRect(0, 0, forcedSize.Width, forcedSize.Height);
@@ -2369,7 +2379,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             try
                             {
-                                wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate);
+                                wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate, hdrConversionRequired);
                                 activeGameFrameSource = wgcCapture;
                                 var size = wgcCapture.ContentSize;
                                 desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
@@ -2467,7 +2477,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         AppLog.Info($"Native capture: WGC source closed ({selectedGameFrameSource.Failure}); restarting WGC.");
                         InvalidateDesktopInputViews();
                         wgcCapture!.Dispose();
-                        try { wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate); activeGameFrameSource = wgcCapture; }
+                        try { wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate, hdrConversionRequired); activeGameFrameSource = wgcCapture; }
                         catch (Exception error) { throw new InvalidOperationException("Windows.Graphics.Capture could not restart for game capture.", error); }
                     }
                     else
@@ -2485,6 +2495,33 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
 
                 if (desktopResource is not null)
                 {
+                    // HDR pixels remain usable only in Windows' float scRGB
+                    // surface. Do conversion before crop, overlays and NV12.
+                    if (hdrConversionRequired)
+                    {
+                        try
+                        {
+                            using var hdrSource = desktopResource.QueryInterface<ID3D11Texture2D>();
+                            hdrConverter ??= new HdrToSdrGpuConverter(device!, hdrProfile);
+                            var sdrTexture = hdrConverter.Convert(hdrSource);
+                            desktopResource.Dispose();
+                            desktopResource = sdrTexture.QueryInterface<ID3D11Resource>();
+                            hdrCompatibilityStatus = ReplayHdrCompatibilityStatus.ConversionActive;
+                        }
+                        catch (Exception error)
+                        {
+                            hdrConverter?.Dispose();
+                            hdrConverter = null;
+                            if (hdrConversionFailures++ == 0)
+                            {
+                                hdrCompatibilityStatus = ReplayHdrCompatibilityStatus.PreparingConversion;
+                                AppLog.Info($"Native capture: HDR conversion failed; rebuilding once ({error.Message}).");
+                                continue;
+                            }
+                            hdrCompatibilityStatus = ReplayHdrCompatibilityStatus.ConversionFailed;
+                            throw new InvalidOperationException("HDR conversion failed after recovery attempt.", error);
+                        }
+                    }
                     consecutiveAcquireFailures = 0;
                     if (!usingWgc && !hasDesktopContentUpdate && !hasPointerUpdate)
                     {
@@ -3283,7 +3320,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         {
                             try
                             {
-                                wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate);
+                                wgcCapture = WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, config.CaptureCursor, activeFrameRate, hdrConversionRequired);
                                 activeGameFrameSource = wgcCapture;
                                 var size = wgcCapture.ContentSize;
                                 desktopBounds = new Vortice.RawRect(0, 0, size.Width, size.Height);
@@ -4226,6 +4263,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 dxgiCapture?.Dispose();
                 lock (nativeGate) duplication?.Dispose();
                 staging?.Dispose();
+                hdrConverter?.Dispose();
                 InvalidateDesktopInputViews();
                 inputView?.Dispose();
                 croppedTexture?.Dispose();
@@ -4701,10 +4739,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // WGC source for whichever target the session resolved: a window item when a
     // game window is selected, a monitor item for desktop capture.
     private static WindowGraphicsCaptureSource CreateForcedWgcSource(
-        ID3D11Device device, object nativeGate, nint targetHandle, nint targetMonitor, bool captureCursor, int frameRate) =>
+        ID3D11Device device, object nativeGate, nint targetHandle, nint targetMonitor, bool captureCursor, int frameRate, bool captureHdr = false) =>
         targetHandle != 0
-            ? WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, captureCursor, frameRate)
-            : WindowGraphicsCaptureSource.CreateForMonitor(device, nativeGate, targetMonitor, captureCursor, frameRate);
+            ? WindowGraphicsCaptureSource.Create(device, nativeGate, targetHandle, captureCursor, frameRate, captureHdr)
+            : WindowGraphicsCaptureSource.CreateForMonitor(device, nativeGate, targetMonitor, captureCursor, frameRate, captureHdr);
 
     private static nint ResolveTargetMonitor(nint targetHandle, ReplayBufferConfig config)
     {
@@ -4821,8 +4859,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             {
                 if (output.Description.Monitor != monitorHandle) continue;
 
-                using var output1 = output.QueryInterface<IDXGIOutput1>();
                 desktopBounds = output.Description.DesktopCoordinates;
+                using var output1 = output.QueryInterface<IDXGIOutput1>();
                 return output1.DuplicateOutput(device);
             }
         }
