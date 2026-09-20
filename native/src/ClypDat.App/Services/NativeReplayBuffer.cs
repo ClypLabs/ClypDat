@@ -412,6 +412,10 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             return TryGetSaveStartAfterRecovery(_recoveryOutages, requestedStartUtc, requestedEndUtc, out saveStartUtc);
     }
 
+    internal static bool IsTransportShortfall(bool hasCapturedRealFrame, bool usingWgc, double targetRate, double sampledRate) =>
+        hasCapturedRealFrame && !usingWgc && targetRate > 0 &&
+        sampledRate < targetRate * ReplayEncoderQualificationPolicy.TargetThreshold;
+
     // A short, completed recovery should shorten a clip, not discard every
     // otherwise-good second in its requested window. An ongoing recovery has
     // no trustworthy tail yet, so it remains a failed save.
@@ -1961,8 +1965,11 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         _ => ReplayPipelineRecoveryAction.None
                     };
                     var freshTransportTarget = Math.Min(activeFrameRate, sourceFrameRate);
-                    var transportShortfall = hasCapturedRealFrame && freshTransportTarget > 0 &&
-                        freshTransportRate < freshTransportTarget * ReplayEncoderQualificationPolicy.TargetThreshold;
+                    // WGC intentionally samples only frames that can reach the
+                    // next encode tick. Its sampled count is not transport
+                    // health, otherwise it permanently quarantines saves.
+                    var transportShortfall = IsTransportShortfall(
+                        hasCapturedRealFrame, wgcCapture is not null, freshTransportTarget, freshTransportRate);
                     if (transportShortfall && !saveInProgress)
                         consecutiveTransportShortfallWindows++;
                     else

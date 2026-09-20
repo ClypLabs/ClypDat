@@ -18,6 +18,13 @@ public sealed class NativeReplayBufferRecoveryWindowTests
     }
 
     [Fact]
+    public void WgcSamplingDoesNotQuarantineHealthyReplaySaves()
+    {
+        Assert.False(NativeReplayBuffer.IsTransportShortfall(
+            hasCapturedRealFrame: true, usingWgc: true, targetRate: 90, sampledRate: 54));
+    }
+
+    [Fact]
     public void SaveWindow_CompletedRecovery_TrimsUnusableHistory()
     {
         var start = new DateTime(2026, 9, 2, 10, 0, 0, DateTimeKind.Utc);
