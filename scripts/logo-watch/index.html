@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ClypDat — logo workbench</title>
+  <style>
+    :root{color-scheme:dark;font:15px/1.5 system-ui,sans-serif;background:#101112;color:#eceeef}*{box-sizing:border-box}body{max-width:1400px;margin:auto;padding:32px}h1{margin:0;font-size:28px}h2{margin:30px 0 12px;font-size:20px}p{color:#a6abb1;margin:8px 0}a{color:#c0d7e9}header{display:flex;justify-content:space-between;gap:24px;align-items:center}#status{color:#d6caa9;border:1px solid #3e3930;padding:8px 12px;border-radius:8px}button,select{font:inherit;color:inherit;background:#25282c;border:1px solid #484d54;border-radius:6px;padding:7px 10px}button{cursor:pointer}.controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}.card{padding:16px;border:1px solid #33373d;border-radius:12px;background:#191c20}.card h3{margin:0;font-size:16px}.card p{min-height:42px;font-size:13px}.large{height:224px;display:grid;place-items:center;margin:12px 0;border-radius:8px;background:var(--preview-bg,#23272c)}.icon{display:grid;place-items:center;position:relative;width:var(--s,184px);height:var(--s,184px);border-radius:18%;flex-shrink:0}.icon img{width:100%;height:100%;object-fit:contain;position:relative;z-index:1}.bare{background:none}.charcoal{background:#17191c}.silver{background:#17191c;border:1px solid #bec2c7}.warm{background:#17191c;border:1px solid #b8a277}.gold{background:linear-gradient(#17191c,#17191c) padding-box,linear-gradient(140deg,#f4df78,#bd843d) border-box;border:2px solid transparent}.slate{background:#252c33;border:1px solid #5b6875}.ivory{background:#e7e6e1;border:1px solid #9b9e9d}.sizes{display:flex;gap:16px;align-items:end;min-height:106px;padding:10px 8px;background:var(--preview-bg,#23272c);border-radius:6px}.sample{display:grid;justify-items:center;gap:8px;font-size:11px;color:#929aa5}.caption{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px;font-size:12px}.compare{display:grid;grid-template-columns:1fr 1fr;gap:18px}.note{border-left:3px solid #ad9267;padding:8px 16px;background:#211f1b}.pending{opacity:.6}.badge{font-size:11px;color:#ccc2a7}.reference{max-width:420px;width:100%;border:1px solid #34383d;border-radius:10px}.folder-links{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;margin-top:20px}.swatch{display:flex;align-items:center;gap:6px}footer{border-top:1px solid #34383d;margin-top:30px;padding:18px 0;color:#8b929c;font-size:12px}@media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){body{padding:18px}.grid,.compare{grid-template-columns:1fr}header{display:block}.sizes{gap:12px}}
+    .silver-edge{background:linear-gradient(#17191c,#17191c) padding-box,linear-gradient(140deg,#eef2f6,#7f8b97) border-box;border:2px solid transparent}
+  </style>
+</head>
+<body>
+  <header><div><h1>ClypDat live icon watch</h1><p>Current app artwork: thick white strokes, separated tips, connected black joins.</p></div><div id="status">Loading current export…</div></header>
+  <div class="note">Selected for web branding: Silver Outline (thin solid silver frame). App logos, About, overlays, taskbar and tray use the transparent mark. The loader keeps its classic spinning hexagons.</div>
+  <div class="controls"><label>Preview surface <select id="surface"><option value="#23272c">Dark gray</option><option value="#0b0c0e">Near black</option><option value="#a7adb5">Light gray</option><option value="#eceef0">Off-white</option><option value="#138dbb">Taskbar blue</option></select></label><button id="refresh">Refresh now</button><span class="badge">Auto-refresh: every 4 seconds</span></div>
+  <h2>Current artwork</h2><p>Current app mark beside the older thick-stroke reference. Both tip gaps stay visible while the white bands retain their weight.</p>
+  <div class="compare" id="comparison"></div>
+  <h2>Backgrounds & borders</h2><p id="treatment-note">Every treatment below uses the current app master.</p>
+  <div class="grid" id="treatments"></div>
+  <h2>Reference</h2><img class="reference" src="references/border-reference.png" alt="User reference: thin warm border around a dark square icon"><p>The reference informs the restrained outer frame, not the symbol itself.</p>
+  <div class="folder-links"><a href="current/clypdat-mark.png">Current transparent master</a><a href="current/clypdat-avatar.svg">Current Silver Outline avatar</a><a href="exports/clypdat-avatar-github.png">GitHub export (under 1 MB)</a><a href="experiments/gap-and-neutral/comparison.png" target="_blank">Earlier study PNG (3×)</a><a href="experiments/gap-and-neutral/comparison.svg" target="_blank">Earlier study SVG</a><a href="archive/earlier-experiments/index.html">Earlier experiments</a><a href="README.md">Folder guide</a></div>
+  <footer>Sizes are CSS pixels. Previews use vector frames and the full-resolution mark, so display scaling does not stretch tiny PNGs. Small PNG downloads remain in the sizes folder.</footer>
+  <script>
+    const current='current/clypdat-mark.png';
+    const reference='current/clypdat-mark-tip-joined.png';
+    const styles=[['bare','01 · Transparent','No tile. Preferred starting point for the taskbar and tray.'],['charcoal','02 · Charcoal','White mark on a quiet near-black tile.'],['silver','03 · Silver outline','Charcoal tile with a thin neutral silver frame.'],['warm','04 · Muted brass outline','Warm but restrained edge; the background stays neutral.'],['gold','05 · Gold edge','Reference-inspired yellow-to-bronze border, confined to the edge.'],['silver-edge','06 · Silver edge','Same frame as Gold Edge, with a bright-silver-to-steel gradient.'],['slate','07 · Slate','Cool gray tile and a low-contrast steel frame.'],['ivory','08 · Off-white','Light neutral tile; the existing black logo outline provides contrast.']];
+    function icon(source,style,size,kind){const el=document.createElement('div');el.className='icon '+style;el.style.setProperty('--s',size+'px');const img=new Image();img.alt='';img.src=source;img.dataset.kind=kind;el.append(img);return el;}
+    function card(title,description,style,source,kind){const el=document.createElement('article');el.className='card';const heading=document.createElement('h3');heading.textContent=title;const note=document.createElement('p');note.textContent=description;const large=document.createElement('div');large.className='large';large.append(icon(source,style,184,kind));const sizes=document.createElement('div');sizes.className='sizes';for(const n of [16,24,32,48,64]){const sample=document.createElement('div');sample.className='sample';sample.append(icon(source,style,n,kind),document.createTextNode(n+' px'));sizes.append(sample);}el.append(heading,note,large,sizes);return el;}
+    const comparison=document.querySelector('#comparison');const currentCard=card('Current · thick strokes + tip gaps','Applied app artwork. Both black joins remain connected.','bare',current,'current');comparison.append(currentCard,card('Earlier · tighter tips','Original thick-stroke reference, before the gap correction.','bare',reference,'reference'));
+    for(const [style,title,description] of styles){const el=card(title+(style==='silver'?' · Selected':''),description,style,current,'treatment');el.dataset.style=style;if(style==='silver')el.style.borderColor='#bec2c7';document.querySelector('#treatments').append(el);}
+    let ready=false;
+    function refresh(){
+      const probe=new Image();const stamp=Date.now();
+      probe.onload=()=>{
+        ready=true;
+        for(const img of document.querySelectorAll('img[data-kind="current"],img[data-kind="treatment"]'))if(!img.dataset.exportReady)img.src=current+'?v='+stamp;
+        document.querySelector('#status').textContent='Current thick-stroke export · '+new Date().toLocaleTimeString();
+        if(!currentCard.querySelector('.caption')){
+          const links=document.createElement('div');links.className='caption';
+          const a=document.createElement('a');a.href=current;a.target='_blank';a.textContent='Open current transparent master';links.append(a);currentCard.append(links);
+        }
+      };
+      probe.onerror=()=>{document.querySelector('#status').textContent=(ready?'Current export unavailable; showing last loaded images':'Current export unavailable')+' · '+new Date().toLocaleTimeString();};
+      probe.src=current+'?v='+stamp;
+      for(const el of document.querySelectorAll('#treatments .card')){
+        const base='current/previews/';const file=base+el.dataset.style+'.png';const preview=base+'svg/'+el.dataset.style+'.svg';const check=new Image();
+        check.onload=()=>{
+          for(const img of el.querySelectorAll('img[data-kind="treatment"]')){
+            const box=img.parentElement;
+            box.className='icon bare';img.dataset.exportReady='true';
+            img.src=preview+'?v='+stamp;
+          }
+          if(!el.querySelector('.caption')){
+            const links=document.createElement('div');links.className='caption';
+            const a=document.createElement('a');a.href=file;a.target='_blank';a.textContent='Open PNG';links.append(a);el.append(links);
+          }
+        };
+        check.src=preview+'?v='+stamp;
+      }
+    }
+    document.querySelector('#surface').addEventListener('change',event=>document.documentElement.style.setProperty('--preview-bg',event.target.value));document.querySelector('#refresh').onclick=refresh;refresh();setInterval(refresh,4000);
+  </script>
+</body>
+</html>

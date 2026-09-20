@@ -12,3 +12,5 @@ Silver Outline is the selected identity: a charcoal tile with a thin, solid silv
 The classic logo assets remain unchanged. Their generator reads the historical dark tile from Git rather than sampling the current avatar.
 
 Regenerate with `node scripts/generate-logo.cjs`, then run `node --test scripts/test-logo-assets.cjs`. The exporter also updates the sibling `clypdat-webapp` assets and requires that project's installed Next.js/Sharp dependencies. Tests keep framed web branding separate from every unframed app icon and verify the theme pairs. Email BIMI uses a compact, path-only approximation of the framed mark.
+
+When the local `ClypDat-logo-thickness` watch exists beside this workspace, the exporter also refreshes its current masters, every neutral preview, and the GitHub avatar. Run `node scripts/sync-logo-watch.cjs` to refresh only the watch. Its page and checks are versioned in `scripts/logo-watch/`; reload the page after layout changes, then images refresh every four seconds.

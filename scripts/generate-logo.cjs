@@ -149,6 +149,7 @@ async function main() {
     const { data, info } = await sharp(frame).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     assert.equal(data[Math.floor(info.width / 2) * 4 + 3], 0, 'Desktop icon must not have a tile background');
   }
-  console.log(JSON.stringify({ style: 'Silver Outline', desktop: 'transparent', crop, icoSizes: sizes, bimiBytes: Buffer.byteLength(bimi) }, null, 2));
+  const watch = await require('./sync-logo-watch.cjs').syncLogoWatch();
+  console.log(JSON.stringify({ style: 'Silver Outline', desktop: 'transparent', crop, icoSizes: sizes, bimiBytes: Buffer.byteLength(bimi), watch }, null, 2));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
