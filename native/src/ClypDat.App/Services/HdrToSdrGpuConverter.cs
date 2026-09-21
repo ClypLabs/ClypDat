@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Vortice.DCommon;
 using Vortice.Direct2D1;
+using Vortice.Direct2D1.Effects;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 
@@ -14,6 +15,9 @@ internal sealed class HdrToSdrGpuConverter : IDisposable
     private readonly ID2D1Device _d2dDevice;
     private readonly ID2D1DeviceContext _context;
     private readonly ID2D1Effect _toneMap;
+    private readonly ID2D1ColorContext _scRgbColorContext;
+    private readonly ID2D1ColorContext _sRgbColorContext;
+    private readonly ColorManagement _colorManagement;
     private ID3D11Texture2D? _output;
     private int _width, _height;
     private bool _disposed;
@@ -25,6 +29,13 @@ internal sealed class HdrToSdrGpuConverter : IDisposable
         _d2dDevice = D2D1.D2D1CreateDevice(dxgiDevice);
         _context = _d2dDevice.CreateDeviceContext(DeviceContextOptions.None);
         _toneMap = new ID2D1Effect(_context.CreateEffect(EffectGuids.HdrToneMap));
+        _scRgbColorContext = _context.CreateColorContext(ColorSpace.ScRgb, Array.Empty<byte>());
+        _sRgbColorContext = _context.CreateColorContext(ColorSpace.Srgb, Array.Empty<byte>());
+        _colorManagement = new ColorManagement(_context)
+        {
+            SourceColorContext = _scRgbColorContext,
+            DestinationColorContext = _sRgbColorContext
+        };
         SetFloat("InputMaxLuminance", Math.Max(80f, profile.PeakLuminanceNits));
         SetFloat("OutputMaxLuminance", 80f);
         SetInt("DisplayMode", (int)HDRToneMapDisplayMode.Sdr);
@@ -48,9 +59,10 @@ internal sealed class HdrToSdrGpuConverter : IDisposable
         try
         {
             _toneMap.SetInput(0, sourceBitmap, true);
+            _colorManagement.SetInput(0, _toneMap.Output, true);
             _context.Target = outputBitmap;
             _context.BeginDraw();
-            _context.DrawImage(_toneMap);
+            _context.DrawImage(_colorManagement);
             _context.EndDraw().CheckError();
             return _output;
         }
@@ -58,6 +70,7 @@ internal sealed class HdrToSdrGpuConverter : IDisposable
         {
             _context.Target = null;
             _toneMap.SetInput(0, null!, true);
+            _colorManagement.SetInput(0, null!, true);
         }
     }
 
@@ -84,6 +97,9 @@ internal sealed class HdrToSdrGpuConverter : IDisposable
         if (_disposed) return;
         _disposed = true;
         _output?.Dispose();
+        _colorManagement.Dispose();
+        _sRgbColorContext.Dispose();
+        _scRgbColorContext.Dispose();
         _toneMap.Dispose();
         _context.Dispose();
         _d2dDevice.Dispose();

@@ -16,7 +16,7 @@ public sealed unsafe class HdrToSdrGpuConverterTests
         using var ownedDevice = device;
         using var ownedContext = context;
         using var converter = new HdrToSdrGpuConverter(device,
-            new HdrCaptureCompatibility.DisplayProfile(true, 80, 1000));
+            new HdrCaptureCompatibility.DisplayProfile(true, 80, 80));
 
         using var rejected = device.CreateTexture2D(new Texture2DDescription
         {
@@ -33,6 +33,10 @@ public sealed unsafe class HdrToSdrGpuConverterTests
         var green = ReadBgra(device, context, firstOutput, 0, 1);
         var blue = ReadBgra(device, context, firstOutput, 1, 1);
         Assert.True(gray.R > 0 && gray.G > 0 && gray.B > 0, "Gray HDR patch became black.");
+        Assert.InRange(gray.R, (byte)115, (byte)121);
+        Assert.InRange(gray.G, (byte)115, (byte)121);
+        Assert.InRange(gray.B, (byte)115, (byte)121);
+        Assert.InRange(white.R, (byte)252, (byte)255);
         Assert.True(white.R > gray.R && white.G > gray.G && white.B > gray.B, "White patch lost contrast.");
         Assert.True(red.R > red.G + 12 && red.R > red.B + 12, "Red patch lost channel separation.");
         Assert.True(green.G > green.R + 12 && green.G > green.B + 12, "Green patch lost channel separation.");
@@ -123,7 +127,7 @@ public sealed unsafe class HdrToSdrGpuConverterTests
 
     private static (float R, float G, float B) FirstPatches(int x, int y) => (x, y) switch
     {
-        (0, 0) => (0, 0, 0), (1, 0) => (0.25f, 0.25f, 0.25f), (2, 0) => (1, 1, 1),
+        (0, 0) => (0, 0, 0), (1, 0) => (0.18f, 0.18f, 0.18f), (2, 0) => (1, 1, 1),
         (3, 0) => (1, 0, 0), (0, 1) => (0, 1, 0), (1, 1) => (0, 0, 1), _ => (0.5f, 0.5f, 0.5f)
     };
 
