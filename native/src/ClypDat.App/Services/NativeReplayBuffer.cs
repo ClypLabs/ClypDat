@@ -2211,11 +2211,18 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     var refreshedMonitor = ResolveTargetMonitor(targetHandle, config);
                     var refreshedProfile = HdrCaptureCompatibility.GetDisplayProfile(device, refreshedMonitor);
                     var sourceProfileChanged = refreshedMonitor != targetMonitor || refreshedProfile.IsHdr != hdrProfile.IsHdr;
+                    // Windows HDR toggled under the same target: the source
+                    // still delivers the old pixel format (BGRA vs scRGB
+                    // float), so it has to be rebuilt below.
+                    var captureFormatChanged = false;
                     if (refreshedMonitor != targetMonitor || refreshedProfile != hdrProfile)
                     {
                         targetMonitor = refreshedMonitor;
                         hdrProfile = refreshedProfile;
                         var refreshedConversionRequired = config.ReplayHdrCompatibilityEnabled && hdrProfile.IsHdr;
+                        captureFormatChanged = refreshedConversionRequired != hdrConversionRequired;
+                        if (captureFormatChanged)
+                            AppLog.Info($"Native capture: Windows HDR turned {(refreshedConversionRequired ? "on" : "off")}; rebuilding capture source.");
                         if (refreshedConversionRequired != hdrConversionRequired || refreshedConversionRequired)
                         {
                             hdrConverter?.Dispose();
@@ -2230,7 +2237,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     if (!hdrConversionRequired)
                         hdrCompatibilityStatus = HdrCaptureCompatibility.Detect(device, refreshedMonitor);
                     var freshHandle = ResolveTargetWindow(_configProvider());
-                    if (freshHandle != targetHandle)
+                    if (freshHandle != targetHandle || captureFormatChanged)
                     {
                         targetHandle = freshHandle;
                         isMonitorMode = targetHandle == 0;
@@ -2501,7 +2508,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 {
                     // HDR pixels remain usable only in Windows' float scRGB
                     // surface. Do conversion before crop, overlays and NV12.
-                    if (hdrConversionRequired)
+                    // Gate on the frame's real format: DXGI duplication and a
+                    // source still mid-rebuild after an HDR toggle hand over
+                    // BGRA that Windows already mapped to SDR, and a float
+                    // frame still in flight after HDR turns off can't reach
+                    // the encoder unconverted.
+                    if (IsScRgbFrame(desktopResource))
                     {
                         try
                         {
@@ -4749,6 +4761,12 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // The output a given target resolves to. Kept separate from
     // CreateDuplicationFor so the capture loop can ask "would this target need a
     // different duplication?" without building one to find out.
+    private static bool IsScRgbFrame(ID3D11Resource resource)
+    {
+        using var texture = resource.QueryInterface<ID3D11Texture2D>();
+        return texture.Description.Format == Vortice.DXGI.Format.R16G16B16A16_Float;
+    }
+
     // WGC source for whichever target the session resolved: a window item when a
     // game window is selected, a monitor item for desktop capture.
     private static WindowGraphicsCaptureSource CreateForcedWgcSource(

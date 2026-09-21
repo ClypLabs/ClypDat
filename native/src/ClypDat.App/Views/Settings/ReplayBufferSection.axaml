@@ -181,7 +181,7 @@
         <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
           <StackPanel Spacing="3">
             <TextBlock Classes="settingsRowTitleSm" Text="HDR Compatibility" />
-            <TextBlock Classes="settingsRowDescSm" Text="Converts HDR capture to SDR so clips play correctly on ordinary displays." />
+            <TextBlock Classes="settingsRowDescSm" Text="Automatically converts to SDR while Windows HDR is on, so clips look right on ordinary displays." />
             <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayHdrCompatibilityStatus}" />
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayHdrCompatibilityEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
