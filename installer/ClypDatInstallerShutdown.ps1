@@ -84,6 +84,7 @@ function Get-OwnedProcesses {
     return @($owned)
 }
 
+$signalled = $false
 try
 {
     $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -91,6 +92,7 @@ try
     try
     {
         [void]$event.Set()
+        $signalled = $true
         Write-Output 'Requested graceful ClypDat shutdown.'
     }
     finally { $event.Dispose() }
@@ -100,7 +102,11 @@ catch [System.Threading.WaitHandleCannotBeOpenedException]
     Write-Output 'No running ClypDat instance exposed update shutdown IPC.'
 }
 
-$deadline = [DateTime]::UtcNow.AddSeconds(10)
+# A signalled ClypDat may hold its exit behind Closing Safely while a save,
+# export or the recorder's file drain (up to 5 minutes) finishes. Without the
+# IPC listener nothing is coming, so keep the short wait.
+$graceSeconds = if ($signalled) { 330 } else { 10 }
+$deadline = [DateTime]::UtcNow.AddSeconds($graceSeconds)
 while ([DateTime]::UtcNow -lt $deadline)
 {
     if ((Get-OwnedProcesses).Count -eq 0) { exit 0 }

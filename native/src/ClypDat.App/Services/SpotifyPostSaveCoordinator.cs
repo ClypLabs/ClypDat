@@ -141,6 +141,7 @@ internal sealed class SpotifyPostSaveCoordinator
         Func<CancellationToken, Task<SpotifyOverlayOutcome>> process, CancellationToken token)
     {
         await Task.Yield();
+        using var shutdownGuard = ShutdownGuard.Begin("Adding Spotify overlay");
         var entered = false;
         var outcome = SpotifyOverlayOutcome.Failed;
         try

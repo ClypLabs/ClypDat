@@ -3096,6 +3096,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var selected = SteelSeriesImportRows.Where(row => row.IsSelected && row.CanImport).ToList();
         if (selected.Count == 0) return;
+        using var shutdownGuard = ShutdownGuard.Begin("Importing SteelSeries clips");
         SteelSeriesImportInProgress = true;
         SteelSeriesImportProgressPercent = 0;
         var imported = 0;
@@ -3477,6 +3478,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var selected = MedalImportRows.Where(row => row.IsSelected && row.CanImport).ToList();
         if (selected.Count == 0) return;
 
+        using var shutdownGuard = ShutdownGuard.Begin("Importing Medal clips");
         MedalImportInProgress = true;
         MedalImportProgressPercent = 0;
         var libraryFolder = Settings.LibraryFolder;
@@ -5369,6 +5371,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
         if (!CanRenameAllClips) return;
+        using var shutdownGuard = ShutdownGuard.Begin("Renaming clips");
         IsRenamingAllClips = true;
         RenameAllClipsStatus = "Renaming library files...";
         try
@@ -5854,6 +5857,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private async Task MigrateLibraryLayoutAsync()
     {
         if (!await _libraryLayoutMigrationLock.WaitAsync(0)) return;
+        using var shutdownGuard = ShutdownGuard.Begin("Organising library");
         try
         {
             var libraryRoot = Settings.LibraryFolder;
@@ -6437,6 +6441,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task<int> DeleteSelectedAsync()
     {
         var selected = AllClips.Where(clip => clip.IsSelected && !clip.IsSpotifyProcessing).ToArray();
+        using var shutdownGuard = ShutdownGuard.Begin("Deleting clips");
         HashSet<string>? importedKeys = null;
         HashSet<string>? steelSeriesKeys = null;
         foreach (var clip in selected)
@@ -6490,6 +6495,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         using var fileOperation = SpotifyProcessingPaths.TryRead(clip.Path);
         if (fileOperation is null) return;
+        using var shutdownGuard = ShutdownGuard.Begin("Deleting clip");
         // Read the import keys before anything is deleted - the sidecar that carries
         // them goes below - but PERSIST the history changes only after the file is
         // actually gone. They used to be written first, so a delete that failed (a
@@ -6552,6 +6558,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         using var fileOperation = SpotifyProcessingPaths.TryRead(clip.Path);
         if (fileOperation is null) return;
+        using var shutdownGuard = ShutdownGuard.Begin("Renaming clip");
         var title = newTitle?.Trim() ?? string.Empty;
         var sanitizedTitle = SanitizeFileTitle(title);
         if (string.IsNullOrWhiteSpace(sanitizedTitle)) return;
@@ -9470,6 +9477,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         var libraryRoot = Settings.LibraryFolder;
         if (string.IsNullOrWhiteSpace(libraryRoot) || !Directory.Exists(libraryRoot)) return (0, 0);
+        using var shutdownGuard = ShutdownGuard.Begin("Renaming game");
 
         var targets = AllClips
             .Where(clip => string.Equals(clip.GameFilterKey, currentName, StringComparison.OrdinalIgnoreCase))
@@ -9555,6 +9563,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         using var fileOperation = SpotifyProcessingPaths.TryRead(path);
         if (fileOperation is null) return null;
+        using var shutdownGuard = ShutdownGuard.Begin("Moving clip");
         var libraryRoot = Settings.LibraryFolder;
         try
         {

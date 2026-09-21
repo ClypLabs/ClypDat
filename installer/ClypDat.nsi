@@ -101,8 +101,9 @@ VIAddVersionKey "FileDescription" "ClypDat Setup"
 
 Section "ClypDat" SecMain
   ; Ask a current ClypDat to stop recording and exit before replacing any
-  ; files. Older versions have no IPC listener, so the helper waits ten
-  ; seconds and then stops only processes it can prove belong to ClypDat.
+  ; files. A signalled ClypDat may finish saves first (up to ~5.5 minutes);
+  ; older versions have no IPC listener, so the helper waits ten seconds.
+  ; Either way it then stops only processes it can prove belong to ClypDat.
   ; A remaining verified process means a locked install: abort rather than
   ; copying a partial update over it.
   SetOutPath "$PLUGINSDIR"

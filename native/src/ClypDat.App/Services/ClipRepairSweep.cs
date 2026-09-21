@@ -271,6 +271,10 @@ public static class ClipRepairSweep
                     currentFraction = Math.Clamp(value, 0, 1);
                     Publish();
                 });
+                // Held through the repair and the immediate inspected-set save
+                // below, so quitting mid-repair waits instead of cutting the
+                // rewrite off.
+                using var shutdownGuard = ShutdownGuard.Begin("Repairing clip");
                 var result = await ClipCorruptionRepairService.RepairAsync(clipPath, fraction, token).ConfigureAwait(false);
                 repairClock.Stop();
                 if (result.Status == ClipCorruptionRepairService.RepairStatus.Repaired)

@@ -59,6 +59,11 @@ public sealed partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var viewModel = new MainWindowViewModel();
+            if (UncleanExitRecovery.BeginSession())
+            {
+                var libraryRoot = viewModel.Settings.LibraryFolder;
+                _ = Task.Run(() => UncleanExitRecovery.RecoverInterruptedTrims(libraryRoot));
+            }
             var launchPresentation = ResolveLaunchPresentation(desktop.Args, viewModel);
             var minimized = LaunchPresentationPolicy.StartsInTray(launchPresentation);
             // LibVLC construction is deferred until the editor asks for it.
@@ -91,6 +96,11 @@ public sealed partial class App : Application
             _mainWindow.SetStartupLoaderActive(useSplash);
             if (useSplash) _mainWindow.RaiseStartupCurtain();
             desktop.MainWindow = _mainWindow;
+            // Windows sign-out/shutdown: held behind Closing Safely while work
+            // is in flight (MainWindow.Quit.cs).
+            desktop.ShutdownRequested += _mainWindow.OnShutdownRequested;
+            // Previously disposed by tray Quit only; every quit path ends here.
+            desktop.Exit += (_, _) => _trayIcon?.Dispose();
             if (WindowsPlatformProfile.IsServer())
             {
                 _serverTrayMenuRenderer = new ServerTrayMenuRenderer("ClypDat");
@@ -413,10 +423,11 @@ public sealed partial class App : Application
             var quitItem = new NativeMenuItem("Quit");
             quitItem.Click += async (_, _) =>
             {
-                if (_mainWindow is not null) await _mainWindow.ShutdownCaptureWorkerAsync();
-                _trayIcon?.Dispose();
-                if (_mainWindow is not null) _mainWindow.AllowRealClose = true;
-                if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+                if (_mainWindow is not null)
+                {
+                    await _mainWindow.QuitAsync("tray");
+                }
+                else if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
                 {
                     desktop.Shutdown();
                 }
@@ -478,6 +489,12 @@ public sealed partial class App : Application
     private void RestoreMainWindow()
     {
         if (_mainWindow is null) return;
+        // Mid-quit the main window stays hidden; surface the Closing Safely popup.
+        if (_mainWindow.IsQuitting)
+        {
+            _ = _mainWindow.QuitAsync("restore-during-quit");
+            return;
+        }
         _mainWindow.ShowInTaskbar = true;
         _mainWindow.Show();
         if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;

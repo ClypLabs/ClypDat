@@ -547,26 +547,27 @@ public sealed partial class MainWindow : Window
         {
             SaveWindowBounds();
             ViewModel?.SaveSettings();
-            if (!AllowRealClose)
+            if (AllowRealClose) return;
+            e.Cancel = true;
+            // A close from outside the app - Alt+F4, the taskbar's Close
+            // window, Task Manager's End task - is a real quit and goes through
+            // the Closing Safely guard. The title bar's own X calls Close()
+            // programmatically and keeps closing to tray.
+            if (!e.IsProgrammatic && e.CloseReason == WindowCloseReason.WindowClosing)
             {
-                e.Cancel = true;
-                // Hiding to tray keeps the app (and replay buffer) running,
-                // but PlaybackSession itself - LibVLC's video output and the
-                // NAudio WasapiOut mixer - has nothing to do with the window
-                // being visible. Without this, a clip actively playing in
-                // the editor when the window closes just kept playing audio
-                // (and technically video, decoding for nobody) indefinitely
-                // in the background. A real quit already covers this via
-                // _playback?.Dispose() in Closed below.
-                ViewModel?.SaveSelectedClipEditState();
-                if (ViewModel?.IsVideoFullscreen == true) ExitVideoFullscreen();
-                StopEditorPlayback(stopMode: PlaybackStopMode.Background);
-                // Closing to tray is a navigation reset, not a suspended
-                // editor. Reopening ClypDat must always return to Library.
-                ViewModel?.CloseEditor();
-                Hide();
-                ShowInTaskbar = false;
+                _ = QuitAsync("window-close");
+                return;
             }
+            if (IsQuitting) return;
+            // Hiding to tray keeps the app (and replay buffer) running,
+            // but PlaybackSession itself - LibVLC's video output and the
+            // NAudio WasapiOut mixer - has nothing to do with the window
+            // being visible. Without this, a clip actively playing in
+            // the editor when the window closes just kept playing audio
+            // (and technically video, decoding for nobody) indefinitely
+            // in the background. A real quit already covers this via
+            // _playback?.Dispose() in Closed below.
+            HideToTray();
         };
         Closed += (_, _) =>
         {
@@ -943,6 +944,7 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not IReplayBuffer buffer) return;
         if (!ReferenceEquals(_replayBuffer, buffer) || ViewModel is null) return;
+        ShutdownGuard.BeginKeyed(WorkerSaveGuardKey(started.SaveId), "Saving clip");
         ViewModel.PinSpotifySave(started.SaveId);
         if (_uiOwnedSaveIds.ContainsKey(started.SaveId))
         {
@@ -1009,8 +1011,13 @@ public sealed partial class MainWindow : Window
         });
     }
 
+    private static string WorkerSaveGuardKey(Guid saveId) => $"worker-save:{saveId}";
+
     private void Worker_SaveCompleted(object? sender, ReplaySaveCompleted completed)
     {
+        // The recorder-side save stays registered with ShutdownGuard until its
+        // post-save processing below has run, so a quit in between still waits.
+        var guardKey = WorkerSaveGuardKey(completed.SaveId);
         // Runs before dispatch and before UI-owned SaveReplayAsync resumes.
         if (string.IsNullOrWhiteSpace(completed.Error) && !string.IsNullOrWhiteSpace(completed.Path))
             SpotifyProcessingPaths.Reserve(completed.Path);
@@ -1018,20 +1025,26 @@ public sealed partial class MainWindow : Window
         {
             Dispatcher.UIThread.Post(async () =>
             {
-                if (ViewModel is not null && !string.IsNullOrWhiteSpace(completed.Path))
+                try
                 {
-                    await ProcessSavedClipAsync(completed.Path, completed.SaveId.ToString());
+                    if (ViewModel is not null && !string.IsNullOrWhiteSpace(completed.Path))
+                    {
+                        await ProcessSavedClipAsync(completed.Path, completed.SaveId.ToString());
+                    }
                 }
+                finally { ShutdownGuard.EndKeyed(guardKey); }
             });
             return;
         }
         if (_uiOwnedSaveIds.ContainsKey(completed.SaveId))
         {
+            ShutdownGuard.EndKeyed(guardKey);
             AppLog.Info($"Clip overlay skipped: trigger=save-completed, id={completed.SaveId}, reason=ui-owned-save.");
             return;
         }
         if (!string.IsNullOrWhiteSpace(completed.Error))
         {
+            ShutdownGuard.EndKeyed(guardKey);
             ViewModel?.ReleaseSpotifySave(completed.SaveId);
             ShowClipNotification("save-failed", "Clip Failed", playSound: false, saveCompletion: true, saveId: completed.SaveId, requestedUtc: completed.RequestedUtc);
             Dispatcher.UIThread.Post(async () => await ShowMessageAsync("Clip Failed", completed.Error));
@@ -1039,22 +1052,27 @@ public sealed partial class MainWindow : Window
         }
         if (string.IsNullOrWhiteSpace(completed.Path))
         {
+            ShutdownGuard.EndKeyed(guardKey);
             AppLog.Info("Clip overlay skipped: trigger=save-completed, reason=empty-path.");
             return;
         }
         ShowClipSavedNotification("save-completed", completed.SaveId, completed.RequestedUtc);
         Dispatcher.UIThread.Post(async () =>
         {
-            RememberSessionClip(completed.Path);
-            // Saves reaching this path are the worker's own hotkey saves: every
-            // UI-started save, auto-clips included, is UI-owned and returned
-            // above, and is counted where SaveReplayClipAsync finishes instead.
-            if (ViewModel is not null)
+            try
             {
-                _ = ClipStatsReporter.RecordFileAsync(ClipStatKind.Clip, completed.Path, ViewModel.MediaProbe);
-                ViewModel.RecordDiscordClipSaved();
-                await ProcessSavedClipAsync(completed.Path, completed.SaveId.ToString());
+                RememberSessionClip(completed.Path);
+                // Saves reaching this path are the worker's own hotkey saves: every
+                // UI-started save, auto-clips included, is UI-owned and returned
+                // above, and is counted where SaveReplayClipAsync finishes instead.
+                if (ViewModel is not null)
+                {
+                    _ = ClipStatsReporter.RecordFileAsync(ClipStatKind.Clip, completed.Path, ViewModel.MediaProbe);
+                    ViewModel.RecordDiscordClipSaved();
+                    await ProcessSavedClipAsync(completed.Path, completed.SaveId.ToString());
+                }
             }
+            finally { ShutdownGuard.EndKeyed(guardKey); }
         });
     }
 
@@ -3168,6 +3186,7 @@ public sealed partial class MainWindow : Window
             return false;
         }
 
+        using var shutdownGuard = ShutdownGuard.Begin("Saving clip");
         try
         {
             if (ViewModel is null) return false;
@@ -6940,6 +6959,7 @@ public sealed partial class MainWindow : Window
             ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, sourcePath)?.OverlayManifest,
             ViewModel.TrimStart.TotalSeconds, trimEnd.TotalSeconds, ViewModel.ClipSpeed, CancellationToken.None);
 
+        using var shutdownGuard = ShutdownGuard.Begin("Saving trim");
         ViewModel.IsExporting = true;
         var progressCts = new CancellationTokenSource();
         var (progressWindow, progressBar, statusText, percentText, etaText) = CreateProgressDialog("Saving trim", "Saving trim...", () => progressCts.Cancel());
@@ -7113,6 +7133,7 @@ public sealed partial class MainWindow : Window
             outputPath = Path.ChangeExtension(outputPath, ".mp4");
         }
 
+        using var shutdownGuard = ShutdownGuard.Begin("Exporting clip");
         ViewModel.IsExporting = true;
         var progressCts = new CancellationTokenSource();
         var (progressWindow, progressBar, statusText, percentText, etaText) = CreateProgressDialog("Exporting clip", "Exporting clip...", () => progressCts.Cancel());
@@ -7762,19 +7783,7 @@ public sealed partial class MainWindow : Window
     /// close-to-tray shipped, closing windows no longer ends the process - so
     /// this has to go out the same way the tray's Quit item does.
     /// </summary>
-    public async Task ExitForUpdateAsync()
-    {
-        AllowRealClose = true;
-        await ShutdownCaptureWorkerAsync();
-        if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
-        {
-            desktop.Shutdown();
-        }
-        else
-        {
-            Environment.Exit(0);
-        }
-    }
+    public Task ExitForUpdateAsync() => QuitAsync("update");
 
     /// <summary>
     /// Covers the window's contents while the startup loader is in front of it.
@@ -8097,16 +8106,7 @@ public sealed partial class MainWindow : Window
                 // tray shipped, closing windows no longer exits the process,
                 // so the helper waited forever and the app never restarted.
                 // Exit for real, exactly like the tray's own Quit item.
-                AllowRealClose = true;
-                await ShutdownCaptureWorkerAsync();
-                if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
-                {
-                    desktop.Shutdown();
-                }
-                else
-                {
-                    Environment.Exit(0);
-                }
+                await ExitForUpdateAsync();
             }
             catch (OperationCanceledException)
             {

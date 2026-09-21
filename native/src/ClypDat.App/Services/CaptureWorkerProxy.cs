@@ -115,6 +115,41 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         SetRecording(false); Disconnect();
     }
 
+    // The worker acks "shutdown" before it drains pending saves and full-session
+    // muxing, so the UI has to watch the process itself to know those files are
+    // finished. Covers a worker this proxy started and one it reconnected to.
+    public async Task<bool> WaitForWorkerExitAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        var workers = new List<Process>();
+        if (_process is { HasExited: false } own) workers.Add(own);
+        else
+        {
+            var sessionId = Process.GetCurrentProcess().SessionId;
+            foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(CaptureWorkerExecutable.FileName)))
+            {
+                try
+                {
+                    if (process.SessionId == sessionId && process.Id != Environment.ProcessId) { workers.Add(process); continue; }
+                }
+                catch (InvalidOperationException) { }
+                process.Dispose();
+            }
+        }
+        if (workers.Count == 0) return true;
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        try
+        {
+            await Task.WhenAll(workers.Select(worker => worker.WaitForExitAsync(timeoutSource.Token)));
+            return true;
+        }
+        catch (OperationCanceledException) { return false; }
+        finally
+        {
+            foreach (var worker in workers) if (!ReferenceEquals(worker, _process)) worker.Dispose();
+        }
+    }
+
     public async Task UpdateHotkeyAsync(string hotkey, CancellationToken cancellationToken = default)
     { _hotkey = hotkey; await EnsureAttachedAsync(cancellationToken); await SendAsync<CaptureWorkerAck>("hotkey", new { hotkey }, cancellationToken); }
 
