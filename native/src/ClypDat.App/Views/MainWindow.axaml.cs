@@ -48,6 +48,12 @@ public sealed partial class MainWindow : Window
     // ffmpeg. See EditorForegroundWork.
     private IDisposable? _editorForegroundScope;
     private CancellationTokenSource? _editorSeekCts;
+    // Target and resume intent of the seek _editorSeekCts belongs to, so a
+    // repeated request for the same frame joins it instead of cancelling and
+    // restarting it - clicking the same spot twice used to throw away a seek
+    // that was about to land.
+    private TimeSpan _editorSeekTarget;
+    private bool _editorSeekTargetResume;
     private TimelineDragMode _timelineDragMode = TimelineDragMode.None;
     // Distance between where the pointer went down and the trim boundary it
     // grabbed. The handle's grab area is far wider than the line drawn in it,
@@ -5152,9 +5158,10 @@ public sealed partial class MainWindow : Window
 
         session.PublishSceneAsync = (position, generation, token) =>
         {
-            if (token.IsCancellationRequested || !session.IsSeekGenerationCurrent(generation)) return Task.CompletedTask;
-            session.Composition?.Submit([], [], position, session.EffectiveOverlayRate);
-            return Task.CompletedTask;
+            if (token.IsCancellationRequested || !session.IsSeekGenerationCurrent(generation)) return Task.FromResult(false);
+            if (session.Composition is not { } output) return Task.FromResult(false);
+            output.Submit([], [], position, session.EffectiveOverlayRate);
+            return Task.FromResult(true);
         };
         async Task PrepareWarmFrameAsync()
         {
@@ -8731,14 +8738,12 @@ public sealed partial class MainWindow : Window
             _playback = playback;
             var openingComposition = playback.Composition;
             playback.PublishSceneAsync = async (position, generation, token) =>
-            {
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (token.IsCancellationRequested || cancellationToken.IsCancellationRequested ||
-                        !playback.IsSeekGenerationCurrent(generation) || _playback != playback || playback.Composition != openingComposition) return;
-                    UpdateNativeComposition(openingViewModel, position);
+                        !playback.IsSeekGenerationCurrent(generation) || _playback != playback || playback.Composition != openingComposition) return false;
+                    return UpdateNativeComposition(openingViewModel, position);
                 });
-            };
             playback.NextRenderAsync = async token =>
             {
                 var rendered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -10425,10 +10430,23 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || ViewModel.IsSelectedSpotifyProcessing) return;
         resumePlayback = TimelineSeekResumePolicy.Resolve(resumePlayback, _editorSeekResumeIntent);
         _editorSeekResumeIntent = resumePlayback;
+        // Clicking the same frame again while its seek is still settling must
+        // join that seek, not cancel and restart it. Deliberately a frame-tight
+        // window: a click anywhere else is a real, different seek.
+        if (_editorSeekInFlight && _editorSeekCts is { IsCancellationRequested: false } &&
+            _editorSeekTargetResume == resumePlayback &&
+            Math.Abs((_editorSeekTarget - time).TotalMilliseconds) <= 20)
+        {
+            ViewModel.CurrentTime = time;
+            SetPlayheadBase(time);
+            return;
+        }
         _editorSeekCts?.Cancel();
         _editorSeekCts?.Dispose();
         var seekCts = new CancellationTokenSource();
         _editorSeekCts = seekCts;
+        _editorSeekTarget = time;
+        _editorSeekTargetResume = resumePlayback;
         _endedAtTrimBoundary = false;
         ViewModel.CurrentTime = time;
         // Render requested position immediately, then hold it until native

@@ -110,6 +110,19 @@ internal sealed class EditorSeekCoordinator
 
     private async Task<TimeSpan?> LandAsync(IEditorSeekTransport transport, TimeSpan target, string id, Func<bool> current, CancellationToken token)
     {
+        // The player parks on its landing frame after a scrub preview, so a
+        // settling seek to that same frame has nothing to decode. Writing the
+        // position anyway raises a compositor seek barrier the decoder will
+        // never satisfy, and the presentation wait then burns its whole budget
+        // on a frame that is already on screen.
+        if (transport.IsParkedOnFrame(target))
+        {
+            // PresentAsync is what normally freezes the clock on the landing
+            // frame; hold that invariant for the frame that is already up.
+            transport.FreezeOnFrame(target);
+            transport.LogDebug($"seek={id} landing: reused parked frame at {target.TotalSeconds:0.###}s.");
+            return target;
+        }
         for (var attempt = 1; attempt <= 2; attempt++)
         {
             token.ThrowIfCancellationRequested();
@@ -131,7 +144,7 @@ internal sealed class EditorSeekCoordinator
 }
 
 internal interface IEditorSeekTransport
-{ bool CanReusePresentedFrame(TimeSpan target); Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token); bool IsPaused { get; } TimeSpan Position { get; } int AudioTrackCount { get; } double PlaybackRate { get; } string VideoState { get; } bool IsNetworkSource { get; } Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default); void StopAudio(); void PauseVideo(); void ResetVideo(); void WritePosition(TimeSpan target); void CommitPaused(TimeSpan position); void CommitPlaying(TimeSpan position, string seekId); void CommitVideoOnly(); void StartDeferredAudio(TimeSpan position, string seekId); void LogDebug(string line); void LogInfo(string line); void LogError(string line); }
+{ bool CanReusePresentedFrame(TimeSpan target); bool IsParkedOnFrame(TimeSpan target); void FreezeOnFrame(TimeSpan target); Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token); bool IsPaused { get; } TimeSpan Position { get; } int AudioTrackCount { get; } double PlaybackRate { get; } string VideoState { get; } bool IsNetworkSource { get; } Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default); void StopAudio(); void PauseVideo(); void ResetVideo(); void WritePosition(TimeSpan target); void CommitPaused(TimeSpan position); void CommitPlaying(TimeSpan position, string seekId); void CommitVideoOnly(); void StartDeferredAudio(TimeSpan position, string seekId); void LogDebug(string line); void LogInfo(string line); void LogError(string line); }
 internal readonly record struct AudioPreparationResult(int ReadyTracks, int FailedTracks, bool Pending) { public static AudioPreparationResult PendingResult => new(0, 0, true); }
 internal readonly record struct EditorSeekResult(bool Succeeded, bool Resumed, bool Superseded, TimeSpan Landed, TimeSpan AudioAnchor) { public static EditorSeekResult FailedResult => new(false,false,false,default,default); public static EditorSeekResult SupersededResult => new(false,false,true,default,default); }
 internal readonly record struct EditorPlaybackStartResult(bool Succeeded, bool Superseded, TimeSpan Landed, AudioPreparationResult Audio) { public static EditorPlaybackStartResult FailedResult => new(false, false, default, default); public static EditorPlaybackStartResult SupersededResult => new(false, true, default, default); }

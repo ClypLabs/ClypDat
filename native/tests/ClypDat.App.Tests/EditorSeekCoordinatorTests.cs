@@ -127,6 +127,22 @@ public sealed class EditorSeekCoordinatorTests
         Assert.False(transport.IsPaused);
     }
 
+    [Fact]
+    public async Task ParkedOnTargetFrame_LandsWithoutRaisingAnotherSeekBarrier()
+    {
+        var transport = new RecoveryTransport(presents: false) { Parked = true, Start = TimeSpan.FromSeconds(12) };
+
+        var result = await new EditorSeekCoordinator().SeekAsync(
+            transport, TimeSpan.FromSeconds(12), resume: true, "parked", () => true, CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Resumed);
+        Assert.Equal(0, transport.Writes);
+        Assert.Equal(1, transport.Freezes);
+        Assert.False(transport.IsPaused);
+        Assert.Equal(1, transport.AudioStarts);
+    }
+
     private sealed class RecoveryTransport : IEditorSeekTransport
     {
         private readonly bool _videoRolls;
@@ -134,6 +150,14 @@ public sealed class EditorSeekCoordinatorTests
         private readonly Task<AudioPreparationResult> _preparation;
         private TimeSpan _position;
         public bool CanReusePresentedFrame(TimeSpan target) => false;
+        // The player is already parked on the requested frame, so the seek has
+        // nothing to write or decode.
+        public bool Parked { get; init; }
+        public TimeSpan Start { get => _position; init => _position = value; }
+        public int Writes { get; private set; }
+        public bool IsParkedOnFrame(TimeSpan target) => Parked;
+        public int Freezes { get; private set; }
+        public void FreezeOnFrame(TimeSpan target) => Freezes++;
         public bool Presented { get; private set; }
         public Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token)
         {
@@ -164,11 +188,11 @@ public sealed class EditorSeekCoordinatorTests
         public void PauseVideo() => IsPaused = true;
         public void ResetVideo() => IsPaused = true;
 
-        public void WritePosition(TimeSpan target) => _position = target;
+        public void WritePosition(TimeSpan target) { Writes++; _position = target; }
         public void CommitPaused(TimeSpan position) => IsPaused = true;
         public void CommitPlaying(TimeSpan position, string seekId)
         {
-            Assert.True(Presented);
+            Assert.True(Presented || Parked);
             AudioStarts++;
             IsPaused = false;
             if (_videoRolls) _position += TimeSpan.FromMilliseconds(25);

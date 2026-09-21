@@ -5,19 +5,20 @@ namespace ClypDat.App.Services;
 // Native presentation status advances independently of VLC's coarse clock events.
 internal static class PresentationWaiter
 {
-    internal enum Stage { SceneSubmission, NativePresentation }
+    internal enum Stage { SceneSubmission, NativePresentation, SceneDeclined }
 
     internal static async Task<bool> WaitForSceneAndPresentationAsync(
-        Func<CancellationToken, Task> submitScene, Func<bool> presented, Func<bool> current,
+        Func<CancellationToken, Task<bool>> submitScene, Func<bool> presented, Func<bool> current,
         CancellationToken token, Action<Stage>? timedOut = null, TimeSpan? timeout = null)
     {
         var limit = timeout ?? TimeSpan.FromSeconds(2);
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
         budget.CancelAfter(limit);
         var clock = Stopwatch.StartNew();
+        bool submitted;
         try
         {
-            await submitScene(budget.Token).WaitAsync(budget.Token).ConfigureAwait(false);
+            submitted = await submitScene(budget.Token).WaitAsync(budget.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (budget.IsCancellationRequested && !token.IsCancellationRequested)
         {
@@ -25,6 +26,14 @@ internal static class PresentationWaiter
             return false;
         }
         if (!current()) return false;
+        // Nothing reached the compositor, so its revision is still the seek
+        // barrier's zero and it will refuse to compose. Waiting out the budget
+        // for a presentation that cannot happen only delays the next seek.
+        if (!submitted)
+        {
+            timedOut?.Invoke(Stage.SceneDeclined);
+            return false;
+        }
 
         var remaining = limit - clock.Elapsed;
         if (remaining <= TimeSpan.Zero)

@@ -98,7 +98,7 @@ public sealed class PlaybackSession : IDisposable
     private long _overlayClockGeneration;
     private Task? _previewWorker;
     private bool _previewAudioPaused;
-    internal Func<TimeSpan, long, CancellationToken, Task>? PublishSceneAsync { get; set; }
+    internal Func<TimeSpan, long, CancellationToken, Task<bool>>? PublishSceneAsync { get; set; }
     internal Func<CancellationToken, Task>? NextRenderAsync { get; set; }
     internal bool PreviewWorkerRunning { get { lock (_previewLock) return _previewWorker is not null; } }
 
@@ -107,11 +107,11 @@ public sealed class PlaybackSession : IDisposable
         var output = Composition;
         if (output is null || !current()) return false;
         FreezeOverlayClock(target);
-        Func<CancellationToken, Task> scene;
+        Func<CancellationToken, Task<bool>> scene;
         if (PublishSceneAsync is { } publish)
             scene = sceneToken => publish(target, generation, sceneToken);
         else
-            scene = _ => { output.Submit([], [], target, _overlayClock.EffectiveRate); return Task.CompletedTask; };
+            scene = _ => { output.Submit([], [], target, _overlayClock.EffectiveRate); return Task.FromResult(true); };
         var valid = () => !_disposed && ReferenceEquals(Composition, output) && current();
         return await PresentationWaiter.WaitForSceneAndPresentationAsync(
             scene,
@@ -126,7 +126,7 @@ public sealed class PlaybackSession : IDisposable
         var native = output.TryReadStatus(out var status)
             ? $"nativeGeneration={status.Generation}, nativeRevision={status.Revision}, decoded={status.DecodedPicture}, presented={status.PresentedPicture}"
             : "nativeGeneration=unavailable, nativeRevision=unavailable, decoded=unavailable, presented=unavailable";
-        AppLog.Error($"Editor seek presentation timeout: stage={stage}, target={target.TotalSeconds:0.###}s, seekGeneration={generation}, {native}, vlcState={VideoPlayer.State}, vlcTime={VideoPlayer.Time / 1000d:0.###}s.");
+        AppLog.Error($"Editor seek presentation stall: stage={stage}, target={target.TotalSeconds:0.###}s, seekGeneration={generation}, {native}, vlcState={VideoPlayer.State}, vlcTime={VideoPlayer.Time / 1000d:0.###}s.");
     }
 
     private readonly List<Task> _seekTasks = new();
@@ -1294,6 +1294,12 @@ public sealed class PlaybackSession : IDisposable
         private TimeSpan _audioAnchor;
         public bool CanReusePresentedFrame(TimeSpan target) => reusePresentedFrame && IsPaused &&
             Math.Abs((Position - target).TotalMilliseconds) <= 150 && session.Composition?.HasPresentedPicture == true;
+        // Deliberately far tighter than CanReusePresentedFrame's startup
+        // tolerance: this must mean the player is parked on exactly the frame
+        // being asked for, not merely near it.
+        public bool IsParkedOnFrame(TimeSpan target) => IsPaused &&
+            Math.Abs((Position - target).TotalMilliseconds) <= 20 && session.Composition?.HasPresentedPicture == true;
+        public void FreezeOnFrame(TimeSpan target) { lock (session._transportLock) session.FreezeOverlayClock(target); }
         public Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token) => session.PresentSeekAsync(target, generation, current, token);
 
         public bool IsPaused => session.VideoPlayer.State == VLCState.Paused;

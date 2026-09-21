@@ -217,6 +217,40 @@ int main() {
     require(cdvo_query(token, &status) != 0 &&
                 status.presented_picture == status.decoded_picture,
             "delayed scene presents current landing picture");
+    // A seek onto the frame the player is already parked on decodes nothing -
+    // VLC never delivers a picture for the new generation, so the barrier must
+    // adopt the retained landing frame instead of waiting for one forever.
+    auto parkedIdentity = sample(64, 32)[0];
+    auto decodedBeforeParkedSeek = status.decoded_picture;
+    state.generation++;
+    state.revision = 0;
+    require(cdvo_submit(token, &state) != 0, "parked seek barrier");
+    state.revision = 1;
+    require(cdvo_submit(token, &state) != 0, "commit parked seek scene");
+    require(cdvo_needs_redraw(renderer) != 0, "parked seek requests redraw");
+    require(cdvo_compose(renderer, rtv.Get(), &viewport, 1) != 0,
+            "present retained frame for parked seek");
+    cdvo_presented(renderer);
+    require(cdvo_query(token, &status) != 0 &&
+                status.generation == state.generation &&
+                status.presented_picture != 0 &&
+                status.decoded_picture == decodedBeforeParkedSeek,
+            "parked seek presents its retained frame without a new decode");
+    require(std::abs(sample(64, 32)[0] - parkedIdentity) < .001f,
+            "parked seek keeps the landing frame identity");
+    // A barrier that moves the position must NOT adopt the stale frame; that
+    // generation waits for the picture the decoder is about to deliver.
+    state.generation++;
+    state.revision = 0;
+    state.media_seconds += 5;
+    require(cdvo_submit(token, &state) != 0, "moved seek barrier");
+    state.revision = 1;
+    require(cdvo_submit(token, &state) != 0, "commit moved seek scene");
+    require(cdvo_needs_redraw(renderer) == 0,
+            "moved seek waits for its own picture");
+    require(cdvo_compose(renderer, rtv.Get(), &viewport, 1) == 0,
+            "moved seek must not compose the stale frame");
+    state.media_seconds -= 5;
     // Recommit the unchanged art after transport's revision-zero barrier. It
     // must reuse its GPU resource; a seek must not require a duplicate upload.
     state.revision = 1;

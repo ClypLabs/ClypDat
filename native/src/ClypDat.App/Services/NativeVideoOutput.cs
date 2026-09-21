@@ -56,7 +56,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
     private static readonly delegate* unmanaged[Cdecl]<ulong, void> Release = (delegate* unmanaged[Cdecl]<ulong, void>)Export("cdvo_release");
     [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl)] private static extern long libvlc_clock();
     internal static long ClockMicroseconds => libvlc_clock();
-    internal void UpdateScene(Action update) { lock (_gate) { if (_token != 0) update(); } }
+    internal bool UpdateScene(Action update) { lock (_gate) { if (_token == 0) return false; update(); return true; } }
 
     private static nint LoadModule()
     {

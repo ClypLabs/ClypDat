@@ -261,24 +261,29 @@ public sealed partial class MainWindow
         catch (InvalidOperationException) { HideSpotifyPreview(); }
     }
 
-    private void UpdateNativeComposition(MainWindowViewModel model, TimeSpan time,
+    /// <summary>Publishes the editor scene to the GPU compositor. Returns false
+    /// when nothing was submitted - a seek waiting on this scene must give up
+    /// immediately rather than poll for a presentation the compositor cannot
+    /// produce while its revision is still the seek barrier's zero.</summary>
+    private bool UpdateNativeComposition(MainWindowViewModel model, TimeSpan time,
         OverlaySceneControl? captured = null, SpotifyCardPreview? spotify = null,
         double width = 0, double height = 0)
     {
         var session = _playback;
-        if (session?.Composition is not { } output || !string.Equals(session.LoadedPath, model.SelectedVideoPath, StringComparison.OrdinalIgnoreCase)) return;
+        if (session?.Composition is not { } output || !string.Equals(session.LoadedPath, model.SelectedVideoPath, StringComparison.OrdinalIgnoreCase)) return false;
         var anchorMicroseconds = NativeVideoOutput.ClockMicroseconds;
         if (!session.IsSeeking && session.TryGetOverlayPosition(out var sampled)) time = sampled;
-        try { output.UpdateScene(() => _compositionScene.Update(output, model, time, session.EffectiveOverlayRate, anchorMicroseconds, captured, spotify, width, height)); }
+        try { return output.UpdateScene(() => _compositionScene.Update(output, model, time, session.EffectiveOverlayRate, anchorMicroseconds, captured, spotify, width, height)); }
         catch (Exception error)
         {
-            if (session.Composition != output) return;
+            if (session.Composition != output) return false;
             session.Pause();
             model.IsPlaying = false;
-            if (_compositionErrorOutput == output) return;
+            if (_compositionErrorOutput == output) return false;
             _compositionErrorOutput = output;
             AppLog.Error("Editor GPU composition failed", error);
             _ = ShowMessageAsync("Video preview paused", error.Message);
+            return false;
         }
     }
 

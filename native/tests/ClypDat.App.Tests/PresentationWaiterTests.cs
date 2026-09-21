@@ -12,7 +12,7 @@ public sealed class PresentationWaiterTests
         PresentationWaiter.Stage? timedOut = null;
 
         var result = await PresentationWaiter.WaitForSceneAndPresentationAsync(
-            _ => scene.Task,
+            async _ => { await scene.Task; return true; },
             presented: () => false,
             current: () => true,
             CancellationToken.None,
@@ -29,7 +29,7 @@ public sealed class PresentationWaiterTests
         PresentationWaiter.Stage? timedOut = null;
 
         var result = await PresentationWaiter.WaitForSceneAndPresentationAsync(
-            async token => await Task.Delay(5, token),
+            async token => { await Task.Delay(5, token); return true; },
             presented: () => false,
             current: () => true,
             CancellationToken.None,
@@ -38,6 +38,25 @@ public sealed class PresentationWaiterTests
 
         Assert.False(result);
         Assert.Equal(PresentationWaiter.Stage.NativePresentation, timedOut);
+    }
+
+    [Fact]
+    public async Task DeclinedSceneFailsImmediatelyWithoutSpendingTheBudget()
+    {
+        PresentationWaiter.Stage? reported = null;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = await PresentationWaiter.WaitForSceneAndPresentationAsync(
+            _ => Task.FromResult(false),
+            presented: () => false,
+            current: () => true,
+            CancellationToken.None,
+            stage => reported = stage,
+            TimeSpan.FromSeconds(2));
+
+        Assert.False(result);
+        Assert.Equal(PresentationWaiter.Stage.SceneDeclined, reported);
+        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(500), $"declined scene waited {clock.ElapsedMilliseconds}ms.");
     }
 
     [Fact]
@@ -52,6 +71,7 @@ public sealed class PresentationWaiterTests
                 await Task.Delay(5, token);
                 current = false;
                 presented = true;
+                return true;
             },
             () => presented,
             () => current,
