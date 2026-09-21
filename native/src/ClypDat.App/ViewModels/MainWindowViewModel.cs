@@ -7872,7 +7872,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             DiscordRichPresenceService.SetPresence(DiscordPresence.None);
             _discordActivityKind = string.Empty;
-            _discordGameProfileUrl = null;
             return;
         }
 
@@ -7896,9 +7895,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (Settings.DiscordRichPresenceOnlyWhenGameActive
             && string.IsNullOrWhiteSpace(activityName))
         {
+            // The resolved image and profile link stay cached together for
+            // _discordGameImageFor. Clearing only the link here meant coming
+            // back to the same game re-used the cached logo with no link, so
+            // clicking it in Discord went nowhere.
             DiscordRichPresenceService.SetPresence(DiscordPresence.None);
             _discordActivityKind = string.Empty;
-            _discordGameProfileUrl = null;
             return;
         }
 
