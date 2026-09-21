@@ -5,13 +5,20 @@ namespace ClypDat.App.Services;
 // Native presentation status advances independently of VLC's coarse clock events.
 internal static class PresentationWaiter
 {
-    internal enum Stage { SceneSubmission, NativePresentation, SceneDeclined }
+    internal enum Stage { SceneSubmission, NativePresentation, SceneDeclined, AdoptedRetained }
+
+    // A player parked on the requested position decodes nothing, so a seek
+    // barrier there never gets a picture of its own. After Grace with no new
+    // decode while Stalled() holds, Adopt() hands the retained picture to the
+    // barrier instead of letting the wait run out on a frame already on screen.
+    internal sealed record ParkedRecovery(Func<ulong> Decoded, Func<bool> Stalled, Func<bool> Adopt, TimeSpan Grace);
 
     internal static async Task<bool> WaitForSceneAndPresentationAsync(
         Func<CancellationToken, Task<bool>> submitScene, Func<bool> presented, Func<bool> current,
-        CancellationToken token, Action<Stage>? timedOut = null, TimeSpan? timeout = null)
+        CancellationToken token, Action<Stage>? timedOut = null, TimeSpan? timeout = null, ParkedRecovery? parked = null)
     {
         var limit = timeout ?? TimeSpan.FromSeconds(2);
+        var decodedAtStart = parked?.Decoded() ?? 0;
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(token);
         budget.CancelAfter(limit);
         var clock = Stopwatch.StartNew();
@@ -43,7 +50,23 @@ internal static class PresentationWaiter
         }
         try
         {
-            var result = await WaitAsync(presented, current, budget.Token, remaining).ConfigureAwait(false);
+            bool result;
+            if (parked is not null && parked.Grace < remaining)
+            {
+                result = await WaitAsync(presented, current, budget.Token, parked.Grace).ConfigureAwait(false);
+                if (!result && current())
+                {
+                    if (parked.Decoded() == decodedAtStart && parked.Stalled() && parked.Adopt())
+                        timedOut?.Invoke(Stage.AdoptedRetained);
+                    var rest = limit - clock.Elapsed;
+                    if (rest > TimeSpan.Zero)
+                        result = await WaitAsync(presented, current, budget.Token, rest).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                result = await WaitAsync(presented, current, budget.Token, remaining).ConfigureAwait(false);
+            }
             if (!result && !token.IsCancellationRequested && current() && !presented())
                 timedOut?.Invoke(Stage.NativePresentation);
             return result;

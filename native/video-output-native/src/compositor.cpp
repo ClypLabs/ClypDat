@@ -34,12 +34,11 @@ struct Context {
   cdvo_status status{sizeof(cdvo_status), CDVO_ABI};
   bool closed = false, dirty = true;
   uint64_t image_serial = 0;
-  // Media time of the picture the renderer currently retains, and the seek
-  // barrier that may adopt it. VLC decodes nothing when it is already parked on
-  // the position being seeked to, so without this the new generation would wait
-  // forever for a picture that is never coming - see cdvo_submit.
-  double retained_media_seconds = 0;
-  bool retained_media_valid = false;
+  // Seek barrier that should adopt the retained picture. VLC decodes nothing
+  // when it is already parked on the position being seeked to, so without this
+  // the new generation waits forever for a picture that is never coming. Only
+  // the managed side can tell that apart from a slow decode - see
+  // cdvo_adopt_retained.
   uint64_t carry_generation = 0;
 };
 std::mutex registry_mutex;
@@ -130,7 +129,6 @@ struct Renderer {
            next_picture = 0;
   int64_t date = 0;
   int64_t pending_date = 0;
-  double composed_media_seconds = 0;
   bool valid = false, pending_valid = false, composed_pending = false;
   Renderer(std::shared_ptr<Context> c, ID3D11Device *d, ID3D11DeviceContext *i)
       : context(std::move(c)), device(d), immediate(i) {
@@ -267,11 +265,9 @@ void fail(const std::shared_ptr<Context> &c, const char *message) {
   c->status.failed = 1;
   strncpy_s(c->status.error, message, _TRUNCATE);
 }
-// Promotes the retained picture into the seek barrier's generation. Only ever
-// reached for a barrier that landed on the media time the retained texture was
-// decoded at, and only while no picture is on its way for that generation -
-// the decoded landing frame always wins when there is one. Caller holds the
-// context mutex.
+// Promotes the retained picture into the seek barrier's generation, but only
+// while no picture is on its way for that generation - the decoded landing
+// frame always wins when there is one. Caller holds the context mutex.
 void adopt_carry(Renderer &r) {
   auto &c = *r.context;
   if (!c.carry_generation)
@@ -349,20 +345,10 @@ int cdvo_submit(uint64_t token, const cdvo_state *s) {
     });
     c->images = std::move(images);
     c->pending_images.clear();
-    const auto barrier = s->revision == 0 &&
-                         s->generation > c->state.clock.generation;
+    if (s->generation != c->state.clock.generation)
+      c->carry_generation = 0;
     c->state = std::move(next);
     c->dirty = true;
-    // A seek onto the position the player is already parked on decodes nothing,
-    // so the retained texture IS this barrier's landing frame. Let the renderer
-    // adopt it; otherwise the new generation can never present anything and the
-    // managed waiter times out with the picture already on screen.
-    if (barrier && c->retained_media_valid &&
-        std::abs(c->retained_media_seconds - c->state.clock.media_seconds) <=
-            0.001)
-      c->carry_generation = c->state.clock.generation;
-    else if (barrier)
-      c->carry_generation = 0;
     return 1;
   } catch (...) {
     fail(c, "Composition state allocation failed. Pause and reopen the clip.");
@@ -394,6 +380,17 @@ int cdvo_update_artwork(uint64_t token, uint64_t generation, uint64_t id,
     fail(c, "Artwork allocation failed. Pause and reopen the clip.");
     return 0;
   }
+}
+int cdvo_adopt_retained(uint64_t token, uint64_t generation) {
+  auto c = lookup(token);
+  if (!c)
+    return 0;
+  std::lock_guard lock(c->mutex);
+  if (c->closed || c->status.failed || generation != c->state.clock.generation)
+    return 0;
+  c->carry_generation = generation;
+  c->dirty = true;
+  return 1;
 }
 int cdvo_request_redraw(uint64_t token) {
   auto c = lookup(token);
@@ -618,7 +615,6 @@ int cdvo_compose(void *renderer, ID3D11RenderTargetView *output,
         return 0;
       r.composed_revision = state.clock.revision;
       r.composed_pending = use_pending;
-      r.composed_media_seconds = state.clock.media_seconds;
       if (redraw) {
         r.context->status.redraws++;
         r.context->status.revision = state.clock.revision;
@@ -646,10 +642,6 @@ void cdvo_presented(void *renderer) {
   }
   r.revision = r.composed_revision;
   std::lock_guard lock(r.context->mutex);
-  if (r.composed_pending) {
-    r.context->retained_media_seconds = r.composed_media_seconds;
-    r.context->retained_media_valid = true;
-  }
   r.context->status.generation = r.generation;
   r.context->status.revision = r.revision;
   r.context->status.presented_picture = r.picture;

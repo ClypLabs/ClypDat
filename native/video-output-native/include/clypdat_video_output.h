@@ -43,6 +43,9 @@ CDVO_API int cdvo_update_artwork(uint64_t token, uint64_t generation,
                                  uint64_t id, uint32_t width, uint32_t height,
                                  uint32_t stride, const void *bgra);
 CDVO_API int cdvo_request_redraw(uint64_t token);
+// Lets a seek generation present the picture already retained when the player
+// will not decode a new one (it is parked on the requested position).
+CDVO_API int cdvo_adopt_retained(uint64_t token, uint64_t generation);
 CDVO_API int cdvo_query(uint64_t token, cdvo_status *status);
 CDVO_API void cdvo_release(uint64_t token);
 #ifdef __cplusplus

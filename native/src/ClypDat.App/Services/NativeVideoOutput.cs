@@ -54,6 +54,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
     private static readonly delegate* unmanaged[Cdecl]<ulong, ulong, ulong, uint, uint, uint, void*, int> Upload = (delegate* unmanaged[Cdecl]<ulong, ulong, ulong, uint, uint, uint, void*, int>)Export("cdvo_update_artwork");
     private static readonly delegate* unmanaged[Cdecl]<ulong, Status*, int> Query = (delegate* unmanaged[Cdecl]<ulong, Status*, int>)Export("cdvo_query");
     private static readonly delegate* unmanaged[Cdecl]<ulong, void> Release = (delegate* unmanaged[Cdecl]<ulong, void>)Export("cdvo_release");
+    private static readonly delegate* unmanaged[Cdecl]<ulong, ulong, int> Adopt = (delegate* unmanaged[Cdecl]<ulong, ulong, int>)Export("cdvo_adopt_retained");
     [DllImport("libvlc", CallingConvention = CallingConvention.Cdecl)] private static extern long libvlc_clock();
     internal static long ClockMicroseconds => libvlc_clock();
     internal bool UpdateScene(Action update) { lock (_gate) { if (_token == 0) return false; update(); return true; } }
@@ -161,6 +162,14 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
             status = snapshot;
             return available;
         }
+    }
+    /// <summary>Lets the current seek generation present the picture the
+    /// compositor already retains. Only for a player parked on the requested
+    /// position, which decodes nothing new; a decoded landing picture still
+    /// wins if one turns up.</summary>
+    internal bool AdoptRetainedPicture()
+    {
+        lock (_gate) return _token != 0 && Adopt(_token, _generation) != 0;
     }
     internal bool HasPresentedPicture
     {

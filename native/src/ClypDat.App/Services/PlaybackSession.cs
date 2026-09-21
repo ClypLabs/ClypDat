@@ -98,7 +98,10 @@ public sealed class PlaybackSession : IDisposable
     private long _overlayClockGeneration;
     private Task? _previewWorker;
     private bool _previewAudioPaused;
-    internal Func<TimeSpan, long, CancellationToken, Task<bool>>? PublishSceneAsync { get; set; }
+    // The currency predicate is the caller's own - a drag preview and a final
+    // seek are current by different rules, and a publish gated on the wrong one
+    // declined every preview scene mid-drag, leaving its barrier unpresentable.
+    internal Func<TimeSpan, Func<bool>, CancellationToken, Task<bool>>? PublishSceneAsync { get; set; }
     internal Func<CancellationToken, Task>? NextRenderAsync { get; set; }
     internal bool PreviewWorkerRunning { get { lock (_previewLock) return _previewWorker is not null; } }
 
@@ -108,17 +111,23 @@ public sealed class PlaybackSession : IDisposable
         if (output is null || !current()) return false;
         FreezeOverlayClock(target);
         Func<CancellationToken, Task<bool>> scene;
+        var valid = () => !_disposed && ReferenceEquals(Composition, output) && current();
         if (PublishSceneAsync is { } publish)
-            scene = sceneToken => publish(target, generation, sceneToken);
+            scene = sceneToken => publish(target, valid, sceneToken);
         else
             scene = _ => { output.Submit([], [], target, _overlayClock.EffectiveRate); return Task.FromResult(true); };
-        var valid = () => !_disposed && ReferenceEquals(Composition, output) && current();
+        var parked = new PresentationWaiter.ParkedRecovery(
+            () => output.TryReadStatus(out var status) ? status.DecodedPicture : 0,
+            () => VideoPlayer.State == VLCState.Paused && Math.Abs(VideoPlayer.Time - target.TotalMilliseconds) <= 20,
+            output.AdoptRetainedPicture,
+            TimeSpan.FromMilliseconds(300));
         return await PresentationWaiter.WaitForSceneAndPresentationAsync(
             scene,
             () => output.HasPresentedPicture,
             valid,
             token,
-            stage => LogPresentationTimeout(stage, target, generation, output)).ConfigureAwait(false);
+            stage => LogPresentationTimeout(stage, target, generation, output),
+            parked: parked).ConfigureAwait(false);
     }
 
     private void LogPresentationTimeout(PresentationWaiter.Stage stage, TimeSpan target, long generation, NativeVideoOutput output)
@@ -126,7 +135,9 @@ public sealed class PlaybackSession : IDisposable
         var native = output.TryReadStatus(out var status)
             ? $"nativeGeneration={status.Generation}, nativeRevision={status.Revision}, decoded={status.DecodedPicture}, presented={status.PresentedPicture}"
             : "nativeGeneration=unavailable, nativeRevision=unavailable, decoded=unavailable, presented=unavailable";
-        AppLog.Error($"Editor seek presentation stall: stage={stage}, target={target.TotalSeconds:0.###}s, seekGeneration={generation}, {native}, vlcState={VideoPlayer.State}, vlcTime={VideoPlayer.Time / 1000d:0.###}s.");
+        var line = $"Editor seek presentation {(stage == PresentationWaiter.Stage.AdoptedRetained ? "recovered" : "stall")}: stage={stage}, target={target.TotalSeconds:0.###}s, seekGeneration={generation}, {native}, vlcState={VideoPlayer.State}, vlcTime={VideoPlayer.Time / 1000d:0.###}s.";
+        if (stage == PresentationWaiter.Stage.AdoptedRetained) AppLog.Info(line);
+        else AppLog.Error(line);
     }
 
     private readonly List<Task> _seekTasks = new();
@@ -194,7 +205,6 @@ public sealed class PlaybackSession : IDisposable
     public bool IsPlaying => VideoPlayer.IsPlaying;
     public double PlaybackRate => _playbackRate;
     internal double EffectiveOverlayRate => _overlayClock.EffectiveRate;
-    internal bool IsSeekGenerationCurrent(long generation) => !_disposed && generation == Interlocked.Read(ref _seekVersion);
     internal bool TryGetOverlayPosition(out TimeSpan position) => _overlayClock.TryGetOverlayPosition(out position);
 
     private void ResetOverlayClock(TimeSpan position)

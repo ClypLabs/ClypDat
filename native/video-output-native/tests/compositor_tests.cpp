@@ -218,8 +218,9 @@ int main() {
                 status.presented_picture == status.decoded_picture,
             "delayed scene presents current landing picture");
     // A seek onto the frame the player is already parked on decodes nothing -
-    // VLC never delivers a picture for the new generation, so the barrier must
-    // adopt the retained landing frame instead of waiting for one forever.
+    // VLC never delivers a picture for the new generation. Without an explicit
+    // adopt the barrier must keep waiting (it cannot tell a slow decode from
+    // none); once the managed side adopts, the retained frame presents.
     auto parkedIdentity = sample(64, 32)[0];
     auto decodedBeforeParkedSeek = status.decoded_picture;
     state.generation++;
@@ -227,7 +228,13 @@ int main() {
     require(cdvo_submit(token, &state) != 0, "parked seek barrier");
     state.revision = 1;
     require(cdvo_submit(token, &state) != 0, "commit parked seek scene");
-    require(cdvo_needs_redraw(renderer) != 0, "parked seek requests redraw");
+    require(cdvo_needs_redraw(renderer) == 0,
+            "barrier without a picture waits for one");
+    require(cdvo_adopt_retained(token, state.generation - 1) == 0,
+            "adopt for an obsolete generation is refused");
+    require(cdvo_adopt_retained(token, state.generation) != 0,
+            "adopt retained picture");
+    require(cdvo_needs_redraw(renderer) != 0, "adopted seek requests redraw");
     require(cdvo_compose(renderer, rtv.Get(), &viewport, 1) != 0,
             "present retained frame for parked seek");
     cdvo_presented(renderer);
@@ -238,19 +245,32 @@ int main() {
             "parked seek presents its retained frame without a new decode");
     require(std::abs(sample(64, 32)[0] - parkedIdentity) < .001f,
             "parked seek keeps the landing frame identity");
-    // A barrier that moves the position must NOT adopt the stale frame; that
-    // generation waits for the picture the decoder is about to deliver.
+    // A decoded landing picture always beats the adopted one. Full-frame art
+    // would hide the video, so shrink it to a corner for this scene (dropping
+    // it would release the uploaded image the next check reuses).
+    art.bounds = {0, 0, .01f, .01f};
     state.generation++;
     state.revision = 0;
-    state.media_seconds += 5;
-    require(cdvo_submit(token, &state) != 0, "moved seek barrier");
+    require(cdvo_submit(token, &state) != 0, "decoding seek barrier");
+    auto decodedLanding = cdvo_begin_picture(renderer, width, height, 11000000);
+    require(decodedLanding != nullptr, "decode landing picture");
+    ++frames;
+    const float landingColor[4] = {0, 1, 0, 1};
+    immediate->ClearRenderTargetView(decodedLanding, landingColor);
     state.revision = 1;
-    require(cdvo_submit(token, &state) != 0, "commit moved seek scene");
-    require(cdvo_needs_redraw(renderer) == 0,
-            "moved seek waits for its own picture");
-    require(cdvo_compose(renderer, rtv.Get(), &viewport, 1) == 0,
-            "moved seek must not compose the stale frame");
-    state.media_seconds -= 5;
+    require(cdvo_submit(token, &state) != 0, "commit decoding seek scene");
+    require(cdvo_adopt_retained(token, state.generation) != 0,
+            "late adopt accepted");
+    require(cdvo_compose(renderer, rtv.Get(), &viewport, 1) != 0,
+            "present decoded landing picture");
+    cdvo_presented(renderer);
+    auto landingPixel = sample(64, 32);
+    require(landingPixel[1] > .99f && landingPixel[0] < .01f,
+            "decoded landing picture wins over adopted retained frame");
+    require(cdvo_query(token, &status) != 0 &&
+                status.presented_picture == status.decoded_picture,
+            "decoded landing picture reached presentation");
+    art.bounds = {0, 0, 1, 1};
     // Recommit the unchanged art after transport's revision-zero barrier. It
     // must reuse its GPU resource; a seek must not require a duplicate upload.
     state.revision = 1;

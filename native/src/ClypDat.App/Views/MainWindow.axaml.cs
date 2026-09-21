@@ -5156,9 +5156,9 @@ public sealed partial class MainWindow : Window
         _spotifyPreviewDirty = true;
         warmup.MarkPlayerAttached();
 
-        session.PublishSceneAsync = (position, generation, token) =>
+        session.PublishSceneAsync = (position, current, token) =>
         {
-            if (token.IsCancellationRequested || !session.IsSeekGenerationCurrent(generation)) return Task.FromResult(false);
+            if (token.IsCancellationRequested || !current()) return Task.FromResult(false);
             if (session.Composition is not { } output) return Task.FromResult(false);
             output.Submit([], [], position, session.EffectiveOverlayRate);
             return Task.FromResult(true);
@@ -8737,11 +8737,11 @@ public sealed partial class MainWindow : Window
             playback.SetMasterVolume(openingVolume);
             _playback = playback;
             var openingComposition = playback.Composition;
-            playback.PublishSceneAsync = async (position, generation, token) =>
+            playback.PublishSceneAsync = async (position, current, token) =>
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (token.IsCancellationRequested || cancellationToken.IsCancellationRequested ||
-                        !playback.IsSeekGenerationCurrent(generation) || _playback != playback || playback.Composition != openingComposition) return false;
+                        !current() || _playback != playback || playback.Composition != openingComposition) return false;
                     return UpdateNativeComposition(openingViewModel, position);
                 });
             playback.NextRenderAsync = async token =>
@@ -10321,6 +10321,24 @@ public sealed partial class MainWindow : Window
         UpdateRecordingPausedOverlay(ViewModel.ShowRecordingPausedBadge);
     }
 
+    // When the UI started believing in playback that LibVLC has not delivered.
+    private long _playbackMismatchSince;
+
+    private bool PlaybackStateMismatched()
+    {
+        var state = _playback?.VideoPlayer.State;
+        if (state is not (VLCState.Paused or VLCState.Stopped))
+        {
+            _playbackMismatchSince = 0;
+            return false;
+        }
+        var now = Stopwatch.GetTimestamp();
+        if (_playbackMismatchSince == 0) _playbackMismatchSince = now;
+        if (Stopwatch.GetElapsedTime(_playbackMismatchSince, now) < TimeSpan.FromMilliseconds(500)) return false;
+        _playbackMismatchSince = 0;
+        return true;
+    }
+
     private void SyncPlaybackPosition()
     {
         if (ViewModel is null || _playback is null) return;
@@ -10339,6 +10357,16 @@ public sealed partial class MainWindow : Window
         if (_playback.Duration > TimeSpan.Zero && IsPlausibleDuration(_playback.Duration, ViewModel.Duration))
         {
             ViewModel.SetDuration(_playback.Duration);
+        }
+        if (!ViewModel.IsPlaying) _playbackMismatchSince = 0;
+        else if (PlaybackStateMismatched())
+        {
+            // The button must never claim playback that is not happening, and
+            // the paused branch below then keeps the playhead on the real frame.
+            AppLog.Info($"Editor playback state mismatch: ui=playing, vlc={_playback.VideoPlayer.State}, position={_playback.Position.TotalSeconds:0.###}s; showing paused.");
+            _editorSeekResumeIntent = false;
+            ViewModel.IsPlaying = false;
+            _playbackTimer.Stop();
         }
         if (ViewModel.IsPlaying)
         {

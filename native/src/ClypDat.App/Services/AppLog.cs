@@ -162,6 +162,32 @@ public static class AppLog
         }
     }
 
+    // FileMode.Append only seeks to the end once, at open; every later write
+    // lands at this handle's own offset. A second ClypDat process writing the
+    // same day's log (publish restart, single-instance handoff) then overwrote
+    // this one's lines, which erased the very seek traces needed to diagnose
+    // editor stalls. A handle holding FILE_APPEND_DATA without FILE_WRITE_DATA
+    // makes Windows place every write at the current end of file, atomically.
+    // Shared read/write so tailing the log (or the log-dump export) never makes
+    // a write fail.
+    internal static FileStream OpenAppendOnly(string path)
+    {
+        const uint FileAppendData = 0x0004, Synchronize = 0x00100000;
+        const uint ShareRead = 0x1, ShareWrite = 0x2, OpenAlways = 4, Normal = 0x80;
+        var handle = CreateFileW(path, FileAppendData | Synchronize, ShareRead | ShareWrite, 0, OpenAlways, Normal, 0);
+        if (handle.IsInvalid)
+        {
+            var error = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
+            handle.Dispose();
+            throw new IOException($"Could not open log file for append (error {error}).");
+        }
+        return new FileStream(handle, FileAccess.Write, 64 * 1024);
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(
+        string name, uint access, uint share, nint security, uint creation, uint flags, nint template);
+
     private static void WriterLoop()
     {
         var writers = new Dictionary<string, StreamWriter>(StringComparer.OrdinalIgnoreCase);
@@ -188,11 +214,7 @@ public static class AppLog
                     if (!writers.TryGetValue(pending.Path, out var writer))
                     {
                         Directory.CreateDirectory(LogFolder);
-                        // FileShare.ReadWrite so tailing the log in another
-                        // program (or the app's own log-dump export) never
-                        // makes a write fail.
-                        var stream = new FileStream(
-                            pending.Path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 64 * 1024);
+                        var stream = OpenAppendOnly(pending.Path);
                         writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = false };
                         writers[pending.Path] = writer;
                     }
