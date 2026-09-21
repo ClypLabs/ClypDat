@@ -88,7 +88,13 @@ public sealed partial class OverwatchDetector
         if (_playOfTheGame.ObservePresence(highlight is not null || PlayOfTheGamePhrases.Any(phrase => Contains(frame.LeftColumnText, phrase))))
             events.Add(Create("play-of-the-game", "Play of the Game", frame.Timestamp, highlight?.Score ?? 0.97));
 
-        if (highlight is not null || IsSpectating(frame.LeftColumnText))
+        // The replay is judged on its own, whether or not Play of the Game is
+        // an enabled auto-clip event - that toggle only decides if the POTG
+        // itself is saved, never whether the featured player's streaks count
+        // as the local player's. Held for the latch's reset window too, so one
+        // frame where the bar is missed (a flash, a cut) cannot let a streak
+        // through mid-replay.
+        if (highlight is not null || _playOfTheGame.IsLatched || IsSpectating(frame.LeftColumnText))
         {
             // Keep the latches fed so a streak that was on screen when the
             // replay started cannot fire the moment it ends.

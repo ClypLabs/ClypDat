@@ -32,6 +32,9 @@ internal sealed class PhraseLatch
         _resetFrames = resetFrames;
     }
 
+    /// <summary>True from confirmation until the phrase has been gone for the reset window.</summary>
+    public bool IsLatched => _latched;
+
     public bool Observe(string? text) =>
         ObservePresence(text is not null && _phrases.Any(phrase => text.Contains(phrase, StringComparison.OrdinalIgnoreCase)));
 

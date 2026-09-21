@@ -183,6 +183,53 @@ public sealed class GrayTemplateMatcher
         return best;
     }
 
+    /// <summary>
+    /// Best score for a fixed-size window slid across a search area in both
+    /// directions. High-pass correlation of thin strokes falls apart after a
+    /// shift of a few pixels, so a banner drawn a little off its measured spot
+    /// (Overwatch's Play of the Game bar lands ~7px higher in some matches)
+    /// scored 0.19 against a 0.22 threshold while plainly on screen. A coarse
+    /// pass every <paramref name="stride"/> pixels, then a one-pixel refine
+    /// around the best, keeps that to a couple of hundred correlations.
+    /// </summary>
+    public double ScoreSearch(GrayDetectorImage search, int windowWidth, int windowHeight, int stride = 3)
+    {
+        windowWidth = Math.Min(windowWidth, search.Width);
+        windowHeight = Math.Min(windowHeight, search.Height);
+        if (windowWidth <= 0 || windowHeight <= 0) return 0;
+        var travelX = search.Width - windowWidth;
+        var travelY = search.Height - windowHeight;
+        stride = Math.Max(1, stride);
+
+        double ScoreAt(int x, int y)
+        {
+            var window = new byte[windowWidth * windowHeight];
+            for (var row = 0; row < windowHeight; row++)
+                Array.Copy(search.Pixels, (y + row) * search.Width + x, window, row * windowWidth, windowWidth);
+            return Score(new GrayDetectorImage(windowWidth, windowHeight, window));
+        }
+
+        var best = double.MinValue;
+        var bestX = 0;
+        var bestY = 0;
+        for (var y = 0; y <= travelY; y += stride)
+            for (var x = 0; x <= travelX; x += stride)
+            {
+                var score = ScoreAt(x, y);
+                if (score > best) (best, bestX, bestY) = (score, x, y);
+            }
+
+        var reach = stride - 1;
+        for (var y = Math.Max(0, bestY - reach); y <= Math.Min(travelY, bestY + reach); y++)
+            for (var x = Math.Max(0, bestX - reach); x <= Math.Min(travelX, bestX + reach); x++)
+            {
+                if (x == bestX && y == bestY) continue;
+                var score = ScoreAt(x, y);
+                if (score > best) best = score;
+            }
+        return Math.Max(0, best);
+    }
+
     /// <summary>Nearest-neighbour is enough: these crops are already close in size.</summary>
     private static byte[] Resample(GrayDetectorImage image, int width, int height)
     {

@@ -155,6 +155,24 @@ public sealed class OverwatchDetectorTests
         Assert.DoesNotContain("elimination", events);
     }
 
+    // A tester's Quintuple Kill clip was the enemy Soldier's Play of the Game:
+    // the bar is missed on the odd frame (a muzzle flash, a camera cut), and a
+    // streak banner on exactly that frame must still belong to the replay.
+    [Fact]
+    public void AStreakOnAFrameWhereTheBarWasMissedStillBelongsToTheReplay()
+    {
+        var detector = new OverwatchDetector();
+
+        var highlight = Banner("play-of-the-game", "Play of the Game");
+        var quintuple = Banner("quintuple-kill", "Quintuple Kill");
+        Observe(detector, Frame(1, banners: highlight));
+        Assert.Contains("play-of-the-game", Observe(detector, Frame(2, banners: highlight)));
+
+        Assert.Empty(Observe(detector, Frame(3, banners: quintuple)));
+        Assert.Empty(Observe(detector, Frame(4, banners: quintuple)));
+        Assert.Empty(Observe(detector, Frame(5, banners: [highlight, quintuple])));
+    }
+
     // The two wordings are one highlight, not two: the intro card gives way to
     // the replay banner, and that must not re-fire the event.
     [Fact]

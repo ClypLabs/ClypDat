@@ -44,10 +44,7 @@ public sealed class TemplateMatchProbeTests
             {
                 var frame = ToFrame(file, regions);
                 var scored = templates
-                    .Select(template => (template.EventId, Score: template.Matcher.ScoreBest(
-                        GrayTemplateMatcher.Crop(
-                            template.Slot == 0 ? frame.First : template.Slot == 1 ? frame.Second : frame.Third,
-                            template.SlotRegion))))
+                    .Select(template => (template.EventId, Score: DetectorTemplates.Score(template, frame)))
                     .OrderByDescending(item => item.Score)
                     .Take(3);
                 report.Add($"{Path.GetFileName(file),-28} {string.Join("  ", scored.Select(item => $"{item.EventId}={item.Score:F3}"))}");
@@ -98,6 +95,10 @@ public sealed class TemplateMatchProbeTests
     // matched rather than read because OCR returns "PIWOfWfCßMf" for it.
     [InlineData("ow-potg-game.png", "play-of-the-game")]
     [InlineData("ow-potg-match.png", "play-of-the-game")]
+    // The bar drawn ~7px higher than the frames above, as the tester's
+    // Soldier: 76 replay had it. Pinned to its measured spot it scored 0.19
+    // against a 0.22 threshold, so the replay's streaks were saved as theirs.
+    [InlineData("ow-potg-shifted.png", "play-of-the-game")]
     public void TheRightBannerWinsOnAKnownFrame(string file, string expected)
     {
         var path = Path.Combine(FixtureRoot, file);
