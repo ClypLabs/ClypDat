@@ -70,6 +70,17 @@ public sealed partial class MainWindow
                 ViewModel?.SaveSettings();
                 HideToTray();
             }
+            // Dialogs (export/share progress, confirms, the scrim behind them)
+            // are hidden, not closed: closing one can cancel the very work the
+            // quit is waiting on. They close themselves when that work ends.
+            if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime)
+            {
+                foreach (var window in lifetime.Windows.ToArray())
+                {
+                    if (window is MainWindow or ClosingSafelyWindow || !window.IsVisible) continue;
+                    window.Hide();
+                }
+            }
 
             if (ShutdownGuard.IsBusy)
             {

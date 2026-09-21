@@ -99,6 +99,19 @@ public sealed partial class App : Application
             // Windows sign-out/shutdown: held behind Closing Safely while work
             // is in flight (MainWindow.Quit.cs).
             desktop.ShutdownRequested += _mainWindow.OnShutdownRequested;
+            // Alt+F4 (or End task) on any other ClypDat window - export and
+            // share progress, confirms, settings dialogs - is an app quit too,
+            // not a way to close that dialog and drop the work behind it.
+            Window.WindowOpenedEvent.AddClassHandler(typeof(Window), (sender, _) =>
+            {
+                if (sender is not Window window || window is MainWindow or ClosingSafelyWindow) return;
+                window.Closing += (_, e) =>
+                {
+                    if (_mainWindow is not { } main || main.AllowRealClose || e.IsProgrammatic || e.CloseReason != WindowCloseReason.WindowClosing) return;
+                    e.Cancel = true;
+                    _ = main.QuitAsync("dialog-close");
+                };
+            });
             // Previously disposed by tray Quit only; every quit path ends here.
             desktop.Exit += (_, _) => _trayIcon?.Dispose();
             if (WindowsPlatformProfile.IsServer())

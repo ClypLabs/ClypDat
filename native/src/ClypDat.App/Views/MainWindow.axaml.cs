@@ -8011,7 +8011,9 @@ public sealed partial class MainWindow : Window
             downloadCts?.Cancel();
             window.Close();
         };
-        window.Closing += (_, _) => downloadCts?.Cancel();
+        // Closed, not Closing: Alt+F4 here is turned into an app quit and the
+        // close is cancelled, which must not abort a download in progress.
+        window.Closed += (_, _) => downloadCts?.Cancel();
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(titleLeft);
         titleBar.Children.Add(closeButton);
