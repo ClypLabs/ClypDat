@@ -365,7 +365,7 @@ internal static class DiscordRichPresenceService
                 {
                     using var server = new WindowsIdentity(token);
                     using var current = WindowsIdentity.GetCurrent();
-                    return server.User is not null && server.User.Equals(current.User);
+                    return server.User is { } serverSid && current.User is { } currentSid && serverSid.Equals(currentSid);
                 }
                 finally
                 {

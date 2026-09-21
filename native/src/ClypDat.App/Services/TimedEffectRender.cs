@@ -100,6 +100,6 @@ public sealed class TimedEffectRender : IDisposable
         using (var context = bitmap.CreateDrawingContext())
             TimedEffectPainter.DrawText(context, e, new Rect(0, 0, bounds.Width, bounds.Height), frameHeight);
         using var file = File.Create(path);
-        bitmap.Save(file);
+        bitmap.Save(file, PngBitmapEncoderOptions.Default);
     }
 }

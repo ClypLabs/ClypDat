@@ -228,7 +228,7 @@ public sealed class TimedEffectEditor : StackPanel
 
     private void BuildTextFields()
     {
-        var caption = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 56, MaxLength = TimedEffectState.MaximumCaptionLength, Watermark = "Caption" };
+        var caption = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 56, MaxLength = TimedEffectState.MaximumCaptionLength, PlaceholderText = "Caption" };
         caption.TextChanged += (_, _) => Live(x => x with { Text = caption.Text ?? "" });
         _caption = caption;
         _sync.Add(() => { if (!caption.IsFocused && caption.Text != Selected?.Text) caption.Text = Selected?.Text; });
