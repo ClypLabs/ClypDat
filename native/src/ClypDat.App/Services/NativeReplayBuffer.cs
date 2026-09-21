@@ -2223,11 +2223,27 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (stopwatch.Elapsed - lastTargetRefresh >= TimeSpan.FromSeconds(1))
                 {
                     lastTargetRefresh = stopwatch.Elapsed;
+                    var refreshedMonitor = ResolveTargetMonitor(targetHandle, config);
+                    var refreshedProfile = HdrCaptureCompatibility.GetDisplayProfile(device, refreshedMonitor);
+                    var sourceProfileChanged = refreshedMonitor != targetMonitor || refreshedProfile.IsHdr != hdrProfile.IsHdr;
+                    if (refreshedMonitor != targetMonitor || refreshedProfile != hdrProfile)
+                    {
+                        targetMonitor = refreshedMonitor;
+                        hdrProfile = refreshedProfile;
+                        var refreshedConversionRequired = config.ReplayHdrCompatibilityEnabled && hdrProfile.IsHdr;
+                        if (refreshedConversionRequired != hdrConversionRequired || refreshedConversionRequired)
+                        {
+                            hdrConverter?.Dispose();
+                            hdrConverter = null;
+                            hdrConversionFailures = 0;
+                        }
+                        hdrConversionRequired = refreshedConversionRequired;
+                    }
                     // Do not overwrite active/failed conversion health with the
                     // display probe. A new source/device starts a new session;
                     // this session keeps its last conversion outcome.
                     if (!hdrConversionRequired)
-                        hdrCompatibilityStatus = HdrCaptureCompatibility.Detect(device, ResolveTargetMonitor(targetHandle, config));
+                        hdrCompatibilityStatus = HdrCaptureCompatibility.Detect(device, refreshedMonitor);
                     var freshHandle = ResolveTargetWindow(_configProvider());
                     if (freshHandle != targetHandle)
                     {
@@ -2236,7 +2252,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                         activeGameFrameSource = null;
 
                         var freshMonitor = ResolveTargetMonitor(targetHandle, config);
-                        if (wgcCapture is not null || freshMonitor != targetMonitor || duplication is null)
+                        if (wgcCapture is not null || freshMonitor != targetMonitor || duplication is null || sourceProfileChanged)
                         {
                             targetMonitor = freshMonitor;
                             InvalidateDesktopInputViews();
