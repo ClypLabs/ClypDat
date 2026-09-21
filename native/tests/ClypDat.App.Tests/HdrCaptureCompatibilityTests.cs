@@ -61,6 +61,16 @@ public sealed class HdrCaptureCompatibilityTests
         Assert.Equal(64, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigModeInfo>());
         Assert.Equal(84, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigSourceName>());
         Assert.Equal(24, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigSdrWhiteLevel>());
+        Assert.Equal(32, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigAdvancedColorInfo>());
         Assert.Equal(20, (int)Marshal.OffsetOf<HdrCaptureCompatibility.DisplayConfigPathInfo>(nameof(HdrCaptureCompatibility.DisplayConfigPathInfo.TargetInfo)));
     }
+
+    [Theory]
+    [InlineData(0x3u, true)]
+    [InlineData(0x0u, false)]
+    [InlineData(0x1u, false)]
+    [InlineData(0x5u, false)]
+    [InlineData(0x7u, false)]
+    public void HdrFollowsAdvancedColourEnabledNotAutoColourManagement(uint value, bool expected) =>
+        Assert.Equal(expected, HdrCaptureCompatibility.IsHdrActive(value));
 }

@@ -5,13 +5,15 @@ using Vortice.DXGI;
 
 namespace ClypDat.App.Services;
 
-// Output6 is Windows' authoritative active-output colour-space report. Keep
-// this small and independent from capture so a display move/HDR toggle can be
-// sampled with the recorder's existing one-second target check.
+// DisplayConfig is the live source for HDR state and SDR white level: DXGI
+// caches output descriptions per factory, so Output6's colour space stays at
+// whatever it was when capture started. Keep this small and independent from
+// capture so a display move/HDR toggle can be sampled with the recorder's
+// existing one-second target check.
 internal static class HdrCaptureCompatibility
 {
-    private static nint _lastWhiteLevelFallbackMonitor;
-    private static int _lastLoggedWhiteLevel;
+    private static nint _lastFallbackMonitor;
+    private static string? _lastLoggedState;
     internal readonly record struct DisplayProfile(bool IsHdr, float SdrWhiteLevelNits, float PeakLuminanceNits)
     {
         public static DisplayProfile Unknown => new(false, 80, 1000);
@@ -19,6 +21,16 @@ internal static class HdrCaptureCompatibility
 
     public static DisplayProfile GetDisplayProfile(ID3D11Device device, nint monitor)
     {
+        var colourAvailable = TryGetDisplayConfigColour(monitor, out var detectedWhite, out var hdrEnabled);
+        var white = colourAvailable ? detectedWhite : 80f;
+        if (colourAvailable)
+        {
+            var state = $"{monitor}|{hdrEnabled}|{white:0}";
+            if (Interlocked.Exchange(ref _lastLoggedState, state) != state)
+                AppLog.Info($"Native capture: Windows HDR {(hdrEnabled ? "on" : "off")} (monitor 0x{monitor:x}), SDR white {white:0} nits.");
+        }
+        else if (Interlocked.Exchange(ref _lastFallbackMonitor, monitor) != monitor)
+            AppLog.Info("Native capture: DisplayConfig HDR state unavailable; using DXGI colour space and assuming 80-nit SDR white.");
         try
         {
             using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
@@ -32,25 +44,25 @@ internal static class HdrCaptureCompatibility
                     if (output.Description.Monitor != monitor) continue;
                     using var output6 = output.QueryInterface<IDXGIOutput6>();
                     var description = output6.Description1;
-                    var whiteAvailable = TryGetSdrWhiteLevel(monitor, out var detectedWhite);
-                    var white = whiteAvailable ? detectedWhite : 80f;
                     var peak = description.MaxLuminance <= 0 ? 1000f : description.MaxLuminance;
-                    if (!whiteAvailable && Interlocked.Exchange(ref _lastWhiteLevelFallbackMonitor, monitor) != monitor)
-                        AppLog.Info("Native capture: HDR SDR white level unavailable; assuming 80 nits.");
-                    if (whiteAvailable && Interlocked.Exchange(ref _lastLoggedWhiteLevel, (int)MathF.Round(white)) != (int)MathF.Round(white))
-                        AppLog.Info($"Native capture: HDR SDR white level {white:0} nits.");
                     if (description.MaxLuminance <= 0) AppLog.Info("Native capture: HDR peak luminance unavailable; assuming 1000 nits.");
-                    return new DisplayProfile(IsHdrColorSpace(description.ColorSpace), white, peak);
+                    return new DisplayProfile(colourAvailable ? hdrEnabled : IsHdrColorSpace(description.ColorSpace), white, peak);
                 }
             }
         }
         catch { }
-        return DisplayProfile.Unknown;
+        return colourAvailable ? new DisplayProfile(hdrEnabled, white, 1000) : DisplayProfile.Unknown;
     }
 
-    private static bool TryGetSdrWhiteLevel(nint monitor, out float nits)
+    // DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO bits: 0x1 supported, 0x2 enabled,
+    // 0x4 wideColorEnforced (SDR Auto Color Management, not HDR).
+    internal static bool IsHdrActive(uint advancedColorValue) =>
+        (advancedColorValue & 0x2) != 0 && (advancedColorValue & 0x4) == 0;
+
+    private static bool TryGetDisplayConfigColour(nint monitor, out float whiteNits, out bool hdrEnabled)
     {
-        nits = 80;
+        whiteNits = 80;
+        hdrEnabled = false;
         try
         {
             var monitorName = new MonitorInfoEx { DeviceName = string.Empty };
@@ -77,10 +89,14 @@ internal static class HdrCaptureCompatibility
             {
                 var source = new DisplayConfigSourceName { Header = Header(1, Marshal.SizeOf<DisplayConfigSourceName>(), paths[i].SourceInfo.AdapterId, paths[i].SourceInfo.Id), ViewGdiDeviceName = string.Empty };
                 if (DisplayConfigGetDeviceInfo(ref source) != 0 || !string.Equals(source.ViewGdiDeviceName, monitorName.DeviceName, StringComparison.OrdinalIgnoreCase)) continue;
-                var white = new DisplayConfigSdrWhiteLevel { Header = Header(11, Marshal.SizeOf<DisplayConfigSdrWhiteLevel>(), paths[i].TargetInfo.AdapterId, paths[i].TargetInfo.Id) };
+                var target = paths[i].TargetInfo;
+                var colour = new DisplayConfigAdvancedColorInfo { Header = Header(9, Marshal.SizeOf<DisplayConfigAdvancedColorInfo>(), target.AdapterId, target.Id) };
+                if (DisplayConfigGetDeviceInfo(ref colour) != 0) return false;
+                var white = new DisplayConfigSdrWhiteLevel { Header = Header(11, Marshal.SizeOf<DisplayConfigSdrWhiteLevel>(), target.AdapterId, target.Id) };
                 if (DisplayConfigGetDeviceInfo(ref white) != 0 || white.SdrWhiteLevel < 1) return false;
-                nits = 80f * white.SdrWhiteLevel / 1000f;
-                return nits > 0 && nits < 10000;
+                hdrEnabled = IsHdrActive(colour.Value);
+                whiteNits = 80f * white.SdrWhiteLevel / 1000f;
+                return whiteNits > 0 && whiteNits < 10000;
             }
         }
         catch { }
@@ -94,6 +110,7 @@ internal static class HdrCaptureCompatibility
     [DllImport("user32.dll", SetLastError = true)] private static extern int QueryDisplayConfig(uint flags, ref uint pathCount, [Out] DisplayConfigPathInfo[]? paths, ref uint modeCount, [Out] DisplayConfigModeInfo[]? modes, nint topologyId);
     [DllImport("user32.dll", SetLastError = true)] private static extern int DisplayConfigGetDeviceInfo(ref DisplayConfigSourceName requestPacket);
     [DllImport("user32.dll", SetLastError = true)] private static extern int DisplayConfigGetDeviceInfo(ref DisplayConfigSdrWhiteLevel requestPacket);
+    [DllImport("user32.dll", SetLastError = true)] private static extern int DisplayConfigGetDeviceInfo(ref DisplayConfigAdvancedColorInfo requestPacket);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool GetMonitorInfo(nint monitor, ref MonitorInfoEx info);
 
     // Layouts must match the Win32 DISPLAYCONFIG_* structs byte for byte;
@@ -109,6 +126,7 @@ internal static class HdrCaptureCompatibility
     [StructLayout(LayoutKind.Explicit, Size = 64)] internal struct DisplayConfigModeInfo { [FieldOffset(0)] public uint InfoType; [FieldOffset(4)] public uint Id; [FieldOffset(8)] public Luid AdapterId; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] internal struct DisplayConfigSourceName { public DisplayConfigDeviceInfoHeader Header; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string ViewGdiDeviceName; }
     [StructLayout(LayoutKind.Sequential)] internal struct DisplayConfigSdrWhiteLevel { public DisplayConfigDeviceInfoHeader Header; public uint SdrWhiteLevel; }
+    [StructLayout(LayoutKind.Sequential)] internal struct DisplayConfigAdvancedColorInfo { public DisplayConfigDeviceInfoHeader Header; public uint Value, ColorEncoding, BitsPerColorChannel; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct MonitorInfoEx { public uint Size; public Vortice.RawRect Monitor, Work; public uint Flags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName; }
 
     public static ReplayHdrCompatibilityStatus Detect(ID3D11Device device, nint monitor)
