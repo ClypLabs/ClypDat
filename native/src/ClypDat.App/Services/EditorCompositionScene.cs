@@ -21,7 +21,7 @@ internal sealed class EditorCompositionScene
     private Rect? _cameraBounds, _keyboardBounds, _spotifyBounds;
     private readonly Dictionary<Guid, (ulong Id, TimedVideoEffect Effect, int Width, int Height, int FrameHeight)> _texts = [];
 
-    internal void Update(NativeVideoOutput output, MainWindowViewModel model, TimeSpan time, long anchorMicroseconds,
+    internal void Update(NativeVideoOutput output, MainWindowViewModel model, TimeSpan time, double rate, long anchorMicroseconds,
         OverlaySceneControl? captured = null, SpotifyCardPreview? spotify = null, double displayWidth = 0, double displayHeight = 0)
     {
         if (_output != output)
@@ -110,7 +110,7 @@ internal sealed class EditorCompositionScene
         if (!model.HasCameraOverlayLayer || !model.CameraOverlayLayerVisible) { _cameraRevision = -1; _cameraBounds = null; }
         if (!model.HasPeripheralOverlayLayer || !model.PeripheralOverlayLayerVisible) { _keyboardKey = null; _keyboardBounds = null; }
         if (!model.Settings.SpotifyOverlayEnabled || !model.SpotifyOverlayLayerVisible) { _spotifyRevision = -1; _spotifyBounds = null; }
-        output.Submit(blurs, artwork.ToArray(), time, model.IsPlaying ? model.ClipSpeed : 0, anchorMicroseconds);
+        output.Submit(blurs, artwork.ToArray(), time, rate, anchorMicroseconds);
         output.ReadStatus();
     }
 }

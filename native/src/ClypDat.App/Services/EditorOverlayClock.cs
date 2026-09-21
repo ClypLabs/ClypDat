@@ -131,6 +131,14 @@ internal sealed class EditorOverlayClock
         }
     }
 
+    internal double EffectiveRate
+    {
+        get
+        {
+            lock (_gate) return _hasAnchor && _running ? _rate : 0;
+        }
+    }
+
     private TimeSpan PositionAt(long timestamp)
     {
         var elapsed = Stopwatch.GetElapsedTime(_anchorTimestamp, timestamp);

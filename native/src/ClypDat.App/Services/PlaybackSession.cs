@@ -98,19 +98,35 @@ public sealed class PlaybackSession : IDisposable
     private long _overlayClockGeneration;
     private Task? _previewWorker;
     private bool _previewAudioPaused;
-    internal Func<TimeSpan, Task>? PublishSceneAsync { get; set; }
+    internal Func<TimeSpan, long, CancellationToken, Task>? PublishSceneAsync { get; set; }
     internal Func<CancellationToken, Task>? NextRenderAsync { get; set; }
     internal bool PreviewWorkerRunning { get { lock (_previewLock) return _previewWorker is not null; } }
 
-    private async Task<bool> PresentSeekAsync(TimeSpan target, Func<bool> current, CancellationToken token)
+    private async Task<bool> PresentSeekAsync(TimeSpan target, long generation, Func<bool> current, CancellationToken token)
     {
         var output = Composition;
         if (output is null || !current()) return false;
         FreezeOverlayClock(target);
-        if (PublishSceneAsync is { } publish) await publish(target).WaitAsync(token).ConfigureAwait(false);
-        else output.Submit([], [], target, 0);
-        return await PresentationWaiter.WaitAsync(() => output.HasPresentedPicture,
-            () => !_disposed && ReferenceEquals(Composition, output) && current(), token).ConfigureAwait(false);
+        Func<CancellationToken, Task> scene;
+        if (PublishSceneAsync is { } publish)
+            scene = sceneToken => publish(target, generation, sceneToken);
+        else
+            scene = _ => { output.Submit([], [], target, _overlayClock.EffectiveRate); return Task.CompletedTask; };
+        var valid = () => !_disposed && ReferenceEquals(Composition, output) && current();
+        return await PresentationWaiter.WaitForSceneAndPresentationAsync(
+            scene,
+            () => output.HasPresentedPicture,
+            valid,
+            token,
+            stage => LogPresentationTimeout(stage, target, generation, output)).ConfigureAwait(false);
+    }
+
+    private void LogPresentationTimeout(PresentationWaiter.Stage stage, TimeSpan target, long generation, NativeVideoOutput output)
+    {
+        var native = output.TryReadStatus(out var status)
+            ? $"nativeGeneration={status.Generation}, nativeRevision={status.Revision}, decoded={status.DecodedPicture}, presented={status.PresentedPicture}"
+            : "nativeGeneration=unavailable, nativeRevision=unavailable, decoded=unavailable, presented=unavailable";
+        AppLog.Error($"Editor seek presentation timeout: stage={stage}, target={target.TotalSeconds:0.###}s, seekGeneration={generation}, {native}, vlcState={VideoPlayer.State}, vlcTime={VideoPlayer.Time / 1000d:0.###}s.");
     }
 
     private readonly List<Task> _seekTasks = new();
@@ -177,6 +193,8 @@ public sealed class PlaybackSession : IDisposable
     }
     public bool IsPlaying => VideoPlayer.IsPlaying;
     public double PlaybackRate => _playbackRate;
+    internal double EffectiveOverlayRate => _overlayClock.EffectiveRate;
+    internal bool IsSeekGenerationCurrent(long generation) => !_disposed && generation == Interlocked.Read(ref _seekVersion);
     internal bool TryGetOverlayPosition(out TimeSpan position) => _overlayClock.TryGetOverlayPosition(out position);
 
     private void ResetOverlayClock(TimeSpan position)
@@ -737,7 +755,7 @@ public sealed class PlaybackSession : IDisposable
                         }
                         PrefetchAudioAt(target);
                     }
-                    await PresentSeekAsync(target, () => _previewRequests.IsCurrent(generation), _disposeCts.Token).ConfigureAwait(false);
+                    await PresentSeekAsync(target, Interlocked.Read(ref _seekVersion), () => _previewRequests.IsCurrent(generation), _disposeCts.Token).ConfigureAwait(false);
                     using var park = _previewRequests.TryAcquirePreviewTransport(generation, parking: true);
                     if (park is not null && !_disposed)
                         lock (_transportLock) VideoPlayer.SetPause(true);
@@ -1276,7 +1294,7 @@ public sealed class PlaybackSession : IDisposable
         private TimeSpan _audioAnchor;
         public bool CanReusePresentedFrame(TimeSpan target) => reusePresentedFrame && IsPaused &&
             Math.Abs((Position - target).TotalMilliseconds) <= 150 && session.Composition?.HasPresentedPicture == true;
-        public Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token) => session.PresentSeekAsync(target, current, token);
+        public Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token) => session.PresentSeekAsync(target, generation, current, token);
 
         public bool IsPaused => session.VideoPlayer.State == VLCState.Paused;
         public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, session.VideoPlayer.Time));

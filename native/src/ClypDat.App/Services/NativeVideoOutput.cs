@@ -152,6 +152,16 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
             return status;
         }
     }
+    internal bool TryReadStatus(out Status status)
+    {
+        lock (_gate)
+        {
+            var snapshot = new Status { Size = (uint)sizeof(Status), Version = Abi };
+            var available = _token != 0 && Query(_token, &snapshot) != 0;
+            status = snapshot;
+            return available;
+        }
+    }
     internal bool HasPresentedPicture
     {
         get

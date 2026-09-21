@@ -24,9 +24,9 @@ public sealed class NativeVideoOutputTests
         Assert.True(output.Generation > generation);
         var pendingGeneration = output.Generation;
         output.EndSeek(TimeSpan.FromSeconds(2.001));
-        Assert.True(output.Generation > pendingGeneration);
+        Assert.Equal(pendingGeneration, output.Generation);
         output.EndSeek(TimeSpan.FromSeconds(2.001));
-        Assert.Equal(pendingGeneration + 1, output.Generation);
+        Assert.Equal(pendingGeneration, output.Generation);
         output.Submit([], [], TimeSpan.FromSeconds(2.001), .5);
         Assert.Equal(0u, output.ReadStatus().Failed);
     }

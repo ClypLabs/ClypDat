@@ -5150,9 +5150,10 @@ public sealed partial class MainWindow : Window
         _spotifyPreviewDirty = true;
         warmup.MarkPlayerAttached();
 
-        session.PublishSceneAsync = position =>
+        session.PublishSceneAsync = (position, generation, token) =>
         {
-            session.Composition?.Submit([], [], position, 0);
+            if (token.IsCancellationRequested || !session.IsSeekGenerationCurrent(generation)) return Task.CompletedTask;
+            session.Composition?.Submit([], [], position, session.EffectiveOverlayRate);
             return Task.CompletedTask;
         };
         async Task PrepareWarmFrameAsync()
@@ -8729,11 +8730,12 @@ public sealed partial class MainWindow : Window
             playback.SetMasterVolume(openingVolume);
             _playback = playback;
             var openingComposition = playback.Composition;
-            playback.PublishSceneAsync = async position =>
+            playback.PublishSceneAsync = async (position, generation, token) =>
             {
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (cancellationToken.IsCancellationRequested || _playback != playback || playback.Composition != openingComposition) return;
+                    if (token.IsCancellationRequested || cancellationToken.IsCancellationRequested ||
+                        !playback.IsSeekGenerationCurrent(generation) || _playback != playback || playback.Composition != openingComposition) return;
                     UpdateNativeComposition(openingViewModel, position);
                 });
             };

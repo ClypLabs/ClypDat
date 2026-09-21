@@ -269,7 +269,7 @@ public sealed partial class MainWindow
         if (session?.Composition is not { } output || !string.Equals(session.LoadedPath, model.SelectedVideoPath, StringComparison.OrdinalIgnoreCase)) return;
         var anchorMicroseconds = NativeVideoOutput.ClockMicroseconds;
         if (!session.IsSeeking && session.TryGetOverlayPosition(out var sampled)) time = sampled;
-        try { output.UpdateScene(() => _compositionScene.Update(output, model, time, anchorMicroseconds, captured, spotify, width, height)); }
+        try { output.UpdateScene(() => _compositionScene.Update(output, model, time, session.EffectiveOverlayRate, anchorMicroseconds, captured, spotify, width, height)); }
         catch (Exception error)
         {
             if (session.Composition != output) return;

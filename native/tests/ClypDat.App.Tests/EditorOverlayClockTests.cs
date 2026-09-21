@@ -96,5 +96,23 @@ public sealed class EditorOverlayClockTests
         Assert.Equal(10, ended.TotalSeconds, 3);
     }
 
+    [Fact]
+    public void EffectiveRateIsZeroWhileLandingOrPaused()
+    {
+        long now = 0;
+        var clock = new EditorOverlayClock(() => TimeSpan.FromSeconds(20), () => now);
+        clock.Reset(1, TimeSpan.Zero, 2);
+        Assert.Equal(0, clock.EffectiveRate);
+
+        clock.Resume(1, TimeSpan.FromSeconds(4), 2);
+        Assert.Equal(2, clock.EffectiveRate);
+        clock.BeginSeek(2, TimeSpan.FromSeconds(12), 2);
+        Assert.Equal(0, clock.EffectiveRate);
+        clock.Freeze(2, TimeSpan.FromSeconds(12));
+        Assert.Equal(0, clock.EffectiveRate);
+        clock.Resume(2, TimeSpan.FromSeconds(12), 2);
+        Assert.Equal(2, clock.EffectiveRate);
+    }
+
     private static long Ticks(double seconds) => (long)(seconds * Stopwatch.Frequency);
 }
