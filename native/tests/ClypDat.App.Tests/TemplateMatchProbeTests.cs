@@ -99,6 +99,11 @@ public sealed class TemplateMatchProbeTests
     // Soldier: 76 replay had it. Pinned to its measured spot it scored 0.19
     // against a 0.22 threshold, so the replay's streaks were saved as theirs.
     [InlineData("ow-potg-shifted.png", "play-of-the-game")]
+    // A tester's kill cam: the killer's Triple Kill beneath the stylised
+    // "ELIMINATED BY" label. The label scores 0.99 here; the worst banner-free
+    // frame in the same clip reached 0.22, hence the 0.45 threshold.
+    [InlineData("ow-killcam.png", "eliminated-by")]
+    [InlineData("ow-killcam.png", "triple-kill")]
     public void TheRightBannerWinsOnAKnownFrame(string file, string expected)
     {
         var path = Path.Combine(FixtureRoot, file);
@@ -132,6 +137,10 @@ public sealed class TemplateMatchProbeTests
     [InlineData("ow-empty-1.png")]
     [InlineData("ow-empty-2.png")]
     [InlineData("ow-empty-3.png")]
+    // "YOU ARE NOW DEATH SPECTATING" sits where the kill cam's label does, in
+    // the same colour family, and was the closest the eliminated-by template
+    // came to a false match.
+    [InlineData("ow-death-spectating.png")]
     public void AFrameWithNoBannerMatchesNothing(string file)
     {
         var path = Path.Combine(FixtureRoot, file);

@@ -94,6 +94,10 @@ public sealed class AppSettings
     // values deserialize unchanged; absent values become this new default.
     public string ReplayFramePacingMode { get; set; } = "CFR";
     public int ReplayMaxHeight { get; set; } = 1080;
+    // The Quality card's Custom choice, kept on its own: the card used to be
+    // re-derived from the values at launch, so Custom at 1080p/60/20M came
+    // back as High because those numbers are exactly High's.
+    public bool ReplayQualityCustom { get; set; }
     public string ReplayBackend { get; set; } = "Native";
     public string ExportVideoCodec { get; set; } = "H.264";
     // Was "Ctrl+Shift+F9" before schema 13; AppSettingsMigrations moves untouched installs over.
@@ -112,7 +116,6 @@ public sealed class AppSettings
     public string ProcessPriority { get; set; } = "Normal";
     // Hidden on new installs. Existing serialized values remain authoritative.
     public bool IsStatusAreaVisible { get; set; }
-    public bool ShowRecordingPausedIndicator { get; set; } = true;
     // On by default - MainWindowViewModel.UpdateCardLayout targets a fixed
     // card width and lets the column count itself grow on wider windows
     // (e.g. ~6 across on a 1440p-wide window) instead of always exactly 3
@@ -431,6 +434,9 @@ public sealed class CustomGameProfile
     public int ReplayFrameRate { get; set; } = 60;
     public int ReplayMaxHeight { get; set; } = 1080;
     public string ReplayFrameRateMode { get; set; } = "CFR";
+    // Same as the global ReplayQualityCustom: Custom survives a restart even
+    // when its values happen to equal a preset's.
+    public bool ReplayQualityCustom { get; set; }
     // Per-game opt-out: accepting intentional 4K capture for one game must
     // not suppress the warning for another game's separate override.
     public bool HideQualityWarning { get; set; }

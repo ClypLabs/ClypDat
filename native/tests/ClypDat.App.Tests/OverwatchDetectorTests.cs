@@ -219,6 +219,56 @@ public sealed class OverwatchDetectorTests
         Assert.Empty(events);
     }
 
+    // A tester's kill cam: the killer's Double then Triple Kill under the
+    // stylised "ELIMINATED BY" label, which OCR cannot read. Nothing fires -
+    // not the streaks, not a Team Kill, not a Play of the Game.
+    [Fact]
+    public void NothingFiresDuringAKillCam()
+    {
+        var detector = new OverwatchDetector();
+        var eliminatedBy = Banner(OverwatchDetector.EliminatedByEventId, "Eliminated By");
+
+        var events = new List<string>();
+        events.AddRange(Observe(detector, Frame(1, killFeed: "YOU WERE ELIMINATED BY BUMBO")));
+        // The kill cam opens before its label fades in.
+        events.AddRange(Observe(detector, Frame(2, banners: Banner("double-kill", "Double Kill"))));
+        events.AddRange(Observe(detector, Frame(3, banners: [eliminatedBy, Banner("double-kill", "Double Kill")])));
+        events.AddRange(Observe(detector, Frame(4, killFeed: "XENKO 88", banners: [eliminatedBy, Banner("triple-kill", "Triple Kill"), Banner("team-kill", "Team Kill")])));
+        events.AddRange(Observe(detector, Frame(5, killFeed: "XENKO 88", banners: [eliminatedBy, Banner("triple-kill", "Triple Kill"), Banner("team-kill", "Team Kill"), Banner("play-of-the-game", "Play of the Game")])));
+        events.AddRange(Observe(detector, Frame(6, banners: [eliminatedBy, Banner("play-of-the-game", "Play of the Game")])));
+
+        Assert.Empty(events);
+    }
+
+    // The label can be missed on a frame (a cut, a flash); the hold carries the
+    // kill cam across it.
+    [Fact]
+    public void AStreakOnAFrameWhereTheKillCamLabelWasMissedIsStillNotYours()
+    {
+        var detector = new OverwatchDetector();
+        var eliminatedBy = Banner(OverwatchDetector.EliminatedByEventId, "Eliminated By");
+        var triple = Banner("triple-kill", "Triple Kill");
+
+        Observe(detector, Frame(1, banners: eliminatedBy));
+
+        Assert.Empty(Observe(detector, Frame(2, banners: triple)));
+        Assert.Empty(Observe(detector, Frame(3, banners: triple)));
+    }
+
+    // Once the hold runs out the player is back, and their own streaks count.
+    [Fact]
+    public void StreaksCountAgainAfterTheKillCam()
+    {
+        var detector = new OverwatchDetector();
+
+        Observe(detector, Frame(1, banners: Banner(OverwatchDetector.EliminatedByEventId, "Eliminated By")));
+        for (var second = 2; second < 12; second++) Observe(detector, Frame(second));
+
+        var triple = Banner("triple-kill", "Triple Kill");
+        Observe(detector, Frame(12, banners: triple));
+        Assert.Contains("triple-kill", Observe(detector, Frame(13, banners: triple)));
+    }
+
     // A streak that was on screen when the replay began must not fire the
     // instant the replay ends.
     [Fact]

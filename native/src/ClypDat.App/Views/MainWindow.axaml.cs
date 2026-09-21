@@ -197,47 +197,11 @@ public sealed partial class MainWindow : Window
     // reached since the X button always fully exited first. Only the tray's
     // own Quit item sets this true before closing for real.
     public bool AllowRealClose { get; set; }
-    private List<(double StartSeconds, double EndSeconds)> _pausedRanges = new();
-    private Window? _recordingPausedOverlay;
     // Top-level dialogs need their own native window to cover VLC's video
     // surface. While one is up, editor-owned overlays must stay down rather
     // than polling/repositioning themselves back above the dialog.
     private int _editorSurfaceCoverCount;
     private bool _newClipsDialogCoversEditorSurface;
-    private TextBlock? _recordingPausedOverlayQuote;
-    private int _recordingPausedOverlayRightClickCount;
-    private bool _recordingPausedOverlayQuotesAlwaysEnabled;
-    private static readonly string[] RecordingPausedQuotes =
-    {
-        "The tape remembers.",
-        "Nothing happened here. Probably.",
-        "A strategic pause has entered the chat.",
-        "Frame by frame, the truth survives.",
-        "Recording took a coffee break.",
-        "The highlight reel is thinking.",
-        "No pixels were harmed during this pause.",
-        "Buffering the plot twist.",
-        "The camera blinked.",
-        "Gameplay temporarily filed under later.",
-        "Silence, but in high definition.",
-        "The replay goblin needed a moment.",
-        "Capture paused. Drama pending.",
-        "Even frame rate needs a breather.",
-        "This scene will return after technical vibes.",
-        "The timeline entered stealth mode.",
-        "A pause worthy of an intermission.",
-        "The clip briefly forgot its lines.",
-        "No signal, just suspense.",
-        "Recording is on a side quest.",
-        "The highlight is behind the curtain.",
-        "Time out, pixels in.",
-        "Hold that thought.",
-        "The moment has been temporarily misplaced.",
-        "Loading dramatic tension.",
-        "A frame escaped into the void.",
-        "The capture card is meditating.",
-        "Intermission. Please admire the silence."
-    };
     private Window? _editorHoverControlsWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
     // Grace between the pointer leaving the video (and the bar) and the bar
@@ -341,12 +305,8 @@ public sealed partial class MainWindow : Window
         QueueLibraryLayoutUpdate();
         _playbackTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         // Guarded like the hover-bar poll timer below (see SetupEditorHoverControls) -
-        // SyncPlaybackPosition repositions the "Playback Paused" badge via
-        // EditorVideoView.PointToScreen, which can throw while the view is
-        // momentarily detached (the fullscreen reparent). An unguarded throw here
-        // kills this tick subscription for the rest of the session at 60fps odds
-        // of hitting that window, which is what made the badge (and everything
-        // else this timer drives) vanish permanently instead of just skipping a beat.
+        // an unguarded throw here kills this tick subscription for the rest of
+        // the session, and everything this timer drives vanishes with it.
         _playbackTimer.Tick += (_, _) =>
         {
             try
@@ -557,14 +517,14 @@ public sealed partial class MainWindow : Window
         // handler runs AFTER the focused Button's own KeyUp already fired
         // Click, too late to swallow it.
         AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
-        TrackPausedOverlayToWindow();
+        TrackEditorOverlaysToWindow();
         SetupEditorHoverControls();
         // Realise the clip badge now, off-screen, rather than on the first
         // notification: that first realise is the one show that happens before
         // WS_EX_NOACTIVATE is on the hwnd, and it used to land mid-game.
         _ = ClipNotifications;
         AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
-        // Owned windows (the hover bar, the paused badge) can get hidden by
+        // Owned windows (the hover bar) can get hidden by
         // Windows itself - owner minimized (alt-tab into an exclusive-
         // fullscreen game), owner loses foreground (alt-tab away, clicking
         // another window), even a transient focus blip mid interactive-resize
@@ -635,7 +595,6 @@ public sealed partial class MainWindow : Window
             _replayBuffer?.Dispose();
             _clipOverlayCoordinator?.Dispose();
             _playbackSessionOwner.Dispose();
-            _recordingPausedOverlay?.Close();
             _editorHoverControlsWindow?.Close();
             EditorVideoView.DisposeClickHandling();
             ViewModel?.Dispose();
@@ -3665,7 +3624,6 @@ public sealed partial class MainWindow : Window
     {
         _editorSurfaceCoverCount++;
         HideEditorHoverControls(immediate: true);
-        _recordingPausedOverlay?.Hide();
     }
 
     private void UncoverEditorSurface()
@@ -5337,8 +5295,7 @@ public sealed partial class MainWindow : Window
             // both so the next poll tick re-shows them correctly instead of
             // trusting IsVisible state the OS invalidated while minimized.
             HideEditorHoverControls(immediate: true);
-            _recordingPausedOverlay?.Hide();
-        }
+            }
 
         if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
         {
@@ -5503,7 +5460,6 @@ public sealed partial class MainWindow : Window
         // against a momentarily-detached EditorVideoView. It's re-evaluated
         // (and re-shown if still applicable) by the next timer tick or layout
         // event once the view has settled into FullscreenVideoHost.
-        _recordingPausedOverlay?.Hide();
 
         // Move the SAME EditorVideoView (already playing) into the
         // fullscreen host instead of hot-swapping MediaPlayer onto a second
@@ -6532,7 +6488,6 @@ public sealed partial class MainWindow : Window
             // the video load now happen there, ahead of the dispatcher hop, so
             // this is the only entry point that sets all of that up.
             QueueEditorPlayback();
-            ReassertHoverBarAbovePausedOverlay();
             return;
         }
 
@@ -6555,7 +6510,6 @@ public sealed partial class MainWindow : Window
             // earlier snapshot was rewinding to a spot already played and replaying
             // it forward - visible as a brief "rewind and repeat" on every unpause.
             PauseEditorPlayback();
-            ReassertHoverBarAbovePausedOverlay();
             return;
         }
 
@@ -6583,27 +6537,12 @@ public sealed partial class MainWindow : Window
             // request with a serialized resume seek rather than letting
             // PlayFrom race it with a separate Stop/Play sequence.
             _ = ApplyTimelineSeekAsync(startTime, resumePlayback: true);
-            ReassertHoverBarAbovePausedOverlay();
             return;
         }
         _playback.PlayFrom(startTime);
         StartPlayheadClock(startTime);
         ViewModel.IsPlaying = true;
         _playbackTimer.Start();
-        ReassertHoverBarAbovePausedOverlay();
-    }
-
-    // A click can put the paused owned window ahead of the hover bar after
-    // the click handler returns. Reassert both the input window and Server's
-    // per-pixel mirror now and after this input/layout turn settles.
-    private void ReassertHoverBarAbovePausedOverlay()
-    {
-        if (_recordingPausedOverlay is not { IsVisible: true }) return;
-        RepositionEditorHoverControlsSafe(force: true);
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (_recordingPausedOverlay is { IsVisible: true }) RepositionEditorHoverControlsSafe(force: true);
-        }, DispatcherPriority.Loaded);
     }
 
     private void PauseEditorPlayback()
@@ -7076,32 +7015,11 @@ public sealed partial class MainWindow : Window
 
             SpotifyTimelineSidecar.Copy(ViewModel.Settings.LibraryFolder, sourcePath, sourcePath, ViewModel.TrimStart.TotalSeconds, ViewModel.TrimEnd.TotalSeconds, ViewModel.ClipSpeed);
 
-            // The ".paused.json" sidecar records pause ranges as offsets into
-            // the ORIGINAL recording. A trim just replaced that file with a
-            // shorter one starting at a different point on that original
-            // timeline, so every stored offset now points at the wrong moment
-            // (or a moment that got trimmed away entirely) - the "Playback
-            // Paused" badge showing over content that plainly isn't paused is
-            // exactly that stale offset landing in the new, shorter file.
-            // Deriving the correct shifted offsets would need to know the
-            // pre-trim TrimStart at export time, and this only runs after the
-            // file has already been replaced - simplest correct fix is to drop
-            // the sidecar: a trimmed clip is user-authored content the badge
-            // was never meant to second-guess anyway.
-            // ALL THREE locations LoadPausedRanges falls back through, not just
-            // the current one - a clip whose sidecar lives at either legacy path
-            // (the "Clip Info" subfolder, or plain adjacent to the video) kept
-            // its stale ranges and went on showing the badge after a trim,
-            // because deleting only the primary path left the fallback to find.
+            // Recording-paused sidecars from older builds describe the untrimmed
+            // timeline. Nothing reads them any more; drop them with the trim.
             AudioCapturePipeline.TryDelete(LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, sourcePath, ".paused.json"));
             AudioCapturePipeline.TryDelete(LibraryLayout.LegacySidecarPath(sourcePath, ".paused.json"));
             AudioCapturePipeline.TryDelete(LibraryLayout.LegacyAdjacentPausedPath(sourcePath));
-            // Durable half of the same fix: the deletes above are best-effort
-            // (TryDelete swallows failures, and a sidecar could be restored by a
-            // library move/rename), so record on the clip itself that it has
-            // been trimmed. LoadPausedRanges refuses to load ranges at all for a
-            // trimmed clip, which is what actually makes the badge impossible
-            // rather than merely unlikely.
             var trimStartSeconds = ViewModel.TrimStart.TotalSeconds;
             var trimEndSeconds = ViewModel.TrimEnd.TotalSeconds;
             var trimmedInfo = ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, sourcePath) ?? new ClipInfo(null, null);
@@ -7110,8 +7028,6 @@ public sealed partial class MainWindow : Window
                 .Select(marker => marker with { OffsetSeconds = marker.OffsetSeconds - trimStartSeconds })
                 .ToArray();
             ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true, AutoClipMarkers = rebasedMarkers });
-            _pausedRanges.Clear();
-            RefreshPausedBadge();
 
             await ViewModel.FinalizeSavedTrimAsync(sourcePath);
             QueueEditorPlayback();
@@ -8750,17 +8666,7 @@ public sealed partial class MainWindow : Window
                 Dispatcher.UIThread.Post(() => RequestAnimationFrame(_ => rendered.TrySetResult()));
                 await rendered.Task.WaitAsync(token).ConfigureAwait(false);
             };
-            _pausedRanges = LoadPausedRanges(ViewModel.SelectedVideoPath);
-            ViewModel.IsRecordingPausedAtCurrentTime = false;
-            // Redundant with StopEditorPlayback's own Hide() above, but closes
-            // a real race: a timer tick already queued/dispatched right before
-            // _playbackTimer.Stop() took effect can still fire once more using
-            // the PREVIOUS clip's now-stale _pausedRanges, briefly reshowing
-            // the overlay with wrong data - right as the editor's own layout
-            // (EditorVideoView's bounds) may not have settled yet either,
-            // which is exactly the "flickers over the library grid" symptom.
-            _recordingPausedOverlay?.Hide();
-            AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
+                AppLog.Info($"Editor open: {ViewModel.SelectedVideoPath}");
             if (hoverWarmup?.PlayerAttached != true)
             {
                 EditorVideoView.MediaPlayer = playback.VideoPlayer;
@@ -9101,12 +9007,10 @@ public sealed partial class MainWindow : Window
         // this parked view until it finishes so libvlc never falls back to a
         // parentless Direct3D window. Destructive synchronous paths detach.
         if (stopMode == PlaybackStopMode.Synchronous) EditorVideoView.MediaPlayer = null;
-        _recordingPausedOverlay?.Hide();
         HideEditorHoverControls(immediate: true);
         if (ViewModel is not null)
         {
             ViewModel.IsPlaying = false;
-            ViewModel.IsRecordingPausedAtCurrentTime = false;
         }
     }
 
@@ -9125,292 +9029,15 @@ public sealed partial class MainWindow : Window
         return Math.Abs((candidate - known).TotalSeconds) < 5;
     }
 
-    // Reads the ".paused.json" sidecar NativeReplayBuffer writes next to a
-    // clip when it recorded via DXGI Desktop Duplication and the game window
-    // wasn't foreground for part of the recording (see class summary there).
-    // Missing sidecar (Legacy backend clips, or no pauses occurred) just
-    // means no badge ever shows - not an error.
-    private List<(double StartSeconds, double EndSeconds)> LoadPausedRanges(string videoPath)
+    // Keeps the hover bar glued to the video area during window drags/resizes.
+    // Each call is independently guarded: they run in plain event handlers
+    // (not a DispatcherTimer tick), so nothing recovers a throw for us.
+    private void TrackEditorOverlaysToWindow()
     {
-        // A trimmed clip's pause ranges describe the ORIGINAL recording's
-        // timeline, not the shorter file that replaced it, so they can only ever
-        // point at the wrong moment - refuse them outright rather than render a
-        // "Playback Paused" badge over content that was never paused. See
-        // ClipInfo.IsTrimmed for why this is checked here and not left to the
-        // best-effort sidecar deletion at trim time.
-        var clipInfo = ViewModel is null ? null : ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, videoPath);
-        if (clipInfo?.IsTrimmed == true || string.Equals(clipInfo?.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase))
-        {
-            return new();
-        }
-
-        var sidecarPath = ViewModel is null ? string.Empty : LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, videoPath, ".paused.json");
-        if (!File.Exists(sidecarPath))
-        {
-            sidecarPath = LibraryLayout.LegacySidecarPath(videoPath, ".paused.json");
-            if (!File.Exists(sidecarPath)) sidecarPath = LibraryLayout.LegacyAdjacentPausedPath(videoPath);
-            if (!File.Exists(sidecarPath)) return new();
-        }
-
-        try
-        {
-            var entries = System.Text.Json.JsonSerializer.Deserialize<List<PausedRangeEntry>>(File.ReadAllText(sidecarPath));
-            var ranges = entries?.Select(e => (StartSeconds: e.start, EndSeconds: e.end)).ToList() ?? new();
-
-            // Catches clips trimmed BEFORE ClipInfo.IsTrimmed existed, which have
-            // no flag to go on. Pause offsets belong to the original recording,
-            // so a sidecar describing a timeline longer than the file itself can
-            // only be left over from before a trim - the ranges cannot be mapped
-            // back and the badge they produce is wrong wherever it lands. One
-            // second of slack so ordinary rounding between the sidecar's own
-            // window and the muxed file's duration is not mistaken for staleness.
-            var duration = ViewModel?.Duration ?? TimeSpan.Zero;
-            if (duration > TimeSpan.Zero && ranges.Count > 0 &&
-                ranges.Max(range => range.EndSeconds) > duration.TotalSeconds + 1)
-            {
-                AppLog.Info($"Ignoring recording-paused sidecar for {Path.GetFileName(videoPath)}: ranges run to " +
-                            $"{ranges.Max(range => range.EndSeconds):0.0}s but the clip is only {duration.TotalSeconds:0.0}s - stale after a trim.");
-                return new();
-            }
-
-            return ranges;
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Failed to read recording-paused sidecar.", error);
-            return new();
-        }
-    }
-
-    private sealed record PausedRangeEntry(double start, double end);
-
-    // A plain in-tree Border never actually rendered over the video because
-    // LibVLCSharp's VideoView is backed by a native (non-Avalonia) hwnd
-    // surface on Windows, which always paints above sibling Avalonia visuals
-    // regardless of XAML z-order. A bare Avalonia Popup does get promoted to
-    // a real top-level OS window to get above that surface, but Avalonia's
-    // popup windows go always-on-top globally (visible over every other app,
-    // and even while ClypDat itself is minimized) instead of being scoped to
-    // ClypDat. An owned Window (Owner = this, no Topmost) gets normal Win32
-    // owned-window z-order behavior instead: always directly above its
-    // owner, hidden/minimized together with it, never floating above
-    // unrelated other windows.
-    private Window EnsureRecordingPausedOverlay()
-    {
-        if (_recordingPausedOverlay is not null) return _recordingPausedOverlay;
-
-        var quote = new TextBlock
-        {
-            Foreground = AppThemeService.Brush("Text_B7C7D8", "#B7C7D8"),
-            FontSize = 14,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            TextAlignment = TextAlignment.Center,
-            TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 560,
-            IsVisible = false,
-        };
-        var scrim = new Border
-        {
-            Background = new SolidColorBrush(Color.FromArgb(0xB3, 0, 0, 0)),
-            Child = new StackPanel
-            {
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Spacing = 14,
-                Children =
-                {
-                    new ClypDatLoader
-                    {
-                        Width = 64,
-                        Height = 64,
-                        Foreground = Brushes.White,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                    },
-                    new TextBlock
-                    {
-                        Text = "Recording/Capture Paused",
-                        Foreground = Brushes.White,
-                        FontSize = 28,
-                        FontWeight = FontWeight.Bold,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        TextAlignment = TextAlignment.Center,
-                    },
-                    quote,
-                }
-            }
-        };
-        var overlay = new Window
-        {
-            WindowDecorations = WindowDecorations.None,
-            ShowInTaskbar = false,
-            CanResize = false,
-            ShowActivated = false,
-            Topmost = false,
-            Background = Brushes.Transparent,
-            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
-            Content = scrim
-        };
-        overlay.Opened += (_, _) =>
-        {
-            OverlayTransparencyDiagnostics.Log(overlay, "playback-paused");
-            WindowTransparencyFallback.ApplyIfNeeded(overlay, scrim.Background, b => scrim.Background = b, "playback-paused");
-        };
-        overlay.AddHandler(PointerPressedEvent, RecordingPausedOverlay_OnPointerPressed, RoutingStrategies.Tunnel);
-        _recordingPausedOverlay = overlay;
-        _recordingPausedOverlayQuote = quote;
-        return overlay;
-    }
-
-    // 67 of 10,000 shows is exactly 0.67%. Roll only on hidden-to-visible so
-    // a timer refresh cannot swap text while the paused layer is on screen.
-    private void UpdateRecordingPausedOverlayQuote(bool force = false)
-    {
-        if (_recordingPausedOverlayQuote is not { } quote) return;
-        if (!force && !_recordingPausedOverlayQuotesAlwaysEnabled && Random.Shared.Next(10_000) >= 670)
-        {
-            quote.Text = string.Empty;
-            quote.IsVisible = false;
-            return;
-        }
-
-        quote.Text = RecordingPausedQuotes[Random.Shared.Next(RecordingPausedQuotes.Length)];
-        quote.IsVisible = true;
-    }
-
-    private void RecordingPausedOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (sender is not Window overlay) return;
-        var point = e.GetCurrentPoint(overlay).Properties;
-        if (point.IsRightButtonPressed)
-        {
-            e.Handled = true;
-            if (_recordingPausedOverlayQuotesAlwaysEnabled) return;
-            _recordingPausedOverlayRightClickCount++;
-            if (_recordingPausedOverlayRightClickCount < 7) return;
-
-            _recordingPausedOverlayQuotesAlwaysEnabled = true;
-            UpdateRecordingPausedOverlayQuote(force: true);
-            return;
-        }
-
-        if (!point.IsLeftButtonPressed) return;
-        e.Handled = true;
-        PlayPauseButton_OnClick(this, new RoutedEventArgs());
-    }
-
-    private void UpdateRecordingPausedOverlay(bool shouldShow)
-    {
-        // Extra guard against a stale/queued timer tick reshowing this over
-        // whatever's currently on screen (e.g. the library, mid-transition)
-        // if it ever fires after the editor's already been left - only the
-        // editor being genuinely visible right now is allowed to show it.
-        if (!shouldShow || ViewModel is null || !ViewModel.IsEditorVisible || IsEditorSurfaceCovered)
-        {
-            _recordingPausedOverlay?.Hide();
-            return;
-        }
-
-        var overlay = EnsureRecordingPausedOverlay();
-        var wasHidden = !overlay.IsVisible;
-        if (wasHidden) UpdateRecordingPausedOverlayQuote();
-        var raised = RepositionPausedOverlay(overlay);
-        if (wasHidden) overlay.Show(this);
-        // Only when the badge actually claimed the top of the z-band does the
-        // hover bar need putting back above it. Doing this unconditionally
-        // re-ordered two owned windows on EVERY playback tick (RefreshPausedBadge
-        // runs from the playback timer), and that constant reshuffling is what
-        // made the bar flicker over the badge. force: the bar itself has not
-        // moved, so the skip-if-unchanged check would otherwise return before
-        // re-asserting z-order.
-        if (raised || wasHidden) RepositionEditorHoverControlsSafe(force: true);
-        // This is editor UI, not an in-game notification. It must stay in
-        // screenshots, recordings, and app shares, regardless of the
-        // notification-overlay privacy preference.
-        ApplyCaptureExclusion(overlay, exclude: false);
-    }
-
-    // Returns true when it actually re-asserted the window's z-order, so the
-    // caller knows whether anything else needs putting back on top of it.
-    private bool RepositionPausedOverlay(Window overlay)
-    {
-        if (IsEditorSurfaceCovered) return false;
-        // Guarded - PointToScreen can throw while EditorVideoView is
-        // momentarily detached from the visual tree (the fullscreen reparent),
-        // and this runs from plain event handlers with no timer-level recovery
-        // of their own (see the callers in TrackPausedOverlayToWindow).
-        try
-        {
-            var topLeft = EditorVideoView.PointToScreen(new Point(0, 0));
-            var bottomRight = EditorVideoView.PointToScreen(new Point(EditorVideoView.Bounds.Width, EditorVideoView.Bounds.Height));
-            var width = Math.Max(1, (bottomRight.X - topLeft.X) / overlay.RenderScaling);
-            var height = Math.Max(1, (bottomRight.Y - topLeft.Y) / overlay.RenderScaling);
-            var handle = NativeHandleOf(overlay);
-
-            // Skip entirely when nothing has actually moved - same
-            // skip-if-unchanged guard the hover bar uses, and read from the REAL
-            // window rect rather than Avalonia's Position (which just echoes back
-            // whatever was last assigned). This runs on every playback timer tick,
-            // and re-asserting z-order that often is what made the hover bar
-            // above it flicker.
-            if (handle != IntPtr.Zero && GetWindowRect(handle, out var nativeRect) &&
-                nativeRect.Left == topLeft.X && nativeRect.Top == topLeft.Y &&
-                Math.Abs(overlay.Width - width) < 0.5 && Math.Abs(overlay.Height - height) < 0.5)
-            {
-                return false;
-            }
-
-            overlay.Position = topLeft;
-            overlay.Width = width;
-            overlay.Height = height;
-
-            // Re-assert the top of the owner's z-band, exactly as the hover bar
-            // does (see RepositionEditorHoverControls). Showing an owned window
-            // once is not enough: the video renderer's own native child hwnd
-            // keeps repainting over it while a clip PLAYS, which hid this badge
-            // for precisely the case it exists to report and made it look like
-            // it only appeared when playback was paused - pausing just stops
-            // the repaints that were covering it. NOACTIVATE so it never takes
-            // focus off the editor.
-            if (handle != IntPtr.Zero)
-            {
-                SetWindowPos(handle, HwndTop, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
-                return true;
-            }
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Paused overlay reposition failed (recovered)", error);
-        }
-
-        return false;
-    }
-
-    // Keeps the badge glued to the video area during window drags/resizes -
-    // without this its position only updated on playback-timer ticks (and
-    // not at all while paused), so it visibly lagged/snapped behind the
-    // window instead of moving with it.
-    //
-    // Each of the three calls below is independently guarded: they run back
-    // to back in one plain event handler (not a DispatcherTimer tick, so
-    // nothing recovers it for us), and one throwing used to skip the rest for
-    // that event - e.g. the paused-overlay reposition failing mid-reparent
-    // meant the hover bar's own reposition and the zoom/pan transform update
-    // silently never ran for that layout pass either.
-    private void TrackPausedOverlayToWindow()
-    {
-        PositionChanged += (_, _) =>
-        {
-            var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
-            // A paused-overlay move claims the top of the owner's z-band.
-            // Re-raise the hover bar even if its geometry did not change, so
-            // its Server per-pixel mirror remains between the input window and
-            // paused overlay instead of being covered by the paused scrim.
-            RepositionEditorHoverControlsSafe(force: pausedRaised);
-        };
+        PositionChanged += (_, _) => RepositionEditorHoverControlsSafe();
         EditorVideoView.LayoutUpdated += (_, _) =>
         {
-            var pausedRaised = _recordingPausedOverlay is { IsVisible: true } overlay && RepositionPausedOverlay(overlay);
-            RepositionEditorHoverControlsSafe(force: pausedRaised);
+            RepositionEditorHoverControlsSafe();
             // Covers window resize AND the fullscreen reparent (both change
             // EditorVideoView's rendered height, which the pan-range math
             // depends on) without needing separate handlers for each.
@@ -9443,8 +9070,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // The video hover bar mirrors the "Recording Paused" badge's owned-window
-    // technique above (see RepositionPausedOverlay/EnsureRecordingPausedOverlay) -
+    // The video hover bar is an owned window rather than an in-tree overlay -
     // LibVLCSharp's VideoView is a native (non-Avalonia) hwnd on Windows that
     // always paints over Avalonia-rendered siblings regardless of z-order, so a
     // plain in-tree Avalonia overlay would never actually show above the video.
@@ -10305,22 +9931,6 @@ public sealed partial class MainWindow : Window
     }
 
 
-    // Recomputes the "Playback Paused" badge for the CURRENT position. Must
-    // run on every path that moves/settles the playhead - it used to live
-    // only inside the playback-timer tick, so with playback paused (timer
-    // stopped) a seek that landed inside a frozen range never showed the
-    // badge until the user pressed play.
-    private void RefreshPausedBadge()
-    {
-        if (ViewModel is null) return;
-        if (_pausedRanges.Count > 0)
-        {
-            var currentSeconds = ViewModel.CurrentTime.TotalSeconds;
-            ViewModel.IsRecordingPausedAtCurrentTime = _pausedRanges.Any(r => currentSeconds >= r.StartSeconds && currentSeconds < r.EndSeconds);
-        }
-        UpdateRecordingPausedOverlay(ViewModel.ShowRecordingPausedBadge);
-    }
-
     // When the UI started believing in playback that LibVLC has not delivered.
     private long _playbackMismatchSince;
 
@@ -10351,7 +9961,6 @@ public sealed partial class MainWindow : Window
             // Target feedback belongs to this seek. Do not run UI stopwatch
             // until native presentation confirms that playback resumed.
             UpdateTimelineChrome();
-            RefreshPausedBadge();
             return;
         }
         if (_playback.Duration > TimeSpan.Zero && IsPlausibleDuration(_playback.Duration, ViewModel.Duration))
@@ -10382,7 +9991,6 @@ public sealed partial class MainWindow : Window
             _playback.EnsurePausedIfNeeded();
         }
         UpdateTimelineChrome();
-        RefreshPausedBadge();
         // Only auto-stops at TrimEnd for a play session that started at/before
         // it (see _trimEndGuardArmed) - a session explicitly started past
         // TrimEnd (user seeked there and hit play) is left alone so the
@@ -10530,9 +10138,6 @@ public sealed partial class MainWindow : Window
             _playbackTimer.Stop();
         }
         UpdateTimelineChrome();
-        // Timer may be stopped here (seek while paused) - refresh the frozen-
-        // range badge for the landing position explicitly.
-        RefreshPausedBadge();
     }
 
     private void UpdateTimelineChrome()

@@ -11,19 +11,22 @@ internal sealed unsafe class HdrToSdrGpuConverter : IDisposable
 {
     private const string Shader = """
         struct VsOut { float4 Position : SV_Position; };
+        // Full-screen triangle (-1,-1), (-1,3), (3,-1): clockwise, so the
+        // default back-face cull keeps it. The previous (3,3), (-1,3), (3,-1)
+        // lay wholly outside the viewport and every converted frame was black.
         VsOut VS(uint id : SV_VertexID) {
-            VsOut o; o.Position = float4(id == 1 ? -1 : 3, id == 2 ? -1 : 3, 0, 1); return o;
+            VsOut o; o.Position = float4(id == 2 ? 3 : -1, id == 1 ? 3 : -1, 0, 1); return o;
         }
         Texture2D<float4> Source : register(t0);
         float Srgb(float v) { return v <= 0.0031308 ? v * 12.92 : 1.055 * pow(v, 1.0 / 2.4) - 0.055; }
         float4 PS(VsOut input) : SV_Target {
             float3 rgb = max(Source.Load(int3(input.Position.xy, 0)).rgb, 0);
             rgb *= SCALE;
+            // SDR content (<= reference white) passes through untouched, so it
+            // matches an SDR capture. Only HDR highlights above white are
+            // pulled back, by their brightest channel so the hue survives.
             float maximum = max(rgb.r, max(rgb.g, rgb.b));
-            if (maximum > 0.9) {
-                float mapped = 0.9 + 0.1 * (1 - exp(-(maximum - 0.9) / 0.1));
-                rgb *= mapped / maximum;
-            }
+            if (maximum > 1) rgb /= maximum;
             return float4(saturate(Srgb(rgb.r)), saturate(Srgb(rgb.g)), saturate(Srgb(rgb.b)), 1);
         }
         """;

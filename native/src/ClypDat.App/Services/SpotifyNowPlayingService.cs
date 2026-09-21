@@ -99,6 +99,9 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     private SpotifyTokens? _tokens;
     private SpotifyNowPlaying _snapshot = SpotifyNowPlaying.Disconnected;
     private DateTimeOffset _lastRefresh;
+    // Set from a 429's Retry-After. Polling on through a rate limit every two
+    // seconds is what kept a tester's app limited for over half an hour.
+    private DateTimeOffset _rateLimitedUntil;
 
     public SpotifyNowPlaying Snapshot => _snapshot;
     public event EventHandler<SpotifyNowPlaying>? Changed;
@@ -130,11 +133,20 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             StartPolling();
             return true;
         }
-        catch (Exception error)
+        catch (HttpRequestException error) when (IsRefreshTokenDead(error))
         {
             AppLog.Error("Spotify: restoring the saved session failed.", error);
             _tokens = null;
             return false;
+        }
+        catch (Exception error) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A timeout or a 5xx at launch is not a lost session: keep the
+            // tokens and let the poll retry, rather than going dark until the
+            // next restart.
+            AppLog.Error("Spotify: first now-playing read failed; polling will retry.", error);
+            StartPolling();
+            return true;
         }
     }
 
@@ -212,11 +224,18 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         {
             try
             {
-                await _pollWake.WaitAsync(PollInterval, cancellationToken).ConfigureAwait(false);
+                var backoff = _rateLimitedUntil - DateTimeOffset.UtcNow;
+                await _pollWake.WaitAsync(backoff > PollInterval ? backoff : PollInterval, cancellationToken).ConfigureAwait(false);
+                // A focus-triggered wake does not get to jump a rate limit.
+                if (DateTimeOffset.UtcNow < _rateLimitedUntil) continue;
                 await RefreshNowPlayingAsync(cancellationToken).ConfigureAwait(false);
                 _lastRefresh = DateTimeOffset.UtcNow;
             }
-            catch (OperationCanceledException) { return; }
+            // Only our own cancellation ends the loop. HttpClient's timeout is
+            // also an OperationCanceledException; returning on it stopped the
+            // poll for good after one slow response, and every clip from then
+            // on was saved without its song.
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
             catch (HttpRequestException error) when (IsRefreshTokenDead(error))
             {
                 // The refresh token itself was rejected - reconnecting needs a
@@ -274,6 +293,19 @@ internal sealed class SpotifyNowPlayingService : IDisposable
                 UpdatedAt = DateTimeOffset.UtcNow,
                 Error = null
             });
+            return;
+        }
+
+        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var retryAfter = response.Headers.RetryAfter is { } header
+                ? header.Delta ?? (header.Date is { } date ? date - now : null)
+                : null;
+            var delay = retryAfter is { } wait && wait > TimeSpan.Zero ? wait : TimeSpan.FromSeconds(30);
+            if (delay > TimeSpan.FromMinutes(10)) delay = TimeSpan.FromMinutes(10);
+            _rateLimitedUntil = now + delay;
+            AppLog.Info($"Spotify: rate limited; pausing now-playing polls for {delay.TotalSeconds:0}s.");
             return;
         }
 

@@ -1753,7 +1753,10 @@
                   </StackPanel>
                   <TextBlock Text="This overlay is already part of the video. Its position and size are fixed."
                              Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap"
-                             IsVisible="{Binding !HasEditableSpotifyOverlay}" />
+                             IsVisible="{Binding IsSpotifyOverlayFlattened}" />
+                  <TextBlock Text="Spotify wasn't playing a song while this clip was recorded, so there's no overlay to show."
+                             Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap"
+                             IsVisible="{Binding !HasSpotifyOverlayLayer}" />
                 </StackPanel>
               </Border>
               <Border Classes="editorInspectorCard" IsVisible="{Binding IsEditorOverlaysSidebarActive}">
@@ -1897,7 +1900,7 @@
                       </StackPanel>
                       <Button Content="Reset layout" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="SpotifyOverlayReset_OnClick" />
                     </StackPanel>
-                    <TextBlock Text="This overlay is already part of the video. Its layout is fixed." Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding !HasEditableSpotifyOverlay}" />
+                    <TextBlock Text="This overlay is already part of the video. Its layout is fixed." Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding IsSpotifyOverlayFlattened}" />
                   </StackPanel>
                 </Border>
 

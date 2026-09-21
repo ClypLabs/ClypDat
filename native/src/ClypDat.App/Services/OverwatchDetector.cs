@@ -61,13 +61,31 @@ public sealed partial class OverwatchDetector
     private Queue<string> _eliminationOrder = new();
 
     /// <summary>
+    /// Matched by appearance, like the streak banners: the kill cam's
+    /// "ELIMINATED BY" label is drawn in the same display font, so OCR never
+    /// read it and the killer's streaks were saved as the local player's - a
+    /// tester's "Triple Kill" was the enemy's, shown back in their kill cam.
+    /// </summary>
+    public const string EliminatedByEventId = "eliminated-by";
+
+    // Sampled frames to keep suppressing after the last sign of death. The
+    // kill cam starts about two seconds after the "YOU WERE ELIMINATED BY"
+    // note leaves the kill feed and the label only fades in a second after
+    // that, and the killer's streak banner can already be up by then.
+    private const int DeathCamHoldFrames = 8;
+    private int _deathCamHold;
+
+    /// <summary>
     /// True while the frame is showing somebody else's game: a Play of the Game
     /// replay, or the death cam after you were eliminated. Kills read off the
     /// HUD in either state are not the local player's.
     /// </summary>
     public static bool IsSpectating(string leftColumnText) =>
         PlayOfTheGamePhrases.Any(phrase => Contains(leftColumnText, phrase))
-        || Contains(leftColumnText, "ELIMINATED BY")
+        || IsDeathCam(leftColumnText);
+
+    private static bool IsDeathCam(string? leftColumnText) =>
+        Contains(leftColumnText, "ELIMINATED BY")
         || Contains(leftColumnText, "DEATH SPECTATING");
 
     public IReadOnlyList<OverwatchDetectedEvent> Observe(OverwatchFrameObservation frame)
@@ -82,10 +100,21 @@ public sealed partial class OverwatchDetector
         // a second chance at it, and cost nothing when OCR fails.
         var highlight = frame.Banners.FirstOrDefault(item => string.Equals(item.EventId, "play-of-the-game", StringComparison.OrdinalIgnoreCase));
 
+        // Dead: the plain "YOU WERE ELIMINATED BY" note in the kill feed, then
+        // the kill cam's stylised label. Nothing on screen from here until the
+        // hold runs out is the local player's, so nothing fires at all.
+        var dying = frame.Banners.Any(item => string.Equals(item.EventId, EliminatedByEventId, StringComparison.OrdinalIgnoreCase))
+                    || Contains(frame.KillFeedText, "ELIMINATED BY")
+                    || IsDeathCam(frame.LeftColumnText);
+        _deathCamHold = dying ? DeathCamHoldFrames : Math.Max(0, _deathCamHold - 1);
+        var deathCam = _deathCamHold > 0;
+
         // Play of the Game is the one event that fires while spectating -
         // it IS the spectated thing, and every POTG is worth keeping even when
-        // the featured player is not you.
-        if (_playOfTheGame.ObservePresence(highlight is not null || PlayOfTheGamePhrases.Any(phrase => Contains(frame.LeftColumnText, phrase))))
+        // the featured player is not you. The kill cam is not one, whatever
+        // the matcher thinks it saw in its corner.
+        if (_playOfTheGame.ObservePresence(highlight is not null || PlayOfTheGamePhrases.Any(phrase => Contains(frame.LeftColumnText, phrase)))
+            && !deathCam)
             events.Add(Create("play-of-the-game", "Play of the Game", frame.Timestamp, highlight?.Score ?? 0.97));
 
         // The replay is judged on its own, whether or not Play of the Game is
@@ -94,7 +123,7 @@ public sealed partial class OverwatchDetector
         // as the local player's. Held for the latch's reset window too, so one
         // frame where the bar is missed (a flash, a cut) cannot let a streak
         // through mid-replay.
-        if (highlight is not null || _playOfTheGame.IsLatched || IsSpectating(frame.LeftColumnText))
+        if (deathCam || highlight is not null || _playOfTheGame.IsLatched || IsSpectating(frame.LeftColumnText))
         {
             // Keep the latches fed so a streak that was on screen when the
             // replay started cannot fire the moment it ends.
@@ -108,6 +137,7 @@ public sealed partial class OverwatchDetector
         // GrayTemplateMatcher for why they cannot be read.
         foreach (var banner in frame.Banners)
         {
+            if (string.Equals(banner.EventId, EliminatedByEventId, StringComparison.OrdinalIgnoreCase)) continue;
             if (!_banners.TryGetValue(banner.EventId, out var latch))
             {
                 // Two frames, not one. Frames are sampled every 500ms and a
@@ -142,6 +172,7 @@ public sealed partial class OverwatchDetector
     {
         foreach (var latch in _banners.Values) latch.Reset();
         _playOfTheGame.Reset();
+        _deathCamHold = 0;
         _recentEliminations.Clear();
         _eliminationOrder = new Queue<string>();
     }

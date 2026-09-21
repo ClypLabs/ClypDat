@@ -133,7 +133,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private ProcessOption? _selectedChatProcess;
     private ProcessOption? _selectedProcessExclusion;
     private ReplayDurationPreset? _selectedReplayDurationPreset;
-    private bool _customReplayQualitySelected;
+    // Persisted, not inferred: see AppSettings.ReplayQualityCustom.
+    private bool CustomReplayQualitySelected
+    {
+        get => Settings.ReplayQualityCustom;
+        set => Settings.ReplayQualityCustom = value;
+    }
     private bool _replayBitrateFollowsRecommendation;
     private int _selectedReplayFrameRate;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
@@ -389,7 +394,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedReplayEncoderMode = ReplayEncoderModes.FirstOrDefault(mode => string.Equals(mode.Value, Settings.ReplayEncoderMode, StringComparison.OrdinalIgnoreCase))
                                      ?? ReplayEncoderModes.First(mode => mode.Value == "GPU");
         _selectedReplayQualityPreset = ReplayQualityPresets.FirstOrDefault(preset => preset.Matches(Settings.ReplayMaxHeight, Settings.ReplayFrameRate, Settings.ReplayBitrateMbps));
-        _customReplayQualitySelected = _selectedReplayQualityPreset is null;
+        CustomReplayQualitySelected = Settings.ReplayQualityCustom || _selectedReplayQualityPreset is null;
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
         _activeReplayEncoderSignature = EncoderSignature;
@@ -1952,7 +1957,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var changed = Settings.ReplayBitrateMbps != recommendation.AutomaticMbps;
         Settings.ReplayBitrateMbps = recommendation.AutomaticMbps;
         _replayBitrateFollowsRecommendation = true;
-        _customReplayQualitySelected = true;
+        CustomReplayQualitySelected = true;
         _selectedReplayQualityPreset = ReplayQualityPresets[^1];
 
         if (changed)
@@ -1989,7 +1994,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             var followsRecommendation = _replayBitrateFollowsRecommendation;
             Settings.ReplayMaxHeight = value.Height;
 
-            _customReplayQualitySelected = true;
+            CustomReplayQualitySelected = true;
             _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             if (followsRecommendation)
             {
@@ -2014,7 +2019,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             value = ReplayFrameRatePolicy.NormalizePersisted(value);
             if (!SetProperty(ref _selectedReplayFrameRate, value)) return;
             Settings.ReplayFrameRate = ReplayFrameRatePolicy.NormalizePersisted(value);
-            _customReplayQualitySelected = true;
+            CustomReplayQualitySelected = true;
             _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             SaveSettings();
             UpdateReplayQualityRestartRequired();
@@ -2026,7 +2031,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public ReplayQualityPreset? SelectedReplayQualityPreset
     {
-        get => _customReplayQualitySelected
+        get => CustomReplayQualitySelected
             ? ReplayQualityPresets[^1]
             : _selectedReplayQualityPreset ?? ReplayQualityPresets.First(preset => preset.Matches(Settings.ReplayMaxHeight, Settings.ReplayFrameRate, Settings.ReplayBitrateMbps));
         set
@@ -2034,15 +2039,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (value is null) return;
             if (value.IsCustom)
             {
-                _customReplayQualitySelected = true;
+                CustomReplayQualitySelected = true;
                 _selectedReplayQualityPreset = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsCustomReplayQuality));
                 NotifyReplayQualityWarning();
+                SaveSettings();
                 return;
             }
 
-            _customReplayQualitySelected = false;
+            CustomReplayQualitySelected = false;
             _replayBitrateFollowsRecommendation = false;
             _selectedReplayQualityPreset = value;
             Settings.ReplayMaxHeight = value.Height;
@@ -2287,7 +2293,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             var changed = Settings.ReplayBitrateMbps != clampedBitrate;
             Settings.ReplayBitrateMbps = clampedBitrate;
             _replayBitrateFollowsRecommendation = clampedBitrate == recommendation.AutomaticMbps;
-            _customReplayQualitySelected = true;
+            CustomReplayQualitySelected = true;
             _selectedReplayQualityPreset = ReplayQualityPresets[^1];
             if (changed) OnPropertyChanged();
             OnPropertyChanged(nameof(SelectedReplayQualityPreset));
@@ -3639,19 +3645,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool ShowRecordingPausedIndicator
-    {
-        get => Settings.ShowRecordingPausedIndicator;
-        set
-        {
-            if (Settings.ShowRecordingPausedIndicator == value) return;
-            Settings.ShowRecordingPausedIndicator = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(ShowRecordingPausedBadge));
-            SaveSettings();
-        }
-    }
-
     public bool ScaleClipsWithWindow
     {
         get => Settings.ScaleClipsWithWindow;
@@ -3663,26 +3656,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             SaveSettings();
         }
     }
-
-    private bool _isRecordingPausedAtCurrentTime;
-
-    // Driven from MainWindow.axaml.cs's SyncPlaybackPosition against the
-    // paused ranges loaded from the current clip's ".paused.json" sidecar
-    // (see NativeReplayBuffer's DXGI Desktop Duplication capture - written
-    // whenever the game window wasn't foreground during recording).
-    public bool IsRecordingPausedAtCurrentTime
-    {
-        get => _isRecordingPausedAtCurrentTime;
-        set
-        {
-            if (_isRecordingPausedAtCurrentTime == value) return;
-            _isRecordingPausedAtCurrentTime = value;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(ShowRecordingPausedBadge));
-        }
-    }
-
-    public bool ShowRecordingPausedBadge => IsRecordingPausedAtCurrentTime && ShowRecordingPausedIndicator;
 
     public AudioDeviceOption? SelectedChatAudioDevice
     {
@@ -4621,6 +4594,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool HasSpotifyOverlayLayer => HasSpotifyAudioTrack(TimelineTracks) &&
         (_selectedSpotifyOverlayBurned || SelectedHasSpotifyTrack || _selectedHasSpotifyTimeline);
     public bool HasEditableSpotifyOverlay => HasSpotifyOverlayLayer && !_selectedSpotifyOverlayBurned && SelectedSourceWidth > 0;
+    // Distinct from "not editable": a clip recorded while Spotify was idle has
+    // no overlay at all, and must not be told its overlay is baked in.
+    public bool IsSpotifyOverlayFlattened => HasSpotifyOverlayLayer && !HasEditableSpotifyOverlay;
     public SpotifyOverlayTransform? SpotifyOverlayTransform => _spotifyOverlayTransform;
 
     public bool SpotifyOverlayLayerVisible
@@ -4695,6 +4671,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(HasSpotifyOverlayLayer));
         OnPropertyChanged(nameof(HasEditableSpotifyOverlay));
+        OnPropertyChanged(nameof(IsSpotifyOverlayFlattened));
         OnPropertyChanged(nameof(SpotifyOverlayLayerVisible));
         OnPropertyChanged(nameof(SpotifyOverlayTransform));
         OnPropertyChanged(nameof(SpotifyOverlayRotationDegrees));

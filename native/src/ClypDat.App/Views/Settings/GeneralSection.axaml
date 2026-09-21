@@ -62,7 +62,7 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Show &quot;Playback Paused&quot; indicator|Scale clips with window size|Video preview|Combine sidebar filters|Layout'}">
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show status panel|Scale clips with window size|Video preview|Combine sidebar filters|Layout'}">
       <StackPanel Spacing="18">
         <TextBlock Classes="settingsCardLabel" Text="LAYOUT" />
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show status panel|Layout}">
@@ -71,13 +71,6 @@
             <TextBlock Classes="settingsRowDesc" Text="The right-hand panel here in Settings showing replay buffer status, hotkey, and active game." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           </StackPanel>
           <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsStatusAreaVisible}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Show &quot;Playback Paused&quot; indicator|Layout'}">
-          <StackPanel Spacing="2">
-            <TextBlock Classes="settingsRowTitle" Text="Show &quot;Playback Paused&quot; Indicator" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDesc" Text="Shows a badge over the video in Editor during moments the game window wasn't in focus while recording." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowRecordingPausedIndicator}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
         <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scale clips with window size|Layout}">
           <StackPanel Spacing="2">

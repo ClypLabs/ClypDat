@@ -46,7 +46,8 @@
       { "eventId": "double-kill", "label": "Double Kill", "slot": 1, "region": [0.4521, 0.6852, 0.1563, 0.0741], "threshold": 0.22, "scoring": "highpass3", "file": "overwatch/double-kill.png" },
       { "eventId": "team-kill", "label": "Team Kill", "slot": 2, "region": [0.4557, 0.2037, 0.1094, 0.0509], "threshold": 0.65, "file": "overwatch/team-kill.png" },
       { "eventId": "play-of-the-game", "label": "Play of the Game", "slot": 0, "region": [0.021484, 0.020833, 0.134766, 0.048611], "threshold": 0.22, "scoring": "highpass3", "searchPad": [0.015, 0.03], "file": "overwatch/play-of-the-game.png" },
-      { "eventId": "play-of-the-game", "label": "Play of the Game", "slot": 0, "region": [0.021484, 0.020833, 0.144531, 0.048611], "threshold": 0.22, "scoring": "highpass3", "searchPad": [0.015, 0.03], "file": "overwatch/play-of-the-match.png" }
+      { "eventId": "play-of-the-game", "label": "Play of the Game", "slot": 0, "region": [0.021484, 0.020833, 0.144531, 0.048611], "threshold": 0.22, "scoring": "highpass3", "searchPad": [0.015, 0.03], "file": "overwatch/play-of-the-match.png" },
+      { "eventId": "eliminated-by", "label": "Eliminated By", "slot": 0, "region": [0.018750, 0.038889, 0.090625, 0.038889], "threshold": 0.45, "scoring": "highpass3", "searchPad": [0.01, 0.02], "file": "overwatch/eliminated-by.png" }
     ],
     "fortnite": [
       { "eventId": "enemy-team-wiped", "label": "Enemy Team Wiped", "slot": 1, "region": [0.4453, 0.6685, 0.1406, 0.0389], "threshold": 0.70, "file": "fortnite/enemy-team-wiped.png" },

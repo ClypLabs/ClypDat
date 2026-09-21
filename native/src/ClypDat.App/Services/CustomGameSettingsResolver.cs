@@ -131,6 +131,7 @@ internal static class CustomGameSettingsResolver
                 profile.ReplayFrameRate = settings.ReplayFrameRate;
                 profile.ReplayMaxHeight = settings.ReplayMaxHeight;
                 profile.ReplayFrameRateMode = settings.ReplayFrameRateMode;
+                profile.ReplayQualityCustom = settings.ReplayQualityCustom;
                 break;
 
             case ReplayGroup:

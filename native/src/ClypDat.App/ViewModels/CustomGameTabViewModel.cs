@@ -268,6 +268,8 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         {
             if (value is null || ReferenceEquals(_selectedQualityPreset, value)) return;
             _selectedQualityPreset = value;
+            Profile.ReplayQualityCustom = value.IsCustom;
+            if (value.IsCustom) _save();
             if (!value.IsCustom)
             {
                 Profile.ReplayMaxHeight = value.Height;
@@ -345,6 +347,8 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     private MainWindowViewModel.ReplayQualityPreset? MatchPreset()
     {
         var presets = MainWindowViewModel.QualityPresets;
+        // A chosen Custom stays Custom even on values equal to a preset's.
+        if (Profile.ReplayQualityCustom) return presets[^1];
         return presets.FirstOrDefault(preset => preset.Matches(Profile.ReplayMaxHeight, Profile.ReplayFrameRate, Profile.ReplayBitrateMbps))
                ?? presets[^1];
     }

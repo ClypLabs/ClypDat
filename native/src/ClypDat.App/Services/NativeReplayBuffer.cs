@@ -46,9 +46,7 @@ namespace ClypDat.App.Services;
 // frame; when it isn't (alt-tabbed away, minimized, covered), the last
 // successfully captured frame is re-submitted to the encoder instead of a fresh
 // (potentially other-app) capture, so the recording visually freezes rather
-// than leaking other windows' content. Each freeze/resume transition is logged
-// as a wall-clock event so SaveReplayAsync can tell the editor which parts of a
-// saved clip were frozen, via a "Recording Paused" sidecar.
+// than leaking other windows' content.
 //
 // An uncapped/tearing game can present outside DWM's desktop-composition
 // cadence. DXGI may then acquire frequently but produce stale cropped content.
@@ -162,9 +160,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // one lock the encode thread needs for every packet it produces.
     private long _ringBufferBytes;
     private long _ringBufferCapacityBytes;
-    // Recording-paused transitions (see class summary) - trimmed alongside
-    // _packets so this never grows unbounded across a long session.
-    private readonly List<PauseEvent> _pauseEvents = new();
     private readonly List<(DateTime StartUtc, DateTime? EndUtc)> _recoveryOutages = new();
     private DateTime? _recoveryCleanSinceUtc;
     private int _recoveryHealthyWindows;
@@ -221,7 +216,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         if (recorder is null || (expected is not null && !ReferenceEquals(recorder, expected))) return;
         var config = recorder.Configuration;
         _audio.LiveAudio -= recorder.EnqueueAudio;
-        var pauseEvents = GetOrderedPauseEvents();
         var end = MonotonicClock.UtcNow;
         recorder.Complete();
         _closingSessions.Enqueue(Task.Run(async () =>
@@ -230,10 +224,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             try
             {
                 if (recorder.StartUtc is { } start)
-                {
-                    WritePausedRangesSidecar(config.LibraryFolder, recorder.OutputPath, ComputePausedRangesSeconds(pauseEvents, start, end));
                     _recordFullSession((end - start).TotalSeconds);
-                }
                 EnforceFullSessionQuota(config);
             }
             catch (Exception error) { AppLog.Error("Full Session metadata finalization failed.", error); }
@@ -497,7 +488,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         Volatile.Write(ref _pendingEncoderFrames, 0);
         Volatile.Write(ref _peakPendingEncoderFrames, 0);
         _lastDegradedUtc = null;
-        lock (_bufferLock) _pauseEvents.Clear();
 
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _captureCts = new CancellationTokenSource();
@@ -591,7 +581,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             _packets.Clear();
             _ringBufferBytes = 0;
             _ringBufferCapacityBytes = 0;
-            _pauseEvents.Clear();
             _recoveryOutages.Clear();
             _recoveryCleanSinceUtc = null;
             _recoveryHealthyWindows = 0;
@@ -810,8 +799,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 chunkStartUtc += TimeSpan.FromSeconds(chunkSeconds);
                 remainingSeconds -= chunkSeconds;
             }
-
-            WritePausedRangesSidecar(config.LibraryFolder, outputPath, ComputePausedRangesSeconds(GetOrderedPauseEvents(), windowStartUtc, windowStartUtc + TimeSpan.FromSeconds(windowDurationSeconds)));
 
             var tracksStartMs = saveTimer.ElapsedMilliseconds;
             List<(string Label, string Path)> tracks;
@@ -1502,9 +1489,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // Whether the target window is currently NOT foreground/visible - the
             // capture keeps encoding through this (re-submitting the last good
             // frame, see below) instead of stopping, so the ring buffer/full
-            // session recording never has a real gap; SaveReplayAsync/
-            // Full Session close reads _pauseEvents to tell the editor
-            // which parts of a saved clip were frozen like this.
+            // session recording never has a real gap.
             var isPaused = false;
             // Whether a real (non-occluded) frame has ever been captured yet.
             // The buffer arms the instant a game is detected, which is often
@@ -2303,11 +2288,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                             }
                         }
 
-                        if (isPaused)
-                        {
-                            isPaused = false;
-                            lock (_bufferLock) _pauseEvents.Add(new PauseEvent(MonotonicClock.UtcNow, false));
-                        }
+                        isPaused = false;
                         previousWgcTelemetry = default;
                         previousDxgiTelemetry = default;
                     }
@@ -2524,11 +2505,21 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         try
                         {
-                            using var hdrSource = desktopResource.QueryInterface<ID3D11Texture2D>();
-                            hdrConverter ??= new HdrToSdrGpuConverter(device!, hdrProfile);
-                            var sdrTexture = hdrConverter.Convert(hdrSource);
-                            desktopResource.Dispose();
-                            desktopResource = sdrTexture.QueryInterface<ID3D11Resource>();
+                            // The draw lands on the shared immediate context, so it
+                            // takes the same locks, in the same order, as the
+                            // per-frame body below: the WGC callback copies into
+                            // this source under the native gate and the encode
+                            // thread shares the context under gpuLock. Unlocked,
+                            // the draw raced both and the output stayed black.
+                            lock (gpuLock)
+                            using (session.EnterNative())
+                            {
+                                using var hdrSource = desktopResource.QueryInterface<ID3D11Texture2D>();
+                                hdrConverter ??= new HdrToSdrGpuConverter(device!, hdrProfile);
+                                var sdrTexture = hdrConverter.Convert(hdrSource);
+                                desktopResource.Dispose();
+                                desktopResource = sdrTexture.QueryInterface<ID3D11Resource>();
+                            }
                             hdrCompatibilityStatus = ReplayHdrCompatibilityStatus.ConversionActive;
                         }
                         catch (Exception error)
@@ -3372,7 +3363,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 if (occluded != isPaused)
                 {
                     isPaused = occluded;
-                    lock (_bufferLock) _pauseEvents.Add(new PauseEvent(MonotonicClock.UtcNow, isPaused));
                     AppLog.Info($"Native capture: recording {(isPaused ? "paused (window not foreground)" : "resumed")}.");
                 }
 
@@ -4168,7 +4158,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     // 200ms wait and this wants to run about once a second
                     // regardless of whether the desktop is producing anything.
                     lastRingTrim = stopwatch.Elapsed;
-                    TrimRingBuffer(_fullSession?.StartUtc);
+                    TrimRingBuffer();
                     // Raw audio belongs only to replay retention; live Full
                     // Session audio has already been queued to its mux worker.
                     var audioCutoffUtc = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5);
@@ -5410,7 +5400,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
         }
     }
 
-    private void TrimRingBuffer(DateTime? fullSessionStartUtc)
+    private void TrimRingBuffer()
     {
         var cutoff = MonotonicClock.UtcNow - Duration - TimeSpan.FromSeconds(5);
         lock (_bufferLock)
@@ -5422,96 +5412,6 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 ReturnPooledPackets(0, removeCount);
                 _packets.RemoveRange(0, removeCount);
             }
-
-            // _pauseEvents is shared between ring-buffer clip saves (which only
-            // ever need the last Duration worth of history) and a running Full
-            // Session recording, which can span hours - trimming to the same
-            // Duration-based cutoff used for _packets silently dropped any pause
-            // event older than that, so a session-start alt-tab was gone from
-            // the sidecar by the time a multi-hour session finished. While a
-            // Full Session is active, nothing older than its own start is
-            // eligible for trimming.
-            var pauseEventCutoff = fullSessionStartUtc is { } sessionStart && sessionStart < cutoff
-                ? sessionStart
-                : cutoff;
-
-            // Keeps at most one event before the cutoff (needed so
-            // ComputePausedRangesSeconds can still tell what state a save
-            // window started in) and drops everything older than that.
-            var keepFromIndex = 0;
-            for (var i = _pauseEvents.Count - 1; i >= 0; i--)
-            {
-                if (_pauseEvents[i].WallClockUtc < pauseEventCutoff) { keepFromIndex = i; break; }
-            }
-            if (keepFromIndex > 0) _pauseEvents.RemoveRange(0, keepFromIndex);
-        }
-    }
-
-    private PauseEvent[] GetOrderedPauseEvents()
-    {
-        lock (_bufferLock) return _pauseEvents.OrderBy(e => e.WallClockUtc).ToArray();
-    }
-
-    // Reconstructs the paused/frozen (game window not foreground during DXGI
-    // Desktop Duplication capture - see class summary) time ranges that fall
-    // within [windowStartUtc, windowEndUtc), as offsets in seconds from the
-    // window's start, for the "Recording Paused" editor overlay to read.
-    private static List<(double StartSeconds, double EndSeconds)> ComputePausedRangesSeconds(
-        PauseEvent[] orderedEvents, DateTime windowStartUtc, DateTime windowEndUtc)
-    {
-        var currentlyPaused = false;
-        foreach (var e in orderedEvents)
-        {
-            if (e.WallClockUtc > windowStartUtc) break;
-            currentlyPaused = e.IsPaused;
-        }
-
-        var ranges = new List<(double, double)>();
-        var pauseStartUtc = currentlyPaused ? windowStartUtc : (DateTime?)null;
-
-        foreach (var e in orderedEvents)
-        {
-            if (e.WallClockUtc <= windowStartUtc || e.WallClockUtc >= windowEndUtc) continue;
-            if (e.IsPaused == currentlyPaused) continue;
-
-            if (e.IsPaused)
-            {
-                pauseStartUtc = e.WallClockUtc;
-            }
-            else if (pauseStartUtc is not null)
-            {
-                ranges.Add((
-                    Math.Max(0, (pauseStartUtc.Value - windowStartUtc).TotalSeconds),
-                    (e.WallClockUtc - windowStartUtc).TotalSeconds));
-                pauseStartUtc = null;
-            }
-
-            currentlyPaused = e.IsPaused;
-        }
-
-        if (currentlyPaused && pauseStartUtc is not null)
-        {
-            ranges.Add((
-                Math.Max(0, (pauseStartUtc.Value - windowStartUtc).TotalSeconds),
-                (windowEndUtc - windowStartUtc).TotalSeconds));
-        }
-
-        return ranges;
-    }
-
-    private static void WritePausedRangesSidecar(string libraryRoot, string outputPath, List<(double StartSeconds, double EndSeconds)> ranges)
-    {
-        if (ranges.Count == 0) return;
-        try
-        {
-            var payload = ranges.Select(r => new { start = Math.Round(r.StartSeconds, 2), end = Math.Round(r.EndSeconds, 2) }).ToArray();
-            var sidecarPath = LibraryLayout.SidecarPath(libraryRoot, outputPath, ".paused.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(sidecarPath)!);
-            File.WriteAllText(sidecarPath, JsonSerializer.Serialize(payload));
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Failed to write recording-paused sidecar.", error);
         }
     }
 
@@ -6439,5 +6339,4 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
     // these; BorrowWindowUnderLock guarantees the window never spans two.
     private readonly record struct EncoderGenerationInfo(byte[]? ExtraData, AVCodecID CodecId, AVRational TimeBase);
 
-    private readonly record struct PauseEvent(DateTime WallClockUtc, bool IsPaused);
 }

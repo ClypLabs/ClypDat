@@ -288,11 +288,9 @@ public sealed partial class MainWindow
     }
 
     /// <summary>Puts the editor chrome back on top after the overlay window has
-    /// claimed the top of the owner's z-band. Mirrors what the paused badge
-    /// already does for the hover bar.</summary>
+    /// claimed the top of the owner's z-band.</summary>
     private void RestoreOverlayChrome()
     {
-        if (_recordingPausedOverlay is { IsVisible: true } badge) RepositionPausedOverlay(badge);
         RepositionEditorHoverControlsSafe(force: true);
     }
 

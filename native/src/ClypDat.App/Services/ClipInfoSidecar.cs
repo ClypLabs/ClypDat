@@ -54,14 +54,6 @@ public sealed record ClipInfo(
     // "Clip from", since it's a derived copy rather than the actual recording.
     bool IsExport = false,
     // Set once Save Trim has replaced a clip with a shorter range of itself.
-    // The ".paused.json" sidecar records recording-pause ranges as offsets into
-    // the ORIGINAL recording, so after a trim every stored offset refers to a
-    // timeline the file no longer has - which is why a trimmed clip could show
-    // "Playback Paused" over content that plainly was not paused. Deleting that
-    // sidecar at trim time handles it going forward, but it is best-effort
-    // across three possible locations and does nothing for clips trimmed before
-    // that fix existed; this flag is the durable half, and makes the badge
-    // impossible for a trimmed clip regardless of what sidecars survive.
     bool IsTrimmed = false,
     // Null is legacy game capture. New desktop clips use "Desktop" so editor
     // behavior does not depend on transient capture sidecars.
