@@ -1,5 +1,6 @@
 using ClypDat.App.Services;
 using ClypDat.Capture.Abstractions;
+using System.Runtime.InteropServices;
 using Vortice.DXGI;
 using Xunit;
 
@@ -49,5 +50,17 @@ public sealed class HdrCaptureCompatibilityTests
         var cleared = ReplayCaptureHealth.Unknown("Worker");
 
         Assert.Equal("HDR status unknown", HdrCompatibilityPresentation.Resolve(cleared.HdrCompatibilityStatus, true));
+    }
+
+    [Fact]
+    public void DisplayConfigStructsMatchWin32Layouts()
+    {
+        Assert.Equal(20, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigSourceInfo>());
+        Assert.Equal(48, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigTargetInfo>());
+        Assert.Equal(72, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigPathInfo>());
+        Assert.Equal(64, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigModeInfo>());
+        Assert.Equal(84, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigSourceName>());
+        Assert.Equal(24, Marshal.SizeOf<HdrCaptureCompatibility.DisplayConfigSdrWhiteLevel>());
+        Assert.Equal(20, (int)Marshal.OffsetOf<HdrCaptureCompatibility.DisplayConfigPathInfo>(nameof(HdrCaptureCompatibility.DisplayConfigPathInfo.TargetInfo)));
     }
 }
