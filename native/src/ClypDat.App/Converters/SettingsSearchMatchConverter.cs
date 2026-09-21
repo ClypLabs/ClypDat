@@ -37,7 +37,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
             "Startup", "Launch ClypDat on Windows boot", "Start minimized on boot", "Process priority", "Automatically Focus ClypDat", "Game exit",
             "Layout", "Show status panel",
             "Scale clips with window size",
-            "Combine sidebar filters", "Clip Filenames", "Template", "Rename all"
+            "Combine sidebar filters", "Clip Filenames", "Naming scheme", "Template", "Rename all", "Rename existing clips"
         },
         ["Game Detection"] = new[]
         {

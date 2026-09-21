@@ -96,29 +96,36 @@
       </StackPanel>
     </Border>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Clip Filenames}">
-      <StackPanel Spacing="12">
-        <TextBlock Classes="settingsCardLabel" Text="Clip Filenames" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <TextBlock Classes="settingsRowDesc" Text="Choose how newly saved clips are named. Windows replaces unsupported filename characters such as colons with hyphens." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <ComboBox Classes="settingsInput" ItemsSource="{Binding ClipFileNameSchemes}" SelectedValue="{Binding SelectedClipFileNameScheme}" SelectedValueBinding="{Binding Value}">
-          <ComboBox.ItemTemplate>
-            <DataTemplate>
-              <TextBlock Text="{Binding Label}" />
-            </DataTemplate>
-          </ComboBox.ItemTemplate>
-        </ComboBox>
-        <StackPanel Spacing="6" IsVisible="{Binding IsCustomClipFileNameScheme}">
-          <TextBlock Foreground="{StaticResource TextSubtleBrush}" FontSize="12">Template: {title}, {game}, {datetime:format}</TextBlock>
-          <TextBox Classes="settingsInput" Text="{Binding CustomClipFileNameTemplate}" PlaceholderText="{}{datetime:yyyy-MM-dd HH-mm-ss} - {title}" />
-          <TextBlock Text="{Binding ClipFileNameTemplateError}" Foreground="{StaticResource DangerBrush}" FontSize="12" IsVisible="{Binding HasClipFileNameTemplateError}" TextWrapping="Wrap" />
-          <TextBlock Text="Date/Time Format Help: Microsoft Learn" Tag="https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings" PointerPressed="LicenseLinkText_OnPointerPressed" Foreground="{StaticResource LinkBrush}" FontSize="12" />
+    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Clip Filenames|Naming scheme|Template|Rename all|Rename existing clips'}">
+      <StackPanel Spacing="18">
+        <TextBlock Classes="settingsCardLabel" Text="CLIP FILENAMES" />
+        <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Naming scheme|Template|Clip Filenames'}">
+          <TextBlock Classes="settingsRowTitle" Text="Naming Scheme" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <TextBlock Classes="settingsRowDesc" Text="Choose how newly saved clips are named. Windows replaces unsupported filename characters such as colons with hyphens." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          <ComboBox Classes="settingsInput" ItemsSource="{Binding ClipFileNameSchemes}" SelectedValue="{Binding SelectedClipFileNameScheme}" SelectedValueBinding="{Binding Value}" HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding Label}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <StackPanel Spacing="6" Margin="0,6,0,0" IsVisible="{Binding IsCustomClipFileNameScheme}">
+            <TextBlock Foreground="{StaticResource TextSubtleBrush}" FontSize="12">Template: {title}, {game}, {datetime:format}</TextBlock>
+            <TextBox Classes="settingsInput" Text="{Binding CustomClipFileNameTemplate}" PlaceholderText="{}{datetime:yyyy-MM-dd HH-mm-ss} - {title}" />
+            <TextBlock Text="{Binding ClipFileNameTemplateError}" Foreground="{StaticResource DangerBrush}" FontSize="12" IsVisible="{Binding HasClipFileNameTemplateError}" TextWrapping="Wrap" />
+            <TextBlock Text="Date/Time Format Help: Microsoft Learn" Tag="https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings" PointerPressed="LicenseLinkText_OnPointerPressed" Foreground="{StaticResource LinkBrush}" FontSize="12" />
+          </StackPanel>
+          <TextBlock Text="Preview" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" Margin="0,6,0,0" />
+          <Border Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="7" Padding="14,10">
+            <TextBlock Text="{Binding ClipFileNamePreview}" Foreground="{StaticResource TextBrush}" FontSize="13" TextWrapping="Wrap" />
+          </Border>
         </StackPanel>
-        <TextBlock Text="Preview" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" />
-        <Border Background="{StaticResource SurfaceRaisedBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="7" Padding="14,10">
-          <TextBlock Text="{Binding ClipFileNamePreview}" Foreground="{StaticResource TextBrush}" FontSize="13" TextWrapping="Wrap" />
-        </Border>
-        <Grid ColumnDefinitions="*,Auto,Auto">
-          <TextBlock Classes="settingsRowDesc" Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Rename all|Rename existing clips|Clip Filenames'}">
+          <StackPanel Spacing="2" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Rename Existing Clips" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            <TextBlock Classes="settingsRowDesc" Text="Apply the current scheme to every video in this library, including imports and Full Sessions stored here." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+          </StackPanel>
           <Button Grid.Column="1" Content="Rename" Click="RenameAllClipsButton_OnClick" IsEnabled="{Binding CanRenameAllClips}" VerticalAlignment="Center" />
         </Grid>
         <TextBlock Text="{Binding RenameAllClipsStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" TextWrapping="Wrap" IsVisible="{Binding HasRenameAllClipsStatus}" />
