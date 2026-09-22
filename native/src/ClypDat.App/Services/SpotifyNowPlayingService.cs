@@ -113,6 +113,17 @@ internal static class SpotifySnapshotMerge
 internal sealed class SpotifyNotApprovedException(string? detail)
     : Exception($"Spotify refused this account ({detail ?? "403"}).");
 
+/// <summary>
+/// Spotify's accounts service refused a token request. Still an
+/// <see cref="HttpRequestException"/> with its status, so a dead refresh token
+/// (400/401) reads as a lost account wherever that is checked.
+/// </summary>
+internal sealed class SpotifyTokenException(HttpStatusCode status, string? code, string detail)
+    : HttpRequestException($"Spotify rejected the sign-in ({(int)status}: {detail}).", null, status)
+{
+    public string? Code { get; } = code;
+}
+
 /// <summary>A sign-in that stopped for a reason the user should read as-is.</summary>
 internal sealed class SpotifySignInException(string message, Exception? inner = null) : Exception(message, inner);
 
@@ -121,11 +132,15 @@ internal sealed class SpotifySignInException(string message, Exception? inner = 
 /// while it was captured.
 ///
 /// Two sources. The Spotify app on this PC, through Windows' media controls
-/// (<see cref="SpotifyLocalSource"/>), needs no sign-in and works for anyone.
-/// Signing in with Spotify adds the Web API: exact cover art and Spotify
-/// playing on another device. The Web API is optional because Spotify now caps
-/// a Development Mode app at five approved accounts; everyone past that gets a
-/// 403 and still has the local source.
+/// (<see cref="SpotifyLocalSource"/>), needs no sign-in and works for anyone -
+/// it is the default. Signing in with Spotify adds the Web API: Spotify's own
+/// cover art and Spotify playing on another device.
+///
+/// Sign-in uses the person's own Spotify developer app (their Client ID, set
+/// up with SpotifyOwnAppDialog), never one shared by ClypDat. Spotify caps a
+/// Development Mode app at five approved accounts and grants more only to
+/// businesses with 250k monthly users; with their own app each person is its
+/// first user, so the cap never comes into it.
 ///
 /// Web sign-in is Authorization Code with PKCE and no client secret, the same
 /// shape <see cref="XboxActivityService"/> uses: a desktop app cannot keep a
@@ -134,18 +149,13 @@ internal sealed class SpotifySignInException(string message, Exception? inner = 
 /// </summary>
 internal sealed class SpotifyNowPlayingService : IDisposable
 {
-    // A client ID is a public identifier, not a credential - the same one ships
-    // in every copy of the app, and PKCE is what stops it being useful on its
-    // own. Registered at developer.spotify.com; the redirect below has to be on
-    // that registration verbatim or Spotify rejects the authorize call before
-    // the user ever sees a consent screen.
-    public const string ClientId = "2b86cd1dd2bb4375a378b486312a3ab4";
-
     // Loopback by IP, not by name. Spotify's redirect rules take http only for
     // a loopback ADDRESS - "localhost" is refused - and the port has to be
-    // fixed because it is half of what is registered.
+    // fixed because it is half of what the user registers on their Spotify app
+    // (SpotifyOwnAppDialog tells them this exact value). Spotify rejects the
+    // authorize call before any consent screen if it does not match.
     private const int RedirectPort = 51338;
-    private const string RedirectUri = "http://127.0.0.1:51338/callback";
+    public const string RedirectUri = "http://127.0.0.1:51338/callback";
 
     // Only what the overlay needs. currently-playing alone covers track,
     // artist, length and position; playback-state is what makes a paused
@@ -158,8 +168,10 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     private const string ProfileUri = "https://api.spotify.com/v1/me";
 
     internal const string NotApprovedMessage =
-        "Spotify hasn't approved this Spotify account for ClypDat - Spotify limits ClypDat's sign-in to a few approved accounts. Reading the Spotify app on this PC instead.";
+        "Spotify refused this account. In your Spotify app's settings, open User Management and add the Spotify account you signed in with. Reading the Spotify app on this PC meanwhile.";
     private const string AccountExpiredMessage = "Spotify sign-in expired. Reading the Spotify app on this PC instead; sign in again for cover art from other devices.";
+    internal const string SharedAppRetiredMessage =
+        "Spotify sign-in now uses your own Spotify app. Reading the Spotify app on this PC; set up your own under Advanced to sign in again.";
 
     // With the PC's own session showing the song, the Web API only adds cover
     // art and the track id, and a track change wakes it at once - so it can
@@ -210,8 +222,25 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     /// </summary>
     public static SpotifyNowPlaying Current { get; private set; } = SpotifyNowPlaying.Disconnected;
 
-    /// <summary>Whether the build carries a registration to authorize against.</summary>
-    public static bool IsConfigured => !string.IsNullOrWhiteSpace(ClientId);
+    /// <summary>
+    /// The user's own Spotify app to sign in through, or null for none. Set
+    /// from settings at launch; a successful <see cref="SignInAsync"/> sets it.
+    /// </summary>
+    public string? ClientId { get; set; }
+
+    /// <summary>A Client ID is set up to sign in with.</summary>
+    public bool IsConfigured => IsValidClientId(ClientId);
+
+    // Spotify Client IDs are 32 hex characters.
+    internal static bool IsValidClientId(string? value) =>
+        value is { Length: 32 } && value.All(Uri.IsHexDigit);
+
+    /// <summary>The Client ID in the form it is stored, or null when it is not one.</summary>
+    internal static string? NormaliseClientId(string? value)
+    {
+        var trimmed = value?.Trim();
+        return IsValidClientId(trimmed) ? trimmed!.ToLowerInvariant() : null;
+    }
 
     /// <summary>Spotify is turned on - reading this PC, and the account if signed in.</summary>
     public bool IsEnabled => _enabled;
@@ -232,9 +261,19 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     {
         if (NoticeBoardService.IsBlocked("pause-spotify")) { SetPolicyPaused(true); return false; }
         Enable();
-        if (!IsConfigured) return true;
         var tokens = LoadTokens();
         if (tokens is null) return true;
+        // Signed in through ClypDat's own Spotify app, which is gone (it could
+        // only ever take five people), or through an app the user has since
+        // replaced: that session cannot be refreshed any more.
+        if (tokens.ClientId is null || !string.Equals(tokens.ClientId, NormaliseClientId(ClientId), StringComparison.Ordinal))
+        {
+            AppLog.Info(tokens.ClientId is null
+                ? "Spotify: dropping a sign-in from ClypDat's retired shared Spotify app."
+                : "Spotify: dropping a sign-in from a Spotify app that is no longer set up.");
+            DropAccount(tokens.ClientId is null ? SharedAppRetiredMessage : null);
+            return true;
+        }
         _tokens = tokens;
         try
         {
@@ -269,16 +308,18 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     }
 
     /// <summary>
-    /// Optional Spotify sign-in, for cover art and other devices. Always opens
-    /// Spotify's own page with the account picker, so a refused account can
-    /// be swapped for another. Pressing it again restarts the attempt.
+    /// Optional Spotify sign-in through the user's own Spotify app, for cover
+    /// art and other devices. Always opens Spotify's own page with the account
+    /// picker, so a refused account can be swapped for another. Pressing it
+    /// again restarts the attempt.
     /// </summary>
-    public async Task<bool> SignInAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> SignInAsync(string clientId, CancellationToken cancellationToken = default)
     {
         if (Blocked) { SetPolicyPaused(true); return false; }
-        if (!IsConfigured)
+        var id = NormaliseClientId(clientId);
+        if (id is null)
         {
-            _notice = "This build has no Spotify application registered.";
+            _notice = "That isn't a Spotify Client ID. It is 32 letters and numbers, shown on your Spotify app's page.";
             Recompute();
             return false;
         }
@@ -289,8 +330,9 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         try
         {
             if (!_enabled) Enable();
-            var (tokens, name) = await RunPkceLoginAsync(attempt.Token).ConfigureAwait(false);
+            var (tokens, name) = await RunPkceLoginAsync(id, attempt.Token).ConfigureAwait(false);
             SaveTokens(tokens);
+            ClientId = id;
             _tokens = tokens;
             _accountName = name;
             _notice = null;
@@ -649,7 +691,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         {
             ["grant_type"] = "refresh_token",
             ["refresh_token"] = current.RefreshToken,
-            ["client_id"] = ClientId
+            ["client_id"] = current.ClientId ?? throw new InvalidOperationException("Spotify sign-in has no Client ID.")
         }, cancellationToken).ConfigureAwait(false);
 
         // A refresh response may omit refresh_token, which means "keep using
@@ -657,7 +699,8 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         var next = new SpotifyTokens(
             refreshed.AccessToken,
             string.IsNullOrWhiteSpace(refreshed.RefreshToken) ? current.RefreshToken : refreshed.RefreshToken!,
-            DateTimeOffset.UtcNow.AddSeconds(refreshed.ExpiresIn));
+            DateTimeOffset.UtcNow.AddSeconds(refreshed.ExpiresIn),
+            current.ClientId);
         // Signed out (or swapped accounts) while the refresh was in flight.
         if (!ReferenceEquals(_tokens, current)) throw new OperationCanceledException("Spotify account changed during refresh.");
         _tokens = next;
@@ -665,7 +708,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         return next.AccessToken;
     }
 
-    private async Task<(SpotifyTokens Tokens, string? Name)> RunPkceLoginAsync(CancellationToken cancellationToken)
+    private async Task<(SpotifyTokens Tokens, string? Name)> RunPkceLoginAsync(string clientId, CancellationToken cancellationToken)
     {
         using var listener = await StartListenerAsync(cancellationToken).ConfigureAwait(false);
 
@@ -675,7 +718,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         // show_dialog: without it Spotify silently reuses whichever account the
         // browser is signed into - including one it has already refused - and
         // there is no way to pick another.
-        var query = $"client_id={Uri.EscapeDataString(ClientId)}&response_type=code" +
+        var query = $"client_id={Uri.EscapeDataString(clientId)}&response_type=code" +
             $"&redirect_uri={Uri.EscapeDataString(RedirectUri)}&scope={Uri.EscapeDataString(Scope)}" +
             $"&state={Uri.EscapeDataString(state)}&code_challenge_method=S256&code_challenge={Uri.EscapeDataString(challenge)}" +
             "&show_dialog=true";
@@ -711,14 +754,22 @@ internal sealed class SpotifyNowPlayingService : IDisposable
                 var code = parameters["code"];
                 if (string.IsNullOrWhiteSpace(code)) throw new SpotifySignInException("Spotify did not return an authorization code. Try again.");
 
-                var response = await PostTokenAsync(new Dictionary<string, string>
+                OAuthTokenResponse response;
+                try
                 {
-                    ["grant_type"] = "authorization_code",
-                    ["code"] = code,
-                    ["redirect_uri"] = RedirectUri,
-                    ["client_id"] = ClientId,
-                    ["code_verifier"] = verifier
-                }, cancellationToken).ConfigureAwait(false);
+                    response = await PostTokenAsync(new Dictionary<string, string>
+                    {
+                        ["grant_type"] = "authorization_code",
+                        ["code"] = code,
+                        ["redirect_uri"] = RedirectUri,
+                        ["client_id"] = clientId,
+                        ["code_verifier"] = verifier
+                    }, cancellationToken).ConfigureAwait(false);
+                }
+                catch (SpotifyTokenException rejected) when (rejected.Code == "invalid_client")
+                {
+                    throw new SpotifySignInException("Spotify didn't accept that Client ID. Check it matches the one on your Spotify app's page.", rejected);
+                }
                 if (string.IsNullOrWhiteSpace(response.RefreshToken))
                     throw new SpotifySignInException("Spotify did not return a refresh token. Try again.");
 
@@ -727,7 +778,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
                 // first is what used to leave a refused token behind that
                 // every later Connect reused.
                 var name = await DisplayNameAsync(response.AccessToken, cancellationToken).ConfigureAwait(false);
-                var tokens = new SpotifyTokens(response.AccessToken, response.RefreshToken!, DateTimeOffset.UtcNow.AddSeconds(response.ExpiresIn));
+                var tokens = new SpotifyTokens(response.AccessToken, response.RefreshToken!, DateTimeOffset.UtcNow.AddSeconds(response.ExpiresIn), clientId);
                 await RespondAsync(context, BrowserCallbackPage.Success(BrowserCallbackService.Spotify), cancellationToken).ConfigureAwait(false);
                 return (tokens, name);
             }
@@ -735,7 +786,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             {
                 var message = error switch
                 {
-                    SpotifyNotApprovedException => "Spotify hasn't approved this Spotify account for ClypDat. ClypDat still reads the Spotify app on your PC, so you can close this tab.",
+                    SpotifyNotApprovedException => "Spotify refused this account. In your Spotify app's settings, open User Management and add the Spotify account you signed in with, then sign in again from ClypDat.",
                     SpotifySignInException => error.Message,
                     _ => "Spotify sign-in could not be completed. Go back to ClypDat and try again.",
                 };
@@ -790,7 +841,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Spotify rejected the sign-in ({(int)response.StatusCode}: {OAuthError(body)}).", null, response.StatusCode);
+            throw new SpotifyTokenException(response.StatusCode, OAuthErrorCode(body), OAuthError(body));
 
         return JsonSerializer.Deserialize<OAuthTokenResponse>(body)
             ?? throw new InvalidOperationException("Spotify returned an unreadable token response.");
@@ -840,6 +891,16 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         catch (JsonException) { return "no error detail"; }
     }
 
+    private static string? OAuthErrorCode(string body)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(body);
+            return json.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String ? error.GetString() : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
     // Web API errors are {"error":{"status":403,"message":"..."}}, unlike the
     // accounts service's flat OAuth errors.
     internal static string? ApiError(string body)
@@ -866,7 +927,9 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         _http.Dispose();
     }
 
-    private sealed record SpotifyTokens(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt);
+    // ClientId is the app the session belongs to; tokens saved before own-app
+    // sign-in have none and came from ClypDat's retired shared app.
+    private sealed record SpotifyTokens(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt, string? ClientId = null);
 
     private sealed class OAuthTokenResponse
     {

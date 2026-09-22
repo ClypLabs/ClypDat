@@ -247,11 +247,12 @@ public sealed class AppSettings
     public bool SpotifyEnabled { get; set; }
 
     /// <summary>
-    /// When Spotify was last turned on here. A Disconnect pressed on
-    /// clypdat.xyz/account before this is stale - the user has connected again
-    /// since - and is not carried out.
+    /// Client ID of the user's own Spotify developer app, for the optional
+    /// Spotify sign-in (Settings > Connected Accounts > Spotify > Advanced).
+    /// A public identifier, not a secret. Null uses the Spotify app on this PC
+    /// only.
     /// </summary>
-    public DateTimeOffset? SpotifyConnectedAtUtc { get; set; }
+    public string? SpotifyClientId { get; set; }
 
     /// <summary>Whether a clip captured while Spotify was playing carries the track.</summary>
     public bool SpotifyOverlayEnabled { get; set; } = true;

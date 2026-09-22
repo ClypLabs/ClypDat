@@ -158,21 +158,23 @@
         <Border Classes="settingsNotice" IsVisible="{Binding SpotifyHasNotice}">
           <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyNotice}" TextWrapping="Wrap" />
         </Border>
+        <!-- Advanced: sign-in goes through the user's own Spotify developer
+             app. ClypDat's shared one could only ever take five people
+             (Spotify's Development Mode cap); with their own app each person
+             is its first user. SpotifyOwnAppDialog walks through making one. -->
         <Border Classes="providerSetting" IsVisible="{Binding SpotifyIsConnected}">
           <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
             <StackPanel Spacing="2" VerticalAlignment="Center">
-              <TextBlock Classes="settingsRowTitleSm" Text="Sign in with Spotify (optional)" IsVisible="{Binding !SpotifyAccountConnected}" />
+              <TextBlock Classes="settingsRowTitleSm" Text="Advanced: use your own Spotify app" />
               <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding !SpotifyAccountConnected}"
-                         Text="Adds Spotify's own cover art, and songs playing on your phone or another device. Spotify only allows a few approved accounts - everyone else keeps the Spotify app on this PC." />
-              <TextBlock Classes="settingsRowTitleSm" Text="Signed in with Spotify" IsVisible="{Binding SpotifyAccountConnected}" />
+                         Text="Adds Spotify's own covers, and songs playing on your phone or another device. Takes a couple of minutes with a free Spotify developer app (the Spotify account needs Premium)." />
               <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding SpotifyAccountConnected}"
-                         Text="Signing out keeps reading the Spotify app on this PC." />
-              <TextBlock Classes="settingsRowDescSm" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap"
-                         Text="This build has no Spotify application registered, so Spotify sign-in is unavailable."
-                         IsVisible="{Binding !SpotifyIsConfigured}" />
+                         Text="Signed in through your own Spotify app. Signing out keeps reading the Spotify app on this PC." />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-              <Button Click="SignInSpotifyButton_OnClick" IsEnabled="{Binding SpotifySignInEnabled}" IsVisible="{Binding !SpotifyAccountConnected}">
+              <Button Content="Set up…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding !SpotifyHasOwnApp}"
+                      IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="A one-page guide to making your own Spotify app." />
+              <Button Click="SignInSpotifyButton_OnClick" IsEnabled="{Binding SpotifySignInEnabled}" IsVisible="{Binding SpotifyCanSignIn}">
                 <Grid>
                   <TextBlock Text="Sign in" IsVisible="{Binding !SpotifyConnectBusy}" VerticalAlignment="Center" />
                   <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding SpotifyConnectBusy}">
@@ -184,6 +186,8 @@
               <Button Content="Cancel" Click="CancelSpotifySignInButton_OnClick" IsVisible="{Binding SpotifyConnectBusy}"
                       ToolTip.Tip="Stop waiting for the browser." />
               <Button Content="Sign out" Click="SignOutSpotifyButton_OnClick" IsVisible="{Binding SpotifyAccountConnected}" />
+              <Button Content="Change app…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding SpotifyHasOwnApp}"
+                      ToolTip.Tip="Open the guide again, or forget this Spotify app." />
             </StackPanel>
           </Grid>
         </Border>

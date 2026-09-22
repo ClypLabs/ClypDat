@@ -18,6 +18,12 @@ public sealed partial class IntegrationsSection : UserControl
     {
         if (DataContext is MainWindowViewModel vm) await vm.SignInSpotifyAsync();
     }
+    private void OpenSpotifyOwnAppButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        _ = new ClypDat.App.Views.SpotifyOwnAppDialog(vm).ShowDialog(owner);
+    }
     private void CancelSpotifySignInButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm) vm.CancelSpotifySignIn();

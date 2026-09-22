@@ -111,44 +111,6 @@ public sealed class ClypDatAccountSecurityTests
     }
 
     [Fact]
-    public async Task SpotifyDisconnectFromTheWebsiteIsRaisedOnceAndAnsweredAgainIfLost()
-    {
-        using var fixture = new AccountFixture(HttpStatusCode.OK)
-        {
-            ActivityBody = "{\"connected\":false,\"providers\":[],\"spotify\":false,\"spotifyDisconnect\":\"2026-09-23T01:02:03.000Z\"}",
-        };
-        fixture.Service.SpotifyConnected = () => true;
-        var raised = new List<DateTimeOffset>();
-        fixture.Service.SpotifyDisconnectRequested += (_, at) => raised.Add(at);
-        Assert.True(await fixture.Service.TryRestoreAsync());
-        Assert.Equal(new[] { DateTimeOffset.Parse("2026-09-23T01:02:03Z") }, raised);
-        // The handler's own report is the answer; nothing else is sent the first time.
-        Assert.Equal(0, fixture.SpotifyReports);
-
-        // Still pending on the next refresh: the report was lost. Not raised
-        // again, but where Spotify stands is sent once more.
-        await fixture.Service.RefreshAsync();
-        Assert.Single(raised);
-        await fixture.WaitForSpotifyReportsAsync(1);
-        await fixture.Service.RefreshAsync();
-        Assert.Equal(1, fixture.SpotifyReports);
-    }
-
-    [Fact]
-    public async Task SpotifyDriftWithoutADisconnectRequestIsStillReported()
-    {
-        using var fixture = new AccountFixture(HttpStatusCode.OK)
-        {
-            ActivityBody = "{\"connected\":false,\"providers\":[],\"spotify\":false}",
-        };
-        fixture.Service.SpotifyConnected = () => true;
-        Assert.True(await fixture.Service.TryRestoreAsync());
-        // Plain drift (no request): the app says "connected" again.
-        await fixture.WaitForSpotifyReportsAsync(1);
-        Assert.Equal(true, fixture.LastSpotifyReport);
-    }
-
-    [Fact]
     public void FailedAtomicCacheReplacementPreservesOriginalAndRemovesTemporaryFile()
     {
         using var fixture = new AccountFixture(HttpStatusCode.OK);
@@ -176,13 +138,11 @@ public sealed class ClypDatAccountSecurityTests
         public ClypDatAccountActivityService Service { get; }
         public HttpStatusCode RevokeStatus { get; set; }
         public HttpStatusCode ActivityStatus { get; init; } = HttpStatusCode.OK;
-        public string ActivityBody { get; init; } = "{\"connected\":true,\"providers\":[\"google\"]}";
+        // What the site sent while it still tracked Spotify: the fields are ignored now.
+        public string ActivityBody { get; init; } = "{\"connected\":true,\"providers\":[\"google\"],\"spotify\":false,\"spotifyDisconnect\":\"2026-09-23T01:02:03Z\"}";
         public int RevokeRequests { get; private set; }
         public int ActivityRequests { get; private set; }
         public int RenewRequests { get; private set; }
-        private int _spotifyReports;
-        public int SpotifyReports => Volatile.Read(ref _spotifyReports);
-        public bool? LastSpotifyReport { get; private set; }
         public bool RevokeQueuedAtRevoke { get; private set; }
 
         public AccountFixture(HttpStatusCode revokeStatus, TimeSpan? lifetime = null)
@@ -218,26 +178,14 @@ public sealed class ClypDatAccountSecurityTests
                     RenewRequests++;
                     return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent($"{{\"token\":\"{RenewedToken}\",\"expires_in\":2592000}}") };
                 }
-                if (path == "/api/desktop/spotify")
-                {
-                    using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
-                    LastSpotifyReport = body.RootElement.GetProperty("connected").GetBoolean();
-                    Interlocked.Increment(ref _spotifyReports);
-                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
-                }
+                // Anything else - including the retired api/desktop/spotify
+                // report - fails the test here: the site keeps no Spotify data.
                 Assert.Equal("/api/desktop/revoke", path);
                 RevokeRequests++;
                 RevokeQueuedAtRevoke = File.Exists(RevokePath);
                 return new HttpResponseMessage(RevokeStatus);
             })) { BaseAddress = new Uri("https://account-security.invalid/") };
             Service = new ClypDatAccountActivityService(client, CachePath) { LiveActivityNeeded = () => false };
-        }
-
-        // Spotify reports are fire-and-forget from the refresh.
-        public async Task WaitForSpotifyReportsAsync(int count)
-        {
-            for (var attempt = 0; attempt < 100 && SpotifyReports < count; attempt++) await Task.Delay(20);
-            Assert.Equal(count, SpotifyReports);
         }
 
         public void Dispose()

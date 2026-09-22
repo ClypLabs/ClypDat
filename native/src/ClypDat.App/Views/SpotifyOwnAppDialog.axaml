@@ -1,0 +1,181 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ClypDat.App.ViewModels"
+        xmlns:controls="using:ClypDat.App.Controls"
+        x:Class="ClypDat.App.Views.SpotifyOwnAppDialog"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Your own Spotify app"
+        WindowDecorations="None"
+        ShowInTaskbar="False"
+        CanResize="False"
+        Width="620"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        KeyDown="Dialog_OnKeyDown">
+  <Window.Resources>
+    <SolidColorBrush x:Key="SpotifyDialogBrush" Color="#1ED760" />
+    <SolidColorBrush x:Key="SpotifyStepBrush" Color="#1F1ED760" />
+  </Window.Resources>
+  <Window.Styles>
+    <!-- The numbered circle in front of each step. -->
+    <Style Selector="Border.stepNumber">
+      <Setter Property="Width" Value="26" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="CornerRadius" Value="13" />
+      <Setter Property="Background" Value="{StaticResource SpotifyStepBrush}" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+    <Style Selector="Border.stepNumber > TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource SpotifyDialogBrush}" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- A value to put into Spotify's form: the text, and a button that puts
+         it on the clipboard so it is never retyped. -->
+    <Style Selector="Border.copyValue">
+      <Setter Property="Background" Value="{StaticResource Surface_0C1319}" />
+      <Setter Property="BorderBrush" Value="{StaticResource Surface_232F3A}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="10,6,6,6" />
+    </Style>
+  </Window.Styles>
+
+  <Border CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True">
+    <DockPanel LastChildFill="True">
+      <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0" PointerPressed="TitleBar_OnPointerPressed">
+        <Grid ColumnDefinitions="Auto,*,Auto" Height="56">
+          <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
+            <Ellipse Width="10" Height="10" Fill="{StaticResource SpotifyDialogBrush}" VerticalAlignment="Center" />
+            <TextBlock Text="YOUR OWN SPOTIFY APP" Foreground="{StaticResource Text_D8E4F2}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
+          </StackPanel>
+          <Button Grid.Column="2" Classes="dialogClose" Content="✕" Click="CloseButton_OnClick"
+                  Width="52" Height="56" FontSize="14"
+                  HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <StackPanel Margin="22,18,22,20" Spacing="16">
+        <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                   Text="Spotify lets an app it hasn't approved sign in only five people, so ClypDat signs you in through a Spotify app of your own - you'll be its first user. It takes a couple of minutes, and the Spotify account needs Premium." />
+
+        <!-- 1. Dashboard -->
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+          <Border Classes="stepNumber"><TextBlock Text="1" /></Border>
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Open Spotify for Developers" />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                       Text="Log in with the Spotify account you listen on, and accept the developer terms if Spotify asks." />
+          </StackPanel>
+          <Button Grid.Column="2" Content="Open dashboard" Click="OpenDashboard_OnClick" VerticalAlignment="Top" />
+        </Grid>
+
+        <!-- 2. Create the app -->
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+          <Border Classes="stepNumber"><TextBlock Text="2" /></Border>
+          <StackPanel Grid.Column="1" Spacing="8">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+              <StackPanel Spacing="2">
+                <TextBlock Classes="settingsRowTitle" Text="Create an app" />
+                <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                           Text="Press Copy, then paste into the matching box on Spotify's form." />
+              </StackPanel>
+              <Button Grid.Column="1" Content="Create app" Click="OpenCreate_OnClick" VerticalAlignment="Top" />
+            </Grid>
+            <Border Classes="copyValue">
+              <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
+                <TextBlock Classes="settingsRowDescSm" Text="App name" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" x:Name="AppNameText" Classes="settingsRowTitleSm" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <Button Grid.Column="2" Content="Copy" Tag="name" Click="Copy_OnClick" />
+              </Grid>
+            </Border>
+            <Border Classes="copyValue">
+              <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
+                <TextBlock Classes="settingsRowDescSm" Text="App description" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" x:Name="AppDescriptionText" Classes="settingsRowTitleSm" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <Button Grid.Column="2" Content="Copy" Tag="description" Click="Copy_OnClick" />
+              </Grid>
+            </Border>
+            <Border Classes="copyValue">
+              <Grid ColumnDefinitions="110,*,Auto" ColumnSpacing="8">
+                <TextBlock Classes="settingsRowDescSm" Text="Redirect URI" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" x:Name="RedirectUriText" Classes="settingsRowTitleSm" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <Button Grid.Column="2" Content="Copy" Tag="redirect" Click="Copy_OnClick" />
+              </Grid>
+            </Border>
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                       Text="After pasting the Redirect URI, press Add beside it. Under the APIs, tick Web API. Accept the terms and press Save." />
+            <TextBlock x:Name="CopiedText" Classes="settingsRowDescSm" Foreground="{StaticResource SpotifyDialogBrush}" IsVisible="False" />
+          </StackPanel>
+        </Grid>
+
+        <!-- 3. Client ID -->
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+          <Border Classes="stepNumber"><TextBlock Text="3" /></Border>
+          <StackPanel Grid.Column="1" Spacing="8">
+            <StackPanel Spacing="2">
+              <TextBlock Classes="settingsRowTitle" Text="Bring back your Client ID" />
+              <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                         Text="On your new app's page, press the copy button beside Client ID and come back here - ClypDat fills it in for you." />
+            </StackPanel>
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBox x:Name="ClientIdBox" Classes="settingsInput" PlaceholderText="Client ID (32 letters and numbers)"
+                       MaxLength="64" TextChanged="ClientIdBox_OnTextChanged" />
+              <Button Grid.Column="1" Content="Paste" Click="Paste_OnClick" VerticalAlignment="Center" />
+            </Grid>
+            <TextBlock x:Name="ClientIdStatus" Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="False" />
+          </StackPanel>
+        </Grid>
+
+        <!-- 4. Sign in -->
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+          <Border Classes="stepNumber"><TextBlock Text="4" /></Border>
+          <StackPanel Grid.Column="1" Spacing="2">
+            <TextBlock Classes="settingsRowTitle" Text="Sign in" />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                       Text="Spotify asks you to allow your app to see what you're playing. Pick the same account you made the app with." />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+            <Button x:Name="SignInButton" Classes="primaryButton" Click="SignIn_OnClick" IsEnabled="False">
+              <Grid>
+                <TextBlock Text="Sign in with Spotify" IsVisible="{Binding !SpotifyConnectBusy}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding SpotifyConnectBusy}">
+                  <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                  <TextBlock Text="Waiting for Spotify…" VerticalAlignment="Center" />
+                </StackPanel>
+              </Grid>
+            </Button>
+            <Button Content="Cancel" Click="CancelSignIn_OnClick" IsVisible="{Binding SpotifyConnectBusy}" />
+          </StackPanel>
+        </Grid>
+
+        <Border Classes="settingsNotice" IsVisible="{Binding SpotifyHasNotice}">
+          <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyNotice}" TextWrapping="Wrap" />
+        </Border>
+
+        <Border Classes="settingsDivider" />
+
+        <!-- The two ways this goes wrong, both fixed on Spotify's side. -->
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="settingsRowTitleSm" Text="Stuck?" />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                       Text="Spotify says INVALID_CLIENT: Invalid redirect URI - the Redirect URI in your app's settings must match the one above exactly." />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                       Text="Spotify refused the account - in your app's settings, open User Management and add the Spotify account you signed in with." />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Top">
+            <Button x:Name="OpenAppSettingsButton" Content="Open my app" Click="OpenAppSettings_OnClick" IsEnabled="False"
+                    ToolTip.Tip="Your Spotify app's page, once ClypDat knows its Client ID." />
+            <Button Content="Forget this app" Click="Forget_OnClick" IsVisible="{Binding SpotifyHasOwnApp}"
+                    ToolTip.Tip="Sign out and forget your Spotify app. ClypDat keeps reading the Spotify app on this PC." />
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+    </DockPanel>
+  </Border>
+</Window>

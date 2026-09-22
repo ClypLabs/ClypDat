@@ -175,6 +175,62 @@ public sealed class SpotifySourceTests : IDisposable
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Theory]
+    [InlineData("2b86cd1dd2bb4375a378b486312a3ab4", "2b86cd1dd2bb4375a378b486312a3ab4")]
+    [InlineData("  2B86CD1DD2BB4375A378B486312A3AB4 ", "2b86cd1dd2bb4375a378b486312a3ab4")]
+    [InlineData("2b86cd1dd2bb4375a378b486312a3ab", null)]
+    [InlineData("2b86cd1dd2bb4375a378b486312a3ab4f", null)]
+    [InlineData("zb86cd1dd2bb4375a378b486312a3ab4", null)]
+    [InlineData("https://developer.spotify.com/dashboard/2b86cd1dd2bb4375a378b486312a3ab4", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void OnlyARealClientIdIsAccepted(string? input, string? expected) =>
+        Assert.Equal(expected, SpotifyNowPlayingService.NormaliseClientId(input));
+
+    [Fact]
+    public async Task ASignInFromTheRetiredSharedAppIsDroppedButThisPcKeepsReading()
+    {
+        WriteSavedSignIn(clientId: null);
+        using var service = new SpotifyNowPlayingService { ClientId = new string('c', 32) };
+        Assert.True(await service.TryRestoreAsync());
+        Assert.True(service.IsEnabled, "the local source is still on");
+        Assert.False(service.IsAccountConnected);
+        Assert.False(File.Exists(SavedSignInPath));
+        Assert.Equal(SpotifyNowPlayingService.SharedAppRetiredMessage, service.Snapshot.Error);
+    }
+
+    [Fact]
+    public async Task ASignInFromAReplacedAppIsDroppedQuietly()
+    {
+        WriteSavedSignIn(clientId: new string('a', 32));
+        using var service = new SpotifyNowPlayingService { ClientId = new string('b', 32) };
+        Assert.True(await service.TryRestoreAsync());
+        Assert.False(service.IsAccountConnected);
+        Assert.False(File.Exists(SavedSignInPath));
+        Assert.Null(service.Snapshot.Error);
+    }
+
+    [Fact]
+    public async Task SignInRefusesSomethingThatIsNotAClientId()
+    {
+        using var service = new SpotifyNowPlayingService();
+        Assert.False(await service.SignInAsync("not-a-client-id"));
+        Assert.False(service.IsAccountConnected);
+        Assert.Contains("Client ID", service.Snapshot.Error);
+    }
+
+    private static string SavedSignInPath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "spotify-auth.bin");
+
+    private static void WriteSavedSignIn(string? clientId)
+    {
+        Directory.CreateDirectory(ClypDat.Core.Settings.AppDataPaths.Root);
+        var json = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            AccessToken = "access", RefreshToken = "refresh", ExpiresAt = DateTimeOffset.UtcNow.AddHours(1), ClientId = clientId,
+        });
+        File.WriteAllBytes(SavedSignInPath, System.Security.Cryptography.ProtectedData.Protect(json, null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+    }
+
     [Fact]
     public void AnAllowListRefusalIsReadFromSpotifysErrorBody()
     {

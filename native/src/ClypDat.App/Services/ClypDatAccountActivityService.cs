@@ -56,9 +56,6 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(3),
     };
     private static readonly TimeSpan DiscordProfileInterval = TimeSpan.FromMinutes(30);
-    // While Spotify is on, a Disconnect pressed on clypdat.xyz/account reaches
-    // the app on its next refresh; this bounds how long that can take.
-    private static readonly TimeSpan SpotifyCheckInterval = TimeSpan.FromMinutes(15);
     // Nothing at all to watch. Still asks now and then, so a sign-in that is
     // about to run out gets renewed (MaybeRenewAsync) in an app left open for
     // days. The site answers these from its cache.
@@ -87,25 +84,6 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// Unset means always needed, which is the old behaviour.
     /// </summary>
     public Func<bool>? LiveActivityNeeded { get; set; }
-
-    /// <summary>
-    /// Whether Spotify is connected in this app right now, or null while that
-    /// is not known yet - the saved Spotify session is still being restored at
-    /// startup. Every refresh compares this against what the site believes and
-    /// reports the difference, so a connect whose report was dropped (offline,
-    /// a 503, the account linked after Spotify) stops being permanent: the
-    /// account page catches up on the next poll instead of waiting for the
-    /// next connect or disconnect. Null means "say nothing".
-    /// </summary>
-    public Func<bool?>? SpotifyConnected { get; set; }
-
-    /// <summary>
-    /// Disconnect was pressed for Spotify on clypdat.xyz/account, at the time
-    /// given (the site's clock). Raised once per request, on the poll's thread.
-    /// The handler disconnects Spotify, or reports it connected if Spotify was
-    /// connected again here after that time; either report clears the request.
-    /// </summary>
-    public event EventHandler<DateTimeOffset>? SpotifyDisconnectRequested;
 
     /// <summary>Call when <see cref="LiveActivityNeeded"/> may have changed.</summary>
     public void LiveActivityNeedChanged()
@@ -480,32 +458,6 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     }
 
     /// <summary>
-    /// Tells clypdat.xyz whether Spotify is connected in this app, so the
-    /// account page can show it too. Spotify's own OAuth never touches the
-    /// server - this is purely a status flag - so a failure here must never
-    /// disrupt whatever caused the report (connecting/disconnecting Spotify,
-    /// or linking this ClypDat account while Spotify was already connected).
-    /// </summary>
-    public async Task ReportSpotifyStatusAsync(bool connected, CancellationToken cancellationToken = default)
-    {
-        if (!IsAuthenticated) return;
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/spotify")
-            {
-                Content = new StringContent(JsonSerializer.Serialize(new { connected }), Encoding.UTF8, "application/json"),
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token!.AccessToken);
-            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.Unauthorized) SignedOutBySite();
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("ClypDat account: reporting Spotify status failed.", error);
-        }
-    }
-
-    /// <summary>
     /// Called when a provider is about to change outside the app - the user has
     /// just been sent to clypdat.xyz to link something, or has come back to the
     /// window afterwards. Linking finishes in the browser, so nothing tells the
@@ -559,10 +511,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         {
             // Nothing live to watch. A Discord account is asked about every 30
             // minutes, which is when the site rechecks the Discord name and
-            // picture; Spotify being on shortens that so a disconnect from the
-            // account page lands. The site answers these from its cache.
-            var parked = _snapshot.DiscordConnected ? DiscordProfileInterval : ParkedInterval;
-            return SpotifyConnected?.Invoke() == true && parked > SpotifyCheckInterval ? SpotifyCheckInterval : parked;
+            // picture. The site answers these from its cache.
+            return _snapshot.DiscordConnected ? DiscordProfileInterval : ParkedInterval;
         }
         if (_snapshot.CurrentTitle is not null) return TimeSpan.FromSeconds(15);
         return IdleBackoff[Math.Min(_idleRefreshes, IdleBackoff.Length - 1)];
@@ -642,51 +592,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null,
             providers.Contains("google", StringComparer.OrdinalIgnoreCase), providers.Contains("discord", StringComparer.OrdinalIgnoreCase),
             ProfileName: result.Profile?.Name, ProfileImage: result.Profile?.Image);
-        HandleSpotifyStatus(result.Spotify, result.SpotifyDisconnect, cancellationToken);
         Changed?.Invoke(this, _snapshot);
         await MaybeRenewAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    // Older builds of the site do not send the flag at all; nothing to compare
-    // against, so nothing to do. Re-sending is rate limited because a report
-    // that keeps failing would otherwise post on every poll for as long as the
-    // app is open.
-    private static readonly TimeSpan SpotifyResendInterval = TimeSpan.FromMinutes(5);
-    private DateTimeOffset _lastSpotifyReport = DateTimeOffset.MinValue;
-    private DateTimeOffset? _handledSpotifyDisconnect;
-
-    private void HandleSpotifyStatus(bool? reported, string? disconnectRequested, CancellationToken cancellationToken)
-    {
-        if (DateTimeOffset.TryParse(disconnectRequested, out var requested))
-        {
-            // New request: the view model decides (and reports back, which
-            // clears it on the site).
-            if (requested != _handledSpotifyDisconnect)
-            {
-                _handledSpotifyDisconnect = requested;
-                AppLog.Info("ClypDat account: Spotify disconnect requested from clypdat.xyz.");
-                SpotifyDisconnectRequested?.Invoke(this, requested);
-                return;
-            }
-            // Handled, but still pending there: the report back was lost.
-            // Say where Spotify stands again - whatever it is, that is the
-            // answer to the request. Never re-report "connected" as a mere
-            // drift correction while it is pending, which would undo it.
-            ReconcileSpotifyStatus(null, cancellationToken, force: true);
-            return;
-        }
-        ReconcileSpotifyStatus(reported, cancellationToken);
-    }
-
-    private void ReconcileSpotifyStatus(bool? reported, CancellationToken cancellationToken, bool force = false)
-    {
-        if (!force && reported is null) return;
-        if (SpotifyConnected?.Invoke() is not { } inApp) return;
-        if (!force && inApp == reported) return;
-        if (DateTimeOffset.UtcNow - _lastSpotifyReport < SpotifyResendInterval) return;
-        _lastSpotifyReport = DateTimeOffset.UtcNow;
-        AppLog.Info($"ClypDat account: Spotify reads {inApp} here and {(reported is { } onSite ? onSite.ToString() : "a pending disconnect")} on clypdat.xyz; reporting again.");
-        _ = ReportSpotifyStatusAsync(inApp, cancellationToken);
     }
 
     // Desktop sign-ins last 30 days. In the last week of one, each refresh
@@ -955,10 +862,6 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         [JsonPropertyName("providers")] public string[]? Providers { get; set; }
         // Present only when the account has Discord linked.
         [JsonPropertyName("profile")] public Profile? Profile { get; set; }
-        [JsonPropertyName("spotify")] public bool? Spotify { get; set; }
-        // When Disconnect was pressed for Spotify on the account page and the
-        // app has not yet carried it out; absent otherwise.
-        [JsonPropertyName("spotifyDisconnect")] public string? SpotifyDisconnect { get; set; }
     }
     private sealed class Profile
     {
