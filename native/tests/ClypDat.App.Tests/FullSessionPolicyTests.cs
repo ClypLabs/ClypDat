@@ -71,8 +71,30 @@ public sealed class FullSessionPolicyTests
         Assert.Equal("MKV", settings.FullSessionContainer);
     }
 
+    [Fact]
+    public void Mp4WarningCanBeIgnoredOrHiddenPermanently()
+    {
+        var settings = new AppSettings { FullSessionContainer = "MP4" }; var saves = 0;
+        var selection = new FullSessionFormatViewModel(settings, () => saves++);
+        Assert.True(selection.IsWarningVisible);
+        selection.IgnoreWarning();
+        Assert.False(selection.IsWarningVisible);
+        Assert.False(settings.HideFullSessionMp4Warning);
+
+        var restartedSelection = new FullSessionFormatViewModel(settings, () => saves++);
+        Assert.True(restartedSelection.IsWarningVisible);
+        restartedSelection.HideWarningPermanently();
+        Assert.True(settings.HideFullSessionMp4Warning);
+        Assert.False(restartedSelection.IsWarningVisible);
+        Assert.Equal(1, saves);
+    }
+
     [Theory]
     [InlineData("{}", "MKV")]
+    [InlineData("{\"FullSessionContainer\":\"MP4\"}", "MP4")]
+    [InlineData("{\"FullSessionContainer\":\"mkv\"}", "MKV")]
+    [InlineData("{\"FullSessionContainer\":\"bad\"}", "MKV")]
+    [InlineData("{\"FullSessionContainer\":null}", "MKV")]
     public void PersistedFormatNormalizesAndRoundTrips(string json, string expected)
     {
         var settings = JsonSerializer.Deserialize<AppSettings>(json)!;
@@ -81,7 +103,33 @@ public sealed class FullSessionPolicyTests
     }
 
     [Theory]
+    [InlineData("Manual", true, false)]
+    [InlineData("FullSession", true, true)]
+    [InlineData("Off", false, false)]
+    public void CustomModeAndQualityTakePrecedence(string mode, bool capture, bool session)
+    {
+        var settings = new AppSettings { FullSessionRecordingEnabled = true, ReplayVideoCodec = "H.264", FullSessionVideoCodec = "H.264" };
+        settings.CustomGameSettings["game.exe"] = new CustomGameProfile
+        {
+            Groups = [CustomGameSettingsResolver.RecordingModeGroup, CustomGameSettingsResolver.QualityGroup],
+            RecordingMode = mode, ReplayVideoCodec = "AV1"
+        };
+        var effective = CustomGameSettingsResolver.Resolve(settings, "game.exe");
+        Assert.Equal(capture, effective.RecordingEnabled);
+        Assert.Equal(session, effective.FullSessionRecordingEnabled);
+        Assert.Equal("AV1", effective.ReplayVideoCodec);
+        Assert.Equal(effective.ReplayVideoCodec, effective.FullSessionVideoCodec);
+        Assert.Equal("MKV", settings.FullSessionContainer);
+    }
+
+    [Theory]
     [InlineData(FullSessionState.Off, false, "Recording", true, "#F04452")]
+    [InlineData(FullSessionState.Recording, false, "Full Session Recording", true, "#F04452")]
+    [InlineData(FullSessionState.Recording, true, "Full Session Recording", true, "#F04452")]
+    [InlineData(FullSessionState.Off, true, "Recording", true, "#F04452")]
+    [InlineData(FullSessionState.Starting, false, "Starting", false, "Transparent")]
+    [InlineData(FullSessionState.Stopping, false, "Stopping", false, "Transparent")]
+    [InlineData(FullSessionState.Failed, false, "Recording", true, "#F04452")]
     public void IndicatorUsesWorkerModeAndPauseState(FullSessionState state, bool paused, string label, bool flash, string color)
     {
         var health = ReplayCaptureHealth.Unknown("test") with
@@ -96,7 +144,24 @@ public sealed class FullSessionPolicyTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NonCaptureStatesNeverFlash(bool paused)
+    {
+        var health = ReplayCaptureHealth.Unknown("test") with { State = ReplayCaptureState.Healthy, FullSession = new(FullSessionState.Recording), CapturePaused = paused };
+        Assert.False(RecordingPresentation.Resolve(health, true, false).Flash);
+        Assert.False(RecordingPresentation.Resolve(health, false, true).Flash);
+        Assert.False(RecordingPresentation.Resolve(health with { State = ReplayCaptureState.Recovering }, true, true).Flash);
+        Assert.False(RecordingPresentation.Resolve(health with { StartupPhase = ReplayCaptureStartupPhase.WaitingForForeground }, true, true).Flash);
+        Assert.False(RecordingPresentation.Resolve(health, true, true, stopping: true).Flash);
+        Assert.False(RecordingPresentation.Resolve(health with { State = ReplayCaptureState.Stopping }, true, true).Flash);
+        Assert.False(RecordingPresentation.Resolve(health with { State = ReplayCaptureState.Unknown }, true, true).Flash);
+    }
+
+    [Theory]
     [InlineData("session.mkv", false)]
+    [InlineData("session.MKV", false)]
+    [InlineData("session.mp4", true)]
     public void FinalizationOptionsMatchContainer(string path, bool movflags)
     {
         var args = new List<string>(); MediaContainerOptions.AddFinalizedOptions(args, path);

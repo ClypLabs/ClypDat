@@ -39,6 +39,8 @@ public sealed class ReplaySessionLifetimeTests
 
     [Theory]
     [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
     public void ShutdownStopsProducerBeforeClosingQueueAndRetainsLateAcknowledgements(bool producerStops, bool encoderStops)
     {
         var session = new ReplaySessionLifetime(CancellationToken.None);
@@ -58,5 +60,24 @@ public sealed class ReplaySessionLifetimeTests
             Assert.True(session.StopWorkers(() => true, () => { }, () => true));
         }
         session.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AcquisitionReleasesExactlyOnceEvenWhenProcessingThrows(bool acquired)
+    {
+        var releases = 0;
+        var lease = new AcquiredCaptureFrame(() => releases++);
+        Assert.Throws<InvalidOperationException>((Action)(() =>
+        {
+            using (lease)
+            {
+                lease.Acquired = acquired;
+                throw new InvalidOperationException("processing failed");
+            }
+        }));
+        lease.Dispose();
+        Assert.Equal(acquired ? 1 : 0, releases);
     }
 }

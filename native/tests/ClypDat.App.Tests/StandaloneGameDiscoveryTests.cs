@@ -23,7 +23,19 @@ public sealed class StandaloneGameDiscoveryTests : IDisposable
 
     [Theory]
     [InlineData("obs64.exe")]
+    [InlineData("steam.exe")]
+    [InlineData("crashpad_handler.exe")]
+    [InlineData("vortex.exe")]
     public void ExcludesKnownSoftware(string executable) => Assert.True(StandaloneGameClassifier.IsExcluded(null, executable));
+
+    [Fact]
+    public void UnityEvidenceNeedsReview()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "Unknown_Data"));
+        var executable = Path.Combine(_root, "Unknown.exe");
+        File.WriteAllText(executable, "");
+        Assert.Equal(StandaloneClassificationKind.NeedsReview, StandaloneGameClassifier.Classify(executable).Kind);
+    }
 
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }
 }

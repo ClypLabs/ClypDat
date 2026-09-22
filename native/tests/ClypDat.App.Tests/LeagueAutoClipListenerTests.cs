@@ -46,7 +46,35 @@ public sealed class LeagueAutoClipListenerTests
     }
 
     [Theory]
+    [InlineData("\"Riot Tuxedo\"", "Riot Tuxedo")]
+    [InlineData("\"Me#OCE\"", "Me#OCE")]
+    [InlineData("Me#OCE", "Me#OCE")]
+    public void ActivePlayerName_DecodesTheJsonString(string body, string expected)
+    {
+        Assert.Equal(expected, LeagueAutoClipListener.ActivePlayerName(body));
+    }
+
+    [Fact]
+    public async Task MatchPresence_FromRiotsPublishedSample()
+    {
+        var client = new FakeGameClient(new() { ["liveclientdata/allgamedata"] = RiotSample() });
+        using var listener = new LeagueAutoClipListener(() => Clipping(false), client) { ReportMatchPresence = true };
+        var reported = new TaskCompletionSource<GameMatchPresence?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        listener.MatchPresence.Changed += (_, presence) => { if (presence is not null) reported.TrySetResult(presence); };
+
+        listener.Start();
+        var presence = (await WithinSeconds(reported))!;
+
+        Assert.Equal("Annie · Summoner's Rift", presence.Details);
+        Assert.Equal("0/0/0", presence.State);
+        Assert.Equal("https://cdn.communitydragon.org/latest/champion/Annie/square", presence.SmallImageUrl);
+        // The sample is taken at 0:00, before there is a clock to show.
+        Assert.Null(presence.MatchStartedUtc);
+    }
+
+    [Theory]
     [InlineData("Me#OCE")]
+    [InlineData("Me")]
     public async Task AutoClip_FiresForTheActivePlayersKill(string killerName)
     {
         var events = JsonSerializer.Serialize(new

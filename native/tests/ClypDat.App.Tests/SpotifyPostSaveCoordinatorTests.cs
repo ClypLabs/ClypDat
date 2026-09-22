@@ -84,4 +84,16 @@ public sealed class SpotifyPostSaveCoordinatorTests
         Assert.False(recreated.IsSpotifyOverlayFailed);
         Assert.True(recreated.IsOpenable);
     }
+
+    [Fact]
+    public async Task CancelledQueuedSaveDoesNotRunAndReleasesReservation()
+    {
+        var path = NewPath();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var result = await new SpotifyPostSaveCoordinator().RunAsync(path, null, false,
+            () => throw new Exception("Must not release readers"), _ => throw new Exception("Must not encode"), cancelled.Token);
+        Assert.Equal(SpotifyOverlayOutcome.Cancelled, result);
+        Assert.False(SpotifyProcessingPaths.IsProcessing(path));
+    }
 }

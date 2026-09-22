@@ -19,4 +19,13 @@ public sealed class FullSessionFinalizeTests
         Assert.False(MediaProbeService.IsVideoFile(staged));
         Assert.True(MediaProbeService.IsVideoFile(session));
     }
+
+    // The old sibling name was a plain .mp4 as far as the scan was concerned,
+    // which is exactly how it became a card.
+    [Fact]
+    public void TheOldSiblingMuxNameWasIndistinguishableFromAClip()
+    {
+        Assert.True(MediaProbeService.IsVideoFile(@"D:\Videos\ClypDat\VODs\Fortnite\Session - Fortnite.mp4.muxing.mp4"));
+    }
+
 }

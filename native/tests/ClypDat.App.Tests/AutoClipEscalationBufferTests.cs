@@ -75,6 +75,69 @@ public sealed class AutoClipEscalationBufferTests
         Assert.Equal("Quadruple Kill", request.EventType);
     }
 
+    // An Elimination is a rung too: it must be allowed to grow into the Double
+    // Kill that followed it rather than clipping on its own.
+    [Fact]
+    public void AnEliminationThatBecomesADoubleKillClipsAsTheDoubleKill()
+    {
+        using var buffer = Buffer(out var ready, out _);
+
+        buffer.Offer(Event("elimination", 0));
+        buffer.Offer(Event("double-kill", 1));
+
+        Assert.True(SpinWait.SpinUntil(() => ready.Count > 0, TimeSpan.FromSeconds(5)));
+        Assert.Equal("double-kill", Assert.Single(ready).EventId);
+    }
+
+    // The window has to cover the whole streak: the opening kill's lead through
+    // the last tier's tail, or the clip starts after the fight began.
+    [Fact]
+    public void TheWindowSpansTheFirstLeadToTheLastTail()
+    {
+        using var buffer = Buffer(out var ready, out _);
+        var catalog = AutoClipCatalog.Get("overwatch");
+        var elimination = catalog.Events.Single(item => item.Id == "elimination");
+        var quadruple = catalog.Events.Single(item => item.Id == "quadruple-kill");
+
+        buffer.Offer(Event("elimination", 0));
+        buffer.Offer(Event("quadruple-kill", 4));
+
+        Assert.True(SpinWait.SpinUntil(() => ready.Count > 0, TimeSpan.FromSeconds(5)));
+        var request = Assert.Single(ready);
+        Assert.Equal(Origin.AddSeconds(-elimination.LeadSeconds), request.StartUtc);
+        Assert.Equal(Origin.AddSeconds(4 + quadruple.TailSeconds), request.EndUtc);
+    }
+
+    // A tier that does not improve on what is pending must not re-toast: the
+    // notification is "your clip is being made", not one per detection.
+    [Fact]
+    public void OnlyAnImprovingTierAnnouncesItself()
+    {
+        using var buffer = Buffer(out _, out var pending);
+
+        buffer.Offer(Event("triple-kill", 0));
+        buffer.Offer(Event("elimination", 1));
+        buffer.Offer(Event("quadruple-kill", 2));
+
+        Assert.Equal(2, pending.Count);
+        Assert.Contains("Triple Kill", pending[0]);
+        Assert.Contains("Quadruple Kill", pending[1]);
+    }
+
+    // Play of the Game has no group in the catalog because it is its own moment,
+    // arriving after the match with a 15s lead. Folding it into a fight that
+    // happened seconds earlier would mislabel the fight and stretch its window.
+    [Fact]
+    public void PlayOfTheGameFiresOnItsOwnWithoutWaiting()
+    {
+        using var buffer = Buffer(out var ready, out _);
+
+        buffer.Offer(Event("play-of-the-game", 0));
+
+        var request = Assert.Single(ready);
+        Assert.Equal("play-of-the-game", request.EventId);
+    }
+
     [Fact]
     public void AStreakStillRunningAtTheMaxWindowIsCutLoose()
     {
@@ -89,5 +152,18 @@ public sealed class AutoClipEscalationBufferTests
         Assert.Equal("double-kill", ready[0].EventId);
         Assert.True(SpinWait.SpinUntil(() => ready.Count > 1, TimeSpan.FromSeconds(5)));
         Assert.Equal("triple-kill", ready[1].EventId);
+    }
+
+    // A window left open when the player switches games must not flush into the
+    // next one.
+    [Fact]
+    public void ResetDropsAnOpenWindowWithoutClipping()
+    {
+        using var buffer = Buffer(out var ready, out _);
+
+        buffer.Offer(Event("double-kill", 0));
+        buffer.Reset();
+
+        Assert.False(SpinWait.SpinUntil(() => ready.Count > 0, TimeSpan.FromSeconds(2)));
     }
 }

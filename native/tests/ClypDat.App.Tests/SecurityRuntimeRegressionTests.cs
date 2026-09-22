@@ -55,6 +55,9 @@ public sealed class SecurityRuntimeRegressionTests
     [Theory]
     [InlineData("https://i.scdn.co/image/cover", true)]
     [InlineData("http://i.scdn.co/image/cover", false)]
+    [InlineData("https://i.scdn.co.attacker.invalid/cover", false)]
+    [InlineData("https://user@i.scdn.co/image/cover", false)]
+    [InlineData("https://i.scdn.co:444/image/cover", false)]
     public void ArtworkOnlyAcceptsSpotifyHttps(string url, bool trusted) =>
         Assert.Equal(trusted, SpotifyCoverArtStore.IsTrustedArtUrl(url));
 

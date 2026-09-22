@@ -29,4 +29,43 @@ public sealed class ShutdownGuardTests
             second.Dispose();
         }
     }
+
+    [Fact]
+    public void KeyedOperationsIgnoreDuplicateStartsAndEnds()
+    {
+        const string key = "worker-save:test";
+        try
+        {
+            ShutdownGuard.BeginKeyed(key, "Test saving clip");
+            ShutdownGuard.BeginKeyed(key, "Test saving clip");
+            Assert.Contains("Test saving clip", ShutdownGuard.ActiveLabels);
+            Assert.DoesNotContain("Test saving clip (2)", ShutdownGuard.ActiveLabels);
+            ShutdownGuard.EndKeyed(key);
+            ShutdownGuard.EndKeyed(key);
+            Assert.DoesNotContain("Test saving clip", ShutdownGuard.ActiveLabels);
+        }
+        finally
+        {
+            ShutdownGuard.EndKeyed(key);
+        }
+    }
+
+    [Fact]
+    public void DisposingATokenTwiceEndsItOnce()
+    {
+        var kept = ShutdownGuard.Begin("Test moving clip");
+        var disposed = ShutdownGuard.Begin("Test deleting clip");
+        try
+        {
+            disposed.Dispose();
+            disposed.Dispose();
+            Assert.Contains("Test moving clip", ShutdownGuard.ActiveLabels);
+            Assert.DoesNotContain("Test deleting clip", ShutdownGuard.ActiveLabels);
+        }
+        finally
+        {
+            kept.Dispose();
+        }
+        Assert.DoesNotContain("Test moving clip", ShutdownGuard.ActiveLabels);
+    }
 }

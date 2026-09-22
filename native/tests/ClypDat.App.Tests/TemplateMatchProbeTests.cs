@@ -28,6 +28,33 @@ public sealed class TemplateMatchProbeTests
             GrayTemplateMatcher.Crop(full, regions.Third));
     }
 
+    [Fact]
+    public void ProbeRealFramesThroughTheFullSlotPipeline()
+    {
+        var folder = Environment.GetEnvironmentVariable("CLYPDAT_FRAME_PROBE_DIR");
+        if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder) || TemplateRoot.Length == 0) return;
+
+        var report = new List<string>();
+        foreach (var (game, prefix) in new[] { ("overwatch", "ow-"), ("fortnite", "fn-") })
+        {
+            var regions = DetectorRegions.ForGame(game)!;
+            var templates = DetectorTemplates.Load(game, regions, TemplateRoot);
+            report.Add($"--- {game}: {templates.Count} templates ---");
+            foreach (var file in Directory.EnumerateFiles(folder, prefix + "*.png").OrderBy(item => item))
+            {
+                var frame = ToFrame(file, regions);
+                var scored = templates
+                    .Select(template => (template.EventId, Score: DetectorTemplates.Score(template, frame)))
+                    .OrderByDescending(item => item.Score)
+                    .Take(3);
+                report.Add($"{Path.GetFileName(file),-28} {string.Join("  ", scored.Select(item => $"{item.EventId}={item.Score:F3}"))}");
+            }
+        }
+
+        File.WriteAllLines(Path.Combine(Path.GetTempPath(), "clypdat-frame-probe.txt"), report);
+        Assert.NotEmpty(report);
+    }
+
     /// <summary>
     /// Frames committed to the repo, so these tests RUN. They used to read a
     /// folder named by CLYPDAT_FRAME_PROBE_DIR and return quietly when it was
@@ -62,14 +89,21 @@ public sealed class TemplateMatchProbeTests
     // nothing, and using one is how a broken double-kill template scored 1.000
     // while never firing in game.
     [InlineData("ow-double.png", "double-kill")]
+    [InlineData("ow-triple.png", "triple-kill")]
+    [InlineData("ow-quadruple.png", "quadruple-kill")]
     // The highlight bar, in both the spellings Overwatch uses for it. It is
     // matched rather than read because OCR returns "PIWOfWfCßMf" for it.
+    [InlineData("ow-potg-game.png", "play-of-the-game")]
+    [InlineData("ow-potg-match.png", "play-of-the-game")]
     // The bar drawn ~7px higher than the frames above, as the tester's
     // Soldier: 76 replay had it. Pinned to its measured spot it scored 0.19
     // against a 0.22 threshold, so the replay's streaks were saved as theirs.
+    [InlineData("ow-potg-shifted.png", "play-of-the-game")]
     // A tester's kill cam: the killer's Triple Kill beneath the stylised
     // "ELIMINATED BY" label. The label scores 0.99 here; the worst banner-free
     // frame in the same clip reached 0.22, hence the 0.45 threshold.
+    [InlineData("ow-killcam.png", "eliminated-by")]
+    [InlineData("ow-killcam.png", "triple-kill")]
     public void TheRightBannerWinsOnAKnownFrame(string file, string expected)
     {
         var path = Path.Combine(FixtureRoot, file);
@@ -92,5 +126,31 @@ public sealed class TemplateMatchProbeTests
                                      && hit.Template.EventId != expected),
             hit => Assert.True(hit.Score < winner.Score - 0.1,
                 $"{hit.Template.EventId} scored {hit.Score:F3} against {expected} at {winner.Score:F3}."));
+    }
+
+    // The regression guard for the false-positive flood: banner-free frames must
+    // match nothing. Two are from a clip the app saved as "Quintuple Kill" that
+    // contains no banner in any of its 31 frames; the third is from one where the
+    // player was killed. Under the old raw correlation the quintuple template
+    // scored up to 0.781 on frames like these, over its 0.70 threshold.
+    [Theory]
+    [InlineData("ow-empty-1.png")]
+    [InlineData("ow-empty-2.png")]
+    [InlineData("ow-empty-3.png")]
+    // "YOU ARE NOW DEATH SPECTATING" sits where the kill cam's label does, in
+    // the same colour family, and was the closest the eliminated-by template
+    // came to a false match.
+    [InlineData("ow-death-spectating.png")]
+    public void AFrameWithNoBannerMatchesNothing(string file)
+    {
+        var path = Path.Combine(FixtureRoot, file);
+        Assert.True(File.Exists(path), $"Missing detector fixture: {path}");
+
+        var regions = DetectorRegions.ForGame("overwatch")!;
+        var templates = DetectorTemplates.Load("overwatch", regions, TemplateRoot);
+        Assert.NotEmpty(templates);
+
+        var hits = DetectorTemplates.Match(templates, ToFrame(path, regions));
+        Assert.Empty(hits);
     }
 }

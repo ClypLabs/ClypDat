@@ -38,9 +38,55 @@ public sealed class AudioCapturePipelineTests
     }
 
     [Fact]
+    public void SnapshotPurpose_UsesInteractiveAndArchiveIoPriorities()
+    {
+        Assert.False(AudioCaptureSession.UsesBackgroundIo(AudioSnapshotPurpose.InteractiveReplay));
+        Assert.True(AudioCaptureSession.UsesBackgroundIo(AudioSnapshotPurpose.BackgroundArchive));
+    }
+    [Fact]
+    public void GameCapture_PidNoLongerRouted_IsStopped()
+    {
+        var routed = new HashSet<int> { 34780 };
+        var excluded = new HashSet<int>();
+
+        Assert.True(AudioCapturePipeline.ShouldKeepGameCapture(true, 34780, routed, excluded));
+        // 14844 was a game pid earlier in the session and is still alive, so
+        // nothing else would ever reap its capture.
+        Assert.False(AudioCapturePipeline.ShouldKeepGameCapture(true, 14844, routed, excluded));
+    }
+
+    [Fact]
+    public void GameCapture_ExcludedOrUnroutedPid_IsStopped()
+    {
+        var routed = new HashSet<int> { 34780 };
+
+        Assert.False(AudioCapturePipeline.ShouldKeepGameCapture(true, 34780, routed, new HashSet<int> { 34780 }));
+        Assert.False(AudioCapturePipeline.ShouldKeepGameCapture(true, null, routed, new HashSet<int>()));
+        // Endpoint capture (no process routing) has no pid and is kept.
+        Assert.True(AudioCapturePipeline.ShouldKeepGameCapture(false, null, new HashSet<int>(), new HashSet<int>()));
+        Assert.False(AudioCapturePipeline.ShouldKeepGameCapture(false, 34780, new HashSet<int>(), new HashSet<int>()));
+    }
+
+    [Fact]
+    public void IsSilentWaveFile_DigitalSilence_IsSilent()
+    {
+        using var fixture = WaveFixture.Create(0f);
+
+        Assert.True(AudioCapturePipeline.IsSilentWaveFile(fixture.Path));
+    }
+
+    [Fact]
     public void IsSilentWaveFile_NonZeroSpotifySample_IsActive()
     {
         using var fixture = WaveFixture.Create(0.25f);
+
+        Assert.False(AudioCapturePipeline.IsSilentWaveFile(fixture.Path));
+    }
+
+    [Fact]
+    public void IsSilentWaveFile_QuietMeaningfulSample_IsActive()
+    {
+        using var fixture = WaveFixture.Create(0.000002f);
 
         Assert.False(AudioCapturePipeline.IsSilentWaveFile(fixture.Path));
     }

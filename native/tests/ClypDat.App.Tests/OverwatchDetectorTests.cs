@@ -18,6 +18,9 @@ public sealed class OverwatchDetectorTests
     // recognised by GrayTemplateMatcher rather than as text.
     [Theory]
     [InlineData("double-kill", "Double Kill")]
+    [InlineData("triple-kill", "Triple Kill")]
+    [InlineData("quadruple-kill", "Quadruple Kill")]
+    [InlineData("quintuple-kill", "Quintuple Kill")]
     public void EachStreakTierFiresFromItsBannerMatch(string eventId, string label)
     {
         var detector = new OverwatchDetector();
@@ -25,6 +28,19 @@ public sealed class OverwatchDetectorTests
         Observe(detector, Frame(1, banners: Banner(eventId, label)));
 
         Assert.Contains(eventId, Observe(detector, Frame(2, banners: Banner(eventId, label))));
+    }
+
+    // Frames are sampled every 500ms and a banner stays up around three seconds,
+    // so a real one is seen six times over. Demanding two sightings costs nothing
+    // real and drops the single-frame matches that filled a tester's library.
+    [Fact]
+    public void AOneFrameBannerDoesNotFire()
+    {
+        var detector = new OverwatchDetector();
+
+        Assert.Empty(Observe(detector, Frame(1, banners: Banner("quintuple-kill", "Quintuple Kill"))));
+        Assert.Empty(Observe(detector, Frame(2)));
+        Assert.Empty(Observe(detector, Frame(3)));
     }
 
     // The banner sits on screen for many sampled frames; without the latch one
@@ -41,6 +57,51 @@ public sealed class OverwatchDetectorTests
         Assert.Empty(Observe(detector, Frame(4, banners: triple)));
     }
 
+    // The score that recognised the banner is what the log line reports, so a
+    // future dump says how confident the match actually was instead of repeating
+    // a constant.
+    [Fact]
+    public void TheMatchScoreIsCarriedIntoTheEvent()
+    {
+        var detector = new OverwatchDetector();
+
+        var banner = Banner("double-kill", "Double Kill", score: 0.42);
+        detector.Observe(Frame(1, banners: banner));
+        var fired = detector.Observe(Frame(2, banners: banner)).Single(item => item.EventId == "double-kill");
+
+        Assert.Equal(0.42, fired.Confidence, 3);
+    }
+
+    [Fact]
+    public void TeamKillFiresFromItsOwnRegion()
+    {
+        var detector = new OverwatchDetector();
+
+        Observe(detector, Frame(1, banners: Banner("team-kill", "Team Kill")));
+
+        Assert.Contains("team-kill", Observe(detector, Frame(2, banners: Banner("team-kill", "Team Kill"))));
+    }
+
+    // The whole point of the left column: during a Play of the Game the HUD
+    // belongs to the featured player, and their kills are not yours. Verified
+    // against session A @ 51:53, which produces a quadruple and a quintuple
+    // inside somebody else's replay.
+    [Fact]
+    public void StreaksInsideAPlayOfTheGameAreIgnored()
+    {
+        var detector = new OverwatchDetector();
+
+        // The POTG latch wants two consecutive frames before it commits, so a
+        // single OCR misread cannot invent a clip.
+        var quad = Banner("quadruple-kill", "Quadruple Kill");
+        Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME GOWONSS", banners: quad));
+        var events = Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME GOWONSS", banners: quad));
+
+        Assert.Contains("play-of-the-game", events);
+        Assert.DoesNotContain("quadruple-kill", events);
+        Assert.DoesNotContain("elimination", events);
+    }
+
     [Fact]
     public void EveryPlayOfTheGameClipsEvenWhenItIsNotYours()
     {
@@ -49,6 +110,113 @@ public sealed class OverwatchDetectorTests
         Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME GOWONSS AS FREJA"));
 
         Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME GOWONSS AS FREJA")));
+    }
+
+    // The banner across the top of the replay, which is the wording that actually
+    // stays on screen - the centred intro card is gone in about two seconds.
+    [Fact]
+    public void ThePlayOfTheMatchBannerAlsoCounts()
+    {
+        var detector = new OverwatchDetector();
+
+        Observe(detector, Frame(1, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY"));
+
+        Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY")));
+    }
+
+    // The bar is matched by appearance, because Windows OCR returns "PIWOfWfCßMf"
+    // for it. This is the path that actually fires in game.
+    [Fact]
+    public void TheHighlightBannerFiresWithoutReadableText()
+    {
+        var detector = new OverwatchDetector();
+
+        var highlight = Banner("play-of-the-game", "Play of the Game");
+        Observe(detector, Frame(1, leftColumn: "PIWOfWfCßMf BY GHOSTECHO", banners: highlight));
+
+        Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PIWOfWfCßMf BY GHOSTECHO", banners: highlight)));
+    }
+
+    // What went wrong for a tester twice: the replay's own streak was saved as
+    // their Triple Kill because the highlight went unrecognised. The bar and the
+    // streak are on screen together, and the bar wins.
+    [Fact]
+    public void AStreakInsideAHighlightBelongsToTheFeaturedPlayer()
+    {
+        var detector = new OverwatchDetector();
+
+        var highlight = Banner("play-of-the-game", "Play of the Game");
+        var triple = Banner("triple-kill", "Triple Kill");
+        Observe(detector, Frame(1, banners: [highlight, triple]));
+        var events = Observe(detector, Frame(2, killFeed: "SOJOURN 240", banners: [highlight, triple]));
+
+        Assert.Contains("play-of-the-game", events);
+        Assert.DoesNotContain("triple-kill", events);
+        Assert.DoesNotContain("elimination", events);
+    }
+
+    // A tester's Quintuple Kill clip was the enemy Soldier's Play of the Game:
+    // the bar is missed on the odd frame (a muzzle flash, a camera cut), and a
+    // streak banner on exactly that frame must still belong to the replay.
+    [Fact]
+    public void AStreakOnAFrameWhereTheBarWasMissedStillBelongsToTheReplay()
+    {
+        var detector = new OverwatchDetector();
+
+        var highlight = Banner("play-of-the-game", "Play of the Game");
+        var quintuple = Banner("quintuple-kill", "Quintuple Kill");
+        Observe(detector, Frame(1, banners: highlight));
+        Assert.Contains("play-of-the-game", Observe(detector, Frame(2, banners: highlight)));
+
+        Assert.Empty(Observe(detector, Frame(3, banners: quintuple)));
+        Assert.Empty(Observe(detector, Frame(4, banners: quintuple)));
+        Assert.Empty(Observe(detector, Frame(5, banners: [highlight, quintuple])));
+    }
+
+    // The two wordings are one highlight, not two: the intro card gives way to
+    // the replay banner, and that must not re-fire the event.
+    [Fact]
+    public void TheIntroCardAndTheReplayBannerAreOneHighlight()
+    {
+        var detector = new OverwatchDetector();
+
+        Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME IPIXELGALAXY"));
+        Assert.Contains("play-of-the-game", Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME IPIXELGALAXY")));
+
+        Assert.Empty(Observe(detector, Frame(3, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY")));
+        Assert.Empty(Observe(detector, Frame(4, leftColumn: "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY")));
+    }
+
+    // What actually went wrong for a tester: their Play of the Match was saved as
+    // a Triple Kill, because the streak belonged to the featured player and only
+    // the intro card's wording was recognised as spectating.
+    [Fact]
+    public void StreaksInsideAPlayOfTheMatchReplayAreNotYours()
+    {
+        var detector = new OverwatchDetector();
+        const string replayBanner = "PLAY OF THE MATCH SOJOURN BY IPIXELGALAXY";
+
+        Observe(detector, Frame(1, leftColumn: replayBanner));
+        Observe(detector, Frame(2, leftColumn: replayBanner));
+
+        var triple = Banner("triple-kill", "Triple Kill");
+        Observe(detector, Frame(3, leftColumn: replayBanner, banners: triple));
+        var events = Observe(detector, Frame(4, leftColumn: replayBanner, killFeed: "SOJOURN 240", banners: triple));
+
+        Assert.DoesNotContain("triple-kill", events);
+        Assert.DoesNotContain("elimination", events);
+    }
+
+    [Theory]
+    [InlineData("ELIMINATED BY D.MON GROINCANCER")]
+    [InlineData("YOU ARE NOW DEATH SPECTATING: EGG")]
+    public void NothingFiresWhileWatchingThePlayerWhoKilledYou(string leftColumn)
+    {
+        var detector = new OverwatchDetector();
+
+        var events = Observe(detector, Frame(1, leftColumn, killFeed: "TRIPLE KILL\nXENKO 88", teamKill: "TEAM KILL!"));
+
+        Assert.Empty(events);
     }
 
     // A tester's kill cam: the killer's Double then Triple Kill under the
@@ -72,6 +240,21 @@ public sealed class OverwatchDetectorTests
         Assert.Empty(events);
     }
 
+    // The label can be missed on a frame (a cut, a flash); the hold carries the
+    // kill cam across it.
+    [Fact]
+    public void AStreakOnAFrameWhereTheKillCamLabelWasMissedIsStillNotYours()
+    {
+        var detector = new OverwatchDetector();
+        var eliminatedBy = Banner(OverwatchDetector.EliminatedByEventId, "Eliminated By");
+        var triple = Banner("triple-kill", "Triple Kill");
+
+        Observe(detector, Frame(1, banners: eliminatedBy));
+
+        Assert.Empty(Observe(detector, Frame(2, banners: triple)));
+        Assert.Empty(Observe(detector, Frame(3, banners: triple)));
+    }
+
     // Once the hold runs out the player is back, and their own streaks count.
     [Fact]
     public void StreaksCountAgainAfterTheKillCam()
@@ -86,6 +269,20 @@ public sealed class OverwatchDetectorTests
         Assert.Contains("triple-kill", Observe(detector, Frame(13, banners: triple)));
     }
 
+    // A streak that was on screen when the replay began must not fire the
+    // instant the replay ends.
+    [Fact]
+    public void AStreakHeldOverFromASpectatedReplayDoesNotFireOnResume()
+    {
+        var detector = new OverwatchDetector();
+
+        var triple = Banner("triple-kill", "Triple Kill");
+        Observe(detector, Frame(1, leftColumn: "PLAY OF THE GAME", banners: triple));
+        Observe(detector, Frame(2, leftColumn: "PLAY OF THE GAME", banners: triple));
+
+        Assert.Empty(Observe(detector, Frame(3)));
+    }
+
     [Fact]
     public void EliminationRowsParseNameAndDamageAndIgnoreSaves()
     {
@@ -93,6 +290,25 @@ public sealed class OverwatchDetectorTests
         Assert.Equal(new[] { "R4V4G3R 25", "ALEX 25" }, OverwatchDetector.ParseEliminations("TRIPLE KILL\nR4V4G3R 25\nALEX 25"));
         Assert.Empty(OverwatchDetector.ParseEliminations("SAVED BY COMRADEDOGGO"));
         Assert.Empty(OverwatchDetector.ParseEliminations("DOUBLE KILL"));
+    }
+
+    [Fact]
+    public void TheSameEliminationRowDoesNotFireTwiceWhileItLingers()
+    {
+        var detector = new OverwatchDetector();
+
+        Assert.Contains("elimination", Observe(detector, Frame(1, killFeed: "XENKO 88")));
+        Assert.Empty(Observe(detector, Frame(2, killFeed: "XENKO 88")));
+    }
+
+    [Fact]
+    public void IsSpectatingCoversEveryBorrowedHudState()
+    {
+        Assert.True(OverwatchDetector.IsSpectating("PLAY OF THE GAME"));
+        Assert.True(OverwatchDetector.IsSpectating("ELIMINATED BY D.MON"));
+        Assert.True(OverwatchDetector.IsSpectating("YOU ARE NOW DEATH SPECTATING: EGG"));
+        Assert.False(OverwatchDetector.IsSpectating(string.Empty));
+        Assert.False(OverwatchDetector.IsSpectating("DEFEND OBJECTIVE A"));
     }
 
     // Every event the detector can raise has to exist in the catalog, or it
@@ -108,5 +324,17 @@ public sealed class OverwatchDetectorTests
         };
 
         Assert.All(detected, id => Assert.Contains(id, catalog));
+    }
+
+    [Fact]
+    public void OverwatchShipsRegionsAndABuiltInDetector()
+    {
+        var overwatch = AutoClipCatalog.Get("overwatch");
+
+        Assert.True(overwatch.UsesDetector);
+        Assert.False(overwatch.UsesDetectorPack);
+        Assert.NotNull(DetectorRegions.ForGame("overwatch"));
+        Assert.NotNull(DetectorRegions.ForGame("helldivers2"));
+        Assert.Null(DetectorRegions.ForGame("cs2"));
     }
 }

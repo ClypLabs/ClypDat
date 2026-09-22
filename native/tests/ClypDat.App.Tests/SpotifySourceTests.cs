@@ -33,6 +33,33 @@ public sealed class SpotifySourceTests : IDisposable
             ArtUrl: "https://i.scdn.co/image/abc", TrackId: "track-id");
 
     [Fact]
+    public void TurnedOffReadsAsDisconnectedWithItsNotice()
+    {
+        var merged = SpotifySnapshotMerge.Merge(false, Local("Song", "Artist"), null, null, "Disconnected from your ClypDat account page.");
+        Assert.False(merged.IsConnected);
+        Assert.Null(merged.Track);
+        Assert.Equal("Disconnected from your ClypDat account page.", merged.Error);
+    }
+
+    [Fact]
+    public void ThisPcAloneIsEnoughWithNoSignIn()
+    {
+        var merged = SpotifySnapshotMerge.Merge(true, Local("Song", "Artist", art: LocalArt), null, null, null);
+        Assert.True(merged.IsConnected);
+        Assert.Equal("Song", merged.Track);
+        Assert.Equal(LocalArt, merged.LocalArtPath);
+        Assert.Null(merged.ArtUrl);
+    }
+
+    [Fact]
+    public void OnWithNothingPlayingIsStillConnected()
+    {
+        var merged = SpotifySnapshotMerge.Merge(true, null, null, null, null);
+        Assert.True(merged.IsConnected);
+        Assert.Null(merged.Track);
+    }
+
+    [Fact]
     public void TheAccountAddsItsCoverAndIdToTheSameSong()
     {
         var merged = SpotifySnapshotMerge.Merge(true, Local("Song", "Artist A, Artist B", art: LocalArt), Web("Song", "Artist A"), "listener", null);
@@ -64,6 +91,9 @@ public sealed class SpotifySourceTests : IDisposable
     [Theory]
     [InlineData("Song", "A, B", "song", "A", true)]
     [InlineData("Song", "B & A", "Song", "A", true)]
+    [InlineData("Song", null, "Song", "A", true)]
+    [InlineData("Song", "A", "Other", "A", false)]
+    [InlineData("Song", "A", "Song", "Z", false)]
     public void SameTrackToleratesHowArtistsAreJoined(string track, string? artist, string otherTrack, string otherArtist, bool expected)
     {
         var a = Local(track, artist!) with { Artist = artist };
@@ -72,9 +102,20 @@ public sealed class SpotifySourceTests : IDisposable
 
     [Theory]
     [InlineData("Spotify.exe", true)]
+    [InlineData("SpotifyAB.SpotifyMusic_zpnnbwrqh6hq!Spotify", true)]
+    [InlineData("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic", false)]
     [InlineData("chrome.exe", false)]
+    [InlineData(null, false)]
     public void OnlySpotifysMediaSessionIsRead(string? appId, bool expected) =>
         Assert.Equal(expected, SpotifyLocalSource.IsSpotifyApp(appId));
+
+    [Theory]
+    [InlineData("Advertisement", null, true)]
+    [InlineData("Spotify Free", null, true)]
+    [InlineData("Advertisement", "An Artist", false)]
+    [InlineData("A Song", null, false)]
+    public void AdvertsAreNotStampedAsSongs(string track, string? artist, bool expected) =>
+        Assert.Equal(expected, SpotifyLocalSource.IsAdvert(track, artist));
 
     [Fact]
     public void OnlyFlatHashNamedCoversInTheCacheFolderAreTrusted()
@@ -138,6 +179,11 @@ public sealed class SpotifySourceTests : IDisposable
     [InlineData("2b86cd1dd2bb4375a378b486312a3ab4", "2b86cd1dd2bb4375a378b486312a3ab4")]
     [InlineData("  2B86CD1DD2BB4375A378B486312A3AB4 ", "2b86cd1dd2bb4375a378b486312a3ab4")]
     [InlineData("2b86cd1dd2bb4375a378b486312a3ab", null)]
+    [InlineData("2b86cd1dd2bb4375a378b486312a3ab4f", null)]
+    [InlineData("zb86cd1dd2bb4375a378b486312a3ab4", null)]
+    [InlineData("https://developer.spotify.com/dashboard/2b86cd1dd2bb4375a378b486312a3ab4", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
     public void OnlyARealClientIdIsAccepted(string? input, string? expected) =>
         Assert.Equal(expected, SpotifyNowPlayingService.NormaliseClientId(input));
 
@@ -153,6 +199,26 @@ public sealed class SpotifySourceTests : IDisposable
         Assert.Equal(SpotifyNowPlayingService.SharedAppRetiredMessage, service.Snapshot.Error);
     }
 
+    [Fact]
+    public async Task ASignInFromAReplacedAppIsDroppedQuietly()
+    {
+        WriteSavedSignIn(clientId: new string('a', 32));
+        using var service = new SpotifyNowPlayingService { ClientId = new string('b', 32) };
+        Assert.True(await service.TryRestoreAsync());
+        Assert.False(service.IsAccountConnected);
+        Assert.False(File.Exists(SavedSignInPath));
+        Assert.Null(service.Snapshot.Error);
+    }
+
+    [Fact]
+    public async Task SignInRefusesSomethingThatIsNotAClientId()
+    {
+        using var service = new SpotifyNowPlayingService();
+        Assert.False(await service.SignInAsync("not-a-client-id"));
+        Assert.False(service.IsAccountConnected);
+        Assert.Contains("Client ID", service.Snapshot.Error);
+    }
+
     private static string SavedSignInPath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "spotify-auth.bin");
 
     private static void WriteSavedSignIn(string? clientId)
@@ -163,6 +229,15 @@ public sealed class SpotifySourceTests : IDisposable
             AccessToken = "access", RefreshToken = "refresh", ExpiresAt = DateTimeOffset.UtcNow.AddHours(1), ClientId = clientId,
         });
         File.WriteAllBytes(SavedSignInPath, System.Security.Cryptography.ProtectedData.Protect(json, null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+    }
+
+    [Fact]
+    public void AnAllowListRefusalIsReadFromSpotifysErrorBody()
+    {
+        Assert.Equal("Check settings on developer.spotify.com/dashboard, the user may not be registered.",
+            SpotifyNowPlayingService.ApiError("{\"error\":{\"status\":403,\"message\":\"Check settings on developer.spotify.com/dashboard, the user may not be registered.\"}}"));
+        Assert.Equal("invalid_grant", SpotifyNowPlayingService.ApiError("{\"error\":\"invalid_grant\"}"));
+        Assert.Null(SpotifyNowPlayingService.ApiError(""));
     }
 
     [Fact]

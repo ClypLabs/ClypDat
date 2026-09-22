@@ -7,6 +7,7 @@ public sealed class ClipInfoCaptureDetailsTests
 {
     [Theory]
     [InlineData("Double Elimination")]
+    [InlineData(null)]
     public void SaveCompletionPreservesRecordedLayersAndOtherMetadata(string? eventType)
     {
         var root = Path.Combine(Path.GetTempPath(), "clypdat-capture-details-" + Guid.NewGuid());

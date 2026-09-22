@@ -17,6 +17,32 @@ public sealed class CapturePausePolicyTests
     }
 
     [Fact]
+    public void IsPaused_WgcWindowMinimised_Pauses()
+    {
+        // A minimised window stops producing frames, so the watchdog must not
+        // read the silence as a broken source.
+        Assert.True(CapturePausePolicy.IsPaused(
+            hostRequestedPause: false, isMonitorMode: false, usingWindowGraphicsCapture: true,
+            targetForeground: false, targetCapturable: false));
+    }
+
+    [Fact]
+    public void IsPaused_DxgiBackgroundGame_StillPauses()
+    {
+        Assert.True(CapturePausePolicy.IsPaused(
+            hostRequestedPause: true, isMonitorMode: false, usingWindowGraphicsCapture: false,
+            targetForeground: false, targetCapturable: true));
+    }
+
+    [Fact]
+    public void IsPaused_DxgiForegroundGame_Runs()
+    {
+        Assert.False(CapturePausePolicy.IsPaused(
+            hostRequestedPause: false, isMonitorMode: false, usingWindowGraphicsCapture: false,
+            targetForeground: true, targetCapturable: true));
+    }
+
+    [Fact]
     public void IsPaused_DesktopCapture_OnlyTheHostPauses()
     {
         Assert.False(CapturePausePolicy.IsPaused(

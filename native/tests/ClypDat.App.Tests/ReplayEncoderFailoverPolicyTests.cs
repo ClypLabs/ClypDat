@@ -7,6 +7,10 @@ public sealed class ReplayEncoderFailoverPolicyTests
 {
     [Theory]
     [InlineData(120, true, 90)]
+    [InlineData(90, true, 60)]
+    [InlineData(60, true, 30)]
+    [InlineData(30, true, 30)]
+    [InlineData(60, false, 60)]
     public void HardwareExhaustion_ProtectsCadenceWithoutSwitchingToCpu(int current, bool enabled, int expected)
     {
         Assert.Equal(expected, ReplayEncoderFailoverPolicy.ProtectedFrameRateAfterHardwareExhaustion(current, enabled));

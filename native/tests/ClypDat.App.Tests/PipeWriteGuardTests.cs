@@ -8,6 +8,18 @@ public sealed class PipeWriteGuardTests
     private static readonly TimeSpan Budget = TimeSpan.FromMilliseconds(150);
 
     [Fact]
+    public async Task WriteAsync_HealthyPeer_WritesAndReleasesTheGate()
+    {
+        var gate = new SemaphoreSlim(1, 1);
+        var stalled = false;
+
+        await PipeWriteGuard.WriteAsync(gate, Budget, _ => Task.CompletedTask, () => stalled = true, CancellationToken.None);
+
+        Assert.False(stalled);
+        Assert.Equal(1, gate.CurrentCount);
+    }
+
+    [Fact]
     public async Task WriteAsync_PeerStopsReading_ReportsItAndFreesTheGate()
     {
         // The wedge: a client that never drains the pipe. The write must not
@@ -40,5 +52,19 @@ public sealed class PipeWriteGuardTests
         // The holder still owns it: this call must not have released someone
         // else's gate on its way out.
         Assert.Equal(0, gate.CurrentCount);
+    }
+
+    [Fact]
+    public async Task WriteAsync_Cancelled_PropagatesCancellationRatherThanBlamingThePeer()
+    {
+        var gate = new SemaphoreSlim(1, 1);
+        using var cancellation = new CancellationTokenSource();
+        var stalled = false;
+        await cancellation.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => PipeWriteGuard.WriteAsync(
+            gate, Budget, _ => Task.CompletedTask, () => stalled = true, cancellation.Token));
+
+        Assert.False(stalled);
     }
 }

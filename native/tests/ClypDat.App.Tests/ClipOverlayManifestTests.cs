@@ -15,8 +15,25 @@ public sealed class ClipOverlayManifestTests
         Assert.Equal(7, ClipOverlayManifest.CurrentVersion);
     }
 
+    [Fact]
+    public void RelativeAsset_ResolvesInsideLibrary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "clypdat-overlay-test", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, ".clipinfo"));
+            var asset = Path.Combine(root, ".clipinfo", "camera.mp4");
+            File.WriteAllBytes(asset, []);
+
+            Assert.Equal(asset, ClipOverlayManifest.ResolveAssetPath(root, ".clipinfo/camera.mp4"));
+            Assert.True(ClipOverlayManifest.IsUsable(root, new ClipOverlayLayer("Camera", true, AssetPath: ".clipinfo/camera.mp4")));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData("../outside.mp4")]
+    [InlineData("C:\\outside.mp4")]
     public void EscapedAsset_IsRejected(string asset) =>
         Assert.Null(ClipOverlayManifest.ResolveAssetPath(Path.GetTempPath(), asset));
 
@@ -63,5 +80,44 @@ public sealed class ClipOverlayManifestTests
             Assert.False(File.Exists(first)); Assert.False(File.Exists(second));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void LegacyAssetsOutsideShortVideo_AreRecoveredApproximately()
+    {
+        var legacy = new ClipOverlayManifest(2, new ClipOverlayLayer("Facecam", true, Assets: [
+            new ClipOverlayAsset(".clipinfo/overlays/0.mp4", 32.53, 34.53),
+            new ClipOverlayAsset(".clipinfo/overlays/1.mp4", 58, 60)]));
+
+        var recovered = ClipOverlayManifest.ForPlayback(legacy, 27.65);
+
+        Assert.True(recovered.Camera!.SynchronizationApproximate);
+        Assert.Equal(.18, recovered.Camera.Assets![0].StartSeconds, 3);
+        Assert.Equal(27.65, recovered.Camera.Assets![^1].EndSeconds, 3);
+    }
+
+    [Fact]
+    public void LegacyAssetsAlreadyInVideo_AreNotShifted()
+    {
+        var legacy = new ClipOverlayManifest(2, new ClipOverlayLayer("Facecam", true, Assets: [
+            new ClipOverlayAsset(".clipinfo/overlays/0.mp4", 36.84, 47.23)]));
+
+        var loaded = ClipOverlayManifest.ForPlayback(legacy, 60);
+
+        Assert.False(loaded.Camera!.SynchronizationApproximate);
+        Assert.Equal(36.84, loaded.Camera.Assets![0].StartSeconds, 3);
+    }
+
+    [Fact]
+    public void StateResolver_UsesLatestRecordedAppearanceAndStaticLegacyFallback()
+    {
+        var camera = new ClipOverlayLayer("Facecam", true, InitialTransform: new(.7, .05, .25));
+        var moved = camera with { InitialTransform = new(.1, .2, .3) };
+        var manifest = new ClipOverlayManifest(ClipOverlayManifest.CurrentVersion, camera, States: [
+            new ClipOverlayState(0, camera, null), new ClipOverlayState(2, moved, null)]);
+
+        Assert.Equal(camera.InitialTransform, ClipOverlayStateResolver.Resolve(manifest, 1).Camera!.InitialTransform);
+        Assert.Equal(moved.InitialTransform, ClipOverlayStateResolver.Resolve(manifest, 2).Camera!.InitialTransform);
+        Assert.Equal(camera, ClipOverlayStateResolver.Resolve(new ClipOverlayManifest(6, camera), 99).Camera);
     }
 }

@@ -37,6 +37,58 @@ public sealed class AudioCaptureWriterTests
     }
 
     [Fact]
+    public void LiveDiskSnapshotTrimsOnlyWholeFramesAndKeepsTimestampAnchor()
+    {
+        var source = new ManualWaveIn();
+        var sourcePath = TempPath();
+        var snapshotPath = TempPath();
+        try
+        {
+            using var session = AudioCaptureSession.Start(source, sourcePath, "tail trim");
+            var start = DateTime.UtcNow;
+            for (byte index = 1; index <= 3; index++)
+            {
+                source.Raise(Enumerable.Repeat(index, 16_000).ToArray(), start.AddSeconds((index - 1) * 8));
+                Assert.True(SpinWait.SpinUntil(() => session.QueuedBytes == 0, TimeSpan.FromSeconds(5)));
+            }
+            Assert.True(session.SnapshotTo(snapshotPath, start.AddSeconds(23.00025), out var end));
+            Assert.Equal(start.AddSeconds(24), end);
+            Assert.Equal(Enumerable.Repeat((byte)2, 6000).Concat(Enumerable.Repeat((byte)3, 16_000)), ReadSamples(snapshotPath));
+        }
+        finally { File.Delete(sourcePath); File.Delete(snapshotPath); }
+    }
+
+    [Fact]
+    public void ProcessLoopbackHeldPacketIsRetainedWhenSessionStops()
+    {
+        var client = new SinglePacketClient();
+        var source = new ProcessLoopbackWaveIn(client, TimeSpan.FromSeconds(2));
+        var output = new ControlledStream();
+        using var session = AudioCaptureSession.StartOn(source, output, "held loopback packet");
+        Assert.True(client.PacketReleased.Wait(TimeSpan.FromSeconds(5)));
+        session.Dispose();
+        Assert.Equal(new byte[200], ReadSamples(output));
+        Assert.Equal(1, client.Disposals);
+    }
+
+    [Fact]
+    public void SnapshotFlushExceptionMarksCaptureFailed()
+    {
+        var source = new ManualWaveIn();
+        var output = new ControlledStream();
+        using var session = AudioCaptureSession.StartOn(source, output, "flush error");
+        var path = TempPath();
+        source.Raise(Packet(1), DateTime.UtcNow);
+        Assert.True(SpinWait.SpinUntil(() => session.QueuedBytes == 0, TimeSpan.FromSeconds(5)));
+        output.ThrowFlush = true;
+        Assert.False(session.SnapshotTo(path, null, out _));
+        Assert.True(session.Died);
+        session.Dispose();
+        Assert.True(output.Disposed);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
     public async Task SnapshotBarrierIncludesEarlierPacketsAndExcludesLaterPackets()
     {
         var source = new ManualWaveIn();
@@ -97,6 +149,25 @@ public sealed class AudioCaptureWriterTests
     }
 
     [Fact]
+    public void UntimestampedPacketsUseArrivalBeforeBlockedWriterResumes()
+    {
+        var source = new ManualWaveIn();
+        var output = new ControlledStream();
+        using var session = AudioCaptureSession.StartOn(source, output, "arrival time");
+        output.Block = true;
+        try
+        {
+            source.Raise(Packet(1));
+            Assert.True(output.Entered.Wait(TimeSpan.FromSeconds(5)));
+            source.Raise(Packet(2));
+            Thread.Sleep(650); // Exceeds the existing 300ms delivery-gap threshold.
+        }
+        finally { output.Resume.Set(); }
+        session.Dispose();
+        Assert.Equal(Packet(1).Concat(Packet(2)), ReadSamples(output));
+    }
+
+    [Fact]
     public void TenSecondLimitIncludesInFlightWriteAndReportsOverflowWithoutBlocking()
     {
         var source = new ManualWaveIn();
@@ -135,6 +206,70 @@ public sealed class AudioCaptureWriterTests
         Assert.True(output.Disposed);
         Assert.Equal(1, source.DisposeCount);
         Assert.Equal(400, session.LostBytes);
+    }
+
+    [Fact]
+    public async Task SnapshotAndShutdownTimeoutRetainStreamUntilBlockedWriteExits()
+    {
+        var source = new ManualWaveIn();
+        var output = new ControlledStream();
+        using var session = AudioCaptureSession.StartOn(source, output, "timeouts", waitTimeout: TimeSpan.FromMilliseconds(30));
+        var path = TempPath();
+        output.Block = true;
+        try
+        {
+            source.Raise(Packet(1), DateTime.UtcNow);
+            Assert.True(output.Entered.Wait(TimeSpan.FromSeconds(5)));
+            Assert.False(session.SnapshotTo(path, null, out _));
+            session.Dispose();
+            Assert.True(session.Died);
+            Assert.False(output.Disposed);
+            Assert.False(session.WriterCompletion.IsCompleted);
+        }
+        finally { output.Resume.Set(); }
+        await session.WriterCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(output.Disposed);
+        Assert.False(File.Exists(path)); // A timed-out barrier cannot create a late snapshot file.
+        Assert.Equal(Packet(1), ReadSamples(output));
+    }
+
+    [Fact]
+    public async Task StopReturningBeforeFinalCallbackKeepsQueueOpenEvenAfterTimeout()
+    {
+        var source = new ManualWaveIn { DeferStopped = true };
+        var output = new ControlledStream();
+        using var session = AudioCaptureSession.StartOn(source, output, "late final packet", waitTimeout: TimeSpan.FromMilliseconds(30));
+        var start = DateTime.UtcNow;
+        source.Raise(Packet(1), start);
+        session.Dispose();
+        Assert.True(session.Died);
+        Assert.False(output.Disposed);
+        Assert.Equal(0, source.DisposeCount);
+        source.Raise(Packet(2), start.AddMilliseconds(100));
+        source.Finish();
+        await session.WriterCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+        session.Dispose();
+        Assert.Equal(1, source.DisposeCount);
+        Assert.Equal(Packet(1).Concat(Packet(2)), ReadSamples(output));
+    }
+
+    [Fact]
+    public void DiskSnapshotAfterStopUsesFinalPacketTimestampAndFixedTailRange()
+    {
+        var source = new ManualWaveIn();
+        var sourcePath = TempPath();
+        var snapshotPath = TempPath();
+        var start = DateTime.UtcNow;
+        try
+        {
+            using var session = AudioCaptureSession.Start(source, sourcePath, "disk boundary");
+            source.Raise(Packet(1), start);
+            session.Dispose();
+            Assert.True(session.SnapshotTo(snapshotPath, null, out var end));
+            Assert.Equal(start.AddMilliseconds(100), end);
+            Assert.Equal(Packet(1), ReadSamples(snapshotPath));
+        }
+        finally { File.Delete(sourcePath); File.Delete(snapshotPath); }
     }
 
     private static string TempPath() => Path.Combine(Path.GetTempPath(), $"clypdat-writer-{Guid.NewGuid():N}.wav");

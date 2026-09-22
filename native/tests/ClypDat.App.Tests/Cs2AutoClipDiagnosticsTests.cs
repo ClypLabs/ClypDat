@@ -49,6 +49,27 @@ public sealed class Cs2AutoClipDiagnosticsTests
         Assert.DoesNotContain("wrong-token", JsonSerializer.Serialize(health), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void PartialHeartbeat_WithNullMapAndRound_IsAcceptedWithoutStoppingTheListener()
+    {
+        var settings = new AutoClipGameSettings { Enabled = true };
+        using var listener = new Cs2GsiListener(() => settings, "test-token");
+
+        listener.ProcessPayload("""
+            {
+              "auth": { "clypdat": "test-token" },
+              "player": { "state": {}, "match_stats": {} },
+              "map": null,
+              "round": null
+            }
+            """);
+
+        var health = listener.GetHealthSnapshot();
+        Assert.Equal(1, health.AcceptedPayloads);
+        Assert.Equal(0, health.ParseFailures);
+        Assert.Equal("State seeded", health.LastStage);
+    }
+
     private static string Payload(int roundKills, bool roundOver = false, string token = "test-token") => $$"""
         {
           "auth": { "clypdat": "{{token}}" },

@@ -7,6 +7,12 @@ public sealed class Helldivers2StreakTests
 {
     [Theory]
     [InlineData(19, null)]
+    [InlineData(20, "killstreak")]
+    [InlineData(49, "killstreak")]
+    [InlineData(50, "killstreak")]
+    [InlineData(99, "killstreak")]
+    [InlineData(100, "killstreak")]
+    [InlineData(123, "killstreak")]
     public void InclusiveBoundaries(int peak, string? expected)
     {
         var detector = new Helldivers2Detector();
@@ -23,6 +29,26 @@ public sealed class Helldivers2StreakTests
             Assert.Equal($"Killstreak ×{peak}", item.Label);
             Assert.Equal(TimeSpan.FromSeconds(1), item.Timestamp);
             Assert.Equal(TimeSpan.Zero, item.StreakStart);
+        }
+        Assert.Empty(Absent(detector, 3));
+    }
+
+    [Theory]
+    [InlineData("killstreak", "killstreak")]
+    [InlineData("", null)]
+    public void SingleSettingControlsCompletedStreak(string enabled, string? expected)
+    {
+        var detector = new Helldivers2Detector();
+        Present(detector, 0, 125);
+        Present(detector, 0.5, 125);
+        Absent(detector, 1);
+        Absent(detector, 1.5);
+        var events = detector.Observe(Frame(2, Helldivers2CounterVisibility.Absent), enabled.Split(',').ToHashSet());
+        if (expected is null) Assert.Empty(events);
+        else
+        {
+            Assert.Equal(expected, Assert.Single(events).EventId);
+            Assert.Equal("Killstreak ×125", events[0].Label);
         }
         Assert.Empty(Absent(detector, 3));
     }
@@ -50,6 +76,33 @@ public sealed class Helldivers2StreakTests
         Present(detector, 1, 50);
         Present(detector, 2, 568);
         Assert.Equal("Killstreak ×50", Complete(detector, 3).Label);
+    }
+
+    [Theory]
+    [InlineData(Helldivers2CounterVisibility.Present)]
+    [InlineData(Helldivers2CounterVisibility.Unknown)]
+    public void InterruptedAbsenceRestartsConfirmation(Helldivers2CounterVisibility interruption)
+    {
+        var detector = new Helldivers2Detector();
+        Present(detector, 0, 20);
+        Present(detector, 0.5, 20);
+        Absent(detector, 1);
+        Absent(detector, 1.5);
+        Assert.Empty(detector.Observe(Frame(2, interruption)));
+        Assert.Equal(TimeSpan.FromSeconds(3), Complete(detector, 3).Timestamp);
+    }
+
+    [Fact]
+    public void AbsenceNeedsThreeDistinctSamplesAndOneSecond()
+    {
+        var detector = new Helldivers2Detector();
+        Present(detector, 0, 20);
+        Present(detector, 0.5, 20);
+        Absent(detector, 1);
+        Assert.Empty(Absent(detector, 1));
+        Assert.Empty(Absent(detector, 1.1));
+        Assert.Empty(Absent(detector, 1.2));
+        Assert.Single(Absent(detector, 2));
     }
 
     [Fact]
@@ -80,8 +133,39 @@ public sealed class Helldivers2StreakTests
         Assert.Equal("Killstreak ×20", Complete(detector, 5).Label);
     }
 
+    [Fact]
+    public void ConsecutiveStreaksCompleteSeparately()
+    {
+        var detector = new Helldivers2Detector();
+        Present(detector, 0, 57);
+        Present(detector, 0.5, 57);
+        var first = Complete(detector, 1);
+        Present(detector, 2.5, 20);
+        Present(detector, 3, 20);
+        var second = Complete(detector, 3.5);
+        Assert.Equal("Killstreak ×57", first.Label);
+        Assert.Equal("Killstreak ×20", second.Label);
+        Assert.NotEqual(first.OccurrenceId, second.OccurrenceId);
+        Assert.Equal(TimeSpan.FromSeconds(2.5), second.StreakStart);
+    }
+
+    [Fact]
+    public void EliminationDoesNotDiscardVisibleStreak()
+    {
+        var detector = new Helldivers2Detector();
+        Present(detector, 0, 57);
+        Present(detector, 1, 57);
+        Assert.Empty(detector.Observe(Frame(2, Helldivers2CounterVisibility.Present) with { CenterBannerText = "ELIMINATED" }));
+        Assert.Equal("eliminated", Assert.Single(detector.Observe(Frame(3, Helldivers2CounterVisibility.Present)
+            with { CenterBannerText = "ELIMINATED" })).EventId);
+        Assert.Equal("Killstreak ×57", Complete(detector, 4).Label);
+    }
+
     [Theory]
     [InlineData("X1000")]
+    [InlineData("9999 KILLS")]
+    [InlineData("k56")]
+    [InlineData("")]
     public void ParserRejectsInvalidForms(string text) => Assert.False(Helldivers2Detector.TryParseKillCounter(text, out _));
 
     private static Helldivers2FrameObservation Frame(double seconds, Helldivers2CounterVisibility visibility, int? count = null) =>
