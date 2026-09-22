@@ -24,7 +24,11 @@ internal sealed record SpotifyNowPlaying(
     string? Error,
     // Cover art is fetched when saving clips or previewing the overlay dialog.
     string? ArtUrl = null,
-    string? TrackId = null)
+    string? TrackId = null,
+    // A cover read from Windows' media controls (SpotifyLocalSource), for a
+    // track the Web API has not described. Cached in app data until a saved
+    // clip imports it into the library's archive.
+    string? LocalArtPath = null)
 {
     public static SpotifyNowPlaying Disconnected { get; } = new(false, null, null, null, null, null, null, false, null, null);
 
@@ -52,13 +56,80 @@ internal sealed record SpotifyNowPlaying(
 }
 
 /// <summary>
-/// Reads the signed-in listener's current track so a clip can say what was
-/// playing while it was captured.
+/// Combines the two places the playing track can come from. Pure, so the
+/// precedence is testable without Windows' media controls or Spotify.
+/// </summary>
+internal static class SpotifySnapshotMerge
+{
+    /// <param name="enabled">Spotify is turned on in ClypDat at all.</param>
+    /// <param name="local">The Spotify app on this PC, or null when it is not running.</param>
+    /// <param name="web">The signed-in account's player, or null when not signed in.</param>
+    public static SpotifyNowPlaying Merge(bool enabled, SpotifyNowPlaying? local, SpotifyNowPlaying? web, string? accountName, string? notice)
+    {
+        if (!enabled) return SpotifyNowPlaying.Disconnected with { Error = notice };
+        var localTrack = local is { Track: not null } ? local : null;
+        var webTrack = web is { Track: not null } ? web : null;
+
+        SpotifyNowPlaying chosen;
+        if (localTrack is not null && webTrack is not null && SameTrack(localTrack, webTrack))
+        {
+            // The PC's session is instant and free; the account adds what the
+            // media controls do not carry - the cover URL, the track id, and a
+            // position when the app reports none.
+            chosen = localTrack with
+            {
+                ArtUrl = webTrack.ArtUrl,
+                TrackId = webTrack.TrackId,
+                Duration = localTrack.Duration ?? webTrack.Duration,
+                Progress = localTrack.Progress ?? webTrack.ProgressNow,
+                UpdatedAt = localTrack.Progress is null ? DateTimeOffset.UtcNow : localTrack.UpdatedAt,
+            };
+        }
+        // Different songs: the one actually playing is the one to show. The
+        // desktop app keeps its last track, paused, while a phone plays on.
+        else if (webTrack is { IsPlaying: true } && localTrack is not { IsPlaying: true }) chosen = webTrack;
+        else if (localTrack is not null) chosen = localTrack;
+        else if (webTrack is not null) chosen = webTrack;
+        else chosen = SpotifyNowPlaying.Disconnected with { IsConnected = true, UpdatedAt = DateTimeOffset.UtcNow };
+
+        return chosen with { IsConnected = true, DisplayName = accountName, Error = notice };
+    }
+
+    // The media controls give Spotify's title and its artists joined one way,
+    // the Web API another; the title plus any shared artist is enough.
+    internal static bool SameTrack(SpotifyNowPlaying a, SpotifyNowPlaying b)
+    {
+        if (!string.Equals(a.Track?.Trim(), b.Track?.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
+        if (string.IsNullOrWhiteSpace(a.Artist) || string.IsNullOrWhiteSpace(b.Artist)) return true;
+        var first = FirstArtist(b.Artist!);
+        var other = FirstArtist(a.Artist!);
+        return a.Artist!.Contains(first, StringComparison.OrdinalIgnoreCase) || b.Artist!.Contains(other, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FirstArtist(string artists) => artists.Split(',', ';', '&')[0].Trim();
+}
+
+/// <summary>Spotify refused an account that signed in fine - Development Mode's allow-list.</summary>
+internal sealed class SpotifyNotApprovedException(string? detail)
+    : Exception($"Spotify refused this account ({detail ?? "403"}).");
+
+/// <summary>A sign-in that stopped for a reason the user should read as-is.</summary>
+internal sealed class SpotifySignInException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>
+/// Reads the listener's current track so a clip can say what was playing
+/// while it was captured.
 ///
-/// Authorization Code with PKCE and no client secret, the same shape
-/// <see cref="XboxActivityService"/> uses: a desktop app cannot keep a secret,
-/// and Spotify's own guidance for installed apps is PKCE for exactly that
-/// reason. The refresh token is the only durable credential and it is written
+/// Two sources. The Spotify app on this PC, through Windows' media controls
+/// (<see cref="SpotifyLocalSource"/>), needs no sign-in and works for anyone.
+/// Signing in with Spotify adds the Web API: exact cover art and Spotify
+/// playing on another device. The Web API is optional because Spotify now caps
+/// a Development Mode app at five approved accounts; everyone past that gets a
+/// 403 and still has the local source.
+///
+/// Web sign-in is Authorization Code with PKCE and no client secret, the same
+/// shape <see cref="XboxActivityService"/> uses: a desktop app cannot keep a
+/// secret. The refresh token is the only durable credential and it is written
 /// through DPAPI, so it is readable by this Windows user and nobody else.
 /// </summary>
 internal sealed class SpotifyNowPlayingService : IDisposable
@@ -73,6 +144,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     // Loopback by IP, not by name. Spotify's redirect rules take http only for
     // a loopback ADDRESS - "localhost" is refused - and the port has to be
     // fixed because it is half of what is registered.
+    private const int RedirectPort = 51338;
     private const string RedirectUri = "http://127.0.0.1:51338/callback";
 
     // Only what the overlay needs. currently-playing alone covers track,
@@ -85,24 +157,43 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     private const string CurrentlyPlayingUri = "https://api.spotify.com/v1/me/player/currently-playing";
     private const string ProfileUri = "https://api.spotify.com/v1/me";
 
-    // Two seconds, not five. This is what decides how stale the track written
-    // onto a clip can be - a save landing seconds after a song change would
-    // otherwise carry the previous song - and it is what the settings row's
-    // now-playing line reads as responsiveness. At one request per two seconds
-    // per user it is a fraction of Spotify's per-app rolling limit.
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+    internal const string NotApprovedMessage =
+        "Spotify hasn't approved this Spotify account for ClypDat - Spotify limits ClypDat's sign-in to a few approved accounts. Reading the Spotify app on this PC instead.";
+    private const string AccountExpiredMessage = "Spotify sign-in expired. Reading the Spotify app on this PC instead; sign in again for cover art from other devices.";
+
+    // With the PC's own session showing the song, the Web API only adds cover
+    // art and the track id, and a track change wakes it at once - so it can
+    // poll slowly. Without one it is the only source and has to keep up. Every
+    // user's polls share one per-app rate budget, which two-second polling
+    // from everyone was exhausting.
+    private static readonly TimeSpan PollWithLocal = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PollWebOnly = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan SignInWindow = TimeSpan.FromMinutes(5);
 
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly string _cachePath = Path.Combine(AppDataPaths.Root, "spotify-auth.bin");
     private readonly SemaphoreSlim _pollWake = new(0, 1);
+    private readonly SpotifyLocalSource _local = new();
+    private readonly object _gate = new();
     private CancellationTokenSource? _pollCts;
+    private CancellationTokenSource? _signInCts;
     private SpotifyTokens? _tokens;
+    private SpotifyNowPlaying? _web;
+    private string? _accountName;
+    private string? _notice;
+    private bool _enabled;
     private SpotifyNowPlaying _snapshot = SpotifyNowPlaying.Disconnected;
     private DateTimeOffset _lastRefresh;
-    // Set from a 429's Retry-After. Polling on through a rate limit every two
-    // seconds is what kept a tester's app limited for over half an hour.
+    private string? _lastLocalTrack;
+    // Set from a 429's Retry-After. Polling on through a rate limit is what
+    // kept a tester's app limited for over half an hour.
     private DateTimeOffset _rateLimitedUntil;
     private bool _policyPaused;
+
+    public SpotifyNowPlayingService()
+    {
+        _local.Changed += (_, _) => OnLocalChanged();
+    }
 
     public SpotifyNowPlaying Snapshot => _snapshot;
     public event EventHandler<SpotifyNowPlaying>? Changed;
@@ -122,24 +213,39 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     /// <summary>Whether the build carries a registration to authorize against.</summary>
     public static bool IsConfigured => !string.IsNullOrWhiteSpace(ClientId);
 
-    /// <summary>Signs back in from the stored refresh token, without a browser.</summary>
+    /// <summary>Spotify is turned on - reading this PC, and the account if signed in.</summary>
+    public bool IsEnabled => _enabled;
+    /// <summary>Signed in with a Spotify account as well.</summary>
+    public bool IsAccountConnected => _tokens is not null;
+    public string? AccountName => _accountName;
+    /// <summary>The Spotify app on this PC has a media session.</summary>
+    public bool IsLocalAvailable => _local.Current is not null;
+    public bool IsSigningIn => _signInCts is not null;
+
+    private bool Blocked => _policyPaused || NoticeBoardService.IsBlocked("pause-spotify");
+
+    /// <summary>
+    /// Turns Spotify on at launch: the local source, plus the saved account if
+    /// there is one. A missing or dead account session only costs the account.
+    /// </summary>
     public async Task<bool> TryRestoreAsync(CancellationToken cancellationToken = default)
     {
         if (NoticeBoardService.IsBlocked("pause-spotify")) { SetPolicyPaused(true); return false; }
-        if (!IsConfigured) return false;
-        _tokens = LoadTokens();
-        if (_tokens is null) return false;
+        Enable();
+        if (!IsConfigured) return true;
+        var tokens = LoadTokens();
+        if (tokens is null) return true;
+        _tokens = tokens;
         try
         {
-            await RefreshNowPlayingAsync(cancellationToken).ConfigureAwait(false);
-            StartPolling();
-            return true;
+            _accountName ??= await DisplayNameAsync(await AccessTokenAsync(cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+            await RefreshWebAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (HttpRequestException error) when (IsRefreshTokenDead(error))
+        catch (Exception error) when (IsAccountLost(error))
         {
-            AppLog.Error("Spotify: restoring the saved session failed.", error);
-            _tokens = null;
-            return false;
+            AppLog.Error("Spotify: restoring the saved account failed.", error);
+            DropAccount(error is SpotifyNotApprovedException ? NotApprovedMessage : AccountExpiredMessage);
+            return true;
         }
         catch (Exception error) when (!cancellationToken.IsCancellationRequested)
         {
@@ -147,50 +253,109 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             // tokens and let the poll retry, rather than going dark until the
             // next restart.
             AppLog.Error("Spotify: first now-playing read failed; polling will retry.", error);
-            StartPolling();
-            return true;
         }
+        StartPolling();
+        return true;
     }
 
-    public async Task<bool> ConnectAsync(CancellationToken cancellationToken = default)
+    /// <summary>Turns Spotify on with no sign-in: the Spotify app on this PC.</summary>
+    public bool Enable()
     {
-        if (NoticeBoardService.IsBlocked("pause-spotify")) { SetPolicyPaused(true); return false; }
+        if (Blocked) { SetPolicyPaused(true); return false; }
+        _enabled = true;
+        _local.Start();
+        Recompute();
+        return true;
+    }
+
+    /// <summary>
+    /// Optional Spotify sign-in, for cover art and other devices. Always opens
+    /// Spotify's own page with the account picker, so a refused account can
+    /// be swapped for another. Pressing it again restarts the attempt.
+    /// </summary>
+    public async Task<bool> SignInAsync(CancellationToken cancellationToken = default)
+    {
+        if (Blocked) { SetPolicyPaused(true); return false; }
         if (!IsConfigured)
         {
-            _snapshot = SpotifyNowPlaying.Disconnected with { Error = "This build has no Spotify application registered." };
-            Changed?.Invoke(this, _snapshot);
+            _notice = "This build has no Spotify application registered.";
+            Recompute();
             return false;
         }
 
+        CancelSignIn();
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        lock (_gate) _signInCts = attempt;
         try
         {
-            _tokens = LoadTokens();
-            if (_tokens is null || _tokens.ExpiresAt <= DateTimeOffset.UtcNow.AddMinutes(2))
-                _tokens = await RunPkceLoginAsync(cancellationToken).ConfigureAwait(false);
-
-            await RefreshNowPlayingAsync(cancellationToken).ConfigureAwait(false);
+            if (!_enabled) Enable();
+            var (tokens, name) = await RunPkceLoginAsync(attempt.Token).ConfigureAwait(false);
+            SaveTokens(tokens);
+            _tokens = tokens;
+            _accountName = name;
+            _notice = null;
+            _web = null;
+            AppLog.Info("Spotify: account signed in.");
+            try { await RefreshWebAsync(attempt.Token).ConfigureAwait(false); }
+            catch (Exception error) when (!IsAccountLost(error) && !attempt.IsCancellationRequested)
+            {
+                AppLog.Error("Spotify: first now-playing read after sign-in failed; polling will retry.", error);
+            }
             StartPolling();
+            Recompute();
             return true;
+        }
+        catch (OperationCanceledException) when (attempt.IsCancellationRequested)
+        {
+            AppLog.Info("Spotify: sign-in cancelled.");
+            return false;
         }
         catch (Exception error)
         {
-            AppLog.Error("Spotify: connection failed.", error);
-            var message = error is HttpRequestException && !string.IsNullOrWhiteSpace(error.Message)
-                ? error.Message
-                : "Spotify connection failed. Try connecting again.";
-            _snapshot = SpotifyNowPlaying.Disconnected with { Error = message };
-            Changed?.Invoke(this, _snapshot);
+            AppLog.Error("Spotify: sign-in failed.", error);
+            _notice = error switch
+            {
+                SpotifyNotApprovedException => NotApprovedMessage,
+                SpotifySignInException => error.Message,
+                TimeoutException => "Spotify sign-in timed out. Press Sign in again.",
+                HttpRequestException { StatusCode: null } => "Couldn't reach Spotify. Check your connection and try again.",
+                _ => "Spotify sign-in failed. Try again.",
+            };
+            Recompute();
             return false;
+        }
+        finally
+        {
+            lock (_gate) if (ReferenceEquals(_signInCts, attempt)) _signInCts = null;
         }
     }
 
+    /// <summary>Stops waiting for the browser. The listener closes with it.</summary>
+    public void CancelSignIn()
+    {
+        CancellationTokenSource? pending;
+        lock (_gate) { pending = _signInCts; _signInCts = null; }
+        try { pending?.Cancel(); } catch (ObjectDisposedException) { }
+    }
+
+    /// <summary>Forgets the Spotify account but keeps reading this PC.</summary>
+    public void SignOutAccount()
+    {
+        DropAccount(null);
+    }
+
+    /// <summary>Turns Spotify off entirely: this PC and the account.</summary>
     public void Disconnect()
     {
-        _pollCts?.Cancel();
-        _pollCts?.Dispose();
-        _pollCts = null;
+        CancelSignIn();
+        StopPolling();
         _tokens = null;
+        _web = null;
+        _accountName = null;
+        _notice = null;
         TryDeleteCache();
+        _enabled = false;
+        _local.Stop();
         _snapshot = SpotifyNowPlaying.Disconnected;
         Current = _snapshot;
         Sampled?.Invoke(this, _snapshot);
@@ -203,9 +368,9 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         _policyPaused = paused;
         if (paused)
         {
-            _pollCts?.Cancel();
-            _pollCts?.Dispose();
-            _pollCts = null;
+            CancelSignIn();
+            StopPolling();
+            _local.Stop();
             _snapshot = SpotifyNowPlaying.Disconnected with { Error = "Spotify is temporarily paused by ClypDat." };
             Current = _snapshot;
             Sampled?.Invoke(this, _snapshot);
@@ -219,13 +384,63 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         AppLog.Info("Policy transition: Spotify resumed.");
     }
 
+    // The account's tokens go, the local source stays. A notice says why when
+    // it was not the user's choice.
+    private void DropAccount(string? notice)
+    {
+        StopPolling();
+        _tokens = null;
+        _web = null;
+        _accountName = null;
+        _notice = notice;
+        TryDeleteCache();
+        Recompute();
+    }
+
+    private void OnLocalChanged()
+    {
+        if (!_enabled || Blocked) return;
+        // A new song on this PC: have the account describe it now rather than
+        // at its next slow poll, so the cover URL arrives with the song.
+        var track = _local.Current?.Track;
+        if (!string.Equals(track, _lastLocalTrack, StringComparison.Ordinal))
+        {
+            _lastLocalTrack = track;
+            if (track is not null && _tokens is not null) WakePoll();
+        }
+        Recompute();
+    }
+
+    // The local source and the account poll finish on different threads.
+    private readonly object _publishGate = new();
+
+    private void Recompute()
+    {
+        if (Blocked) return;
+        lock (_publishGate) Publish(SpotifySnapshotMerge.Merge(_enabled, _local.Current, _web, _accountName, _notice));
+    }
+
     private void StartPolling()
     {
-        if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
-        _pollCts?.Cancel();
-        _pollCts?.Dispose();
-        _pollCts = new CancellationTokenSource();
-        _ = PollAsync(_pollCts.Token);
+        if (Blocked || _tokens is null) return;
+        CancellationTokenSource next;
+        lock (_gate)
+        {
+            _pollCts?.Cancel();
+            _pollCts?.Dispose();
+            _pollCts = next = new CancellationTokenSource();
+        }
+        _ = PollAsync(next.Token);
+    }
+
+    private void StopPolling()
+    {
+        lock (_gate)
+        {
+            _pollCts?.Cancel();
+            _pollCts?.Dispose();
+            _pollCts = null;
+        }
     }
 
     /// <summary>
@@ -237,8 +452,15 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     /// </summary>
     public void RefreshSoon()
     {
-        if (!_snapshot.IsConnected) return;
+        if (!_enabled) return;
+        _local.Wake();
+        if (_tokens is null) return;
         if (DateTimeOffset.UtcNow - _lastRefresh < TimeSpan.FromSeconds(1)) return;
+        WakePoll();
+    }
+
+    private void WakePoll()
+    {
         try { if (_pollWake.CurrentCount == 0) _pollWake.Release(); }
         catch (SemaphoreFullException) { }
         catch (ObjectDisposedException) { }
@@ -248,14 +470,15 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
+            if (Blocked) return;
             try
             {
+                var interval = _local.Current is not null ? PollWithLocal : PollWebOnly;
                 var backoff = _rateLimitedUntil - DateTimeOffset.UtcNow;
-                await _pollWake.WaitAsync(backoff > PollInterval ? backoff : PollInterval, cancellationToken).ConfigureAwait(false);
+                await _pollWake.WaitAsync(backoff > interval ? backoff : interval, cancellationToken).ConfigureAwait(false);
                 // A focus-triggered wake does not get to jump a rate limit.
                 if (DateTimeOffset.UtcNow < _rateLimitedUntil) continue;
-                await RefreshNowPlayingAsync(cancellationToken).ConfigureAwait(false);
+                await RefreshWebAsync(cancellationToken).ConfigureAwait(false);
                 _lastRefresh = DateTimeOffset.UtcNow;
             }
             // Only our own cancellation ends the loop. HttpClient's timeout is
@@ -263,42 +486,39 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             // poll for good after one slow response, and every clip from then
             // on was saved without its song.
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
-            catch (HttpRequestException error) when (IsRefreshTokenDead(error))
+            catch (Exception error) when (IsAccountLost(error))
             {
-                // The refresh token itself was rejected - reconnecting needs a
-                // fresh browser sign-in, so there is nothing left to poll for.
-                // Unlike a transient failure, the UI must stop claiming
-                // "Connected" here instead of silently retrying forever.
-                AppLog.Error("Spotify: session expired.", error);
-                _pollCts?.Cancel();
-                _snapshot = SpotifyNowPlaying.Disconnected with { Error = "Spotify session expired. Reconnect." };
-                Current = _snapshot;
-                TryDeleteCache();
-                _tokens = null;
-                Sampled?.Invoke(this, _snapshot);
-                Changed?.Invoke(this, _snapshot);
+                // Refused outright (not approved) or the refresh token is dead:
+                // polling again cannot fix either. The PC's own session carries
+                // on; the account needs a fresh sign-in.
+                AppLog.Error("Spotify: the account session ended.", error);
+                DropAccount(error is SpotifyNotApprovedException ? NotApprovedMessage : AccountExpiredMessage);
                 return;
             }
             catch (Exception error)
             {
                 // A poll failing is a network blip or a token that needs one
                 // more refresh, not a reason to sign the user out - the next
-                // tick retries. Only an explicit Disconnect ends this loop.
+                // tick retries.
                 AppLog.Error("Spotify: now-playing poll failed.", error);
             }
         }
     }
 
     // Spotify answers a dead/revoked refresh token with 400 (invalid_grant) or
-    // 401; anything else (a timeout, a 5xx) is transient and worth retrying.
-    private static bool IsRefreshTokenDead(HttpRequestException error) =>
-        error.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized;
-
-    private async Task RefreshNowPlayingAsync(CancellationToken cancellationToken)
+    // 401; a 403 means the account is not allowed to use this app at all.
+    // Anything else (a timeout, a 5xx) is transient and worth retrying.
+    private static bool IsAccountLost(Exception error) => error switch
     {
-        if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
+        SpotifyNotApprovedException => true,
+        HttpRequestException { StatusCode: HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized } => true,
+        _ => false,
+    };
+
+    private async Task RefreshWebAsync(CancellationToken cancellationToken)
+    {
+        if (Blocked || _tokens is null) return;
         var token = await AccessTokenAsync(cancellationToken).ConfigureAwait(false);
-        var name = _snapshot.DisplayName ?? await DisplayNameAsync(token, cancellationToken).ConfigureAwait(false);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, CurrentlyPlayingUri);
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
@@ -308,20 +528,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         // a failure, and the overlay simply has nothing to say for that clip.
         if (response.StatusCode == HttpStatusCode.NoContent)
         {
-            if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
-            Publish(_snapshot with
-            {
-                IsConnected = true,
-                DisplayName = name,
-                Track = null,
-                Artist = null,
-                Album = null,
-                Duration = null,
-                Progress = null,
-                IsPlaying = false,
-                UpdatedAt = DateTimeOffset.UtcNow,
-                Error = null
-            });
+            SetWeb(SpotifyNowPlaying.Disconnected with { IsConnected = true, UpdatedAt = DateTimeOffset.UtcNow });
             return;
         }
 
@@ -338,14 +545,14 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             return;
         }
 
+        await ThrowIfNotApprovedAsync(response, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         var payload = await response.Content.ReadFromJsonAsync<CurrentlyPlayingResponse>(cancellationToken).ConfigureAwait(false);
-        if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
         var item = payload?.Item;
 
-        Publish(new SpotifyNowPlaying(
+        SetWeb(new SpotifyNowPlaying(
             IsConnected: true,
-            DisplayName: name,
+            DisplayName: null,
             Track: item?.Name,
             Artist: item?.Artists is { Length: > 0 } artists ? string.Join(", ", artists.Select(artist => artist.Name)) : null,
             Album: item?.Album?.Name,
@@ -359,6 +566,23 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             // the cheapest correct choice.
             ArtUrl: SmallestUsableArt(item?.Album?.Images),
             TrackId: item?.Id));
+    }
+
+    private void SetWeb(SpotifyNowPlaying web)
+    {
+        if (Blocked || _tokens is null) return;
+        _web = web;
+        Recompute();
+    }
+
+    // A Development Mode app answers any account not on its allow-list with
+    // 403 on every Web API call, after a sign-in that looked fine. The body
+    // says "the user may not be registered".
+    private static async Task ThrowIfNotApprovedAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (response.StatusCode != HttpStatusCode.Forbidden) return;
+        var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        throw new SpotifyNotApprovedException(ApiError(body));
     }
 
     // 300px is the middle image Spotify publishes for an album, and the card's
@@ -375,17 +599,24 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             ?? images[0].Url;
     }
 
+    private bool _publishedLocalAvailable;
+
     private void Publish(SpotifyNowPlaying snapshot)
     {
-        // Poll ticks that change nothing still arrive every five seconds; only
-        // a real change is worth waking the UI for. Progress is deliberately
-        // not compared - it moves on every tick by definition.
+        // Ticks that change nothing still arrive every few seconds; only a real
+        // change is worth waking the UI for. Progress is deliberately not
+        // compared - it moves on every tick by definition.
         var unchanged = _snapshot.IsConnected == snapshot.IsConnected &&
             string.Equals(_snapshot.TrackId, snapshot.TrackId, StringComparison.Ordinal) &&
             string.Equals(_snapshot.Track, snapshot.Track, StringComparison.Ordinal) &&
             string.Equals(_snapshot.Artist, snapshot.Artist, StringComparison.Ordinal) &&
+            string.Equals(_snapshot.DisplayName, snapshot.DisplayName, StringComparison.Ordinal) &&
             _snapshot.IsPlaying == snapshot.IsPlaying &&
-            string.Equals(_snapshot.Error, snapshot.Error, StringComparison.Ordinal);
+            string.Equals(_snapshot.Error, snapshot.Error, StringComparison.Ordinal) &&
+            // The settings line says whether the Spotify app is open, which
+            // can change while the snapshot itself (nothing playing) does not.
+            _publishedLocalAvailable == IsLocalAvailable;
+        _publishedLocalAvailable = IsLocalAvailable;
 
         _snapshot = snapshot;
         Current = snapshot;
@@ -395,89 +626,162 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
     private async Task<string?> DisplayNameAsync(string token, CancellationToken cancellationToken)
     {
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, ProfileUri);
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-            var profile = await response.Content.ReadFromJsonAsync<ProfileResponse>(cancellationToken).ConfigureAwait(false);
-            return profile?.DisplayName;
-        }
-        catch (Exception error)
+        using var request = new HttpRequestMessage(HttpMethod.Get, ProfileUri);
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await ThrowIfNotApprovedAsync(response, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
         {
             // A name is a nicety. Losing it must not cost the connection.
-            AppLog.Error("Spotify: profile lookup failed.", error);
+            AppLog.Info($"Spotify: profile lookup returned {(int)response.StatusCode}.");
             return null;
         }
+        var profile = await response.Content.ReadFromJsonAsync<ProfileResponse>(cancellationToken).ConfigureAwait(false);
+        return profile?.DisplayName;
     }
 
     private async Task<string> AccessTokenAsync(CancellationToken cancellationToken)
     {
-        if (_tokens is null) throw new InvalidOperationException("Spotify is not connected.");
-        if (_tokens.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1)) return _tokens.AccessToken;
+        var current = _tokens ?? throw new InvalidOperationException("Spotify is not signed in.");
+        if (current.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1)) return current.AccessToken;
 
         var refreshed = await PostTokenAsync(new Dictionary<string, string>
         {
             ["grant_type"] = "refresh_token",
-            ["refresh_token"] = _tokens.RefreshToken,
+            ["refresh_token"] = current.RefreshToken,
             ["client_id"] = ClientId
         }, cancellationToken).ConfigureAwait(false);
 
         // A refresh response may omit refresh_token, which means "keep using
         // the one you have" rather than "you no longer have one".
-        _tokens = new SpotifyTokens(
+        var next = new SpotifyTokens(
             refreshed.AccessToken,
-            string.IsNullOrWhiteSpace(refreshed.RefreshToken) ? _tokens.RefreshToken : refreshed.RefreshToken!,
+            string.IsNullOrWhiteSpace(refreshed.RefreshToken) ? current.RefreshToken : refreshed.RefreshToken!,
             DateTimeOffset.UtcNow.AddSeconds(refreshed.ExpiresIn));
-        SaveTokens(_tokens);
-        return _tokens.AccessToken;
+        // Signed out (or swapped accounts) while the refresh was in flight.
+        if (!ReferenceEquals(_tokens, current)) throw new OperationCanceledException("Spotify account changed during refresh.");
+        _tokens = next;
+        SaveTokens(next);
+        return next.AccessToken;
     }
 
-    private async Task<SpotifyTokens> RunPkceLoginAsync(CancellationToken cancellationToken)
+    private async Task<(SpotifyTokens Tokens, string? Name)> RunPkceLoginAsync(CancellationToken cancellationToken)
     {
-        using var listener = new HttpListener();
-        listener.Prefixes.Add("http://127.0.0.1:51338/");
-        listener.Start();
+        using var listener = await StartListenerAsync(cancellationToken).ConfigureAwait(false);
 
         var verifier = Base64Url(RandomNumberGenerator.GetBytes(32));
         var challenge = Base64Url(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
         var state = Base64Url(RandomNumberGenerator.GetBytes(16));
+        // show_dialog: without it Spotify silently reuses whichever account the
+        // browser is signed into - including one it has already refused - and
+        // there is no way to pick another.
         var query = $"client_id={Uri.EscapeDataString(ClientId)}&response_type=code" +
             $"&redirect_uri={Uri.EscapeDataString(RedirectUri)}&scope={Uri.EscapeDataString(Scope)}" +
-            $"&state={Uri.EscapeDataString(state)}&code_challenge_method=S256&code_challenge={Uri.EscapeDataString(challenge)}";
+            $"&state={Uri.EscapeDataString(state)}&code_challenge_method=S256&code_challenge={Uri.EscapeDataString(challenge)}" +
+            "&show_dialog=true";
 
         Process.Start(new ProcessStartInfo($"{AuthorizeUri}?{query}") { UseShellExecute = true });
 
-        var context = await listener.GetContextAsync().WaitAsync(TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
-        var code = context.Request.QueryString["code"];
-        var returnedState = context.Request.QueryString["state"];
-        var page = BrowserCallbackPage.Success(BrowserCallbackService.Spotify);
+        var deadline = DateTimeOffset.UtcNow.Add(SignInWindow);
+        while (true)
+        {
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) throw new TimeoutException("Spotify sign-in timed out.");
+            HttpListenerContext context;
+            try { context = await listener.GetContextAsync().WaitAsync(remaining, cancellationToken).ConfigureAwait(false); }
+            catch (TimeoutException) { throw new TimeoutException("Spotify sign-in timed out."); }
+
+            var parameters = context.Request.QueryString;
+            // The state check is what stops a page the user did not open from
+            // handing us a code for an account they did not choose. Anything
+            // else - a favicon request, a prefetch, a reload - is answered and
+            // ignored rather than failing the attempt.
+            if (context.Request.HttpMethod != "GET" || !string.Equals(parameters["state"], state, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = (int)HttpStatusCode.NoContent;
+                context.Response.Close();
+                continue;
+            }
+
+            try
+            {
+                var error = parameters["error"];
+                if (!string.IsNullOrWhiteSpace(error))
+                    throw new SpotifySignInException(error == "access_denied" ? "Spotify sign-in was cancelled." : $"Spotify sign-in failed ({error}).");
+                var code = parameters["code"];
+                if (string.IsNullOrWhiteSpace(code)) throw new SpotifySignInException("Spotify did not return an authorization code. Try again.");
+
+                var response = await PostTokenAsync(new Dictionary<string, string>
+                {
+                    ["grant_type"] = "authorization_code",
+                    ["code"] = code,
+                    ["redirect_uri"] = RedirectUri,
+                    ["client_id"] = ClientId,
+                    ["code_verifier"] = verifier
+                }, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(response.RefreshToken))
+                    throw new SpotifySignInException("Spotify did not return a refresh token. Try again.");
+
+                // Checked before anything is saved: an account outside the
+                // allow-list gets this far and is refused only now. Saving it
+                // first is what used to leave a refused token behind that
+                // every later Connect reused.
+                var name = await DisplayNameAsync(response.AccessToken, cancellationToken).ConfigureAwait(false);
+                var tokens = new SpotifyTokens(response.AccessToken, response.RefreshToken!, DateTimeOffset.UtcNow.AddSeconds(response.ExpiresIn));
+                await RespondAsync(context, BrowserCallbackPage.Success(BrowserCallbackService.Spotify), cancellationToken).ConfigureAwait(false);
+                return (tokens, name);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                var message = error switch
+                {
+                    SpotifyNotApprovedException => "Spotify hasn't approved this Spotify account for ClypDat. ClypDat still reads the Spotify app on your PC, so you can close this tab.",
+                    SpotifySignInException => error.Message,
+                    _ => "Spotify sign-in could not be completed. Go back to ClypDat and try again.",
+                };
+                try { await RespondAsync(context, BrowserCallbackPage.Failure(BrowserCallbackService.Spotify, message), cancellationToken).ConfigureAwait(false); }
+                catch (Exception pageError) { AppLog.Error("Spotify: showing the sign-in result failed.", pageError); }
+                throw;
+            }
+            finally
+            {
+                context.Response.Close();
+            }
+        }
+    }
+
+    // The port is fixed, so a press that restarts sign-in can arrive while the
+    // attempt it cancelled is still letting go of it. A second is plenty for
+    // that; longer means something else really has the port.
+    private static async Task<HttpListener> StartListenerAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add($"http://127.0.0.1:{RedirectPort}/");
+            try
+            {
+                listener.Start();
+                return listener;
+            }
+            catch (HttpListenerException error)
+            {
+                ((IDisposable)listener).Dispose();
+                if (attempt >= 10)
+                    throw new SpotifySignInException(
+                        $"Another program is using port {RedirectPort}, which Spotify sign-in needs. Close other ClypDat windows or restart ClypDat, then try again.", error);
+            }
+            await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task RespondAsync(HttpListenerContext context, byte[] page, CancellationToken cancellationToken)
+    {
+        context.Response.Headers["Cache-Control"] = "no-store";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.ContentLength64 = page.Length;
         await context.Response.OutputStream.WriteAsync(page, cancellationToken).ConfigureAwait(false);
-        context.Response.Close();
-
-        // The state check is what stops a page the user did not open from
-        // handing us a code for an account they did not choose.
-        if (!string.Equals(returnedState, state, StringComparison.Ordinal) || string.IsNullOrWhiteSpace(code))
-            throw new InvalidOperationException("Spotify did not return an authorization code.");
-
-        var tokens = await PostTokenAsync(new Dictionary<string, string>
-        {
-            ["grant_type"] = "authorization_code",
-            ["code"] = code!,
-            ["redirect_uri"] = RedirectUri,
-            ["client_id"] = ClientId,
-            ["code_verifier"] = verifier
-        }, cancellationToken).ConfigureAwait(false);
-
-        if (string.IsNullOrWhiteSpace(tokens.RefreshToken))
-            throw new InvalidOperationException("Spotify did not return a refresh token.");
-
-        var saved = new SpotifyTokens(tokens.AccessToken, tokens.RefreshToken!, DateTimeOffset.UtcNow.AddSeconds(tokens.ExpiresIn));
-        SaveTokens(saved);
-        return saved;
     }
 
     private async Task<OAuthTokenResponse> PostTokenAsync(Dictionary<string, string> form, CancellationToken cancellationToken)
@@ -530,16 +834,34 @@ internal sealed class SpotifyNowPlayingService : IDisposable
             using var json = JsonDocument.Parse(body);
             var code = json.RootElement.TryGetProperty("error_description", out var description) ? description.GetString() : null;
             if (string.IsNullOrWhiteSpace(code))
-                code = json.RootElement.TryGetProperty("error", out var error) ? error.GetString() : null;
+                code = json.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String ? error.GetString() : null;
             return string.IsNullOrWhiteSpace(code) ? "no error detail" : code;
         }
         catch (JsonException) { return "no error detail"; }
     }
 
+    // Web API errors are {"error":{"status":403,"message":"..."}}, unlike the
+    // accounts service's flat OAuth errors.
+    internal static string? ApiError(string body)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(body);
+            if (json.RootElement.TryGetProperty("error", out var error))
+            {
+                if (error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var message)) return message.GetString();
+                if (error.ValueKind == JsonValueKind.String) return error.GetString();
+            }
+        }
+        catch (JsonException) { }
+        return string.IsNullOrWhiteSpace(body) ? null : body.Length > 200 ? body[..200] : body;
+    }
+
     public void Dispose()
     {
-        _pollCts?.Cancel();
-        _pollCts?.Dispose();
+        CancelSignIn();
+        StopPolling();
+        _local.Dispose();
         _pollWake.Dispose();
         _http.Dispose();
     }

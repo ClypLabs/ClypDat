@@ -97,6 +97,38 @@ internal static class SpotifyCoverArtStore
         return timeline with { Samples = timeline.Samples.Select(item => item with { ArtPath = item.ArtUrl is { } url && paths.TryGetValue(url, out var path) && path is not null ? path : item.ArtPath }).ToArray() };
     }
 
+    /// <summary>
+    /// Moves covers read from this PC's media controls into the archive, for
+    /// samples the Web API gave no URL for. Local and quick, so it runs before
+    /// the downloads; a cover that has since been pruned just stays missing.
+    /// </summary>
+    public static async Task<SpotifyTimeline> ImportLocalArtAsync(string root, SpotifyTimeline timeline, CancellationToken token)
+    {
+        var paths = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var local in timeline.Samples.Select(item => item.LocalArtPath).Where(SpotifyLocalArt.IsLocalArtPath).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var info = new FileInfo(local!);
+                paths[local!] = info.Exists && info.Length is > 0 and <= MaximumBytes
+                    ? await ImportBytesAsync(root, await File.ReadAllBytesAsync(local!, token).ConfigureAwait(false), token).ConfigureAwait(false)
+                    : null;
+            }
+            catch (Exception error) when (error is not OperationCanceledException || !token.IsCancellationRequested)
+            {
+                AppLog.Error("Spotify cover import from this PC failed.", error);
+                paths[local!] = null;
+            }
+        }
+        if (paths.Count == 0) return timeline;
+        return timeline with
+        {
+            Samples = timeline.Samples.Select(item => item.LocalArtPath is { } local && paths.TryGetValue(local, out var archived)
+                ? item with { ArtPath = archived ?? item.ArtPath, LocalArtPath = null }
+                : item).ToArray()
+        };
+    }
+
     private static async Task<string?> FetchToArchiveAsync(string root, string url, CancellationToken token)
     {
         if (!IsTrustedArtUrl(url)) return null;

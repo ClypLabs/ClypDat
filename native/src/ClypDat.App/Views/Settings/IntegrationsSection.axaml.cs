@@ -10,9 +10,25 @@ public sealed partial class IntegrationsSection : UserControl
     {
         if (DataContext is MainWindowViewModel vm) await vm.LinkClypDatAccountAsync();
     }
-    private async void ConnectSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void ConnectSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm) await vm.ConnectSpotifyAsync();
+        if (DataContext is MainWindowViewModel vm) vm.ConnectSpotify();
+    }
+    private async void SignInSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) await vm.SignInSpotifyAsync();
+    }
+    private void CancelSpotifySignInButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) vm.CancelSpotifySignIn();
+    }
+    private void SignOutSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) vm.SignOutSpotifyAccount();
+    }
+    private void CancelClypDatLinkButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) vm.CancelClypDatLink();
     }
     private void ConfigureSpotifyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -30,9 +46,9 @@ public sealed partial class IntegrationsSection : UserControl
     {
         if (DataContext is MainWindowViewModel vm) vm.OpenClypDatAccount();
     }
-    private async void UnlinkClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void UnlinkClypDatButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel vm) await vm.SignOutClypDatAccountAsync();
+        if (DataContext is MainWindowViewModel vm) vm.SignOutClypDatAccount();
     }
     private async void UnlinkClypDatXboxButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {

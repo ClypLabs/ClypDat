@@ -243,6 +243,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _spotify.Sampled += _spotifyHistory.Sample;
         SpotifyProcessingPaths.Changed += SpotifyProcessingChanged;
         _clypDatAccount.Changed += ClypDatAccountChanged;
+        _clypDatAccount.SpotifyDisconnectRequested += (_, requestedAt) => Dispatcher.UIThread.Post(() => ApplySpotifyDisconnectRequest(requestedAt));
         _clypDatAccount.LiveActivityNeeded = () => ClypDatXboxActivityNeeded;
         if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
         var spotifyRestore = Settings.SpotifyEnabled ? _spotify.TryRestoreAsync() : Task.FromResult(false);
@@ -2720,6 +2721,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(SpotifyPolicyBlocked));
         OnPropertyChanged(nameof(SpotifyPolicyPause));
         OnPropertyChanged(nameof(SpotifyConnectEnabled));
+        OnPropertyChanged(nameof(SpotifySignInEnabled));
         OnPropertyChanged(nameof(XboxPolicyBlocked));
         OnPropertyChanged(nameof(XboxPolicyPause));
         OnPropertyChanged(nameof(XboxActivityForDesktop));
@@ -7294,7 +7296,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly ClypDatAccountActivityService _clypDatAccount = new();
     private XboxActivitySnapshot _xboxSnapshot = XboxActivitySnapshot.Disconnected;
     private XboxActivitySnapshot _clypDatSnapshot = XboxActivitySnapshot.Disconnected;
-    private bool _clypDatAccountSetupStarted;
 
     private XboxActivitySnapshot EffectiveXboxSnapshot => _clypDatSnapshot.IsConnected ? _clypDatSnapshot : _xboxSnapshot;
 
@@ -7342,10 +7343,26 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
     public bool SpotifyIsConfigured => SpotifyNowPlayingService.IsConfigured;
-    public string SpotifyAccountStatus => _spotifySnapshot.Error
-        ?? (_spotifySnapshot.IsConnected
-            ? string.IsNullOrWhiteSpace(_spotifySnapshot.DisplayName) ? "Connected" : $"Connected as {_spotifySnapshot.DisplayName}"
-            : "Not connected");
+
+    /// <summary>Where the song comes from, in a line.</summary>
+    public string SpotifyAccountStatus => !_spotifySnapshot.IsConnected
+        ? "Off"
+        : _spotify.IsAccountConnected
+            ? string.IsNullOrWhiteSpace(_spotify.AccountName) ? "Signed in with Spotify" : $"Signed in with Spotify as {_spotify.AccountName}"
+            : _spotify.IsLocalAvailable
+                ? "Reading the Spotify app on this PC - no sign-in needed"
+                : "Open the Spotify app on this PC to show your songs";
+
+    /// <summary>
+    /// Something the user should know: an account Spotify refused, a sign-in
+    /// that was cancelled or failed, a disconnect from the website. The source
+    /// line above still says what is being read.
+    /// </summary>
+    public string SpotifyNotice => _spotifyOffNotice ?? _spotifySnapshot.Error ?? string.Empty;
+    public bool SpotifyHasNotice => !string.IsNullOrWhiteSpace(SpotifyNotice);
+    // Why Spotify is off when it was not this window that turned it off.
+    private string? _spotifyOffNotice;
+    public bool SpotifyAccountConnected => _spotify.IsAccountConnected;
 
     /// <summary>
     /// The now-playing line. A connected account with an idle player is its own
@@ -7377,30 +7394,78 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool SpotifyHasTrack => _spotifySnapshot.IsConnected && !string.IsNullOrWhiteSpace(_spotifySnapshot.Track);
 
-    public async Task ConnectSpotifyAsync()
+    /// <summary>
+    /// Turns Spotify on. No browser and no account: the song is read from the
+    /// Spotify app on this PC, which works for anyone. Signing in with Spotify
+    /// is a separate, optional step (<see cref="SignInSpotifyAsync"/>).
+    /// </summary>
+    public void ConnectSpotify()
     {
+        if (!_spotify.Enable()) return;
+        _spotifyOffNotice = null;
+        Settings.SpotifyConnectedAtUtc = DateTimeOffset.UtcNow;
+        EnableSpotifyAudioAfterConnect();
+        _spotifySnapshot = _spotify.Snapshot;
+        RaiseSpotifyStatusChanged();
+        _ = _clypDatAccount.ReportSpotifyStatusAsync(true);
+    }
+
+    /// <summary>
+    /// Optional Spotify sign-in: exact covers, and Spotify playing on another
+    /// device. Spotify limits it to the accounts approved for ClypDat; anyone
+    /// else is told so and keeps reading this PC.
+    /// </summary>
+    public async Task SignInSpotifyAsync()
+    {
+        var wasEnabled = _spotify.IsEnabled;
         SpotifyConnectBusy = true;
         try
         {
-            if (!await _spotify.ConnectAsync().ConfigureAwait(false)) return;
+            var signedIn = await _spotify.SignInAsync().ConfigureAwait(false);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                EnableSpotifyAudioAfterConnect();
-                // Belt-and-suspenders, the same way LinkClypDatAccountAsync
-                // does not rely solely on the service's own Changed event:
-                // Publish() suppresses Changed when the new snapshot reads as
-                // unchanged from the last one it saw (e.g. reconnecting into
-                // the same idle state TryRestoreAsync had already reported).
-                OnPropertyChanged(nameof(SpotifyIsConnected));
-                OnPropertyChanged(nameof(SpotifyAccountStatus));
-                OnPropertyChanged(nameof(SpotifyNowPlayingLabel));
-                OnPropertyChanged(nameof(SpotifyHasTrack));
-                OnPropertyChanged(nameof(HasAccountsToAdd));
-                OnPropertyChanged(nameof(HasLinkedAccounts));
+                // Signing in turns Spotify on too, if it was off.
+                if (!wasEnabled && _spotify.IsEnabled)
+                {
+                    _spotifyOffNotice = null;
+                    Settings.SpotifyConnectedAtUtc = DateTimeOffset.UtcNow;
+                    EnableSpotifyAudioAfterConnect();
+                    _ = _clypDatAccount.ReportSpotifyStatusAsync(true);
+                }
+                if (signedIn) AppLog.Info("Spotify: signed in from Connected Accounts.");
+                _spotifySnapshot = _spotify.Snapshot;
+                RaiseSpotifyStatusChanged();
             });
-            _ = _clypDatAccount.ReportSpotifyStatusAsync(true);
         }
         finally { SpotifyConnectBusy = false; }
+    }
+
+    public void CancelSpotifySignIn() => _spotify.CancelSignIn();
+
+    /// <summary>Forgets the Spotify account; keeps reading the app on this PC.</summary>
+    public void SignOutSpotifyAccount()
+    {
+        _spotify.SignOutAccount();
+        _spotifySnapshot = _spotify.Snapshot;
+        RaiseSpotifyStatusChanged();
+    }
+
+    // Belt-and-braces, the same way LinkClypDatAccountAsync does not rely
+    // solely on the service's own Changed event: Publish() suppresses Changed
+    // when the new snapshot reads as unchanged from the last one it saw.
+    private void RaiseSpotifyStatusChanged()
+    {
+        OnPropertyChanged(nameof(SpotifyIsConnected));
+        OnPropertyChanged(nameof(SpotifyAccountConnected));
+        OnPropertyChanged(nameof(SpotifyAccountStatus));
+        OnPropertyChanged(nameof(SpotifyNotice));
+        OnPropertyChanged(nameof(SpotifyHasNotice));
+        OnPropertyChanged(nameof(SpotifyNowPlayingLabel));
+        OnPropertyChanged(nameof(SpotifyTrackLength));
+        OnPropertyChanged(nameof(SpotifyHasTrack));
+        OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
+        OnPropertyChanged(nameof(SpotifySignInEnabled));
+        UpdateSpotifyProgressTimer();
     }
 
     private void EnableSpotifyAudioAfterConnect()
@@ -7427,9 +7492,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public void DisconnectSpotify()
     {
         _spotify.Disconnect();
+        _spotifyOffNotice = null;
         Settings.SpotifyEnabled = false;
         SaveSettings();
+        _spotifySnapshot = _spotify.Snapshot;
+        RaiseSpotifyStatusChanged();
         _ = _clypDatAccount.ReportSpotifyStatusAsync(false);
+    }
+
+    /// <summary>
+    /// Disconnect was pressed for Spotify on clypdat.xyz/account. Carried out
+    /// unless Spotify was turned on here after it - then the request is stale,
+    /// and reporting "connected" clears it on the site. Either report is the
+    /// answer the site is waiting for.
+    /// </summary>
+    private void ApplySpotifyDisconnectRequest(DateTimeOffset requestedAt)
+    {
+        if (Settings.SpotifyConnectedAtUtc is { } connectedAt && connectedAt > requestedAt)
+        {
+            AppLog.Info("Spotify: ignoring a website disconnect older than the current connection.");
+            _ = _clypDatAccount.ReportSpotifyStatusAsync(SpotifyIsConnected);
+            return;
+        }
+        if (!Settings.SpotifyEnabled && !SpotifyIsConnected)
+        {
+            _ = _clypDatAccount.ReportSpotifyStatusAsync(false);
+            return;
+        }
+        AppLog.Info("Spotify: disconnected from clypdat.xyz/account.");
+        DisconnectSpotify();
+        _spotifyOffNotice = "Disconnected from your ClypDat account page.";
+        RaiseSpotifyStatusChanged();
     }
 
     /// <summary>
@@ -7503,6 +7596,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 if (timeline is not null)
                 {
+                    // Covers read from the Spotify app on this PC first: they
+                    // are already on disk, and cover every song the account
+                    // (if any) gave no URL for.
+                    timeline = await SpotifyCoverArtStore.ImportLocalArtAsync(library, timeline, token);
                     timeline = await SpotifyCoverArtStore.FetchTimelineAsync(library, clipPath, timeline, token);
                     SpotifyTimelineSidecar.Save(library, clipPath, timeline.Samples);
                     var first = timeline.Samples.FirstOrDefault(item => item.Available);
@@ -7558,30 +7655,18 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private void SpotifyChanged(object? sender, SpotifyNowPlaying snapshot)
     {
         _spotifySnapshot = snapshot;
-        Dispatcher.UIThread.Post(() =>
-        {
-            OnPropertyChanged(nameof(SpotifyIsConnected));
-            OnPropertyChanged(nameof(SpotifyAccountStatus));
-            OnPropertyChanged(nameof(SpotifyNowPlayingLabel));
-            OnPropertyChanged(nameof(SpotifyTrackLength));
-            OnPropertyChanged(nameof(SpotifyHasTrack));
-            OnPropertyChanged(nameof(SpotifyOverlayPreviewText));
-            OnPropertyChanged(nameof(HasAccountsToAdd));
-            OnPropertyChanged(nameof(HasLinkedAccounts));
-            UpdateSpotifyProgressTimer();
-        });
+        Dispatcher.UIThread.Post(RaiseSpotifyStatusChanged);
     }
 
     public string XboxConnectionStatus => EffectiveXboxSnapshot.Error ?? (EffectiveXboxSnapshot.IsConnected ? "Connected" : "Not connected");
     public string XboxCurrentTitle => EffectiveXboxSnapshot.CurrentTitle ?? "No active Xbox game";
     public bool XboxIsConnected => EffectiveXboxSnapshot.IsConnected;
     public string ClypDatAccountStatus => _clypDatAccount.ConnectionCode is not null
-        ? "Compare the pairing code in your browser, then approve linking."
+        ? "Check the code in your browser matches this one, then press Link this PC there."
         : _clypDatAccount.IsAuthenticated
         ? _clypDatSnapshot.IsConnected ? "Connected" : "Connected. No Xbox account linked."
-        : (_clypDatSnapshot.ServerUnavailable ? null : _clypDatSnapshot.Error) ?? (_clypDatAccountSetupStarted
-            ? "After signing in, click Link account here."
-            : "Create or sign in first, then link your account here.");
+        : (_clypDatSnapshot.ServerUnavailable ? null : _clypDatSnapshot.Error)
+            ?? "Sign in through your browser. New to ClypDat? You can make an account there.";
     public string ClypDatXboxStatus => _clypDatSnapshot.IsConnected ? "Linked through ClypDat" : "No Xbox account linked.";
     public bool ClypDatAccountIsConnected => _clypDatAccount.IsAuthenticated;
     public string ClypDatPairingCode => _clypDatAccount.ConnectionCode ?? string.Empty;
@@ -7589,12 +7674,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ClypDatXboxIsLinked => _clypDatSnapshot.IsConnected;
     public string DiscordAccountStatus => _clypDatSnapshot.DiscordConnected ? "Connected" : "Not connected";
     public bool DiscordAccountIsConnected => _clypDatSnapshot.DiscordConnected;
-    public bool ClypDatAccountCanLink => !_clypDatAccount.IsAuthenticated && _clypDatAccountSetupStarted && !ClypDatLinkBusy;
+    // One button now: the site handles "not signed in yet" itself, so the old
+    // "Create or sign in" step that had to come first is gone.
+    public bool ClypDatAccountCanLink => !_clypDatAccount.IsAuthenticated && !ClypDatLinkBusy;
     // The "add an account" and "linked accounts" cards each render an empty
     // titled box once every provider has moved to the other one, so both ask
-    // whether they still have a row to show before drawing themselves.
-    public bool HasAccountsToAdd => !_clypDatSnapshot.DiscordConnected || !_clypDatSnapshot.IsConnected || !SpotifyIsConnected;
-    public bool HasLinkedAccounts => _clypDatSnapshot.DiscordConnected || _clypDatSnapshot.IsConnected || SpotifyIsConnected;
+    // whether they still have a row to show before drawing themselves. Spotify
+    // has a card of its own - it needs no ClypDat account.
+    public bool HasAccountsToAdd => !_clypDatSnapshot.DiscordConnected || !_clypDatSnapshot.IsConnected;
+    public bool HasLinkedAccounts => _clypDatSnapshot.DiscordConnected || _clypDatSnapshot.IsConnected;
 
     // The account card shows the Discord name and picture. The site sends a
     // profile only for accounts with Discord linked; anyone else keeps the
@@ -7627,12 +7715,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (_spotifyConnectBusy == value) return;
             _spotifyConnectBusy = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(SpotifyConnectEnabled));
+            OnPropertyChanged(nameof(SpotifySignInEnabled));
         }
     }
     public bool SpotifyPolicyBlocked => NoticeBoardService.IsBlocked("pause-spotify");
     public PolicyPause? SpotifyPolicyPause => PolicyPauseFor("Spotify", "pause-spotify");
-    public bool SpotifyConnectEnabled => SpotifyIsConfigured && !SpotifyConnectBusy && !SpotifyPolicyBlocked;
+    public bool SpotifyConnectEnabled => !SpotifyPolicyBlocked;
+    public bool SpotifySignInEnabled => SpotifyIsConfigured && !SpotifyConnectBusy && !SpotifyPolicyBlocked;
     // The browser handoff (RunBrowserHandoffAsync) can take a while when the
     // user has to sign in first - this is what lets the button say so instead
     // of sitting there looking unclicked.
@@ -7728,13 +7817,25 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         finally { ClypDatLinkBusy = false; }
     }
 
-    public async Task SignOutClypDatAccountAsync()
+    public void CancelClypDatLink() => _clypDatAccount.CancelConnect();
+
+    /// <summary>
+    /// Signs this PC out at once. Telling clypdat.xyz happens in the
+    /// background and is retried until it lands, so an outage no longer leaves
+    /// Sign out doing nothing (see ClypDatAccountActivityService.SignOutAsync).
+    /// </summary>
+    public void SignOutClypDatAccount()
     {
-        if (!await _clypDatAccount.RevokeAndDisconnectAsync()) return;
-        _clypDatAccountSetupStarted = false;
+        var serverSignOut = _clypDatAccount.SignOutAsync();
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
+        UpdateDiscordPresence();
         Process.Start(new ProcessStartInfo("https://www.clypdat.xyz/account/signout") { UseShellExecute = true });
+        _ = serverSignOut.ContinueWith(task =>
+        {
+            if (task.IsCompletedSuccessfully && !task.Result)
+                AppLog.Info("ClypDat account: signed out here; clypdat.xyz will be told when it answers.");
+        }, TaskScheduler.Default);
     }
 
     public async Task UnlinkSocialAccountAsync(string provider)
@@ -7760,9 +7861,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void OpenClypDatAccount()
     {
-        _clypDatAccountSetupStarted = true;
-        OnPropertyChanged(nameof(ClypDatAccountStatus));
-        OnPropertyChanged(nameof(ClypDatAccountCanLink));
         _clypDatAccount.ExpectLinkChange();
         Process.Start(new ProcessStartInfo("https://www.clypdat.xyz/account") { UseShellExecute = true });
     }

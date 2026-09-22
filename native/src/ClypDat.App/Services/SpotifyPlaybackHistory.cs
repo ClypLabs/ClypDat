@@ -90,7 +90,9 @@ internal sealed class SpotifyPlaybackHistory
             if (progress is not null && state.Duration is { } length) progress = Math.Min(progress.Value, length.TotalMilliseconds);
             result.Add(new(at - start, state.TrackId, state.Track, state.Artist, state.Album,
                 state.Duration is { } d ? (int)d.TotalMilliseconds : null, progress is { } p ? (int)p : null,
-                state.IsPlaying, null, true, ArtUrl: state.ArtUrl));
+                state.IsPlaying, null, true, ArtUrl: state.ArtUrl,
+                // Only when the account gave no URL: that cover is the better one.
+                LocalArtPath: state.ArtUrl is null && SpotifyLocalArt.IsLocalArtPath(state.LocalArtPath) ? state.LocalArtPath : null));
         }
     }
     private static SpotifyTimelineSample Unavailable(double offset) => new(offset, null, null, null, null, null, null, false, null, false);

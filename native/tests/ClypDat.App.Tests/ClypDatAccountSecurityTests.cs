@@ -23,16 +23,19 @@ public sealed class ClypDatAccountSecurityTests
         Assert.Equal(expected, ClypDatAccountActivityService.PairingCode(state));
 
     [Fact]
-    public async Task SuccessfulRevokeHappensBeforeLocalCredentialsAreDeleted()
+    public async Task SignOutQueuesTheRevokeBeforeLocalCredentialsAreDeleted()
     {
         using var fixture = new AccountFixture(HttpStatusCode.OK);
         Assert.True(await fixture.Service.TryRestoreAsync());
         Assert.True(fixture.Service.IsAuthenticated);
-        Assert.True(await fixture.Service.RevokeAndDisconnectAsync());
+        Assert.True(await fixture.Service.SignOutAsync());
         Assert.Equal(1, fixture.RevokeRequests);
-        Assert.True(fixture.CacheExistedAtRevoke);
+        // A crash between the two steps must still leave the token recorded
+        // somewhere it will be revoked from.
+        Assert.True(fixture.RevokeQueuedAtRevoke);
         Assert.False(fixture.Service.IsAuthenticated);
         Assert.False(File.Exists(fixture.CachePath));
+        Assert.False(File.Exists(fixture.RevokePath));
     }
 
     [Fact]
@@ -40,22 +43,109 @@ public sealed class ClypDatAccountSecurityTests
     {
         using var fixture = new AccountFixture(HttpStatusCode.Unauthorized);
         Assert.True(await fixture.Service.TryRestoreAsync());
-        Assert.True(await fixture.Service.RevokeAndDisconnectAsync());
+        Assert.True(await fixture.Service.SignOutAsync());
         Assert.False(fixture.Service.IsAuthenticated);
         Assert.False(File.Exists(fixture.CachePath));
+        Assert.False(File.Exists(fixture.RevokePath));
     }
 
     [Fact]
-    public async Task FailedRevokePreservesCredentialsAndReportsFailure()
+    public async Task SignOutDuringAnOutageSignsOutHereAndRetriesTheRevokeLater()
     {
         using var fixture = new AccountFixture(HttpStatusCode.ServiceUnavailable);
+        Assert.True(await fixture.Service.TryRestoreAsync());
+        Assert.False(await fixture.Service.SignOutAsync(), "the site has not confirmed");
+        Assert.Equal(1, fixture.RevokeRequests);
+        // Signed out here regardless: Sign out used to do nothing at all while
+        // clypdat.xyz answered 503.
+        Assert.False(fixture.Service.IsAuthenticated);
+        Assert.False(File.Exists(fixture.CachePath));
+        Assert.True(File.Exists(fixture.RevokePath), "the token waits, encrypted, for a retry");
+        Assert.DoesNotContain(fixture.Token, File.ReadAllText(fixture.RevokePath));
+
+        fixture.RevokeStatus = HttpStatusCode.NoContent;
+        Assert.True(await fixture.Service.FlushPendingRevokesAsync());
+        Assert.Equal(2, fixture.RevokeRequests);
+        Assert.False(File.Exists(fixture.RevokePath));
+    }
+
+    [Fact]
+    public async Task SiteRejectingTheTokenSignsOutCleanly()
+    {
+        using var fixture = new AccountFixture(HttpStatusCode.OK) { ActivityStatus = HttpStatusCode.Unauthorized };
+        Assert.False(await fixture.Service.TryRestoreAsync());
+        Assert.False(fixture.Service.IsAuthenticated);
+        Assert.False(File.Exists(fixture.CachePath));
+        Assert.Contains("signed out", fixture.Service.Snapshot.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, fixture.ActivityRequests);
+    }
+
+    [Fact]
+    public async Task ServerErrorAtRestoreKeepsTheSignIn()
+    {
+        using var fixture = new AccountFixture(HttpStatusCode.OK) { ActivityStatus = HttpStatusCode.ServiceUnavailable };
         var original = File.ReadAllBytes(fixture.CachePath);
         Assert.True(await fixture.Service.TryRestoreAsync());
-        Assert.False(await fixture.Service.RevokeAndDisconnectAsync());
-        Assert.Equal(1, fixture.RevokeRequests);
         Assert.True(fixture.Service.IsAuthenticated);
         Assert.Equal(original, File.ReadAllBytes(fixture.CachePath));
-        Assert.Contains("Couldn't sign out", fixture.Service.Snapshot.Error);
+        Assert.True(fixture.Service.Snapshot.ServerUnavailable);
+    }
+
+    [Fact]
+    public async Task SignInInItsLastWeekIsRenewed()
+    {
+        using var fixture = new AccountFixture(HttpStatusCode.OK, TimeSpan.FromDays(2));
+        Assert.True(await fixture.Service.TryRestoreAsync());
+        Assert.Equal(1, fixture.RenewRequests);
+        using var saved = JsonDocument.Parse(ProtectedData.Unprotect(File.ReadAllBytes(fixture.CachePath), null, DataProtectionScope.CurrentUser));
+        Assert.Equal(AccountFixture.RenewedToken, saved.RootElement.GetProperty("AccessToken").GetString());
+        Assert.True(saved.RootElement.GetProperty("ExpiresAt").GetDateTimeOffset() > DateTimeOffset.UtcNow.AddDays(29));
+    }
+
+    [Fact]
+    public async Task SignInWithTimeLeftIsNotRenewed()
+    {
+        using var fixture = new AccountFixture(HttpStatusCode.OK, TimeSpan.FromDays(20));
+        Assert.True(await fixture.Service.TryRestoreAsync());
+        Assert.Equal(0, fixture.RenewRequests);
+    }
+
+    [Fact]
+    public async Task SpotifyDisconnectFromTheWebsiteIsRaisedOnceAndAnsweredAgainIfLost()
+    {
+        using var fixture = new AccountFixture(HttpStatusCode.OK)
+        {
+            ActivityBody = "{\"connected\":false,\"providers\":[],\"spotify\":false,\"spotifyDisconnect\":\"2026-09-23T01:02:03.000Z\"}",
+        };
+        fixture.Service.SpotifyConnected = () => true;
+        var raised = new List<DateTimeOffset>();
+        fixture.Service.SpotifyDisconnectRequested += (_, at) => raised.Add(at);
+        Assert.True(await fixture.Service.TryRestoreAsync());
+        Assert.Equal(new[] { DateTimeOffset.Parse("2026-09-23T01:02:03Z") }, raised);
+        // The handler's own report is the answer; nothing else is sent the first time.
+        Assert.Equal(0, fixture.SpotifyReports);
+
+        // Still pending on the next refresh: the report was lost. Not raised
+        // again, but where Spotify stands is sent once more.
+        await fixture.Service.RefreshAsync();
+        Assert.Single(raised);
+        await fixture.WaitForSpotifyReportsAsync(1);
+        await fixture.Service.RefreshAsync();
+        Assert.Equal(1, fixture.SpotifyReports);
+    }
+
+    [Fact]
+    public async Task SpotifyDriftWithoutADisconnectRequestIsStillReported()
+    {
+        using var fixture = new AccountFixture(HttpStatusCode.OK)
+        {
+            ActivityBody = "{\"connected\":false,\"providers\":[],\"spotify\":false}",
+        };
+        fixture.Service.SpotifyConnected = () => true;
+        Assert.True(await fixture.Service.TryRestoreAsync());
+        // Plain drift (no request): the app says "connected" again.
+        await fixture.WaitForSpotifyReportsAsync(1);
+        Assert.Equal(true, fixture.LastSpotifyReport);
     }
 
     [Fact]
@@ -77,16 +167,27 @@ public sealed class ClypDatAccountSecurityTests
 
     private sealed class AccountFixture : IDisposable
     {
-        private const string Token = "account-security-test-token";
+        public const string RenewedToken = "account-security-renewed-token";
         private readonly string _allowedRoot;
+        public string Token { get; } = "account-security-test-token";
         public string Root { get; }
         public string CachePath { get; }
+        public string RevokePath => CachePath + ".revoke";
         public ClypDatAccountActivityService Service { get; }
+        public HttpStatusCode RevokeStatus { get; set; }
+        public HttpStatusCode ActivityStatus { get; init; } = HttpStatusCode.OK;
+        public string ActivityBody { get; init; } = "{\"connected\":true,\"providers\":[\"google\"]}";
         public int RevokeRequests { get; private set; }
-        public bool CacheExistedAtRevoke { get; private set; }
+        public int ActivityRequests { get; private set; }
+        public int RenewRequests { get; private set; }
+        private int _spotifyReports;
+        public int SpotifyReports => Volatile.Read(ref _spotifyReports);
+        public bool? LastSpotifyReport { get; private set; }
+        public bool RevokeQueuedAtRevoke { get; private set; }
 
-        public AccountFixture(HttpStatusCode revokeStatus)
+        public AccountFixture(HttpStatusCode revokeStatus, TimeSpan? lifetime = null)
         {
+            RevokeStatus = revokeStatus;
             var directory = new DirectoryInfo(AppContext.BaseDirectory);
             while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "native", "ClypDat.Native.sln")))
                 directory = directory.Parent;
@@ -95,23 +196,48 @@ public sealed class ClypDatAccountSecurityTests
             Root = Path.Combine(_allowedRoot, Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
             CachePath = Path.Combine(Root, "account.bin");
+            // Thirty days by default: far enough from expiry that no test
+            // renews unless it asks to.
             File.WriteAllBytes(CachePath, ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(new
             {
-                AccessToken = Token, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+                AccessToken = Token, ExpiresAt = DateTimeOffset.UtcNow.Add(lifetime ?? TimeSpan.FromDays(30))
             }), null, DataProtectionScope.CurrentUser));
             var client = new HttpClient(new FixtureHandler(request =>
             {
                 Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
                 Assert.Equal(Token, request.Headers.Authorization?.Parameter);
-                if (request.Method == HttpMethod.Get && request.RequestUri?.AbsolutePath == "/api/desktop/xbox/activity")
-                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"connected\":true,\"providers\":[\"google\"]}") };
+                var path = request.RequestUri?.AbsolutePath;
+                if (request.Method == HttpMethod.Get && path == "/api/desktop/xbox/activity")
+                {
+                    ActivityRequests++;
+                    return new HttpResponseMessage(ActivityStatus) { Content = new StringContent(ActivityStatus == HttpStatusCode.OK ? ActivityBody : "{\"error\":\"fixture\"}") };
+                }
                 Assert.Equal(HttpMethod.Post, request.Method);
-                Assert.Equal("/api/desktop/revoke", request.RequestUri?.AbsolutePath);
+                if (path == "/api/desktop/token/renew")
+                {
+                    RenewRequests++;
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent($"{{\"token\":\"{RenewedToken}\",\"expires_in\":2592000}}") };
+                }
+                if (path == "/api/desktop/spotify")
+                {
+                    using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                    LastSpotifyReport = body.RootElement.GetProperty("connected").GetBoolean();
+                    Interlocked.Increment(ref _spotifyReports);
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+                }
+                Assert.Equal("/api/desktop/revoke", path);
                 RevokeRequests++;
-                CacheExistedAtRevoke = File.Exists(CachePath);
-                return new HttpResponseMessage(revokeStatus);
+                RevokeQueuedAtRevoke = File.Exists(RevokePath);
+                return new HttpResponseMessage(RevokeStatus);
             })) { BaseAddress = new Uri("https://account-security.invalid/") };
             Service = new ClypDatAccountActivityService(client, CachePath) { LiveActivityNeeded = () => false };
+        }
+
+        // Spotify reports are fire-and-forget from the refresh.
+        public async Task WaitForSpotifyReportsAsync(int count)
+        {
+            for (var attempt = 0; attempt < 100 && SpotifyReports < count; attempt++) await Task.Delay(20);
+            Assert.Equal(count, SpotifyReports);
         }
 
         public void Dispose()

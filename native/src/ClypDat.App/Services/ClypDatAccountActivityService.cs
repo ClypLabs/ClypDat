@@ -17,6 +17,9 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private const string BaseUrl = "https://www.clypdat.xyz/";
     private readonly HttpClient _http;
     private readonly string _cachePath;
+    // Desktop tokens signed out on this PC whose server-side revocation has not
+    // gone through yet. See SignOutAsync.
+    private readonly string _revokePath;
     private readonly CancellationTokenSource _lifetime = new();
 
     public ClypDatAccountActivityService() : this(
@@ -27,6 +30,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     {
         _http = http;
         _cachePath = cachePath;
+        _revokePath = cachePath + ".revoke";
     }
 
     public string? ConnectionCode { get; private set; }
@@ -52,8 +56,17 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(3),
     };
     private static readonly TimeSpan DiscordProfileInterval = TimeSpan.FromMinutes(30);
+    // While Spotify is on, a Disconnect pressed on clypdat.xyz/account reaches
+    // the app on its next refresh; this bounds how long that can take.
+    private static readonly TimeSpan SpotifyCheckInterval = TimeSpan.FromMinutes(15);
+    // Nothing at all to watch. Still asks now and then, so a sign-in that is
+    // about to run out gets renewed (MaybeRenewAsync) in an app left open for
+    // days. The site answers these from its cache.
+    private static readonly TimeSpan ParkedInterval = TimeSpan.FromHours(6);
     private int _idleRefreshes;
     private CancellationTokenSource? _pollCts;
+    private CancellationTokenSource? _connectCts;
+    private readonly object _connectGate = new();
     private readonly SemaphoreSlim _pollWake = new(0, 1);
     private DateTimeOffset _linkWatchUntil = DateTimeOffset.MinValue;
     private DateTimeOffset _linkWatchStarted = DateTimeOffset.MinValue;
@@ -86,6 +99,14 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// </summary>
     public Func<bool?>? SpotifyConnected { get; set; }
 
+    /// <summary>
+    /// Disconnect was pressed for Spotify on clypdat.xyz/account, at the time
+    /// given (the site's clock). Raised once per request, on the poll's thread.
+    /// The handler disconnects Spotify, or reports it connected if Spotify was
+    /// connected again here after that time; either report clears the request.
+    /// </summary>
+    public event EventHandler<DateTimeOffset>? SpotifyDisconnectRequested;
+
     /// <summary>Call when <see cref="LiveActivityNeeded"/> may have changed.</summary>
     public void LiveActivityNeedChanged()
     {
@@ -97,18 +118,32 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private bool IsLiveActivityNeeded => LiveActivityNeeded?.Invoke() ?? true;
     private (bool Xbox, bool Google, bool Discord) LinkSignature => (_snapshot.IsConnected, _snapshot.GoogleConnected, _snapshot.DiscordConnected);
     public bool IsAuthenticated => _token is { ExpiresAt: var expiresAt } && expiresAt > DateTimeOffset.UtcNow;
+    public bool IsConnecting => _connectCts is not null;
     public event EventHandler<XboxActivitySnapshot>? Changed;
 
     public async Task<bool> TryRestoreAsync(CancellationToken cancellationToken = default)
     {
+        // A sign-out that could not reach the site last time gets another go.
+        _ = FlushPendingRevokesAsync(_lifetime.Token);
         if (NoticeBoardService.IsBlocked("pause-xbox-activity")) { SetPolicyPaused(true); return false; }
         _token = LoadToken();
-        if (_token is null || _token.ExpiresAt <= DateTimeOffset.UtcNow) return false;
+        if (_token is null) return false;
+        if (_token.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            _token = null;
+            TryDeleteCache();
+            SetSignedOutSnapshot(SignInExpiredMessage);
+            return false;
+        }
         try
         {
             await RefreshAsync(cancellationToken).ConfigureAwait(false);
             StartPolling();
             return true;
+        }
+        catch (ClypDatSignedOutException)
+        {
+            return false;
         }
         catch (Exception error) when (IsServerProblem(error))
         {
@@ -120,20 +155,38 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             StartPolling();
             return true;
         }
-        catch
+        catch (Exception error) when (!cancellationToken.IsCancellationRequested)
         {
-            _token = null;
-            TryDeleteCache();
-            return false;
+            // Only the site saying the token is no good (401, above) signs the
+            // app out. Anything else - an unreadable response, a 4xx from a
+            // half-deployed site - used to delete a perfectly good sign-in.
+            AppLog.Error("ClypDat account: first refresh after restore failed; polling will retry.", error);
+            StartPolling();
+            return true;
         }
     }
 
+    /// <summary>
+    /// Signs in through the browser: clypdat.xyz asks the person to sign in
+    /// there if they are not already, then to confirm the pairing code.
+    /// Pressing it again, or <see cref="CancelConnect"/>, abandons the wait.
+    /// </summary>
     public async Task<bool> ConnectAsync(CancellationToken cancellationToken = default)
     {
         if (NoticeBoardService.IsBlocked("pause-xbox-activity")) { SetPolicyPaused(true); return false; }
+        CancelConnect();
+        using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+        lock (_connectGate) _connectCts = attempt;
+        DesktopToken token;
         try
         {
-            _token = await RunBrowserHandoffAsync(cancellationToken).ConfigureAwait(false);
+            if (_snapshot.Error is not null) _snapshot = _snapshot with { Error = null, ServerUnavailable = false };
+            token = await RunBrowserHandoffAsync(attempt.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (attempt.IsCancellationRequested)
+        {
+            AppLog.Info("ClypDat account: sign-in cancelled.");
+            return false;
         }
         catch (Exception error)
         {
@@ -141,14 +194,25 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
         finally
         {
+            lock (_connectGate) if (ReferenceEquals(_connectCts, attempt)) _connectCts = null;
             ConnectionCode = null;
             Changed?.Invoke(this, _snapshot);
         }
 
         try
         {
-            SaveToken(_token);
+            _token = token;
+            SaveToken(token);
             await RefreshAsync(cancellationToken).ConfigureAwait(false);
+            StartPolling();
+            return true;
+        }
+        catch (Exception error) when (IsServerProblem(error))
+        {
+            // Linked; the site just did not answer the first refresh. Keep the
+            // new sign-in rather than making the person do it all again.
+            AppLog.Error("ClypDat account: first refresh after sign-in could not reach clypdat.xyz.", error);
+            ReportServerProblem();
             StartPolling();
             return true;
         }
@@ -158,6 +222,14 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
     }
 
+    /// <summary>Stops waiting for the browser. The loopback listener closes with it.</summary>
+    public void CancelConnect()
+    {
+        CancellationTokenSource? pending;
+        lock (_connectGate) { pending = _connectCts; _connectCts = null; }
+        try { pending?.Cancel(); } catch (ObjectDisposedException) { }
+    }
+
     private bool Fail(Exception error)
     {
         AppLog.Error("ClypDat account: connection failed.", error);
@@ -165,9 +237,12 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         var serverProblem = IsServerProblem(error);
         var message = serverProblem
             ? ServerProblemMessage
-            : error is InvalidOperationException invalid && invalid.Message.StartsWith("ClypDat sign-in required.", StringComparison.Ordinal)
-                ? invalid.Message
-                : "ClypDat account connection failed. Sign in through the browser and try again.";
+            : error switch
+            {
+                ClypDatSignInException => error.Message,
+                TimeoutException => "ClypDat sign-in timed out. Press Sign in to try again.",
+                _ => "ClypDat sign-in didn't finish. Press Sign in to try again.",
+            };
         _snapshot = new XboxActivitySnapshot(false, null, null, null, null, message, ServerUnavailable: serverProblem);
         Changed?.Invoke(this, _snapshot);
         return false;
@@ -175,13 +250,18 @@ internal sealed class ClypDatAccountActivityService : IDisposable
 
     public void Disconnect()
     {
-        _pollCts?.Cancel();
-        _pollCts?.Dispose();
-        _pollCts = null;
+        StopPolling();
         _token = null;
         TryDeleteCache();
         _snapshot = XboxActivitySnapshot.Disconnected;
         Changed?.Invoke(this, _snapshot);
+    }
+
+    private void StopPolling()
+    {
+        _pollCts?.Cancel();
+        _pollCts?.Dispose();
+        _pollCts = null;
     }
 
     public void SetPolicyPaused(bool paused)
@@ -190,9 +270,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         _policyPaused = paused;
         if (paused)
         {
-            _pollCts?.Cancel();
-            _pollCts?.Dispose();
-            _pollCts = null;
+            StopPolling();
             _snapshot = XboxActivitySnapshot.Disconnected with { Error = "Xbox activity is temporarily paused by ClypDat." };
             Changed?.Invoke(this, _snapshot);
             AppLog.Info("Policy transition: account-backed Xbox activity paused.");
@@ -204,27 +282,134 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         AppLog.Info("Policy transition: account-backed Xbox activity resumed.");
     }
 
-    public async Task<bool> RevokeAndDisconnectAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Signs this PC out. The local sign-in is gone before the first await, so
+    /// the app reads as signed out at once whatever the network does. Telling
+    /// the site the token is dead is queued: the token is written to a
+    /// DPAPI-protected list first, then sent to api/desktop/revoke, and stays
+    /// listed - retried in the background and at every launch - until the site
+    /// confirms. Sign-out used to wait on that request and refuse to sign out
+    /// at all when it failed, which a site outage turned into a Sign out button
+    /// that did nothing.
+    /// </summary>
+    /// <returns>Whether the site has confirmed the sign-out.</returns>
+    public async Task<bool> SignOutAsync(CancellationToken cancellationToken = default)
     {
-        if (_token is { } token)
+        CancelConnect();
+        var token = _token;
+        if (token is not null)
         {
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/revoke");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
-                using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-                if (response.StatusCode != HttpStatusCode.Unauthorized) response.EnsureSuccessStatusCode();
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("ClypDat account: server sign-out failed.", error);
-                _snapshot = _snapshot with { Error = "Couldn't sign out this PC on the server. Check your connection and try again.", ServerUnavailable = false };
-                Changed?.Invoke(this, _snapshot);
-                return false;
-            }
+            try { QueueRevoke(token); }
+            catch (Exception error) { AppLog.Error("ClypDat account: queueing the server sign-out failed.", error); }
         }
         Disconnect();
-        return true;
+        return await FlushPendingRevokesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private readonly SemaphoreSlim _revokeGate = new(1, 1);
+    private static readonly TimeSpan[] RevokeRetryBackoff =
+    {
+        TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(15), TimeSpan.FromHours(1),
+    };
+    private int _revokeRetries;
+    private int _revokeRetryScheduled;
+
+    /// <summary>Sends every queued sign-out. True when none are left.</summary>
+    internal async Task<bool> FlushPendingRevokesAsync(CancellationToken cancellationToken = default)
+    {
+        try { await _revokeGate.WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception error) when (error is OperationCanceledException or ObjectDisposedException) { return false; }
+        try
+        {
+            var pending = LoadPendingRevokes();
+            if (pending.Count == 0) return true;
+            var remaining = new List<DesktopToken>();
+            foreach (var token in pending)
+            {
+                // Expired on its own: nothing left to take back.
+                if (token.ExpiresAt <= DateTimeOffset.UtcNow) continue;
+                try
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/revoke");
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
+                    using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                    // 401: already expired or signed out from the site, which is
+                    // the outcome wanted.
+                    if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized) continue;
+                    AppLog.Info($"ClypDat account: server sign-out returned {(int)response.StatusCode}; will retry.");
+                    remaining.Add(token);
+                }
+                catch (Exception error) when (!cancellationToken.IsCancellationRequested)
+                {
+                    AppLog.Error("ClypDat account: server sign-out failed; will retry.", error);
+                    remaining.Add(token);
+                }
+                catch (OperationCanceledException)
+                {
+                    remaining.Add(token);
+                }
+            }
+            SavePendingRevokes(remaining);
+            if (remaining.Count == 0)
+            {
+                _revokeRetries = 0;
+                AppLog.Info("ClypDat account: server sign-out confirmed.");
+                return true;
+            }
+            ScheduleRevokeRetry();
+            return false;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("ClypDat account: sending queued sign-outs failed.", error);
+            return false;
+        }
+        finally
+        {
+            try { _revokeGate.Release(); } catch (ObjectDisposedException) { }
+        }
+    }
+
+    private void ScheduleRevokeRetry()
+    {
+        if (Interlocked.Exchange(ref _revokeRetryScheduled, 1) == 1) return;
+        var delay = RevokeRetryBackoff[Math.Min(_revokeRetries++, RevokeRetryBackoff.Length - 1)];
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(delay, _lifetime.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+            finally { Interlocked.Exchange(ref _revokeRetryScheduled, 0); }
+            await FlushPendingRevokesAsync(_lifetime.Token).ConfigureAwait(false);
+        });
+    }
+
+    private void QueueRevoke(DesktopToken token)
+    {
+        var pending = LoadPendingRevokes();
+        if (pending.All(item => item.AccessToken != token.AccessToken)) pending.Add(token);
+        SavePendingRevokes(pending);
+    }
+
+    private List<DesktopToken> LoadPendingRevokes()
+    {
+        try
+        {
+            if (!File.Exists(_revokePath)) return new();
+            var bytes = ProtectedData.Unprotect(File.ReadAllBytes(_revokePath), null, DataProtectionScope.CurrentUser);
+            return JsonSerializer.Deserialize<List<DesktopToken>>(bytes)?.Where(item => !string.IsNullOrWhiteSpace(item.AccessToken)).ToList() ?? new();
+        }
+        catch { return new(); }
+    }
+
+    private void SavePendingRevokes(List<DesktopToken> pending)
+    {
+        var live = pending.Where(item => item.ExpiresAt > DateTimeOffset.UtcNow).ToList();
+        if (live.Count == 0)
+        {
+            try { if (File.Exists(_revokePath)) File.Delete(_revokePath); } catch { }
+            return;
+        }
+        WriteProtected(_revokePath, live);
     }
 
     public async Task<bool> DisconnectXboxAsync(CancellationToken cancellationToken = default)
@@ -237,13 +422,14 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                Disconnect();
+                SignedOutBySite();
                 return false;
             }
             if (!response.IsSuccessStatusCode) throw new HttpRequestException($"ClypDat Xbox unlink failed ({(int)response.StatusCode}).", null, response.StatusCode);
             await RefreshAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
+        catch (ClypDatSignedOutException) { return false; }
         catch (Exception error)
         {
             AppLog.Error("ClypDat account: Xbox unlink failed.", error);
@@ -270,7 +456,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                Disconnect();
+                SignedOutBySite();
                 return false;
             }
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
@@ -281,6 +467,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             await RefreshAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
+        catch (ClypDatSignedOutException) { return false; }
         catch (Exception error)
         {
             AppLog.Error($"ClypDat account: {provider} unlink failed.", error);
@@ -310,7 +497,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token!.AccessToken);
             using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.Unauthorized) Disconnect();
+            if (response.StatusCode == HttpStatusCode.Unauthorized) SignedOutBySite();
         }
         catch (Exception error)
         {
@@ -368,12 +555,15 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         // The site was unreachable: keep trying until it answers, so the notice
         // clears by itself once the outage is over.
         if (_snapshot.ServerUnavailable) return TimeSpan.FromMinutes(1);
-        // Nothing to watch for: park until woken (a link, the window coming
-        // back, or LiveActivityNeedChanged) instead of refreshing on a timer -
-        // except that a Discord account is asked about every 30 minutes, which
-        // is when the site rechecks the Discord name and picture. The site
-        // answers that from its cache unless something changed.
-        if (!IsLiveActivityNeeded) return _snapshot.DiscordConnected ? DiscordProfileInterval : Timeout.InfiniteTimeSpan;
+        if (!IsLiveActivityNeeded)
+        {
+            // Nothing live to watch. A Discord account is asked about every 30
+            // minutes, which is when the site rechecks the Discord name and
+            // picture; Spotify being on shortens that so a disconnect from the
+            // account page lands. The site answers these from its cache.
+            var parked = _snapshot.DiscordConnected ? DiscordProfileInterval : ParkedInterval;
+            return SpotifyConnected?.Invoke() == true && parked > SpotifyCheckInterval ? SpotifyCheckInterval : parked;
+        }
         if (_snapshot.CurrentTitle is not null) return TimeSpan.FromSeconds(15);
         return IdleBackoff[Math.Min(_idleRefreshes, IdleBackoff.Length - 1)];
     }
@@ -400,6 +590,10 @@ internal sealed class ClypDatAccountActivityService : IDisposable
                 if (LinkSignature != _linkWatchSignature) _linkWatchUntil = DateTimeOffset.MinValue;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            // Signed out from the site, or the sign-in expired: nothing left to
+            // poll with. This used to loop on a null token every minute while
+            // the card said the service was "temporarily unavailable".
+            catch (ClypDatSignedOutException) { return; }
             catch (Exception error)
             {
                 AppLog.Error("ClypDat account: activity refresh failed.", error);
@@ -423,15 +617,14 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     public async Task RefreshAsync(CancellationToken cancellationToken = default, bool refreshProfile = false)
     {
         if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
-        if (_token is null) throw new InvalidOperationException("ClypDat account is not authenticated.");
+        var token = _token ?? throw new ClypDatSignedOutException();
         using var request = new HttpRequestMessage(HttpMethod.Get, refreshProfile ? "api/desktop/xbox/activity?profile=refresh" : "api/desktop/xbox/activity");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token.AccessToken);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            _token = null;
-            TryDeleteCache();
-            throw new InvalidOperationException("ClypDat account sign-in expired.");
+            SignedOutBySite();
+            throw new ClypDatSignedOutException();
         }
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
@@ -442,13 +635,16 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         _lastRefresh = DateTimeOffset.UtcNow;
         var result = JsonSerializer.Deserialize<ActivityResponse>(body) ?? throw new InvalidOperationException("ClypDat activity returned no data.");
         if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
+        // Signed out (or in again) while this was in flight.
+        if (!ReferenceEquals(_token, token)) return;
         var activity = result.Activity;
         var providers = result.Providers ?? Array.Empty<string>();
         _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null,
             providers.Contains("google", StringComparer.OrdinalIgnoreCase), providers.Contains("discord", StringComparer.OrdinalIgnoreCase),
             ProfileName: result.Profile?.Name, ProfileImage: result.Profile?.Image);
-        ReconcileSpotifyStatus(result.Spotify, cancellationToken);
+        HandleSpotifyStatus(result.Spotify, result.SpotifyDisconnect, cancellationToken);
         Changed?.Invoke(this, _snapshot);
+        await MaybeRenewAsync(cancellationToken).ConfigureAwait(false);
     }
 
     // Older builds of the site do not send the flag at all; nothing to compare
@@ -457,19 +653,82 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     // app is open.
     private static readonly TimeSpan SpotifyResendInterval = TimeSpan.FromMinutes(5);
     private DateTimeOffset _lastSpotifyReport = DateTimeOffset.MinValue;
+    private DateTimeOffset? _handledSpotifyDisconnect;
 
-    private void ReconcileSpotifyStatus(bool? reported, CancellationToken cancellationToken)
+    private void HandleSpotifyStatus(bool? reported, string? disconnectRequested, CancellationToken cancellationToken)
     {
-        if (reported is not { } onSite) return;
-        if (SpotifyConnected?.Invoke() is not { } inApp || inApp == onSite) return;
+        if (DateTimeOffset.TryParse(disconnectRequested, out var requested))
+        {
+            // New request: the view model decides (and reports back, which
+            // clears it on the site).
+            if (requested != _handledSpotifyDisconnect)
+            {
+                _handledSpotifyDisconnect = requested;
+                AppLog.Info("ClypDat account: Spotify disconnect requested from clypdat.xyz.");
+                SpotifyDisconnectRequested?.Invoke(this, requested);
+                return;
+            }
+            // Handled, but still pending there: the report back was lost.
+            // Say where Spotify stands again - whatever it is, that is the
+            // answer to the request. Never re-report "connected" as a mere
+            // drift correction while it is pending, which would undo it.
+            ReconcileSpotifyStatus(null, cancellationToken, force: true);
+            return;
+        }
+        ReconcileSpotifyStatus(reported, cancellationToken);
+    }
+
+    private void ReconcileSpotifyStatus(bool? reported, CancellationToken cancellationToken, bool force = false)
+    {
+        if (!force && reported is null) return;
+        if (SpotifyConnected?.Invoke() is not { } inApp) return;
+        if (!force && inApp == reported) return;
         if (DateTimeOffset.UtcNow - _lastSpotifyReport < SpotifyResendInterval) return;
         _lastSpotifyReport = DateTimeOffset.UtcNow;
-        AppLog.Info($"ClypDat account: Spotify reads {inApp} here and {onSite} on clypdat.xyz; reporting again.");
+        AppLog.Info($"ClypDat account: Spotify reads {inApp} here and {(reported is { } onSite ? onSite.ToString() : "a pending disconnect")} on clypdat.xyz; reporting again.");
         _ = ReportSpotifyStatusAsync(inApp, cancellationToken);
     }
 
+    // Desktop sign-ins last 30 days. In the last week of one, each refresh
+    // swaps it for a fresh one (api/desktop/token/renew), so an app in daily
+    // use stays signed in instead of dropping out a month after linking.
+    private static readonly TimeSpan RenewWithin = TimeSpan.FromDays(7);
+    private static readonly TimeSpan RenewRetry = TimeSpan.FromHours(1);
+    private DateTimeOffset _lastRenewAttempt = DateTimeOffset.MinValue;
+
+    private async Task MaybeRenewAsync(CancellationToken cancellationToken)
+    {
+        var token = _token;
+        var now = DateTimeOffset.UtcNow;
+        if (token is null || token.ExpiresAt - now > RenewWithin || now - _lastRenewAttempt < RenewRetry) return;
+        _lastRenewAttempt = now;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/token/renew");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            // 404 is a site from before renewal existed; the token simply runs
+            // its course. Nothing here signs anyone out: the next refresh is
+            // what notices a token the site no longer accepts.
+            if (!response.IsSuccessStatusCode)
+            {
+                AppLog.Info($"ClypDat account: sign-in renewal returned {(int)response.StatusCode}.");
+                return;
+            }
+            var renewed = ReadToken(await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken).ConfigureAwait(false));
+            if (!ReferenceEquals(_token, token)) return;
+            _token = renewed;
+            SaveToken(renewed);
+            AppLog.Info("ClypDat account: sign-in renewed.");
+        }
+        catch (Exception error) when (!cancellationToken.IsCancellationRequested)
+        {
+            AppLog.Error("ClypDat account: sign-in renewal failed; will retry.", error);
+        }
+    }
+
     // Keep the loopback listener open through sign-in and the consent click.
-    private static readonly TimeSpan HandoffWindow = TimeSpan.FromMinutes(20);
+    private static readonly TimeSpan HandoffWindow = TimeSpan.FromMinutes(10);
 
     internal static string PairingCode(string state)
     {
@@ -483,8 +742,6 @@ internal sealed class ClypDatAccountActivityService : IDisposable
 
     private async Task<DesktopToken> RunBrowserHandoffAsync(CancellationToken cancellationToken)
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
-        cancellationToken = linked.Token;
         var port = GetFreePort();
         var redirectUri = $"http://127.0.0.1:{port}/callback/";
         var state = Base64Url(RandomNumberGenerator.GetBytes(24));
@@ -505,11 +762,11 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         while (true)
         {
             var remaining = deadline - DateTimeOffset.UtcNow;
-            if (remaining <= TimeSpan.Zero) throw new TimeoutException("ClypDat sign-in timed out. Press Link again.");
+            if (remaining <= TimeSpan.Zero) throw new TimeoutException("ClypDat sign-in timed out.");
 
             HttpListenerContext context;
             try { context = await listener.GetContextAsync().WaitAsync(remaining, cancellationToken).ConfigureAwait(false); }
-            catch (TimeoutException) { throw new TimeoutException("ClypDat sign-in timed out. Press Link again."); }
+            catch (TimeoutException) { throw new TimeoutException("ClypDat sign-in timed out."); }
 
             if (context.Request.HttpMethod != "GET" || !string.Equals(context.Request.QueryString["state"], state, StringComparison.Ordinal))
             {
@@ -521,19 +778,25 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             try
             {
                 var error = context.Request.QueryString["error"];
+                if (string.Equals(error, "access_denied", StringComparison.Ordinal))
+                    throw new ClypDatSignInException("Linking was cancelled in the browser.");
                 if (string.Equals(error, "login-required", StringComparison.Ordinal))
-                    throw new InvalidOperationException("ClypDat sign-in required. Open clypdat.xyz/account, sign in, then retry here.");
-                if (!string.IsNullOrWhiteSpace(error)) throw new InvalidOperationException("ClypDat sign-in was not completed.");
+                    throw new ClypDatSignInException("Sign in on clypdat.xyz, then press Sign in here again.");
+                if (!string.IsNullOrWhiteSpace(error)) throw new ClypDatSignInException("ClypDat sign-in was not completed. Press Sign in to try again.");
                 var code = context.Request.QueryString["code"];
-                if (string.IsNullOrWhiteSpace(code)) throw new InvalidOperationException("ClypDat sign-in returned no link code.");
+                if (string.IsNullOrWhiteSpace(code)) throw new ClypDatSignInException("ClypDat sign-in returned no link code. Press Sign in to try again.");
                 var token = await ExchangeCodeAsync(code, verifier, cancellationToken).ConfigureAwait(false);
-                var body = BrowserCallbackPage.Success(BrowserCallbackService.ClypDat);
-                context.Response.Headers["Cache-Control"] = "no-store";
-                context.Response.Headers["Referrer-Policy"] = "no-referrer";
-                context.Response.ContentType = "text/html; charset=utf-8";
-                context.Response.ContentLength64 = body.Length;
-                await context.Response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+                await RespondAsync(context, BrowserCallbackPage.Success(BrowserCallbackService.ClypDat), cancellationToken).ConfigureAwait(false);
                 return token;
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                var message = error is ClypDatSignInException ? error.Message
+                    : IsServerProblem(error) ? "clypdat.xyz didn't answer. Go back to ClypDat and try again."
+                    : "ClypDat sign-in could not be completed. Go back to ClypDat and try again.";
+                try { await RespondAsync(context, BrowserCallbackPage.Failure(BrowserCallbackService.ClypDat, message), cancellationToken).ConfigureAwait(false); }
+                catch (Exception pageError) { AppLog.Error("ClypDat account: showing the sign-in result failed.", pageError); }
+                throw;
             }
             finally
             {
@@ -542,13 +805,33 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
     }
 
+    private static async Task RespondAsync(HttpListenerContext context, byte[] body, CancellationToken cancellationToken)
+    {
+        context.Response.Headers["Cache-Control"] = "no-store";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.ContentLength64 = body.Length;
+        await context.Response.OutputStream.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<DesktopToken> ExchangeCodeAsync(string code, string verifier, CancellationToken cancellationToken)
     {
         using var response = await _http.PostAsJsonAsync("api/desktop/token", new { code, code_verifier = verifier }, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        var token = await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if ((int)response.StatusCode >= 500) throw new HttpRequestException($"ClypDat sign-in failed ({(int)response.StatusCode}).", null, response.StatusCode);
+            // The site words these for the user ("The link code is invalid or
+            // has expired. Press Link again.").
+            throw new ClypDatSignInException(TryReadError(body) ?? $"ClypDat sign-in was refused ({(int)response.StatusCode}). Press Sign in to try again.");
+        }
+        return ReadToken(await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken).ConfigureAwait(false));
+    }
+
+    private static DesktopToken ReadToken(TokenResponse? token)
+    {
         if (token is null || string.IsNullOrWhiteSpace(token.Token) || token.ExpiresIn <= 0 || token.ExpiresIn > 60 * 60 * 24 * 30)
-            throw new InvalidOperationException("ClypDat sign-in returned an invalid token.");
+            throw new ClypDatSignInException("ClypDat sign-in returned an invalid token. Press Sign in to try again.");
         return new DesktopToken(token.Token, DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn));
     }
 
@@ -577,11 +860,13 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         catch { return null; }
     }
 
-    private void SaveToken(DesktopToken token)
+    private void SaveToken(DesktopToken token) => WriteProtected(_cachePath, token);
+
+    private static void WriteProtected<T>(string path, T value)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_cachePath)!);
-        var temporary = _cachePath + ".tmp-" + Guid.NewGuid().ToString("N");
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(token);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(value);
         try
         {
             var encrypted = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
@@ -590,7 +875,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
                 stream.Write(encrypted);
                 stream.Flush(flushToDisk: true);
             }
-            File.Move(temporary, _cachePath, overwrite: true);
+            File.Move(temporary, path, overwrite: true);
         }
         finally
         {
@@ -600,6 +885,25 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     }
 
     private const string ServerProblemMessage = "Couldn't reach clypdat.xyz. Check your connection, or the status page for an outage.";
+    private const string SignedOutMessage = "This PC was signed out of ClypDat - from your account page, or because the sign-in ended. Sign in again to reconnect.";
+    private const string SignInExpiredMessage = "Your ClypDat sign-in on this PC expired. Sign in again to reconnect.";
+
+    // The site answered 401: this token is revoked, expired, or its account is
+    // gone. Clean signed-out state, with a line saying why.
+    private void SignedOutBySite()
+    {
+        AppLog.Info("ClypDat account: the site no longer accepts this PC's sign-in; signed out.");
+        StopPolling();
+        _token = null;
+        TryDeleteCache();
+        SetSignedOutSnapshot(SignedOutMessage);
+    }
+
+    private void SetSignedOutSnapshot(string message)
+    {
+        _snapshot = XboxActivitySnapshot.Disconnected with { Error = message };
+        Changed?.Invoke(this, _snapshot);
+    }
 
     /// <summary>
     /// The request never got an answer (no network, DNS, a timeout) or the site
@@ -628,15 +932,22 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         try
         {
             using var json = JsonDocument.Parse(body);
-            return json.RootElement.TryGetProperty("error", out var error) ? error.GetString() : null;
+            return json.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.String ? error.GetString() : null;
         }
         catch (JsonException) { return null; }
     }
     private static DateTimeOffset ParseTimestamp(string? value) => DateTimeOffset.TryParse(value, out var parsed) ? parsed : DateTimeOffset.UtcNow;
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); _pollCts?.Cancel(); _pollCts?.Dispose(); _pollWake.Dispose(); _http.Dispose(); }
+    public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); CancelConnect(); _pollCts?.Cancel(); _pollCts?.Dispose(); _pollWake.Dispose(); _revokeGate.Dispose(); _http.Dispose(); }
 
     private sealed record DesktopToken(string AccessToken, DateTimeOffset ExpiresAt);
+
+    /// <summary>The site no longer accepts this PC's sign-in; the service is already signed out.</summary>
+    private sealed class ClypDatSignedOutException() : Exception("ClypDat account is signed out.");
+
+    /// <summary>A sign-in that stopped for a reason worded for the user.</summary>
+    private sealed class ClypDatSignInException(string message) : Exception(message);
+
     private sealed class ActivityResponse
     {
         [JsonPropertyName("connected")] public bool Connected { get; set; }
@@ -645,6 +956,9 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         // Present only when the account has Discord linked.
         [JsonPropertyName("profile")] public Profile? Profile { get; set; }
         [JsonPropertyName("spotify")] public bool? Spotify { get; set; }
+        // When Disconnect was pressed for Spotify on the account page and the
+        // app has not yet carried it out; absent otherwise.
+        [JsonPropertyName("spotifyDisconnect")] public string? SpotifyDisconnect { get; set; }
     }
     private sealed class Profile
     {

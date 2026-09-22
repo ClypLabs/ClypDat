@@ -11,7 +11,10 @@ internal sealed record SpotifyTimeline(int Version, IReadOnlyList<SpotifyTimelin
 internal sealed record SpotifyTimelineSample(
     double OffsetSeconds, string? TrackId, string? Track, string? Artist, string? Album,
     int? DurationMs, int? ProgressMs, bool IsPlaying, string? ArtPath, bool Available,
-    double ProgressRate = 1, string? ArtUrl = null);
+    double ProgressRate = 1, string? ArtUrl = null,
+    // A cover read from this PC's media controls, waiting to be imported into
+    // the archive (SpotifyCoverArtStore.ImportLocalArtAsync), which sets ArtPath.
+    string? LocalArtPath = null);
 
 internal static class SpotifyTimelineSidecar
 {
@@ -38,7 +41,10 @@ internal static class SpotifyTimelineSidecar
     {
         var artPath = SpotifyCoverArtStore.TrustedArtPath(libraryRoot, clipPath, sample.ArtPath);
         var artUrl = SpotifyCoverArtStore.IsTrustedArtUrl(sample.ArtUrl) ? sample.ArtUrl : null;
-        return artPath == sample.ArtPath && artUrl == sample.ArtUrl ? sample : sample with { ArtPath = artPath, ArtUrl = artUrl };
+        var localArt = SpotifyLocalArt.IsLocalArtPath(sample.LocalArtPath) ? sample.LocalArtPath : null;
+        return artPath == sample.ArtPath && artUrl == sample.ArtUrl && localArt == sample.LocalArtPath
+            ? sample
+            : sample with { ArtPath = artPath, ArtUrl = artUrl, LocalArtPath = localArt };
     }
 
     public static void Save(string libraryRoot, string clipPath, IEnumerable<SpotifyTimelineSample> samples)

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 
 namespace ClypDat.App.Services;
@@ -29,7 +30,7 @@ internal static class BrowserCallbackPage
           <meta charset="utf-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <meta name="referrer" content="no-referrer">
-          <title>__NAME__ connected</title>
+          <title>__TITLE__</title>
           <link rel="preconnect" href="https://fonts.googleapis.com">
           <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
           <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&amp;family=Geist:wght@400;500;600&amp;display=swap">
@@ -221,10 +222,10 @@ internal static class BrowserCallbackPage
             <div class="brand">__LOGO__<span>ClypDat</span></div>
             <section class="card" role="status">
               <div class="badge" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path pathLength="1" d="M5 11.5l4.5 4.5L19 6.5" /></svg>
+                <svg viewBox="0 0 24 24"><path pathLength="1" d="__BADGE__" /></svg>
               </div>
-              <p class="eyebrow">Account linked</p>
-              <h1>__NAME__ is <span class="accent">connected</span></h1>
+              <p class="eyebrow">__EYEBROW__</p>
+              <h1>__HEADING__</h1>
               <p class="detail">__DETAIL__</p>
               <a class="button" href="https://www.clypdat.xyz/account">Manage your account <span aria-hidden="true">&rarr;</span></a>
               <p class="hint">You can close this tab and go back to ClypDat.</p>
@@ -381,8 +382,37 @@ internal static class BrowserCallbackPage
             BrowserCallbackService.Xbox => ("Xbox", "Desktop Capture clips can now be named after the game you are playing on Xbox."),
             _ => ("ClypDat", "Your account is linked to the ClypDat desktop app."),
         };
+        return Render($"{name} connected", "Account linked", $"{name} is <span class=\"accent\">connected</span>", detail, SuccessBadge);
+    }
+
+    /// <summary>
+    /// The same page for a sign-in that did not finish - cancelled, refused by
+    /// the service, or unusable once it came back. The app shows the same
+    /// message; this is so the tab the user is looking at says so too, instead
+    /// of claiming success or leaving them on a blank loopback page.
+    /// </summary>
+    public static byte[] Failure(BrowserCallbackService service, string message)
+    {
+        var name = service switch
+        {
+            BrowserCallbackService.Spotify => "Spotify",
+            BrowserCallbackService.Xbox => "Xbox",
+            _ => "ClypDat",
+        };
+        return Render($"{name} not connected", "Not linked", $"{name} is <span class=\"accent\">not connected</span>",
+            WebUtility.HtmlEncode(message), FailureBadge);
+    }
+
+    private const string SuccessBadge = "M5 11.5l4.5 4.5L19 6.5";
+    private const string FailureBadge = "M7 7l10 10M17 7L7 17";
+
+    private static byte[] Render(string title, string eyebrow, string heading, string detail, string badge)
+    {
         var html = Shell.Value
-            .Replace("__NAME__", name, StringComparison.Ordinal)
+            .Replace("__TITLE__", WebUtility.HtmlEncode(title), StringComparison.Ordinal)
+            .Replace("__EYEBROW__", eyebrow, StringComparison.Ordinal)
+            .Replace("__HEADING__", heading, StringComparison.Ordinal)
+            .Replace("__BADGE__", badge, StringComparison.Ordinal)
             .Replace("__DETAIL__", detail, StringComparison.Ordinal);
         return Encoding.UTF8.GetBytes(html);
     }

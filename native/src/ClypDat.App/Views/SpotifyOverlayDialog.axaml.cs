@@ -48,7 +48,10 @@ public partial class SpotifyOverlayDialog : Window
         timer.Tick += (_, _) =>
         {
             var now = viewModel.SpotifyDialogNowPlaying;
-            var artPath = string.IsNullOrWhiteSpace(now.Track) ? null : artwork.Get(now.ArtUrl);
+            // The account's cover when there is one; otherwise the one the
+            // Spotify app on this PC handed Windows' media controls.
+            var artPath = string.IsNullOrWhiteSpace(now.Track) ? null
+                : artwork.Get(now.ArtUrl) ?? (SpotifyLocalArt.IsLocalArtPath(now.LocalArtPath) ? now.LocalArtPath : null);
             var spec = viewModel.SpotifyDialogSpec(now, artPath) with { Transform = _transform };
             if (spec.LegacyCard?.Track != track) { track = spec.LegacyCard?.Track; clock.Restart(); }
             var raster = SpotifyOverlayLayout.ResolveRenderBounds(PreviewWidth, PreviewHeight, spec.Position, _transform);

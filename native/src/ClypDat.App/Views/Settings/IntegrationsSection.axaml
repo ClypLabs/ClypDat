@@ -36,7 +36,7 @@
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Connected Accounts" />
-      <TextBlock Classes="settingsSectionDesc" Text="Manage ClypDat sign-in, optional social accounts, and Xbox activity." />
+      <TextBlock Classes="settingsSectionDesc" Text="Manage ClypDat sign-in, Spotify, optional social accounts, and Xbox activity." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
     <!-- DataContext switches to the PolicyPause, so visibility lives on the wrapper. -->
@@ -86,19 +86,21 @@
                        IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
           </StackPanel>
           <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Button Content="Create or sign in" Click="CreateClypDatButton_OnClick"
-                    IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
+            <!-- One button: clypdat.xyz asks the person to sign in (or make an
+                 account) first when they need to, then to confirm the code. -->
             <Button Classes="primaryButton" Click="LinkClypDatButton_OnClick"
                     IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}"
                     IsEnabled="{Binding ClypDatAccountCanLink}">
               <Grid>
-                <TextBlock Text="Link account" IsVisible="{Binding !ClypDatLinkBusy}" VerticalAlignment="Center" />
+                <TextBlock Text="Sign in" IsVisible="{Binding !ClypDatLinkBusy}" VerticalAlignment="Center" />
                 <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding ClypDatLinkBusy}">
                   <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
                   <TextBlock Text="Waiting for your browser…" VerticalAlignment="Center" />
                 </StackPanel>
               </Grid>
             </Button>
+            <Button Content="Cancel" Click="CancelClypDatLinkButton_OnClick" IsVisible="{Binding ClypDatLinkBusy}"
+                    ToolTip.Tip="Stop waiting for the browser." />
             <Button Content="Refresh" Click="RefreshClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}"
                     ToolTip.Tip="Re-read your linked accounts and pull your current Discord name and picture. ClypDat also checks Discord every 30 minutes." />
             <Button Content="Sign out" Click="UnlinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" />
@@ -114,11 +116,85 @@
       </StackPanel>
     </Border>
 
+    <!-- Spotify needs no ClypDat account, so it is not inside the signed-in
+         block below. It reads the Spotify app on this PC through Windows'
+         media controls; signing in with Spotify is optional, because Spotify
+         only lets a few approved accounts use ClypDat's sign-in. -->
+    <Border Classes="settingsCard">
+      <StackPanel Spacing="14">
+        <TextBlock Classes="settingsCardLabel" Text="SPOTIFY" />
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+          <Border Classes="providerBadge" Background="{StaticResource SpotifyBadgeBrush}" VerticalAlignment="Center">
+            <PathIcon Data="{StaticResource SpotifyMark}" Foreground="{StaticResource SpotifyBrandBrush}" />
+          </Border>
+          <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
+            <TextBlock Classes="settingsRowTitle" Text="Spotify" />
+            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding !SpotifyIsConnected}"
+                       Text="Show the song, artist and cover playing while a clip was captured. Reads the Spotify app on this PC - no sign-in needed." />
+            <!-- The now-playing line doubles as the proof the connection is
+                 reading anything, the way the Xbox row uses the title it is
+                 currently polling. -->
+            <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding SpotifyIsConnected}">
+              <Border Classes="statusPill ok">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <Ellipse />
+                  <TextBlock Text="On" />
+                </StackPanel>
+              </Border>
+              <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyNowPlayingLabel}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="340" />
+              <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyTrackLength}" VerticalAlignment="Center" IsVisible="{Binding SpotifyHasTrack}" />
+            </StackPanel>
+            <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyAccountStatus}" TextWrapping="Wrap" IsVisible="{Binding SpotifyIsConnected}" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <Button Classes="primaryButton" Content="Turn on" Click="ConnectSpotifyButton_OnClick"
+                    IsVisible="{Binding !SpotifyIsConnected}" IsEnabled="{Binding SpotifyConnectEnabled}" />
+            <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}"
+                    IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="Choose where the track sits on your clips." />
+            <Button Content="Turn off" Click="DisconnectSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}"
+                    ToolTip.Tip="Stop reading Spotify, and forget the Spotify sign-in if there is one." />
+          </StackPanel>
+        </Grid>
+        <Border Classes="settingsNotice" IsVisible="{Binding SpotifyHasNotice}">
+          <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyNotice}" TextWrapping="Wrap" />
+        </Border>
+        <Border Classes="providerSetting" IsVisible="{Binding SpotifyIsConnected}">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+            <StackPanel Spacing="2" VerticalAlignment="Center">
+              <TextBlock Classes="settingsRowTitleSm" Text="Sign in with Spotify (optional)" IsVisible="{Binding !SpotifyAccountConnected}" />
+              <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding !SpotifyAccountConnected}"
+                         Text="Adds Spotify's own cover art, and songs playing on your phone or another device. Spotify only allows a few approved accounts - everyone else keeps the Spotify app on this PC." />
+              <TextBlock Classes="settingsRowTitleSm" Text="Signed in with Spotify" IsVisible="{Binding SpotifyAccountConnected}" />
+              <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding SpotifyAccountConnected}"
+                         Text="Signing out keeps reading the Spotify app on this PC." />
+              <TextBlock Classes="settingsRowDescSm" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap"
+                         Text="This build has no Spotify application registered, so Spotify sign-in is unavailable."
+                         IsVisible="{Binding !SpotifyIsConfigured}" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <Button Click="SignInSpotifyButton_OnClick" IsEnabled="{Binding SpotifySignInEnabled}" IsVisible="{Binding !SpotifyAccountConnected}">
+                <Grid>
+                  <TextBlock Text="Sign in" IsVisible="{Binding !SpotifyConnectBusy}" VerticalAlignment="Center" />
+                  <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding SpotifyConnectBusy}">
+                    <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="Waiting for Spotify…" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Grid>
+              </Button>
+              <Button Content="Cancel" Click="CancelSpotifySignInButton_OnClick" IsVisible="{Binding SpotifyConnectBusy}"
+                      ToolTip.Tip="Stop waiting for the browser." />
+              <Button Content="Sign out" Click="SignOutSpotifyButton_OnClick" IsVisible="{Binding SpotifyAccountConnected}" />
+            </StackPanel>
+          </Grid>
+        </Border>
+      </StackPanel>
+    </Border>
+
     <StackPanel Spacing="18" IsVisible="{Binding ClypDatAccountIsConnected}">
       <Border Classes="settingsCard" IsVisible="{Binding HasAccountsToAdd}">
         <StackPanel Spacing="14">
           <TextBlock Classes="settingsCardLabel" Text="ADD AN ACCOUNT" />
-          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Add Discord, optional Xbox activity, or Spotify. Discord and Xbox open clypdat.xyz in your browser; Spotify signs in with Spotify itself." />
+          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Add Discord or optional Xbox activity. Both open clypdat.xyz in your browser." />
           <StackPanel Spacing="10">
             <Border Classes="providerRow" IsVisible="{Binding DiscordAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}">
               <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
@@ -144,34 +220,6 @@
                 <Button Grid.Column="2" VerticalAlignment="Center" Content="Connect" Click="CreateClypDatButton_OnClick" />
               </Grid>
             </Border>
-            <!-- Spotify is not a sign-in method and is not brokered by
-                 clypdat.xyz - the token only ever leaves this machine to ask
-                 Spotify what is playing. It sits in this list anyway, because
-                 this is where a user looks for something to connect. -->
-            <Border Classes="providerRow" IsVisible="{Binding !SpotifyIsConnected}">
-              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <Border Classes="providerBadge" Background="{StaticResource SpotifyBadgeBrush}">
-                  <PathIcon Data="{StaticResource SpotifyMark}" Foreground="{StaticResource SpotifyBrandBrush}" />
-                </Border>
-                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Classes="settingsRowTitle" Text="Spotify" />
-                  <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Show the song, artist and track length playing while a clip was captured." />
-                  <TextBlock Classes="settingsRowDescSm" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap"
-                             Text="This build has no Spotify application registered, so connecting is unavailable."
-                             IsVisible="{Binding !SpotifyIsConfigured}" />
-                </StackPanel>
-                <Button Grid.Column="2" VerticalAlignment="Center"
-                        Click="ConnectSpotifyButton_OnClick" IsEnabled="{Binding SpotifyConnectEnabled}">
-                  <Grid>
-                    <TextBlock Text="Connect" IsVisible="{Binding !SpotifyConnectBusy}" VerticalAlignment="Center" />
-                    <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding SpotifyConnectBusy}">
-                      <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                      <TextBlock Text="Connecting…" VerticalAlignment="Center" />
-                    </StackPanel>
-                  </Grid>
-                </Button>
-              </Grid>
-            </Border>
           </StackPanel>
         </StackPanel>
       </Border>
@@ -184,34 +232,6 @@
             <TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountError}" TextWrapping="Wrap" />
           </Border>
           <StackPanel Spacing="10">
-            <Border Classes="providerRow" IsVisible="{Binding SpotifyIsConnected}">
-              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <Border Classes="providerBadge" Background="{StaticResource SpotifyBadgeBrush}">
-                  <PathIcon Data="{StaticResource SpotifyMark}" Foreground="{StaticResource SpotifyBrandBrush}" />
-                </Border>
-                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
-                  <TextBlock Classes="settingsRowTitle" Text="Spotify" />
-                  <!-- The now-playing line doubles as the proof the connection
-                       is reading anything, the way the Xbox row uses the title
-                       it is currently polling. -->
-                  <StackPanel Orientation="Horizontal" Spacing="10">
-                    <Border Classes="statusPill ok">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Ellipse />
-                        <TextBlock Text="Connected" />
-                      </StackPanel>
-                    </Border>
-                    <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyNowPlayingLabel}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="340" />
-                    <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyTrackLength}" VerticalAlignment="Center" IsVisible="{Binding SpotifyHasTrack}" />
-                  </StackPanel>
-                  <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyAccountStatus}" TextWrapping="Wrap" IsVisible="{Binding !SpotifyHasTrack}" />
-                </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="Choose where the track sits on your clips." />
-                  <Button Content="Disconnect" Click="DisconnectSpotifyButton_OnClick" />
-                </StackPanel>
-              </Grid>
-            </Border>
             <Border Classes="providerRow" IsVisible="{Binding DiscordAccountIsConnected}">
               <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                 <Border Classes="providerBadge" Background="{StaticResource DiscordBadgeBrush}">
