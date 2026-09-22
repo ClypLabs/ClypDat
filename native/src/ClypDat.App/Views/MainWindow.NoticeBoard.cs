@@ -15,7 +15,7 @@ namespace ClypDat.App.Views;
 // in the header reopens everything current.
 public sealed partial class MainWindow
 {
-    private static readonly TimeSpan NoticeRefreshInterval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan NoticeRefreshInterval = TimeSpan.FromSeconds(15);
     private DispatcherTimer? _noticeTimer;
     private bool _noticeRefreshInProgress;
     // Critical notices already popped this session, so the minute refresh does
