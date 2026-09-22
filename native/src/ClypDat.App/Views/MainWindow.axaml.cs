@@ -200,8 +200,12 @@ public sealed partial class MainWindow : Window
     // Top-level dialogs need their own native window to cover VLC's video
     // surface. While one is up, editor-owned overlays must stay down rather
     // than polling/repositioning themselves back above the dialog.
-    private int _editorSurfaceCoverCount;
-    private bool _newClipsDialogCoversEditorSurface;
+    private readonly EditorSurfaceCovers _editorSurfaceCovers = new();
+    // A cover left behind by a window that went away without releasing it is
+    // reclaimed after this long, so a missed release costs seconds, not the
+    // rest of the session.
+    private static readonly TimeSpan EditorSurfaceOrphanedCoverAge = TimeSpan.FromSeconds(5);
+    private IDisposable? _newClipsEditorSurfaceCover;
     private Window? _editorHoverControlsWindow;
     private DispatcherTimer? _hoverControlsHideTimer;
     // Grace between the pointer leaving the video (and the bar) and the bar
@@ -225,6 +229,8 @@ public sealed partial class MainWindow : Window
     // compositing keeps empty area transparent; see ServerPerPixelOverlay.
     private const double HoverControlsSlideDistance = 52;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan HoverControlsAnimationStallGrace = TimeSpan.FromMilliseconds(250);
+    private DateTime _hoverControlsAnimationStartedUtc;
     private TranslateTransform? _hoverControlsTranslate;
     private ServerPerPixelOverlay? _hoverControlsPerPixelOverlay;
     private double _hoverControlsAnimationStartOffset;
@@ -3546,10 +3552,20 @@ public sealed partial class MainWindow : Window
             // window (see NewClipsDialog), and the ownership chain is what keeps
             // the popup above it without making either one modal. A popup with
             // no backdrop is still worth showing - undimmed beats absent.
-            _editorNewClipsBackdrop?.Show(this);
-            _editorNewClipsDialog!.SetCardWidth(dialogWidth);
-            _editorNewClipsDialog.Show((Window?)_editorNewClipsBackdrop ?? this);
-            _editorNewClipsDialog.RefreshOwnerBounds();
+            try
+            {
+                _editorNewClipsBackdrop?.Show(this);
+                _editorNewClipsDialog!.SetCardWidth(dialogWidth);
+                _editorNewClipsDialog.Show((Window?)_editorNewClipsBackdrop ?? this);
+                _editorNewClipsDialog.RefreshOwnerBounds();
+            }
+            catch (Exception error)
+            {
+                // Same non-visible-owner failure ShowModalDialogAsync guards.
+                // Tear it down so the editor-surface cover goes with it.
+                AppLog.Error("Failed to show editor new clips dialog", error);
+                CloseEditorNewClipsDialog();
+            }
         }
         else
         {
@@ -3651,31 +3667,31 @@ public sealed partial class MainWindow : Window
     // window over the video, so with Share up it punched through the dimmed
     // backdrop and sat on top of the dialog. Down for as long as Share is
     // open, back on its own the moment the poll sees this clear again.
-    private bool IsEditorSurfaceCovered => _editorSurfaceCoverCount > 0;
+    private bool IsEditorSurfaceCovered => _editorSurfaceCovers.IsCovered;
 
-    private void CoverEditorSurface()
+    // Dispose the result to release. With tiedTo, the cover also releases when
+    // that window closes, and is reclaimed by the hover poll if the window is
+    // no longer visible - a dialog that never made it on screen, or one that
+    // vanished without closing, cannot hold the bar down for good.
+    private IDisposable CoverEditorSurface(string reason, Window? tiedTo = null)
     {
-        _editorSurfaceCoverCount++;
+        var cover = _editorSurfaceCovers.Acquire(reason, tiedTo is null ? null : () => !tiedTo.IsVisible);
+        if (tiedTo is not null) tiedTo.Closed += (_, _) => cover.Dispose();
+        AppLog.Debug($"Editor surface covered: {reason} (covers={_editorSurfaceCovers.Describe()}).");
         HideEditorHoverControls(immediate: true);
-    }
-
-    private void UncoverEditorSurface()
-    {
-        if (_editorSurfaceCoverCount > 0) _editorSurfaceCoverCount--;
+        return cover;
     }
 
     private void CoverEditorSurfaceForNewClips()
     {
-        if (_newClipsDialogCoversEditorSurface) return;
-        _newClipsDialogCoversEditorSurface = true;
-        CoverEditorSurface();
+        if (_newClipsEditorSurfaceCover is not null) return;
+        _newClipsEditorSurfaceCover = CoverEditorSurface("new clips", _editorNewClipsDialog);
     }
 
     private void UncoverEditorSurfaceForNewClips()
     {
-        if (!_newClipsDialogCoversEditorSurface) return;
-        _newClipsDialogCoversEditorSurface = false;
-        UncoverEditorSurface();
+        _newClipsEditorSurfaceCover?.Dispose();
+        _newClipsEditorSurfaceCover = null;
     }
 
     // Embedded, non-destructive dialogs light-dismiss through their scrim. A
@@ -7123,9 +7139,8 @@ public sealed partial class MainWindow : Window
         // The shell picker is a top-level native window. Keep the editor's
         // own top-level hover bar down for its whole lifetime; otherwise it
         // stays above the picker because it is not a child of this window.
-        CoverEditorSurface();
         IStorageFile? file;
-        try
+        using (CoverEditorSurface("export file picker"))
         {
             file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
             {
@@ -7137,10 +7152,6 @@ public sealed partial class MainWindow : Window
                     new FilePickerFileType("MP4 video") { Patterns = new[] { "*.mp4" } }
                 }
             });
-        }
-        finally
-        {
-            UncoverEditorSurface();
         }
         if (file?.Path.LocalPath is not { Length: > 0 } outputPath) return;
         if (string.IsNullOrWhiteSpace(Path.GetExtension(outputPath)))
@@ -7440,14 +7451,10 @@ public sealed partial class MainWindow : Window
         if (fileOperation is null) return;
         _playback?.Pause();
         ViewModel.IsPlaying = false;
-        CoverEditorSurface();
-        try
+        var dialog = new ShareDialog(this, ViewModel);
+        using (CoverEditorSurface("share", dialog))
         {
-            await new ShareDialog(this, ViewModel).ShowWithBackdropAsync(this);
-        }
-        finally
-        {
-            UncoverEditorSurface();
+            await dialog.ShowWithBackdropAsync(this);
         }
     }
 
@@ -7482,6 +7489,14 @@ public sealed partial class MainWindow : Window
 
     private async Task ShowMessageAsync(string title, string message)
     {
+        // Background events (a clip save failing while ClypDat sits in the tray
+        // during a game) land here with no window to own the dialog, and Show
+        // would only throw. Their own toast has already told the user.
+        if (!IsVisible)
+        {
+            AppLog.Info($"Message dialog skipped while hidden: {title}: {message}");
+            return;
+        }
         var dialog = CreateDialog(title, message, false);
         try
         {
@@ -7559,19 +7574,25 @@ public sealed partial class MainWindow : Window
     // the whole owner (including native video surfaces) darkens consistently.
     // ShowDialog uses the backdrop as the owner, making the card modal without
     // allowing clicks to leak through the scrim.
+    //
+    // Everything after the cover is taken sits inside the try. Show throws
+    // "Cannot show window with non-visible owner" while ClypDat is in the tray,
+    // and when the backdrop's Show ran before the try, that throw skipped the
+    // release and the editor hover bar never came back for the session.
     private async Task<T> ShowModalDialogAsync<T>(Window dialog)
     {
-        CoverEditorSurface();
-        var backdrop = new ShareBackdropWindow(this);
-        backdrop.Show(this);
+        var cover = CoverEditorSurface(dialog.Title is { Length: > 0 } title ? $"dialog '{title}'" : "dialog", dialog);
+        ShareBackdropWindow? backdrop = null;
         try
         {
+            backdrop = new ShareBackdropWindow(this);
+            backdrop.Show(this);
             return await dialog.ShowDialog<T>(backdrop);
         }
         finally
         {
-            backdrop.Close();
-            UncoverEditorSurface();
+            backdrop?.Close();
+            cover.Dispose();
         }
     }
 
@@ -9153,6 +9174,18 @@ public sealed partial class MainWindow : Window
     // and nothing else.
     private void PollEditorHoverControls()
     {
+        // Only while ClypDat itself is on screen: during a quit or tray hide,
+        // dialogs are hidden on purpose and their covers are still wanted.
+        if (IsVisible)
+        {
+            foreach (var reason in _editorSurfaceCovers.ReleaseOrphaned(EditorSurfaceOrphanedCoverAge))
+            {
+                AppLog.Info($"Editor surface cover '{reason}' outlived its window; released so the hover bar can return.");
+            }
+        }
+
+        RecoverStalledHoverControlsAnimation();
+
         // IsVisible is the main window's own. Closing ClypDat hides it to the
         // tray rather than exiting, and Avalonia refuses outright to show a
         // window whose owner isn't visible ("Cannot show window with
@@ -9165,7 +9198,15 @@ public sealed partial class MainWindow : Window
         {
             if (_editorHoverControlsWindow is { IsVisible: true })
             {
-                LogHoverControlsState($"hidden (window={IsVisible}, editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, covered={IsEditorSurfaceCovered})");
+                LogHoverControlsState($"hidden (window={IsVisible}, editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, covers={_editorSurfaceCovers.Describe()})");
+            }
+            else if (IsEditorSurfaceCovered && IsVisible && ViewModel?.IsEditorVisible == true)
+            {
+                // Logged even though the bar is already down: a cover that
+                // never lifts otherwise leaves no trace at all, which is how
+                // a leaked one hid the bar for a whole session unexplained.
+                // Reasons only, so the ticking age doesn't re-log every poll.
+                LogHoverControlsState($"blocked (covered by {_editorSurfaceCovers.Describe(withAge: false)})");
             }
             HideEditorHoverControls(immediate: true);
             return;
@@ -9308,6 +9349,15 @@ public sealed partial class MainWindow : Window
                 // lines. A second between attempts still recovers promptly.
                 AppLog.Error("Editor hover bar show failed; rebuilding it", error);
                 _editorHoverControlsWindow = null;
+                StopHoverControlsAnimation();
+                try
+                {
+                    window.Close();
+                }
+                catch (Exception closeError)
+                {
+                    AppLog.Debug($"Editor hover bar: closing the failed window threw ({closeError.Message}).");
+                }
                 _hoverControlsTranslate = null;
                 _hoverControlsLastState = string.Empty;
                 _hoverControlsSuppressedUntilUtc = DateTime.UtcNow + TimeSpan.FromSeconds(1);
@@ -9415,6 +9465,7 @@ public sealed partial class MainWindow : Window
         }
 
         _hoverControlsAnimationRunning = true;
+        _hoverControlsAnimationStartedUtc = DateTime.UtcNow;
         var animationId = ++_hoverControlsAnimationId;
         TimeSpan? startTime = null;
 
@@ -9437,6 +9488,22 @@ public sealed partial class MainWindow : Window
         }
 
         topLevel.RequestAnimationFrame(Step);
+    }
+
+    // The slide steps off RequestAnimationFrame. If frames stop arriving
+    // mid-slide, the animation stays "running" with the bar parked below its
+    // clip - visible to every check, invisible on screen - and the same-target
+    // guard above turns each re-show into a no-op. Finish it by hand instead.
+    private void RecoverStalledHoverControlsAnimation()
+    {
+        if (!_hoverControlsAnimationRunning) return;
+        if (DateTime.UtcNow - _hoverControlsAnimationStartedUtc < HoverControlsSlideDuration + HoverControlsAnimationStallGrace) return;
+        AppLog.Debug($"Editor hover bar: slide to {_hoverControlsAnimationTargetOffset:0} stalled; finishing it directly.");
+        var target = _hoverControlsAnimationTargetOffset;
+        var completed = _hoverControlsAnimationComplete;
+        StopHoverControlsAnimation();
+        SetHoverControlsOffset(target);
+        completed?.Invoke();
     }
 
     private void StopHoverControlsAnimation()
@@ -9805,6 +9872,16 @@ public sealed partial class MainWindow : Window
             _hoverControlsPerPixelOverlay?.Dispose();
             _hoverControlsPerPixelOverlay = null;
             _hoverControlsTranslate = null;
+            // A closed Window can never be shown again. Forget it so the next
+            // poll builds a fresh one, rather than throwing on Show and
+            // backing off first.
+            if (ReferenceEquals(_editorHoverControlsWindow, window))
+            {
+                StopHoverControlsAnimation();
+                _hoverControlsSlidingOut = false;
+                _editorHoverControlsWindow = null;
+                _hoverControlsLastState = string.Empty;
+            }
         };
         _editorHoverControlsWindow = window;
         return window;
