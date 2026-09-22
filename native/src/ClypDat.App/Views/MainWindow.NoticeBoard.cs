@@ -10,14 +10,15 @@ namespace ClypDat.App.Views;
 
 // The Notice Board: announcements written at www.clypdat.xyz/admin that reach
 // every install without an update (NoticeBoardService). New notices pop up once
-// at launch; critical ones (security, severe bugs) pop up every launch until
-// acknowledged, and interrupt a running session as soon as they arrive. The bell
+// at launch; info and critical ones also interrupt a running session. Critical
+// notices pop up every launch until acknowledged. The bell
 // in the header reopens everything current.
 public sealed partial class MainWindow
 {
-    private static readonly TimeSpan NoticeRefreshInterval = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan NoticeRefreshInterval = TimeSpan.FromMinutes(1);
     private DispatcherTimer? _noticeTimer;
-    // Critical notices already popped this session, so the 30-minute refresh does
+    private bool _noticeRefreshInProgress;
+    // Critical notices already popped this session, so the minute refresh does
     // not keep reopening one the user just closed without acknowledging.
     private readonly HashSet<string> _noticesPoppedThisSession = new(StringComparer.OrdinalIgnoreCase);
 
@@ -46,18 +47,26 @@ public sealed partial class MainWindow
 
     private async void NoticeTimer_OnTick(object? sender, EventArgs e)
     {
+        if (_noticeRefreshInProgress) return;
+        _noticeRefreshInProgress = true;
         try
         {
-            if (!await NoticeBoardService.RefreshAsync()) return;
+            await NoticeBoardService.RefreshAsync();
             UpdateNoticeBadge();
-            // Only a critical notice interrupts a session in progress; anything
-            // else waits on the bell and the next launch.
-            var urgent = NoticesToShow().Where(notice => notice.IsCritical && !_noticesPoppedThisSession.Contains(notice.Id)).ToList();
+            // Reconsider the held feed even when unchanged: another dialog may
+            // have blocked presentation on the tick that fetched this notice.
+            if (ViewModel is not { } model) return;
+            var urgent = NoticeBoardRules.ToShowDuringSession(ApplicableNotices(),
+                model.Settings.SeenNoticeIds, model.Settings.AcknowledgedNoticeIds, _noticesPoppedThisSession);
             if (urgent.Count > 0 && !_updateDialogOpen) await ShowNoticeDialogAsync(urgent, board: false);
         }
         catch (Exception error)
         {
             AppLog.Error("Notice board refresh tick failed (non-fatal)", error);
+        }
+        finally
+        {
+            _noticeRefreshInProgress = false;
         }
     }
 
@@ -111,7 +120,8 @@ public sealed partial class MainWindow
     {
         var window = new Window
         {
-            Width = 640,
+            Title = "Notice Board",
+            Width = 600,
             SizeToContent = SizeToContent.Height,
             MaxHeight = 720,
             CanResize = false,
@@ -123,47 +133,70 @@ public sealed partial class MainWindow
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent }
         };
 
-        var titleBar = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Height = 48 };
+        var titleBar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Avalonia.Thickness(24, 20, 16, 18) };
         var titleLeft = new StackPanel
         {
             Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                new Image { Source = AppThemeService.CurrentLogo(large: false), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center },
-                new TextBlock { Text = "Notice Board", Foreground = AppThemeService.Brush("Text_B9C6D4", "#B9C6D4"), FontSize = 12, FontWeight = FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center }
+                new Border
+                {
+                    Width = 40, Height = 40, CornerRadius = new Avalonia.CornerRadius(12),
+                    Background = AppThemeService.Brush("Surface_1E2A34", "#1E2A34"),
+                    Child = new Image { Source = AppThemeService.CurrentLogo(large: false), Width = 22, Height = 22 }
+                },
+                new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center, Children =
+                {
+                    new TextBlock { Text = "Notice Board", Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"), FontSize = 17, FontWeight = FontWeight.SemiBold },
+                    new TextBlock { Text = "Updates from ClypDat", Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"), FontSize = 12 }
+                } }
             }
         };
-        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
+        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 32, Height = 32, FontSize = 12, VerticalAlignment = VerticalAlignment.Top, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(8) };
+        Avalonia.Automation.AutomationProperties.SetName(closeButton, "Close Notice Board");
+        ToolTip.SetTip(closeButton, "Close");
         closeButton.Click += (_, _) => window.Close();
-        Grid.SetColumn(closeButton, 2);
+        Grid.SetColumn(closeButton, 1);
         titleBar.Children.Add(titleLeft);
         titleBar.Children.Add(closeButton);
-        var roundedTitleBar = new Border { Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"), CornerRadius = new Avalonia.CornerRadius(11, 11, 0, 0), Child = titleBar };
+        var roundedTitleBar = new Border { Child = titleBar };
 
-        var list = new StackPanel { Spacing = 12, Margin = new Avalonia.Thickness(22, 18, 22, 18) };
+        var list = new StackPanel { Spacing = 14, Margin = new Avalonia.Thickness(24, 0, 24, 20) };
         if (notices.Count == 0)
         {
-            list.Children.Add(new TextBlock
+            list.Children.Add(new Border
             {
-                Text = "Nothing on the board right now. Big features and anything urgent will show up here.",
-                Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
-                FontSize = 13,
-                TextWrapping = TextWrapping.Wrap
+                Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
+                CornerRadius = new Avalonia.CornerRadius(12), Padding = new Avalonia.Thickness(24, 30),
+                Child = new StackPanel { Spacing = 8, Children =
+                {
+                    new TextBlock { Text = "You're all caught up", FontSize = 19, FontWeight = FontWeight.SemiBold, Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB") },
+                    new TextBlock { Text = "New features and important updates will appear here.", FontSize = 13, TextWrapping = TextWrapping.Wrap, Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6") }
+                } }
             });
         }
         foreach (var notice in notices) list.Children.Add(BuildNoticeCard(notice));
 
-        var closeFooter = new Button { Content = board ? "Close" : "Got it", Width = 120, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "primaryButton" } };
+        var closeFooter = new Button { Content = board ? "Done" : "Got it", MinWidth = 104, Height = 38, Padding = new Avalonia.Thickness(20, 0), CornerRadius = new Avalonia.CornerRadius(9), FontSize = 13, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "primaryButton" } };
         closeFooter.Click += (_, _) => window.Close();
-        var footer = new StackPanel
+        var footerRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 16 };
+        footerRow.Children.Add(new TextBlock
         {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Avalonia.Thickness(22, 0, 22, 20),
-            Children = { closeFooter }
+            Text = board ? $"{notices.Count} active {(notices.Count == 1 ? "notice" : "notices")}" : "Revisit anytime from the bell.",
+            FontSize = 12, Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+            VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap
+        });
+        Grid.SetColumn(closeFooter, 1);
+        footerRow.Children.Add(closeFooter);
+        var footer = new Border
+        {
+            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"), BorderThickness = new Avalonia.Thickness(0, 1, 0, 0),
+            Padding = new Avalonia.Thickness(24, 16), Child = footerRow
         };
 
-        var content = new DockPanel { Children = { roundedTitleBar, footer, new ScrollViewer { Content = list, MaxHeight = 560 } } };
+        var content = new DockPanel { Children = { roundedTitleBar, footer, new ScrollViewer { Content = list, MaxHeight = 520, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled } } };
         DockPanel.SetDock(roundedTitleBar, Dock.Top);
         DockPanel.SetDock(footer, Dock.Bottom);
         var shell = CreateRoundedDialogShell(content);
@@ -174,51 +207,58 @@ public sealed partial class MainWindow
 
     private Border BuildNoticeCard(Notice notice)
     {
-        var (label, accent, pillBackground) = notice.Severity switch
+        var (label, accent) = notice.Severity switch
         {
-            "critical" => ("CRITICAL", "#F05A63", "#3A1C20"),
-            "feature" => ("NEW FEATURE", "#13C8B5", "#1C3A36"),
-            _ => ("INFO", "#8EA1B6", "#1E2A34")
+            "critical" => ("IMPORTANT", "#FF8991"),
+            "feature" => ("NEW FEATURE", "#45DDC1"),
+            _ => ("INFO", "#91BDFA")
         };
+        var accentColor = Color.Parse(accent);
+        var accentBrush = new SolidColorBrush(accentColor);
+        var tint = new SolidColorBrush(Color.FromArgb(22, accentColor.R, accentColor.G, accentColor.B));
 
-        var header = new StackPanel
+        var header = new Grid
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 10,
+            ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 12,
             Children =
             {
                 new Border
                 {
-                    Background = Brush.Parse(pillBackground),
-                    CornerRadius = new Avalonia.CornerRadius(5),
-                    Padding = new Avalonia.Thickness(7, 2),
+                    Background = tint,
+                    CornerRadius = new Avalonia.CornerRadius(6),
+                    Padding = new Avalonia.Thickness(9, 4),
                     VerticalAlignment = VerticalAlignment.Center,
-                    Child = new TextBlock { Text = label, Foreground = Brush.Parse(accent), FontSize = 10, FontWeight = FontWeight.Bold }
+                    Child = new TextBlock { Text = label, Foreground = accentBrush, FontSize = 10, FontWeight = FontWeight.SemiBold, LetterSpacing = 0.7 }
                 },
                 new TextBlock
                 {
                     Text = notice.PublishedAt.ToLocalTime().ToString("d MMM yyyy"),
-                    Foreground = AppThemeService.Brush("Text_5C6D7E", "#5C6D7E"),
-                    FontSize = 12,
+                    Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+                    FontSize = 11,
+                    HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Center
                 }
             }
         };
+        Grid.SetColumn(header.Children[1], 1);
 
-        var body = new StackPanel { Spacing = 8, Children = { header, new TextBlock
+        var body = new StackPanel { Spacing = 12, Margin = new Avalonia.Thickness(22, 20, 22, 22), Children = { header, new TextBlock
         {
             Text = notice.Title,
             Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
-            FontSize = 17,
-            FontWeight = FontWeight.Bold,
+            FontSize = 23,
+            LineHeight = 29,
+            FontWeight = FontWeight.SemiBold,
             TextWrapping = TextWrapping.Wrap
         } } };
-        foreach (var block in BuildNoticeBody(notice.Body)) body.Children.Add(block);
+        var paragraphs = new StackPanel { Spacing = 8 };
+        foreach (var block in BuildNoticeBody(notice.Body)) paragraphs.Children.Add(block);
+        body.Children.Add(paragraphs);
 
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Avalonia.Thickness(0, 6, 0, 0) };
+        var actions = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Avalonia.Thickness(0, 4, 0, 0) };
         if (notice.Link is { } link && NoticeBoardRules.IsAllowedLink(link.Url))
         {
-            var linkButton = new Button { Content = link.Label, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
+            var linkButton = new Button { Content = new TextBlock { Text = link.Label, TextWrapping = TextWrapping.Wrap }, MaxWidth = 460, MinHeight = 36, Padding = new Avalonia.Thickness(14, 8), Margin = new Avalonia.Thickness(0, 0, 10, 6), CornerRadius = new Avalonia.CornerRadius(8), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center };
             ToolTip.SetTip(linkButton, link.Url);
             linkButton.Click += (_, _) =>
             {
@@ -229,7 +269,7 @@ public sealed partial class MainWindow
         }
         if (notice.IsCritical && ViewModel is { } model && !model.Settings.AcknowledgedNoticeIds.Contains(notice.Id, StringComparer.OrdinalIgnoreCase))
         {
-            var acknowledge = new Button { Content = "I understand", HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "primaryButton" } };
+            var acknowledge = new Button { Content = "I understand", MinHeight = 36, Padding = new Avalonia.Thickness(14, 8), Margin = new Avalonia.Thickness(0, 0, 0, 6), CornerRadius = new Avalonia.CornerRadius(8), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Classes = { "primaryButton" } };
             acknowledge.Click += (_, _) =>
             {
                 model.Settings.AcknowledgedNoticeIds.Add(notice.Id);
@@ -243,14 +283,19 @@ public sealed partial class MainWindow
         }
         if (actions.Children.Count > 0) body.Children.Add(actions);
 
+        var card = new DockPanel();
+        var accentLine = new Border { Height = 3, Background = accentBrush };
+        DockPanel.SetDock(accentLine, Dock.Top);
+        card.Children.Add(accentLine);
+        card.Children.Add(body);
         return new Border
         {
             Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
-            BorderBrush = notice.IsCritical ? Brush.Parse("#5A2A30") : AppThemeService.Brush("Surface_1E2A34", "#1E2A34"),
+            BorderBrush = notice.IsCritical ? new SolidColorBrush(Color.FromArgb(90, accentColor.R, accentColor.G, accentColor.B)) : AppThemeService.Brush("Surface_232F3A", "#232F3A"),
             BorderThickness = new Avalonia.Thickness(1),
-            CornerRadius = new Avalonia.CornerRadius(8),
-            Padding = new Avalonia.Thickness(16, 14),
-            Child = body
+            CornerRadius = new Avalonia.CornerRadius(12),
+            ClipToBounds = true,
+            Child = card
         };
     }
 
@@ -262,7 +307,7 @@ public sealed partial class MainWindow
         static bool AllowLink(Uri uri) => NoticeBoardRules.IsAllowedLink(uri.AbsoluteUri);
         var paragraph = new List<string>();
 
-        TextBlock Text(string value, double size = 13, FontWeight? weight = null)
+        TextBlock Text(string value, double size = 14, FontWeight? weight = null)
         {
             var text = new TextBlock
             {
@@ -270,7 +315,7 @@ public sealed partial class MainWindow
                 FontSize = size,
                 FontWeight = weight ?? FontWeight.Normal,
                 TextWrapping = TextWrapping.Wrap,
-                LineHeight = size * 1.45
+                LineHeight = size * 1.55
             };
             ReleaseNotesMarkdownRenderer.Apply(text, value, AllowLink);
             return text;

@@ -99,6 +99,22 @@ public sealed class NoticeBoardRulesTests
     }
 
     [Fact]
+    public void ActiveSessionShowsInfoAndCriticalButDefersFeatures()
+    {
+        var feed = NoticeBoardRules.ParseAndVerify(Envelope("2027-01-02T00:00:00Z",
+            NoticeJson("feature"), NoticeJson("info", "info"), NoticeJson("critical", "critical")), TrustedKeys);
+        var applicable = NoticeBoardRules.Applicable(feed, new Version(1, 5, 4), DateTimeOffset.Parse("2027-01-05T00:00:00Z"));
+        Assert.Equal(new[] { "info", "critical" }, NoticeBoardRules.ToShowDuringSession(applicable, [], [], []).Select(n => n.Id));
+        // A blocked dialog must leave these eligible on the next tick, even with the same feed.
+        Assert.Equal(2, NoticeBoardRules.ToShowDuringSession(applicable, [], [], []).Count);
+        Assert.Empty(NoticeBoardRules.ToShowDuringSession(applicable, ["INFO"], [], ["CRITICAL"]));
+        Assert.Empty(NoticeBoardRules.ToShowDuringSession(applicable, ["info"], ["critical"], []));
+        // On a new launch an unacknowledged critical notice returns, but seen info does not.
+        Assert.Equal("critical", Assert.Single(NoticeBoardRules.ToShowDuringSession(applicable, ["info"], [], [])).Id);
+        Assert.Contains(NoticeBoardRules.ToShow(applicable, ["info"], ["critical"]), n => n.Id == "feature");
+    }
+
+    [Fact]
     public void UnknownSeverityIsDowngradedAndDisallowedLinksDropped()
     {
         var feed = NoticeBoardRules.ParseAndVerify(Envelope("2027-01-02T00:00:00Z",

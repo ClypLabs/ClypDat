@@ -121,6 +121,16 @@ internal static class NoticeBoardRules
     public static bool HasUnread(IReadOnlyList<Notice> applicable, IEnumerable<string> seenIds, IEnumerable<string> acknowledgedIds) =>
         ToShow(applicable, seenIds, acknowledgedIds).Count > 0;
 
+    /// <summary>Info and critical notices interrupt a session once; features wait until launch.</summary>
+    public static IReadOnlyList<Notice> ToShowDuringSession(IReadOnlyList<Notice> applicable,
+        IEnumerable<string> seenIds, IEnumerable<string> acknowledgedIds, IEnumerable<string> poppedThisSession)
+    {
+        var popped = new HashSet<string>(poppedThisSession, StringComparer.OrdinalIgnoreCase);
+        return ToShow(applicable, seenIds, acknowledgedIds)
+            .Where(notice => notice.Severity is "info" or "critical" && !popped.Contains(notice.Id))
+            .ToList();
+    }
+
     /// <summary>
     /// Where a notice may send someone. Enforced here even though the site checks the
     /// same list, so a hijacked admin account still cannot turn a notice into a link
