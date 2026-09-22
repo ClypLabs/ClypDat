@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:controls="using:ClypDat.App.Controls"
              xmlns:opconv="using:ClypDat.App.Converters"
              x:Class="ClypDat.App.Views.Settings.DiscordRichPresenceSection"
              x:DataType="vm:MainWindowViewModel">
@@ -15,9 +16,12 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Discord Rich Presence" />
       <TextBlock Classes="settingsSectionDesc" Text="Control what ClypDat shares on your Discord profile." />
-      <TextBlock Classes="settingsRowDescSm" Text="{Binding DiscordPolicyStatus}" IsVisible="{Binding DiscordPolicyBlocked}" Foreground="{StaticResource CautionBrush}" TextWrapping="Wrap" />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
+    <!-- DataContext switches to the PolicyPause, so visibility lives on the wrapper. -->
+    <Panel IsVisible="{Binding DiscordPolicyBlocked}">
+      <controls:PolicyPauseBanner DataContext="{Binding DiscordPolicyPause}" />
+    </Panel>
     <Border Classes="settingsCard">
       <StackPanel Spacing="14">
         <TextBlock Classes="settingsCardLabel" Text="DISCORD" />

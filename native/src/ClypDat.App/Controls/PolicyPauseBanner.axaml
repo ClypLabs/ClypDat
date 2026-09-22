@@ -1,0 +1,28 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             x:Class="ClypDat.App.Controls.PolicyPauseBanner"
+             x:DataType="vm:PolicyPause">
+  <!-- Shown at the top of a settings section while a ClypDat kill switch has
+       that feature paused. A single amber line under the section description
+       was easy to read past, and the controls below it still looked usable -
+       this is a full-width card with a heading, the reason, and when the
+       feature comes back by itself. -->
+  <Border Classes="settingsNotice policyPauseNotice">
+    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+      <Border Width="30" Height="30" CornerRadius="15" Background="#2A2410" VerticalAlignment="Top">
+        <PathIcon Width="14" Height="14" Foreground="{StaticResource CautionBrush}"
+                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Data="M14,19H18V5H14M6,19H10V5H6V19Z" />
+      </Border>
+      <StackPanel Grid.Column="1" Spacing="3">
+        <TextBlock Text="{Binding Heading}" FontSize="14" FontWeight="Bold"
+                   Foreground="{StaticResource Text_EDF4FB}" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Reason}" Classes="settingsRowDescSm"
+                   Foreground="{StaticResource Text_C4D2E0}" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Until}" Classes="settingsRowDescSm"
+                   Foreground="{StaticResource CautionBrush}" TextWrapping="Wrap" Margin="0,2,0,0" />
+      </StackPanel>
+    </Grid>
+  </Border>
+</UserControl>

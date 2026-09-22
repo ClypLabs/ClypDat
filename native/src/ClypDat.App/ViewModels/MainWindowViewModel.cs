@@ -2674,13 +2674,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool AutoClippingPolicyBlocked => NoticeBoardService.IsBlocked("pause-auto-clipping");
-    public string AutoClippingPolicyStatus => PolicyStatus("pause-auto-clipping");
+    public PolicyPause? AutoClippingPolicyPause => PolicyPauseFor("Auto-clipping", "pause-auto-clipping");
 
-    private string PolicyStatus(string control, string? target = null)
+    private static PolicyPause? PolicyPauseFor(string feature, string control, string? target = null)
     {
         var item = NoticeBoardService.ActiveSwitches.FirstOrDefault(item => string.Equals(item.Control, control, StringComparison.Ordinal) &&
             (item.Target is null || string.Equals(item.Target, target, StringComparison.OrdinalIgnoreCase)));
-        return item is null ? string.Empty : $"Temporarily disabled: {item.Reason} Expires {item.ExpiresAt.ToLocalTime():g}.";
+        return item is null ? null : PolicyPause.From(feature, item.Reason, item.ExpiresAt, DateTimeOffset.Now);
     }
 
     // What ApplyRemotePolicy last applied, so a switch clearing brings its
@@ -2716,15 +2716,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (AutoClipGames is not null) foreach (var game in AutoClipGames) game.RefreshPolicy();
         OnPropertyChanged(nameof(AutoClippingEnabled));
         OnPropertyChanged(nameof(AutoClippingPolicyBlocked));
-        OnPropertyChanged(nameof(AutoClippingPolicyStatus));
+        OnPropertyChanged(nameof(AutoClippingPolicyPause));
         OnPropertyChanged(nameof(SpotifyPolicyBlocked));
-        OnPropertyChanged(nameof(SpotifyPolicyStatus));
+        OnPropertyChanged(nameof(SpotifyPolicyPause));
         OnPropertyChanged(nameof(SpotifyConnectEnabled));
         OnPropertyChanged(nameof(XboxPolicyBlocked));
-        OnPropertyChanged(nameof(XboxPolicyStatus));
+        OnPropertyChanged(nameof(XboxPolicyPause));
         OnPropertyChanged(nameof(XboxActivityForDesktop));
         OnPropertyChanged(nameof(DiscordPolicyBlocked));
-        OnPropertyChanged(nameof(DiscordPolicyStatus));
+        OnPropertyChanged(nameof(DiscordPolicyPause));
         OnPropertyChanged(nameof(DiscordRichPresenceEnabled));
         UpdateDiscordPresence();
     }
@@ -7631,7 +7631,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
     public bool SpotifyPolicyBlocked => NoticeBoardService.IsBlocked("pause-spotify");
-    public string SpotifyPolicyStatus => PolicyStatus("pause-spotify");
+    public PolicyPause? SpotifyPolicyPause => PolicyPauseFor("Spotify", "pause-spotify");
     public bool SpotifyConnectEnabled => SpotifyIsConfigured && !SpotifyConnectBusy && !SpotifyPolicyBlocked;
     // The browser handoff (RunBrowserHandoffAsync) can take a while when the
     // user has to sign in first - this is what lets the button say so instead
@@ -7660,7 +7660,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         set { if (XboxPolicyBlocked) return; if (Settings.XboxActivityEnabled == value) return; Settings.XboxActivityEnabled = value; SaveSettings(); UpdateDiscordPresence(); NotifyClypDatXboxActivityNeed(); OnPropertyChanged(); }
     }
     public bool XboxPolicyBlocked => NoticeBoardService.IsBlocked("pause-xbox-activity");
-    public string XboxPolicyStatus => PolicyStatus("pause-xbox-activity");
+    public PolicyPause? XboxPolicyPause => PolicyPauseFor("Xbox activity", "pause-xbox-activity");
 
     // Live Xbox activity is read in exactly one situation: Xbox is linked
     // through the ClypDat account, "Use Xbox activity" is on, and the capture
@@ -8128,7 +8128,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
     public bool DiscordPolicyBlocked => NoticeBoardService.IsBlocked("pause-discord-presence");
-    public string DiscordPolicyStatus => PolicyStatus("pause-discord-presence");
+    public PolicyPause? DiscordPolicyPause => PolicyPauseFor("Discord Rich Presence", "pause-discord-presence");
 
     public bool DiscordRichPresenceOnlyWhenGameActive
     {

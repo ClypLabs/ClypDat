@@ -110,9 +110,26 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         OnPropertyChanged(nameof(EnabledEventCount));
         OnPropertyChanged(nameof(SummaryLabel));
     }
+    // Just this game's detector paused remotely. The section-wide banner
+    // covers "all auto-clipping paused"; this drives the pill on the row.
+    public bool IsDetectorPolicyBlocked => _detectorPolicyReason is not null;
+    // Null, not empty: an empty tooltip still opens as a blank box.
+    public string? DetectorPolicyTip => _detectorPolicyReason is null ? null
+        : $"Paused by ClypDat: {_detectorPolicyReason}";
+    private string? _detectorPolicyReason;
+
     public void RefreshPolicy()
     {
-        var blocked = NoticeBoardService.IsBlocked("pause-auto-clipping") || NoticeBoardService.IsBlocked("disable-game-detector", Id);
+        var detector = NoticeBoardService.ActiveSwitches.FirstOrDefault(item =>
+            item.Control == "disable-game-detector" && string.Equals(item.Target, Id, StringComparison.OrdinalIgnoreCase));
+        var reason = detector?.Reason;
+        if (reason != _detectorPolicyReason)
+        {
+            _detectorPolicyReason = reason;
+            OnPropertyChanged(nameof(IsDetectorPolicyBlocked));
+            OnPropertyChanged(nameof(DetectorPolicyTip));
+        }
+        var blocked = NoticeBoardService.IsBlocked("pause-auto-clipping") || detector is not null;
         if (_policyBlocked == blocked) return;
         _policyBlocked = blocked;
         OnPropertyChanged(nameof(IsPolicyBlocked));

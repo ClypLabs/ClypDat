@@ -17,7 +17,6 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Auto-Clipping" />
       <TextBlock Classes="settingsSectionDesc" Text="Have ClypDat save important moments using local event feeds or captured game frames." />
-      <TextBlock Classes="settingsRowDescSm" Text="{Binding AutoClippingPolicyStatus}" IsVisible="{Binding AutoClippingPolicyBlocked}" Foreground="{StaticResource CautionBrush}" TextWrapping="Wrap" />
       <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6" Margin="0,4,0,0">
         <PathIcon Classes="cautionIcon" />
         <TextBlock Grid.Column="1" Text="Experimental - still being worked on and can miss events, mislabel clips, or misbehave."
@@ -25,6 +24,10 @@
       </Grid>
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
+    <!-- DataContext switches to the PolicyPause, so visibility lives on the wrapper. -->
+    <Panel IsVisible="{Binding AutoClippingPolicyBlocked}">
+      <controls:PolicyPauseBanner DataContext="{Binding AutoClippingPolicyPause}" />
+    </Panel>
 
     <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Auto Capture Events}">
       <StackPanel Spacing="14">
@@ -60,14 +63,23 @@
                   <Image Source="{Binding CoverImage}" Stretch="UniformToFill" />
                 </Border>
                 <StackPanel Grid.Column="2" Spacing="3" VerticalAlignment="Center" IsHitTestVisible="False">
-                  <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="15"
-                             opconv:SettingsHighlight.Query="{Binding SearchQuery}" />
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="15"
+                               opconv:SettingsHighlight.Query="{Binding SearchQuery}" />
+                    <!-- This panel ignores hit tests, so the reason is the
+                         toggle's tooltip (column 4) rather than the pill's. -->
+                    <Border IsVisible="{Binding IsDetectorPolicyBlocked}" Background="#2A2410" CornerRadius="5"
+                            Padding="7,2" VerticalAlignment="Center">
+                      <TextBlock Text="PAUSED BY CLYPDAT" Foreground="{StaticResource CautionBrush}" FontSize="10" FontWeight="Bold" />
+                    </Border>
+                  </StackPanel>
                   <!-- Collapsed, this line is all the user gets, so it says
                        how many events are on rather than repeating the name. -->
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding StatusText}" IsVisible="{Binding IsExpanded}" />
                 </StackPanel>
                 <TextBlock Grid.Column="3" Classes="autoClipCount" Text="{Binding SummaryLabel}" IsHitTestVisible="False" />
-                <ToggleSwitch Grid.Column="4" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding !IsPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                <ToggleSwitch Grid.Column="4" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding !IsPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center"
+                              ToolTip.Tip="{Binding DetectorPolicyTip}" ToolTip.ShowOnDisabled="True" />
               </Grid>
 
               <StackPanel Spacing="0" Margin="34,0,0,0" IsVisible="{Binding IsExpanded}">

@@ -39,6 +39,14 @@
       <TextBlock Classes="settingsSectionDesc" Text="Manage ClypDat sign-in, optional social accounts, and Xbox activity." />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
+    <!-- DataContext switches to the PolicyPause, so visibility lives on the wrapper. -->
+    <Panel IsVisible="{Binding SpotifyPolicyBlocked}">
+      <controls:PolicyPauseBanner DataContext="{Binding SpotifyPolicyPause}" />
+    </Panel>
+    <!-- DataContext switches to the PolicyPause, so visibility lives on the wrapper. -->
+    <Panel IsVisible="{Binding XboxPolicyBlocked}">
+      <controls:PolicyPauseBanner DataContext="{Binding XboxPolicyPause}" />
+    </Panel>
 
     <Border Classes="settingsCard">
       <StackPanel Spacing="14">
@@ -199,7 +207,6 @@
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyAccountStatus}" TextWrapping="Wrap" IsVisible="{Binding !SpotifyHasTrack}" />
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <TextBlock Grid.Column="1" Classes="settingsRowDescSm" Text="{Binding SpotifyPolicyStatus}" IsVisible="{Binding SpotifyPolicyBlocked}" Foreground="{StaticResource CautionBrush}" TextWrapping="Wrap" />
                   <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="Choose where the track sits on your clips." />
                   <Button Content="Disconnect" Click="DisconnectSpotifyButton_OnClick" />
                 </StackPanel>
