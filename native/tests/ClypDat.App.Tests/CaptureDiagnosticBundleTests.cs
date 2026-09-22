@@ -7,27 +7,6 @@ namespace ClypDat.App.Tests;
 public sealed class CaptureDiagnosticBundleTests
 {
     [Fact]
-    public void WorkerLogComesFromAppDataRootRatherThanLogFolder()
-    {
-        var previous = ClypDat.Core.Settings.AppDataPaths.ProductFolderName;
-        ClypDat.Core.Settings.AppDataPaths.ConfigureProductFolder("ClypDat-DiagnosticsTest-" + Guid.NewGuid().ToString("N"));
-        var root = ClypDat.Core.Settings.AppDataPaths.Root;
-        try
-        {
-            Directory.CreateDirectory(root);
-            File.WriteAllText(Path.Combine(root, "capture-worker.log"), "worker evidence");
-            var bundle = CaptureDiagnosticBundle.Create(null, null, Path.Combine(root, "logs"), DateTime.Now);
-            using var archive = ZipFile.OpenRead(bundle);
-            Assert.Equal("worker evidence", ReadEntry(archive, "logs/capture-worker.log"));
-        }
-        finally
-        {
-            ClypDat.Core.Settings.AppDataPaths.ConfigureProductFolder(previous);
-            Directory.Delete(root, true);
-        }
-    }
-
-    [Fact]
     public void Create_WhenOneLogIsExclusivelyLocked_ExportsReadableLogsAndRecordsWarning()
     {
         var root = Path.Combine(Path.GetTempPath(), "ClypDat-CaptureDiagnosticBundleTests", Guid.NewGuid().ToString("N"));

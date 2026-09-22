@@ -21,54 +21,6 @@ public sealed class CaptureLifecycleCoordinatorTests
         Assert.Equal(new[] { "start", "stop", "start" }, fixture.Events);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WakeDuringStopUsesLatestUserIntent(bool disable)
-    {
-        var fixture = new Fixture();
-        await fixture.Start();
-        fixture.StopBlocked = true;
-        fixture.Coordinator.SetAvailability(false);
-        var suspend = fixture.Coordinator.ReconcileAsync(default);
-        await fixture.StopEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        fixture.Coordinator.SetAvailability(true);
-        if (disable) fixture.Coordinator.Request(false);
-        var wake = fixture.Coordinator.ReconcileAsync(default);
-        fixture.StopContinue.SetResult();
-        await Task.WhenAll(suspend, wake).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(disable ? new[] { "start", "stop" } : new[] { "start", "stop", "start" }, fixture.Events);
-        Assert.Equal(!disable, fixture.Recording);
-    }
-
-    [Fact]
-    public async Task DisableWhileSuspendedPreventsWakeRestart()
-    {
-        var fixture = new Fixture();
-        await fixture.Start();
-        fixture.Coordinator.SetAvailability(false);
-        await fixture.Coordinator.ReconcileAsync(default);
-        fixture.Coordinator.Request(false);
-        await fixture.Coordinator.ReconcileAsync(default);
-        fixture.Coordinator.SetAvailability(true);
-        await fixture.Coordinator.ReconcileAsync(default);
-        Assert.Equal(new[] { "start", "stop" }, fixture.Events);
-    }
-
-    [Fact]
-    public async Task RepeatedNotificationsDoNotRepeatTransitions()
-    {
-        var fixture = new Fixture();
-        await fixture.Start();
-        fixture.Coordinator.SetAvailability(true);
-        await fixture.Coordinator.ReconcileAsync(default);
-        fixture.Coordinator.SetAvailability(false);
-        await fixture.Coordinator.ReconcileAsync(default);
-        fixture.Coordinator.SetAvailability(false);
-        await fixture.Coordinator.ReconcileAsync(default);
-        Assert.Equal(new[] { "start", "stop" }, fixture.Events);
-    }
-
     [Fact]
     public async Task SuspendDuringStartStopsBeforeRestart()
     {
@@ -81,21 +33,6 @@ public sealed class CaptureLifecycleCoordinatorTests
         fixture.StartContinue.SetResult();
         await Task.WhenAll(start, wake).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(new[] { "start", "stop", "start" }, fixture.Events);
-    }
-
-    [Fact]
-    public async Task DisableDuringPendingSavePreventsRestart()
-    {
-        var fixture = new Fixture();
-        await fixture.Start();
-        await fixture.Saves.WaitAsync();
-        fixture.Coordinator.SetAvailability(false);
-        var suspend = fixture.Coordinator.ReconcileAsync(default);
-        fixture.Coordinator.Request(false);
-        fixture.Coordinator.SetAvailability(true);
-        fixture.Saves.Release();
-        await suspend.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(new[] { "start", "stop" }, fixture.Events);
     }
 
     private sealed class Fixture

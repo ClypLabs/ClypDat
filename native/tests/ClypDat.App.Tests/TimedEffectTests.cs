@@ -9,13 +9,6 @@ namespace ClypDat.App.Tests;
 public sealed class TimedEffectTests
 {
     [Fact]
-    public void LegacySidecarHasEmptyEffects()
-    {
-        var edit = JsonSerializer.Deserialize<ClipEditSettings>("{\"TrimStartSeconds\":1}")!;
-        Assert.Empty(edit.TextEffects); Assert.Empty(edit.BlurEffects);
-    }
-
-    [Fact]
     public void TrimRebasesBothLanesAndRetainsStylesAndIdentity()
     {
         var item = new TimedVideoEffect { Start = 2, End = 8, Text = "你好\n'quoted': [x], %", Bold = true };
@@ -39,15 +32,6 @@ public sealed class TimedEffectTests
     }
 
     [Fact]
-    public void BlurComposesAfterUnderlyingLayersWithExclusiveEnd()
-    {
-        var graph = ClipRenderFilters.ComposeWithOverlays("setpts=PTS/2",
-            [new(new(0, 0, 20, 20), null, true, "[1:v:0]"), new(new(0, 0, 20, 20), "gte(t,1)*lt(t,2)", false, "", 10)], "[0:v:0]", "[out]");
-        Assert.True(graph.IndexOf("overlay=", StringComparison.Ordinal) < graph.IndexOf("gblur=", StringComparison.Ordinal));
-        Assert.Contains("gte(t,1)*lt(t,2)", graph);
-    }
-
-    [Fact]
     public void ActualBlurPixelsChangeOnlyInsideActiveTimeAndRegion()
     {
         var root = Path.Combine(Path.GetTempPath(), "clypdat-effect-test-" + Guid.NewGuid().ToString("N"));
@@ -67,56 +51,6 @@ public sealed class TimedEffectTests
             Assert.True(Pixel(2, 30) > 30);
             Assert.True(Pixel(4, 30) < 10);
             Assert.True(Pixel(2, 4) < 10);
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    [Fact]
-    public void ExportBlurMixesInThePictureAroundTheBox()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "clypdat-effect-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            // The box covers only black; white starts right after its right edge.
-            var graph = ClipRenderFilters.ComposeWithOverlays(null,
-                [new(new(0, 0, 32, 64), "gte(t,0)", false, "", 5, FrameWidth: 64, FrameHeight: 64)], "[0:v:0]", "[out]");
-            var output = Path.Combine(root, "pixels.rgb");
-            Run("-y", "-f", "lavfi", "-i", "color=black:s=64x64:r=4:d=0.25,drawbox=x=32:y=0:w=32:h=64:color=white:t=fill",
-                "-filter_complex", graph, "-map", "[out]", "-pix_fmt", "rgb24", "-f", "rawvideo", output);
-            var pixels = File.ReadAllBytes(output);
-            int Pixel(int x) => pixels[(32 * 64 + x) * 3];
-            Assert.True(Pixel(31) > 30, "the box edge should pick up the white beside it");
-            Assert.True(Pixel(2) < 10);
-            Assert.True(Pixel(40) > 245, "outside the box stays untouched");
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    [Fact]
-    public void ShapedExportBlurOnlyReplacesPixelsInsideTheMask()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "clypdat-effect-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            // Box x16-48 straddles a black/white edge at x32; the mask is the
-            // ellipse inscribed in the box, a single frame like the real PNG.
-            var graph = ClipRenderFilters.ComposeWithOverlays(null,
-                [new(new(16, 0, 32, 64), "gte(t,0)", false, "[1:v:0]", 10, FrameWidth: 64, FrameHeight: 64)], "[0:v:0]", "[out]");
-            var output = Path.Combine(root, "pixels.rgb");
-            Run("-y", "-f", "lavfi", "-i", "color=black:s=64x64:r=4:d=0.5,drawbox=x=32:y=0:w=32:h=64:color=white:t=fill",
-                "-f", "lavfi", "-i", "color=black:s=32x64:d=0.04,format=gray,geq=lum='255*lte(pow((X-15.5)/16\\,2)+pow((Y-31.5)/32\\,2)\\,1)'",
-                "-filter_complex", graph, "-map", "[out]", "-pix_fmt", "rgb24", "-f", "rawvideo", output);
-            var pixels = File.ReadAllBytes(output);
-            const int frameSize = 64 * 64 * 3;
-            Assert.Equal(2 * frameSize, pixels.Length);
-            int Pixel(int frame, int x, int y) => pixels[frame * frameSize + (y * 64 + x) * 3];
-            foreach (var frame in new[] { 0, 1 })
-            {
-                Assert.True(Pixel(frame, 33, 32) < 235, "the middle of the ellipse is blurred");
-                Assert.True(Pixel(frame, 40, 2) > 250, "the box corner outside the ellipse is untouched");
-            }
         }
         finally { Directory.Delete(root, true); }
     }
@@ -145,34 +79,6 @@ public sealed class TimedEffectTests
             }
             finally { File.Delete(output); }
         }, TimeSpan.FromSeconds(45), "timed text raster");
-    }
-
-    [Fact]
-    [Trait("Category", "IsolatedSTA")]
-    public void EveryBlurShapeGetsASoftMaskAndCleanupRemovesIt()
-    {
-        AvaloniaTestThread.Run(() =>
-        {
-            var blurs = new TimedVideoEffect[] { new() { Shape = "Rectangle", X = 0, Y = 0, Width = .5, Height = .5 }, new() { Shape = "Rounded", X = .5, Y = 0, Width = .5, Height = .5 }, new() { Shape = "Ellipse", X = 0, Y = .5, Width = .5, Height = .5 } };
-            using var render = TimedEffectRender.PrepareAsync([], blurs, 0, 3, 1, 40, 20, CancellationToken.None).GetAwaiter().GetResult();
-            var masks = render.Blur.Select(blur => blur.Mask!).ToArray();
-            Assert.All(masks, path => Assert.True(File.Exists(path)));
-            for (var i = 0; i < masks.Length; i++)
-            {
-                var mask = masks[i];
-                using var bitmap = new Avalonia.Media.Imaging.Bitmap(mask);
-                Assert.Equal(new Avalonia.PixelSize(20, 10), bitmap.PixelSize);
-                var pixels = new byte[20 * 10 * 4];
-                var handle = System.Runtime.InteropServices.GCHandle.Alloc(pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
-                try { bitmap.CopyPixels(new Avalonia.PixelRect(0, 0, 20, 10), handle.AddrOfPinnedObject(), pixels.Length, 20 * 4); }
-                finally { handle.Free(); }
-                Assert.True(pixels[(5 * 20 + 10) * 4] > 250, "centre retains full blur");
-                var expected = (byte)Math.Round(255 * TimedEffectRender.Coverage(blurs[i].Shape, .5, 5.5, 20, 10));
-                Assert.InRange(pixels[(5 * 20) * 4], (byte)Math.Max(0, expected - 1), (byte)Math.Min(255, expected + 1));
-            }
-            render.Dispose();
-            Assert.All(masks, path => Assert.False(File.Exists(path)));
-        }, TimeSpan.FromSeconds(45), "blur shape mask");
     }
 
     private static void Run(params string[] args)

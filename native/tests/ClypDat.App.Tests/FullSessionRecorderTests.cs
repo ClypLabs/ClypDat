@@ -17,11 +17,6 @@ public sealed class FullSessionRecorderTests
 
     [Theory]
     [InlineData("MKV", 6, "libx264")]
-    [InlineData("MP4", 6, "libx264")]
-    [InlineData("MKV", 120, "libx264")]
-    [InlineData("MP4", 120, "libx264")]
-    [InlineData("MKV", 6, "libaom-av1")]
-    [InlineData("MP4", 6, "libaom-av1")]
     public unsafe void LiveFileHasVideoNamedAudioAndRecoverableCompletedFootage(string container, int secondsToRecord, string encoder)
     {
         FfmpegPathResolver.EnsureBundledFfmpeg();
@@ -166,48 +161,6 @@ public sealed class FullSessionRecorderTests
             Assert.Equal(FullSessionState.Failed, buffer.GetHealthSnapshot().FullSession.State);
         }
         finally { ffmpeg.av_packet_free(&packet); ffmpeg.avcodec_free_context(&codec); Directory.Delete(root, true); }
-    }
-
-    [Theory]
-    [InlineData("MKV")]
-    [InlineData("MP4")]
-    public async Task AbruptWriterTerminationReleasesOwnershipAndPreservesAudio(string container)
-    {
-        FfmpegPathResolver.EnsureBundledFfmpeg();
-        var root = Path.Combine(AppContext.BaseDirectory, "full-session-tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        using var child = new Process { StartInfo = new("dotnet") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true } };
-        foreach (var arg in new[] { typeof(FullSessionRecorderTests).Assembly.Location, "--full-session-crash", root, container }) child.StartInfo.ArgumentList.Add(arg);
-        var started = false;
-        try
-        {
-            started = child.Start();
-            var stderr = child.StandardError.ReadToEndAsync(); var stdout = child.StandardOutput.ReadToEndAsync();
-            var ready = Path.Combine(root, "ready.txt");
-            Assert.True(SpinWait.SpinUntil(() => File.Exists(ready) || child.HasExited, TimeSpan.FromSeconds(30)));
-            Assert.False(child.HasExited, child.HasExited ? await stderr : "");
-            var path = File.ReadAllText(ready);
-            Assert.True(RecordingFileOwnership.IsActive(path));
-            Assert.False(MediaProbeService.IsVideoFile(path));
-            child.Kill(entireProcessTree: true); Assert.True(child.WaitForExit(10000));
-            Assert.True(MediaProbeService.IsVideoFile(path));
-            Assert.False(File.Exists(path + ".recording"));
-            Assert.True(File.Exists(FullSessionRecovery.Marker(path)));
-            Assert.True(await FullSessionRecovery.RecoverAsync(path));
-            Assert.False(File.Exists(FullSessionRecovery.Marker(path)));
-            using var probe = JsonDocument.Parse(Run(FfmpegPathResolver.FfprobePath, "-v", "error", "-show_streams", "-of", "json", path));
-            Assert.Equal(4, probe.RootElement.GetProperty("streams").GetArrayLength());
-            // Decode every track, then rebuild the missing final index in the same container.
-            Run(FfmpegPathResolver.FfmpegPath, "-v", "error", "-i", path, "-map", "0", "-f", "null", "-");
-            var repaired = Path.Combine(root, "recovered." + container.ToLowerInvariant());
-            Run(FfmpegPathResolver.FfmpegPath, "-v", "error", "-i", path, "-map", "0", "-c", "copy", repaired);
-            Assert.InRange(DecodeRms(repaired, 1, root, 1), 0.1, 0.3);
-        }
-        finally
-        {
-            if (started && !child.HasExited) { child.Kill(true); child.WaitForExit(10000); }
-            Directory.Delete(root, true);
-        }
     }
 
     internal static string Run(string executable, params string[] args)

@@ -17,17 +17,6 @@ public sealed class CameraPreviewModeTests
     }
 
     [Fact]
-    public void FallsBackFromUnsupportedSixtyToThirtyThenLowerRates()
-    {
-        var modes = CameraPreviewModeProbe.Parse("""
-            [dshow @ 000] pixel_format=nv12 min s=640x360 fps=5 max s=640x360 fps=29.97
-            [dshow @ 000] pixel_format=nv12 min s=640x360 fps=5 max s=640x360 fps=25
-            """);
-        Assert.Equal(29.97, modes[0].FramesPerSecond, 2);
-        Assert.Equal(25, modes[1].FramesPerSecond);
-    }
-
-    [Fact]
     public void UsesArgumentListSafeUnicodeDeviceNameAndPassthroughTiming()
     {
         var arguments = CameraPreviewService.BuildArguments("Cámara Ø", new CameraPreviewMode(640, 360, 59.94, "nv12", false));

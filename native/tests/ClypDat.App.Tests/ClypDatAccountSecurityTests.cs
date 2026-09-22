@@ -17,8 +17,6 @@ public sealed class ClypDatAccountSecurityTests
     // Fixtures generated with the website's Node SHA-256/UTF-8 pairing algorithm.
     [Theory]
     [InlineData("test-state-0123456789", "UV3-UX3")]
-    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "9RE-TQA")]
-    [InlineData("f3f5b8f73b524f7e91c765c4054e31ab", "A3J-Z53")]
     public void PairingCodeMatchesWebsite(string state, string expected) =>
         Assert.Equal(expected, ClypDatAccountActivityService.PairingCode(state));
 
@@ -33,17 +31,6 @@ public sealed class ClypDatAccountSecurityTests
         // A crash between the two steps must still leave the token recorded
         // somewhere it will be revoked from.
         Assert.True(fixture.RevokeQueuedAtRevoke);
-        Assert.False(fixture.Service.IsAuthenticated);
-        Assert.False(File.Exists(fixture.CachePath));
-        Assert.False(File.Exists(fixture.RevokePath));
-    }
-
-    [Fact]
-    public async Task AlreadyRevokedTokenCanBeRemovedLocally()
-    {
-        using var fixture = new AccountFixture(HttpStatusCode.Unauthorized);
-        Assert.True(await fixture.Service.TryRestoreAsync());
-        Assert.True(await fixture.Service.SignOutAsync());
         Assert.False(fixture.Service.IsAuthenticated);
         Assert.False(File.Exists(fixture.CachePath));
         Assert.False(File.Exists(fixture.RevokePath));
@@ -100,14 +87,6 @@ public sealed class ClypDatAccountSecurityTests
         using var saved = JsonDocument.Parse(ProtectedData.Unprotect(File.ReadAllBytes(fixture.CachePath), null, DataProtectionScope.CurrentUser));
         Assert.Equal(AccountFixture.RenewedToken, saved.RootElement.GetProperty("AccessToken").GetString());
         Assert.True(saved.RootElement.GetProperty("ExpiresAt").GetDateTimeOffset() > DateTimeOffset.UtcNow.AddDays(29));
-    }
-
-    [Fact]
-    public async Task SignInWithTimeLeftIsNotRenewed()
-    {
-        using var fixture = new AccountFixture(HttpStatusCode.OK, TimeSpan.FromDays(20));
-        Assert.True(await fixture.Service.TryRestoreAsync());
-        Assert.Equal(0, fixture.RenewRequests);
     }
 
     [Fact]

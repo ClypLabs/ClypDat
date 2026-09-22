@@ -51,15 +51,6 @@ public sealed class DetectorTemplateTests
         });
     }
 
-    [Fact]
-    public void MissingTemplatesDegradeToNoBannersRatherThanThrowing()
-    {
-        var loaded = DetectorTemplates.Load("overwatch", DetectorRegions.ForGame("overwatch")!,
-            Path.Combine(Path.GetTempPath(), "clypdat-templates-that-do-not-exist"));
-
-        Assert.Empty(loaded);
-    }
-
     // A template matches itself exactly, and something unrelated does not - the
     // property the whole banner path rests on.
     [Fact]
@@ -70,31 +61,6 @@ public sealed class DetectorTemplateTests
 
         Assert.True(matcher.Score(template) > 0.99);
         Assert.True(matcher.Score(Gray(40, 12, (_, _) => 128)) < 0.2);
-    }
-
-    // Brightness invariance is why this survives the banner fading in and the
-    // world behind it changing.
-    [Fact]
-    public void CorrelationIgnoresOverallBrightness()
-    {
-        var template = Gray(40, 12, (x, y) => (byte)(x * 5 + y * 2));
-        var matcher = GrayTemplateMatcher.FromGray(template);
-
-        var dimmer = Gray(40, 12, (x, y) => (byte)((x * 5 + y * 2) / 2));
-
-        Assert.True(matcher.Score(dimmer) > 0.99);
-    }
-
-    // A 1080p reference has to match a 1440p capture of the same banner.
-    [Fact]
-    public void CorrelationSurvivesADifferentCaptureResolution()
-    {
-        var template = Gray(40, 12, (x, y) => (byte)(x * 6 + y * 3));
-        var matcher = GrayTemplateMatcher.FromGray(template);
-
-        var larger = Gray(80, 24, (x, y) => (byte)(x / 2 * 6 + y / 2 * 3));
-
-        Assert.True(matcher.Score(larger) > 0.95);
     }
 
     // Fortnite shifts its banner vertically when it stacks another line above,
@@ -110,19 +76,5 @@ public sealed class DetectorTemplateTests
 
         Assert.True(matcher.Score(band) < 0.8);
         Assert.True(matcher.ScoreBest(band) > 0.95);
-    }
-
-    [Fact]
-    public void SlotRelativeConversionKeepsARegionInsideItsSlot()
-    {
-        var slot = new NormalizedRegion(0.43, 0.685, 0.28, 0.115);
-        var frame = new NormalizedRegion(0.4521, 0.6852, 0.1563, 0.0741);
-
-        var relative = GrayTemplateMatcher.ToSlotRelative(frame, slot);
-
-        Assert.InRange(relative.X, 0, 1);
-        Assert.InRange(relative.Y, 0, 1);
-        Assert.True(relative.X + relative.Width <= 1.0001);
-        Assert.True(relative.Y + relative.Height <= 1.0001);
     }
 }

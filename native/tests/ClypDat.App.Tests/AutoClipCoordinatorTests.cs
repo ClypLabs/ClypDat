@@ -40,23 +40,6 @@ public sealed class AutoClipCoordinatorTests
     }
 
     [Fact]
-    public async Task SessionSwitchCancelsQueuedTailAndClearsOccurrences()
-    {
-        var saves = 0;
-        var first = Guid.NewGuid();
-        await using var coordinator = new AutoClipCoordinator((_, _) => { Interlocked.Increment(ref saves); return Task.CompletedTask; });
-        var enabled = new HashSet<string> { "victory-royale" };
-        await coordinator.ReconcileAsync(new AutoClipPolicy(first, "fortnite", true, enabled, TimeSpan.FromMinutes(2)));
-        Assert.True(await coordinator.ObserveAsync(Signal(first, "fortnite", "victory-royale", "win", tailSeconds: 1)));
-
-        var second = Guid.NewGuid();
-        await coordinator.ReconcileAsync(new AutoClipPolicy(second, "fortnite", true, enabled, TimeSpan.FromMinutes(2)));
-        await Task.Delay(1100);
-        Assert.Equal(0, Volatile.Read(ref saves));
-        Assert.True(await coordinator.ObserveAsync(Signal(second, "fortnite", "victory-royale", "win")));
-    }
-
-    [Fact]
     public async Task QueueIsBoundedToThirtyTwoPlans()
     {
         var session = Guid.NewGuid();

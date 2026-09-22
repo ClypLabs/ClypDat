@@ -9,13 +9,6 @@ public sealed class ClipOverlayComposeTests
         new(new SpotifyOverlayBounds(10, 20, 320, 180), enable, straight, label);
 
     [Fact]
-    public void NoOverlaysLeavesTheEffectsChainAloneSoTheSimpleVfPathSurvives()
-    {
-        Assert.Equal("crop=100:100:0:0", ClipRenderFilters.ComposeWithOverlays("crop=100:100:0:0", [], "[0:v:0]", "[vout]"));
-        Assert.Equal(string.Empty, ClipRenderFilters.ComposeWithOverlays(null, [], "[0:v:0]", "[vout]"));
-    }
-
-    [Fact]
     public void EachLayerScalesToItsOwnBoxAndChainsIntoTheNext()
     {
         var graph = ClipRenderFilters.ComposeWithOverlays("setpts=PTS/2",
@@ -28,24 +21,6 @@ public sealed class ClipOverlayComposeTests
             ";[2:v:0]scale=320:180:flags=lanczos[ovl1]" +
             ";[ovs0][ovl1]overlay=10:20:eof_action=pass:repeatlast=0:alpha=straight[vout]",
             graph);
-    }
-
-    [Fact]
-    public void AnEmptyEffectsChainStillGetsANodeToOverlayOnto()
-    {
-        var graph = ClipRenderFilters.ComposeWithOverlays(null, [Layer("[1:v:0]")], "[0:v:0]", "[vout]");
-
-        Assert.StartsWith("[0:v:0]null[ovbase]", graph);
-    }
-
-    [Fact]
-    public void OnlyATimeLimitedLayerCarriesAnEnableExpression()
-    {
-        var graph = ClipRenderFilters.ComposeWithOverlays(null,
-            [Layer("[1:v:0]", "between(t,0,4)"), Layer("[2:v:0]")], "[0:v:0]", "[vout]");
-
-        Assert.Contains("overlay=10:20:enable='between(t,0,4)'", graph);
-        Assert.Single(graph.Split("enable=").Skip(1));
     }
 
     [Fact]

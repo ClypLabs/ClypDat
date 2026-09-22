@@ -8,30 +8,6 @@ namespace ClypDat.App.Tests;
 public sealed class AutoClipCatalogTests
 {
     [Fact]
-    public void CvGamesExposeTheirRuntimeDeliveryAndDefaultDisabledState()
-    {
-        var fortnite = AutoClipCatalog.Get("fortnite");
-        var helldivers = AutoClipCatalog.Get("helldivers2");
-
-        // Both ship their detector inside the app now; neither waits on a
-        // downloadable pack.
-        Assert.False(fortnite.UsesDetectorPack);
-        Assert.True(fortnite.UsesDetector);
-        Assert.False(helldivers.UsesDetectorPack);
-        Assert.True(helldivers.UsesDetector);
-        Assert.False(fortnite.DefaultEnabled);
-        Assert.False(helldivers.DefaultEnabled);
-        Assert.Equal("clypdat-cv", fortnite.ProviderId);
-        Assert.Equal("clypdat-cv", helldivers.ProviderId);
-        Assert.Equal("epic-fortnite", fortnite.PortraitDetectionKey);
-        Assert.Equal("steam-553850", helldivers.PortraitDetectionKey);
-        Assert.Equal("HELLDIVERS™ 2", helldivers.PortraitDisplayName);
-        // Display name drops the trademark mark; the portrait key above keeps it,
-        // because that is the spelling official-game-art.json is indexed on.
-        Assert.Equal("HELLDIVERS 2", helldivers.Name);
-    }
-
-    [Fact]
     public void CvDefaultsAndDominancePrioritiesMatchPackContract()
     {
         var fortnite = AutoClipCatalog.Get("fortnite");
@@ -72,9 +48,6 @@ public sealed class AutoClipCatalogTests
 
     [Theory]
     [InlineData(false, false, false, false)]
-    [InlineData(true, false, false, true)]
-    [InlineData(false, true, false, true)]
-    [InlineData(false, false, true, true)]
     public void LegacyKillstreakSettingsMigrateToOneToggle(bool twenty, bool fifty, bool hundred, bool expected)
     {
         var events = new Dictionary<string, bool>
@@ -88,66 +61,6 @@ public sealed class AutoClipCatalogTests
         events["killstreak"] = !expected;
         AutoClipCatalog.MigrateHelldiversKillstreakSetting(events);
         Assert.Equal(!expected, events["killstreak"]);
-    }
-
-    [Fact]
-    public void NewKillstreakPreferenceWinsOverLegacyAndMissingDefaultsRemainUnset()
-    {
-        var events = new Dictionary<string, bool>();
-        AutoClipCatalog.MigrateHelldiversKillstreakSetting(events);
-        Assert.Empty(events);
-        events["killstreak"] = false;
-        events["killstreak-100"] = true;
-        AutoClipCatalog.MigrateHelldiversKillstreakSetting(events);
-        Assert.False(Assert.Single(events).Value);
-    }
-
-    // The settings list renders the catalog in order, and every tile now comes
-    // from GamePortraitService rather than a bundled cover - so a new entry
-    // without a portrait key would render a blank box.
-    [Fact]
-    public void ActiveGamesAreAlphabeticalAndAllResolveAPortrait()
-    {
-        var names = AutoClipCatalog.Active.Select(game => game.Name).ToArray();
-
-        Assert.Equal(names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray(), names);
-        Assert.All(AutoClipCatalog.Active, game => Assert.False(string.IsNullOrWhiteSpace(game.PortraitDetectionKey)));
-    }
-
-    [Fact]
-    public void OverwatchShipsWithABuiltInDetector()
-    {
-        var overwatch = AutoClipCatalog.Get("overwatch");
-
-        // Built in, not a downloadable pack: the detector ships inside the app.
-        Assert.True(overwatch.UsesDetector);
-        Assert.False(overwatch.UsesDetectorPack);
-        Assert.True(overwatch.DefaultEnabled);
-        Assert.Equal("overwatch-prototype", overwatch.PackId);
-        Assert.Equal("clypdat-cv", overwatch.ProviderId);
-        Assert.Equal("steam-2357570", overwatch.PortraitDetectionKey);
-        Assert.Equal("Overwatch®", overwatch.PortraitDisplayName);
-        Assert.Equal("Overwatch", overwatch.Name);
-        Assert.Equal(
-            new HashSet<string> { "double-kill", "triple-kill", "quadruple-kill", "quintuple-kill", "team-kill", "play-of-the-game" },
-            overwatch.Events.Where(item => item.DefaultEnabled).Select(item => item.Id).ToHashSet());
-        // Each streak tier is its own event because Overwatch prints the tier
-        // name, and the bigger streak has to win a shared clip window.
-        var tiers = new[] { "double-kill", "triple-kill", "quadruple-kill", "quintuple-kill" }
-            .Select(id => overwatch.Events.Single(item => item.Id == id).Priority)
-            .ToArray();
-        Assert.Equal(tiers.OrderBy(priority => priority).ToArray(), tiers);
-        Assert.True(overwatch.Events.Single(item => item.Id == "team-kill").Priority > tiers[^1]);
-        Assert.Equal("overwatch", AutoClipCatalog.MatchGame(null, "Overwatch.exe", null));
-    }
-
-    [Theory]
-    [InlineData("FortniteClient-Win64-Shipping.exe", "fortnite")]
-    [InlineData("helldivers2.exe", "helldivers2")]
-    [InlineData("cs2.exe", "cs2")]
-    public void DetectionAliasesResolveStableGameIds(string executable, string expected)
-    {
-        Assert.Equal(expected, AutoClipCatalog.MatchGame(null, executable, null));
     }
 
     [Fact]

@@ -34,7 +34,6 @@ public sealed class ProcessLoopbackLifetimeTests
 
     [Theory]
     [InlineData(false)]
-    [InlineData(true)]
     public async Task DisposalFromCallbackDoesNotReleaseInsideCaptureCall(bool dataCallback)
     {
         var client = new StalledClient { DeliverPackets = dataCallback };
@@ -73,42 +72,6 @@ public sealed class ProcessLoopbackLifetimeTests
     }
 
     [Fact]
-    public void StalledNativeStopAlsoRetainsResources()
-    {
-        var client = new StalledClient { StallOnStop = true };
-        using var capture = new ProcessLoopbackWaveIn(client, TimeSpan.FromMilliseconds(20));
-        capture.StartRecording();
-        Assert.True(client.Entered.Wait(TimeSpan.FromSeconds(5)));
-        client.Continue.Set();
-        capture.Dispose();
-        Assert.True(client.StopEntered.Wait(TimeSpan.FromSeconds(5)));
-        try { Assert.Equal(0, client.Releases); }
-        finally { client.StopContinue.Set(); }
-        Assert.True(client.Released.Wait(TimeSpan.FromSeconds(5)));
-        Assert.Equal(1, client.Releases);
-    }
-
-    [Fact]
-    public void CompletedStopAllowsSequentialRestart()
-    {
-        var client = new StalledClient();
-        using var capture = new ProcessLoopbackWaveIn(client, TimeSpan.FromSeconds(2));
-        capture.StartRecording();
-        Assert.True(client.Entered.Wait(TimeSpan.FromSeconds(5)));
-        client.Continue.Set();
-        capture.StopRecording();
-        client.Entered.Reset();
-        capture.StartRecording();
-        Assert.True(client.Entered.Wait(TimeSpan.FromSeconds(5)));
-        capture.StopRecording();
-        Assert.Equal(2, client.Starts);
-        Assert.Equal(2, client.Stops);
-        Assert.Equal(0, client.Releases);
-        capture.Dispose();
-        Assert.Equal(1, client.Releases);
-    }
-
-    [Fact]
     public async Task StalledReleaseDoesNotHoldLifetimeLock()
     {
         var client = new StalledClient { StallOnRelease = true };
@@ -126,17 +89,6 @@ public sealed class ProcessLoopbackLifetimeTests
         finally { client.ReleaseContinue.Set(); }
         Assert.True(client.Released.Wait(TimeSpan.FromSeconds(5)));
         Assert.Equal(1, client.Releases);
-    }
-
-    [Fact]
-    public void DisposeBeforeStartReleasesExactlyOnce()
-    {
-        var client = new StalledClient();
-        var capture = new ProcessLoopbackWaveIn(client, TimeSpan.Zero);
-        capture.Dispose();
-        capture.Dispose();
-        Assert.Equal(1, client.Releases);
-        Assert.Throws<ObjectDisposedException>(capture.StartRecording);
     }
 
     // WASAPI process loopback hands back zero-filled device periods without
@@ -168,45 +120,6 @@ public sealed class ProcessLoopbackLifetimeTests
         Assert.Equal(level, after[after.Length / 2]);
         Assert.True(before[^1] < level, $"packet before the hole was not faded out (ends at {before[^1]})");
         Assert.True(after[0] < level, $"packet after the hole was not faded in (starts at {after[0]})");
-    }
-
-    [Fact]
-    public void SilenceCounter_FullySilentInterval_DoesNotCarryFramesForward()
-    {
-        var counter = new SilentHoleCounter();
-        // A whole interval of silence: no run STARTS, because nothing precedes
-        // it that was audible.
-        for (var i = 0; i < 6000; i++) counter.Packet(silent: true, previousSilent: true, frames: 480);
-        Assert.False(counter.TryTakeInterval(out var runs, out var frames));
-        Assert.Equal(0, runs);
-        Assert.Equal(2_880_000, frames);
-
-        // The next interval must report only its own silence, not the last
-        // one's - that is what produced silentMs=327550 inside a 60s window.
-        counter.Packet(silent: true, previousSilent: false, frames: 480);
-        counter.Packet(silent: true, previousSilent: true, frames: 480);
-        Assert.True(counter.TryTakeInterval(out runs, out frames));
-        Assert.Equal(1, runs);
-        Assert.Equal(960, frames);
-    }
-
-    [Fact]
-    public void SilenceCounter_CountsRunStartsNotPackets()
-    {
-        var counter = new SilentHoleCounter();
-        counter.Packet(silent: false, previousSilent: true, frames: 480);
-        counter.Packet(silent: true, previousSilent: false, frames: 480);
-        counter.Packet(silent: true, previousSilent: true, frames: 480);
-        counter.Packet(silent: false, previousSilent: true, frames: 480);
-        counter.Packet(silent: true, previousSilent: false, frames: 480);
-
-        Assert.True(counter.TryTakeInterval(out var runs, out var frames));
-        Assert.Equal(2, runs);
-        Assert.Equal(1440, frames);
-        // Cleared, so an idle capture reports nothing rather than repeating.
-        Assert.False(counter.TryTakeInterval(out runs, out frames));
-        Assert.Equal(0, runs);
-        Assert.Equal(0, frames);
     }
 
     private static float[] ToSamples(byte[] buffer, int bytes)

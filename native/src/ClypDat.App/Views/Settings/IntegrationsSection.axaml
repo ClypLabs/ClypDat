@@ -167,7 +167,7 @@
             <StackPanel Spacing="2" VerticalAlignment="Center">
               <TextBlock Classes="settingsRowTitleSm" Text="Advanced: use your own Spotify app" />
               <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding !SpotifyAccountConnected}"
-                         Text="Adds Spotify's own covers, and songs playing on your phone or another device. Takes a couple of minutes with a free Spotify developer app (the Spotify account needs Premium)." />
+                         Text="Also shows songs you play on your phone, the web player or another device, not just the Spotify app on this PC. Takes a couple of minutes with a free Spotify developer app (the Spotify account needs Premium)." />
               <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding SpotifyAccountConnected}"
                          Text="Signed in through your own Spotify app. Signing out keeps reading the Spotify app on this PC." />
             </StackPanel>

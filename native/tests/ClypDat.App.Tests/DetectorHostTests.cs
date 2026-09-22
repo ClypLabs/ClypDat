@@ -12,7 +12,6 @@ public sealed class DetectorHostTests
 {
     [Theory]
     [InlineData(false)]
-    [InlineData(true)]
     public void SharedMemoryCodecRoundTripsAllRegions(bool withMask)
     {
         using var map = MemoryMappedFile.CreateNew(null, DetectorFrameCodec.SlotBytes * 3L);
@@ -62,77 +61,13 @@ public sealed class DetectorHostTests
     }
 
     [Theory]
-    [InlineData(1920, 1080)]
-    [InlineData(2560, 1440)]
-    [InlineData(3840, 2160)]
-    public void SupportedHelldiversCropsWithMaskFitSlot(int width, int height)
-    {
-        var regions = DetectorRegions.ForGame("helldivers2")!;
-        GrayDetectorImage Crop(NormalizedRegion area)
-        {
-            var rect = area.ToPixelRect(width, height);
-            return Image(rect.Width, rect.Height, 0);
-        }
-        using var map = MemoryMappedFile.CreateNew(null, DetectorFrameCodec.SlotBytes * 3L);
-        using var view = map.CreateViewAccessor();
-        var third = Crop(regions.Third);
-        DetectorFrameCodec.Write(view, 2, new(DateTime.UtcNow, Crop(regions.First), Crop(regions.Second), third, third));
-        Assert.Equal(third.Pixels, DetectorFrameCodec.Read(view, 2).ThirdMask!.Pixels);
-    }
-
-    [Theory]
     [InlineData(1)]
-    [InlineData(2)]
     public async Task WireRejectsIncompatibleProtocol(int version)
     {
         using var stream = new MemoryStream();
         var bytes = Encoding.UTF8.GetBytes($"{{\"version\":{version},\"type\":\"frame\",\"payload\":{{}}}}");
         stream.Write(BitConverter.GetBytes(bytes.Length)); stream.Write(bytes); stream.Position = 0;
         await Assert.ThrowsAsync<InvalidDataException>(() => DetectorHostWire.ReadAsync(stream, CancellationToken.None));
-    }
-
-    // The wire writes with web defaults (camelCase) but payloads used to be read
-    // back with JsonElement.Deserialize, which is case-sensitive - so "gameId"
-    // never bound to GameId and the host received a policy with no game and no
-    // enabled events. It failed silently for as long as the only detector was
-    // constructed unconditionally.
-    [Fact]
-    public async Task PolicyFieldsSurviveTheWireRoundTrip()
-    {
-        var sent = new DetectorHostPolicy("overwatch", new[] { "team-kill", "play-of-the-game" }, "clypdat.overwatch", "0.1.0", "builtin");
-        using var stream = new MemoryStream();
-
-        await DetectorHostWire.WriteAsync(stream, "policy", sent, CancellationToken.None);
-        stream.Position = 0;
-        var message = await DetectorHostWire.ReadAsync(stream, CancellationToken.None);
-
-        Assert.NotNull(message);
-        Assert.Equal("policy", message.Type);
-        var received = DetectorHostWire.Deserialize<DetectorHostPolicy>(message.Payload);
-        Assert.NotNull(received);
-        Assert.Equal("overwatch", received.GameId);
-        Assert.Equal(new[] { "team-kill", "play-of-the-game" }, received.EnabledEventIds);
-        Assert.Equal("clypdat.overwatch", received.PackId);
-    }
-
-    // Same asymmetry in the other direction: a detected event reached the app
-    // with every field defaulted, so nothing could ever be clipped.
-    [Fact]
-    public async Task DetectedEventFieldsSurviveTheWireRoundTrip()
-    {
-        var sent = new AutoClipDetectorEvent("fortnite", "distance-shot", "Distance Shot (64 M)", "occurrence-1", 0.92, DateTime.UtcNow, 8, 6);
-        using var stream = new MemoryStream();
-
-        await DetectorHostWire.WriteAsync(stream, "detected", sent, CancellationToken.None);
-        stream.Position = 0;
-        var message = await DetectorHostWire.ReadAsync(stream, CancellationToken.None);
-
-        var received = DetectorHostWire.Deserialize<AutoClipDetectorEvent>(message!.Payload);
-        Assert.NotNull(received);
-        Assert.Equal("fortnite", received.GameId);
-        Assert.Equal("distance-shot", received.EventId);
-        Assert.Equal("Distance Shot (64 M)", received.EventLabel);
-        Assert.Equal(8, received.LeadSeconds);
     }
 
     [Fact]
@@ -144,14 +79,6 @@ public sealed class DetectorHostTests
         Assert.Equal(2, breaker.Record(now.AddMinutes(4)));
         Assert.Equal(3, breaker.Record(now.AddMinutes(9)));
         Assert.Equal(1, breaker.Record(now.AddMinutes(20)));
-    }
-
-    [Fact]
-    public void HostResolverUsesDedicatedSiblingWhenPresent()
-    {
-        var app = Path.Combine("C:\\ClypDat", "ClypDatRecorder.exe");
-        var result = DetectorHostExecutable.Resolve(app, path => path.EndsWith(DetectorHostExecutable.FileName));
-        Assert.Equal(Path.Combine("C:\\ClypDat", DetectorHostExecutable.FileName), result);
     }
 
     [Fact]

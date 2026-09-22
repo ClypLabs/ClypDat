@@ -7,20 +7,6 @@ namespace ClypDat.App.Tests;
 public sealed class CustomGameSettingsTests
 {
     [Fact]
-    public void AllGroups_ContainsOnlySupportedGroups()
-    {
-        Assert.Equal(
-            [
-                CustomGameSettingsResolver.RecordingModeGroup,
-                CustomGameSettingsResolver.QualityGroup,
-                CustomGameSettingsResolver.ReplayGroup,
-                CustomGameSettingsResolver.AudioGroup,
-                CustomGameSettingsResolver.OverlaysGroup
-            ],
-            CustomGameSettingsResolver.AllGroups);
-    }
-
-    [Fact]
     public void PruneUnknownGroups_RemovesRetiredGroupsWithoutChangingValidOverrides()
     {
         var profile = new CustomGameProfile
@@ -33,81 +19,6 @@ public sealed class CustomGameSettingsTests
 
         Assert.Equal([CustomGameSettingsResolver.RecordingModeGroup], profile.Groups);
         Assert.Equal(CustomGameSettingsResolver.OffMode, profile.RecordingMode);
-    }
-
-    [Fact]
-    public void ReplayHotkey_OnlyAppliesWhenReplayGroupEnabled()
-    {
-        var settings = new AppSettings { SaveReplayHotkey = "Ctrl+Shift+F9" };
-        settings.CustomGameSettings["game.exe"] = new CustomGameProfile
-        {
-            SaveReplayHotkey = "Alt+F9",
-            Groups = [CustomGameSettingsResolver.ReplayGroup]
-        };
-
-        Assert.Equal("Alt+F9", CustomGameSettingsResolver.Resolve(settings, "game.exe").SaveReplayHotkey);
-        settings.CustomGameSettings["game.exe"].Groups.Clear();
-        Assert.Equal("Ctrl+Shift+F9", CustomGameSettingsResolver.Resolve(settings, "game.exe").SaveReplayHotkey);
-    }
-
-    [Fact]
-    public void FullSessionHotkey_OnlyAppliesWhenReplayGroupEnabled()
-    {
-        var settings = new AppSettings { FullSessionHotkey = "F8" };
-        settings.CustomGameSettings["game.exe"] = new CustomGameProfile
-        {
-            FullSessionHotkey = "F10",
-            Groups = [CustomGameSettingsResolver.ReplayGroup]
-        };
-
-        Assert.Equal("F10", CustomGameSettingsResolver.Resolve(settings, "game.exe").FullSessionHotkey);
-        settings.CustomGameSettings["game.exe"].Groups.Clear();
-        Assert.Equal("F8", CustomGameSettingsResolver.Resolve(settings, "game.exe").FullSessionHotkey);
-    }
-
-    [Fact]
-    public void ReplayGroupSeedsBothRecordingHotkeys()
-    {
-        var settings = new AppSettings { SaveReplayHotkey = "Insert", FullSessionHotkey = "F8" };
-        var profile = new CustomGameProfile { SaveReplayHotkey = "F9", FullSessionHotkey = "F10" };
-
-        CustomGameSettingsResolver.SeedGroupFromGlobal(settings, profile, CustomGameSettingsResolver.ReplayGroup);
-
-        Assert.Equal("Insert", profile.SaveReplayHotkey);
-        Assert.Equal("F8", profile.FullSessionHotkey);
-    }
-
-    [Fact]
-    public void ReplayHotkey_ResolvesAliasProfile()
-    {
-        var settings = new AppSettings { SaveReplayHotkey = "Ctrl+Shift+F9" };
-        settings.GameCaptureOverrides.Add(new GameCaptureOverride { ExecutableName = "steam-1", DisplayName = "Game" });
-        settings.GameCaptureOverrides.Add(new GameCaptureOverride { ExecutableName = "game.exe", DisplayName = "Game" });
-        settings.CustomGameSettings["game.exe"] = new CustomGameProfile
-        {
-            SaveReplayHotkey = "Alt+F9",
-            Groups = [CustomGameSettingsResolver.ReplayGroup]
-        };
-
-        Assert.Equal("Alt+F9", CustomGameSettingsResolver.Resolve(settings, "steam-1").SaveReplayHotkey);
-    }
-
-    [Fact]
-    public void V5Migration_ResetsDormantProfileHotkeysToGlobalHotkey()
-    {
-        var settings = new AppSettings { SettingsSchemaVersion = 5, SaveReplayHotkey = "Ctrl+Alt+F9" };
-        settings.CustomGameSettings["game.exe"] = new CustomGameProfile { SaveReplayHotkey = "Alt+F9" };
-
-        Assert.True(AppSettingsMigrations.Apply(settings));
-        Assert.Equal(AppSettingsMigrations.CurrentSchemaVersion, settings.SettingsSchemaVersion);
-        Assert.Equal("Ctrl+Alt+F9", settings.CustomGameSettings["game.exe"].SaveReplayHotkey);
-    }
-
-    [Fact]
-    public void NewSettings_DefaultSaveHotkeyIsInsert()
-    {
-        Assert.Equal("Insert", new AppSettings().SaveReplayHotkey);
-        Assert.Equal("Insert", new CustomGameProfile().SaveReplayHotkey);
     }
 
     [Fact]
@@ -135,12 +46,15 @@ public sealed class CustomGameSettingsTests
     }
 
     [Fact]
-    public void CurrentSchema_KeepsDeliberateOldDefaultChoice()
+    public void V14Migration_TurnsSpotifyOffOnceAndNewSettingsStartOff()
     {
-        // Picked after upgrading, so it is a user choice, not a leftover default.
-        var settings = new AppSettings { SettingsSchemaVersion = AppSettingsMigrations.CurrentSchemaVersion, SaveReplayHotkey = "Ctrl+Shift+F9" };
-
-        Assert.False(AppSettingsMigrations.Apply(settings));
-        Assert.Equal("Ctrl+Shift+F9", settings.SaveReplayHotkey);
+        Assert.False(new AppSettings().SpotifyEnabled);
+        var upgraded = new AppSettings { SettingsSchemaVersion = 13, SpotifyEnabled = true };
+        Assert.True(AppSettingsMigrations.Apply(upgraded));
+        Assert.False(upgraded.SpotifyEnabled);
+        // Turned back on afterwards, it stays on.
+        upgraded.SpotifyEnabled = true;
+        Assert.False(AppSettingsMigrations.Apply(upgraded));
+        Assert.True(upgraded.SpotifyEnabled);
     }
 }

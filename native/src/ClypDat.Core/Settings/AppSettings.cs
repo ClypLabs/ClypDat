@@ -240,9 +240,9 @@ public sealed class AppSettings
     public bool XboxActivityEnabled { get; set; }
 
     /// <summary>
-    /// Whether ClypDat reconnects to Spotify on launch. Set when the user
-    /// connects and cleared when they disconnect, so a signed-out user never
-    /// pays for a poll loop they did not ask for.
+    /// Whether ClypDat reads Spotify, and so reconnects to it on launch. Off
+    /// until the user turns it on in Connected Accounts, and cleared when they
+    /// turn it off.
     /// </summary>
     public bool SpotifyEnabled { get; set; }
 

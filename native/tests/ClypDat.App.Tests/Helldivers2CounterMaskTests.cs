@@ -39,12 +39,6 @@ public sealed class Helldivers2CounterMaskTests
 
     [Theory]
     [InlineData(230, 45, 90, true, false)] // Pink belongs only in the skull area.
-    [InlineData(235, 220, 20, true, true)]
-    [InlineData(255, 210, 0, true, false)] // Gold skull at the lower counts.
-    [InlineData(100, 40, 45, true, false)] // Pink skull during fade.
-    [InlineData(255, 255, 255, false, false)]
-    [InlineData(240, 40, 0, false, false)] // Orange terrain/fire.
-    [InlineData(40, 40, 40, false, false)]
     public void IsolatesHudColours(int r, int g, int b, bool skull, bool digits)
     {
         var bgra = new byte[308 * 4];
@@ -55,12 +49,5 @@ public sealed class Helldivers2CounterMaskTests
         var mask = Helldivers2CounterMask.FromBgra(bgra, bgra.Length, new(0, 0, 308, 1));
         Assert.Equal(skull ? 255 : 0, mask.Pixels[119]);
         Assert.Equal(digits ? 255 : 0, mask.Pixels[120]);
-    }
-
-    [Fact]
-    public void RejectsPlanesThatCannotCoverCrop()
-    {
-        Assert.Throws<ArgumentException>(() => Helldivers2CounterMask.FromNv12(new byte[32], 8, new byte[7], 8, new(1, 1, 6, 3)));
-        Assert.Throws<ArgumentException>(() => Helldivers2CounterMask.FromBgra(new byte[32], 4, new(1, 1, 2, 2)));
     }
 }

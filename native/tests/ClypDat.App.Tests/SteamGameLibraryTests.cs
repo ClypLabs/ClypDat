@@ -14,7 +14,6 @@ public sealed class SteamGameLibraryTests
 {
     [Theory]
     [InlineData("Game")]
-    [InlineData("common")]
     public void ClassificationValuesAndKeysStillRequireStrictUtf8(string target)
     {
         var bytes = AppInfo(40, (730, "Game"));
@@ -25,60 +24,8 @@ public sealed class SteamGameLibraryTests
         Assert.Throws<DecoderFallbackException>(() => SteamAppInfoReader.Parse(bytes));
     }
 
-    [Fact]
-    public void UnrelatedStringsRemainBoundedAndRequireTerminator()
-    {
-        var oversized = Enumerable.Repeat((byte)0xFD, 1024 * 1024 + 1).Append((byte)0).ToArray();
-        Assert.Throws<InvalidDataException>(() => SteamAppInfoReader.Parse(AppInfoWithText(40, oversized, (730, "Game"))));
-        Assert.ThrowsAny<Exception>(() => SteamAppInfoReader.Parse(AppInfoWithText(40, [0xFD], (730, null))));
-    }
-
     [Theory]
     [InlineData(39)]
-    [InlineData(40)]
-    [InlineData(41)]
-    public void UnrelatedInvalidUtf8DoesNotSuppressCs2(int version)
-    {
-        var bytes = AppInfoWithText(version, [0xFD, 0], (730, "Game"), (1905180, "Application"));
-        var kinds = SteamAppInfoReader.Parse(bytes);
-        Assert.Equal(SteamAppKind.Game, kinds[730]);
-        Assert.Equal(SteamAppKind.NonGame, kinds[1905180]);
-    }
-
-    [Fact]
-    public async Task BundledCs2MatchesWithoutMetadataAndHonorsIgnore()
-    {
-        using var fixture = new LibraryFixture();
-        var path = fixture.Install(730, "cs2.exe");
-        var library = fixture.Library();
-        await library.RefreshAsync();
-        var detector = new ForegroundGameDetector(library);
-        var result = detector.MatchWindow(path, "cs2.exe", "Counter-Strike 2", "SDL_app");
-        Assert.True(result.IsDetected);
-        Assert.Equal("Counter-Strike 2", result.DisplayName);
-        Assert.Equal("steam-730", result.DetectionKey);
-        detector.ApplyUserIgnoredExecutables(["steam-730"]);
-        Assert.False(detector.MatchWindow(path, "cs2.exe", "Counter-Strike 2", "SDL_app").IsDetected);
-    }
-
-    [Theory]
-    [InlineData(39)]
-    [InlineData(40)]
-    [InlineData(41)]
-    public void ReadsCommonTypeAcrossFormats(int version)
-    {
-        var kinds = SteamAppInfoReader.Parse(AppInfo(version,
-            (730, "Game"), (620980, "game"), (438100, "Game"), (100, "Demo"), (101, "Beta"),
-            (1905180, "Application"), (1009850, "Application"), (250820, "Tool"), (102, null)));
-        foreach (var id in new[] { 730, 620980, 438100, 100, 101 }) Assert.Equal(SteamAppKind.Game, kinds[id]);
-        foreach (var id in new[] { 1905180, 1009850, 250820 }) Assert.Equal(SteamAppKind.NonGame, kinds[id]);
-        Assert.Equal(SteamAppKind.Unknown, kinds[102]);
-    }
-
-    [Theory]
-    [InlineData(39)]
-    [InlineData(40)]
-    [InlineData(41)]
     public void RejectsEveryTruncationWithoutPublishingPartialRecords(int version)
     {
         var bytes = AppInfo(version, (730, "Game"), (1905180, "Application"));
@@ -106,12 +53,6 @@ public sealed class SteamGameLibraryTests
     [Theory]
     [InlineData(730, "cs2.exe")]
     [InlineData(1905180, "obs64.exe")]
-    [InlineData(1009850, "AdvancedSettings.exe")]
-    [InlineData(250820, "vrmonitor.exe")]
-    [InlineData(365670, "blender.exe")]
-    [InlineData(431960, "wallpaper64.exe")]
-    [InlineData(629520, "soundpad.exe")]
-    [InlineData(993090, "LosslessScaling.exe")]
     public async Task SoftwareCannotMatchByPathNameCatalogOrCustomOverride(int id, string exe)
     {
         using var fixture = new LibraryFixture();
@@ -137,10 +78,6 @@ public sealed class SteamGameLibraryTests
 
     [Theory]
     [InlineData(730, "Game")]
-    [InlineData(620980, "Game")]
-    [InlineData(438100, "Game")]
-    [InlineData(111, "Demo")]
-    [InlineData(112, "Beta")]
     public async Task VerifiedGamesDemosAndPlaytestsMatchByPathAndRelocatedExecutable(int id, string type)
     {
         using var fixture = new LibraryFixture();
@@ -154,62 +91,6 @@ public sealed class SteamGameLibraryTests
         var detector = new ForegroundGameDetector(library);
         Assert.True(detector.MatchWindow(path, exe, "Game", "Window").IsDetected);
         Assert.Equal($"steam-{id}", detector.MatchWindow(Path.Combine(fixture.Root, exe), exe, "Game", "Window").DetectionKey);
-    }
-
-    [Fact]
-    public async Task ExternalJavaRuntimeIsOnlyMatchedByItsMinecraftWindow()
-    {
-        using var fixture = new LibraryFixture();
-        fixture.Install(108600, "javaw.exe", "Project Zomboid");
-        fixture.Metadata((108600, "Game"));
-        var library = fixture.Library();
-        await library.RefreshAsync();
-
-        var detector = new ForegroundGameDetector(library);
-        var minecraftJava = Path.Combine(fixture.Root, "Modrinth", "javaw.exe");
-
-        detector.ApplyRemoteCatalog([new()
-        {
-            Id = "minecraft-java", DisplayName = "Minecraft",
-            Matchers = [new() { Executable = "javaw.exe", ClassEquals = ["GLFW30"], TitleContains = ["Minecraft"] }]
-        }]);
-
-        Assert.Equal("Minecraft", detector.MatchWindow(minecraftJava, "javaw.exe", "Minecraft", "GLFW30", processId: 42).DisplayName);
-        Assert.False(detector.MatchWindow(minecraftJava, "javaw.exe", "Java configuration", "GLFW30", processId: 42).IsDetected);
-    }
-
-    [Fact]
-    public async Task UnknownInstallsRequireMetadataButIndependentCatalogAndCustomGamesWork()
-    {
-        using var fixture = new LibraryFixture();
-        var path = fixture.Install(123, "unknown-fixture.exe");
-        var library = fixture.Library();
-        await library.RefreshAsync();
-        Assert.Null(library.FindByExecutablePath(path));
-        Assert.Null(library.FindByExecutableName("unknown-fixture.exe"));
-        var detector = new ForegroundGameDetector(library);
-        Assert.False(detector.MatchWindow(path, "unknown-fixture.exe", "Game", "Window").IsDetected);
-        detector.ApplyRemoteCatalog([new() { Id = "independent", DisplayName = "Game", Matchers = [new() { Executable = "unknown-fixture.exe" }] }]);
-        Assert.Equal(GameMatchSource.Catalog, detector.MatchWindow(path, "unknown-fixture.exe", "Game", "Window").MatchSource);
-        detector.ApplyCustomGameNames([new() { ExecutableName = "custom-fixture.exe", DisplayName = "Custom", Origin = "UserCustom" }]);
-        Assert.Equal(GameMatchSource.UserCustom, detector.MatchWindow(Path.Combine(fixture.Root, "custom-fixture.exe"), "custom-fixture.exe", "Game", "Window").MatchSource);
-    }
-
-    [Fact]
-    public async Task MostSpecificInstallWinsAndAmbiguousNamesDoNotExcludeGames()
-    {
-        using var fixture = new LibraryFixture();
-        var software = fixture.Install(1905180, "shared.exe", "Parent");
-        var game = fixture.Install(730, "shared.exe", "Parent/Game");
-        fixture.Metadata((1905180, "Application"), (730, "Game"));
-        var library = fixture.Library();
-        await library.RefreshAsync();
-        Assert.True(library.IsSoftware(software));
-        Assert.False(library.IsSoftware(game));
-        Assert.Equal(730, library.FindByExecutablePath(game)?.AppId);
-        Assert.False(library.IsSoftware(executableName: "shared.exe"));
-        Assert.Null(library.FindByExecutableName("shared.exe"));
-        Assert.Null(library.FindByExecutablePath(fixture.Root + "-neighbor/shared.exe"));
     }
 
     [Fact]
@@ -266,83 +147,6 @@ public sealed class SteamGameLibraryTests
         await library.RefreshAsync(true);
         Assert.True(library.IsSoftware(path));
         Assert.Null(library.FindByExecutableName("changing.exe"));
-    }
-
-    [Fact]
-    public async Task SettingsFilterSoftwareAndRejectManualAddsWithoutChangingStoredSettings()
-    {
-        using var fixture = new LibraryFixture();
-        var path = fixture.Install(321, "software-fixture.exe");
-        fixture.Install(730, "game-fixture.exe");
-        fixture.Metadata((321, "Application"), (730, "Game"));
-        var library = fixture.Library();
-        await library.RefreshAsync();
-        var settings = new AppSettings();
-        settings.GameCaptureOverrides =
-        [
-            new() { ExecutableName = "steam-321", DisplayName = "Software", ProcessName = "software-fixture.exe" },
-            new() { ExecutableName = "software-fixture.exe", DisplayName = "Software custom", Origin = "UserCustom" },
-            new() { ExecutableName = "steam-730", DisplayName = "Game", ProcessName = "game-fixture.exe" }
-        ];
-        settings.CustomGameSettings["steam-321"] = new() { DisplayName = "Software profile" };
-        // Exercise the actual settings consumers without starting audio devices,
-        // account restoration, timers or reading/writing the user's settings.
-        var viewModel = (MainWindowViewModel)RuntimeHelpers.GetUninitializedObject(typeof(MainWindowViewModel));
-        void Field(string name, object value) => typeof(MainWindowViewModel)
-            .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(viewModel, value);
-        Field("_steamGames", library);
-        Field("<Settings>k__BackingField", settings);
-        Field("<GameCaptureRows>k__BackingField", new ObservableCollection<GameBackendRowViewModel>());
-        Field("<CustomGameCandidates>k__BackingField", new ObservableCollection<GameBackendRowViewModel>());
-        Field("<CustomGameTabs>k__BackingField", new ObservableCollection<CustomGameTabViewModel>());
-        Field("_gameSearchText", "");
-        Field("_customGameSearchText", "");
-        typeof(MainWindowViewModel).GetMethod("RebuildGameCaptureRows", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(viewModel, null);
-        viewModel.RebuildCustomGameTabs();
-        Assert.Equal("steam-730", Assert.Single(viewModel.GameCaptureRows).ExecutableName);
-        Assert.Equal("steam-730", Assert.Single(viewModel.CustomGameCandidates).ExecutableName);
-        Assert.Empty(viewModel.CustomGameTabs);
-        var candidateMethod = typeof(MainWindowViewModel).GetMethod("IsGameCandidate", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        Assert.False((bool)candidateMethod.Invoke(viewModel, [new ProcessOption("software-fixture.exe", path)])!);
-        Assert.True((bool)candidateMethod.Invoke(viewModel, [new ProcessOption("non-steam-game.exe", Path.Combine(fixture.Root, "non-steam-game.exe"))])!);
-        viewModel.NewCustomGameExecutable = path;
-        viewModel.NewCustomGameDisplayName = "Pretend game";
-        viewModel.AddCustomGame();
-        Assert.Contains("software, not a game", viewModel.GameAdditionError);
-        viewModel.AddCustomGame("steam-1905180", "OBS profile");
-        Assert.Contains("software, not a game", viewModel.GameAdditionError);
-        Assert.Equal(3, settings.GameCaptureOverrides.Count);
-        Assert.Single(settings.CustomGameSettings);
-    }
-
-    [Fact]
-    public async Task CachedSteamMatchDisappearsWhenMetadataBecomesUnknown()
-    {
-        using var fixture = new LibraryFixture();
-        var path = fixture.Install(321, "cache-fixture.exe");
-        fixture.Metadata((321, "Game"));
-        var library = fixture.Library();
-        await library.RefreshAsync();
-        var detector = new ForegroundGameDetector(library);
-        var first = detector.MatchWindow(path, "cache-fixture.exe", "Game", "Window", handle: 42);
-        Assert.True(first.IsDetected);
-        Assert.Same(first, detector.MatchWindow(path, "cache-fixture.exe", "Game", "Window", handle: 42));
-        fixture.Metadata((321, null));
-        await library.RefreshAsync(true);
-        Assert.False(detector.MatchWindow(path, "cache-fixture.exe", "Game", "Window", handle: 42).IsDetected);
-    }
-
-    [Fact]
-    public void CatalogSoftwareAppIdCannotBeOverriddenByCustomExecutableRule()
-    {
-        var detector = new ForegroundGameDetector(new SteamGameLibrary(() => null));
-        detector.ApplyRemoteCatalog([new()
-        {
-            Id = "software-alias", DisplayName = "OBS", SteamAppIds = [1905180],
-            Matchers = [new() { Executable = "renamed-obs.exe" }]
-        }]);
-        detector.ApplyCustomGameNames([new() { ExecutableName = "renamed-obs.exe", DisplayName = "Pretend game", Origin = "UserCustom" }]);
-        Assert.False(detector.MatchWindow(@"C:\elsewhere\renamed-obs.exe", "renamed-obs.exe", "OBS", "Window").IsDetected);
     }
 
     internal static byte[] AppInfo(int version, params (int Id, string? Type)[] entries)

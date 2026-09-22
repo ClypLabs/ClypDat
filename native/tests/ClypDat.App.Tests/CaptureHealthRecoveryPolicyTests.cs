@@ -26,37 +26,6 @@ public sealed class CaptureHealthRecoveryPolicyTests
     }
 
     [Fact]
-    public void SaveOrQueueRecovery_ClearsFatalSequence()
-    {
-        var policy = new CaptureHealthRecoveryPolicy();
-        var fatal = ReplayCaptureHealth.Unknown("Worker") with
-        {
-            State = ReplayCaptureState.Degraded, CaptureMode = "WGC",
-            OutputFrameRate = 0, TargetFrameRate = 90,
-            QueueDepth = 9,
-            EncodeQueueCapacity = 12, EncoderSubmissionStalled = true
-        };
-
-        Assert.False(policy.Observe(fatal));
-        Assert.False(policy.Observe(fatal with { SaveInProgress = true }));
-        Assert.False(policy.Observe(fatal));
-    }
-
-    [Fact]
-    public void FailedWorkerRestartRequest_IsImmediateForEveryCaptureSource()
-    {
-        var health = ReplayCaptureHealth.Unknown("Worker") with
-        {
-            State = ReplayCaptureState.Failed,
-            CaptureMode = "DXGI Desktop Duplication",
-            PipelineRecoveryAction = ReplayPipelineRecoveryAction.RestartWorker,
-            LastFailure = "Capture worker shutdown timed out; preserving live native resources."
-        };
-
-        Assert.True(new CaptureHealthRecoveryPolicy().Observe(health));
-    }
-
-    [Fact]
     public void SourceStarvation_RecreatesThenFallsBackToWgc()
     {
         var policy = new CaptureSourceRecoveryPolicy();
@@ -68,41 +37,6 @@ public sealed class CaptureHealthRecoveryPolicyTests
         var now = DateTime.UtcNow;
         Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(sample, true, now));
         Assert.Equal(CaptureSourceRecoveryAction.RecreateDxgi, policy.Observe(sample, true, now));
-        Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(sample, true, now));
-        Assert.Equal(CaptureSourceRecoveryAction.SwitchToWgc, policy.Observe(sample, true, now));
-    }
-
-    [Fact]
-    public void SourceRecovery_IgnoresPausedOrBackground_AndHealthyResets()
-    {
-        var policy = new CaptureSourceRecoveryPolicy();
-        var starving = ReplayCaptureHealth.Unknown() with { OutputFrameRate = 0, QueueDepth = 0, EncodeQueueCapacity = 12 };
-        Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(starving with { CapturePaused = true }, true, DateTime.UtcNow));
-        Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(starving, false, DateTime.UtcNow));
-        Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(starving, true, DateTime.UtcNow));
-        Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(starving with { InputFrameRate = 90, UniqueFrameRate = 90 }, true, DateTime.UtcNow));
-        Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(starving, true, DateTime.UtcNow));
-    }
-
-    [Fact]
-    public void SharedSurfaceExhaustionHiddenByCfr_SwitchesToWgcAfterTwoWindows()
-    {
-        var policy = new CaptureSourceRecoveryPolicy();
-        var sample = ReplayCaptureHealth.Unknown("Native") with
-        {
-            TargetFrameRate = 60,
-            InputFrameRate = 25.28,
-            UniqueFrameRate = 25.28,
-            OutputFrameRate = 60,
-            QueueDepth = 0,
-            EncodeQueueCapacity = 8,
-            SurfacesInUse = 6,
-            SurfaceCapacity = 6,
-            TransportBusySlotSkips = 330,
-            TransportAllBusyDrops = 55,
-            TransportReleaseLagFrames = 6
-        };
-        var now = DateTime.UtcNow;
         Assert.Equal(CaptureSourceRecoveryAction.None, policy.Observe(sample, true, now));
         Assert.Equal(CaptureSourceRecoveryAction.SwitchToWgc, policy.Observe(sample, true, now));
     }

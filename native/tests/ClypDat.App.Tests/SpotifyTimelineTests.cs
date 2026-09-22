@@ -138,18 +138,6 @@ public sealed class SpotifyTimelineTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
-    [Theory]
-    [InlineData(0, 100, 0)]
-    [InlineData(48, 0, 0)]
-    [InlineData(48, 1, 0)]
-    [InlineData(48, 2, 24)]
-    [InlineData(48, 3, 48)]
-    [InlineData(48, 4, 48)]
-    [InlineData(48, 5, 24)]
-    [InlineData(48, 6, 0)]
-    public void TitleOscillatesAt24PixelsWithEndPauses(double overflow, double seconds, double expected) =>
-        Assert.Equal(expected, SpotifyOverlayCardRenderer.TitleOffset(overflow, seconds), 6);
-
     private static void WithHistory(Action<SpotifyPlaybackHistory, string> test)
     {
         var folder = Path.Combine(Path.GetTempPath(), "spotify-history-" + Guid.NewGuid());

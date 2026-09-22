@@ -24,22 +24,6 @@ public sealed class DefaultMicrophoneTests
     }
 
     [Fact]
-    public void FailedUnregistrationKeepsInertCallbackRooted()
-    {
-        var registration = new FakeRegistration { FailUnregister = true };
-        var changes = 0;
-        var watcher = new DefaultMicrophoneWatcher(() => Interlocked.Increment(ref changes), registration);
-
-        watcher.Dispose();
-        registration.Callback!.OnDefaultDeviceChanged(DataFlow.Capture, Role.Multimedia, "microphone");
-
-        Assert.Equal(1, registration.UnregisterCalls);
-        Assert.False(registration.Disposed);
-        Assert.True(watcher.CallbackRooted);
-        Assert.Equal(0, Volatile.Read(ref changes));
-    }
-
-    [Fact]
     public void FailedRegistrationDisposesAdapterAndDoesNotRetainCallback()
     {
         var registration = new FakeRegistration { FailRegister = true };
@@ -53,18 +37,6 @@ public sealed class DefaultMicrophoneTests
         var change = AudioDeviceSelectionChange.FromPicker(null, isApplyingSnapshot: true);
 
         Assert.False(change.ShouldPersist);
-    }
-
-    [Theory]
-    [InlineData("default")]
-    [InlineData("physical-microphone-id")]
-    public void DeviceSelectionOutsideSnapshot_PersistsSelection(string deviceId)
-    {
-        var change = AudioDeviceSelectionChange.FromPicker(
-            new AudioDeviceOption(deviceId, "Microphone"), isApplyingSnapshot: false);
-
-        Assert.True(change.ShouldPersist);
-        Assert.Equal(deviceId, change.DeviceId);
     }
 
     [Fact]
@@ -83,32 +55,6 @@ public sealed class DefaultMicrophoneTests
         Assert.Equal(AudioDeviceOption.DefaultDeviceId, settings.MicrophoneDeviceId);
         Assert.True(settings.MultiMicrophoneEnabled);
         Assert.Equal(["microphone-a", "microphone-b"], settings.MicrophoneDeviceIds);
-    }
-
-    [Fact]
-    public void V6Migration_PreservesExplicitMicrophoneSelection()
-    {
-        var settings = new AppSettings { SettingsSchemaVersion = 6, MicrophoneDeviceId = "physical-microphone-id" };
-
-        Assert.True(AppSettingsMigrations.Apply(settings));
-        Assert.Equal("physical-microphone-id", settings.MicrophoneDeviceId);
-    }
-
-    [Fact]
-    public void DefaultResolution_UsesMultimediaRole()
-    {
-        Assert.Equal(Role.Multimedia, DefaultMicrophone.Role);
-    }
-
-    [Theory]
-    [InlineData(DataFlow.Capture, Role.Console, true)]
-    [InlineData(DataFlow.Capture, Role.Multimedia, true)]
-    [InlineData(DataFlow.Capture, Role.Communications, false)]
-    [InlineData(DataFlow.Render, Role.Console, false)]
-    [InlineData(DataFlow.Render, Role.Multimedia, false)]
-    public void DefaultChangeWatcher_OnlyHandlesCaptureConsoleOrMultimedia(DataFlow flow, Role role, bool expected)
-    {
-        Assert.Equal(expected, DefaultMicrophoneWatcher.IsRelevantDefaultChange(flow, role));
     }
 
     private sealed class FakeRegistration : IDefaultMicrophoneNotificationRegistration

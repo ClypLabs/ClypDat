@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-public const int CurrentSchemaVersion = 13;
+public const int CurrentSchemaVersion = 14;
 
     private static bool IsLegacyDefaultSaveHotkey(string? hotkey) =>
         string.Equals(hotkey?.Replace(" ", string.Empty), "Ctrl+Shift+F9", StringComparison.OrdinalIgnoreCase);
@@ -103,6 +103,15 @@ public const int CurrentSchemaVersion = 13;
             foreach (var profile in settings.CustomGameSettings?.Values ?? Enumerable.Empty<CustomGameProfile>())
                 if (profile is not null && IsLegacyDefaultSaveHotkey(profile.SaveReplayHotkey))
                     profile.SaveReplayHotkey = AppSettings.DefaultSaveReplayHotkey;
+        }
+
+        if (settings.SettingsSchemaVersion < 14)
+        {
+            // Spotify is now off until the user turns it on. It used to be on
+            // for anyone who had signed in through ClypDat's shared Spotify
+            // app, which is gone; that sign-in is dropped at launch, and turning
+            // Spotify back on is one press (it reads the Spotify app on the PC).
+            settings.SpotifyEnabled = false;
         }
 
         settings.CustomThemes ??= new();
