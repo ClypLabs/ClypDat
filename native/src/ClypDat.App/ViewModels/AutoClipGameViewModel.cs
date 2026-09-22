@@ -14,6 +14,7 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     private bool _isExpanded;
     private string _searchQuery = string.Empty;
     private string _statusText = "Waiting for game";
+    private bool _policyBlocked;
 
     public event EventHandler? SettingsChanged;
 
@@ -43,7 +44,8 @@ public sealed class AutoClipGameViewModel : ViewModelBase
     public bool IsSetupRequired => Definition.RequiresSetup;
     public bool UsesDetectorPack => Definition.UsesDetectorPack;
     public bool IsCs2 => string.Equals(Id, "cs2", StringComparison.OrdinalIgnoreCase);
-    public bool IsEnabled { get => _settings.Enabled; set { if (_settings.Enabled == value) return; _settings.Enabled = value; OnPropertyChanged(); SaveAndRefresh(); } }
+    public bool IsPolicyBlocked => _policyBlocked;
+    public bool IsEnabled { get => _settings.Enabled && !_policyBlocked; set { if (_policyBlocked || _settings.Enabled == value) return; _settings.Enabled = value; OnPropertyChanged(); SaveAndRefresh(); } }
     public bool DeathmatchClipping { get => _settings.DeathmatchClipping; set { if (_settings.DeathmatchClipping == value) return; _settings.DeathmatchClipping = value; OnPropertyChanged(); SaveAndRefresh(); } }
     public bool IsSearchMatch { get => _isSearchMatch; set => SetProperty(ref _isSearchMatch, value); }
 
@@ -107,6 +109,14 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         foreach (var item in UngroupedEvents) item.Refresh();
         OnPropertyChanged(nameof(EnabledEventCount));
         OnPropertyChanged(nameof(SummaryLabel));
+    }
+    public void RefreshPolicy()
+    {
+        var blocked = NoticeBoardService.IsBlocked("pause-auto-clipping") || NoticeBoardService.IsBlocked("disable-game-detector", Id);
+        if (_policyBlocked == blocked) return;
+        _policyBlocked = blocked;
+        OnPropertyChanged(nameof(IsPolicyBlocked));
+        OnPropertyChanged(nameof(IsEnabled));
     }
     private void SaveAndRefresh() { Refresh(); _save(); SettingsChanged?.Invoke(this, EventArgs.Empty); }
 

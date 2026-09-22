@@ -236,6 +236,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        NoticeBoardService.PolicyChanged += (_, _) => Dispatcher.UIThread.Post(ApplyRemotePolicy);
+        ApplyRemotePolicy();
         _xboxActivity.Changed += XboxActivityChanged;
         _spotify.Changed += SpotifyChanged;
         _spotify.Sampled += _spotifyHistory.Sample;
@@ -365,6 +367,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             .OrderBy(definition => definition.Name, StringComparer.OrdinalIgnoreCase)
             .Select(definition =>
             new AutoClipGameViewModel(definition, Settings.AutoClipping.Games[definition.Id], SaveSettings)));
+        ApplyRemotePolicy();
         _steamGames.Changed += SteamClassificationChanged;
         _ = _steamGames.Snapshot;
         RebuildGameCaptureRows();
@@ -2659,14 +2662,71 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool AutoClippingEnabled
     {
-        get => Settings.AutoClipping.Enabled;
+        get => Settings.AutoClipping.Enabled && !AutoClippingPolicyBlocked;
         set
         {
+            if (AutoClippingPolicyBlocked) return;
             if (Settings.AutoClipping.Enabled == value) return;
             Settings.AutoClipping.Enabled = value;
             OnPropertyChanged();
             SaveSettings();
         }
+    }
+
+    public bool AutoClippingPolicyBlocked => NoticeBoardService.IsBlocked("pause-auto-clipping");
+    public string AutoClippingPolicyStatus => PolicyStatus("pause-auto-clipping");
+
+    private string PolicyStatus(string control, string? target = null)
+    {
+        var item = NoticeBoardService.ActiveSwitches.FirstOrDefault(item => string.Equals(item.Control, control, StringComparison.Ordinal) &&
+            (item.Target is null || string.Equals(item.Target, target, StringComparison.OrdinalIgnoreCase)));
+        return item is null ? string.Empty : $"Temporarily disabled: {item.Reason} Expires {item.ExpiresAt.ToLocalTime():g}.";
+    }
+
+    // What ApplyRemotePolicy last applied, so a switch clearing brings its
+    // integration back exactly once. Null until the first apply.
+    private (bool Spotify, bool Xbox, bool Discord)? _appliedPolicyBlocks;
+
+    // Runs on every notice-board tick (so expiry resumes things on time) and on
+    // every new feed revision. Everything here is idempotent; only a change in
+    // what is blocked pauses or reconnects anything.
+    public void ApplyRemotePolicy()
+    {
+        var blocks = (
+            Spotify: NoticeBoardService.IsBlocked("pause-spotify"),
+            Xbox: NoticeBoardService.IsBlocked("pause-xbox-activity"),
+            Discord: NoticeBoardService.IsBlocked("pause-discord-presence"));
+        var previous = _appliedPolicyBlocks;
+        _appliedPolicyBlocks = blocks;
+        _spotify.SetPolicyPaused(blocks.Spotify);
+        _xboxActivity.SetPolicyPaused(blocks.Xbox);
+        _clypDatAccount.SetPolicyPaused(blocks.Xbox);
+        DiscordRichPresenceService.SetPolicyPaused(blocks.Discord);
+        if (previous is { } before)
+        {
+            // Same conditions startup restores them under (constructor).
+            if (before.Spotify && !blocks.Spotify && Settings.SpotifyEnabled) _ = _spotify.TryRestoreAsync();
+            if (before.Xbox && !blocks.Xbox)
+            {
+                if (Settings.XboxActivityEnabled) _ = _xboxActivity.TryRestoreAsync();
+                _ = _clypDatAccount.TryRestoreAsync();
+            }
+            if (before.Discord != blocks.Discord) ApplyDiscordSettings();
+        }
+        if (AutoClipGames is not null) foreach (var game in AutoClipGames) game.RefreshPolicy();
+        OnPropertyChanged(nameof(AutoClippingEnabled));
+        OnPropertyChanged(nameof(AutoClippingPolicyBlocked));
+        OnPropertyChanged(nameof(AutoClippingPolicyStatus));
+        OnPropertyChanged(nameof(SpotifyPolicyBlocked));
+        OnPropertyChanged(nameof(SpotifyPolicyStatus));
+        OnPropertyChanged(nameof(SpotifyConnectEnabled));
+        OnPropertyChanged(nameof(XboxPolicyBlocked));
+        OnPropertyChanged(nameof(XboxPolicyStatus));
+        OnPropertyChanged(nameof(XboxActivityForDesktop));
+        OnPropertyChanged(nameof(DiscordPolicyBlocked));
+        OnPropertyChanged(nameof(DiscordPolicyStatus));
+        OnPropertyChanged(nameof(DiscordRichPresenceEnabled));
+        UpdateDiscordPresence();
     }
 
     public string AutoClipSearchText
@@ -7570,7 +7630,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(SpotifyConnectEnabled));
         }
     }
-    public bool SpotifyConnectEnabled => SpotifyIsConfigured && !SpotifyConnectBusy;
+    public bool SpotifyPolicyBlocked => NoticeBoardService.IsBlocked("pause-spotify");
+    public string SpotifyPolicyStatus => PolicyStatus("pause-spotify");
+    public bool SpotifyConnectEnabled => SpotifyIsConfigured && !SpotifyConnectBusy && !SpotifyPolicyBlocked;
     // The browser handoff (RunBrowserHandoffAsync) can take a while when the
     // user has to sign in first - this is what lets the button say so instead
     // of sitting there looking unclicked.
@@ -7594,9 +7656,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         Process.Start(new ProcessStartInfo("https://status.clypdat.xyz") { UseShellExecute = true });
     public bool XboxActivityForDesktop
     {
-        get => Settings.XboxActivityEnabled;
-        set { if (Settings.XboxActivityEnabled == value) return; Settings.XboxActivityEnabled = value; SaveSettings(); UpdateDiscordPresence(); NotifyClypDatXboxActivityNeed(); OnPropertyChanged(); }
+        get => Settings.XboxActivityEnabled && !XboxPolicyBlocked;
+        set { if (XboxPolicyBlocked) return; if (Settings.XboxActivityEnabled == value) return; Settings.XboxActivityEnabled = value; SaveSettings(); UpdateDiscordPresence(); NotifyClypDatXboxActivityNeed(); OnPropertyChanged(); }
     }
+    public bool XboxPolicyBlocked => NoticeBoardService.IsBlocked("pause-xbox-activity");
+    public string XboxPolicyStatus => PolicyStatus("pause-xbox-activity");
 
     // Live Xbox activity is read in exactly one situation: Xbox is linked
     // through the ClypDat account, "Use Xbox activity" is on, and the capture
@@ -7604,7 +7668,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // ignore it otherwise. Outside that, the account service stops polling.
     private bool ClypDatXboxActivityNeeded =>
         _clypDatSnapshot.IsConnected
-        && Settings.XboxActivityEnabled
+        && XboxActivityForDesktop
         && string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase);
     private bool _lastClypDatXboxActivityNeeded;
 
@@ -7624,7 +7688,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Xbox-backed desktop clip fall back to the generic source label.
         var source = captureSource ?? Settings.ReplayCaptureSource;
         if (!string.Equals(source, "Desktop", StringComparison.OrdinalIgnoreCase)) return fallback;
-        return Settings.XboxActivityEnabled && !string.IsNullOrWhiteSpace(EffectiveXboxSnapshot.CurrentTitle)
+        return XboxActivityForDesktop && !string.IsNullOrWhiteSpace(EffectiveXboxSnapshot.CurrentTitle)
             ? EffectiveXboxSnapshot.CurrentTitle!
             : fallback;
     }
@@ -7861,7 +7925,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void UpdateDiscordPresence()
     {
-        if (!Settings.DiscordRichPresenceEnabled)
+        if (!DiscordRichPresenceEnabled)
         {
             DiscordRichPresenceService.SetPresence(DiscordPresence.None);
             _discordActivityKind = string.Empty;
@@ -7869,7 +7933,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         var pcGameActive = ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName);
-        var xboxGame = Settings.XboxActivityEnabled && Settings.ReplayCaptureSource.Equals("Desktop", StringComparison.OrdinalIgnoreCase)
+        var xboxGame = XboxActivityForDesktop && Settings.ReplayCaptureSource.Equals("Desktop", StringComparison.OrdinalIgnoreCase)
             ? EffectiveXboxSnapshot.CurrentTitle
             : null;
         var activityName = pcGameActive ? ActiveGameDetection.DisplayName : xboxGame;
@@ -8002,7 +8066,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>Whether the game listeners should report match snapshots at all.</summary>
-    public bool WantsGameMatchPresence => Settings.DiscordRichPresenceEnabled && Settings.DiscordRichPresenceShowMatchDetails;
+    public bool WantsGameMatchPresence => DiscordRichPresenceEnabled && Settings.DiscordRichPresenceShowMatchDetails;
 
     public bool DiscordRichPresenceShowMatchDetails
     {
@@ -8052,9 +8116,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool DiscordRichPresenceEnabled
     {
-        get => Settings.DiscordRichPresenceEnabled;
+        get => Settings.DiscordRichPresenceEnabled && !DiscordPolicyBlocked;
         set
         {
+            if (DiscordPolicyBlocked) return;
             if (Settings.DiscordRichPresenceEnabled == value) return;
             Settings.DiscordRichPresenceEnabled = value;
             OnPropertyChanged();
@@ -8062,6 +8127,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             ApplyDiscordSettings();
         }
     }
+    public bool DiscordPolicyBlocked => NoticeBoardService.IsBlocked("pause-discord-presence");
+    public string DiscordPolicyStatus => PolicyStatus("pause-discord-presence");
 
     public bool DiscordRichPresenceOnlyWhenGameActive
     {

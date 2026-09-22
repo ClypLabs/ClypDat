@@ -22,6 +22,12 @@ public sealed record Notice(
 
 public sealed record NoticeFeed(DateTimeOffset IssuedAt, IReadOnlyList<Notice> Notices);
 
+public sealed record KillSwitch(
+    string Id, string Control, string? Target, string Reason,
+    string? MinVersion, string? MaxVersion, DateTimeOffset PublishedAt, DateTimeOffset ExpiresAt);
+
+public sealed record NoticeFeedPolicy(long Revision, DateTimeOffset IssuedAt, IReadOnlyList<Notice> Notices, IReadOnlyList<KillSwitch> Switches);
+
 /// <summary>
 /// Everything about the Notice Board that is not I/O or UI, so it can be tested on
 /// its own (NoticeBoardRulesTests). The feed is written at www.clypdat.xyz/admin and
@@ -34,18 +40,28 @@ internal static class NoticeBoardRules
     // the admin page could have produced, so it is refused rather than trimmed.
     public const int MaxEnvelopeBytes = 256 * 1024;
     private const int MaxNotices = 50;
+    private const int MaxSwitches = 50;
+    private const int MaxReason = 1000;
     private const int MaxTitle = 200;
     private const int MaxBody = 8000;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private sealed record Envelope(string? Payload, string? Signature);
-    private sealed record PayloadDto(int Schema, DateTimeOffset IssuedAt, List<NoticeDto>? Notices);
+    private sealed record PayloadDto(int Schema, DateTimeOffset IssuedAt, List<NoticeDto>? Notices, long Revision = 0, JsonElement Flags = default);
     private sealed record NoticeDto(
         string? Id, string? Severity, string? Title, string? Body,
         DateTimeOffset PublishedAt, DateTimeOffset? ExpiresAt,
         string? MinVersion, string? MaxVersion, LinkDto? Link);
     private sealed record LinkDto(string? Label, string? Url);
+
+    private static readonly HashSet<string> SupportedControls = new(StringComparer.Ordinal)
+    {
+        "pause-auto-clipping", "disable-game-detector", "pause-spotify", "pause-xbox-activity",
+        "pause-discord-presence", "block-update-version"
+    };
+    private static readonly HashSet<string> SupportedGameIds = new(StringComparer.OrdinalIgnoreCase)
+        { "cs2", "dota2", "fortnite", "helldivers2", "league", "overwatch" };
 
     /// <summary>
     /// Verifies the envelope's signature against <paramref name="trustedKeys"/> and
@@ -85,15 +101,100 @@ internal static class NoticeBoardRules
             parsed.Add(new Notice(notice.Id, severity, notice.Title, notice.Body, notice.PublishedAt, notice.ExpiresAt,
                 notice.MinVersion, notice.MaxVersion, link));
         }
+        ParseSwitches(dto.Flags);
         return new NoticeFeed(dto.IssuedAt, parsed);
+    }
+
+    public static NoticeFeedPolicy ParsePolicy(string envelopeJson, IReadOnlyList<PinnedReleaseKey> trustedKeys)
+    {
+        if (Encoding.UTF8.GetByteCount(envelopeJson) > MaxEnvelopeBytes) throw new InvalidDataException("Notice feed is too large.");
+        var envelope = JsonSerializer.Deserialize<Envelope>(envelopeJson, JsonOptions)
+            ?? throw new InvalidDataException("Notice feed was empty.");
+        if (string.IsNullOrEmpty(envelope.Payload) || string.IsNullOrEmpty(envelope.Signature)) throw new InvalidDataException("Notice feed is missing its payload or signature.");
+        byte[] payload;
+        try { payload = Convert.FromBase64String(envelope.Payload); } catch (FormatException error) { throw new InvalidDataException("Notice feed payload is not base64.", error); }
+        ReleaseSigning.VerifyDetached(payload, Encoding.UTF8.GetBytes(envelope.Signature), trustedKeys, "Notice feed");
+        var dto = JsonSerializer.Deserialize<PayloadDto>(payload, JsonOptions) ?? throw new InvalidDataException("Notice feed payload was empty.");
+        if (dto.Schema != 1) throw new InvalidDataException($"Unsupported notice feed schema {dto.Schema}.");
+        var feed = ParseNotices(dto);
+        return new NoticeFeedPolicy(dto.Revision, feed.IssuedAt, feed.Notices, ParseSwitches(dto.Flags));
+    }
+
+    private static NoticeFeed ParseNotices(PayloadDto dto)
+    {
+        var notices = dto.Notices ?? new List<NoticeDto>();
+        if (notices.Count > MaxNotices) throw new InvalidDataException("Notice feed lists too many notices.");
+        var parsed = new List<Notice>(notices.Count);
+        foreach (var notice in notices)
+        {
+            if (string.IsNullOrWhiteSpace(notice.Id) || string.IsNullOrWhiteSpace(notice.Title) || string.IsNullOrWhiteSpace(notice.Body)) continue;
+            if (notice.Title.Length > MaxTitle || notice.Body.Length > MaxBody) continue;
+            var severity = notice.Severity is "feature" or "info" or "critical" ? notice.Severity : "info";
+            var link = notice.Link is { Url: { } url } && IsAllowedLink(url)
+                ? new NoticeLink(string.IsNullOrWhiteSpace(notice.Link.Label) ? "Read more" : notice.Link.Label!, url) : null;
+            parsed.Add(new Notice(notice.Id, severity, notice.Title, notice.Body, notice.PublishedAt, notice.ExpiresAt, notice.MinVersion, notice.MaxVersion, link));
+        }
+        return new NoticeFeed(dto.IssuedAt, parsed);
+    }
+
+    private static IReadOnlyList<KillSwitch> ParseSwitches(JsonElement flags)
+    {
+        if (flags.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return Array.Empty<KillSwitch>();
+        if (flags.ValueKind == JsonValueKind.Object && flags.EnumerateObject().Any()) throw new InvalidDataException("Notice feed flags must be an array or legacy empty object.");
+        if (flags.ValueKind == JsonValueKind.Object) return Array.Empty<KillSwitch>();
+        if (flags.ValueKind != JsonValueKind.Array || flags.GetArrayLength() > MaxSwitches) throw new InvalidDataException("Notice feed lists too many or malformed switches.");
+        var result = new List<KillSwitch>();
+        foreach (var item in flags.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || !item.TryGetProperty("id", out var id) || !item.TryGetProperty("control", out var control) ||
+                !item.TryGetProperty("reason", out var reason) || !item.TryGetProperty("expiresAt", out var expires)) continue;
+            var name = control.GetString();
+            if (name is null || !SupportedControls.Contains(name)) continue;
+            var target = item.TryGetProperty("target", out var targetElement) && targetElement.ValueKind != JsonValueKind.Null ? targetElement.GetString() : null;
+            if (name == "disable-game-detector" && (target is null || !SupportedGameIds.Contains(target))) continue;
+            if (name == "block-update-version" && (target is null || !TryParseStableVersion(target, out _))) continue;
+            if (name != "disable-game-detector" && name != "block-update-version" && target is not null) continue;
+            var why = reason.GetString();
+            if (string.IsNullOrWhiteSpace(why) || why.Length > MaxReason || !DateTimeOffset.TryParse(expires.GetString(), out var expiry) || expiry <= DateTimeOffset.UtcNow) continue;
+            var min = OptionalVersion(item, "minVersion");
+            var max = OptionalVersion(item, "maxVersion");
+            if (item.TryGetProperty("minVersion", out var minElement) && minElement.ValueKind == JsonValueKind.String && min is null) continue;
+            if (item.TryGetProperty("maxVersion", out var maxElement) && maxElement.ValueKind == JsonValueKind.String && max is null) continue;
+            if (min is not null && max is not null && new Version(min) > new Version(max)) continue;
+            var published = item.TryGetProperty("publishedAt", out var publishedElement) && DateTimeOffset.TryParse(publishedElement.GetString(), out var publishedAt) ? publishedAt : DateTimeOffset.MinValue;
+            result.Add(new KillSwitch(id.GetString()!, name, target, why, min, max, published, expiry));
+        }
+        return result;
+    }
+
+    private static string? OptionalVersion(JsonElement item, string name) =>
+        !item.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null ? null : TryParseStableVersion(value.GetString() ?? string.Empty, out _) ? value.GetString() : null;
+
+    private static bool TryParseStableVersion(string value, out Version version)
+    {
+        version = new Version(0, 0, 0);
+        return Version.TryParse(value, out var parsed) && parsed.Revision < 0 && parsed.Build >= 0 && value.Count(c => c == '.') == 2 && (version = new Version(parsed.Major, parsed.Minor, parsed.Build)) is not null;
     }
 
     /// <summary>
     /// Rollback guard: a feed older than the one already held is refused, so a
     /// replayed old (validly signed) feed cannot hide a critical notice.
     /// </summary>
+    public static bool ShouldReplace(NoticeFeedPolicy? current, NoticeFeedPolicy candidate) =>
+        current is null || candidate.Revision > current.Revision || (candidate.Revision == current.Revision && candidate.IssuedAt >= current.IssuedAt);
+
     public static bool ShouldReplace(NoticeFeed? current, NoticeFeed candidate) =>
         current is null || candidate.IssuedAt >= current.IssuedAt;
+
+    public static IReadOnlyList<KillSwitch> ActiveSwitches(NoticeFeedPolicy? feed, Version currentVersion, DateTimeOffset now) =>
+        feed is null ? Array.Empty<KillSwitch>() : feed.Switches.Where(item => item.ExpiresAt > now)
+            .Where(item => !TryParseStableVersion(item.MinVersion ?? string.Empty, out var min) || currentVersion >= min)
+            .Where(item => !TryParseStableVersion(item.MaxVersion ?? string.Empty, out var max) || currentVersion <= max)
+            .ToList();
+
+    public static bool IsBlocked(IReadOnlyList<KillSwitch> switches, string control, string? target = null) =>
+        switches.Any(item => string.Equals(item.Control, control, StringComparison.Ordinal) &&
+            (item.Target is null || string.Equals(item.Target, target, StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>Notices meant for this version and not yet expired, newest first.</summary>
     public static IReadOnlyList<Notice> Applicable(NoticeFeed? feed, Version currentVersion, DateTimeOffset now)

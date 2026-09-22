@@ -56,6 +56,9 @@ internal sealed class AutoClipCoordinator : IAutoClipCoordinator
     public ValueTask ReconcileAsync(AutoClipPolicy policy, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var blocked = NoticeBoardService.IsBlocked("pause-auto-clipping") ||
+            (policy.ActiveGameId is { } gameId && NoticeBoardService.IsBlocked("disable-game-detector", gameId));
+        if (blocked) policy = policy with { Enabled = false };
         lock (_gate)
         {
             var sessionChanged = policy.CaptureSessionId != _policy.CaptureSessionId
@@ -77,6 +80,8 @@ internal sealed class AutoClipCoordinator : IAutoClipCoordinator
     public ValueTask<bool> ObserveAsync(AutoClipSignal signal, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (NoticeBoardService.IsBlocked("pause-auto-clipping") || NoticeBoardService.IsBlocked("disable-game-detector", signal.GameId))
+            return ValueTask.FromResult(false);
         lock (_gate)
         {
             if (!_policy.Enabled || signal.CaptureSessionId != _policy.CaptureSessionId

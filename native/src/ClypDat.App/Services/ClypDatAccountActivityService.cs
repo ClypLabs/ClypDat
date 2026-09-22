@@ -61,6 +61,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private (bool Xbox, bool Google, bool Discord) _linkWatchSignature;
     private DesktopToken? _token;
     private XboxActivitySnapshot _snapshot = XboxActivitySnapshot.Disconnected;
+    private bool _policyPaused;
 
     public XboxActivitySnapshot Snapshot => _snapshot;
 
@@ -88,6 +89,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// <summary>Call when <see cref="LiveActivityNeeded"/> may have changed.</summary>
     public void LiveActivityNeedChanged()
     {
+        if (_policyPaused) return;
         _idleRefreshes = 0;
         if (IsAuthenticated) WakePoll();
     }
@@ -99,6 +101,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
 
     public async Task<bool> TryRestoreAsync(CancellationToken cancellationToken = default)
     {
+        if (NoticeBoardService.IsBlocked("pause-xbox-activity")) { SetPolicyPaused(true); return false; }
         _token = LoadToken();
         if (_token is null || _token.ExpiresAt <= DateTimeOffset.UtcNow) return false;
         try
@@ -127,6 +130,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
 
     public async Task<bool> ConnectAsync(CancellationToken cancellationToken = default)
     {
+        if (NoticeBoardService.IsBlocked("pause-xbox-activity")) { SetPolicyPaused(true); return false; }
         try
         {
             _token = await RunBrowserHandoffAsync(cancellationToken).ConfigureAwait(false);
@@ -178,6 +182,26 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         TryDeleteCache();
         _snapshot = XboxActivitySnapshot.Disconnected;
         Changed?.Invoke(this, _snapshot);
+    }
+
+    public void SetPolicyPaused(bool paused)
+    {
+        if (_policyPaused == paused) return;
+        _policyPaused = paused;
+        if (paused)
+        {
+            _pollCts?.Cancel();
+            _pollCts?.Dispose();
+            _pollCts = null;
+            _snapshot = XboxActivitySnapshot.Disconnected with { Error = "Xbox activity is temporarily paused by ClypDat." };
+            Changed?.Invoke(this, _snapshot);
+            AppLog.Info("Policy transition: account-backed Xbox activity paused.");
+            return;
+        }
+        // Reconnecting (TryRestoreAsync) is MainWindowViewModel.ApplyRemotePolicy's
+        // job, so a switch that was active at launch - before any token was
+        // loaded - still comes back.
+        AppLog.Info("Policy transition: account-backed Xbox activity resumed.");
     }
 
     public async Task<bool> RevokeAndDisconnectAsync(CancellationToken cancellationToken = default)
@@ -356,6 +380,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
 
     private void StartPolling()
     {
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
         _pollCts?.Cancel();
         _pollCts = new CancellationTokenSource();
         _ = PollAsync(_pollCts.Token);
@@ -365,6 +390,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
             try
             {
                 await _pollWake.WaitAsync(NextPollDelay(), cancellationToken).ConfigureAwait(false);
@@ -396,6 +422,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// </param>
     public async Task RefreshAsync(CancellationToken cancellationToken = default, bool refreshProfile = false)
     {
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
         if (_token is null) throw new InvalidOperationException("ClypDat account is not authenticated.");
         using var request = new HttpRequestMessage(HttpMethod.Get, refreshProfile ? "api/desktop/xbox/activity?profile=refresh" : "api/desktop/xbox/activity");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token.AccessToken);
@@ -414,6 +441,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
         _lastRefresh = DateTimeOffset.UtcNow;
         var result = JsonSerializer.Deserialize<ActivityResponse>(body) ?? throw new InvalidOperationException("ClypDat activity returned no data.");
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
         var activity = result.Activity;
         var providers = result.Providers ?? Array.Empty<string>();
         _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null,

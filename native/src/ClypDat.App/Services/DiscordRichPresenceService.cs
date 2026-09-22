@@ -107,6 +107,7 @@ internal static class DiscordRichPresenceService
     private sealed record ActivityRevision(DiscordPresence Presence, bool ShowButton, long Number);
     private static long _revisionNumber;
     private static ActivityRevision _desired = new(DiscordPresence.None, false, 0);
+    private static bool _policyPaused;
     private static ActivityRevision? _sent;
     private static Task? _worker;
     // Kept after Stop clears _worker, so the next generation has something to
@@ -120,6 +121,9 @@ internal static class DiscordRichPresenceService
     /// </summary>
     public static void Configure(bool enabled, bool showGetClypDatButton, bool classicLogo)
     {
+        // Only SetPolicyPaused changes _policyPaused, so its transition (and the
+        // Stop that goes with it) cannot be skipped by a state set here first.
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-discord-presence")) enabled = false;
         var enabledChanged = false;
         var buttonChanged = false;
         var applicationChanged = false;
@@ -169,6 +173,8 @@ internal static class DiscordRichPresenceService
     /// </summary>
     public static void SetPresence(DiscordPresence presence)
     {
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-discord-presence"))
+            presence = DiscordPresence.None;
         lock (Sync)
         {
             if (_desired.Presence == presence) return;
@@ -182,8 +188,24 @@ internal static class DiscordRichPresenceService
 
     public static void Shutdown() => Stop();
 
+    public static void SetPolicyPaused(bool paused)
+    {
+        // Called on every notice-board tick; only a real transition acts.
+        if (_policyPaused == paused) return;
+        _policyPaused = paused;
+        if (paused)
+        {
+            SetPresence(DiscordPresence.None);
+            Stop("paused by policy");
+            AppLog.Info("Policy transition: Discord presence paused.");
+            return;
+        }
+        AppLog.Info("Policy transition: Discord presence resumed.");
+    }
+
     private static void Start()
     {
+        if (_policyPaused) return;
         lock (Sync)
         {
             if (_worker is not null) return;

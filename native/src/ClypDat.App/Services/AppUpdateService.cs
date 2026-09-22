@@ -213,6 +213,11 @@ public static class AppUpdateService
             {
                 continue;
             }
+            if (NoticeBoardService.IsBlocked("block-update-version", version.ToString(3)))
+            {
+                AppLog.Info($"Update {version.ToString(3)} excluded by remote policy.");
+                continue;
+            }
 
             var asset = release.Assets.FirstOrDefault(item => item.Name.Equals(ExpectedAssetName, StringComparison.OrdinalIgnoreCase));
             if (asset is null || !IsTrustedReleaseAssetUrl(asset.DownloadUrl))
@@ -291,6 +296,8 @@ public static class AppUpdateService
 
     public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
     {
+        if (NoticeBoardService.IsBlocked("block-update-version", update.LatestVersion.ToString(3)))
+            throw new InvalidOperationException($"Update {update.LatestVersion.ToString(3)} is temporarily blocked by ClypDat policy.");
         // Resolve the digest to enforce BEFORE downloading anything. When a signing key
         // is pinned this must come from the signed manifest; the release API's own digest
         // is not an independent control, because whoever serves the metadata serves both

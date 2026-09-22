@@ -58,6 +58,9 @@ public sealed partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            // Load and verify cached remote policy before integration services
+            // are restored. A missing or invalid cache leaves normal behavior.
+            _ = NoticeBoardService.CurrentPolicy;
             var viewModel = new MainWindowViewModel();
             if (UncleanExitRecovery.BeginSession())
             {

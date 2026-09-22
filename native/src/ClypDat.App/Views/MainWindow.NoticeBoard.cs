@@ -52,6 +52,10 @@ public sealed partial class MainWindow
         try
         {
             await NoticeBoardService.RefreshAsync();
+            // Expiry is local policy state too. Reapply every tick even when
+            // the signed revision did not change, so controls resume on time.
+            ViewModel?.ApplyRemotePolicy();
+            UpdateAutoClipStates();
             UpdateNoticeBadge();
             // Reconsider the held feed even when unchanged: another dialog may
             // have blocked presentation on the tick that fetched this notice.

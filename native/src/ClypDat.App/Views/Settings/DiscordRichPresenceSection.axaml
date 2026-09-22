@@ -15,6 +15,7 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Discord Rich Presence" />
       <TextBlock Classes="settingsSectionDesc" Text="Control what ClypDat shares on your Discord profile." />
+      <TextBlock Classes="settingsRowDescSm" Text="{Binding DiscordPolicyStatus}" IsVisible="{Binding DiscordPolicyBlocked}" Foreground="{StaticResource CautionBrush}" TextWrapping="Wrap" />
       <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
     <Border Classes="settingsCard">
@@ -25,7 +26,7 @@
             <TextBlock Classes="settingsRowTitle" Text="Discord Rich Presence" />
             <TextBlock Classes="settingsRowDescSm" Text="Shows what you are recording, editing or browsing. Anyone who can see your profile can see the game name." />
           </StackPanel>
-          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceEnabled}" IsEnabled="{Binding !DiscordPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" />
         </Grid>
         <Border Classes="settingsDivider" />
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding DiscordRichPresenceEnabled}">

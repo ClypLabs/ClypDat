@@ -41,12 +41,14 @@ internal sealed class XboxActivityService : IDisposable
     private CancellationTokenSource? _pollCts;
     private XboxTokens? _tokens;
     private XboxActivitySnapshot _snapshot = XboxActivitySnapshot.Disconnected;
+    private bool _policyPaused;
 
     public XboxActivitySnapshot Snapshot => _snapshot;
     public event EventHandler<XboxActivitySnapshot>? Changed;
 
     public async Task<bool> TryRestoreAsync(CancellationToken cancellationToken = default)
     {
+        if (NoticeBoardService.IsBlocked("pause-xbox-activity")) { SetPolicyPaused(true); return false; }
         _tokens = LoadTokens();
         if (_tokens is null) return false;
         try
@@ -64,6 +66,7 @@ internal sealed class XboxActivityService : IDisposable
 
     public async Task<bool> ConnectAsync(CancellationToken cancellationToken = default)
     {
+        if (NoticeBoardService.IsBlocked("pause-xbox-activity")) { SetPolicyPaused(true); return false; }
         try
         {
             _tokens = LoadTokens();
@@ -99,8 +102,28 @@ internal sealed class XboxActivityService : IDisposable
         Changed?.Invoke(this, _snapshot);
     }
 
+    public void SetPolicyPaused(bool paused)
+    {
+        if (_policyPaused == paused) return;
+        _policyPaused = paused;
+        if (paused)
+        {
+            _pollCts?.Cancel();
+            _pollCts?.Dispose();
+            _pollCts = null;
+            _snapshot = XboxActivitySnapshot.Disconnected with { Error = "Xbox activity is temporarily paused by ClypDat." };
+            Changed?.Invoke(this, _snapshot);
+            AppLog.Info("Policy transition: Xbox activity paused.");
+            return;
+        }
+        // Reconnecting is MainWindowViewModel.ApplyRemotePolicy's job: it knows
+        // whether the user still has Xbox activity turned on.
+        AppLog.Info("Policy transition: Xbox activity resumed.");
+    }
+
     private void StartPolling()
     {
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
         _pollCts?.Cancel();
         _pollCts = new CancellationTokenSource();
         _ = PollAsync(_pollCts.Token);
@@ -110,6 +133,7 @@ internal sealed class XboxActivityService : IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(_snapshot.CurrentTitle is null ? 60 : 15), cancellationToken).ConfigureAwait(false);
@@ -129,6 +153,7 @@ internal sealed class XboxActivityService : IDisposable
 
     private async Task RefreshPresenceAsync(CancellationToken cancellationToken)
     {
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
         if (_tokens is null) throw new InvalidOperationException("Xbox is not authenticated.");
         if (_tokens.ExpiresAt <= DateTimeOffset.UtcNow.AddMinutes(2))
         {
@@ -146,6 +171,7 @@ internal sealed class XboxActivityService : IDisposable
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-xbox-activity")) return;
         var activity = FindActiveTitle(json.RootElement);
         _snapshot = _snapshot with { IsConnected = true, CurrentTitle = activity.Title, ConsoleName = activity.Console, UpdatedAt = DateTimeOffset.UtcNow, Error = null };
         Changed?.Invoke(this, _snapshot);

@@ -102,6 +102,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     // Set from a 429's Retry-After. Polling on through a rate limit every two
     // seconds is what kept a tester's app limited for over half an hour.
     private DateTimeOffset _rateLimitedUntil;
+    private bool _policyPaused;
 
     public SpotifyNowPlaying Snapshot => _snapshot;
     public event EventHandler<SpotifyNowPlaying>? Changed;
@@ -124,6 +125,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     /// <summary>Signs back in from the stored refresh token, without a browser.</summary>
     public async Task<bool> TryRestoreAsync(CancellationToken cancellationToken = default)
     {
+        if (NoticeBoardService.IsBlocked("pause-spotify")) { SetPolicyPaused(true); return false; }
         if (!IsConfigured) return false;
         _tokens = LoadTokens();
         if (_tokens is null) return false;
@@ -152,6 +154,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
     public async Task<bool> ConnectAsync(CancellationToken cancellationToken = default)
     {
+        if (NoticeBoardService.IsBlocked("pause-spotify")) { SetPolicyPaused(true); return false; }
         if (!IsConfigured)
         {
             _snapshot = SpotifyNowPlaying.Disconnected with { Error = "This build has no Spotify application registered." };
@@ -194,8 +197,31 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         Changed?.Invoke(this, _snapshot);
     }
 
+    public void SetPolicyPaused(bool paused)
+    {
+        if (_policyPaused == paused) return;
+        _policyPaused = paused;
+        if (paused)
+        {
+            _pollCts?.Cancel();
+            _pollCts?.Dispose();
+            _pollCts = null;
+            _snapshot = SpotifyNowPlaying.Disconnected with { Error = "Spotify is temporarily paused by ClypDat." };
+            Current = _snapshot;
+            Sampled?.Invoke(this, _snapshot);
+            Changed?.Invoke(this, _snapshot);
+            AppLog.Info("Policy transition: Spotify paused.");
+            return;
+        }
+
+        // Reconnecting is MainWindowViewModel.ApplyRemotePolicy's job: it knows
+        // whether the user still has Spotify turned on.
+        AppLog.Info("Policy transition: Spotify resumed.");
+    }
+
     private void StartPolling()
     {
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
         _pollCts?.Cancel();
         _pollCts?.Dispose();
         _pollCts = new CancellationTokenSource();
@@ -222,6 +248,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     {
         while (!cancellationToken.IsCancellationRequested)
         {
+            if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
             try
             {
                 var backoff = _rateLimitedUntil - DateTimeOffset.UtcNow;
@@ -269,6 +296,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
     private async Task RefreshNowPlayingAsync(CancellationToken cancellationToken)
     {
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
         var token = await AccessTokenAsync(cancellationToken).ConfigureAwait(false);
         var name = _snapshot.DisplayName ?? await DisplayNameAsync(token, cancellationToken).ConfigureAwait(false);
 
@@ -280,6 +308,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
         // a failure, and the overlay simply has nothing to say for that clip.
         if (response.StatusCode == HttpStatusCode.NoContent)
         {
+            if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
             Publish(_snapshot with
             {
                 IsConnected = true,
@@ -311,6 +340,7 @@ internal sealed class SpotifyNowPlayingService : IDisposable
 
         response.EnsureSuccessStatusCode();
         var payload = await response.Content.ReadFromJsonAsync<CurrentlyPlayingResponse>(cancellationToken).ConfigureAwait(false);
+        if (_policyPaused || NoticeBoardService.IsBlocked("pause-spotify")) return;
         var item = payload?.Item;
 
         Publish(new SpotifyNowPlaying(

@@ -149,4 +149,90 @@ public sealed class NoticeBoardRulesTests
         Assert.NotEmpty(NoticeSigning.PinnedPublicKeys);
         Assert.DoesNotContain(NoticeSigning.PinnedPublicKeys, key => release.Contains(key.SubjectPublicKeyInfoBase64));
     }
+
+    // Kill switches travel in the same signed payload as notices, as a `flags` array.
+    private static string PolicyEnvelope(long revision, object flags, string issuedAt = "2027-01-02T00:00:00Z")
+    {
+        var payload = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { schema = 1, issuedAt, revision, notices = Array.Empty<object>(), flags }));
+        var signature = SigningKey.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
+        return JsonSerializer.Serialize(new { payload = Convert.ToBase64String(payload), signature = Convert.ToBase64String(signature) });
+    }
+
+    private static object Switch(string id, string control, string? target = null, string? min = null, string? max = null, string? expires = null) => new
+    {
+        id, control, target, reason = "testing", minVersion = min, maxVersion = max,
+        publishedAt = "2027-01-01T00:00:00Z",
+        expiresAt = expires ?? DateTimeOffset.UtcNow.AddDays(1).ToString("O"),
+    };
+
+    [Fact]
+    public void SignedSwitchesBlockTheirControlAndTarget()
+    {
+        var policy = NoticeBoardRules.ParsePolicy(PolicyEnvelope(3, new[]
+        {
+            Switch("x", "pause-xbox-activity"),
+            Switch("d", "disable-game-detector", target: "cs2"),
+            Switch("u", "block-update-version", target: "1.5.5"),
+        }), TrustedKeys);
+        Assert.Equal(3, policy.Revision);
+        var active = NoticeBoardRules.ActiveSwitches(policy, new Version(1, 5, 4), DateTimeOffset.UtcNow);
+        Assert.True(NoticeBoardRules.IsBlocked(active, "pause-xbox-activity"));
+        Assert.False(NoticeBoardRules.IsBlocked(active, "pause-spotify"));
+        Assert.True(NoticeBoardRules.IsBlocked(active, "disable-game-detector", "CS2"));
+        Assert.False(NoticeBoardRules.IsBlocked(active, "disable-game-detector", "dota2"));
+        Assert.True(NoticeBoardRules.IsBlocked(active, "block-update-version", "1.5.5"));
+        Assert.False(NoticeBoardRules.IsBlocked(active, "block-update-version", "1.5.6"));
+    }
+
+    [Fact]
+    public void SwitchesRespectVersionRangeAndExpiry()
+    {
+        var policy = NoticeBoardRules.ParsePolicy(PolicyEnvelope(1, new[]
+        {
+            Switch("old", "pause-spotify", max: "1.5.3"),
+            Switch("range", "pause-xbox-activity", min: "1.5.0", max: "1.5.4"),
+            Switch("soon", "pause-discord-presence", expires: DateTimeOffset.UtcNow.AddMinutes(5).ToString("O")),
+        }), TrustedKeys);
+        var now = NoticeBoardRules.ActiveSwitches(policy, new Version(1, 5, 4), DateTimeOffset.UtcNow);
+        Assert.False(NoticeBoardRules.IsBlocked(now, "pause-spotify"));
+        Assert.True(NoticeBoardRules.IsBlocked(now, "pause-xbox-activity"));
+        Assert.True(NoticeBoardRules.IsBlocked(now, "pause-discord-presence"));
+        // Expiry is enforced on the client, so a held feed stops blocking on time.
+        var later = NoticeBoardRules.ActiveSwitches(policy, new Version(1, 5, 4), DateTimeOffset.UtcNow.AddMinutes(10));
+        Assert.False(NoticeBoardRules.IsBlocked(later, "pause-discord-presence"));
+    }
+
+    [Fact]
+    public void MalformedSwitchesAreDroppedNotApplied()
+    {
+        var policy = NoticeBoardRules.ParsePolicy(PolicyEnvelope(1, new[]
+        {
+            Switch("unknown", "wipe-everything"),
+            Switch("no-target", "disable-game-detector"),
+            Switch("bad-game", "disable-game-detector", target: "minecraft"),
+            Switch("target-not-allowed", "pause-spotify", target: "cs2"),
+            Switch("fuzzy-version", "block-update-version", target: "1.5"),
+            Switch("expired", "pause-spotify", expires: "2020-01-01T00:00:00Z"),
+        }), TrustedKeys);
+        Assert.Empty(policy.Switches);
+    }
+
+    [Fact]
+    public void FlagsObjectWithContentIsRejectedButLegacyEmptyObjectIsFine()
+    {
+        Assert.Empty(NoticeBoardRules.ParsePolicy(PolicyEnvelope(0, new { }), TrustedKeys).Switches);
+        Assert.Throws<InvalidDataException>(() => NoticeBoardRules.ParsePolicy(PolicyEnvelope(0, new { autoClip = false }), TrustedKeys));
+    }
+
+    [Fact]
+    public void RevisionDecidesReplacementBeforeIssueTime()
+    {
+        var current = NoticeBoardRules.ParsePolicy(PolicyEnvelope(3, Array.Empty<object>(), "2027-01-02T00:00:00Z"), TrustedKeys);
+        var reissued = NoticeBoardRules.ParsePolicy(PolicyEnvelope(3, Array.Empty<object>(), "2027-01-03T00:00:00Z"), TrustedKeys);
+        var olderRevision = NoticeBoardRules.ParsePolicy(PolicyEnvelope(2, Array.Empty<object>(), "2027-02-01T00:00:00Z"), TrustedKeys);
+        var newerRevision = NoticeBoardRules.ParsePolicy(PolicyEnvelope(4, Array.Empty<object>(), "2027-01-01T00:00:00Z"), TrustedKeys);
+        Assert.True(NoticeBoardRules.ShouldReplace(current, reissued));
+        Assert.False(NoticeBoardRules.ShouldReplace(current, olderRevision));
+        Assert.True(NoticeBoardRules.ShouldReplace(current, newerRevision));
+    }
 }

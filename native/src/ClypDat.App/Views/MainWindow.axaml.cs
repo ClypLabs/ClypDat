@@ -485,6 +485,7 @@ public sealed partial class MainWindow : Window
                         or nameof(MainWindowViewModel.IsGameFilterActive)
                         or nameof(MainWindowViewModel.IsClipTypeFilterActive)) OnViewHistoryStateChanged();
                 };
+                NoticeBoardService.PolicyChanged += MainWindow_PolicyChanged;
                 foreach (var autoClipGame in ViewModel.AutoClipGames)
                 {
                     autoClipGame.PropertyChanged += (_, e) =>
@@ -667,6 +668,17 @@ public sealed partial class MainWindow : Window
         // trusting the popup to notice on its own, sidesteps the problem
         // entirely instead of chasing why light-dismiss itself won't fire.
         AddHandler(PointerPressedEvent, (_, _) => _changeGameFlyout?.Hide(), RoutingStrategies.Tunnel);
+    }
+
+    private void MainWindow_PolicyChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_availableUpdate is { } update && NoticeBoardService.IsBlocked("block-update-version", update.LatestVersion.ToString(3)))
+                SetAvailableUpdate(null);
+            ViewModel?.ApplyRemotePolicy();
+            UpdateAutoClipStates();
+        });
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
@@ -5842,6 +5854,7 @@ public sealed partial class MainWindow : Window
 
     private async Task UpdateDetectorPolicyAsync(string gameId, bool enabled)
     {
+        enabled &= !NoticeBoardService.IsBlocked("pause-auto-clipping") && !NoticeBoardService.IsBlocked("disable-game-detector", gameId);
         if (ViewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
         var settings = GetAutoClipSettingsSnapshot(gameId);
         var events = settings.Events.Where(item => item.Value).Select(item => item.Key).OrderBy(item => item, StringComparer.Ordinal).ToArray();
@@ -7754,6 +7767,11 @@ public sealed partial class MainWindow : Window
     private async void AvailableUpdateButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (_availableUpdate is null || _updateDialogOpen) return;
+        if (NoticeBoardService.IsBlocked("block-update-version", _availableUpdate.LatestVersion.ToString(3)))
+        {
+            SetAvailableUpdate(null);
+            return;
+        }
         await ShowUpdateDialogAsync(CreateUpdateDialog(_availableUpdate));
     }
 

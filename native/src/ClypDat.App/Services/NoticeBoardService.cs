@@ -26,7 +26,7 @@ internal static class NoticeBoardService
     private static string CachePath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, CacheFileName);
 
     private static readonly object Gate = new();
-    private static NoticeFeed? _current;
+    private static NoticeFeedPolicy? _current;
     private static bool _cacheLoaded;
 
     public static NoticeFeed? Current
@@ -34,9 +34,14 @@ internal static class NoticeBoardService
         get
         {
             EnsureCacheLoaded();
-            lock (Gate) return _current;
+            lock (Gate) return _current is { } policy ? new NoticeFeed(policy.IssuedAt, policy.Notices) : null;
         }
     }
+
+    public static event EventHandler? PolicyChanged;
+    public static NoticeFeedPolicy? CurrentPolicy { get { EnsureCacheLoaded(); lock (Gate) return _current; } }
+    public static IReadOnlyList<KillSwitch> ActiveSwitches => NoticeBoardRules.ActiveSwitches(CurrentPolicy, AppUpdateService.CurrentVersion, DateTimeOffset.UtcNow);
+    public static bool IsBlocked(string control, string? target = null) => NoticeBoardRules.IsBlocked(ActiveSwitches, control, target);
 
     private static void EnsureCacheLoaded()
     {
@@ -47,7 +52,7 @@ internal static class NoticeBoardService
             try
             {
                 if (!File.Exists(CachePath)) return;
-                _current = NoticeBoardRules.ParseAndVerify(File.ReadAllText(CachePath), NoticeSigning.PinnedPublicKeys);
+                _current = NoticeBoardRules.ParsePolicy(File.ReadAllText(CachePath), NoticeSigning.PinnedPublicKeys);
             }
             catch (Exception error)
             {
@@ -69,7 +74,7 @@ internal static class NoticeBoardService
             {
                 var json = await FetchAsync(url, cancellationToken);
                 if (json is null) continue;
-                var feed = NoticeBoardRules.ParseAndVerify(json, NoticeSigning.PinnedPublicKeys);
+                var feed = NoticeBoardRules.ParsePolicy(json, NoticeSigning.PinnedPublicKeys);
                 lock (Gate)
                 {
                     if (!NoticeBoardRules.ShouldReplace(_current, feed))
@@ -77,15 +82,23 @@ internal static class NoticeBoardService
                         AppLog.Info($"Notice board: ignored a feed issued {feed.IssuedAt:O}, older than the one held ({_current!.IssuedAt:O}).");
                         return false;
                     }
-                    var changed = _current is null || feed.IssuedAt != _current.IssuedAt;
+                    // The site re-signs the same content whenever its cache
+                    // rebuilds, so a new issuedAt alone is not news. Only a new
+                    // revision (bumped on every notice or switch write) is.
+                    var revised = _current is null || feed.Revision != _current.Revision;
+                    var reissued = revised || feed.IssuedAt != _current!.IssuedAt;
                     _current = feed;
-                    if (changed)
+                    if (reissued)
                     {
                         Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
                         File.WriteAllText(CachePath, json);
-                        AppLog.Info($"Notice board: verified feed, {feed.Notices.Count} notice(s), issued {feed.IssuedAt:O}.");
                     }
-                    return changed;
+                    if (revised)
+                    {
+                        AppLog.Info($"Notice board: verified feed, {feed.Notices.Count} notice(s), {feed.Switches.Count} switch(es), revision {feed.Revision}.");
+                        PolicyChanged?.Invoke(null, EventArgs.Empty);
+                    }
+                    return revised;
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

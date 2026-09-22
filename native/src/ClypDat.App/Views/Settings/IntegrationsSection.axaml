@@ -199,7 +199,8 @@
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyAccountStatus}" TextWrapping="Wrap" IsVisible="{Binding !SpotifyHasTrack}" />
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" ToolTip.Tip="Choose where the track sits on your clips." />
+                  <TextBlock Grid.Column="1" Classes="settingsRowDescSm" Text="{Binding SpotifyPolicyStatus}" IsVisible="{Binding SpotifyPolicyBlocked}" Foreground="{StaticResource CautionBrush}" TextWrapping="Wrap" />
+                  <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="Choose where the track sits on your clips." />
                   <Button Content="Disconnect" Click="DisconnectSpotifyButton_OnClick" />
                 </StackPanel>
               </Grid>
@@ -275,7 +276,7 @@
                       <TextBlock Classes="settingsRowTitleSm" Text="Use Xbox activity for Desktop Capture" />
                       <TextBlock Classes="settingsRowDescSm" Text="Names Desktop Capture clips after the game you are playing on Xbox. PC Game Capture stays higher priority." />
                     </StackPanel>
-                    <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding XboxActivityForDesktop}" OnContent="{x:Null}" OffContent="{x:Null}" />
+                      <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding XboxActivityForDesktop}" IsEnabled="{Binding !XboxPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" />
                   </Grid>
                 </Border>
               </StackPanel>

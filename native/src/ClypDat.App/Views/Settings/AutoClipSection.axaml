@@ -17,6 +17,7 @@
     <StackPanel Spacing="4">
       <TextBlock Classes="settingsSectionTitle" Text="Auto-Clipping" />
       <TextBlock Classes="settingsSectionDesc" Text="Have ClypDat save important moments using local event feeds or captured game frames." />
+      <TextBlock Classes="settingsRowDescSm" Text="{Binding AutoClippingPolicyStatus}" IsVisible="{Binding AutoClippingPolicyBlocked}" Foreground="{StaticResource CautionBrush}" TextWrapping="Wrap" />
       <Grid ColumnDefinitions="Auto,*" ColumnSpacing="6" Margin="0,4,0,0">
         <PathIcon Classes="cautionIcon" />
         <TextBlock Grid.Column="1" Text="Experimental - still being worked on and can miss events, mislabel clips, or misbehave."
@@ -33,7 +34,7 @@
             <TextBlock Classes="settingsRowTitle" Text="Auto Capture Events" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
             <TextBlock Classes="settingsRowDescSm" Text="Turn this off to pause every game without losing your event choices." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
           </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoClippingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+          <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoClippingEnabled}" IsEnabled="{Binding !AutoClippingPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
         </Grid>
       </StackPanel>
     </Border>
@@ -66,7 +67,7 @@
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding StatusText}" IsVisible="{Binding IsExpanded}" />
                 </StackPanel>
                 <TextBlock Grid.Column="3" Classes="autoClipCount" Text="{Binding SummaryLabel}" IsHitTestVisible="False" />
-                <ToggleSwitch Grid.Column="4" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                <ToggleSwitch Grid.Column="4" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding !IsPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
               </Grid>
 
               <StackPanel Spacing="0" Margin="34,0,0,0" IsVisible="{Binding IsExpanded}">
