@@ -271,9 +271,22 @@
           </Button>
         </Grid>
 
-        <Button Grid.Column="2" Classes="windowChromeButton" Click="AvailableUpdateButton_OnClick" ToolTip.Tip="Update available" IsVisible="{Binding ShowHeaderUpdateButton}">
-          <PathIcon Data="M5,20H19V22H5V20M12,17L5,10H9V3H15V10H19L12,17Z" Width="18" Height="18" Foreground="{StaticResource Semantic_38D996}" />
-        </Button>
+        <StackPanel Grid.Column="2" Orientation="Horizontal">
+          <Button Classes="windowChromeButton" Click="AvailableUpdateButton_OnClick" ToolTip.Tip="Update available" IsVisible="{Binding ShowHeaderUpdateButton}">
+            <PathIcon Data="M5,20H19V22H5V20M12,17L5,10H9V3H15V10H19L12,17Z" Width="18" Height="18" Foreground="{StaticResource Semantic_38D996}" />
+          </Button>
+          <!-- Notice Board. Always shown so past notices can be reread; the dot
+               marks anything unread or a critical notice not yet acknowledged. -->
+          <Button Classes="windowChromeButton" Click="NoticeBoardButton_OnClick" ToolTip.Tip="Notice Board"
+                  AutomationProperties.Name="Notice Board">
+            <Panel>
+              <PathIcon Data="M12,22A2,2 0 0,0 14,20H10A2,2 0 0,0 12,22M18,16V11C18,7.93 16.36,5.36 13.5,4.68V4A1.5,1.5 0 0,0 12,2.5A1.5,1.5 0 0,0 10.5,4V4.68C7.63,5.36 6,7.92 6,11V16L4,18V19H20V18L18,16Z" Width="16" Height="16" />
+              <Border Width="7" Height="7" CornerRadius="3.5" Background="{StaticResource Semantic_13C8B5}"
+                      HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-3,0"
+                      IsVisible="{Binding HasUnreadNotices}" />
+            </Panel>
+          </Button>
+        </StackPanel>
 
         <!-- The active-game chip that used to sit here is gone: the Library
              heading names the filter now, and the sidebar's All Games button

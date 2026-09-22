@@ -30,9 +30,11 @@ internal static class ReleaseNotesMarkdownRenderer
         return textBlock;
     }
 
-    internal static void Apply(TextBlock textBlock, string? markdown)
+    // allowLink narrows which links become clickable (the Notice Board passes its
+    // host allow-list); anything it rejects renders as plain text.
+    internal static void Apply(TextBlock textBlock, string? markdown, Func<Uri, bool>? allowLink = null)
     {
-        var builder = new InlineBuilder();
+        var builder = new InlineBuilder(allowLink);
         var document = Markdown.Parse(markdown ?? string.Empty, Pipeline);
 
         foreach (var block in document)
@@ -117,8 +119,13 @@ internal static class ReleaseNotesMarkdownRenderer
         }
     }
 
-    private sealed class InlineBuilder
+    private sealed class InlineBuilder(Func<Uri, bool>? allowLink)
     {
+        private Uri? Allowed(string? destination) =>
+            IsSupportedLink(destination) && Uri.TryCreate(destination, UriKind.Absolute, out var parsed) && (allowLink?.Invoke(parsed) ?? true)
+                ? parsed
+                : null;
+
         internal InlineCollection Inlines { get; } = new();
         internal List<LinkTarget> Links { get; } = [];
         private int _textLength;
@@ -210,7 +217,7 @@ internal static class ReleaseNotesMarkdownRenderer
 
         private void RenderLink(LinkInline link, InlineStyle style)
         {
-            var uri = IsSupportedLink(link.Url) && Uri.TryCreate(link.Url, UriKind.Absolute, out var parsed) ? parsed : null;
+            var uri = Allowed(link.Url);
             var start = _textLength;
             RenderChildren(link, uri is null ? style : style with { LinkUri = uri });
             AddLink(start, uri);
@@ -218,7 +225,7 @@ internal static class ReleaseNotesMarkdownRenderer
 
         private void RenderAutoLink(AutolinkInline autoLink, InlineStyle style)
         {
-            var uri = IsSupportedLink(autoLink.Url) && Uri.TryCreate(autoLink.Url, UriKind.Absolute, out var parsed) ? parsed : null;
+            var uri = Allowed(autoLink.Url);
             var start = _textLength;
             AddText(autoLink.Url, uri is null ? style : style with { LinkUri = uri });
             AddLink(start, uri);

@@ -100,12 +100,23 @@ public static class ReleaseSigning
     public static PinnedReleaseKey VerifyDetached(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signatureBytes, string subject = "Data")
     {
         if (!IsConfigured) throw new InvalidOperationException("No release signing key is pinned in this build.");
+        return VerifyDetached(data, signatureBytes, PinnedPublicKeys, subject);
+    }
+
+    /// <summary>
+    /// The same RSA-PSS/SHA-256 check against a different trusted set - the Notice
+    /// Board has its own key (NoticeSigning.cs), so a leaked notice key can never
+    /// pass as a release signature or the other way round.
+    /// </summary>
+    public static PinnedReleaseKey VerifyDetached(ReadOnlySpan<byte> data, ReadOnlySpan<byte> signatureBytes, IReadOnlyList<PinnedReleaseKey> trustedKeys, string subject)
+    {
+        if (trustedKeys.Count == 0) throw new InvalidOperationException($"No {subject} signing key is pinned in this build.");
         byte[] signature;
         try { signature = Convert.FromBase64String(System.Text.Encoding.UTF8.GetString(signatureBytes).Trim()); }
         catch (FormatException error) { throw new InvalidDataException($"{subject} signature is not base64.", error); }
 
         var signedData = data.ToArray();
-        foreach (var candidate in PinnedPublicKeys)
+        foreach (var candidate in trustedKeys)
         {
             using var rsa = RSA.Create();
             try
@@ -114,13 +125,13 @@ public static class ReleaseSigning
             }
             catch (Exception error)
             {
-                AppLog.Error($"Pinned release key '{candidate.Label}' could not be imported; skipping it.", error);
+                AppLog.Error($"Pinned {subject} key '{candidate.Label}' could not be imported; skipping it.", error);
                 continue;
             }
 
             if (rsa.VerifyData(signedData, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss)) return candidate;
         }
-        throw new CryptographicException($"{subject} signature did not verify against any of the {PinnedPublicKeys.Count} pinned release key(s).");
+        throw new CryptographicException($"{subject} signature did not verify against any of the {trustedKeys.Count} pinned key(s).");
     }
 
     /// <summary>

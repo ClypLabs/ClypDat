@@ -1519,6 +1519,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool ShowHeaderUpdateButton => HasAvailableUpdate;
 
+    // Dot on the header's Notice Board bell: something new, or a critical notice
+    // not yet acknowledged.
+    public bool HasUnreadNotices
+    {
+        get => _hasUnreadNotices;
+        set => SetProperty(ref _hasUnreadNotices, value);
+    }
+    private bool _hasUnreadNotices;
+
     public double EditorSidebarWidth => 64;
 
     // Always one section showing - there is no collapsed state. The sidebar

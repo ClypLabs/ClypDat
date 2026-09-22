@@ -363,6 +363,7 @@ public sealed partial class MainWindow : Window
             UpdateDetectedGame();
             _gameDetectionTimer.Start();
             _updateCheckTimer.Start();
+            StartNoticeBoardTimer();
             _ = EnsureLibraryFolderAsync();
             if (ViewModel is not null && ViewModel.Settings.GameDiscoveryFolders.Count > 0) _ = ViewModel.ScanGameFoldersAsync();
             // Four independent HTTPS calls used to fire in the same instant here.
@@ -582,6 +583,7 @@ public sealed partial class MainWindow : Window
             foreach (var buffer in _autoClipEscalation.Values) buffer.Dispose();
             _gameDetectionTimer.Stop();
             _updateCheckTimer.Stop();
+            StopNoticeBoardTimer();
             if (_replayBuffer is not null) _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
             if (_replayBuffer is IReplayCaptureWorkerEvents workerEvents)
             {
@@ -7575,6 +7577,7 @@ public sealed partial class MainWindow : Window
 
         await ShowAudioOnlyClipPromptAsync();
         await CheckForUpdatesAsync();
+        await ShowStartupNoticesAsync();
     }
 
     private void StartStartupDialogsAfterUserActivation()

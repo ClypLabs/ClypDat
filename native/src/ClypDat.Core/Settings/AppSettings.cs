@@ -326,6 +326,10 @@ public sealed class AppSettings
     // fresh install (no settings.json at all, see AppSettingsStore.Load) gets it
     // explicitly set to false.
     public bool HasSeenOnboarding { get; set; } = true;
+    // Notice Board: ids of notices that already popped up once, and of critical
+    // notices the user clicked "I understand" on (those keep popping up until then).
+    public List<string> SeenNoticeIds { get; set; } = new();
+    public List<string> AcknowledgedNoticeIds { get; set; } = new();
     // Off by default and requires an explicit destination folder - the ClypDat (Native)
     // backend's continuous encoder can also write the whole session to disk
     // alongside the rolling replay buffer, separate from clip saves. Native only
