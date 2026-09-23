@@ -155,7 +155,7 @@ public:
     Frame convert(const CapturePixels& pixels, int64_t pts) {
         if (!pixels.texture) throw std::runtime_error("Recording frame has no GPU texture");
         struct Lock { ID3D11Multithread* p; Lock(ID3D11Multithread* v):p(v){if(p)p->Enter();} ~Lock(){if(p)p->Leave();} } lock(multithread_.Get());
-        auto hr = [](HRESULT value, const char* text) { if (FAILED(value)) throw std::runtime_error(text); };
+        auto hr = [](HRESULT value, const char* text) { if (FAILED(value)) { char code[16]{};std::snprintf(code,sizeof(code),"0x%08X",unsigned(value));throw std::runtime_error(std::string(text)+" (hr="+code+")"); } };
         if (!processor_ || pixels.width != source_width_ || pixels.height != source_height_) {
             enumerator_.Reset(); processor_.Reset();
             D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{}; desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
@@ -173,7 +173,14 @@ public:
         Microsoft::WRL::ComPtr<ID3D11VideoProcessorInputView> input;
         Microsoft::WRL::ComPtr<ID3D11VideoProcessorOutputView> output;
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC id{}; id.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
-        hr(video_->CreateVideoProcessorInputView(pixels.texture.get(), enumerator_.Get(), &id, &input), "Create recording video input view");
+        const auto input_view_result=video_->CreateVideoProcessorInputView(pixels.texture.get(), enumerator_.Get(), &id, &input);
+        if(FAILED(input_view_result)){
+            D3D11_TEXTURE2D_DESC source_desc{};pixels.texture->GetDesc(&source_desc);UINT format_support=0;
+            const auto support_result=enumerator_->CheckVideoProcessorFormat(source_desc.Format,&format_support);
+            char error[192]{};std::snprintf(error,sizeof(error),"Create recording video input view (hr=0x%08X, format=0x%X support=0x%X supportHr=0x%08X source=%ux%u bind=0x%X)",
+                unsigned(input_view_result),unsigned(source_desc.Format),unsigned(format_support),unsigned(support_result),source_desc.Width,source_desc.Height,source_desc.BindFlags);
+            throw std::runtime_error(error);
+        }
         auto* texture = reinterpret_cast<ID3D11Texture2D*>(frame->data[0]); D3D11_TEXTURE2D_DESC td{}; texture->GetDesc(&td);
         D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC od{};
         if (td.ArraySize > 1) { od.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2DARRAY;
@@ -241,6 +248,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     std::map<int64_t, int64_t> submitted_at;
     std::map<int64_t, Frame> retained_surfaces;
     std::deque<double> submission_times, completion_times;
+    double readback_ms_sum=0,video_processor_ms_sum=0,software_convert_ms_sum=0,hardware_upload_ms_sum=0,overlay_compose_ms_sum=0;
+    uint64_t processing_stage_samples=0;
     int64_t health_window = 0;
     int64_t session_started = 0, last_tuning_decision = 0, clean_since = 0;
     std::deque<bool> severe_windows;
@@ -255,6 +264,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     RecordingRecoveryTimeline recovery;
     SwsContext* scaler = nullptr;
     SwsContext* detector_scaler = nullptr;
+    std::string gpu_initialization_error;
 
     State(RecordingCaptureConfig c, RecordingCaptureCallbacks cb, std::unique_ptr<RecordingFrameSource> s,RecordingCaptureDependencies deps={})
         : config(std::move(c)), callbacks(std::move(cb)),dependencies(std::move(deps)), source(std::move(s)) {
@@ -423,6 +433,14 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             return sorted[size_t(std::ceil(sorted.size()*.95))-1];
         };
         status.submission_p95_ms = percentile(submission_times); status.completion_p95_ms = percentile(completion_times);
+        if(processing_stage_samples){
+            const double samples=double(processing_stage_samples);
+            status.texture_readback_ms=readback_ms_sum/samples;status.video_processor_ms=video_processor_ms_sum/samples;
+            status.software_convert_ms=software_convert_ms_sum/samples;status.hardware_upload_ms=hardware_upload_ms_sum/samples;
+            status.overlay_compose_ms=overlay_compose_ms_sum/samples;
+            readback_ms_sum=video_processor_ms_sum=software_convert_ms_sum=hardware_upload_ms_sum=overlay_compose_ms_sum=0;
+            processing_stage_samples=0;
+        }
         const bool pressured = status.queue_depth * 4 >= status.queue_capacity * 3;
         if(!status.paused&&!saving&&!pressured&&source->foreground()){
             const bool wgc=status.source=="Windows Graphics Capture";
@@ -651,29 +669,50 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             if (callbacks.compose) { capture_copy_texture_pixels(*pixels); composed = *pixels; composed.timestamp_us = work.pts;
                 callbacks.compose(composed); composed.texture.reset(); pixels = &composed; }
             Frame frame;
+            double readback_ms=0,video_processor_ms=0,software_convert_ms=0,hardware_upload_ms=0,overlay_ms=0;
+            std::string processing_path;
+            auto elapsed_ms=[](auto started){return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();};
             if (gpu && pixels->texture && !config.disable_gpu_processing) {
                 try {
+                    const auto started=std::chrono::steady_clock::now();
                     frame = gpu->convert(*pixels, work.pts);
+                    video_processor_ms=elapsed_ms(started);
+                    processing_path=encoder_candidates[active_candidate].d3d11?"d3d11-video-processor":"d3d11-video-processor-readback";
                     if(!encoder_candidates[active_candidate].d3d11){
+                        const auto readback_started=std::chrono::steady_clock::now();
                         Frame software(av_frame_alloc());if(!software)throw std::bad_alloc();
                         check(av_hwframe_transfer_data(software.get(),frame.get(),0),"Read processed recording NV12");
                         check(av_frame_copy_props(software.get(),frame.get()),"Copy processed recording timestamps");frame=std::move(software);
+                        readback_ms+=elapsed_ms(readback_started);
                     }
+                } catch (const std::exception& error) {
+                    { std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks;status.gpu_conversion_fallback_error=error.what(); }
+                    const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);readback_ms+=elapsed_ms(readback_started);
+                    const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);software_convert_ms=elapsed_ms(convert_started);
+                    processing_path=encoder_candidates[active_candidate].d3d11?"gpu-fallback-cpu-convert-d3d11-upload":"gpu-fallback-cpu-convert";
+                    if(encoder_candidates[active_candidate].d3d11){const auto upload_started=std::chrono::steady_clock::now();frame=gpu->upload(*frame);hardware_upload_ms=elapsed_ms(upload_started);}
                 } catch (...) {
-                    capture_copy_texture_pixels(*pixels);frame=convert(*pixels,work.pts);
-                    if(encoder_candidates[active_candidate].d3d11)frame=gpu->upload(*frame);
+                    { std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks;status.gpu_conversion_fallback_error="Unknown GPU conversion error"; }
+                    const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);readback_ms+=elapsed_ms(readback_started);
+                    const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);software_convert_ms=elapsed_ms(convert_started);
+                    processing_path=encoder_candidates[active_candidate].d3d11?"gpu-fallback-cpu-convert-d3d11-upload":"gpu-fallback-cpu-convert";
+                    if(encoder_candidates[active_candidate].d3d11){const auto upload_started=std::chrono::steady_clock::now();frame=gpu->upload(*frame);hardware_upload_ms=elapsed_ms(upload_started);}
                 }
             } else {
-                capture_copy_texture_pixels(*pixels); frame = convert(*pixels, work.pts);
-                if (encoder_candidates[active_candidate].d3d11) frame = gpu->upload(*frame);
+                if(pixels->texture){const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);readback_ms=elapsed_ms(readback_started);}
+                const auto convert_started=std::chrono::steady_clock::now();frame = convert(*pixels, work.pts);software_convert_ms=elapsed_ms(convert_started);
+                processing_path=encoder_candidates[active_candidate].d3d11?"cpu-convert-d3d11-upload":"cpu-convert";
+                if (encoder_candidates[active_candidate].d3d11) {const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*frame);hardware_upload_ms=elapsed_ms(upload_started);}
             }
             if (callbacks.compose_nv12&&(!callbacks.overlay_enabled||callbacks.overlay_enabled())) {
+                const auto overlay_started=std::chrono::steady_clock::now();
                 if (frame->format == AV_PIX_FMT_D3D11) {
                     Frame software(av_frame_alloc()); if (!software) throw std::bad_alloc();
                     check(av_hwframe_transfer_data(software.get(), frame.get(), 0), "Download recording overlay canvas");
                     check(av_frame_copy_props(software.get(), frame.get()), "Copy recording overlay timing");
-                    callbacks.compose_nv12(*software); frame = gpu->upload(*software);
+                    callbacks.compose_nv12(*software); const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*software);hardware_upload_ms+=elapsed_ms(upload_started);
                 } else callbacks.compose_nv12(*frame);
+                overlay_ms=elapsed_ms(overlay_started);
             }
             if (first) { frame->pict_type = AV_PICTURE_TYPE_I; first = false; }
             // The opened pool keeps its configured capacity when pacing is
@@ -687,7 +726,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             submitted[work.pts] = {work.acquired_us, work.fresh};
             const auto submit_started = now(); submitted_at[work.pts] = submit_started;
             { std::lock_guard lock(mutex); status.processing_ms = double(submit_started-process_started)/1000;
-                status.processing_max_ms=std::max(status.processing_max_ms,status.processing_ms);++status.submitted; }
+                status.processing_max_ms=std::max(status.processing_max_ms,status.processing_ms);++status.submitted;
+                readback_ms_sum+=readback_ms;video_processor_ms_sum+=video_processor_ms;software_convert_ms_sum+=software_convert_ms;
+                hardware_upload_ms_sum+=hardware_upload_ms;overlay_compose_ms_sum+=overlay_ms;++processing_stage_samples;
+                status.processing_path=processing_path; }
             try {
                 auto packets = encoder->submit(*frame);
                 const double duration = double(now()-submit_started)/1000;
@@ -725,7 +767,9 @@ void RecordingCapture::start() {
         s->config.width=width+(width&1);s->config.height=height+(height&1);
     }
     if(!s->gpu&&s->source->d3d_device()){
-        try{s->gpu=std::make_unique<GpuProcessor>(s->source->d3d_device(),s->config.width,s->config.height,s->fps);}catch(...){ }
+        try{s->gpu=std::make_unique<GpuProcessor>(s->source->d3d_device(),s->config.width,s->config.height,s->fps);s->gpu_initialization_error.clear();}
+        catch(const std::exception& error){s->gpu_initialization_error=error.what();std::lock_guard lock(s->mutex);++s->status.gpu_conversion_fallbacks;s->status.gpu_conversion_fallback_error=s->gpu_initialization_error;}
+        catch(...){s->gpu_initialization_error="Unknown GPU processor initialization error";std::lock_guard lock(s->mutex);++s->status.gpu_conversion_fallbacks;s->status.gpu_conversion_fallback_error=s->gpu_initialization_error;}
     }
     s->fps=s->config.fps;s->user_paused=false;
     std::fill(s->failed_candidates.begin(),s->failed_candidates.end(),false);

@@ -89,6 +89,9 @@ struct RecordingCaptureHealth {
     uint64_t unique_frames=0;
     double input_fps = 0, unique_fps = 0, output_fps = 0;
     double queue_age_ms = 0, processing_ms = 0, submission_ms = 0, completion_ms = 0;
+    double texture_readback_ms=0,video_processor_ms=0,software_convert_ms=0,hardware_upload_ms=0,overlay_compose_ms=0;
+    uint64_t gpu_conversion_fallbacks=0;
+    std::string processing_path,gpu_conversion_fallback_error;
     double submission_p95_ms = 0, completion_p95_ms = 0;
     double queue_age_max_ms=0,processing_max_ms=0,submission_max_ms=0,completion_max_ms=0;
     int surfaces_in_use = 0, surface_capacity = 0;

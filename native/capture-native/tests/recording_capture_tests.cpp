@@ -22,22 +22,34 @@ class GeneratedSource final : public RecordingFrameSource {
     int width_=128,height_=72;
     std::chrono::steady_clock::time_point next_ = std::chrono::steady_clock::now();
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture_;
 public:
-    explicit GeneratedSource(int fps,bool gpu=false) : fps_(fps) {
-        if(gpu){width_=256;height_=144;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
-            CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context)));
-            Microsoft::WRL::ComPtr<ID3D11Multithread> protection;CHECK(SUCCEEDED(context.As(&protection)));protection->SetMultithreadProtected(TRUE);}
+    explicit GeneratedSource(int fps,bool gpu=false,int width=256,int height=144) : fps_(fps) {
+        if(gpu){width_=width;height_=height;
+            CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context_)));
+            Microsoft::WRL::ComPtr<ID3D11Multithread> protection;CHECK(SUCCEEDED(context_.As(&protection)));protection->SetMultithreadProtected(TRUE);
+            std::vector<uint8_t> initial(size_t(width_)*height_*4,96);
+            for(size_t i=3;i<initial.size();i+=4)initial[i]=255;
+            D3D11_TEXTURE2D_DESC desc{};desc.Width=width_;desc.Height=height_;desc.MipLevels=1;desc.ArraySize=1;desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET;
+            D3D11_SUBRESOURCE_DATA data{initial.data(),UINT(width_*4),0};CHECK(SUCCEEDED(device_->CreateTexture2D(&desc,&data,&texture_)));}
     }
     bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
         const auto now = std::chrono::steady_clock::now();
         if (now < next_) { std::this_thread::sleep_for(std::min(timeout, std::chrono::duration_cast<std::chrono::milliseconds>(next_-now)+1ms)); return false; }
         next_ += std::chrono::microseconds(1000000/fps_);
         pixels.width = width_; pixels.height = height_; pixels.stride = width_*4;
-        pixels.bgra.resize(size_t(width_)*height_*4);
-        for(int y=0;y<height_;++y)for(int x=0;x<width_;++x){auto* p=&pixels.bgra[(y*width_+x)*4];p[0]=uint8_t(x+index_);p[1]=uint8_t(y+index_);p[2]=uint8_t(x+y+index_);p[3]=255;}
-        if(device_){D3D11_TEXTURE2D_DESC desc{};desc.Width=width_;desc.Height=height_;desc.MipLevels=1;desc.ArraySize=1;desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-            D3D11_SUBRESOURCE_DATA data{pixels.bgra.data(),UINT(pixels.stride),0};ID3D11Texture2D* texture=nullptr;CHECK(SUCCEEDED(device_->CreateTexture2D(&desc,&data,&texture)));
-            pixels.texture={texture,[](auto*p){p->Release();}};pixels.bgra.clear();}
+        if(device_){
+            constexpr int patch=64;std::vector<uint8_t> moving(size_t(patch)*patch*4);
+            for(size_t i=0;i<moving.size();i+=4){moving[i]=uint8_t(index_);moving[i+1]=uint8_t(index_*3);moving[i+2]=255;moving[i+3]=255;}
+            const int left=(index_*17)%(width_-patch),top=(index_*11)%(height_-patch);
+            D3D11_BOX box{UINT(left),UINT(top),0,UINT(left+patch),UINT(top+patch),1};
+            context_->UpdateSubresource(texture_.Get(),0,&box,moving.data(),patch*4,0);
+            texture_->AddRef();pixels.texture={texture_.Get(),[](auto*p){p->Release();}};pixels.bgra.clear();
+        }else{
+            pixels.bgra.resize(size_t(width_)*height_*4);
+            for(int y=0;y<height_;++y)for(int x=0;x<width_;++x){auto* p=&pixels.bgra[(y*width_+x)*4];p[0]=uint8_t(x+index_);p[1]=uint8_t(y+index_);p[2]=uint8_t(x+y+index_);p[3]=255;}
+        }
         ++index_; return true;
     }
     bool eligible() const override { return true; }
@@ -90,6 +102,24 @@ void blocked_writer(){
     CHECK(capture.health().queue_depth<=15);CHECK(capture.health().replaced>0);
     CHECK(!capture.stop(10ms));CHECK(capture.health().restart_required);
     {std::lock_guard lock(mutex);released=true;}changed.notify_all();CHECK(capture.stop(3s));
+}
+void gpu_4k_to_1440p(int fps){
+    RecordingCaptureConfig config;config.width=2560;config.height=1440;config.fps=fps;
+    std::mutex mutex;std::condition_variable changed;uint64_t packets=0;
+    RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){std::lock_guard lock(mutex);++packets;changed.notify_all();};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(fps,true,3840,2160));capture.start();
+    bool reached=false;{std::unique_lock lock(mutex);reached=changed.wait_for(lock,5s,[&]{return packets>=size_t(fps*2);});}
+    if(!reached){capture.stop();const auto stalled=capture.health();std::lock_guard lock(mutex);
+        throw std::runtime_error("4K-to-1440p "+std::to_string(fps)+" FPS GPU capture timed out: packets="+std::to_string(packets)+" acquired="+std::to_string(stalled.acquired)+" encoded="+std::to_string(stalled.encoded)+" input="+std::to_string(stalled.input_fps)+" output="+std::to_string(stalled.output_fps)+" queue="+std::to_string(stalled.queue_depth)+" drops="+std::to_string(stalled.replaced)+" path="+stalled.processing_path+" fallback="+stalled.gpu_conversion_fallback_error+" error="+stalled.error);}
+    CHECK(capture.stop());const auto health=capture.health();
+    if(!health.error.empty())throw std::runtime_error("4K-to-1440p "+std::to_string(fps)+" FPS GPU capture failed: "+health.error);
+    CHECK(health.hardware_input);CHECK(health.output_width==2560&&health.output_height==1440);
+    if(health.processing_path!="d3d11-video-processor")throw std::runtime_error("4K-to-1440p path="+health.processing_path+" fallbacks="+std::to_string(health.gpu_conversion_fallbacks)+" fallbackError="+health.gpu_conversion_fallback_error+" videoProcessor="+std::to_string(health.video_processor_ms)+" softwareConvert="+std::to_string(health.software_convert_ms));
+    CHECK(health.gpu_conversion_fallbacks==0);
+    CHECK(health.output_fps>=fps*.9);CHECK(health.queue_depth<health.queue_capacity);
+    CHECK(health.processing_ms<1000.0/fps);
+    std::cout<<"4K-to-1440p@"<<fps<<" GPU capture: input="<<health.input_fps<<" output="<<health.output_fps
+        <<" processing="<<health.processing_ms<<"ms videoProcessor="<<health.video_processor_ms<<"ms dropped="<<health.replaced<<"\n";
 }
 void detector(){
     RecordingCaptureConfig config;config.width=1920;config.height=1080;config.fps=30;config.cpu_encoder=true;
@@ -213,6 +243,7 @@ void gpu_generation_failover(){
 int main(int argc,char**argv) {
     try{
     av_log_set_level(AV_LOG_ERROR);
+    if(argc>1&&std::string_view(argv[1])=="--4k-gpu"){gpu_4k_to_1440p(90);return 0;}
     CHECK(capture_queue_capacity(30)==4);CHECK(capture_queue_capacity(120)==15);
     CHECK(capture_final_hold(true,16667,500000)==33334);CHECK(capture_final_hold(false,16667,500000)==16667);
     auto fit=capture_aspect_fit(1920,1200,1920,1080); CHECK(fit.width==1728&&fit.height==1080&&fit.x==96);
@@ -227,7 +258,7 @@ int main(int argc,char**argv) {
         roundtrip(fps,variable);
         if(gpu){roundtrip(fps,variable,true,false);roundtrip(fps,variable,true,true);}
     }
-    blocked_writer();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();}
+    blocked_writer();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

@@ -208,6 +208,11 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"outputWidth\":" << h.output_width << ",\"outputHeight\":" << h.output_height
         << ",\"duplicates\":" << h.duplicates << ",\"submitted\":" << h.submitted << ",\"sourceRecoveries\":" << h.source_recoveries
         << ",\"queueAgeMs\":" << h.queue_age_ms << ",\"processingMs\":" << h.processing_ms
+        << ",\"processingPath\":" << quoted(h.processing_path)
+        << ",\"textureReadbackMs\":" << h.texture_readback_ms << ",\"videoProcessorMs\":" << h.video_processor_ms
+        << ",\"softwareConvertMs\":" << h.software_convert_ms << ",\"hardwareUploadMs\":" << h.hardware_upload_ms
+        << ",\"overlayComposeMs\":" << h.overlay_compose_ms << ",\"gpuConversionFallbacks\":" << h.gpu_conversion_fallbacks
+        << ",\"gpuConversionFallbackError\":" << quoted(h.gpu_conversion_fallback_error)
         << ",\"submissionMs\":" << h.submission_ms << ",\"completionMs\":" << h.completion_ms
         << ",\"submissionP95Ms\":" << h.submission_p95_ms << ",\"completionP95Ms\":" << h.completion_p95_ms
         << ",\"queueAgeMaxMs\":" << h.queue_age_max_ms << ",\"processingMaxMs\":" << h.processing_max_ms

@@ -22,6 +22,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
     private Task _controlTask = Task.CompletedTask, _lastStop = Task.CompletedTask;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Native C++");
     private int _saving;
+    private long _lastNativeDiagnosticLogTicks;
     private bool _recording;
     private volatile bool _lastFrozen;
     private string _fullSessionPath = "";
@@ -68,6 +69,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                 var initialArtwork = artwork.Update(settings, [], 0, Math.Max(2, configuration.CaptureWidth), Math.Max(2, configuration.CaptureHeight), NowUs());
                 if (initialArtwork is not null) session.UpdateArtwork(initialArtwork);
                 session.Start();
+                GpuScheduling.TryRaiseProcessGpuPriority();
                 var startup = Stopwatch.StartNew();
                 while (true)
                 {
@@ -225,6 +227,12 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             EncodeQueueAge = TimeSpan.FromMilliseconds(Number(details, "queueAgeMs")),
             SubmissionP95Ms = Number(details, "submissionP95Ms"),
             ProcessingMaxMs = Number(details, "processingMaxMs"), SubmissionMaxMs = Number(details, "submissionMaxMs"),
+            ProcessingPath = Text(details, "processingPath"),
+            TextureReadbackMs = Number(details, "textureReadbackMs"), VideoProcessorMs = Number(details, "videoProcessorMs"),
+            SoftwareConvertMs = Number(details, "softwareConvertMs"), HardwareUploadMs = Number(details, "hardwareUploadMs"),
+            OverlayComposeMs = Number(details, "overlayComposeMs"), GpuConversionFallbacks = (long)Number(details, "gpuConversionFallbacks"),
+            GpuConversionFallbackError = Text(details, "gpuConversionFallbackError"),
+            ProcessGpuPriority = GpuScheduling.ProcessPriorityApplied,
             EncoderOutputLatencyMaxMs = Number(details, "completionMaxMs"),
             EncoderOutputLatencyP95Ms = Number(details, "completionP95Ms"), SurfacesInUse = (int)Number(details, "surfacesInUse"),
             SurfaceCapacity = (int)Number(details, "surfaceCapacity"), EncoderInputPath = Bool(details, "hardwareInput") ? "D3D11" : "Software",
@@ -239,6 +247,13 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
         };
         lock (_gate) _health = health;
         HealthChanged?.Invoke(this, health);
+        var diagnosticNow = Stopwatch.GetTimestamp();
+        var previousDiagnostic = Volatile.Read(ref _lastNativeDiagnosticLogTicks);
+        if (diagnosticNow - previousDiagnostic >= Stopwatch.Frequency &&
+            Interlocked.CompareExchange(ref _lastNativeDiagnosticLogTicks, diagnosticNow, previousDiagnostic) == previousDiagnostic)
+        {
+            AppLog.Debug($"Native capture: input={health.InputFrameRate:F1} fresh={health.UniqueFrameRate:F1} output={health.OutputFrameRate:F1}fps; queue={health.QueueDepth}/{health.EncodeQueueCapacity}; dropped={health.TotalDroppedFrames}; processingMax={health.ProcessingMaxMs:F2}ms path={health.ProcessingPath}; readback={health.TextureReadbackMs:F2}ms videoProcessor={health.VideoProcessorMs:F2}ms softwareConvert={health.SoftwareConvertMs:F2}ms upload={health.HardwareUploadMs:F2}ms overlay={health.OverlayComposeMs:F2}ms; GPU fallbacks={health.GpuConversionFallbacks} error='{health.GpuConversionFallbackError}' processGpuPriority={health.ProcessGpuPriority?.ToString() ?? "unavailable"}.");
+        }
         if (health.FullSession.State == FullSessionState.Recording && health.FullSession.OutputPath.Length > 0)
         {
             var publish = false;

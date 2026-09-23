@@ -60,7 +60,7 @@ public:
         D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
         const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
         desc.Usage = D3D11_USAGE_DEFAULT; desc.CPUAccessFlags = 0; desc.MiscFlags = 0;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | (hdr ? D3D11_BIND_RENDER_TARGET : 0);
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
         if (hdr) desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         ComPtr<ID3D11Texture2D> owned;
         checked(device->CreateTexture2D(&desc, nullptr, &owned), "Allocate owned recording texture");
@@ -393,7 +393,7 @@ public:
         if (crop.width <= 0 || crop.height <= 0) crop = {0,0,int(desc.Width),int(desc.Height)};
         if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return false;
         desc.Width = crop.width; desc.Height = crop.height; desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.CPUAccessFlags = 0; desc.MiscFlags = 0; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        desc.CPUAccessFlags = 0; desc.MiscFlags = 0; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
         ComPtr<ID3D11Texture2D> owned;
         checked(gpu_.device->CreateTexture2D(&desc, nullptr, &owned), "Allocate owned desktop frame");
         D3D11_BOX box{UINT(crop.x),UINT(crop.y),0,UINT(crop.x+crop.width),UINT(crop.y+crop.height),1};

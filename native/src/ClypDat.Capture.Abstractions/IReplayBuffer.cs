@@ -163,6 +163,7 @@ public sealed record ReplayCaptureHealth(
     public bool CapturePaused { get; init; }
     public ReplayRecoveryStopReason RecoveryStopReason { get; init; }
     public int? ProcessingGpuPriority { get; init; }
+    public int? ProcessGpuPriority { get; init; }
     public int? AcquisitionGpuPriority { get; init; }
     // Recovery fields are optional so old worker JSON payloads remain valid.
     // CleanSince is set only after two clean diagnostic windows.
@@ -177,6 +178,14 @@ public sealed record ReplayCaptureHealth(
     public long EncodeQueueReplacements { get; init; }
     public double ProcessingP95Ms { get; init; }
     public double ProcessingMaxMs { get; init; }
+    public string ProcessingPath { get; init; } = string.Empty;
+    public double TextureReadbackMs { get; init; }
+    public double VideoProcessorMs { get; init; }
+    public double SoftwareConvertMs { get; init; }
+    public double HardwareUploadMs { get; init; }
+    public double OverlayComposeMs { get; init; }
+    public long GpuConversionFallbacks { get; init; }
+    public string GpuConversionFallbackError { get; init; } = string.Empty;
 
     // Native engine diagnostics. These are optional for managed/legacy
     // backends, but make worker health actionable without parsing logs.

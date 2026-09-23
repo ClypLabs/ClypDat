@@ -59,6 +59,7 @@ internal static class GpuScheduling
     internal const int OverlayDevicePriority = 7;
 
     private static int _processPriorityRaised;
+    private static int _processPriorityApplied = -1;
 
     [DllImport("gdi32.dll")]
     private static extern int D3DKMTSetProcessSchedulingPriorityClass(nint process, int priorityClass);
@@ -104,7 +105,14 @@ internal static class GpuScheduling
     {
         if (Interlocked.Exchange(ref _processPriorityRaised, 1) != 0) return;
         var requested = ResolveProcessPriority(Environment.GetEnvironmentVariable("CLYPDAT_GPU_PROCESS_PRIORITY"));
-        if (requested is null) return;
+        if (requested is null)
+        {
+            _processPriorityApplied = TryReadProcessPriority();
+            AppLog.Info(_processPriorityApplied >= 0
+                ? $"Native capture: GPU process scheduling priority left unchanged; applied={ProcessPriorityName(_processPriorityApplied)}."
+                : "Native capture: GPU process scheduling priority left unchanged; read-back unavailable.");
+            return;
+        }
 
         AppLog.Info($"Capture worker: raising process-wide GPU scheduling priority to {requested}.");
 
@@ -113,7 +121,27 @@ internal static class GpuScheduling
         if (requested == "REALTIME" && TrySetProcessPriorityClass(SchedulingPriorityClassHigh, "HIGH")) return;
         if (TrySetProcessPriorityClass(SchedulingPriorityClassAboveNormal, "ABOVE_NORMAL")) return;
 
-        AppLog.Info("Native capture: GPU process scheduling priority could not be raised - capture will queue behind the foreground game as before.");
+        _processPriorityApplied = TryReadProcessPriority();
+        AppLog.Info(_processPriorityApplied >= 0
+            ? $"Native capture: GPU process scheduling priority could not be raised; applied={ProcessPriorityName(_processPriorityApplied)}."
+            : "Native capture: GPU process scheduling priority could not be raised; applied priority read-back unavailable.");
+    }
+
+    internal static int? ProcessPriorityApplied => Volatile.Read(ref _processPriorityApplied) is var value && value >= 0 ? value : null;
+
+    private static int TryReadProcessPriority()
+    {
+        try
+        {
+            var status = D3DKMTGetProcessSchedulingPriorityClass(GetCurrentProcess(), out var applied);
+            if (status == 0) return applied;
+            AppLog.Info($"Native capture: GPU process scheduling priority read-back refused (status=0x{status:X8}).");
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"Native capture: GPU process scheduling priority read-back unavailable (non-fatal): {error.Message}");
+        }
+        return -1;
     }
 
     private static bool TrySetProcessPriorityClass(int priorityClass, string name)
@@ -126,17 +154,10 @@ internal static class GpuScheduling
             var status = D3DKMTSetProcessSchedulingPriorityClass(GetCurrentProcess(), priorityClass);
             if (status == 0)
             {
-                try
-                {
-                    var readBackStatus = D3DKMTGetProcessSchedulingPriorityClass(GetCurrentProcess(), out var applied);
-                    AppLog.Info(readBackStatus == 0
-                        ? $"Native capture: GPU process scheduling priority requested={name}, applied={ProcessPriorityName(applied)}."
-                        : $"Native capture: GPU process scheduling priority raised to {name}; read-back refused (status=0x{readBackStatus:X8}).");
-                }
-                catch (Exception error)
-                {
-                    AppLog.Info($"Native capture: GPU process scheduling priority raised to {name}; read-back unavailable (non-fatal): {error.Message}");
-                }
+                _processPriorityApplied = TryReadProcessPriority();
+                AppLog.Info(_processPriorityApplied >= 0
+                    ? $"Native capture: GPU process scheduling priority requested={name}, applied={ProcessPriorityName(_processPriorityApplied)}."
+                    : $"Native capture: GPU process scheduling priority set to {name}; read-back unavailable.");
                 return true;
             }
 
