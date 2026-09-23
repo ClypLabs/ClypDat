@@ -20,6 +20,10 @@ int main(int argc, char** argv) {
     CHECK(info.health_size == sizeof(cd_engine_health));
     CHECK(info.save_request_size == sizeof(cd_save_request));
     CHECK(info.save_result_size == sizeof(cd_save_result));
+    CHECK(info.capabilities == 0); // Foundation must not advertise recording.
+    info.header.struct_size = 32; // Earlier ABI v3 foundation.
+    CHECK(cd_engine_get_abi_info(&info) == CD_E_INVALID_ARGUMENT);
+    info.header.struct_size = sizeof(info);
     info.header.abi_version = 2;
     CHECK(cd_engine_get_abi_info(&info) == CD_E_UNSUPPORTED_ABI);
 

@@ -12,6 +12,18 @@ internal static class NativeReplayEngineAbi
     internal const uint EngineVersion = 3;
     internal const string LibraryName = "ClypDat.Capture.Native";
 
+    static NativeReplayEngineAbi() => NativeLibrary.SetDllImportResolver(typeof(NativeReplayEngineAbi).Assembly,
+        (name, assembly, searchPath) => name == LibraryName ? NativeRecorderLibrary.Handle : IntPtr.Zero);
+
+    [Flags]
+    internal enum Capability : ulong
+    {
+        Capture = 1, ReplaySave = 2, Audio = 4, FullSession = 8, Overlays = 16, AsyncControl = 32
+    }
+
+    internal const Capability RequiredCapabilities = Capability.Capture | Capability.ReplaySave | Capability.Audio |
+        Capability.FullSession | Capability.Overlays | Capability.AsyncControl;
+
     internal enum Result : int
     {
         Ok = 0,
@@ -21,7 +33,8 @@ internal static class NativeReplayEngineAbi
         DeviceFailure = -4,
         Unavailable = -5,
         BufferTooSmall = -6,
-        Internal = -7
+        Internal = -7,
+        RuntimeMismatch = -8
     }
 
     internal enum EngineState : uint { Created, Running, Paused, Stopped, Failed }
@@ -38,6 +51,9 @@ internal static class NativeReplayEngineAbi
         internal uint HealthSize;
         internal uint SaveRequestSize;
         internal uint SaveResultSize;
+        internal Capability Capabilities;
+
+        internal readonly bool CanRecord => (Capabilities & RequiredCapabilities) == RequiredCapabilities;
 
         internal readonly bool IsCompatible => Header.AbiVersion == Version &&
             Header.StructSize == Marshal.SizeOf<AbiInfo>() && EngineVersion == NativeReplayEngineAbi.EngineVersion &&
@@ -198,6 +214,11 @@ internal sealed class NativeReplayEngine : IDisposable
                 error = $"native ABI layout mismatch ({query})";
                 return false;
             }
+            if (!info.CanRecord)
+            {
+                error = $"native recorder is incomplete; missing capabilities: {NativeReplayEngineAbi.RequiredCapabilities & ~info.Capabilities}. Install a complete recording engine.";
+                return false;
+            }
             var result = NativeReplayEngineAbi.cd_engine_create(NativeReplayEngineAbi.EngineConfig.From(config), out var handle);
             if (result != NativeReplayEngineAbi.Result.Ok)
             {
@@ -208,9 +229,9 @@ internal sealed class NativeReplayEngine : IDisposable
             engine = new NativeReplayEngine(handle);
             return true;
         }
-        catch (DllNotFoundException) { error = "native DLL unavailable"; return false; }
-        catch (EntryPointNotFoundException) { error = "native ABI unavailable"; return false; }
-        catch (BadImageFormatException) { error = "native DLL architecture mismatch"; return false; }
+        catch (DllNotFoundException exception) { error = exception.Message; return false; }
+        catch (EntryPointNotFoundException exception) { error = $"native ABI unavailable: {exception.Message}. Reinstall ClypDat."; return false; }
+        catch (BadImageFormatException exception) { error = exception.Message; return false; }
     }
 
     internal bool TryStart(out string error) => TryInvoke(() => NativeReplayEngineAbi.cd_engine_start(_handle), out error);
@@ -250,10 +271,10 @@ internal sealed class NativeReplayEngine : IDisposable
             0, 0, checked((int)native.QueueDepth), string.Empty, string.Empty, failure, DateTime.UtcNow)
         {
             ConfiguredFrameRate = checked((int)native.SelectedFps),
-            EncoderInputPath = "GPU resident",
+            EncoderInputPath = string.Empty,
             EncodeQueueCapacity = checked((int)native.QueueCapacity),
             AdapterDescription = $"LUID {native.AdapterLuidHigh:X8}:{native.AdapterLuidLow:X8}",
-            FrameRateMode = "CFR",
+            FrameRateMode = string.Empty,
             DegradeReason = native.FatalError == NativeReplayEngineAbi.FatalError.Encoder ? ReplayDegradeReason.EncoderOverload : ReplayDegradeReason.None,
             NativeEngineVersion = native.EngineVersion,
             NativeBuildVersion = native.BuildVersion,

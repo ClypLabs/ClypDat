@@ -12,7 +12,7 @@ public sealed class NativeReplayEngineAbiTests
         Assert.Equal(8, Marshal.SizeOf<NativeReplayEngineAbi.Header>());
         Assert.Equal(56, Marshal.SizeOf<NativeReplayEngineAbi.EngineConfig>());
         Assert.Equal(112, Marshal.SizeOf<NativeReplayEngineAbi.EngineHealth>());
-        Assert.Equal(32, Marshal.SizeOf<NativeReplayEngineAbi.AbiInfo>());
+        Assert.Equal(40, Marshal.SizeOf<NativeReplayEngineAbi.AbiInfo>());
         Assert.Equal(24, Marshal.SizeOf<NativeReplayEngineAbi.SaveRequest>());
         Assert.Equal(56, Marshal.SizeOf<NativeReplayEngineAbi.SaveResult>());
         Assert.Equal(40, Marshal.OffsetOf<NativeReplayEngineAbi.SaveResult>("TemporaryVideoPath").ToInt32());
@@ -33,6 +33,17 @@ public sealed class NativeReplayEngineAbiTests
             SaveResultSize = 56
         };
         Assert.True(info.IsCompatible);
+        Assert.False(info.CanRecord);
+        info.Capabilities = NativeReplayEngineAbi.RequiredCapabilities;
+        Assert.True(info.CanRecord);
+        foreach (var capability in Enum.GetValues<NativeReplayEngineAbi.Capability>())
+        {
+            info.Capabilities = NativeReplayEngineAbi.RequiredCapabilities & ~capability;
+            Assert.False(info.CanRecord);
+        }
+        info.Header.StructSize = 32;
+        Assert.False(info.IsCompatible);
+        info.Header.StructSize = 40;
         info.Header.AbiVersion = 2;
         Assert.False(info.IsCompatible);
         info.Header.AbiVersion = NativeReplayEngineAbi.Version;
@@ -59,6 +70,7 @@ public sealed class NativeReplayEngineAbiTests
         Assert.Equal(60, health.TargetFrameRate);
         Assert.Equal("DXGI", health.CaptureMode);
         Assert.Equal(89.9, health.OutputFrameRate, 1);
-        Assert.Equal("GPU resident", health.EncoderInputPath);
+        Assert.Empty(health.EncoderInputPath);
+        Assert.Empty(health.FrameRateMode);
     }
 }

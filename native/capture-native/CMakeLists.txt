@@ -19,6 +19,15 @@ foreach(component avcodec avformat avutil swresample swscale)
         INTERFACE_INCLUDE_DIRECTORIES "${ffmpeg_include}")
 endforeach()
 
+add_library(RecorderCore STATIC src/video_encoder.cpp src/video_encoder.h)
+target_compile_features(RecorderCore PUBLIC cxx_std_20)
+target_include_directories(RecorderCore PUBLIC src)
+target_compile_definitions(RecorderCore PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(RecorderCore PRIVATE /W4 /permissive- /EHsc)
+set_target_properties(RecorderCore PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_link_libraries(RecorderCore PUBLIC
+    ffmpeg_avcodec ffmpeg_avformat ffmpeg_avutil ffmpeg_swresample ffmpeg_swscale)
+
 add_library(ClypDat.Capture.Native SHARED
     src/engine.cpp
     include/clypdat_capture_native.h)
@@ -32,7 +41,12 @@ set_target_properties(ClypDat.Capture.Native PROPERTIES
 target_include_directories(ClypDat.Capture.Native PUBLIC include)
 target_compile_definitions(ClypDat.Capture.Native PRIVATE CD_BUILDING_DLL WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(ClypDat.Capture.Native PRIVATE /W4 /permissive- /EHsc)
-target_link_libraries(ClypDat.Capture.Native PRIVATE d3d11 dxgi)
+target_link_libraries(ClypDat.Capture.Native PRIVATE RecorderCore d3d11 dxgi)
+add_custom_command(TARGET ClypDat.Capture.Native POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_RUNTIME_DLLS:ClypDat.Capture.Native>
+        $<TARGET_FILE_DIR:ClypDat.Capture.Native>
+    COMMAND_EXPAND_LISTS)
 
 enable_testing()
 add_executable(ClypDat.Capture.Native.Tests tests/abi_smoke.cpp)
@@ -53,10 +67,21 @@ target_compile_features(ClypDat.Capture.Native.CHeader PRIVATE c_std_11)
 add_executable(ClypDat.Capture.Native.FfmpegTests tests/ffmpeg_sdk.cpp)
 target_compile_features(ClypDat.Capture.Native.FfmpegTests PRIVATE cxx_std_20)
 target_link_libraries(ClypDat.Capture.Native.FfmpegTests PRIVATE
-    ffmpeg_avcodec ffmpeg_avformat ffmpeg_avutil ffmpeg_swresample ffmpeg_swscale)
+    RecorderCore)
+set_target_properties(ClypDat.Capture.Native.FfmpegTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_custom_command(TARGET ClypDat.Capture.Native.FfmpegTests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_RUNTIME_DLLS:ClypDat.Capture.Native.FfmpegTests>
         $<TARGET_FILE_DIR:ClypDat.Capture.Native.FfmpegTests>
     COMMAND_EXPAND_LISTS)
 add_test(NAME ClypDat.Capture.Native.FfmpegSdk COMMAND ClypDat.Capture.Native.FfmpegTests)
+if(CLYPDAT_TEST_GPU)
+    add_test(NAME ClypDat.Capture.Native.NvencD3D11 COMMAND ClypDat.Capture.Native.FfmpegTests --gpu)
+endif()
+
+add_executable(ClypDat.Capture.Native.EncoderTests tests/encoder_failures.cpp)
+target_link_libraries(ClypDat.Capture.Native.EncoderTests PRIVATE RecorderCore)
+set_target_properties(ClypDat.Capture.Native.EncoderTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.EncoderFailures COMMAND ClypDat.Capture.Native.EncoderTests)

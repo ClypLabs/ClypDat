@@ -1,4 +1,5 @@
 #include "clypdat_capture_native.h"
+#include "video_encoder.h"
 
 #include <d3d11.h>
 #include <dxgi.h>
@@ -9,15 +10,13 @@
 namespace {
 constexpr uint32_t kMinimumFps = 30;
 constexpr uint32_t kMaximumFps = 120;
-constexpr uint32_t kEncodeQueueCapacity = 8;
-constexpr uint32_t kSurfacePoolCapacity = 12;
 
 static_assert(sizeof(cd_struct_header) == 8);
 static_assert(sizeof(cd_engine_config) == 56);
 static_assert(sizeof(cd_engine_health) == 112);
 static_assert(sizeof(cd_save_request) == 24);
 static_assert(sizeof(cd_save_result) == 56);
-static_assert(sizeof(cd_abi_info) == 32);
+static_assert(sizeof(cd_abi_info) == 40);
 static_assert(sizeof(void*) == 8, "The recorder ABI requires x64.");
 
 int32_t validate_header(const cd_struct_header* header, uint32_t required_size) {
@@ -51,7 +50,7 @@ int32_t CD_CALL cd_engine_get_abi_info(cd_abi_info* info) {
     const auto result = validate_header(info == nullptr ? nullptr : &info->header, sizeof(cd_abi_info));
     if (result != CD_OK) return result;
     *info = { { sizeof(cd_abi_info), CD_ABI_VERSION }, CD_ENGINE_VERSION, sizeof(void*),
-        sizeof(cd_engine_config), sizeof(cd_engine_health), sizeof(cd_save_request), sizeof(cd_save_result) };
+        sizeof(cd_engine_config), sizeof(cd_engine_health), sizeof(cd_save_request), sizeof(cd_save_result), 0 };
     return CD_OK;
 }
 
@@ -61,6 +60,7 @@ int32_t CD_CALL cd_engine_create(const cd_engine_config* config, cd_engine** eng
     const auto result = validate_header(config == nullptr ? nullptr : &config->header, sizeof(cd_engine_config));
     if (result != CD_OK) return result;
     if (config->selected_fps < kMinimumFps || config->selected_fps > kMaximumFps || config->width == 0 || config->height == 0) return CD_E_INVALID_ARGUMENT;
+    if (!clypdat::runtime_versions_match()) return CD_E_RUNTIME_MISMATCH;
     auto created = std::make_unique<cd_engine>();
     created->config = *config;
     created->active_fps = config->selected_fps;
@@ -152,9 +152,9 @@ int32_t CD_CALL cd_engine_get_health(const cd_engine* engine, cd_engine_health* 
     health->capture_route = mutable_engine->route;
     health->fatal_error = mutable_engine->fatal;
     health->queue_depth = 0;
-    health->queue_capacity = kEncodeQueueCapacity;
+    health->queue_capacity = 0;
     health->surfaces_in_use = 0;
-    health->surface_capacity = kSurfacePoolCapacity;
+    health->surface_capacity = 0;
     health->adapter_luid_low = mutable_engine->adapter_luid_low;
     health->adapter_luid_high = mutable_engine->adapter_luid_high;
     health->encoder_slot_wait_p95_ms = 0;

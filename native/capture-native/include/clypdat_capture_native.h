@@ -37,6 +37,7 @@ enum cd_result {
     CD_E_UNAVAILABLE = -5,
     CD_E_BUFFER_TOO_SMALL = -6,
     CD_E_INTERNAL = -7,
+    CD_E_RUNTIME_MISMATCH = -8,
 };
 
 enum cd_engine_state {
@@ -61,6 +62,16 @@ enum cd_fatal_error {
     CD_FATAL_ABI = 4,
 };
 
+// Advertise only completed end-to-end contracts, not isolated building blocks.
+enum cd_capability {
+    CD_CAP_CAPTURE = 1,
+    CD_CAP_REPLAY_SAVE = 2,
+    CD_CAP_AUDIO = 4,
+    CD_CAP_FULL_SESSION = 8,
+    CD_CAP_OVERLAYS = 16,
+    CD_CAP_ASYNC_CONTROL = 32,
+};
+
 #pragma pack(push, 8)
 
 typedef struct cd_struct_header {
@@ -78,6 +89,7 @@ typedef struct cd_abi_info {
     uint32_t health_size;
     uint32_t save_request_size;
     uint32_t save_result_size;
+    uint64_t capabilities;
 } cd_abi_info;
 
 typedef struct cd_engine_config {

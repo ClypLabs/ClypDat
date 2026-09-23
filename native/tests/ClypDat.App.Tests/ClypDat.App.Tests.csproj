@@ -24,4 +24,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+  <Target Name="CopyNativeRecorderForIntegrationTests" AfterTargets="Build">
+    <Copy SourceFiles="../../capture-native/build/$(Configuration)/ClypDat.Capture.Native.dll"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

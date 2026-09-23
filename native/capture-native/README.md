@@ -4,15 +4,22 @@ Branch: `cpp-rewrite`, based on `d9b84d9c`. The C# recording pipeline remains
 selected by `ReplayBufferFactory.CreateLocal()`. This DLL does not record yet.
 
 The current implementation provides ABI v3 negotiation, copied configuration,
-D3D11 device lifecycle, pinned FFmpeg development imports, and executable
-Release tests. `cd_engine_save_window` still returns `CD_E_UNAVAILABLE`.
-Creating a device does not establish a capture route.
+D3D11 device lifecycle, pinned FFmpeg development imports, and a shared
+`RecorderCore` library containing the native video encoder. It does not replace
+the managed recorder yet. `cd_engine_save_window` still returns
+`CD_E_UNAVAILABLE`. Creating a device does not establish a capture route.
+
+ABI information now includes recording capability bits. The engine advertises
+none until the corresponding end-to-end contracts work. The managed adapter
+rejects this incomplete engine and the earlier 32-byte ABI information layout.
+The loader loads dependencies by absolute path with DLL-directory/System32
+search flags, verifies all five pinned runtime versions, then loads the engine.
 
 Build from the repository root:
 
 ```powershell
 ./eng/Build-NativeCapture.ps1 -Configuration Release -Test
-# Optional physical-device lifecycle checks; does not acquire screen images.
+# Physical-device lifecycle and generated NVENC textures; no screen acquisition.
 ./eng/Build-NativeCapture.ps1 -Configuration Release -TestGpu
 ```
 
@@ -34,10 +41,18 @@ are caller-owned UTF-16 buffers, with capacities measured in code units.
 Callers must serialize destruction against outstanding engine calls.
 
 Tests cover C and C++ structure layouts, ABI rejection, copied configuration,
-caller buffer bounds, lifecycle state, and real libx264 encode/decode at
-30/60/90/120 fps. PCM silence is resampled from 44.1 kHz to 48 kHz. Device tests
-run twenty D3D11 start/pause/stop cycles separately from GPU-free CI tests.
-These fixtures verify SDK integration, not recording parity or vendor encoding.
+caller buffer bounds, lifecycle state, and the shared production encoder's
+libx264 encode/decode at 30/60/90/120 fps. Encoder options preserve the existing
+microsecond time base, NV12, limited BT.709, bitrate/VBV, one-second GOP and
+vendor settings. Injected codec responses exercise identical-frame EAGAIN
+retry, flush retry, failed generations, and repeated drain. PCM resampling
+remains a standalone SDK check, not a production audio test.
+
+`-TestGpu` runs twenty D3D11 lifecycle cycles and generated D3D11 NV12 textures
+through NVENC H.264/AV1 at all four rates. Those checks passed on the RTX 4070 Ti;
+they cover decoded dimensions/timestamps/color tags, GOP flags and releasing
+input surfaces before delayed output. They do not establish capture, saved-file
+or performance parity. AMF/QSV options are ported but untested on hardware.
 
 Remaining migration work, in implementation order:
 
@@ -57,5 +72,5 @@ Remaining migration work, in implementation order:
 7. Switch the factory only after parity checks, then remove superseded managed
    recording code while retaining editor/export dependencies.
 
-NVENC, AMF and QSV encoding parity, real capture recovery, concurrent saves,
-interrupted MP4/MKV sessions and performance comparisons remain unverified.
+Capture recovery, concurrent saves, interrupted MP4/MKV sessions, complete
+vendor encoding parity and paired performance comparisons remain unverified.
