@@ -14,6 +14,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Reflection;
 using ClypDat.Capture.Abstractions;
 using ClypDat.App.Controls;
 using ClypDat.App.Converters;
@@ -2024,18 +2025,6 @@ public sealed partial class MainWindow : Window
         HarvestGameIcons();
     }
 
-    private void FeedbackButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo("https://github.com/ClypLabs/ClypDat/issues") { UseShellExecute = true });
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Open feedback link failed", error);
-        }
-    }
-
     private void HelpSupportButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || ViewModel.IsHelpVisible) return;
@@ -2043,37 +2032,57 @@ public sealed partial class MainWindow : Window
         ViewModel.OpenHelp();
     }
 
-    private async void ReadChangelogButton_OnClick(object? sender, RoutedEventArgs e)
+    private async Task ReadChangelogAsync()
     {
         try
         {
             var (whatsNew, fixes) = await AppUpdateService.GetCurrentVersionNotesAsync();
-            await ShowUpdateDialogAsync(CreateUpToDateDialog(whatsNew, fixes));
+            await ShowUpdateDialogAsync(CreateUpToDateDialog(whatsNew, fixes, changelog: true));
         }
         catch (Exception error)
         {
             AppLog.Error("Load current release notes failed", error);
-            await ShowMessageAsync("Release notes unavailable", "Release notes could not be loaded. View them at https://github.com/ClypLabs/ClypDat/releases.");
+            await ShowUpdateDialogAsync(CreateUpToDateDialog([], [], changelog: true));
         }
     }
 
-    private async void HelpCheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e) => await CheckUpdatesAsync();
-    private void FaqButton_OnClick(object? sender, RoutedEventArgs e) => OpenSupportUrl("https://clypdat.xyz/#faq");
-    private void DiscordButton_OnClick(object? sender, RoutedEventArgs e) => OpenSupportUrl("https://discord.gg/jt3eJf238t");
+    internal async Task RunHelpActionAsync(HelpSupportAction action)
+    {
+        try
+        {
+            switch (action)
+            {
+                case HelpSupportAction.Changelog: await ReadChangelogAsync(); break;
+                case HelpSupportAction.Updates: await CheckUpdatesAsync(); break;
+                case HelpSupportAction.Faq: OpenSupportUrl("https://clypdat.xyz/#faq"); break;
+                case HelpSupportAction.Bug: ReportBug(); break;
+                case HelpSupportAction.Feature: SuggestFeature(); break;
+                case HelpSupportAction.Discord: OpenSupportUrl("https://discord.gg/jt3eJf238t"); break;
+                case HelpSupportAction.Diagnostics: await ExportCaptureDiagnosticsAsync(); break;
+                case HelpSupportAction.Logs: AppLog.OpenFolder(); break;
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error($"Help action {action} failed", error);
+            await ShowMessageAsync("Could not complete action", $"Please try again.\n\n{error.Message}");
+        }
+    }
 
-    private void ReportBugButton_OnClick(object? sender, RoutedEventArgs e)
+    private void ReportBug()
     {
         var body = $"## Summary\n\n## Steps to reproduce\n1. \n\n## Expected behavior\n\n## Actual behavior\n\n---\nClypDat version: {AppUpdateService.CurrentVersion}\nBuild: {GetBuildIdentifier()}";
         OpenIssueDraft("Bug report", body);
     }
 
-    private void SuggestFeatureButton_OnClick(object? sender, RoutedEventArgs e)
+    private void SuggestFeature()
     {
         var body = $"## Problem this would solve\n\n## Proposed solution\n\n---\nClypDat version: {AppUpdateService.CurrentVersion}\nBuild: {GetBuildIdentifier()}";
         OpenIssueDraft("Feature request", body);
     }
 
-    private static string GetBuildIdentifier() => System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+    private static string GetBuildIdentifier() => System.Reflection.Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
     private void OpenIssueDraft(string title, string body) => OpenSupportUrl($"https://github.com/ClypLabs/ClypDat/issues/new?title={Uri.EscapeDataString(title)}&body={Uri.EscapeDataString(body)}");
 
     private void OpenSupportUrl(string url)
@@ -5936,6 +5945,19 @@ public sealed partial class MainWindow : Window
 
     internal async void ExportCaptureDiagnosticsButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (sender is Button button) button.IsEnabled = false;
+        try { await ExportCaptureDiagnosticsAsync(); }
+        finally { if (sender is Button completedButton) completedButton.IsEnabled = true; }
+    }
+
+    private Task? _diagnosticExportTask;
+    internal Task ExportCaptureDiagnosticsAsync() =>
+        _diagnosticExportTask is { IsCompleted: false } pending
+            ? pending
+            : _diagnosticExportTask = ExportCaptureDiagnosticsCoreAsync();
+
+    private async Task ExportCaptureDiagnosticsCoreAsync()
+    {
         try
         {
             var replayBuffer = _replayBuffer;
@@ -6686,6 +6708,8 @@ public sealed partial class MainWindow : Window
                 return;
             }
         }
+
+        if (ViewModel?.IsHelpVisible == true) return;
 
         // Space is reserved app-wide for play/pause and must never activate
         // whatever control currently has keyboard focus instead (a Settings
@@ -8673,7 +8697,7 @@ public sealed partial class MainWindow : Window
     // shows what the currently installed version actually shipped (via
     // AppUpdateService.GetCurrentVersionNotesAsync) instead of just a bare
     // version number.
-    private Window CreateUpToDateDialog(IReadOnlyList<string> whatsNew, IReadOnlyList<string> fixes)
+    private Window CreateUpToDateDialog(IReadOnlyList<string> whatsNew, IReadOnlyList<string> fixes, bool changelog = false)
     {
         var window = new Window
         {
@@ -8695,7 +8719,7 @@ public sealed partial class MainWindow : Window
             Height = 48
         };
         var titleIcon = new Image { Source = AppThemeService.CurrentLogo(large: false), Width = 16, Height = 16, Margin = new Avalonia.Thickness(14, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
-        var titleText = new TextBlock { Text = "You're up to date", Foreground = AppThemeService.Brush("Text_B9C6D4", "#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var titleText = new TextBlock { Text = changelog ? "Changelog" : "You're up to date", Foreground = AppThemeService.Brush("Text_B9C6D4", "#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
         var closeButton = new Button { Classes = { "dialogClose" }, Content = "✕", Width = 52, Height = 48, Margin = new Avalonia.Thickness(0), FontSize = 12, VerticalAlignment = VerticalAlignment.Top, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
@@ -8717,6 +8741,24 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(fixesColumn, 2);
         notesGrid.Children.Add(whatsNewColumn);
         notesGrid.Children.Add(fixesColumn);
+        if (changelog && whatsNew.Count == 0 && fixes.Count == 0)
+        {
+            notesGrid.Children.Clear();
+            notesGrid.ColumnDefinitions = new ColumnDefinitions("*");
+            var releases = new Button { Content = "Open GitHub releases", HorizontalAlignment = HorizontalAlignment.Left };
+            releases.Click += (_, _) => OpenSupportUrl("https://github.com/ClypLabs/ClypDat/releases");
+            notesGrid.Children.Add(new StackPanel
+            {
+                Spacing = 12,
+                Margin = new Thickness(0, 12),
+                Children =
+                {
+                    new TextBlock { Text = "Release notes unavailable", Foreground = AppThemeService.Brush("TextStrongBrush", "#EDF4FB") },
+                    releases
+                }
+            });
+        }
+
 
         var hero = new StackPanel
         {
@@ -8739,6 +8781,7 @@ public sealed partial class MainWindow : Window
                         },
                         new Border
                         {
+                            IsVisible = !changelog,
                             Background = AppThemeService.Brush("Surface_1C3345", "#1C3345"),
                             CornerRadius = new Avalonia.CornerRadius(5),
                             Padding = new Avalonia.Thickness(7, 2),
@@ -8755,7 +8798,7 @@ public sealed partial class MainWindow : Window
                 },
                 new TextBlock
                 {
-                    Text = "You're running the latest version. Here's what it brought:",
+                    Text = changelog ? "Release notes for your installed version." : "You're running the latest version. Here's what it brought:",
                     Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
                     FontSize = 13
                 }

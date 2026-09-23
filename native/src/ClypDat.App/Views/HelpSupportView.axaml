@@ -1,0 +1,173 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:ClypDat.App.Controls"
+             xmlns:views="using:ClypDat.App.Views"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             x:Class="ClypDat.App.Views.HelpSupportView"
+             x:Name="HelpRoot"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.helpCard">
+      <Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EdgeStrongBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="20" />
+      <Setter Property="Margin" Value="8" />
+    </Style>
+    <Style Selector="Border.helpIcon">
+      <Setter Property="Width" Value="44" />
+      <Setter Property="Height" Value="44" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Background" Value="{DynamicResource AccentSelectedBrush}" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+    </Style>
+    <Style Selector="Path.helpGlyph">
+      <Setter Property="Stroke" Value="{DynamicResource AccentSelectedIconBrush}" />
+      <Setter Property="StrokeThickness" Value="1.7" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+    </Style>
+    <Style Selector="TextBlock.helpTitle">
+      <Setter Property="FontSize" Value="17" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TextStrongBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.helpDescription">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="LineHeight" Value="20" />
+      <Setter Property="Foreground" Value="{DynamicResource TextSubtleBrush}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.helpSectionTitle">
+      <Setter Property="FontSize" Value="19" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="{DynamicResource TextStrongBrush}" />
+    </Style>
+    <Style Selector="Button.helpAction:not(ToggleSwitch)">
+      <Setter Property="MinHeight" Value="38" />
+      <Setter Property="Padding" Value="14,8" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource EdgeStrongBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource TextStrongBrush}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.helpAction:not(ToggleSwitch):pointerover">
+      <Setter Property="Background" Value="{DynamicResource AccentSelectedBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentSelectedIconBrush}" />
+    </Style>
+    <Style Selector="Button.helpAction:focus-visible">
+      <Setter Property="BorderBrush" Value="{DynamicResource AccentSelectedIconBrush}" />
+      <Setter Property="BorderThickness" Value="2" />
+    </Style>
+  </UserControl.Styles>
+
+  <UserControl.Resources>
+    <DataTemplate x:Key="ActionContent" x:DataType="views:HelpSupportCard">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <TextBlock Text="{Binding ActionLabel}" VerticalAlignment="Center" TextWrapping="Wrap" />
+        <Path Grid.Column="1" Data="{Binding ActionIcon}" Width="16" Height="16"
+              Stroke="{DynamicResource TextSubtleBrush}" StrokeThickness="1.5" StrokeLineCap="Round"
+              StrokeJoin="Round" VerticalAlignment="Center" IsVisible="{Binding !IsBusy}" />
+        <ProgressBar Grid.Column="1" Width="20" Height="3" IsIndeterminate="True"
+                     IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
+      </Grid>
+    </DataTemplate>
+    <DataTemplate x:Key="SupportCard" x:DataType="views:HelpSupportCard">
+      <Border Classes="helpCard" MinHeight="246">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
+          <Border Classes="helpIcon">
+            <Canvas Width="24" Height="24"><Path Classes="helpGlyph" Data="{Binding Icon}" /></Canvas>
+          </Border>
+          <TextBlock Grid.Row="1" Classes="helpTitle" Text="{Binding Title}" Margin="0,16,0,6" />
+          <TextBlock Grid.Row="2" Classes="helpDescription" Text="{Binding Description}" Margin="0,0,0,20" />
+          <Button Grid.Row="3" Classes="helpAction" Click="Action_OnClick" Tag="{Binding}"
+                  IsEnabled="{Binding !IsBusy}" Content="{Binding}" ContentTemplate="{StaticResource ActionContent}"
+                  AutomationProperties.Name="{Binding ButtonLabel}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+    <DataTemplate x:Key="WideCard" x:DataType="views:HelpSupportCard">
+      <Border Classes="helpCard" MinHeight="178">
+        <Grid ColumnDefinitions="44,*" RowDefinitions="Auto,*,Auto" ColumnSpacing="16">
+          <Border Classes="helpIcon">
+            <Canvas Width="24" Height="24"><Path Classes="helpGlyph" Data="{Binding Icon}" /></Canvas>
+          </Border>
+          <StackPanel Grid.Column="1" Spacing="6">
+            <TextBlock Classes="helpTitle" Text="{Binding Title}" />
+            <TextBlock Classes="helpDescription" Text="{Binding Description}" />
+          </StackPanel>
+          <Button Grid.Row="2" Grid.Column="1" Classes="helpAction" Margin="0,18,0,0"
+                  HorizontalAlignment="Left" Click="Action_OnClick" Tag="{Binding}"
+                  IsEnabled="{Binding !IsBusy}" Content="{Binding}" ContentTemplate="{StaticResource ActionContent}"
+                  AutomationProperties.Name="{Binding ButtonLabel}" />
+        </Grid>
+      </Border>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <ScrollViewer Background="{DynamicResource PanelBgBrush}" HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+    <Border Padding="32">
+      <StackPanel MaxWidth="1400" Spacing="28">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20" Margin="0,4,0,6">
+          <StackPanel Spacing="8">
+            <TextBlock Text="Help &amp; support" FontSize="30" FontWeight="Bold"
+                       Foreground="{DynamicResource TextStrongBrush}" TextWrapping="Wrap" />
+            <TextBlock Classes="helpDescription" FontSize="14" Text="Answers, updates, and a hand when you need one." />
+          </StackPanel>
+          <Border Grid.Column="1" Background="{DynamicResource SurfaceRaisedBrush}"
+                  BorderBrush="{DynamicResource EdgeBrush}" BorderThickness="1" CornerRadius="8"
+                  Padding="12,7" VerticalAlignment="Center">
+            <TextBlock Text="{Binding AppVersionDisplay}" FontSize="12" FontWeight="Medium"
+                       Foreground="{DynamicResource TextSubtleBrush}" />
+          </Border>
+        </Grid>
+
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="20">
+            <TextBlock Classes="helpSectionTitle" Text="What's new?" />
+            <Border Grid.Column="1" Height="1" Background="{DynamicResource EdgeBrush}" VerticalAlignment="Center" />
+          </Grid>
+          <ItemsControl x:Name="NewsCards" ItemsSource="{Binding News, ElementName=HelpRoot}"
+                        ItemTemplate="{StaticResource WideCard}" Margin="-8,-8,-8,-8">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate>
+              <controls:ResponsiveUniformGrid MaximumColumns="2" MinimumItemWidth="360" />
+            </ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="20">
+            <TextBlock Classes="helpSectionTitle" Text="Help &amp; support" />
+            <Border Grid.Column="1" Height="1" Background="{DynamicResource EdgeBrush}" VerticalAlignment="Center" />
+          </Grid>
+          <ItemsControl x:Name="SupportCards" ItemsSource="{Binding Support, ElementName=HelpRoot}"
+                        ItemTemplate="{StaticResource SupportCard}" Margin="-8,-8,-8,-8">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate>
+              <controls:ResponsiveUniformGrid MaximumColumns="4" MinimumItemWidth="280" />
+            </ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </StackPanel>
+
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="20">
+            <TextBlock Classes="helpSectionTitle" Text="Self help" />
+            <Border Grid.Column="1" Height="1" Background="{DynamicResource EdgeBrush}" VerticalAlignment="Center" />
+          </Grid>
+          <ItemsControl x:Name="SelfHelpCards" ItemsSource="{Binding SelfHelp, ElementName=HelpRoot}"
+                        ItemTemplate="{StaticResource WideCard}" Margin="-8,-8,-8,-8">
+            <ItemsControl.ItemsPanel><ItemsPanelTemplate>
+              <controls:ResponsiveUniformGrid MaximumColumns="2" MinimumItemWidth="360" />
+            </ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          </ItemsControl>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+  </ScrollViewer>
+</UserControl>

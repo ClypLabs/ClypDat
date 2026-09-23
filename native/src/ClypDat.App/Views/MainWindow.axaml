@@ -6,6 +6,7 @@
         xmlns:conv="using:Avalonia.Data.Converters"
         xmlns:opconv="using:ClypDat.App.Converters"
         xmlns:settings="using:ClypDat.App.Views.Settings"
+        xmlns:views="using:ClypDat.App.Views"
         x:Class="ClypDat.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="ClypDat"
@@ -1330,28 +1331,7 @@
       </controls:RetainedPageHost>
 
     <settings:SettingsPanel x:Name="SettingsPanelView" Grid.Column="1" IsVisible="{Binding IsSettingsVisible}" />
-    <ScrollViewer Grid.Column="1" IsVisible="{Binding IsHelpVisible}" Background="{StaticResource Surface_101820}">
-      <StackPanel MaxWidth="1400" HorizontalAlignment="Center" Margin="32" Spacing="22">
-        <StackPanel Spacing="5"><TextBlock Text="Help &amp; support" FontSize="28" FontWeight="Bold"/><TextBlock Text="Find answers, share feedback, or gather diagnostics." Foreground="{StaticResource Text_93A6B8}" TextWrapping="Wrap"/></StackPanel>
-        <Border Height="1" Background="{StaticResource Surface_2A3640}"/>
-        <StackPanel Spacing="12"><TextBlock Text="WHAT'S NEW?" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Text_93A6B8}"/><UniformGrid Columns="2" ColumnSpacing="16" RowSpacing="16">
-          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Read changelog" FontSize="17" FontWeight="Bold"/><TextBlock Text="See what's new and fixed in this version." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Read changelog" HorizontalAlignment="Left" Click="ReadChangelogButton_OnClick"/></StackPanel></Border>
-          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Check for updates" FontSize="17" FontWeight="Bold"/><TextBlock Text="Check whether a newer version is available." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Check for updates" HorizontalAlignment="Left" Click="HelpCheckUpdatesButton_OnClick"/></StackPanel></Border>
-        </UniformGrid></StackPanel>
-        <Border Height="1" Background="{StaticResource Surface_2A3640}"/>
-        <StackPanel Spacing="12"><TextBlock Text="HELP &amp; SUPPORT" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Text_93A6B8}"/><UniformGrid Columns="4" ColumnSpacing="16" RowSpacing="16">
-          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Find a solution" FontSize="17" FontWeight="Bold"/><TextBlock Text="Browse frequently asked questions." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Check FAQ" HorizontalAlignment="Left" Click="FaqButton_OnClick"/></StackPanel></Border>
-          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Report a bug" FontSize="17" FontWeight="Bold"/><TextBlock Text="Open a prefilled issue draft for a bug report." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Report a bug" HorizontalAlignment="Left" Click="ReportBugButton_OnClick"/></StackPanel></Border>
-          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Suggest a feature" FontSize="17" FontWeight="Bold"/><TextBlock Text="Tell us what would make ClypDat better." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Suggest a feature" HorizontalAlignment="Left" Click="SuggestFeatureButton_OnClick"/></StackPanel></Border>
-          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Join Discord" FontSize="17" FontWeight="Bold"/><TextBlock Text="Chat with the ClypDat community." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Join Discord" HorizontalAlignment="Left" Click="DiscordButton_OnClick"/></StackPanel></Border>
-        </UniformGrid></StackPanel>
-        <Border Height="1" Background="{StaticResource Surface_2A3640}"/>
-        <StackPanel Spacing="12"><TextBlock Text="SELF HELP" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Text_93A6B8}"/><UniformGrid Columns="2" ColumnSpacing="16" RowSpacing="16">
-          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Export diagnostic bundle" FontSize="17" FontWeight="Bold"/><TextBlock Text="Create a local ZIP with diagnostics for troubleshooting." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Export bundle" HorizontalAlignment="Left" Click="ExportCaptureDiagnosticsButton_OnClick"/></StackPanel></Border>
-          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Open logs" FontSize="17" FontWeight="Bold"/><TextBlock Text="Open the folder containing ClypDat logs." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Open logs" HorizontalAlignment="Left" Click="OpenLogsButton_OnClick"/></StackPanel></Border>
-        </UniformGrid></StackPanel>
-      </StackPanel>
-    </ScrollViewer>
+    <views:HelpSupportView Grid.Column="1" IsVisible="{Binding IsHelpVisible}" />
       <!-- Stays realized while Library is visible so EditorVideoView retains
            its native HWND for LibVLC hover warm-up. Parked margins preserve
            native bounds while keeping both editor and video offscreen. -->
