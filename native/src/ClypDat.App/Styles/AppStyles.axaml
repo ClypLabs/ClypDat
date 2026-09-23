@@ -2775,7 +2775,7 @@
        the page had no visible top. -->
   <Style Selector="TextBlock.settingsSectionTitle">
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="FontSize" Value="24" />
+    <Setter Property="FontSize" Value="28" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
@@ -2790,9 +2790,9 @@
        summary ran the width of the window. -->
   <Style Selector="TextBlock.settingsSectionDesc">
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
-    <Setter Property="FontSize" Value="13.5" />
-    <Setter Property="LineHeight" Value="20" />
-    <Setter Property="MaxWidth" Value="640" />
+    <Setter Property="FontSize" Value="14.5" />
+    <Setter Property="LineHeight" Value="22" />
+    <Setter Property="MaxWidth" Value="760" />
     <Setter Property="HorizontalAlignment" Value="Left" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
@@ -2867,19 +2867,25 @@
        =================================================================== -->
 
   <!-- The column itself. Capped so a row's control stays next to its words
-       and a description wraps at a readable measure on any window width. -->
+       and a description wraps at a readable measure on any window width, and
+       centred in the space between the category list and the status panel:
+       pinned to the left it left a wide dead band on the right that read as
+       a broken layout rather than as breathing room. Stretch, not Center:
+       Center sizes the column to its content, so every section came out a
+       different width; a stretched element held under its MaxWidth is
+       centred by layout and still fills the full 880 when there is room. -->
   <Style Selector="StackPanel.settingsPage">
-    <Setter Property="MaxWidth" Value="880" />
-    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="MaxWidth" Value="1040" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
 
   <!-- A label and the card it names, shown and hidden together by search. -->
   <Style Selector="StackPanel.settingsGroup">
-    <Setter Property="Spacing" Value="8" />
+    <Setter Property="Spacing" Value="10" />
   </Style>
   <Style Selector="TextBlock.settingsGroupLabel">
     <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
-    <Setter Property="FontSize" Value="11.5" />
+    <Setter Property="FontSize" Value="12.5" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="LetterSpacing" Value="0.8" />
     <Setter Property="Margin" Value="4,0,0,0" />
@@ -2888,10 +2894,10 @@
        context before its rows make sense. -->
   <Style Selector="TextBlock.settingsGroupDesc">
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
-    <Setter Property="FontSize" Value="12.5" />
-    <Setter Property="LineHeight" Value="18" />
+    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="LineHeight" Value="20" />
     <Setter Property="Margin" Value="4,-4,0,2" />
-    <Setter Property="MaxWidth" Value="640" />
+    <Setter Property="MaxWidth" Value="760" />
     <Setter Property="HorizontalAlignment" Value="Left" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
@@ -2911,7 +2917,7 @@
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="CornerRadius" Value="14" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="ClipToBounds" Value="True" />
   </Style>
@@ -2922,8 +2928,8 @@
     <!-- Zero-alpha version of the hover fill, so the transition animates only
          alpha rather than flashing through white on the way out. -->
     <Setter Property="Background" Value="{StaticResource Surface_0016212B}" />
-    <Setter Property="Padding" Value="20,16" />
-    <Setter Property="MinHeight" Value="60" />
+    <Setter Property="Padding" Value="24,18" />
+    <Setter Property="MinHeight" Value="68" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.1" />
@@ -2940,11 +2946,11 @@
   </Style>
   <Style Selector="Border.settingsRowDivider">
     <Setter Property="Height" Value="1" />
-    <Setter Property="Margin" Value="20,0" />
+    <Setter Property="Margin" Value="24,0" />
     <Setter Property="Background" Value="{StaticResource DividerBrush}" />
   </Style>
   <Style Selector="Border.settingsRow Grid.settingsRowGrid">
-    <Setter Property="ColumnSpacing" Value="24" />
+    <Setter Property="ColumnSpacing" Value="32" />
   </Style>
   <Style Selector="Border.settingsRow Grid.settingsRowGrid > ToggleSwitch">
     <Setter Property="VerticalAlignment" Value="Center" />
@@ -2955,23 +2961,23 @@
        description was the hardest thing on the page to read. -->
   <Style Selector="Border.settingsGroupCard TextBlock.settingsRowTitle">
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontSize" Value="15.5" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="Border.settingsGroupCard TextBlock.settingsRowTitleSm">
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="FontSize" Value="14.5" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
   <Style Selector="Border.settingsGroupCard TextBlock.settingsRowDesc, Border.settingsGroupCard TextBlock.settingsRowDescSm">
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
-    <Setter Property="FontSize" Value="12.5" />
-    <Setter Property="LineHeight" Value="18" />
-    <Setter Property="MaxWidth" Value="600" />
+    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="LineHeight" Value="20" />
+    <Setter Property="MaxWidth" Value="700" />
     <Setter Property="HorizontalAlignment" Value="Left" />
   </Style>
   <Style Selector="Border.settingsGroupCard StackPanel.settingsRowText">
-    <Setter Property="Spacing" Value="3" />
+    <Setter Property="Spacing" Value="4" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
@@ -2982,8 +2988,8 @@
     <Setter Property="Background" Value="{StaticResource Surface_0016212B}" />
     <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
-    <Setter Property="Padding" Value="20,10" />
-    <Setter Property="MinHeight" Value="48" />
+    <Setter Property="Padding" Value="24,12" />
+    <Setter Property="MinHeight" Value="54" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.1" />
@@ -2995,7 +3001,7 @@
   </Style>
   <Style Selector="Border.settingsListItem TextBlock.settingsListItemText">
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="FontSize" Value="14.5" />
     <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
@@ -3005,37 +3011,37 @@
   <!-- What an empty list says instead of nothing. -->
   <Style Selector="TextBlock.settingsEmptyText">
     <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
-    <Setter Property="FontSize" Value="12.5" />
-    <Setter Property="Margin" Value="20,14" />
+    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="Margin" Value="24,16" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
 
   <!-- A row's own problem, said in the row rather than in a dialog. -->
   <Style Selector="TextBlock.settingsRowError">
     <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
-    <Setter Property="FontSize" Value="12.5" />
-    <Setter Property="LineHeight" Value="18" />
+    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="LineHeight" Value="20" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
   <!-- Something the user has to act on for a change to take effect. -->
   <Style Selector="TextBlock.settingsRowWarning">
     <Setter Property="Foreground" Value="{StaticResource CautionBrush}" />
-    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="FontSize" Value="13.5" />
     <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="LineHeight" Value="18" />
+    <Setter Property="LineHeight" Value="20" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
   <!-- Notices inside a card read as part of the row they explain. -->
   <Style Selector="Border.settingsGroupCard Border.settingsNotice TextBlock.settingsNoticeText">
     <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="FontSize" Value="12.5" />
-    <Setter Property="LineHeight" Value="18" />
+    <Setter Property="FontSize" Value="13.5" />
+    <Setter Property="LineHeight" Value="20" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
   <Style Selector="Border.settingsGroupCard Border.settingsNotice TextBlock.settingsNoticeDetail">
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
-    <Setter Property="FontSize" Value="12" />
-    <Setter Property="LineHeight" Value="17" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="LineHeight" Value="19" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
   <!-- A value shown back to the user inside a row - a filename preview, a
@@ -3049,13 +3055,13 @@
   </Style>
   <Style Selector="Border.settingsInset TextBlock">
     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontSize" Value="14" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
   <!-- An inline web link inside a row (opened by the TextBlock's Tag). -->
   <Style Selector="TextBlock.settingsLink">
     <Setter Property="Foreground" Value="{StaticResource LinkBrush}" />
-    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="FontSize" Value="13.5" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="HorizontalAlignment" Value="Left" />
   </Style>
@@ -3065,15 +3071,15 @@
   <!-- A small caption over a field inside a row. -->
   <Style Selector="TextBlock.settingsFieldLabel">
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
-    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontSize" Value="13" />
     <Setter Property="FontWeight" Value="Medium" />
   </Style>
 
   <!-- A secondary action that belongs to one row: sits under its description,
        quieter than the row's own control. -->
   <Style Selector="Button.settingsRowAction">
-    <Setter Property="Padding" Value="11,5" />
-    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Padding" Value="12,6" />
+    <Setter Property="FontSize" Value="13.5" />
     <Setter Property="Margin" Value="0,10,0,0" />
     <Setter Property="HorizontalAlignment" Value="Left" />
   </Style>
@@ -3098,9 +3104,9 @@
     <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="6" />
-    <Setter Property="Padding" Value="14,6" />
+    <Setter Property="Padding" Value="16,7" />
     <Setter Property="MinHeight" Value="0" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontSize" Value="14" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -3132,7 +3138,7 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
-    <Setter Property="MaxWidth" Value="600" />
+    <Setter Property="MaxWidth" Value="700" />
     <Setter Property="HorizontalAlignment" Value="Left" />
     <Setter Property="ItemsPanel">
       <ItemsPanelTemplate>
@@ -3146,9 +3152,9 @@
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="10,8" />
-    <Setter Property="Margin" Value="0,0,8,8" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Padding" Value="12,10" />
+    <Setter Property="Margin" Value="0,0,10,10" />
+    <Setter Property="FontSize" Value="14" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="HorizontalContentAlignment" Value="Left" />
   </Style>

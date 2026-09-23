@@ -30,21 +30,21 @@
     </Style>
     <Style Selector="TextBlock.creditRole">
       <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
-      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontSize" Value="13" />
     </Style>
     <Style Selector="TextBlock.aboutMeta">
       <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
-      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontSize" Value="13" />
       <Setter Property="FontWeight" Value="Medium" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="TextBlock.licenceText">
       <Setter Property="Foreground" Value="{StaticResource TextSubtleBrush}" />
-      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontSize" Value="14" />
     </Style>
     <Style Selector="TextBlock.licenceLink">
       <Setter Property="Foreground" Value="{StaticResource LinkBrush}" />
-      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontSize" Value="14" />
       <Setter Property="TextDecorations" Value="Underline" />
       <Setter Property="Cursor" Value="Hand" />
     </Style>
@@ -63,7 +63,7 @@
     </StackPanel>
 
     <Border Classes="settingsGroupCard">
-      <Border Classes="settingsRow static" Padding="20,18">
+      <Border Classes="settingsRow static" Padding="24,20">
         <!-- Grid, not a horizontal StackPanel: a StackPanel offers its children
              infinite width, so the description below never wraps and is clipped
              by the card instead. -->
@@ -74,7 +74,7 @@
             <Image Source="{DynamicResource AppLogoLarge}" Width="40" Height="40" RenderOptions.BitmapInterpolationMode="HighQuality" HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Border>
           <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
-            <TextBlock Text="ClypDat" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="20" />
+            <TextBlock Text="ClypDat" Foreground="{StaticResource TextStrongBrush}" FontWeight="Bold" FontSize="22" />
             <TextBlock Classes="settingsRowDesc" Text="A clip recorder and editor, made to be fast and to stay out of your way." />
             <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,2,0,0">
               <TextBlock Classes="aboutMeta" Text="{Binding AppVersionDisplay}" />
@@ -82,7 +82,7 @@
               <TextBlock Classes="aboutMeta" Text="Made by ClypLabs" />
               <TextBlock Classes="aboutMeta" Text="·" IsVisible="{Binding HasAppCommit}" />
               <TextBlock Classes="settingsLink" Text="{Binding AppCommitDisplay}"
-                         FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                         FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
                          ToolTip.Tip="View this build's commit on GitHub"
                          IsVisible="{Binding HasAppCommit}"
                          Tag="{Binding AppCommitUrl}"
@@ -180,7 +180,7 @@
       <TextBlock Classes="settingsGroupLabel" Text="CREDITS" />
       <TextBlock Classes="settingsGroupDesc" Text="People who contributed to ClypDat." />
       <Border Classes="settingsGroupCard">
-        <Border Classes="settingsRow static" Padding="20,20,8,8">
+        <Border Classes="settingsRow static" Padding="24,22,12,10">
           <controls:ResponsiveUniformGrid MinimumItemWidth="212" MaximumColumns="4">
             <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Stormanzanii" ToolTip.Tip="Open Arashii's GitHub profile" Click="CreditCard_OnClick">
               <StackPanel Orientation="Horizontal" Spacing="12">

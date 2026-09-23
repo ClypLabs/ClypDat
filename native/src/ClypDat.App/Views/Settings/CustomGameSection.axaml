@@ -387,7 +387,7 @@
                 </Border>
               </StackPanel>
             </Border>
-            <Border Classes="settingsRow static" Padding="20,0,20,18">
+            <Border Classes="settingsRow static" Padding="24,0,24,20">
               <StackPanel Spacing="8">
                 <TextBlock Classes="settingsPickerLabel" Text="APP TRACKS" />
                 <Border Classes="audioProcessList">

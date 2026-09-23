@@ -38,7 +38,7 @@
     <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Themes|System|ClypDat Blue|Berry|Violet|Emerald|Rose|Amber'}">
       <TextBlock Classes="settingsGroupLabel" Text="PRESET THEMES" />
       <Border Classes="settingsGroupCard">
-        <Border Classes="settingsRow static" Padding="17,17,7,7">
+        <Border Classes="settingsRow static" Padding="21,20,11,10">
           <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding ThemeOptions}"
                    SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}"
                    ItemTemplate="{StaticResource ThemeSwatchTemplate}">
@@ -53,7 +53,7 @@
     <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Light|Light mode|Light themes|Light Blue|Light Berry|Light Violet|Light Emerald|Light Rose|Light Amber'}">
       <TextBlock Classes="settingsGroupLabel" Text="LIGHT THEMES" />
       <Border Classes="settingsGroupCard">
-        <Border Classes="settingsRow static" Padding="17,17,7,7">
+        <Border Classes="settingsRow static" Padding="21,20,11,10">
           <ListBox Classes="themePresetGrid" SelectionMode="Single" ItemsSource="{Binding LightThemeOptions}"
                    SelectedValue="{Binding SelectedThemePreset}" SelectedValueBinding="{Binding Id}"
                    ItemTemplate="{StaticResource ThemeSwatchTemplate}">
@@ -113,7 +113,7 @@
               </StackPanel>
             </Grid>
           </Border>
-          <Border Classes="settingsRow static" Padding="18,16,18,8" IsVisible="{Binding !IsCustomThemesEmpty}">
+          <Border Classes="settingsRow static" Padding="22,18,22,10" IsVisible="{Binding !IsCustomThemesEmpty}">
             <ListBox Classes="customThemeList" SelectionMode="Single" ItemsSource="{Binding CustomThemes}" SelectedItem="{Binding SelectedCustomTheme, Mode=TwoWay}">
               <ListBox.ItemTemplate>
                 <DataTemplate>
