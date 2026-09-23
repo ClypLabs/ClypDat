@@ -86,12 +86,44 @@ internal static class CaptureWorkerHost
         }
     }
 
+    // How long the worker waits for a ClypDat app to (re)connect before it
+    // decides it has been orphaned. The app normally stays connected for its
+    // whole life - closing the window only hides it to the tray - and quitting
+    // sends "shutdown", so a dropped connection means the app died: crashed, or
+    // was killed with "End task" from the taskbar or Task Manager, which
+    // terminates only ClypDat.exe. Waiting forever left an invisible recorder
+    // capturing the screen, holding its hotkey and writing Full Session files
+    // with no app and no tray icon to stop it. The grace covers the app's own
+    // 2s reconnect after a pipe hiccup and a quick relaunch.
+    internal static readonly TimeSpan OrphanedGrace = TimeSpan.FromSeconds(10);
+    // The app that launched this worker connects within a second or two; this
+    // only catches one that died before it ever did.
+    internal static readonly TimeSpan FirstClientGrace = TimeSpan.FromSeconds(60);
+
     private static async Task RunLoopAsync()
     {
+        var hadClient = false;
         while (!Shutdown.IsCancellationRequested)
         {
             using var server = CaptureWorkerPipe.CreateServer();
-            await server.WaitForConnectionAsync(Shutdown.Token);
+            var grace = hadClient ? OrphanedGrace : FirstClientGrace;
+            using (var wait = CancellationTokenSource.CreateLinkedTokenSource(Shutdown.Token))
+            {
+                wait.CancelAfter(grace);
+                try
+                {
+                    await server.WaitForConnectionAsync(wait.Token);
+                }
+                catch (OperationCanceledException) when (!Shutdown.IsCancellationRequested)
+                {
+                    CaptureWorkerLog.Info(hadClient
+                        ? $"No ClypDat app reconnected within {grace.TotalSeconds:0}s of the last one leaving; stopping capture and exiting."
+                        : $"No ClypDat app connected within {grace.TotalSeconds:0}s of the worker starting; exiting.");
+                    await ShutdownOrphanedAsync();
+                    return;
+                }
+            }
+            hadClient = true;
             _client = server;
             try
             {
@@ -105,6 +137,26 @@ internal static class CaptureWorkerHost
             {
                 if (ReferenceEquals(_client, server)) _client = null;
             }
+        }
+    }
+
+    // What a "shutdown" from the app does, for an app that can no longer send
+    // one: finish any save already under way, stop capture, and let a Full
+    // Session file close properly rather than be cut off mid-write. Run's
+    // finally block then releases the hotkeys, detector and buffer.
+    private static async Task ShutdownOrphanedAsync()
+    {
+        Lifecycle.Request(false);
+        Shutdown.Cancel();
+        try
+        {
+            await StopCaptureAfterSavesAsync(CancellationToken.None);
+            if (_buffer is IFullSessionRecorderLifecycle pending)
+                await pending.WaitForFullSessionCloseAsync(TimeSpan.FromMinutes(5));
+        }
+        catch (Exception error)
+        {
+            CaptureWorkerLog.Error("Orphaned worker shutdown failed.", error);
         }
     }
 
