@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace ClypDat.App.Services;
 
-// The recorded shape, moved out of RawInputRecorder so the reader and the
+// Shared versioned clip input shape read by the editor after capture. The
 // writer can share it. Property names are load-bearing: sidecars already on
 // disk were written with default JsonSerializer options, so these must stay
 // exactly as they were when nested.

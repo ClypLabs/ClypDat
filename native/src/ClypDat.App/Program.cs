@@ -49,6 +49,21 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        var verification = Array.IndexOf(args, "--verify-native-recording");
+        if (verification >= 0)
+        {
+            var rounds = 1;
+            // The capture apphost adds --capture-worker before invoking this
+            // entry point; that dispatch flag must not become a CLI parameter.
+            var verifyArguments = args.Skip(verification + 1)
+                .Where(argument => !string.Equals(argument, "--capture-worker", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (verifyArguments.Length is < 1 or > 2 ||
+                (verifyArguments.Length == 2 && !int.TryParse(verifyArguments[1], out rounds)))
+            { Environment.ExitCode = 2; return; }
+            Environment.ExitCode = NativeRecordingVerification.Run(verifyArguments[0], rounds);
+            return;
+        }
         DevChannelMode.ConfigureDataRoot();
         // Release packaging calls this after publish. Reaching Main proves the
         // app host loaded ClypDat with its bundled runtime before any user data,

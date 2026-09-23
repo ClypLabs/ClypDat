@@ -55,8 +55,7 @@ public static class FfmpegPathResolver
             return;
         }
 
-        // NativeReplayBuffer P/Invokes libavcodec/libavformat directly (FFmpeg.AutoGen)
-        // rather than shelling out, so it needs the shared DLLs' folder explicitly.
+        // Managed export features use FFmpeg.AutoGen and need the shared DLL folder.
         FFmpeg.AutoGen.ffmpeg.RootPath = bundledFolder;
 
         FfmpegPath = ffmpeg;

@@ -5,6 +5,9 @@ on:
     branches: [master, cpp-rewrite]
     paths:
       - 'native/capture-native/**'
+      - 'native/src/**'
+      - 'native/tests/**'
+      - 'eng/AvaloniaPin.props'
       - 'native/vendor/ffmpeg/**'
       - 'eng/Build-NativeCapture.ps1'
       - 'eng/Prepare-CaptureFfmpegSdk.ps1'
@@ -12,6 +15,9 @@ on:
   pull_request:
     paths:
       - 'native/capture-native/**'
+      - 'native/src/**'
+      - 'native/tests/**'
+      - 'eng/AvaloniaPin.props'
       - 'native/vendor/ffmpeg/**'
       - 'eng/Build-NativeCapture.ps1'
       - 'eng/Prepare-CaptureFfmpegSdk.ps1'
@@ -31,3 +37,39 @@ jobs:
       - name: Build and test Release without capture hardware
         shell: pwsh
         run: ./eng/Build-NativeCapture.ps1 -Configuration Release -Test
+
+  managed-boundary:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ClypLabs/clypdat-avalonia
+          path: clypdat-avalonia
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build pinned UI dependencies
+        shell: pwsh
+        run: |
+          $forkRoot = Join-Path $env:GITHUB_WORKSPACE 'clypdat-avalonia'
+          $pin = [xml](Get-Content eng/AvaloniaPin.props -Raw)
+          $commit = $pin.SelectSingleNode('//ClypDatAvaloniaStableCommit').InnerText.Trim()
+          git -C $forkRoot checkout --detach $commit
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Avalonia checkout failed.' }
+          ./eng/Build-ReleaseAvaloniaPackages.ps1 -AvaloniaRoot $forkRoot
+          ./dotnet.ps1 nuget update source clypdat-avalonia --source (Join-Path $forkRoot 'artifacts/nuget') --configfile NuGet.Config
+          if ($LASTEXITCODE -ne 0) { throw 'Local package feed configuration failed.' }
+      - name: Test x64 recording boundary and worker contracts
+        shell: pwsh
+        run: |
+          ./dotnet.ps1 test native/tests/ClypDat.App.Tests/ClypDat.App.Tests.csproj -c Release -p:Platform=x64 --filter 'FullyQualifiedName~NativeRecording|FullyQualifiedName~NativeRecorder|FullyQualifiedName~CaptureWorker'
+          if ($LASTEXITCODE -ne 0) { throw 'Recording boundary tests failed.' }
+      - name: Publish and verify bundled native recording
+        shell: pwsh
+        run: |
+          ./dotnet.ps1 publish native/src/ClypDat.App/ClypDat.App.csproj -c Release -r win-x64 -p:Platform=x64 --self-contained true -o native/publish/recording-check
+          if ($LASTEXITCODE -ne 0) { throw 'Recording verification publish failed.' }
+          & ./native/publish/recording-check/ClypDatRecorder.exe --verify-native-recording (Join-Path $env:GITHUB_WORKSPACE 'native/artifacts/recording-verification')
+          if ($LASTEXITCODE -ne 0) { throw 'Published native recording verification failed.' }

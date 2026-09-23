@@ -52,7 +52,7 @@ internal static class MonitorThumbnailService
             out var created, out _, out ID3D11DeviceContext? createdContext);
         // The context this hands back is a separate wrapper from the one the
         // device caches; releasing it here is what keeps the grab from leaking
-        // native memory (same reasoning as NativeReplayBuffer's device creation).
+        // native memory (same reasoning as native recorder device creation).
         createdContext?.Dispose();
         result.CheckError();
         using var device = created!;

@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -7612,7 +7612,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var timeline = SpotifyTimelineSidecar.Load(library, clipPath);
         if (timeline is null && source is not null)
         {
-            timeline = _spotifyHistory.Materialize(source.StartSeconds, source.DurationSeconds);
+            timeline = _spotifyHistory.Materialize(source);
             SpotifyTimelineSidecar.Save(library, clipPath, timeline.Samples);
         }
         _spotifyHistory.Release(saveId);
@@ -8557,7 +8557,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var selectedChatName = SelectedChatProcess?.Name ?? Settings.ChatAudioProcessName;
         var selectedName = SelectedProcessExclusion?.Name;
         var processesTask = Task.Run(ProcessListService.GetOpenExecutables);
-        var audioProcessNamesTask = Task.Run(AudioCapturePipeline.GetActiveAudioProcesses);
+        var audioProcessNamesTask = Task.Run(AudioProcessCatalog.GetActiveAudioProcesses);
         await Task.WhenAll(processesTask, audioProcessNamesTask);
         var processes = await processesTask;
         var audioProcesses = await audioProcessNamesTask;
@@ -9012,7 +9012,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // is worth roughly a full ladder tier on its own.
         //
         // Walks the same NVENC -> AMD AMF -> Intel QSV -> CPU ladder as the
-        // native capture engine's EncoderCandidates (NativeReplayBuffer.cs) -
+        // native capture engine's encoder candidates -
         // ShareDialog picks the tier by trying each in turn and falling
         // through on a nonzero ffmpeg exit code, since there's no cheap way
         // to ask ffmpeg's CLI "is this encoder actually usable" up front.
@@ -9144,7 +9144,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public readonly record struct ShareEncodeSpec(int Width, int Height, double Fps, int VideoBitrateKbps, bool Downscaled, bool IsOriginalQuality);
 
-    // Same ladder order NativeReplayBuffer's EncoderCandidates uses for the
+    // Same ladder order RecorderCore uses for the
     // live capture path: NVIDIA first (this app already targets NVENC for
     // capture), then AMD AMF, then Intel QSV, then software as the last
     // resort that always works.

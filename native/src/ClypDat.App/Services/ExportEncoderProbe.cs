@@ -10,8 +10,8 @@ namespace ClypDat.App.Services;
 /// "no hardware encoder, redo it on the CPU". On an AMD or Intel machine that
 /// meant every export paid a failed NVENC attempt and then encoded on libx264 -
 /// slow, and needlessly so, since those machines have a perfectly good encoder
-/// under a different name. Capture already picks per vendor (see
-/// NativeReplayBuffer.EncoderCandidates); this is the same idea for the code
+/// under a different name. Capture picks per vendor in RecorderCore; this is
+/// the same idea for the code
 /// paths that shell out to ffmpeg.exe instead of driving libavcodec directly.
 ///
 /// Presence in the ffmpeg build proves nothing - h264_nvenc is compiled into

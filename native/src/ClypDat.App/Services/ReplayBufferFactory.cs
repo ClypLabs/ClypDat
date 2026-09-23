@@ -10,7 +10,8 @@ public static class ReplayBufferFactory
 #if CLYPDAT_UI_PREVIEW
         return new UiPreviewReplayBuffer();
 #else
-        if (!OperatingSystem.IsWindows()) return new FfmpegReplayBuffer(configProvider);
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("ClypDat capture requires the native Windows recorder.");
 
         return new CaptureWorkerProxy(configProvider);
 #endif
@@ -21,10 +22,10 @@ public static class ReplayBufferFactory
 #if CLYPDAT_UI_PREVIEW
         return new UiPreviewReplayBuffer();
 #else
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("ClypDat replay capture requires Windows DXGI Desktop Duplication.");
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("ClypDat replay capture requires the native Windows recorder.");
 
-        AppLog.Info("Replay backend selected: DXGI Desktop Duplication.");
-        return new NativeReplayBuffer(configProvider);
+        AppLog.Info("Replay backend selected: native C++ recorder.");
+        return new NativeRecordingAdapter(configProvider);
 #endif
     }
 

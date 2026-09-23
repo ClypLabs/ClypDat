@@ -18,6 +18,8 @@ internal static class MonotonicClock
     private static readonly long _stopwatchBase = Stopwatch.GetTimestamp();
 
     public static DateTime UtcNow => _utcBase + Stopwatch.GetElapsedTime(_stopwatchBase, Stopwatch.GetTimestamp());
+    internal static DateTime UtcAnchor => _utcBase;
+    internal static long QpcAnchor => _stopwatchBase;
 
     public static double ToSharedSeconds(DateTime utc) =>
         (double)_stopwatchBase / Stopwatch.Frequency + (utc - _utcBase).TotalSeconds;

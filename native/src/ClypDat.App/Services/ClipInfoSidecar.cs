@@ -23,7 +23,7 @@ public static class ClipEventMarkerMapping
         // The ring may contain less than its configured history after startup
         // or recovery. The saved source window records what was actually kept.
         return events.Select(item => new ClipEventMarker(item.Id, item.Label,
-                MonotonicClock.ToSharedSeconds(item.OccurredUtc) - savedSource.StartSeconds))
+                savedSource.MediaSeconds(MonotonicClock.ToSharedSeconds(item.OccurredUtc))))
             .Where(item => double.IsFinite(item.OffsetSeconds) && item.OffsetSeconds >= 0
                 && item.OffsetSeconds <= savedSource.DurationSeconds)
             .ToArray();

@@ -1,17 +1,19 @@
 # ClypDat Native
 
-This is the Avalonia/.NET migration target for ClypDat.
+This is the Avalonia/.NET desktop application for ClypDat.
 
-The Electron app remains in the repository while the native app catches up. The native app is split so platform-specific capture work can be implemented without coupling it to the UI:
+The Electron app remains in the repository. The native application separates platform capture from its UI:
 
 - `ClypDat.App`: Avalonia desktop UI.
 - `ClypDat.Core`: shared settings, clip-library, and metadata logic.
 - `ClypDat.Capture.Abstractions`: capture/replay-buffer interfaces used by platform backends.
 
-Planned backend shape:
+Current backend:
 
-- Windows: Windows Graphics Capture, WASAPI audio capture, Win32 foreground process detection.
-- Linux: PipeWire/xdg-desktop-portal capture and desktop-environment-specific foreground app detection.
+- Windows recording: native WGC/DXGI capture, WASAPI audio, foreground-window detection, session recovery and overlay composition in `capture-native/`.
+- Monitor previews, settings and library metadata remain in the Avalonia/.NET application.
+
+Linux recording is not implemented.
 
 ## Build
 

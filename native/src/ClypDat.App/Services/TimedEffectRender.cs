@@ -19,7 +19,7 @@ public sealed class TimedEffectRender : IDisposable
     public void Dispose()
     {
         foreach (var layer in Text) layer.Dispose();
-        foreach (var mask in Blur.Select(b => b.Mask).OfType<string>()) AudioCapturePipeline.TryDelete(mask);
+        foreach (var mask in Blur.Select(b => b.Mask).OfType<string>()) FileCleanup.TryDelete(mask);
     }
     private static string F(double n) => n.ToString("0.######", CultureInfo.InvariantCulture);
     private static string Enable(TimedVideoEffect e) => $"gte(t,{F(e.Start)})*lt(t,{F(e.End)})";

@@ -95,11 +95,34 @@ internal sealed class SpotifyPlaybackHistory
                 LocalArtPath: state.ArtUrl is null && SpotifyLocalArt.IsLocalArtPath(state.LocalArtPath) ? state.LocalArtPath : null));
         }
     }
+    public SpotifyTimeline Materialize(SpotifySourceWindow source)
+    {
+        if (source.AudioMappings is not { Count: > 0 } mappings) return Materialize(source.StartSeconds, source.DurationSeconds);
+        var samples = new List<SpotifyTimelineSample>();
+        foreach (var mapping in mappings.OrderBy(mapping => mapping.OutputStartSeconds))
+        {
+            if (!double.IsFinite(mapping.SourceStartSeconds) || !double.IsFinite(mapping.DurationSeconds) ||
+                !double.IsFinite(mapping.OutputStartSeconds) || mapping.DurationSeconds <= 0 || mapping.OutputStartSeconds < 0) continue;
+            samples.AddRange(Materialize(mapping.SourceStartSeconds, mapping.DurationSeconds).Samples
+                .Select(sample => sample with { OffsetSeconds = sample.OffsetSeconds + mapping.OutputStartSeconds }));
+        }
+        return new(SpotifyTimeline.CurrentVersion, samples.OrderBy(sample => sample.OffsetSeconds).ToArray());
+    }
     private static SpotifyTimelineSample Unavailable(double offset) => new(offset, null, null, null, null, null, null, false, null, false);
 }
 
-internal sealed record SpotifySourceWindow(double StartSeconds, double DurationSeconds, string BootId)
+internal sealed record SpotifySourceMapping(double SourceStartSeconds, double DurationSeconds, double OutputStartSeconds);
+internal sealed record SpotifySourceWindow(double StartSeconds, double DurationSeconds, string BootId,
+    IReadOnlyList<SpotifySourceMapping>? AudioMappings = null)
 {
+    public double MediaSeconds(double sourceSeconds)
+    {
+        if (AudioMappings is not { Count: > 0 }) return sourceSeconds - StartSeconds;
+        foreach (var mapping in AudioMappings)
+            if (sourceSeconds >= mapping.SourceStartSeconds && sourceSeconds <= mapping.SourceStartSeconds + mapping.DurationSeconds)
+                return mapping.OutputStartSeconds + sourceSeconds - mapping.SourceStartSeconds;
+        return double.NaN;
+    }
     public static void Save(string root, string clip, DateTime start, double duration)
     {
         var path = LibraryLayout.SidecarPath(root, clip, ".source.json");

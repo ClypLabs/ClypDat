@@ -164,7 +164,7 @@ internal static class GpuScheduling
     };
 
     // Same raw-vtable approach as TryMarkDeviceMultithreadProtected in
-    // NativeReplayBuffer, and for the same reason: this call has to reach
+    // native capture interop, and for the same reason: this call has to reach
     // IDXGIDevice on whatever COM pointer the device exposes, without
     // depending on a Vortice wrapper existing or keeping its name across
     // package versions.

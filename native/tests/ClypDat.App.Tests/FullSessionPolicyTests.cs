@@ -27,7 +27,7 @@ public sealed class FullSessionPolicyTests
             File.SetCreationTimeUtc(recent, DateTime.UtcNow.AddHours(-1));
             using (RecordingFileOwnership.Acquire(active))
             {
-                NativeReplayBuffer.EnforceFullSessionQuota(FullSessionRecorderTests.Config(root, "MKV") with { FullSessionQuotaGb = 1 });
+                FullSessionPublication.EnforceQuota(TestReplayConfiguration.Create(root, "MKV") with { FullSessionQuotaGb = 1 });
                 Assert.False(File.Exists(old)); Assert.True(File.Exists(recent)); Assert.True(File.Exists(active));
                 Assert.Throws<IOException>(() => RecordingFileOwnership.ThrowIfActive(active));
             }
@@ -38,7 +38,7 @@ public sealed class FullSessionPolicyTests
     [Fact]
     public void ReconnectDoesNotRestartWriterForNextSessionFormatChange()
     {
-        var config = FullSessionRecorderTests.Config("library", "MKV");
+        var config = TestReplayConfiguration.Create("library", "MKV");
         Assert.Equal(ReplayBufferConfigIdentity.Serialize(config), ReplayBufferConfigIdentity.Serialize(config with { FullSessionContainer = "MP4" }));
         Assert.NotEqual(ReplayBufferConfigIdentity.Serialize(config), ReplayBufferConfigIdentity.Serialize(config with { VideoCodec = "AV1" }));
         var status = new FullSessionStatus(FullSessionState.Failed, "session.mkv", "disk full");

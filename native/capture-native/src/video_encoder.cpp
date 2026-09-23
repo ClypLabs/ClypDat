@@ -76,11 +76,12 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         if (name == "h264_nvenc") option("profile", "high");
         option("tune", "ll");
         option("surfaces", std::to_string(std::clamp((config.fps + 1) / 2, 16, 60)));
+        if(config.nvenc_delay==4||config.nvenc_delay==8)option("delay",std::to_string(config.nvenc_delay));
         char* delay = nullptr;
         size_t length = 0;
         if (_dupenv_s(&delay, &length, "CLYPDAT_NVENC_DELAY") == 0 && delay) {
             const std::unique_ptr<char, decltype(&std::free)> owned(delay, &std::free);
-            if (std::string(delay) == "4" || std::string(delay) == "8") option("delay", delay);
+            if (config.nvenc_delay!=4&&config.nvenc_delay!=8&&(std::string(delay) == "4" || std::string(delay) == "8")) option("delay", delay);
         }
         option("spatial-aq", "0");
         option("temporal-aq", "0");

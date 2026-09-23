@@ -28,6 +28,7 @@ struct VideoEncoderConfig {
     std::string name = "libx264";
     bool low_power = false;
     AVBufferRef* hardware_frames = nullptr; // Retained by the opened context.
+    int nvenc_delay = 0;
 };
 
 // Single encoding thread owns this object. Packets are transferred to history

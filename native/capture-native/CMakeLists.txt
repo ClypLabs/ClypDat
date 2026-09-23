@@ -19,17 +19,35 @@ foreach(component avcodec avformat avutil swresample swscale)
         INTERFACE_INCLUDE_DIRECTORIES "${ffmpeg_include}")
 endforeach()
 
-add_library(RecorderCore STATIC src/video_encoder.cpp src/video_encoder.h)
+add_library(RecorderCore STATIC
+    src/video_encoder.cpp src/video_encoder.h
+    src/recording_capture.cpp src/recording_capture.h
+    src/recording_windows_source.cpp
+    src/recording_audio.cpp src/recording_audio.h
+    src/recording_process.cpp src/recording_process.h
+    src/recording_save.cpp src/recording_save.h
+    src/recorder_session.cpp src/recorder_session.h
+    src/recording_verification.cpp src/recording_verification.h
+    src/recording_overlays.cpp src/recording_overlays.h
+    src/recording_overlays_input.cpp
+    src/recording_overlays_camera.cpp)
 target_compile_features(RecorderCore PUBLIC cxx_std_20)
 target_include_directories(RecorderCore PUBLIC src)
 target_compile_definitions(RecorderCore PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(RecorderCore PRIVATE /W4 /permissive- /EHsc)
 set_target_properties(RecorderCore PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_link_libraries(RecorderCore PUBLIC
-    ffmpeg_avcodec ffmpeg_avformat ffmpeg_avutil ffmpeg_swresample ffmpeg_swscale)
+    ffmpeg_avcodec ffmpeg_avformat ffmpeg_avutil ffmpeg_swresample ffmpeg_swscale
+    d3d11 dxgi d3dcompiler runtimeobject windowsapp ole32 avrt user32 gdi32 mmdevapi uuid psapi)
 
 add_library(ClypDat.Capture.Native SHARED
     src/engine.cpp
+    src/recorder_abi.cpp
+    src/recording_audio_meter.cpp
+    src/recording_recovery_abi.cpp
+    include/clypdat_recorder.h
+    src/camera_preview_abi.cpp
+    include/clypdat_camera_preview.h
     include/clypdat_capture_native.h)
 
 target_compile_features(ClypDat.Capture.Native PRIVATE cxx_std_20)
@@ -85,3 +103,37 @@ target_link_libraries(ClypDat.Capture.Native.EncoderTests PRIVATE RecorderCore)
 set_target_properties(ClypDat.Capture.Native.EncoderTests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_test(NAME ClypDat.Capture.Native.EncoderFailures COMMAND ClypDat.Capture.Native.EncoderTests)
+
+add_executable(ClypDat.Capture.Native.CaptureTests tests/recording_capture_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.CaptureTests PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.CaptureTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.CaptureTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.CapturePipeline COMMAND ClypDat.Capture.Native.CaptureTests)
+
+add_executable(ClypDat.Capture.Native.AudioSaveTests tests/recording_audio_save.cpp)
+target_link_libraries(ClypDat.Capture.Native.AudioSaveTests PRIVATE RecorderCore)
+set_target_properties(ClypDat.Capture.Native.AudioSaveTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.AudioSave COMMAND ClypDat.Capture.Native.AudioSaveTests)
+
+add_executable(ClypDat.Capture.Native.SessionRecoveryTests tests/recording_session_recovery.cpp)
+target_link_libraries(ClypDat.Capture.Native.SessionRecoveryTests PRIVATE RecorderCore)
+set_target_properties(ClypDat.Capture.Native.SessionRecoveryTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.SessionRecovery COMMAND ClypDat.Capture.Native.SessionRecoveryTests)
+
+add_executable(ClypDat.Capture.Native.SessionTests tests/recording_session_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.SessionTests PRIVATE RecorderCore)
+set_target_properties(ClypDat.Capture.Native.SessionTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.Session COMMAND ClypDat.Capture.Native.SessionTests)
+if(CLYPDAT_TEST_GPU)
+    add_test(NAME ClypDat.Capture.Native.GeneratedGpuCapture COMMAND ClypDat.Capture.Native.CaptureTests --gpu)
+endif()
+
+add_executable(ClypDat.Capture.Native.OverlayTests tests/recording_overlays.cpp)
+target_link_libraries(ClypDat.Capture.Native.OverlayTests PRIVATE RecorderCore)
+set_target_properties(ClypDat.Capture.Native.OverlayTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.Overlays COMMAND ClypDat.Capture.Native.OverlayTests)

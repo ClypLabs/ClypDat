@@ -8,11 +8,7 @@
     <Product>ClypDat</Product>
     <ApplicationIcon>..\..\..\assets\clypdat-icon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- Windows-versioned TFM (overriding Directory.Build.props' plain net8.0, scoped
-         to just this project) so Windows.Graphics.Capture's WinRT types are available
-         to NativeReplayBuffer for true per-window capture, instead of DXGI Desktop
-         Duplication's fixed-screen-region capture (which shows whatever's on screen
-         during alt-tab, not the game specifically). -->
+    <!-- Windows-versioned TFM keeps WinRT interop available for monitor previews. -->
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
@@ -76,7 +72,6 @@
 
   <ItemGroup Condition="'$(ClypDatUiPreview)' == 'true'">
     <Compile Remove="Services\CaptureInterop.cs" />
-    <Compile Remove="Services\NativeReplayBuffer.cs" />
   </ItemGroup>
 
   <!-- System.GC.ConserveMemory (0-9): how hard the GC works to hand freed
@@ -203,11 +198,9 @@
        output has FFmpeg.AutoGen.dll (the managed binding) but none of the
        native avcodec/avformat/avutil DLLs it binds to, so
        FfmpegPathResolver finds no bundled folder, never sets
-       ffmpeg.RootPath, and NativeReplayBuffer's very first
-       avcodec_find_encoder_by_name throws NotSupportedException - the
-       capture loop dies instantly and every clip attempt reports "Replay
-       just started". Recording has to work when running a dev build, not
-       only a published one. -->
+       ffmpeg.RootPath, and export tools' first
+       ffmpeg.avcodec_find_encoder_by_name throws NotSupportedException. The
+       native recorder and export tools need this in dev builds too. -->
   <Target Name="CopyFfmpegToOutput" AfterTargets="Build" Condition="Exists('..\..\vendor\ffmpeg')">
     <ItemGroup>
       <FfmpegOutputFiles Include="..\..\vendor\ffmpeg\**\*" />

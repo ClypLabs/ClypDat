@@ -1,140 +1,94 @@
+using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using NAudio.CoreAudioApi;
-using NAudio.Wave;
 
 namespace ClypDat.App.Services;
 
-// Drives the Mic Test meter in Settings > Audio. Opens the selected capture
-// device, runs it through exactly the same filter stage the replay buffer
-// would (MicrophoneNoiseSuppression.Wrap), and reports a level in dBFS so the
-// meter shows what would actually be recorded - including the gate opening and
-// closing against the threshold the slider is set to.
-//
-// Deliberately a separate, short-lived capture rather than a tap on the replay
-// buffer's own: the test has to work before the buffer is armed, on a device
-// that is not the one currently being recorded, and with settings the user has
-// not saved yet.
+// Independent native capture handle shares the recorder's WASAPI and microphone
+// filter modules. Managed code polls a coalesced scalar; no PCM crosses the ABI.
 [SupportedOSPlatform("windows")]
 internal sealed class MicrophoneLevelMonitor : IDisposable
 {
-    // Anything below this reads as silence on the meter. Matches the noise
-    // gate slider's own floor so the two scales line up on screen.
-    public const double FloorDb = MicrophoneNoiseSuppression.MinimumGateThresholdDb;
-
+    public const double FloorDb = -100;
     private readonly object _lock = new();
-    private IWaveIn? _capture;
-    private MMDevice? _device;
-    private double _smoothedDb = FloorDb;
-    private long _packetsSeen;
-    private float _peakSinceLastLog;
-
-    /// <summary>Latest level in dBFS, already smoothed. Raised off the capture thread.</summary>
+    private IntPtr _meter;
+    private Timer? _timer;
     public event EventHandler<double>? LevelChanged;
+    public bool IsRunning { get { lock (_lock) return _meter != IntPtr.Zero; } }
 
-    public bool IsRunning { get { lock (_lock) return _capture is not null; } }
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    private struct Text { internal IntPtr Data; internal uint Length, Reserved; }
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    private struct Config
+    {
+        internal uint Size, Version;
+        internal Text Device, Ffmpeg, Model;
+        internal uint Suppression, Reserved;
+        internal double Gate;
+    }
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int CreateDelegate(ref Config config, out IntPtr meter);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int LevelDelegate(IntPtr meter, out float level);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int DestroyDelegate(IntPtr meter);
+    private static class Api
+    {
+        internal static readonly CreateDelegate Create = Load<CreateDelegate>("cd_audio_meter_create");
+        internal static readonly LevelDelegate Level = Load<LevelDelegate>("cd_audio_meter_level");
+        internal static readonly DestroyDelegate Destroy = Load<DestroyDelegate>("cd_audio_meter_destroy");
+        private static T Load<T>(string name) where T : Delegate =>
+            Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(NativeRecorderLibrary.Handle, name));
+    }
 
-    public void Start(string deviceId, bool noiseSuppression, double gateThresholdDb)
+    public unsafe void Start(string deviceId, bool noiseSuppression, double gateThresholdDb)
     {
         Stop();
-
+        var device = string.IsNullOrWhiteSpace(deviceId) || deviceId == AudioDeviceOption.DefaultDeviceId ? string.Empty : deviceId;
+        var ffmpeg = FfmpegPathResolver.FfmpegPath;
+        var model = FfmpegPathResolver.RnnoiseModelPath;
         lock (_lock)
         {
-            try
+            fixed (char* devicePointer = device, ffmpegPointer = ffmpeg, modelPointer = model)
             {
-                using var enumerator = new MMDeviceEnumerator();
-                _device = string.IsNullOrWhiteSpace(deviceId) || deviceId == AudioDeviceOption.DefaultDeviceId
-                    ? DefaultMicrophone.Get(enumerator)
-                    : enumerator.GetDevice(deviceId);
+                var config = new Config
+                {
+                    Size = (uint)Marshal.SizeOf<Config>(), Version = 3,
+                    Device = new() { Data = (IntPtr)devicePointer, Length = (uint)device.Length },
+                    Ffmpeg = new() { Data = (IntPtr)ffmpegPointer, Length = (uint)ffmpeg.Length },
+                    Model = new() { Data = (IntPtr)modelPointer, Length = (uint)model.Length },
+                    Suppression = noiseSuppression ? 1u : 0u,
+                    Gate = double.IsFinite(gateThresholdDb) ? Math.Clamp(gateThresholdDb, -100, -25) : -100
+                };
+                var result = Api.Create(ref config, out _meter);
+                if (result != 0) throw new InvalidOperationException($"Native microphone test could not start ({result}). Check the selected device and reinstall ClypDat if native components are missing.");
+            }
+            var meter = _meter;
+            _timer = new Timer(_ => Poll(meter), null, 0, 50);
+            AppLog.Info($"Native mic test started: device={deviceId}, denoise={noiseSuppression}, gate={gateThresholdDb:0.#}dB.");
+        }
+    }
 
-                _smoothedDb = FloorDb;
-                _packetsSeen = 0;
-                _peakSinceLastLog = 0;
-                var capture = MicrophoneNoiseSuppression.Wrap(
-                    new MicrophoneWaveIn(_device),
-                    noiseSuppression,
-                    gateThresholdDb,
-                    _device.FriendlyName);
-                capture.DataAvailable += Capture_OnDataAvailable;
-                capture.StartRecording();
-                _capture = capture;
-                AppLog.Info($"Mic test started: device={_device.FriendlyName}, denoise={noiseSuppression}, gate={gateThresholdDb:0.#}dB.");
-            }
-            catch (Exception error)
-            {
-                AppLog.Error("Mic test could not start.", error);
-                StopLocked();
-                throw;
-            }
+    private void Poll(IntPtr meter)
+    {
+        lock (_lock)
+        {
+            if (_meter != meter || meter == IntPtr.Zero) return;
+            if (Api.Level(meter, out var level) == 0) LevelChanged?.Invoke(this, level);
         }
     }
 
     public void Stop()
     {
-        lock (_lock) StopLocked();
-    }
-
-    private void StopLocked()
-    {
-        var capture = _capture;
-        _capture = null;
-        if (capture is not null)
+        lock (_lock)
         {
-            capture.DataAvailable -= Capture_OnDataAvailable;
-            try { capture.StopRecording(); } catch { /* teardown is best effort */ }
-            try { capture.Dispose(); } catch { /* teardown is best effort */ }
-        }
-
-        // MicrophoneWaveIn deliberately does not dispose the MMDevice's cached
-        // AudioClient (see its Dispose), so the device object is this class's
-        // to release.
-        try { _device?.Dispose(); } catch { /* teardown is best effort */ }
-        _device = null;
-
-        if (capture is not null)
-        {
-            _smoothedDb = FloorDb;
+            _timer?.Dispose(); _timer = null;
+            var meter = _meter; _meter = IntPtr.Zero;
+            if (meter == IntPtr.Zero) return;
+            // Failed native joins retain their own live graph until process exit.
+            var result = Api.Destroy(meter);
+            if (result != 0) AppLog.Info($"Native microphone teardown requires process restart ({result}).");
             LevelChanged?.Invoke(this, FloorDb);
         }
     }
-
-    private void Capture_OnDataAvailable(object? sender, WaveInEventArgs e)
-    {
-        var format = (sender as IWaveIn)?.WaveFormat;
-        if (format is null || e.BytesRecorded <= 0) return;
-
-        if (!AudioSampleFormat.TryGetPeak(format, e.Buffer, e.BytesRecorded, out var peak))
-        {
-            // Once per start, not per packet: an unreadable format does not
-            // fix itself, and this runs ~100 times a second.
-            if (Interlocked.Increment(ref _packetsSeen) == 1)
-            {
-                AppLog.Info(
-                    $"Mic test cannot read this capture format ({AudioSampleFormat.ResolveEncoding(format)}, " +
-                    $"{format.BitsPerSample}-bit); the meter will stay at its floor.");
-            }
-
-            return;
-        }
-
-        var db = peak <= 0 ? FloorDb : Math.Clamp(20 * Math.Log10(peak), FloorDb, 0);
-
-        // Fast attack, slow release - the standard meter ballistics. A raw
-        // per-packet peak at 10ms granularity flickers too hard to read, and
-        // smoothing the attack as well would hide exactly the transients the
-        // user is checking the gate against.
-        _smoothedDb = db > _smoothedDb ? db : _smoothedDb + (db - _smoothedDb) * 0.25;
-        LevelChanged?.Invoke(this, _smoothedDb);
-
-        // Roughly once a second while the test runs. This is what makes "is
-        // the meter actually reading my microphone?" answerable from the log
-        // instead of by poking at private methods from outside the process.
-        if (peak > _peakSinceLastLog) _peakSinceLastLog = peak;
-        if (Interlocked.Increment(ref _packetsSeen) % 100 == 0)
-        {
-            AppLog.Debug($"Mic test level: peak={_peakSinceLastLog:0.####}, smoothed={_smoothedDb:0.#}dB.");
-            _peakSinceLastLog = 0;
-        }
-    }
-
     public void Dispose() => Stop();
 }

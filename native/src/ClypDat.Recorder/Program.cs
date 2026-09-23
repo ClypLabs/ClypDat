@@ -34,7 +34,7 @@ internal static class Program
             ? args
             : [.. args, "--capture-worker"];
         entryPoint.Invoke(null, [workerArgs]);
-        return 0;
+        return Environment.ExitCode;
     }
 
     [DllImport("kernel32.dll")] private static extern uint GetErrorMode();

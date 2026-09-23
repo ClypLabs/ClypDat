@@ -154,15 +154,6 @@ public sealed class SecurityRuntimeRegressionTests
         Assert.Equal("Keep me", AppSettingsStore.Load().FontFamilyName);
     }
 
-    [Fact]
-    public async Task HungMediaProcessTimesOut()
-    {
-        FfmpegPathResolver.EnsureBundledFfmpeg();
-        await Assert.ThrowsAsync<TimeoutException>(() => AudioCapturePipeline.RunProcessAsync("ffmpeg",
-            ["-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "anullsrc", "-f", "null", "-"],
-            CancellationToken.None, TimeSpan.FromMilliseconds(250)));
-    }
-
     private sealed class Files : IDisposable
     {
         public string Root { get; } = Path.Combine(AppContext.BaseDirectory, "SecurityRuntimeFixtures", Guid.NewGuid().ToString("N"));

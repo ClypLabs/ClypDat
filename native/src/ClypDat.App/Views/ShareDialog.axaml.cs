@@ -467,7 +467,7 @@ public partial class ShareDialog : Window
             // Walks NVENC -> AMD AMF -> Intel QSV -> CPU from wherever `tier`
             // currently sits, same "try, fall through if this vendor doesn't
             // answer" shape as the native capture engine's EncoderCandidates
-            // (NativeReplayBuffer.cs). Only ever moves forward - a tier that
+            // (RecorderCore). Only ever moves forward - a tier that
             // failed once is assumed unusable for the rest of this dialog's
             // session, so a later size/codec retry doesn't re-probe hardware
             // that already said no.

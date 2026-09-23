@@ -80,7 +80,7 @@ internal static class ClipOverlayBurn
             var root = Path.Combine(AppDataPaths.Root, "overlay-burn");
             if (!Directory.Exists(root)) return;
             foreach (var file in Directory.EnumerateFiles(root))
-                if (File.GetLastWriteTimeUtc(file) < DateTime.UtcNow - TimeSpan.FromHours(1)) AudioCapturePipeline.TryDelete(file);
+                if (File.GetLastWriteTimeUtc(file) < DateTime.UtcNow - TimeSpan.FromHours(1)) FileCleanup.TryDelete(file);
         }
         catch (Exception) { }
     }
@@ -167,7 +167,7 @@ internal static class ClipOverlayBurn
             return new(path, ClipOverlayBurnLayout.Resolve(spec.CameraTransform, VideoOverlayLayout.CameraAspectRatio, frameWidth, frameHeight),
                 ClipOverlayBurnLayout.Enable(coverage, duration), StraightAlpha: false);
         }
-        catch { AudioCapturePipeline.TryDelete(path); throw; }
+        catch { FileCleanup.TryDelete(path); throw; }
         finally { reader.Dispose(); }
     }
 
@@ -229,7 +229,7 @@ internal static class ClipOverlayBurn
             }
             return new(path, bounds, null, StraightAlpha: true);
         }
-        catch { AudioCapturePipeline.TryDelete(path); throw; }
+        catch { FileCleanup.TryDelete(path); throw; }
         finally { if (renderer is not null) await Dispatcher.UIThread.InvokeAsync(renderer.Dispose); }
     }
 

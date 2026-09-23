@@ -7358,14 +7358,14 @@ public sealed partial class MainWindow : Window
 
             var createdUtc = File.GetCreationTimeUtc(sourcePath);
             var backupPath = sourcePath + ".clypdat-trim-backup";
-            AudioCapturePipeline.TryDelete(backupPath);
+            FileCleanup.TryDelete(backupPath);
             File.Move(sourcePath, backupPath);
             try
             {
                 File.Move(tempPath, sourcePath);
                 var stagedEditPath = editPath + ".trim.tmp";
                 try { File.WriteAllBytes(stagedEditPath, stagedEdit); File.Move(stagedEditPath, editPath, true); }
-                finally { AudioCapturePipeline.TryDelete(stagedEditPath); }
+                finally { FileCleanup.TryDelete(stagedEditPath); }
             }
             catch
             {
@@ -7374,16 +7374,16 @@ public sealed partial class MainWindow : Window
                 throw;
             }
             File.SetCreationTimeUtc(sourcePath, createdUtc);
-            AudioCapturePipeline.TryDelete(backupPath);
+            FileCleanup.TryDelete(backupPath);
             stagedInput?.Install();
 
             SpotifyTimelineSidecar.Copy(ViewModel.Settings.LibraryFolder, sourcePath, sourcePath, ViewModel.TrimStart.TotalSeconds, ViewModel.TrimEnd.TotalSeconds, ViewModel.ClipSpeed);
 
             // Recording-paused sidecars from older builds describe the untrimmed
             // timeline. Nothing reads them any more; drop them with the trim.
-            AudioCapturePipeline.TryDelete(LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, sourcePath, ".paused.json"));
-            AudioCapturePipeline.TryDelete(LibraryLayout.LegacySidecarPath(sourcePath, ".paused.json"));
-            AudioCapturePipeline.TryDelete(LibraryLayout.LegacyAdjacentPausedPath(sourcePath));
+            FileCleanup.TryDelete(LibraryLayout.SidecarPath(ViewModel.Settings.LibraryFolder, sourcePath, ".paused.json"));
+            FileCleanup.TryDelete(LibraryLayout.LegacySidecarPath(sourcePath, ".paused.json"));
+            FileCleanup.TryDelete(LibraryLayout.LegacyAdjacentPausedPath(sourcePath));
             var trimStartSeconds = ViewModel.TrimStart.TotalSeconds;
             var trimEndSeconds = ViewModel.TrimEnd.TotalSeconds;
             var trimmedInfo = ClipInfoSidecar.Load(ViewModel.Settings.LibraryFolder, sourcePath) ?? new ClipInfo(null, null);
@@ -7407,7 +7407,7 @@ public sealed partial class MainWindow : Window
             if (progressWindow.IsVisible) progressWindow.Close();
             await progressDialogTask;
             progressCts.Dispose();
-            AudioCapturePipeline.TryDelete(tempPath);
+            FileCleanup.TryDelete(tempPath);
             ViewModel.IsExporting = false;
         }
     }
@@ -7521,7 +7521,7 @@ public sealed partial class MainWindow : Window
             progressWindow.Close();
             if (progressCts.IsCancellationRequested)
             {
-                AudioCapturePipeline.TryDelete(outputPath);
+                FileCleanup.TryDelete(outputPath);
             }
             else if (result.ExitCode != 0)
             {

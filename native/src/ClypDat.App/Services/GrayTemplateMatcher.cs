@@ -39,7 +39,7 @@ public enum TemplateScoring
 /// banner frames then picks its own template. Detail is what a small capture
 /// loses first, so the margin narrows going DOWN but not up - see
 /// <c>IsSupportedDetectorResolution</c> in NativeReplayBuffer for the floor and
-/// the per-resolution numbers.
+/// the per-resolution minimum size policy.
 ///
 /// Note the order in <see cref="Score"/>: resample first, filter second. The
 /// blur radius is in template pixels, so filtering before the resample would
