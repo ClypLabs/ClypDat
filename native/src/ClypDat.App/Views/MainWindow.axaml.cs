@@ -4884,8 +4884,8 @@ public sealed partial class MainWindow : Window
 
     // Hovering the title (TextBlock.editableTitle's underline in
     // AppStyles.axaml) is the only affordance now - clicking it swaps it for
-    // a bordered TextBox in place instead of opening a separate "type a new
-    // name" dialog.
+    // a boxless TextBox in place, so the title itself becomes editable instead
+    // of opening a separate "type a new name" dialog.
     private void ClipTitle_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is not TextBlock { DataContext: ClipCardViewModel clip } titleBlock) return;
@@ -4926,15 +4926,16 @@ public sealed partial class MainWindow : Window
             FontSize = 15,
             FontWeight = Avalonia.Media.FontWeight.Bold,
             Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(6, 2),
+            // No box (inlineTitleEdit in AppStyles.axaml) and no padding, so
+            // the text stays exactly where the TextBlock drew it.
+            Padding = new Thickness(0),
+            BorderThickness = new Thickness(0),
             // Fluent's TextBox defaults to a much taller MinHeight (~32px)
             // than a plain 15px Bold TextBlock's own line height - without
             // pinning this down explicitly, swapping the two made the whole
-            // card visibly jump/reflow (title row growing ~12px taller, the
-            // date/duration row below shoved down) the instant editing
-            // started, then snapping back when it ended.
-            MinHeight = 24,
+            // card visibly jump/reflow the instant editing started, then
+            // snapping back when it ended.
+            MinHeight = 0,
             VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Stretch
         };

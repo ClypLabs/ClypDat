@@ -1596,19 +1596,14 @@
     is what actually keeps the inline clip-title editor's own dark, muted
     look instead of flashing to Fluent's default look on hover/focus.
   -->
-  <Style Selector="TextBox.inlineTitleEdit /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_22303A}" />
-    <Setter Property="BorderThickness" Value="1" />
-  </Style>
-  <Style Selector="TextBox.inlineTitleEdit:pointerover /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_324454}" />
-  </Style>
-  <Style Selector="TextBox.inlineTitleEdit:focus /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="{StaticResource Surface_0D151C}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_4C6478}" />
-    <Setter Property="BorderThickness" Value="1" />
+  <!-- Renaming a clip edits the title text in place: no field box in any
+       state, just the caret and selection over the card. -->
+  <Style Selector="TextBox.inlineTitleEdit /template/ Border#PART_BorderElement,
+                   TextBox.inlineTitleEdit:pointerover /template/ Border#PART_BorderElement,
+                   TextBox.inlineTitleEdit:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
   </Style>
   <!--
     Same Fluent problem as inlineTitleEdit above, and for the same reason: the
