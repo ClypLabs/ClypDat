@@ -16,9 +16,14 @@ static_assert(sizeof(cd_struct_header) == 8);
 static_assert(sizeof(cd_engine_config) == 56);
 static_assert(sizeof(cd_engine_health) == 112);
 static_assert(sizeof(cd_save_request) == 24);
+static_assert(sizeof(cd_save_result) == 56);
+static_assert(sizeof(cd_abi_info) == 32);
+static_assert(sizeof(void*) == 8, "The recorder ABI requires x64.");
 
-bool valid_header(const cd_struct_header* header, uint32_t required_size) {
-    return header != nullptr && header->abi_version == CD_ABI_VERSION && header->struct_size >= required_size;
+int32_t validate_header(const cd_struct_header* header, uint32_t required_size) {
+    if (header == nullptr || header->struct_size < sizeof(cd_struct_header)) return CD_E_INVALID_ARGUMENT;
+    if (header->abi_version != CD_ABI_VERSION) return CD_E_UNSUPPORTED_ABI;
+    return header->struct_size >= required_size ? CD_OK : CD_E_INVALID_ARGUMENT;
 }
 
 void release_device(ID3D11Device*& device, ID3D11DeviceContext*& context) {
@@ -40,17 +45,30 @@ struct cd_engine {
     ID3D11DeviceContext* context = nullptr;
 };
 
-int32_t CD_CALL cd_engine_create(const cd_engine_config* config, cd_engine** engine) {
-    if (engine == nullptr || !valid_header(config == nullptr ? nullptr : &config->header, sizeof(cd_engine_config))) return CD_E_INVALID_ARGUMENT;
+uint32_t CD_CALL cd_engine_abi_version(void) { return CD_ABI_VERSION; }
+
+int32_t CD_CALL cd_engine_get_abi_info(cd_abi_info* info) {
+    const auto result = validate_header(info == nullptr ? nullptr : &info->header, sizeof(cd_abi_info));
+    if (result != CD_OK) return result;
+    *info = { { sizeof(cd_abi_info), CD_ABI_VERSION }, CD_ENGINE_VERSION, sizeof(void*),
+        sizeof(cd_engine_config), sizeof(cd_engine_health), sizeof(cd_save_request), sizeof(cd_save_result) };
+    return CD_OK;
+}
+
+int32_t CD_CALL cd_engine_create(const cd_engine_config* config, cd_engine** engine) try {
+    if (engine == nullptr) return CD_E_INVALID_ARGUMENT;
+    *engine = nullptr;
+    const auto result = validate_header(config == nullptr ? nullptr : &config->header, sizeof(cd_engine_config));
+    if (result != CD_OK) return result;
     if (config->selected_fps < kMinimumFps || config->selected_fps > kMaximumFps || config->width == 0 || config->height == 0) return CD_E_INVALID_ARGUMENT;
     auto created = std::make_unique<cd_engine>();
     created->config = *config;
     created->active_fps = config->selected_fps;
     *engine = created.release();
     return CD_OK;
-}
+} catch (...) { return CD_E_INTERNAL; }
 
-int32_t CD_CALL cd_engine_start(cd_engine* engine) {
+int32_t CD_CALL cd_engine_start(cd_engine* engine) try {
     if (engine == nullptr) return CD_E_INVALID_ARGUMENT;
     std::scoped_lock lock(engine->mutex);
     if (engine->state == CD_ENGINE_RUNNING || engine->state == CD_ENGINE_PAUSED) return CD_OK;
@@ -77,7 +95,8 @@ int32_t CD_CALL cd_engine_start(cd_engine* engine) {
     }
     if (adapter != nullptr) adapter->Release();
     if (dxgi_device != nullptr) dxgi_device->Release();
-    engine->route = CD_CAPTURE_ROUTE_DXGI;
+    // Device initialization alone does not establish a capture route.
+    engine->route = CD_CAPTURE_ROUTE_NONE;
     // This is capture engine's own device only. Do not change process-wide
     // scheduling; that would also reprioritize Avalonia and DWM-facing work.
     if (IDXGIDevice* priority_device = nullptr; SUCCEEDED(engine->device->QueryInterface(IID_PPV_ARGS(&priority_device)))) {
@@ -87,15 +106,16 @@ int32_t CD_CALL cd_engine_start(cd_engine* engine) {
     }
     engine->state = CD_ENGINE_RUNNING;
     return CD_OK;
-}
+} catch (...) { return CD_E_INTERNAL; }
 
-int32_t CD_CALL cd_engine_stop(cd_engine* engine) {
+int32_t CD_CALL cd_engine_stop(cd_engine* engine) try {
     if (engine == nullptr) return CD_E_INVALID_ARGUMENT;
     std::scoped_lock lock(engine->mutex);
     release_device(engine->device, engine->context);
+    engine->route = CD_CAPTURE_ROUTE_NONE;
     if (engine->state != CD_ENGINE_FAILED) engine->state = CD_ENGINE_STOPPED;
     return CD_OK;
-}
+} catch (...) { return CD_E_INTERNAL; }
 
 void CD_CALL cd_engine_destroy(cd_engine* engine) {
     if (engine == nullptr) return;
@@ -103,23 +123,25 @@ void CD_CALL cd_engine_destroy(cd_engine* engine) {
     delete engine;
 }
 
-int32_t CD_CALL cd_engine_set_paused(cd_engine* engine, uint32_t paused) {
-    if (engine == nullptr) return CD_E_INVALID_ARGUMENT;
+int32_t CD_CALL cd_engine_set_paused(cd_engine* engine, uint32_t paused) try {
+    if (engine == nullptr || paused > 1) return CD_E_INVALID_ARGUMENT;
     std::scoped_lock lock(engine->mutex);
     if (engine->state != CD_ENGINE_RUNNING && engine->state != CD_ENGINE_PAUSED) return CD_E_INVALID_STATE;
     engine->state = paused != 0 ? CD_ENGINE_PAUSED : CD_ENGINE_RUNNING;
     return CD_OK;
-}
+} catch (...) { return CD_E_INTERNAL; }
 
-int32_t CD_CALL cd_engine_set_active_fps(cd_engine* engine, uint32_t active_fps) {
+int32_t CD_CALL cd_engine_set_active_fps(cd_engine* engine, uint32_t active_fps) try {
     if (engine == nullptr || active_fps < kMinimumFps || active_fps > engine->config.selected_fps) return CD_E_INVALID_ARGUMENT;
     std::scoped_lock lock(engine->mutex);
     engine->active_fps = active_fps;
     return CD_OK;
-}
+} catch (...) { return CD_E_INTERNAL; }
 
-int32_t CD_CALL cd_engine_get_health(const cd_engine* engine, cd_engine_health* health) {
-    if (engine == nullptr || !valid_header(health == nullptr ? nullptr : &health->header, sizeof(cd_engine_health))) return CD_E_INVALID_ARGUMENT;
+int32_t CD_CALL cd_engine_get_health(const cd_engine* engine, cd_engine_health* health) try {
+    if (engine == nullptr) return CD_E_INVALID_ARGUMENT;
+    const auto result = validate_header(health == nullptr ? nullptr : &health->header, sizeof(cd_engine_health));
+    if (result != CD_OK) return result;
     auto* mutable_engine = const_cast<cd_engine*>(engine);
     std::scoped_lock lock(mutable_engine->mutex);
     health->engine_version = CD_ENGINE_VERSION;
@@ -142,17 +164,20 @@ int32_t CD_CALL cd_engine_get_health(const cd_engine* engine, cd_engine_health* 
     health->output_fps = 0;
     health->fresh_fps = 0;
     return CD_OK;
-}
+} catch (...) { return CD_E_INTERNAL; }
 
 int32_t CD_CALL cd_engine_save_window(cd_engine* engine, const cd_save_request* request, cd_save_result* result) {
-    if (engine == nullptr || !valid_header(request == nullptr ? nullptr : &request->header, sizeof(cd_save_request)) ||
-        !valid_header(result == nullptr ? nullptr : &result->header, sizeof(cd_save_result))) return CD_E_INVALID_ARGUMENT;
+    if (engine == nullptr) return CD_E_INVALID_ARGUMENT;
+    auto validation = validate_header(request == nullptr ? nullptr : &request->header, sizeof(cd_save_request));
+    if (validation != CD_OK) return validation;
+    validation = validate_header(result == nullptr ? nullptr : &result->header, sizeof(cd_save_result));
+    if (validation != CD_OK) return validation;
     if (request->end_qpc <= request->start_qpc) return CD_E_INVALID_ARGUMENT;
     if (result->temporary_video_path == nullptr || result->temporary_video_path_capacity == 0) return CD_E_BUFFER_TOO_SMALL;
     result->temporary_video_path[0] = L'\0';
-    result->actual_start_qpc = request->start_qpc;
-    result->actual_end_qpc = request->end_qpc;
-    result->duration_qpc = request->end_qpc - request->start_qpc;
+    result->actual_start_qpc = 0;
+    result->actual_end_qpc = 0;
+    result->duration_qpc = 0;
     result->packet_count = 0;
     return CD_E_UNAVAILABLE;
 }

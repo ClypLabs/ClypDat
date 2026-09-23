@@ -1,0 +1,33 @@
+name: Native capture checks
+
+on:
+  push:
+    branches: [master, cpp-rewrite]
+    paths:
+      - 'native/capture-native/**'
+      - 'native/vendor/ffmpeg/**'
+      - 'eng/Build-NativeCapture.ps1'
+      - 'eng/Prepare-CaptureFfmpegSdk.ps1'
+      - '.github/workflows/native-capture.yml'
+  pull_request:
+    paths:
+      - 'native/capture-native/**'
+      - 'native/vendor/ffmpeg/**'
+      - 'eng/Build-NativeCapture.ps1'
+      - 'eng/Prepare-CaptureFfmpegSdk.ps1'
+      - '.github/workflows/native-capture.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build and test Release without capture hardware
+        shell: pwsh
+        run: ./eng/Build-NativeCapture.ps1 -Configuration Release -Test

@@ -12,7 +12,32 @@ public sealed class NativeReplayEngineAbiTests
         Assert.Equal(8, Marshal.SizeOf<NativeReplayEngineAbi.Header>());
         Assert.Equal(56, Marshal.SizeOf<NativeReplayEngineAbi.EngineConfig>());
         Assert.Equal(112, Marshal.SizeOf<NativeReplayEngineAbi.EngineHealth>());
+        Assert.Equal(32, Marshal.SizeOf<NativeReplayEngineAbi.AbiInfo>());
+        Assert.Equal(24, Marshal.SizeOf<NativeReplayEngineAbi.SaveRequest>());
+        Assert.Equal(56, Marshal.SizeOf<NativeReplayEngineAbi.SaveResult>());
+        Assert.Equal(40, Marshal.OffsetOf<NativeReplayEngineAbi.SaveResult>("TemporaryVideoPath").ToInt32());
         Assert.Equal(NativeReplayEngineAbi.Version, NativeReplayEngineAbi.Header.Create<NativeReplayEngineAbi.EngineHealth>().AbiVersion);
+    }
+
+    [Fact]
+    public void AbiNegotiation_RejectsVersionAndLayoutMismatch()
+    {
+        var info = new NativeReplayEngineAbi.AbiInfo
+        {
+            Header = NativeReplayEngineAbi.Header.Create<NativeReplayEngineAbi.AbiInfo>(),
+            EngineVersion = NativeReplayEngineAbi.EngineVersion,
+            PointerSize = 8,
+            ConfigSize = 56,
+            HealthSize = 112,
+            SaveRequestSize = 24,
+            SaveResultSize = 56
+        };
+        Assert.True(info.IsCompatible);
+        info.Header.AbiVersion = 2;
+        Assert.False(info.IsCompatible);
+        info.Header.AbiVersion = NativeReplayEngineAbi.Version;
+        info.SaveResultSize = 48;
+        Assert.False(info.IsCompatible);
     }
 
     [Fact]

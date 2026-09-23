@@ -269,7 +269,7 @@
        published app output. The bridge is presently probe-only, so an absent
        DLL cannot affect capture startup before the native media path is live. -->
   <Target Name="BuildNativeCaptureEngine" BeforeTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\capture-native\build.ps1&quot; -Configuration $(Configuration)" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\..\eng\Build-NativeCapture.ps1&quot; -Configuration $(Configuration)" />
   </Target>
 
   <Target Name="BuildEditorVideoOutput" BeforeTargets="PrepareForBuild" Condition="'$(ClypDatUiPreview)' != 'true'">

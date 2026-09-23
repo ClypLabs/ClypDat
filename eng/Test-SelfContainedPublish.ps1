@@ -11,6 +11,7 @@ $requiredFiles = @(
     'ClypDat.exe',
     'ClypDatRecorder.exe',
     'ClypDatDetectorHost.exe',
+    'ClypDat.Capture.Native.dll',
     'ClypDat.runtimeconfig.json',
     'ClypDatRecorder.dll',
     'ClypDatRecorder.deps.json',

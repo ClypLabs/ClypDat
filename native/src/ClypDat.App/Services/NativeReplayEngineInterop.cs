@@ -8,8 +8,8 @@ namespace ClypDat.App.Services;
 // SafeHandle; every native frame and packet stays inside the native engine.
 internal static class NativeReplayEngineAbi
 {
-    internal const uint Version = 2;
-    internal const uint EngineVersion = 2;
+    internal const uint Version = 3;
+    internal const uint EngineVersion = 3;
     internal const string LibraryName = "ClypDat.Capture.Native";
 
     internal enum Result : int
@@ -20,14 +20,53 @@ internal static class NativeReplayEngineAbi
         InvalidState = -3,
         DeviceFailure = -4,
         Unavailable = -5,
-        BufferTooSmall = -6
+        BufferTooSmall = -6,
+        Internal = -7
     }
 
     internal enum EngineState : uint { Created, Running, Paused, Stopped, Failed }
     internal enum CaptureRoute : uint { None, Dxgi, Wgc }
     internal enum FatalError : uint { None, Device, Encoder, Capture, Abi }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    internal struct AbiInfo
+    {
+        internal Header Header;
+        internal uint EngineVersion;
+        internal uint PointerSize;
+        internal uint ConfigSize;
+        internal uint HealthSize;
+        internal uint SaveRequestSize;
+        internal uint SaveResultSize;
+
+        internal readonly bool IsCompatible => Header.AbiVersion == Version &&
+            Header.StructSize == Marshal.SizeOf<AbiInfo>() && EngineVersion == NativeReplayEngineAbi.EngineVersion &&
+            PointerSize == 8 && IntPtr.Size == 8 && ConfigSize == Marshal.SizeOf<EngineConfig>() &&
+            HealthSize == Marshal.SizeOf<EngineHealth>() && SaveRequestSize == Marshal.SizeOf<SaveRequest>() &&
+            SaveResultSize == Marshal.SizeOf<SaveResult>();
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    internal struct SaveRequest
+    {
+        internal Header Header;
+        internal long StartQpc;
+        internal long EndQpc;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
+    internal struct SaveResult
+    {
+        internal Header Header;
+        internal long ActualStartQpc;
+        internal long ActualEndQpc;
+        internal long DurationQpc;
+        internal ulong PacketCount;
+        internal IntPtr TemporaryVideoPath;
+        internal uint TemporaryVideoPathCapacity;
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
     internal struct Header
     {
         internal uint StructSize;
@@ -40,7 +79,7 @@ internal static class NativeReplayEngineAbi
         };
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
     internal struct EngineConfig
     {
         internal Header Header;
@@ -73,7 +112,7 @@ internal static class NativeReplayEngineAbi
         private static int MakeEven(int value) => value % 2 == 0 ? value : value - 1;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 8)]
     internal struct EngineHealth
     {
         internal Header Header;
@@ -100,6 +139,10 @@ internal static class NativeReplayEngineAbi
         internal static EngineHealth CreateRequest() => new() { Header = NativeReplayEngineAbi.Header.Create<EngineHealth>() };
     }
 
+    [DllImport(LibraryName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern uint cd_engine_abi_version();
+    [DllImport(LibraryName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
+    internal static extern Result cd_engine_get_abi_info(ref AbiInfo info);
     [DllImport(LibraryName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
     internal static extern Result cd_engine_create(in EngineConfig config, out NativeReplayEngineHandle engine);
     [DllImport(LibraryName, CallingConvention = CallingConvention.StdCall, ExactSpelling = true)]
@@ -142,6 +185,19 @@ internal sealed class NativeReplayEngine : IDisposable
         error = string.Empty;
         try
         {
+            var version = NativeReplayEngineAbi.cd_engine_abi_version();
+            if (version != NativeReplayEngineAbi.Version)
+            {
+                error = $"native ABI mismatch: expected {NativeReplayEngineAbi.Version}, found {version}";
+                return false;
+            }
+            var info = new NativeReplayEngineAbi.AbiInfo { Header = NativeReplayEngineAbi.Header.Create<NativeReplayEngineAbi.AbiInfo>() };
+            var query = NativeReplayEngineAbi.cd_engine_get_abi_info(ref info);
+            if (query != NativeReplayEngineAbi.Result.Ok || !info.IsCompatible)
+            {
+                error = $"native ABI layout mismatch ({query})";
+                return false;
+            }
             var result = NativeReplayEngineAbi.cd_engine_create(NativeReplayEngineAbi.EngineConfig.From(config), out var handle);
             if (result != NativeReplayEngineAbi.Result.Ok)
             {
