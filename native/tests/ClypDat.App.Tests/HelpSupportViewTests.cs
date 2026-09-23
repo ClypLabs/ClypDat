@@ -46,15 +46,15 @@ public sealed class HelpSupportViewTests
                     Assert.True(button.Focusable);
                     Assert.True(KeyboardNavigation.GetIsTabStop(button));
                     var position = button.TranslatePoint(default, card)!.Value;
-                    Assert.InRange(position.X, 20, card.Bounds.Width - button.Bounds.Width - 19);
+                    Assert.InRange(position.X, 16, card.Bounds.Width - button.Bounds.Width - 15);
                     // Layout rounds to physical pixels at the host's DPI scale.
-                    Assert.InRange(card.Bounds.Height - position.Y - button.Bounds.Height, 20, 22);
+                    Assert.InRange(card.Bounds.Height - position.Y - button.Bounds.Height, 16, 18);
 
                     foreach (var text in card.GetVisualDescendants().OfType<TextBlock>())
                     {
                         Assert.Equal(window.FontFamily, text.FontFamily);
                         var point = text.TranslatePoint(default, card)!.Value;
-                        Assert.True(point.X + text.Bounds.Width <= card.Bounds.Width - 19);
+                        Assert.True(point.X + text.Bounds.Width <= card.Bounds.Width - 15);
                     }
                 }
 
@@ -86,7 +86,7 @@ public sealed class HelpSupportViewTests
                 {
                     AppThemeService.Apply(Application.Current!, theme, Colors.Blue, useSystemAccent: false);
                     window.UpdateLayout();
-                    Assert.Equal(AppThemeService.Brush("SurfaceRaisedBrush", "#1A242E").ToString(), card.Background!.ToString());
+                    Assert.Equal(AppThemeService.Brush("SurfaceBrush", "#141D24").ToString(), card.Background!.ToString());
                     Assert.NotEqual(AppThemeService.Brush("PanelBgBrush", "#101820").ToString(), card.Background.ToString());
                 }
 
@@ -116,6 +116,6 @@ public sealed class HelpSupportViewTests
         var positions = cards.Select(card => card.TranslatePoint(default, items)!.Value).ToArray();
         Assert.Equal(expected, positions.Count(point => Math.Abs(point.Y - positions[0].Y) < 1));
         if (expected > 1)
-            Assert.InRange(positions[1].X - positions[0].X - cards[0].Bounds.Width, 15, 17);
+            Assert.InRange(positions[1].X - positions[0].X - cards[0].Bounds.Width, 11, 13);
     }
 }
