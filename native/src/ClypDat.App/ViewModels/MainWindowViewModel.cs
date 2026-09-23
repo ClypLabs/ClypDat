@@ -8050,6 +8050,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void UpdateDiscordPresence()
     {
+        // Remote policy is applied before the constructor creates the library.
+        // Normal Discord setup publishes presence after initialization.
+        if (AllClips is null) return;
         if (!DiscordRichPresenceEnabled)
         {
             DiscordRichPresenceService.SetPresence(DiscordPresence.None);
