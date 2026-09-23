@@ -6231,16 +6231,66 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    internal void OpenLicensesButton_OnClick(object? sender, RoutedEventArgs e)
+    // Shown inside ClypDat rather than handed to whatever the system opens a
+    // .md file with - often nothing, or a code editor showing raw Markdown.
+    internal async void OpenLicensesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "THIRD-PARTY-LICENSES.md");
+        string markdown;
         try
         {
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            markdown = await File.ReadAllTextAsync(path);
         }
         catch (Exception error)
         {
-            AppLog.Error("Open licenses failed", error);
+            AppLog.Error("Open licences failed", error);
+            await ShowMessageAsync("Licences unavailable", "The licence notices could not be read from ClypDat's install folder. Reinstalling ClypDat restores them.");
+            return;
+        }
+
+        var (window, body) = CreateChromelessDialog("Open source licences", centerTitle: false);
+        window.Width = 760;
+        if (body is StackPanel stack)
+        {
+            stack.Margin = new Thickness(0);
+            stack.Spacing = 0;
+        }
+        body.Children.Add(new ScrollViewer
+        {
+            // Tall enough to read comfortably, short enough that the dialog
+            // never runs off a 1080p screen.
+            MaxHeight = Math.Max(320, Math.Min(620, Bounds.Height - 180)),
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Padding = new Thickness(28, 22, 22, 22),
+            Content = LicenceDocumentView.Build(markdown)
+        });
+        var close = new Button
+        {
+            Classes = { "primaryButton" },
+            Content = "Close",
+            MinWidth = 104,
+            Height = 36,
+            Padding = new Thickness(16, 0),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        close.Click += (_, _) => window.Close(true);
+        body.Children.Add(new Border
+        {
+            BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
+            BorderThickness = new Thickness(0, 1, 0, 0),
+            Padding = new Thickness(28, 14, 28, 18),
+            Child = close
+        });
+
+        try
+        {
+            await ShowModalDialogAsync<bool>(window);
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Failed to show licences dialog", error);
         }
     }
 

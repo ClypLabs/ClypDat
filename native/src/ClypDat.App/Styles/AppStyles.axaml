@@ -40,6 +40,34 @@
         <Setter Property="Height" Value="10" />
       </Style>
     </ControlTheme>
+
+    <!--
+      Every option list in the app - segmented choices, pills, preset cards,
+      theme swatches, the overlay position grid - uses this template instead
+      of Fluent's. Its SelectionIndicatorHost glides one highlight from the
+      old choice to the new one rather than switching one item's highlight
+      off and another's on. Each list styles PART_SelectionIndicator itself
+      (a filled pill under the items, or an accent ring over them via ZIndex)
+      and drops its items' own selected highlight to match. No ScrollViewer:
+      none of these lists scroll, they wrap.
+    -->
+    <ControlTheme x:Key="SlidingSelectionListBox" TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Name="border"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}"
+                  Padding="{TemplateBinding Padding}">
+            <controls:SelectionIndicatorHost>
+              <Border Name="PART_SelectionIndicator" IsHitTestVisible="False" Opacity="0" />
+              <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" />
+            </controls:SelectionIndicatorHost>
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </ControlTheme>
   </Styles.Resources>
   <!--
     Shared control styles for the whole app. These must live at Application
@@ -1296,6 +1324,13 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="ItemsPanel"><ItemsPanelTemplate><UniformGrid Columns="2" Rows="2" /></ItemsPanelTemplate></Setter>
+    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
+  </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards /template/ Border#PART_SelectionIndicator">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="ZIndex" Value="1" />
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem">
     <Setter Property="MinHeight" Value="76" />
@@ -1316,8 +1351,6 @@
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="BorderThickness" Value="2" />
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:focus">
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
@@ -1325,7 +1358,14 @@
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Surface_405668}" />
+  </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.18" />
+      </Transitions>
+    </Setter>
   </Style>
   <!-- Custom title-bar min/maximize/close buttons - replace Windows' own
        caption buttons (WindowDecorations="None" on
@@ -1674,6 +1714,7 @@
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="ListBox.pillGroup">
+    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
@@ -1694,16 +1735,28 @@
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="FontSize" Value="14" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.16" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.16" />
+        <BrushTransition Property="Foreground" Duration="0:0:0.16" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem:pointerover">
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
-  <Style Selector="ListBox.pillGroup ListBoxItem:selected">
+  <Style Selector="ListBox.pillGroup /template/ Border#PART_SelectionIndicator">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+    <Setter Property="CornerRadius" Value="7" />
+  </Style>
+  <Style Selector="ListBox.pillGroup ListBoxItem:selected, ListBox.pillGroup ListBoxItem:selected:pointerover">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
-  <Style Selector="ListBox.pillGroup ListBoxItem:selected:pointerover">
-    <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
+  <Style Selector="ListBox.pillGroup ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter, ListBox.pillGroup ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.pillGroup ListBoxItem:selected:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
   </Style>
   <Style Selector="ListBox.onboardingPills ListBoxItem">
     <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -1915,6 +1968,20 @@
         <controls:ResponsiveUniformGrid MinimumItemWidth="180" MaximumColumns="4" />
       </ItemsPanelTemplate>
     </Setter>
+    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
+  </Style>
+  <Style Selector="ListBox.qualityPresetCards /template/ Border#PART_SelectionIndicator">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="1.5" />
+    <Setter Property="CornerRadius" Value="9" />
+    <Setter Property="ZIndex" Value="1" />
+  </Style>
+  <Style Selector="ListBox.qualityPresetCards ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.18" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem">
     <Setter Property="MinHeight" Value="88" />
@@ -1934,7 +2001,7 @@
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
     <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover">
@@ -1942,7 +2009,7 @@
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource Surface_39434C}" />
@@ -1956,6 +2023,7 @@
        selected state on the presenter, not the item, so setting it on the item
        alone leaves the stock blue selection block visible underneath. -->
   <Style Selector="ListBox.themePresetGrid">
+    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
@@ -1979,19 +2047,22 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
-  <Style Selector="ListBox.themePresetGrid ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+  <Style Selector="ListBox.themePresetGrid ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter, ListBox.themePresetGrid ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
   </Style>
-  <Style Selector="ListBox.themePresetGrid ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrushHover}" />
+  <Style Selector="ListBox.themePresetGrid /template/ Border#PART_SelectionIndicator">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="CornerRadius" Value="11" />
+    <Setter Property="ZIndex" Value="1" />
   </Style>
   <!-- Saved custom themes. A ListBox rather than an ItemsControl because the
        rows are a selector - clicking one switches the app to that theme - so
        the selection ring is the same accent ring the preset swatches use. The
        row's own Border paints the fill; only the ring lives on the item. -->
   <Style Selector="ListBox.customThemeList">
+    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
@@ -2017,13 +2088,15 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
-  <Style Selector="ListBox.customThemeList ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+  <Style Selector="ListBox.customThemeList ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter, ListBox.customThemeList ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
   </Style>
-  <Style Selector="ListBox.customThemeList ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrushHover}" />
+  <Style Selector="ListBox.customThemeList /template/ Border#PART_SelectionIndicator">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="ZIndex" Value="1" />
   </Style>
   <Style Selector="Button.autoClipCardHeader">
     <Setter Property="Background" Value="Transparent" />
@@ -3091,6 +3164,7 @@
   <!-- A handful of short, mutually exclusive choices as one control, rather
        than a row of separate heavy buttons. -->
   <Style Selector="ListBox.settingsSegmented">
+    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
     <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
@@ -3114,9 +3188,18 @@
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Foreground" Duration="0:0:0.18" />
+      </Transitions>
+    </Setter>
   </Style>
   <Style Selector="ListBox.settingsSegmented ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="6" />
+  </Style>
+  <Style Selector="ListBox.settingsSegmented /template/ Border#PART_SelectionIndicator">
+    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
     <Setter Property="CornerRadius" Value="6" />
   </Style>
   <Style Selector="ListBox.settingsSegmented ListBoxItem:pointerover">
@@ -3128,17 +3211,18 @@
   <Style Selector="ListBox.settingsSegmented ListBoxItem:selected">
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
-  <Style Selector="ListBox.settingsSegmented ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+  <Style Selector="ListBox.settingsSegmented ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
-  <Style Selector="ListBox.settingsSegmented ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{StaticResource AccentBrushHover}" />
+  <Style Selector="ListBox.settingsSegmented ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter, ListBox.settingsSegmented ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.settingsSegmented ListBoxItem:selected:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
   </Style>
 
   <!-- Overlay position: six equal chips on a 3x2 grid, each with a small
        screen showing where the badge lands. Selected is marked with the
        accent ring and a tinted fill rather than a solid accent block. -->
   <Style Selector="ListBox.settingsPositionPicker">
+    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
@@ -3167,6 +3251,18 @@
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.18" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.18" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="ListBox.settingsPositionPicker /template/ Border#PART_SelectionIndicator">
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderThickness" Value="1.5" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="ZIndex" Value="1" />
   </Style>
   <Style Selector="ListBox.settingsPositionPicker ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
@@ -3177,11 +3273,11 @@
   </Style>
   <Style Selector="ListBox.settingsPositionPicker ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource AccentSelectedBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
   </Style>
   <Style Selector="ListBox.settingsPositionPicker ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource AccentSelectedHoverBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
 
   <!-- Connected Accounts: one provider per row, each row its own bordered
