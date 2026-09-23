@@ -95,6 +95,18 @@ async function main() {
   fs.writeFileSync(path.join(app, 'assets/clypdat-logo.svg'), svg);
   fs.writeFileSync(path.join(web, 'public/logo.svg'), svg);
 
+  // Discord masks Rich Presence art with its own rounded corners, at a radius
+  // that varies by surface. The avatar's rounded stroke sits inside transparent
+  // corners, so any larger mask shaves the frame off at the corners. Here the
+  // silver fills the canvas to its edges and only the charcoal window is
+  // rounded: Discord's mask becomes the frame's outer curve at every radius.
+  const discordSize = 1024;
+  const discordMark = 921;
+  const discordX = (discordSize / 2 - (left + right + 1) / 2 * discordMark / info.width).toFixed(6);
+  const discordY = (discordSize / 2 - (top + bottom + 1) / 2 * discordMark / info.height).toFixed(6);
+  const discordSvg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${discordSize}" height="${discordSize}" viewBox="0 0 ${discordSize} ${discordSize}"><title>ClypDat — Discord</title><defs><linearGradient id="silver-edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef2f6"/><stop offset="1" stop-color="#7f8b97"/></linearGradient></defs><rect width="${discordSize}" height="${discordSize}" fill="url(#silver-edge)"/><rect x="40" y="40" width="944" height="944" rx="190" fill="#17191c"/><image x="${discordX}" y="${discordY}" width="${discordMark}" height="${discordMark}" xlink:href="data:image/png;base64,${mark.toString('base64')}"/></svg>`;
+  await sharp(Buffer.from(discordSvg)).png(pngOptions).toFile(path.join(app, 'assets/branding/clypdat-discord.png'));
+
   const transparentFrames = [];
   const frames = [];
   for (const size of sizes) {

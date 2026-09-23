@@ -80,6 +80,21 @@ test('desktop icon carries the Silver Edge tile at every frame size', async () =
   assert.ok(asset('clypdat-icon.ico').equals(fs.readFileSync(path.join(web, 'app/favicon.ico'))));
 });
 
+// Discord rounds Rich Presence art itself, at a radius that differs by
+// surface. Silver to the canvas corners means its mask cuts the outer curve
+// of the frame rather than slicing through a rounded stroke.
+test('Discord asset keeps its frame under Discord corner masks', async () => {
+  const { data, info } = await sharp(asset('branding/clypdat-discord.png')).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  assert.deepEqual([info.width, info.height], [1024, 1024]);
+  const pixel = (x, y) => Array.from(data.subarray((y * info.width + x) * 4, (y * info.width + x) * 4 + 4));
+  const silver = ([r, g, b, a]) => a === 255 && Math.min(r, g, b) > 100;
+  for (const [x, y] of [[0, 0], [1023, 0], [0, 1023], [1023, 1023]]) assert.ok(silver(pixel(x, y)), `corner ${x},${y} must be opaque silver`);
+  // A 25% mask meets the diagonal 75px in from each corner; the silver band
+  // must still continue past it before the charcoal window starts.
+  for (const [x, y] of [[85, 85], [938, 85], [85, 938], [938, 938]]) assert.ok(silver(pixel(x, y)), `diagonal ${x},${y} must stay silver inside a 25% mask`);
+  assert.deepEqual(pixel(512, 60), [0x17, 0x19, 0x1c, 255], 'charcoal window sits inside the frame');
+});
+
 test('every in-app dark mark stays an unframed transparent symbol', async () => {
   for (const size of [16, 24, 32, 48, 64, 128, 256]) {
     const icon = asset(`clypdat-icon-${size}.png`);
