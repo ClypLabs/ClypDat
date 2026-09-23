@@ -1501,7 +1501,38 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible;
+    private bool _isHelpVisible;
+    private bool _wasEditorVisibleBeforeHelp;
+    public bool IsHelpVisible
+    {
+        get => _isHelpVisible;
+        private set
+        {
+            if (!SetProperty(ref _isHelpVisible, value)) return;
+            OnPropertyChanged(nameof(IsLibraryVisible));
+            OnPropertyChanged(nameof(ShowLibraryActions));
+            OnPropertyChanged(nameof(ShowLibraryStatus));
+            OnPropertyChanged(nameof(ShowHeaderUpdateButton));
+        }
+    }
+
+    public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible && !IsHelpVisible;
+
+    public void OpenHelp()
+    {
+        if (IsHelpVisible) return;
+        _wasEditorVisibleBeforeHelp = IsEditorVisible;
+        IsHelpVisible = true;
+        IsEditorVisible = false;
+    }
+
+    public void CloseHelp(bool restoreEditor = true)
+    {
+        if (!IsHelpVisible) return;
+        var reopenEditor = restoreEditor && _wasEditorVisibleBeforeHelp && !string.IsNullOrWhiteSpace(SelectedVideoPath);
+        if (reopenEditor) IsEditorVisible = true;
+        IsHelpVisible = false;
+    }
 
     // Header update control reopens a known update; it never performs a
     // network check itself.

@@ -786,8 +786,8 @@
                            HorizontalAlignment="Center" />
               </StackPanel>
             </Button>
-            <Button Classes="railIconButton boxedRailFooterButton" Classes.editorRailFooter="{Binding IsEditorVisible}" Click="FeedbackButton_OnClick" ToolTip.Tip="Send feedback">
-              <PathIcon Data="M11,18h2v-2h-2V18z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M12,20c-4.41,0-8-3.59-8-8s3.59-8,8-8s8,3.59,8,8S16.41,20,12,20z M12,6c-2.21,0-4,1.79-4,4h2c0-1.1,0.9-2,2-2s2,0.9,2,2c0,2-3,1.75-3,5h2c0-2.25,3-2.5,3-5C16,7.79,14.21,6,12,6z"
+            <Button Classes="railIconButton boxedRailFooterButton" Classes.editorRailFooter="{Binding IsEditorVisible}" Classes.active="{Binding IsHelpVisible}" Click="HelpSupportButton_OnClick" ToolTip.Tip="Help &amp; support">
+              <PathIcon Data="M12,2A10,10 0,0 0,2 12A10,10 0,0 0,12 22H20A2,2 0,0 0,22 20V12A10,10 0,0 0,12 2M12,18A1.25,1.25 0,1 1,12 15.5A1.25,1.25 0,0 1,12 18M13.8,13.2C13.1,13.7 13,14 13,15H11C11,13.6 11.4,12.8 12.6,12C13.5,11.4 14,10.9 14,10A2,2 0,0 0,10 10H8A4,4 0,0 1,16 10C16,11.5 15,12.4 13.8,13.2Z"
                         Width="18" Height="18" />
             </Button>
             <Button Classes="railIconButton boxedRailFooterButton" Classes.editorRailFooter="{Binding IsEditorVisible}" Classes.active="{Binding IsSettingsVisible}" Click="OpenSettingsButton_OnClick" ToolTip.Tip="Settings">
@@ -1330,6 +1330,28 @@
       </controls:RetainedPageHost>
 
     <settings:SettingsPanel x:Name="SettingsPanelView" Grid.Column="1" IsVisible="{Binding IsSettingsVisible}" />
+    <ScrollViewer Grid.Column="1" IsVisible="{Binding IsHelpVisible}" Background="{StaticResource Surface_101820}">
+      <StackPanel MaxWidth="1400" HorizontalAlignment="Center" Margin="32" Spacing="22">
+        <StackPanel Spacing="5"><TextBlock Text="Help &amp; support" FontSize="28" FontWeight="Bold"/><TextBlock Text="Find answers, share feedback, or gather diagnostics." Foreground="{StaticResource Text_93A6B8}" TextWrapping="Wrap"/></StackPanel>
+        <Border Height="1" Background="{StaticResource Surface_2A3640}"/>
+        <StackPanel Spacing="12"><TextBlock Text="WHAT'S NEW?" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Text_93A6B8}"/><UniformGrid Columns="2" ColumnSpacing="16" RowSpacing="16">
+          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Read changelog" FontSize="17" FontWeight="Bold"/><TextBlock Text="See what's new and fixed in this version." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Read changelog" HorizontalAlignment="Left" Click="ReadChangelogButton_OnClick"/></StackPanel></Border>
+          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Check for updates" FontSize="17" FontWeight="Bold"/><TextBlock Text="Check whether a newer version is available." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Check for updates" HorizontalAlignment="Left" Click="HelpCheckUpdatesButton_OnClick"/></StackPanel></Border>
+        </UniformGrid></StackPanel>
+        <Border Height="1" Background="{StaticResource Surface_2A3640}"/>
+        <StackPanel Spacing="12"><TextBlock Text="HELP &amp; SUPPORT" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Text_93A6B8}"/><UniformGrid Columns="4" ColumnSpacing="16" RowSpacing="16">
+          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Find a solution" FontSize="17" FontWeight="Bold"/><TextBlock Text="Browse frequently asked questions." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Check FAQ" HorizontalAlignment="Left" Click="FaqButton_OnClick"/></StackPanel></Border>
+          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Report a bug" FontSize="17" FontWeight="Bold"/><TextBlock Text="Open a prefilled issue draft for a bug report." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Report a bug" HorizontalAlignment="Left" Click="ReportBugButton_OnClick"/></StackPanel></Border>
+          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Suggest a feature" FontSize="17" FontWeight="Bold"/><TextBlock Text="Tell us what would make ClypDat better." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Suggest a feature" HorizontalAlignment="Left" Click="SuggestFeatureButton_OnClick"/></StackPanel></Border>
+          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Join Discord" FontSize="17" FontWeight="Bold"/><TextBlock Text="Chat with the ClypDat community." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Join Discord" HorizontalAlignment="Left" Click="DiscordButton_OnClick"/></StackPanel></Border>
+        </UniformGrid></StackPanel>
+        <Border Height="1" Background="{StaticResource Surface_2A3640}"/>
+        <StackPanel Spacing="12"><TextBlock Text="SELF HELP" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Text_93A6B8}"/><UniformGrid Columns="2" ColumnSpacing="16" RowSpacing="16">
+          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Export diagnostic bundle" FontSize="17" FontWeight="Bold"/><TextBlock Text="Create a local ZIP with diagnostics for troubleshooting." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Export bundle" HorizontalAlignment="Left" Click="ExportCaptureDiagnosticsButton_OnClick"/></StackPanel></Border>
+          <Border Classes="settingsGroup" Padding="20"><StackPanel Spacing="10"><TextBlock Text="Open logs" FontSize="17" FontWeight="Bold"/><TextBlock Text="Open the folder containing ClypDat logs." TextWrapping="Wrap" Foreground="{StaticResource Text_93A6B8}"/><Button Content="Open logs" HorizontalAlignment="Left" Click="OpenLogsButton_OnClick"/></StackPanel></Border>
+        </UniformGrid></StackPanel>
+      </StackPanel>
+    </ScrollViewer>
       <!-- Stays realized while Library is visible so EditorVideoView retains
            its native HWND for LibVLC hover warm-up. Parked margins preserve
            native bounds while keeping both editor and video offscreen. -->

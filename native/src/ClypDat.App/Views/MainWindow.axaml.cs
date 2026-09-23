@@ -438,8 +438,14 @@ public sealed partial class MainWindow : Window
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.ActiveGameDetection)) _ = UpdateVideoOverlaySettingsAsync();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVideoLoading)) RestartEditorLoadingIndicator();
-                    if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
+                    if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsHelpVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
                         UpdateEditorSurfaceVisibility();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsHelpVisible) && ViewModel.IsHelpVisible)
+                    {
+                        PauseEditorPlayback();
+                        _clipHoverPreview.Stop("help navigation");
+                        CancelEditorHoverWarmup();
+                    }
                     if (e.PropertyName is nameof(MainWindowViewModel.AutoClippingEnabled)
                         or nameof(MainWindowViewModel.DiscordRichPresenceEnabled)
                         or nameof(MainWindowViewModel.DiscordRichPresenceShowMatchDetails)) UpdateAutoClipStates();
@@ -510,6 +516,7 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName is nameof(MainWindowViewModel.SelectedThemePreset) or nameof(MainWindowViewModel.UseSystemAccentColor))
                         QueueEditorCropPreview(flush: true);
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
+                        or nameof(MainWindowViewModel.IsHelpVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
                         or nameof(MainWindowViewModel.IsGameFilterActive)
@@ -2026,6 +2033,56 @@ public sealed partial class MainWindow : Window
         catch (Exception error)
         {
             AppLog.Error("Open feedback link failed", error);
+        }
+    }
+
+    private void HelpSupportButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || ViewModel.IsHelpVisible) return;
+        if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings(returnToEditor: false);
+        ViewModel.OpenHelp();
+    }
+
+    private async void ReadChangelogButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var (whatsNew, fixes) = await AppUpdateService.GetCurrentVersionNotesAsync();
+            await ShowUpdateDialogAsync(CreateUpToDateDialog(whatsNew, fixes));
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Load current release notes failed", error);
+            await ShowMessageAsync("Release notes unavailable", "Release notes could not be loaded. View them at https://github.com/ClypLabs/ClypDat/releases.");
+        }
+    }
+
+    private async void HelpCheckUpdatesButton_OnClick(object? sender, RoutedEventArgs e) => await CheckUpdatesAsync();
+    private void FaqButton_OnClick(object? sender, RoutedEventArgs e) => OpenSupportUrl("https://clypdat.xyz/#faq");
+    private void DiscordButton_OnClick(object? sender, RoutedEventArgs e) => OpenSupportUrl("https://discord.gg/jt3eJf238t");
+
+    private void ReportBugButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var body = $"## Summary\n\n## Steps to reproduce\n1. \n\n## Expected behavior\n\n## Actual behavior\n\n---\nClypDat version: {AppUpdateService.CurrentVersion}\nBuild: {GetBuildIdentifier()}";
+        OpenIssueDraft("Bug report", body);
+    }
+
+    private void SuggestFeatureButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var body = $"## Problem this would solve\n\n## Proposed solution\n\n---\nClypDat version: {AppUpdateService.CurrentVersion}\nBuild: {GetBuildIdentifier()}";
+        OpenIssueDraft("Feature request", body);
+    }
+
+    private static string GetBuildIdentifier() => System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown";
+    private void OpenIssueDraft(string title, string body) => OpenSupportUrl($"https://github.com/ClypLabs/ClypDat/issues/new?title={Uri.EscapeDataString(title)}&body={Uri.EscapeDataString(body)}");
+
+    private void OpenSupportUrl(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception error)
+        {
+            AppLog.Error("Open support link failed", error);
+            _ = ShowMessageAsync("Could not open link", $"ClypDat could not open this link. Copy it into your browser:\n\n{url}");
         }
     }
 
@@ -5510,7 +5567,7 @@ public sealed partial class MainWindow : Window
     // it means reopening one specific clip rather than just flipping a flag -
     // without that it couldn't be in the history at all, which is why Back
     // sat permanently disabled while a clip was open.
-    private enum ViewHistoryKind { Library, Settings, Editor }
+    private enum ViewHistoryKind { Library, Settings, Help, Editor }
 
     // GameKey/ClipTypeKey only mean anything for a Library entry - the rail
     // selection active at that point, so Back/Forward step through the
@@ -5526,6 +5583,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return new ViewHistoryEntry(ViewHistoryKind.Library, null);
         if (ViewModel.IsEditorVisible) return new ViewHistoryEntry(ViewHistoryKind.Editor, ViewModel.SelectedVideoPath);
+        if (ViewModel.IsHelpVisible) return new ViewHistoryEntry(ViewHistoryKind.Help, null);
         if (ViewModel.IsSettingsVisible) return new ViewHistoryEntry(ViewHistoryKind.Settings, null);
         return new ViewHistoryEntry(ViewHistoryKind.Library, null, ViewModel.ActiveGameFilterKey, ViewModel.ActiveClipTypeFilterKey);
     }
@@ -5576,6 +5634,7 @@ public sealed partial class MainWindow : Window
             switch (entry.Kind)
             {
                 case ViewHistoryKind.Editor:
+                    if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
                     var clip = ViewModel.AllClips.FirstOrDefault(c => string.Equals(c.Path, entry.ClipPath, StringComparison.OrdinalIgnoreCase));
                     // Deleted or renamed since it was visited - drop the entry
                     // rather than stranding the user on a dead history slot.
@@ -5593,13 +5652,21 @@ public sealed partial class MainWindow : Window
                     break;
 
                 case ViewHistoryKind.Settings:
+                    if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
                     // Close the editor first so CloseSettings' own
                     // "restore whatever was open before" doesn't bring it back.
                     CloseEditorForNavigation();
                     if (!ViewModel.IsSettingsVisible) ViewModel.OpenSettings();
                     break;
 
+                case ViewHistoryKind.Help:
+                    if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings(returnToEditor: false);
+                    CloseEditorForNavigation();
+                    ViewModel.OpenHelp();
+                    break;
+
                 default:
+                    if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
                     if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
                     CloseEditorForNavigation();
                     // Game first, then clip-type - SelectClipTypeSection's own
@@ -5780,6 +5847,12 @@ public sealed partial class MainWindow : Window
 
         ViewModel.ClearAllFilters();
 
+        if (ViewModel.IsHelpVisible)
+        {
+            ViewModel.CloseHelp(restoreEditor: false);
+            return;
+        }
+
         if (ViewModel.IsEditorVisible)
         {
             CloseEditorButton_OnClick(sender, e);
@@ -5799,6 +5872,7 @@ public sealed partial class MainWindow : Window
     private async void OpenSettingsButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;
+        if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
         ViewModel.OpenSettings();
         await ViewModel.RefreshOpenProcessesAsync();
     }
@@ -6584,6 +6658,14 @@ public sealed partial class MainWindow : Window
             if (ViewModel.IsVideoFullscreen)
             {
                 ExitVideoFullscreen();
+                e.Handled = true;
+                return;
+            }
+
+            if (ViewModel.IsHelpVisible)
+            {
+                if (_viewHistoryIndex > 0) BackNavButton_OnClick(this, new RoutedEventArgs());
+                else ViewModel.CloseHelp(restoreEditor: false);
                 e.Handled = true;
                 return;
             }
