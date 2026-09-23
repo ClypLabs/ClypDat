@@ -12,118 +12,153 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Overlays and Notifications">
+  <StackPanel Spacing="24" Tag="Overlays and Notifications">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-    <StackPanel Spacing="4">
-      <TextBlock Classes="settingsSectionTitle" Text="Overlays and Notifications" />
-      <TextBlock Classes="settingsSectionDesc" Text="Turn the on-screen confirmation and sound on or off, and choose where and how loud it is when a clip saves." />
-      <Border Classes="settingsDivider" Margin="0,14,0,0" />
+    <StackPanel Spacing="6">
+      <TextBlock Classes="settingsSectionTitle" Text="Overlays and notifications" />
+      <TextBlock Classes="settingsSectionDesc" Text="Choose what appears on screen while you play, and what you see and hear when a clip saves." />
     </StackPanel>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip save notifications|Hide overlays from screen capture|Show new clips when a game closes|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position|Overlays}">
-      <StackPanel Spacing="18">
-        <TextBlock Classes="settingsCardLabel" Text="OVERLAYS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip save notifications}">
-            <TextBlock Classes="settingsRowTitle" Text="Show Clip Save Notifications" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip save notifications|Hide notification overlays from screen capture|Hide overlays from screen capture|Show new clips after a session|new clips popup|game closes|Show clipping started overlay|Show auto-clip detected overlay|Show auto-clip failed overlay|Overlay position|Overlays}">
+      <TextBlock Classes="settingsGroupLabel" Text="OVERLAYS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clip save notifications}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Show clip save notifications" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="A small confirmation over your game each time a clip saves." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
 
-        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
 
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hide notification overlays from screen capture}">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Hide Notification Overlays from Screen Capture" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Clip notifications stay on your screen but are left out of clips and Discord screenshare. Editor controls and playback state remain visible. Needs Windows 10 build 19041 or newer." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding ExcludeOverlaysFromCapture}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Hide notification overlays from screen capture}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Hide notification overlays from screen capture" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Clip notifications stay on your screen but are left out of clips and Discord screenshare. Editor controls and playback state remain visible. Needs Windows 10 build 19041 or newer." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding ExcludeOverlaysFromCapture}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
 
-        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
 
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show new clips after a session|new clips popup|game closes}">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Show New Clips after a Session" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Lists everything the session captured, so you can open or delete it without going to the library. Appears when the game closes, and again if a Full Session VOD finishes later." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowNewClipsOnGameClose}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
-        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show new clips after a session|new clips popup|game closes}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Show new clips after a session" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Lists everything the session captured, so you can open or delete it without going to the library. Appears when the game closes, and again if a Full Session VOD finishes later." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowNewClipsOnGameClose}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
 
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clipping started overlay}">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Show Clipping Started Overlay" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Shows the game and save hotkey once recording is active and the game is foreground." />
-            <Button Content="Preview Recording Notification" Click="RecordingOverlayPreview_OnClick" HorizontalAlignment="Left" Margin="0,6,0,0" />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableGameDetectedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
 
-        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show clipping started overlay}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Show clipping started overlay" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Shows the game and save hotkey once recording is active and the game is in the foreground." />
+                <Button Classes="settingsRowAction" Content="Preview notification" Click="RecordingOverlayPreview_OnClick" />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableGameDetectedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
 
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip detected overlay}">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Show Auto-Clip Detected Overlay" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Shown the instant CS2/Dota/League auto-clipping spots a highlight-worthy moment, before the clip itself finishes saving." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAutoClipPendingOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
 
-        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip detected overlay}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Show auto-clip detected overlay" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Shown the instant CS2, Dota or League auto-clipping spots a highlight, before the clip itself finishes saving." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAutoClipPendingOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
 
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip failed overlay}">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Show Auto-Clip Failed Overlay" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Shown when an auto-clip save fails." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAutoClipFailedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
 
-        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Show auto-clip failed overlay}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Show auto-clip failed overlay" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Shown when an auto-clip save fails." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableAutoClipFailedOverlay}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
 
-        <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Overlay position}">
-          <TextBlock Classes="settingsRowTitle" Text="Overlay Position" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <ListBox Classes="pillGroup" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedClipOverlayPosition}">
-            <ListBox.ItemTemplate>
-              <DataTemplate>
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                  <Border Width="52" Height="34" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="4">
-                    <Border Width="16" Height="8" Margin="4" CornerRadius="2" Background="{StaticResource AccentBrush}"
-                            HorizontalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToHorizontalAlignmentConverter.Instance}}"
-                            VerticalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToVerticalAlignmentConverter.Instance}}" />
-                  </Border>
-                  <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+
+          <Border Classes="settingsRow static" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Overlay position}">
+            <StackPanel Spacing="12">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Overlay position" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Classes="settingsRowDesc" Text="Where notifications appear on the screen you're playing on." />
                 </StackPanel>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-          <!-- Shows a real notification on the monitor the badge would actually
-               use, so placement can be checked without saving a clip - and
-               after changing monitors, capture source or scaling. -->
-          <Button Classes="linkButton"
-                  Content="Preview overlay"
-                  HorizontalAlignment="Left"
-                  Margin="0,4,0,0"
-                  Click="OverlayPreview_OnClick"
-                  ToolTip.Tip="Show the clip notification where it would appear" />
+                <!-- Shows a real notification on the monitor the badge would actually
+                     use, so placement can be checked without saving a clip - and
+                     after changing monitors, capture source or scaling. -->
+                <Button Grid.Column="1"
+                        Classes="linkButton"
+                        Content="Preview"
+                        VerticalAlignment="Center"
+                        Click="OverlayPreview_OnClick"
+                        ToolTip.Tip="Show the clip notification where it would appear" />
+              </Grid>
+              <ListBox Classes="settingsPositionPicker" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedClipOverlayPosition}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                      <Border Width="40" Height="26" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1" CornerRadius="4">
+                        <Border Width="12" Height="6" Margin="3" CornerRadius="2" Background="{StaticResource AccentBrush}"
+                                HorizontalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToHorizontalAlignmentConverter.Instance}}"
+                                VerticalAlignment="{Binding Converter={x:Static opconv:OverlayPositionToVerticalAlignmentConverter.Instance}}" />
+                      </Border>
+                      <TextBlock Text="{Binding Converter={x:Static opconv:OverlayPositionLabelConverter.Instance}}" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </StackPanel>
+          </Border>
         </StackPanel>
-      </StackPanel>
-    </Border>
+      </Border>
+    </StackPanel>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Play clip saved sound|Sound volume|Sound}">
-      <StackPanel Spacing="18">
-        <TextBlock Classes="settingsCardLabel" Text="SOUND" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Play clip saved sound}">
-          <TextBlock Classes="settingsRowTitle" Text="Play Clip Saved Sound" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlaySound}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Play clip saved sound|Sound volume|Sound}">
+      <TextBlock Classes="settingsGroupLabel" Text="SOUND" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Play clip saved sound}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Play clip saved sound" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="A short chime when a clip finishes saving." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding EnableClipOverlaySound}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
 
-        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
 
-        <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Sound volume}">
-          <TextBlock Classes="settingsRowTitle" Text="Sound Volume" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <ListBox Classes="pillGroup" ItemsSource="{Binding ClipOverlayVolumes}" SelectedItem="{Binding SelectedClipOverlayVolume}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Sound volume}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Sound volume" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              </StackPanel>
+              <ListBox Grid.Column="1" Classes="settingsSegmented" VerticalAlignment="Center" ItemsSource="{Binding ClipOverlayVolumes}" SelectedItem="{Binding SelectedClipOverlayVolume}" />
+            </Grid>
+          </Border>
         </StackPanel>
-      </StackPanel>
-    </Border>
+      </Border>
+    </StackPanel>
   </StackPanel>
 </UserControl>

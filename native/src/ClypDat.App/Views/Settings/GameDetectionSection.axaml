@@ -12,154 +12,190 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Game Detection">
+  <StackPanel Spacing="24" Tag="Game Detection">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-    <StackPanel Spacing="4">
-      <TextBlock Classes="settingsSectionTitle" Text="Game Detection" />
-      <TextBlock Classes="settingsSectionDesc" Text="Add a game ClypDat doesn't recognize yet, and pick which capture backend any game should always use." />
-      <Border Classes="settingsDivider" Margin="0,14,0,0" />
+    <StackPanel Spacing="6">
+      <TextBlock Classes="settingsSectionTitle" Text="Game detection" />
+      <TextBlock Classes="settingsSectionDesc" Text="Add a game ClypDat doesn't recognise yet, and manage the games it already knows." />
     </StackPanel>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Add a running game|Or browse for an executable|Add Games}">
-      <StackPanel Spacing="16">
-        <TextBlock Classes="settingsCardLabel" Text="ADD GAMES" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Add a running game}">
-          <TextBlock Classes="settingsRowTitle" Text="Add a Running Game" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-            <ComboBox Classes="settingsInput" ItemsSource="{Binding GameCandidateProcesses}" SelectedItem="{Binding SelectedGameProcess}" HorizontalAlignment="Stretch" />
-            <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
-            <Button Grid.Column="2" Content="Add" Click="AddGameFromProcessButton_OnClick" />
-          </Grid>
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Add a running game|Or browse for an executable|Add Games}">
+      <TextBlock Classes="settingsGroupLabel" Text="ADD GAMES" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow static" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Add a running game}">
+            <StackPanel Spacing="10">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Add a running game" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Start the game, then pick it from the apps that are open right now." />
+              </StackPanel>
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                <ComboBox Classes="settingsInput" ItemsSource="{Binding GameCandidateProcesses}" SelectedItem="{Binding SelectedGameProcess}" HorizontalAlignment="Stretch" />
+                <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                <Button Grid.Column="2" Classes="primaryButton" Content="Add" Click="AddGameFromProcessButton_OnClick" />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Or browse for an executable}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Or browse for an executable" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Choose the game's .exe file directly." />
+              </StackPanel>
+              <Button Grid.Column="1" Content="Browse…" Click="BrowseCustomGameButton_OnClick" VerticalAlignment="Center" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRow static" Padding="20,0,20,16" MinHeight="0" IsVisible="{Binding GameAdditionError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
+            <TextBlock Classes="settingsRowError" Text="{Binding GameAdditionError}" />
+          </Border>
         </StackPanel>
+      </Border>
+    </StackPanel>
 
-        <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
-
-        <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Or browse for an executable}">
-          <TextBlock Classes="settingsRowTitle" Text="Or Browse for an Executable" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <Button Content="Browse for game.exe" Click="BrowseCustomGameButton_OnClick" HorizontalAlignment="Left" />
-        </StackPanel>
-
-        <TextBlock Text="{Binding GameAdditionError}" TextWrapping="Wrap" IsVisible="{Binding GameAdditionError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
-      </StackPanel>
-    </Border>
-
-    <Border Classes="settingsCard">
-      <StackPanel Spacing="8">
-        <TextBlock Classes="settingsCardLabel" Text="GAME FOLDERS" />
-        <TextBlock Classes="settingsRowDescSm" Text="Scan folders you choose. Known standalone games are added automatically; uncertain engine applications need review." />
-        <Grid ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8">
-          <Button Content="Add folder" Click="AddGameFolderButton_OnClick" />
-          <Button Grid.Column="1" Content="Scan now" Click="ScanGameFoldersButton_OnClick" IsEnabled="{Binding !IsScanningGameFolders}" />
-          <Button Grid.Column="2" Content="Cancel" Click="CancelGameFolderScanButton_OnClick" IsEnabled="{Binding IsScanningGameFolders}" />
-          <TextBlock Grid.Column="3" Text="{Binding GameDiscoveryStatus}" VerticalAlignment="Center" Foreground="{StaticResource TextSubtleBrush}" />
-        </Grid>
-        <ItemsControl ItemsSource="{Binding GameDiscoveryFolders}">
-          <ItemsControl.ItemTemplate><DataTemplate><Grid ColumnDefinitions="*,Auto"><TextBlock Text="{Binding}" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Remove" Click="RemoveGameFolderButton_OnClick" /></Grid></DataTemplate></ItemsControl.ItemTemplate>
-        </ItemsControl>
-        <StackPanel Spacing="5" IsVisible="{Binding HasDiscoveredGameReviews}">
-          <TextBlock Classes="settingsRowTitle" Text="Review discovered games" />
-          <ItemsControl ItemsSource="{Binding DiscoveredGameReviews}">
-            <ItemsControl.ItemTemplate><DataTemplate><Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8"><StackPanel><TextBox Text="{Binding DisplayName}" /><TextBlock Text="{Binding ExecutablePath}" FontSize="11" /><TextBlock Text="{Binding Reason}" FontSize="11" /></StackPanel><Button Grid.Column="1" Content="Add" Click="AddDiscoveredGameButton_OnClick" /><Button Grid.Column="2" Content="Ignore" Click="IgnoreDiscoveredGameButton_OnClick" /></Grid></DataTemplate></ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </StackPanel>
-      </StackPanel>
-    </Border>
-
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Game icons|Game Icons}">
-      <StackPanel Spacing="10">
-        <TextBlock Classes="settingsCardLabel" Text="GAME ICONS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <StackPanel Spacing="2">
-          <TextBlock Classes="settingsRowTitle" Text="Game Icons" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <TextBlock Classes="settingsRowDescSm" Text="Sidebar artwork is found automatically and then kept forever, so a wrong or missing icon stays that way. Refreshing throws the cached images away and looks every game up again." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        </StackPanel>
-        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-          <Button Content="Refresh Game Icons"
-                  Click="RefreshGameIconsButton_OnClick"
-                  IsEnabled="{Binding !IsRefreshingGameIcons}"
-                  HorizontalAlignment="Left" />
-          <TextBlock Grid.Column="1"
-                     Text="{Binding GameIconRefreshStatus}"
-                     Foreground="{StaticResource TextSubtleBrush}"
-                     FontSize="12"
-                     VerticalAlignment="Center"
-                     TextWrapping="Wrap"
-                     IsVisible="{Binding GameIconRefreshStatus, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
-        </Grid>
-      </StackPanel>
-    </Border>
-
-    <!-- The search box belongs to the list it filters, not to the Add Games
-         card two cards above it, where it read as "search for a game to add"
-         and was off screen by the time the list it actually filters was in
-         view. -->
-    <StackPanel Spacing="8">
-      <TextBox Classes="settingsInput" PlaceholderText="Search games" Text="{Binding GameSearchText}" />
-      <Border Classes="listPane">
-        <ScrollViewer Classes="listScroll">
-          <ItemsControl ItemsSource="{Binding GameCaptureRows}">
+    <StackPanel Classes="settingsGroup">
+      <TextBlock Classes="settingsGroupLabel" Text="GAME FOLDERS" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow static">
+            <StackPanel Spacing="12">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Scan folders for games" />
+                <TextBlock Classes="settingsRowDesc" Text="Scans the folders you choose. Known standalone games are added automatically; uncertain engine apps are listed for you to review." />
+              </StackPanel>
+              <Grid ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8">
+                <Button Content="Add folder" Click="AddGameFolderButton_OnClick" />
+                <Button Grid.Column="1" Content="Scan now" Click="ScanGameFoldersButton_OnClick" IsEnabled="{Binding !IsScanningGameFolders}" />
+                <Button Grid.Column="2" Content="Cancel" Click="CancelGameFolderScanButton_OnClick" IsEnabled="{Binding IsScanningGameFolders}" />
+                <TextBlock Grid.Column="3" Classes="settingsRowDesc" Text="{Binding GameDiscoveryStatus}" VerticalAlignment="Center" Margin="6,0,0,0" />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <ItemsControl ItemsSource="{Binding GameDiscoveryFolders}">
             <ItemsControl.ItemTemplate>
               <DataTemplate>
-                <Border BorderThickness="0" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top" IsVisible="{Binding IsVisible}">
-                  <Grid RowDefinitions="*,Auto">
-                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-                      <StackPanel Spacing="1" Margin="{Binding TitleMargin}" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" />
-                        <!-- ExecutableName is the detection key (e.g.
-                             "steam-381210" for a Catalog-origin row), not
-                             a real filename - ProcessName is the actual
-                             exe. Rows saved before ProcessName existed
-                             have it empty until next detected - collapsed
-                             rather than shown blank so a name-only row's
-                             title centers vertically in the row (which is
-                             as tall as the Capture Backend combo box)
-                             instead of sitting pinned above empty space. -->
-                        <TextBlock Text="{Binding ProcessName}" Foreground="{StaticResource LabelBrush}" FontSize="11" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
-                      </StackPanel>
-                      <Button Grid.Column="1" Content="Remove" Padding="14,7" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
-                              ToolTip.Tip="Removes it from this list and stops ClypDat detecting it as a game again" />
-                    </Grid>
-                    <Border Grid.Row="1" Height="1" Background="{StaticResource DividerBrush}" Margin="0,10,0,0" IsVisible="{Binding ShowDivider}" />
+                <Border Classes="settingsListItem">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <TextBlock Classes="settingsListItemText" Text="{Binding}" />
+                    <Button Grid.Column="1" Classes="linkButton" Content="Remove" VerticalAlignment="Center" Click="RemoveGameFolderButton_OnClick" />
                   </Grid>
                 </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-        </ScrollViewer>
+          <StackPanel IsVisible="{Binding HasDiscoveredGameReviews}">
+            <Border Classes="settingsListItem">
+              <TextBlock Classes="settingsRowTitle" Text="Review discovered games" VerticalAlignment="Center" />
+            </Border>
+            <ItemsControl ItemsSource="{Binding DiscoveredGameReviews}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Classes="settingsListItem">
+                    <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                      <StackPanel Spacing="4" MaxWidth="440" HorizontalAlignment="Left">
+                        <TextBox Classes="settingsInput compact" Text="{Binding DisplayName}" />
+                        <TextBlock Classes="settingsRowDescSm" Text="{Binding ExecutablePath}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Classes="settingsRowDescSm" Text="{Binding Reason}" TextWrapping="Wrap" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Classes="primaryButton" Content="Add" VerticalAlignment="Center" Click="AddDiscoveredGameButton_OnClick" />
+                      <Button Grid.Column="2" Content="Ignore" VerticalAlignment="Center" Click="IgnoreDiscoveredGameButton_OnClick" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Game icons|Game Icons}">
+      <TextBlock Classes="settingsGroupLabel" Text="GAME ICONS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <Border Classes="settingsRow">
+          <StackPanel Spacing="8">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Refresh game icons" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Sidebar artwork is found automatically and then kept, so a wrong or missing icon stays that way. Refreshing throws the cached images away and looks every game up again." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              </StackPanel>
+              <Button Grid.Column="1" Content="Refresh" Click="RefreshGameIconsButton_OnClick" IsEnabled="{Binding !IsRefreshingGameIcons}" VerticalAlignment="Center" />
+            </Grid>
+            <TextBlock Classes="settingsRowDesc" Text="{Binding GameIconRefreshStatus}"
+                       IsVisible="{Binding GameIconRefreshStatus, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+        </Border>
+      </Border>
+    </StackPanel>
+
+    <!-- The search box belongs to the list it filters, not to the Add Games
+         card above it, where it read as "search for a game to add" and was off
+         screen by the time the list it actually filters was in view. -->
+    <StackPanel Classes="settingsGroup">
+      <TextBlock Classes="settingsGroupLabel" Text="DETECTED GAMES" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow static" Padding="20,14">
+            <TextBox Classes="settingsInput" PlaceholderText="Search games" Text="{Binding GameSearchText}" />
+          </Border>
+          <ScrollViewer Classes="listScroll">
+            <ItemsControl ItemsSource="{Binding GameCaptureRows}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Classes="settingsListItem" IsVisible="{Binding IsVisible}">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                      <StackPanel Spacing="1" Margin="{Binding TitleMargin}" VerticalAlignment="Center">
+                        <TextBlock Classes="settingsListItemText" Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                        <!-- ExecutableName is the detection key (e.g.
+                             "steam-381210" for a Catalog-origin row), not a real
+                             filename - ProcessName is the actual exe. Rows saved
+                             before ProcessName existed have it empty until next
+                             detected - collapsed rather than shown blank so a
+                             name-only row's title centres vertically. -->
+                        <TextBlock Classes="settingsRowDescSm" Text="{Binding ProcessName}" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Classes="linkButton" Content="Remove" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
+                              ToolTip.Tip="Removes it from this list and stops ClypDat detecting it as a game again" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </StackPanel>
       </Border>
     </StackPanel>
 
     <Border IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Excluded from detection}">
-      <Border Classes="settingsCard" IsVisible="{Binding HasIgnoredGameExecutables}">
-        <StackPanel Spacing="10">
-          <TextBlock Classes="settingsCardLabel" Text="EXCLUDED GAMES" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <StackPanel Spacing="2">
-          <TextBlock Classes="settingsRowTitle" Text="Excluded from Detection" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="Apps you told ClypDat not to treat as games (click the detected game in the header, or Remove a row below, to add one)." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          </StackPanel>
-          <Border Classes="listPane">
-            <ScrollViewer Classes="listScroll">
-              <ItemsControl ItemsSource="{Binding IgnoredGameExecutableRows}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Border BorderThickness="0" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top">
-                      <Grid RowDefinitions="*,Auto">
-                      <Grid ColumnDefinitions="*,Auto">
-                        <StackPanel Spacing="1" Margin="{Binding TitleMargin}" VerticalAlignment="Center">
-                          <TextBlock Text="{Binding DisplayName}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" />
-                          <TextBlock Text="{Binding ProcessName}" Foreground="{StaticResource LabelBrush}" FontSize="11" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
-                        </StackPanel>
-                        <Button Grid.Column="1" Content="Remove" Width="80" VerticalAlignment="Center" Click="RemoveIgnoredGameButton_OnClick" />
-                      </Grid>
-                      <Border Grid.Row="1" Height="1" Background="{StaticResource DividerBrush}" Margin="0,10,0,0" IsVisible="{Binding ShowDivider}" />
-                      </Grid>
-                    </Border>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </ScrollViewer>
-          </Border>
-        </StackPanel>
-      </Border>
+      <StackPanel Classes="settingsGroup" IsVisible="{Binding HasIgnoredGameExecutables}">
+        <TextBlock Classes="settingsGroupLabel" Text="EXCLUDED FROM DETECTION" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <TextBlock Classes="settingsGroupDesc" Text="Apps you told ClypDat not to treat as games. Click the detected game in the header, or remove a detected game above, to add one." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Border Classes="settingsGroupCard">
+          <ScrollViewer Classes="listScroll">
+            <ItemsControl ItemsSource="{Binding IgnoredGameExecutableRows}">
+              <ItemsControl.Styles>
+                <!-- The card's own edge is the top rule for the first entry. -->
+                <Style Selector="ContentPresenter:nth-child(1) > Border.settingsListItem">
+                  <Setter Property="BorderThickness" Value="0" />
+                </Style>
+              </ItemsControl.Styles>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Classes="settingsListItem">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                      <StackPanel Spacing="1" Margin="{Binding TitleMargin}" VerticalAlignment="Center">
+                        <TextBlock Classes="settingsListItemText" Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                        <TextBlock Classes="settingsRowDescSm" Text="{Binding ProcessName}" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                      </StackPanel>
+                      <Button Grid.Column="1" Classes="linkButton" Content="Remove" VerticalAlignment="Center" Click="RemoveIgnoredGameButton_OnClick" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+      </StackPanel>
     </Border>
   </StackPanel>
 </UserControl>

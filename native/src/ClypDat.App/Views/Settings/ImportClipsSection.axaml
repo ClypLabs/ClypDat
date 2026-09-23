@@ -10,163 +10,199 @@
     <Binding Path="SelectedSettingsSection" Converter="{x:Static conv:ObjectConverters.Equal}" ConverterParameter="Import Clips" />
   </UserControl.IsVisible>
   <StackPanel>
-    <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsImportSourcePickerVisible}">
+    <StackPanel Spacing="24" Tag="Import Clips" IsVisible="{Binding IsImportSourcePickerVisible}">
       <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-      <StackPanel Spacing="4">
-        <TextBlock Classes="settingsSectionTitle" Text="Import Clips" />
-        <TextBlock Classes="settingsSectionDesc" Text="Choose where your clips come from." />
-        <Border Classes="settingsDivider" Margin="0,14,0,0" />
+      <StackPanel Spacing="6">
+        <TextBlock Classes="settingsSectionTitle" Text="Import clips" />
+        <TextBlock Classes="settingsSectionDesc" Text="Bring clips you recorded with another app into your ClypDat library." />
       </StackPanel>
-      <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-        <Border Classes="settingsCard" Padding="16">
-          <StackPanel Spacing="10">
-            <TextBlock Text="Medal" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
-            <TextBlock Classes="settingsRowDescSm" Text="Import clips recorded by Medal, including its titles and game metadata." />
-            <Button Content="Open Medal Importer" FontSize="12" Classes="primaryButton" Tag="Medal" Click="ChooseImportSourceButton_OnClick" HorizontalAlignment="Left" />
+      <StackPanel Classes="settingsGroup">
+        <TextBlock Classes="settingsGroupLabel" Text="SOURCES" />
+        <Border Classes="settingsGroupCard">
+          <StackPanel>
+            <Border Classes="settingsRow">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Medal" />
+                  <TextBlock Classes="settingsRowDesc" Text="Import clips recorded by Medal, including its titles and game metadata." />
+                </StackPanel>
+                <Button Grid.Column="1" Classes="primaryButton" Content="Open importer" Tag="Medal" Click="ChooseImportSourceButton_OnClick" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
+            <Border Classes="settingsRowDivider" />
+            <Border Classes="settingsRow">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="SteelSeries Moments" />
+                  <TextBlock Classes="settingsRowDesc" Text="Import Moments clips with their dates, titles, games and auto-clip reasons." />
+                </StackPanel>
+                <Button Grid.Column="1" Classes="primaryButton" Content="Open importer" Tag="SteelSeries" Click="ChooseImportSourceButton_OnClick" VerticalAlignment="Center" />
+              </Grid>
+            </Border>
           </StackPanel>
         </Border>
-        <Border Grid.Column="1" Classes="settingsCard" Padding="16">
-          <StackPanel Spacing="10">
-            <TextBlock Text="SteelSeries Moments" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="16" />
-            <TextBlock Classes="settingsRowDescSm" Text="Import Moments clips with metadata dates, titles, games, and auto-clip reasons." />
-            <Button Content="Open SteelSeries Importer" FontSize="12" Classes="primaryButton" Tag="SteelSeries" Click="ChooseImportSourceButton_OnClick" HorizontalAlignment="Left" />
-          </StackPanel>
-        </Border>
-      </Grid>
+      </StackPanel>
     </StackPanel>
 
-    <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsMedalImportPageVisible}">
-      <Button Content="← Import Sources" Classes="linkButton" Click="BackToImportSourcesButton_OnClick" HorizontalAlignment="Left" Padding="0" />
+    <StackPanel Spacing="24" Tag="Import Clips" IsVisible="{Binding IsMedalImportPageVisible}">
       <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-      <StackPanel Spacing="4">
+      <StackPanel Spacing="6">
+        <Button Content="← Import sources" Classes="linkButton" Click="BackToImportSourcesButton_OnClick" HorizontalAlignment="Left" Padding="0" Margin="0,0,0,6" />
         <TextBlock Classes="settingsSectionTitle" Text="Import from Medal" />
-        <TextBlock Classes="settingsSectionDesc" Text="Finds clips Medal has recorded locally and copies (or moves) them into your ClypDat library, keeping Medal's own clip titles." />
+        <TextBlock Classes="settingsSectionDesc" Text="Finds clips Medal has recorded locally and copies or moves them into your ClypDat library, keeping Medal's own clip titles." />
       </StackPanel>
-      <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Strip emoji from titles|Copy instead of move|Import Options}">
-        <StackPanel Spacing="18">
-          <TextBlock Classes="settingsCardLabel" Text="IMPORT OPTIONS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Strip emoji from titles}">
-            <TextBlock Text="Strip Emoji from Titles" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportStripEmoji}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-          </Grid>
-          <Border Classes="settingsDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
-          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Copy instead of move}">
-            <StackPanel Spacing="2">
-            <TextBlock Text="Copy instead of Move" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              <TextBlock Classes="settingsRowDescSm" Text="On: Medal keeps its own copy. Off: clips are removed from Medal once imported." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            </StackPanel>
-            <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportCopyNotMove}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-          </Grid>
-        </StackPanel>
-      </Border>
-
-      <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scan for Medal clips|Scan}">
-        <StackPanel Spacing="16">
-          <TextBlock Classes="settingsCardLabel" Text="SCAN" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Scan for Medal Clips" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              <TextBlock Text="{Binding MedalScanStatusText}" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" TextWrapping="Wrap" />
-            </StackPanel>
-            <Button Grid.Column="1" Content="Scan for Medal Clips" Classes="primaryButton" Click="ScanMedalButton_OnClick" IsEnabled="{Binding !MedalImportInProgress}" VerticalAlignment="Center" />
-          </Grid>
-
-          <StackPanel IsVisible="{Binding MedalImportInProgress}" Spacing="6">
-            <ProgressBar Minimum="0" Maximum="100" Value="{Binding MedalImportProgressPercent}" Height="8" />
-            <TextBlock Classes="settingsRowDesc" Text="{Binding MedalImportStatusText}" />
+      <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Strip emoji from titles|Copy instead of move|Import Options}">
+        <TextBlock Classes="settingsGroupLabel" Text="IMPORT OPTIONS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Border Classes="settingsGroupCard">
+          <StackPanel>
+            <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Strip emoji from titles}">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Strip emoji from titles" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Classes="settingsRowDesc" Text="Removes emoji from Medal clip titles as they're imported." />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportStripEmoji}" OnContent="{x:Null}" OffContent="{x:Null}" />
+              </Grid>
+            </Border>
+            <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+            <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Copy instead of move}">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Copy instead of move" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Classes="settingsRowDesc" Text="On: Medal keeps its own copy. Off: clips are removed from Medal once imported." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding MedalImportCopyNotMove}" OnContent="{x:Null}" OffContent="{x:Null}" />
+              </Grid>
+            </Border>
           </StackPanel>
-          <TextBlock Classes="settingsRowDesc" Text="{Binding MedalImportStatusText}" IsVisible="{Binding ShowMedalImportStatusText}" />
+        </Border>
+      </StackPanel>
 
-          <StackPanel Spacing="14" IsVisible="{Binding MedalScanned}">
-            <Border Classes="settingsDivider" />
+      <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scan for Medal clips|Scan}">
+        <TextBlock Classes="settingsGroupLabel" Text="SCAN" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Border Classes="settingsGroupCard">
+          <StackPanel>
+            <Border Classes="settingsRow static">
+              <StackPanel Spacing="12">
+                <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                  <StackPanel Classes="settingsRowText">
+                    <TextBlock Classes="settingsRowTitle" Text="Scan for Medal clips" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <TextBlock Classes="settingsRowDesc" Text="{Binding MedalScanStatusText}" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Content="Scan" Classes="primaryButton" Click="ScanMedalButton_OnClick" IsEnabled="{Binding !MedalImportInProgress}" VerticalAlignment="Center" />
+                </Grid>
+                <StackPanel IsVisible="{Binding MedalImportInProgress}" Spacing="6">
+                  <ProgressBar Minimum="0" Maximum="100" Value="{Binding MedalImportProgressPercent}" Height="8" />
+                  <TextBlock Classes="settingsRowDesc" Text="{Binding MedalImportStatusText}" />
+                </StackPanel>
+                <TextBlock Classes="settingsRowDesc" Text="{Binding MedalImportStatusText}" IsVisible="{Binding ShowMedalImportStatusText}" />
+              </StackPanel>
+            </Border>
 
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" Margin="12,0,0,0">
-              <CheckBox IsThreeState="True" IsChecked="{Binding MedalImportSelectionState, Mode=OneWay}"
-                        IsEnabled="{Binding CanToggleMedalImportSelection}" Click="ToggleMedalImportSelection_OnClick"
-                        ToolTip.Tip="Select or deselect all importable Medal clips" VerticalAlignment="Center" />
-              <Button Grid.Column="1" Content="Import Selected" Click="ImportMedalButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton"
-                      IsEnabled="{Binding !MedalImportInProgress}" />
-            </Grid>
-
-            <ItemsControl ItemsSource="{Binding MedalImportRows}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <Border Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                      <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding CanImport}" VerticalAlignment="Center" />
-                      <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding DisplayTitle}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" FontFamily="Segoe UI,Segoe UI Emoji" />
-                        <TextBlock Classes="settingsRowDescSm">
-                          <Run Text="{Binding GameFolderName}" /><Run Text=" � " /><Run Text="{Binding CreatedAtLocal}" />
-                        </TextBlock>
-                        <TextBlock Text="{Binding ValidationMessage}" Foreground="{StaticResource DangerBrush}" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasValidationMessage}" />
-                      </StackPanel>
-                    </Grid>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <StackPanel IsVisible="{Binding MedalScanned}">
+              <Border Classes="settingsListItem">
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                  <CheckBox IsThreeState="True" IsChecked="{Binding MedalImportSelectionState, Mode=OneWay}"
+                            IsEnabled="{Binding CanToggleMedalImportSelection}" Click="ToggleMedalImportSelection_OnClick"
+                            ToolTip.Tip="Select or deselect all importable Medal clips" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="1" Classes="settingsRowDesc" Text="Select all" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Content="Import selected" Click="ImportMedalButton_OnClick" Classes="primaryButton"
+                          IsEnabled="{Binding !MedalImportInProgress}" VerticalAlignment="Center" />
+                </Grid>
+              </Border>
+              <ItemsControl ItemsSource="{Binding MedalImportRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Classes="settingsListItem">
+                      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                        <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding CanImport}" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                          <TextBlock Classes="settingsListItemText" Text="{Binding DisplayTitle}" FontWeight="SemiBold" FontFamily="Segoe UI,Segoe UI Emoji" />
+                          <TextBlock Classes="settingsRowDescSm">
+                            <Run Text="{Binding GameFolderName}" /><Run Text=" • " /><Run Text="{Binding CreatedAtLocal}" />
+                          </TextBlock>
+                          <TextBlock Classes="settingsRowError" Text="{Binding ValidationMessage}" IsVisible="{Binding HasValidationMessage}" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
           </StackPanel>
-        </StackPanel>
-      </Border>
+        </Border>
+      </StackPanel>
     </StackPanel>
 
-    <StackPanel Spacing="18" Tag="Import Clips" IsVisible="{Binding IsSteelSeriesImportPageVisible}">
-      <Button Content="← Import Sources" Classes="linkButton" Click="BackToImportSourcesButton_OnClick" HorizontalAlignment="Left" Padding="0" />
+    <StackPanel Spacing="24" Tag="Import Clips" IsVisible="{Binding IsSteelSeriesImportPageVisible}">
       <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-      <StackPanel Spacing="4">
+      <StackPanel Spacing="6">
+        <Button Content="← Import sources" Classes="linkButton" Click="BackToImportSourcesButton_OnClick" HorizontalAlignment="Left" Padding="0" Margin="0,0,0,6" />
         <TextBlock Classes="settingsSectionTitle" Text="Import from SteelSeries Moments" />
-        <TextBlock Classes="settingsSectionDesc" Text="Finds SteelSeries Moments clips locally and copies (or moves) them into your ClypDat library, keeping meaningful Moments titles and capture dates." />
+        <TextBlock Classes="settingsSectionDesc" Text="Finds SteelSeries Moments clips locally and copies or moves them into your ClypDat library, keeping meaningful Moments titles and capture dates." />
       </StackPanel>
-      <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Copy instead of move}">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="2">
-            <TextBlock Text="Copy instead of Move" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDescSm" Text="On: SteelSeries keeps its own copy. Off: clips are removed from Moments once imported." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding SteelSeriesImportCopyNotMove}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
-      </Border>
-      <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scan for SteelSeries clips|Scan}">
-        <StackPanel Spacing="16">
-          <TextBlock Classes="settingsCardLabel" Text="SCAN" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Scan for SteelSeries Clips" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              <TextBlock Text="{Binding SteelSeriesScanStatusText}" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" TextWrapping="Wrap" />
-            </StackPanel>
-            <Button Grid.Column="1" Content="Scan for SteelSeries Clips" Classes="primaryButton" Click="ScanSteelSeriesButton_OnClick" IsEnabled="{Binding !SteelSeriesImportInProgress}" VerticalAlignment="Center" />
-          </Grid>
-          <StackPanel IsVisible="{Binding SteelSeriesImportInProgress}" Spacing="6">
-            <ProgressBar Minimum="0" Maximum="100" Value="{Binding SteelSeriesImportProgressPercent}" Height="8" />
-            <TextBlock Classes="settingsRowDesc" Text="{Binding SteelSeriesImportStatusText}" />
-          </StackPanel>
-          <TextBlock Classes="settingsRowDesc" Text="{Binding SteelSeriesImportStatusText}" IsVisible="{Binding ShowSteelSeriesImportStatusText}" />
-          <StackPanel Spacing="14" IsVisible="{Binding SteelSeriesScanned}">
-            <Border Classes="settingsDivider" />
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12" Margin="12,0,0,0">
-              <CheckBox IsThreeState="True" IsChecked="{Binding SteelSeriesImportSelectionState, Mode=OneWay}" IsEnabled="{Binding CanToggleSteelSeriesImportSelection}" Click="ToggleSteelSeriesImportSelection_OnClick" ToolTip.Tip="Select or deselect all SteelSeries clips" VerticalAlignment="Center" />
-              <Button Grid.Column="1" Content="Import Selected" Click="ImportSteelSeriesButton_OnClick" HorizontalAlignment="Left" Classes="primaryButton" IsEnabled="{Binding !SteelSeriesImportInProgress}" />
+      <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Copy instead of move}">
+        <TextBlock Classes="settingsGroupLabel" Text="IMPORT OPTIONS" />
+        <Border Classes="settingsGroupCard">
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Copy instead of move" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="On: SteelSeries keeps its own copy. Off: clips are removed from Moments once imported." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding SteelSeriesImportCopyNotMove}" OnContent="{x:Null}" OffContent="{x:Null}" />
             </Grid>
-            <ItemsControl ItemsSource="{Binding SteelSeriesImportRows}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <Border Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="0,0,0,8">
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                      <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding CanImport}" VerticalAlignment="Center" />
-                      <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
-                        <TextBlock Text="{Binding DisplayTitle}" Foreground="{StaticResource TextBrush}" FontWeight="Bold" FontSize="14" FontFamily="Segoe UI,Segoe UI Emoji" />
-                        <TextBlock Classes="settingsRowDescSm"><Run Text="{Binding GameName}" /><Run Text=" • " /><Run Text="{Binding CreatedAtLocal}" /></TextBlock>
-                        <TextBlock Text="{Binding ValidationMessage}" Foreground="{StaticResource DangerBrush}" FontSize="11" TextWrapping="Wrap" IsVisible="{Binding HasValidationMessage}" />
-                      </StackPanel>
-                    </Grid>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
+          </Border>
+        </Border>
+      </StackPanel>
+      <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Scan for SteelSeries clips|Scan}">
+        <TextBlock Classes="settingsGroupLabel" Text="SCAN" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Border Classes="settingsGroupCard">
+          <StackPanel>
+            <Border Classes="settingsRow static">
+              <StackPanel Spacing="12">
+                <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                  <StackPanel Classes="settingsRowText">
+                    <TextBlock Classes="settingsRowTitle" Text="Scan for SteelSeries clips" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                    <TextBlock Classes="settingsRowDesc" Text="{Binding SteelSeriesScanStatusText}" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Content="Scan" Classes="primaryButton" Click="ScanSteelSeriesButton_OnClick" IsEnabled="{Binding !SteelSeriesImportInProgress}" VerticalAlignment="Center" />
+                </Grid>
+                <StackPanel IsVisible="{Binding SteelSeriesImportInProgress}" Spacing="6">
+                  <ProgressBar Minimum="0" Maximum="100" Value="{Binding SteelSeriesImportProgressPercent}" Height="8" />
+                  <TextBlock Classes="settingsRowDesc" Text="{Binding SteelSeriesImportStatusText}" />
+                </StackPanel>
+                <TextBlock Classes="settingsRowDesc" Text="{Binding SteelSeriesImportStatusText}" IsVisible="{Binding ShowSteelSeriesImportStatusText}" />
+              </StackPanel>
+            </Border>
+            <StackPanel IsVisible="{Binding SteelSeriesScanned}">
+              <Border Classes="settingsListItem">
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                  <CheckBox IsThreeState="True" IsChecked="{Binding SteelSeriesImportSelectionState, Mode=OneWay}" IsEnabled="{Binding CanToggleSteelSeriesImportSelection}" Click="ToggleSteelSeriesImportSelection_OnClick" ToolTip.Tip="Select or deselect all SteelSeries clips" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="1" Classes="settingsRowDesc" Text="Select all" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Content="Import selected" Click="ImportSteelSeriesButton_OnClick" Classes="primaryButton" IsEnabled="{Binding !SteelSeriesImportInProgress}" VerticalAlignment="Center" />
+                </Grid>
+              </Border>
+              <ItemsControl ItemsSource="{Binding SteelSeriesImportRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Classes="settingsListItem">
+                      <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                        <CheckBox IsChecked="{Binding IsSelected}" IsEnabled="{Binding CanImport}" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                          <TextBlock Classes="settingsListItemText" Text="{Binding DisplayTitle}" FontWeight="SemiBold" FontFamily="Segoe UI,Segoe UI Emoji" />
+                          <TextBlock Classes="settingsRowDescSm"><Run Text="{Binding GameName}" /><Run Text=" • " /><Run Text="{Binding CreatedAtLocal}" /></TextBlock>
+                          <TextBlock Classes="settingsRowError" Text="{Binding ValidationMessage}" IsVisible="{Binding HasValidationMessage}" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
           </StackPanel>
-        </StackPanel>
-      </Border>
+        </Border>
+      </StackPanel>
     </StackPanel>
   </StackPanel>
 </UserControl>

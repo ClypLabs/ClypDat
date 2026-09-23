@@ -12,247 +12,301 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Replay Buffer">
+  <StackPanel Spacing="24" Tag="Replay Buffer">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-    <StackPanel Spacing="4">
-      <TextBlock Classes="settingsSectionTitle" Text="Replay Buffer" />
+    <StackPanel Spacing="6">
+      <TextBlock Classes="settingsSectionTitle" Text="Replay buffer" />
       <StackPanel Orientation="Horizontal" Spacing="7" ToolTip.Tip="{Binding RecordingDetail}" AutomationProperties.HelpText="{Binding RecordingDetail}">
         <Ellipse Width="7" Height="7" Fill="{Binding RecordingDotColor}" Opacity="{Binding RecordingDotOpacity}" IsVisible="{Binding RecordingDotVisible}" VerticalAlignment="Center" />
-        <TextBlock Text="{Binding RecorderStatus}" />
+        <TextBlock Classes="settingsFieldLabel" Text="{Binding RecorderStatus}" />
       </StackPanel>
       <TextBlock Classes="settingsSectionDesc" Text="Control how ClypDat records in the background and which capture backend it uses." />
-      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Save hotkey|Hotkey}">
-      <StackPanel Spacing="10">
-        <TextBlock Classes="settingsCardLabel" Text="HOTKEY" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16">
-          <StackPanel Spacing="6">
-            <TextBlock Classes="settingsRowTitle" Text="Save Hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <Button Content="{Binding HotkeyDisplay}" Tag="SaveReplay" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
-          </StackPanel>
-          <StackPanel Grid.Column="1" Spacing="6">
-            <TextBlock Classes="settingsRowTitle" Text="Full Session Hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <Button Content="{Binding FullSessionHotkeyDisplay}" Tag="FullSession" Click="HotkeyCaptureButton_OnClick" HorizontalAlignment="Left" MinWidth="200" />
-          </StackPanel>
-        </Grid>
-        <TextBlock Classes="settingsRowDescSm" Text="Full Session starts or stops a full-session recording while replay capture is running." />
-      </StackPanel>
-    </Border>
-
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length|Recording}">
-      <StackPanel Spacing="18">
-        <TextBlock Classes="settingsCardLabel" Text="RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <StackPanel Spacing="6" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length}">
-          <TextBlock Classes="settingsRowTitle" Text="Replay Length" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          <ListBox Classes="pillGroup" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
-            <ListBox.ItemTemplate>
-              <DataTemplate>
-                <TextBlock Text="{Binding Label}" />
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </StackPanel>
-      </StackPanel>
-    </Border>
-
-    <Border x:Name="RecordingQualityCard" Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording quality|Resolution|Frame rate|FPS|Bitrate|Codec|Encoder|Quality|Encoding}">
-      <StackPanel Spacing="11">
-        <TextBlock Classes="settingsCardLabel" Text="RECORDING QUALITY" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <StackPanel Spacing="4">
-          <TextBlock Classes="settingsRowTitle" Text="Quality" />
-          <TextBlock Text="Customize clip quality. Higher settings use more resources and storage." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-        </StackPanel>
-
-        <ListBox Classes="qualityPresetCards" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}">
-          <ListBox.ItemTemplate>
-            <DataTemplate>
-              <StackPanel Spacing="3" HorizontalAlignment="Left" VerticalAlignment="Center">
-                <TextBlock Text="{Binding Label}" FontSize="15" FontWeight="Bold" />
-                <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextBrush}" FontSize="11" TextWrapping="Wrap" />
-                <TextBlock Text="{Binding Summary}" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Save hotkey|Hotkey}">
+      <TextBlock Classes="settingsGroupLabel" Text="HOTKEYS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Save hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Saves the replay buffer as a clip." />
               </StackPanel>
-            </DataTemplate>
-          </ListBox.ItemTemplate>
-        </ListBox>
-
-        <WrapPanel HorizontalAlignment="Left" IsVisible="{Binding IsCustomReplayQuality}">
-          <StackPanel Margin="0,0,12,10" Spacing="3">
-            <TextBlock Text="Resolution" Foreground="{StaticResource TextBrush}" FontSize="12" />
-            <ComboBox Classes="settingsInput" Width="170" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
-              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" /></DataTemplate></ComboBox.ItemTemplate>
-            </ComboBox>
-          </StackPanel>
-          <StackPanel Margin="0,0,12,10" Spacing="3">
-            <TextBlock Text="FPS" Foreground="{StaticResource TextBrush}" FontSize="12" />
-            <ComboBox Classes="settingsInput" Width="96" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
-              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0}}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" /></DataTemplate></ComboBox.ItemTemplate>
-            </ComboBox>
-          </StackPanel>
-          <StackPanel Margin="0,0,12,10" Spacing="3">
-            <TextBlock Text="Bitrate" Foreground="{StaticResource TextBrush}" FontSize="12" />
-            <ComboBox Classes="settingsInput" Width="96" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}">
-              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
-            </ComboBox>
-          </StackPanel>
-        </WrapPanel>
-
-        <!-- Negative top margin cancels the 10px bottom margin the combo-box
-             columns above carry to separate wrapped rows, which otherwise leaks
-             out of the last row and stacks on this panel's 11px spacing. -->
-        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,-10,0,0" IsVisible="{Binding IsCustomReplayQuality}">
-          <TextBlock Classes="replayBitrateRecommendation" Text="{Binding ReplayBitrateRecommendationText}" />
-          <Button Classes="linkButton replayBitrateRecommendationButton"
-                  Content="{Binding ReplayBitrateRecommendationActionText}"
-                  IsVisible="{Binding ReplayBitrateRecommendationNeedsApply}"
-                  Click="ApplyReplayBitrateRecommendationButton_OnClick" />
-        </StackPanel>
-
-        <Border Classes="settingsNotice" IsVisible="{Binding ReplayQualityAboveDefault}">
-          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-            <PathIcon Classes="cautionIcon" />
-            <StackPanel Grid.Column="1" Spacing="4">
-            <TextBlock FontSize="12" TextWrapping="Wrap">
-              <Run Text="Performance note: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
-              <Run Text="{Binding ReplayQualityWarningSummary}" Foreground="{StaticResource TextStrongBrush}" />
-            </TextBlock>
-            <TextBlock Text="• Check capture headroom during gameplay; higher quality increases encoder workload." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-            <TextBlock Text="{Binding ReplayQualityWarning}" Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-            <TextBlock Text="• Encoder overload is monitored, but your selected FPS is never lowered automatically." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-            <TextBlock Text="• Stable output usually matters more than maximum resolution." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-            </StackPanel>
-          </Grid>
-        </Border>
-
-        <WrapPanel HorizontalAlignment="Left">
-          <StackPanel Margin="0,0,12,10" Spacing="3">
-            <TextBlock Text="Video Encoder" Foreground="{StaticResource TextBrush}" FontSize="12" />
-            <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayEncoderModes}" SelectedItem="{Binding SelectedReplayEncoderMode}">
-              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
-            </ComboBox>
-          </StackPanel>
-          <StackPanel Margin="0,0,12,10" Spacing="3">
-            <TextBlock Text="Codec" Foreground="{StaticResource TextBrush}" FontSize="12" />
-            <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
-              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
-            </ComboBox>
-          </StackPanel>
-        </WrapPanel>
-        <!-- Same cancellation as the bitrate hint below: the encoder/codec
-             columns carry a 10px bottom margin for wrapped rows, which leaks out
-             of the last row and stacks on this panel's 11px spacing. -->
-        <StackPanel Spacing="2" Margin="0,-10,0,0">
-          <TextBlock Text="{Binding ReplayEncoderModeStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
-          <TextBlock Text="{Binding ReplayVideoCodecStatus}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
-          <Border Classes="settingsNotice" Margin="0,6,0,0" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-              <PathIcon Classes="cautionIcon" />
-              <StackPanel Grid.Column="1" Spacing="4">
-                <TextBlock FontSize="12" TextWrapping="Wrap">
-                  <Run Text="Performance note: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
-                  <Run Text="{Binding CpuEncoderHardwareWarning}" Foreground="{StaticResource TextStrongBrush}" />
-                </TextBlock>
-                <TextBlock Text="• CPU mode is best reserved for troubleshooting or when GPU encoding is unavailable." Foreground="{StaticResource TextSubtleBrush}" FontSize="11" TextWrapping="Wrap" />
-              </StackPanel>
+              <Button Grid.Column="1" Content="{Binding HotkeyDisplay}" Tag="SaveReplay" Click="HotkeyCaptureButton_OnClick" MinWidth="180" VerticalAlignment="Center" />
             </Grid>
           </Border>
-          <TextBlock Text="Automatic encoder profile: chooses the fastest stable configuration for the available NVIDIA, AMD, Intel, or CPU encoder." Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" />
-          <TextBlock Text="{Binding ReplayFrameTimingMetrics}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" IsVisible="{Binding ReplayFrameTimingMetrics, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Full Session hotkey" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Starts or stops a Full Session recording while replay capture is running." />
+              </StackPanel>
+              <Button Grid.Column="1" Content="{Binding FullSessionHotkeyDisplay}" Tag="FullSession" Click="HotkeyCaptureButton_OnClick" MinWidth="180" VerticalAlignment="Center" />
+            </Grid>
+          </Border>
         </StackPanel>
+      </Border>
+    </StackPanel>
 
-        <StackPanel Spacing="3" HorizontalAlignment="Left">
-          <TextBlock Text="Frame Timing" Foreground="{StaticResource TextBrush}" FontSize="12" />
-          <ComboBox Classes="settingsInput" Width="150" ItemsSource="{Binding ReplayFrameTimingModes}" SelectedItem="{Binding SelectedReplayFrameTiming}">
-            <ComboBox.ItemTemplate><DataTemplate><TextBlock MinWidth="150" Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
-            <ComboBox.SelectionBoxItemTemplate><DataTemplate><TextBlock Text="{Binding Value}" /></DataTemplate></ComboBox.SelectionBoxItemTemplate>
-          </ComboBox>
-          <TextBlock Text="{Binding ReplayFrameTimingDescription}" Foreground="{StaticResource TextSubtleBrush}" FontSize="10" TextWrapping="Wrap" MaxWidth="520" />
-        </StackPanel>
-
-        <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
-          <StackPanel Spacing="3">
-            <TextBlock Classes="settingsRowTitleSm" Text="Frame-rate Protection" />
-            <TextBlock Classes="settingsRowDescSm" Text="Lower capture FPS under encoder pressure, then restore your selected FPS after sustained recovery." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAdaptiveFrameRateEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
-
-        <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
-          <StackPanel Spacing="3">
-            <TextBlock Classes="settingsRowTitleSm" Text="HDR Compatibility" />
-            <TextBlock Classes="settingsRowDescSm" Text="Automatically converts to SDR while Windows HDR is on, so clips look right on ordinary displays." />
-            <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayHdrCompatibilityStatus}" />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayHdrCompatibilityEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
-
-        <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding ReplayQualityRestartRequired}">
-          <TextBlock Text="Restart replay buffer to apply changed quality or encoder settings." Foreground="{StaticResource CautionBrush}" FontSize="12" FontWeight="Bold" VerticalAlignment="Center" TextWrapping="Wrap" />
-        </StackPanel>
-      </StackPanel>
-    </Border>
-
-    <Border Classes="settingsCard" Padding="20,20,20,8" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|File Format|MKV|MP4|Storage limit|Custom limit|Full Session Recording}">
-      <StackPanel Spacing="14">
-        <TextBlock Classes="settingsCardLabel" Text="FULL SESSION RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording}">
-          <StackPanel Spacing="2">
-            <TextBlock Classes="settingsRowTitle" Text="Full Session Recording" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDesc" Text="Also writes the entire session (video and audio) to ClypDat's VODs folder. ClypDat backend only for now." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionRecordingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-        </Grid>
-        <StackPanel Spacing="6">
-          <StackPanel Spacing="2" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Destination folder}">
-            <TextBlock Classes="settingsRowTitleSm" Text="Destination Folder" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <TextBlock Classes="settingsRowDesc" Text="{Binding FullSessionRecordingFolderDisplay}" TextTrimming="CharacterEllipsis" />
-          </StackPanel>
-          <Border Classes="settingsDivider" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-              <TextBlock Classes="settingsRowTitleSm" Text="File Format" />
-              <TextBlock Classes="settingsRowDescSm" Text="Uses Recording Quality settings. Format changes apply to the next Full Session." TextWrapping="Wrap" />
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length|Recording}">
+      <TextBlock Classes="settingsGroupLabel" Text="RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow static" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Replay length}">
+            <StackPanel Spacing="12">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Replay length" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="How much of your most recent gameplay each saved clip holds." />
+              </StackPanel>
+              <ListBox Classes="settingsSegmented" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Label}" />
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
             </StackPanel>
-            <ComboBox Grid.Column="1" Classes="settingsInput compact" Width="190" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
-          </Grid>
-          <TextBlock Classes="settingsRowDescSm" Text="{Binding FullSessionFormatRecommendation}" TextWrapping="Wrap" IsVisible="{Binding !IsFullSessionMp4}" />
-          <Border Classes="settingsNotice" IsVisible="{Binding FullSessionFormatSelection.IsWarningVisible}">
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-              <PathIcon Classes="cautionIcon" />
-              <StackPanel Grid.Column="1" Spacing="4">
-                <TextBlock Text="{Binding FullSessionFormatWarning}" Foreground="{StaticResource TextStrongBrush}" FontSize="12" TextWrapping="Wrap" />
-                <WrapPanel Margin="0,4,0,0">
-                  <Button Classes="primaryButton" Content="Use MKV" Click="UseMkv_OnClick" Margin="0,0,8,0" />
-                  <Button Content="Ignore" Click="IgnoreFullSessionMp4Warning_OnClick" Margin="0,0,8,0" />
-                  <Button Content="Don't Show Again" Click="HideFullSessionMp4Warning_OnClick" />
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <!-- Named: opening Settings from a quality warning scrolls here. -->
+    <Border x:Name="RecordingQualityCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording quality|Resolution|Frame rate|FPS|Bitrate|Codec|Encoder|Quality|Encoding}">
+      <StackPanel Classes="settingsGroup">
+        <TextBlock Classes="settingsGroupLabel" Text="RECORDING QUALITY" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+        <Border Classes="settingsGroupCard">
+          <StackPanel>
+            <Border Classes="settingsRow static">
+              <StackPanel Spacing="14">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Quality" />
+                  <TextBlock Classes="settingsRowDesc" Text="Higher settings look better but use more of your GPU and more storage." />
+                </StackPanel>
+
+                <ListBox Classes="qualityPresetCards" ItemsSource="{Binding ReplayQualityPresets}" SelectedItem="{Binding SelectedReplayQualityPreset}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel Spacing="3" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Label}" FontSize="14" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Description}" Foreground="{StaticResource TextBrush}" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Summary}" Foreground="{StaticResource TextSubtleBrush}" FontSize="11.5" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+
+                <StackPanel Spacing="8" IsVisible="{Binding IsCustomReplayQuality}">
+                  <WrapPanel HorizontalAlignment="Left" ItemSpacing="12" LineSpacing="10">
+                    <StackPanel Spacing="5">
+                      <TextBlock Classes="settingsFieldLabel" Text="Resolution" />
+                      <ComboBox Classes="settingsInput" Width="170" ItemsSource="{Binding ReplayResolutions}" SelectedItem="{Binding SelectedReplayResolution}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Resolution}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Spacing="5">
+                      <TextBlock Classes="settingsFieldLabel" Text="Frame rate" />
+                      <ComboBox Classes="settingsInput" Width="110" ItemsSource="{Binding ReplayFrameRates}" SelectedItem="{Binding SelectedReplayFrameRate}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding StringFormat={}{0}}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=FrameRate}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                    <StackPanel Spacing="5">
+                      <TextBlock Classes="settingsFieldLabel" Text="Bitrate" />
+                      <ComboBox Classes="settingsInput" Width="110" ItemsSource="{Binding ReplayBitrateOptions}" SelectedItem="{Binding SelectedReplayBitrateOption}">
+                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" Foreground="{Binding Converter={x:Static opconv:ReplayQualityOptionBrushConverter.Instance}, ConverterParameter=Bitrate}" /></DataTemplate></ComboBox.ItemTemplate>
+                      </ComboBox>
+                    </StackPanel>
+                  </WrapPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Classes="replayBitrateRecommendation" Text="{Binding ReplayBitrateRecommendationText}" />
+                    <Button Classes="linkButton replayBitrateRecommendationButton"
+                            Content="{Binding ReplayBitrateRecommendationActionText}"
+                            IsVisible="{Binding ReplayBitrateRecommendationNeedsApply}"
+                            Click="ApplyReplayBitrateRecommendationButton_OnClick" />
+                  </StackPanel>
+                </StackPanel>
+
+                <Border Classes="settingsNotice" IsVisible="{Binding ReplayQualityAboveDefault}">
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                    <PathIcon Classes="cautionIcon" />
+                    <StackPanel Grid.Column="1" Spacing="4">
+                      <TextBlock Classes="settingsNoticeText">
+                        <Run Text="Performance note: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
+                        <Run Text="{Binding ReplayQualityWarningSummary}" />
+                      </TextBlock>
+                      <TextBlock Classes="settingsNoticeDetail" Text="• Check capture headroom during gameplay; higher quality increases encoder workload." />
+                      <TextBlock Classes="settingsNoticeDetail" Text="{Binding ReplayQualityWarning}" />
+                      <TextBlock Classes="settingsNoticeDetail" Text="• Encoder overload is monitored, but your selected FPS is never lowered automatically." />
+                      <TextBlock Classes="settingsNoticeDetail" Text="• Stable output usually matters more than maximum resolution." />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="settingsRowDivider" />
+
+            <Border Classes="settingsRow static">
+              <StackPanel Spacing="12">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Encoder" />
+                  <TextBlock Classes="settingsRowDesc" Text="Automatic picks the fastest stable configuration for the NVIDIA, AMD, Intel or CPU encoder available." />
+                </StackPanel>
+                <WrapPanel HorizontalAlignment="Left" ItemSpacing="12" LineSpacing="10">
+                  <StackPanel Spacing="5">
+                    <TextBlock Classes="settingsFieldLabel" Text="Video encoder" />
+                    <ComboBox Classes="settingsInput" Width="170" ItemsSource="{Binding ReplayEncoderModes}" SelectedItem="{Binding SelectedReplayEncoderMode}">
+                      <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                    </ComboBox>
+                  </StackPanel>
+                  <StackPanel Spacing="5">
+                    <TextBlock Classes="settingsFieldLabel" Text="Codec" />
+                    <ComboBox Classes="settingsInput" Width="170" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
+                      <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                    </ComboBox>
+                  </StackPanel>
                 </WrapPanel>
+                <StackPanel Spacing="2">
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayEncoderModeStatus}" />
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayVideoCodecStatus}" />
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayFrameTimingMetrics}" IsVisible="{Binding ReplayFrameTimingMetrics, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+                <Border Classes="settingsNotice" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                    <PathIcon Classes="cautionIcon" />
+                    <StackPanel Grid.Column="1" Spacing="4">
+                      <TextBlock Classes="settingsNoticeText">
+                        <Run Text="Performance note: " Foreground="{StaticResource CautionBrush}" FontWeight="SemiBold" />
+                        <Run Text="{Binding CpuEncoderHardwareWarning}" />
+                      </TextBlock>
+                      <TextBlock Classes="settingsNoticeDetail" Text="• CPU mode is best reserved for troubleshooting or when GPU encoding is unavailable." />
+                    </StackPanel>
+                  </Grid>
+                </Border>
               </StackPanel>
-            </Grid>
-          </Border>
-          <Border Classes="settingsDivider" Margin="0,6" IsVisible="{Binding !IsSettingsSearchActive}" />
-          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Storage limit}">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitleSm" Text="Storage Limit" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              <TextBlock Classes="settingsRowDescSm" Text="When session recordings exceed this, the oldest ones are deleted automatically after each save." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            </StackPanel>
-            <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" ItemsSource="{Binding FullSessionQuotaOptions}" SelectedItem="{Binding SelectedFullSessionQuota}" VerticalAlignment="Center">
-              <ComboBox.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock Text="{Binding Label}" />
-                </DataTemplate>
-              </ComboBox.ItemTemplate>
-            </ComboBox>
-          </Grid>
-          <Border IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Custom limit}">
-            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" IsVisible="{Binding IsCustomFullSessionQuota}">
-            <TextBlock Text="Custom Limit" Foreground="{StaticResource TextBrush}" FontSize="12" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              <TextBox Grid.Column="1" Classes="settingsInput" Width="110" Text="{Binding CustomFullSessionQuotaGb}" PlaceholderText="500" VerticalAlignment="Center" />
-              <TextBlock Classes="settingsRowDesc" Grid.Column="2" Text="GB" VerticalAlignment="Center" />
-            </Grid>
-          </Border>
-        </StackPanel>
+            </Border>
+
+            <Border Classes="settingsRowDivider" />
+
+            <Border Classes="settingsRow">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Frame timing" />
+                  <TextBlock Classes="settingsRowDesc" Text="{Binding ReplayFrameTimingDescription}" />
+                </StackPanel>
+                <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" VerticalAlignment="Center" ItemsSource="{Binding ReplayFrameTimingModes}" SelectedItem="{Binding SelectedReplayFrameTiming}">
+                  <ComboBox.ItemTemplate><DataTemplate><TextBlock MinWidth="150" Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                  <ComboBox.SelectionBoxItemTemplate><DataTemplate><TextBlock Text="{Binding Value}" /></DataTemplate></ComboBox.SelectionBoxItemTemplate>
+                </ComboBox>
+              </Grid>
+            </Border>
+
+            <Border Classes="settingsRowDivider" />
+
+            <Border Classes="settingsRow">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Frame-rate protection" />
+                  <TextBlock Classes="settingsRowDesc" Text="Lowers capture FPS under encoder pressure, then restores your selected FPS after a sustained recovery." />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAdaptiveFrameRateEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+              </Grid>
+            </Border>
+
+            <Border Classes="settingsRowDivider" />
+
+            <Border Classes="settingsRow">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="HDR compatibility" />
+                  <TextBlock Classes="settingsRowDesc" Text="Automatically converts to SDR while Windows HDR is on, so clips look right on ordinary displays." />
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayHdrCompatibilityStatus}" />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayHdrCompatibilityEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+              </Grid>
+            </Border>
+
+            <Border Classes="settingsRow static" IsVisible="{Binding ReplayQualityRestartRequired}" MinHeight="0" Padding="20,0,20,16">
+              <TextBlock Classes="settingsRowWarning" Text="Restart the replay buffer to apply changed quality or encoder settings." />
+            </Border>
+          </StackPanel>
+        </Border>
       </StackPanel>
     </Border>
+
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|File Format|MKV|MP4|Storage limit|Custom limit|Full Session Recording}">
+      <TextBlock Classes="settingsGroupLabel" Text="FULL SESSION RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Full Session recording" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Also writes the entire session, video and audio, to ClypDat's VODs folder. ClypDat backend only for now." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionRecordingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Destination folder}">
+            <StackPanel Classes="settingsRowText">
+              <TextBlock Classes="settingsRowTitle" Text="Destination folder" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              <TextBlock Classes="settingsRowDesc" Text="{Binding FullSessionRecordingFolderDisplay}" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=File Format|MKV|MP4}">
+            <StackPanel Spacing="10">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="File format" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Classes="settingsRowDesc" Text="Uses the Recording quality settings above. Format changes apply to the next Full Session." />
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding FullSessionFormatRecommendation}" IsVisible="{Binding !IsFullSessionMp4}" />
+                </StackPanel>
+                <ComboBox Grid.Column="1" Classes="settingsInput" Width="190" VerticalAlignment="Center" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
+              </Grid>
+              <Border Classes="settingsNotice" IsVisible="{Binding FullSessionFormatSelection.IsWarningVisible}">
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                  <PathIcon Classes="cautionIcon" />
+                  <StackPanel Grid.Column="1" Spacing="10">
+                    <TextBlock Classes="settingsNoticeText" Text="{Binding FullSessionFormatWarning}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button Classes="primaryButton" Content="Use MKV" Click="UseMkv_OnClick" />
+                      <Button Content="Ignore" Click="IgnoreFullSessionMp4Warning_OnClick" />
+                      <Button Content="Don't show again" Click="HideFullSessionMp4Warning_OnClick" />
+                    </StackPanel>
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Storage limit|Custom limit}">
+            <StackPanel Spacing="12">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Storage limit" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Classes="settingsRowDesc" Text="When session recordings exceed this, the oldest ones are deleted automatically after each save." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                </StackPanel>
+                <ComboBox Grid.Column="1" Classes="settingsInput" Width="190" ItemsSource="{Binding FullSessionQuotaOptions}" SelectedItem="{Binding SelectedFullSessionQuota}" VerticalAlignment="Center">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding IsCustomFullSessionQuota}">
+                <TextBlock Classes="settingsFieldLabel" Text="Custom limit" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBox Classes="settingsInput" Width="110" Text="{Binding CustomFullSessionQuotaGb}" PlaceholderText="500" VerticalAlignment="Center" />
+                <TextBlock Classes="settingsFieldLabel" Text="GB" VerticalAlignment="Center" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
   </StackPanel>
 </UserControl>

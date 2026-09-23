@@ -34,7 +34,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         // survive the nav filter or the page it lives on never appears.
         ["General"] = new[]
         {
-            "Startup", "Launch ClypDat on Windows boot", "Start minimized on boot", "Process priority", "Automatically Focus ClypDat", "Game exit",
+            "Startup", "Launch ClypDat on Windows boot", "Start minimized on boot", "Start minimised on boot", "Process priority", "Automatically Focus ClypDat", "Game exit",
             "Layout", "Show status panel",
             "Scale clips with window size",
             "Combine sidebar filters", "Clip Filenames", "Naming scheme", "Template", "Rename all", "Rename existing clips"
@@ -105,7 +105,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["About"] = new[]
         {
             "Updates", "Check for updates", "Source and Licenses", "View on GitHub", "Diagnostics",
-            "Log folder", "Get Started", "Setup walkthrough", "License",
+            "Log folder", "Get Started", "Setup walkthrough", "License", "Licence", "Source and Licences",
         },
     };
 

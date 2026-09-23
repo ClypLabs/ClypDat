@@ -134,6 +134,7 @@
   <SolidColorBrush x:Key="Surface_718396" Color="#718396" />
   <SolidColorBrush x:Key="Surface_00101820" Color="#00101820" />
   <SolidColorBrush x:Key="Surface_00141D24" Color="#00141D24" />
+  <SolidColorBrush x:Key="Surface_0016212B" Color="#0016212B" />
   <SolidColorBrush x:Key="Surface_00182029" Color="#00182029" />
   <SolidColorBrush x:Key="Surface_001D2A36" Color="#001D2A36" />
   <SolidColorBrush x:Key="Surface_0026323D" Color="#0026323D" />

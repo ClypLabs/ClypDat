@@ -11,52 +11,61 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Discord Rich Presence">
+  <StackPanel Spacing="24" Tag="Discord Rich Presence">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-    <StackPanel Spacing="4">
+    <StackPanel Spacing="6">
       <TextBlock Classes="settingsSectionTitle" Text="Discord Rich Presence" />
       <TextBlock Classes="settingsSectionDesc" Text="Control what ClypDat shares on your Discord profile." />
-      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
     <!-- DataContext switches to the PolicyPause, so visibility lives on the wrapper. -->
     <Panel IsVisible="{Binding DiscordPolicyBlocked}">
       <controls:PolicyPauseBanner DataContext="{Binding DiscordPolicyPause}" />
     </Panel>
-    <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
-        <TextBlock Classes="settingsCardLabel" Text="DISCORD" />
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Discord Rich Presence" />
-            <TextBlock Classes="settingsRowDescSm" Text="Shows what you are recording, editing or browsing. Anyone who can see your profile can see the game name." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceEnabled}" IsEnabled="{Binding !DiscordPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" />
-        </Grid>
-        <Border Classes="settingsDivider" />
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding DiscordRichPresenceEnabled}">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Only show while playing a game" />
-            <TextBlock Classes="settingsRowDescSm" Text="Hide browsing, editing, and settings activity unless ClypDat detects a game." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceOnlyWhenGameActive}" OnContent="{x:Null}" OffContent="{x:Null}" />
-        </Grid>
-        <Border Classes="settingsDivider" />
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding DiscordRichPresenceEnabled}">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Show match details" />
-            <TextBlock Classes="settingsRowDescSm" Text="League of Legends, Counter-Strike 2 and Dota 2: your champion or hero, map, score and K/D/A. Dota 2 also needs -gamestateintegration in its Steam launch options." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceShowMatchDetails}" OnContent="{x:Null}" OffContent="{x:Null}" />
-        </Grid>
-        <Border Classes="settingsDivider" />
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Show “Get ClypDat” Link" />
-            <TextBlock Classes="settingsRowDescSm" Text="Adds a clypdat.xyz button for people viewing your Rich Presence." />
-          </StackPanel>
-          <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding DiscordRichPresenceShowGetClypDatButton}" IsEnabled="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
-        </Grid>
-      </StackPanel>
-    </Border>
+    <StackPanel Classes="settingsGroup">
+      <TextBlock Classes="settingsGroupLabel" Text="DISCORD" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Discord Rich Presence" />
+                <TextBlock Classes="settingsRowDesc" Text="Shows what you are recording, editing or browsing. Anyone who can see your profile can see the game name." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceEnabled}" IsEnabled="{Binding !DiscordPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow" IsEnabled="{Binding DiscordRichPresenceEnabled}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Only show while playing a game" />
+                <TextBlock Classes="settingsRowDesc" Text="Hide browsing, editing and settings activity unless ClypDat detects a game." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceOnlyWhenGameActive}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow" IsEnabled="{Binding DiscordRichPresenceEnabled}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Show match details" />
+                <TextBlock Classes="settingsRowDesc" Text="League of Legends, Counter-Strike 2 and Dota 2: your champion or hero, map, score and K/D/A. Dota 2 also needs -gamestateintegration in its Steam launch options." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceShowMatchDetails}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Show “Get ClypDat” link" />
+                <TextBlock Classes="settingsRowDesc" Text="Adds a clypdat.xyz button for people viewing your Rich Presence." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding DiscordRichPresenceShowGetClypDatButton}" IsEnabled="{Binding DiscordRichPresenceEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
   </StackPanel>
 </UserControl>

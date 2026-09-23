@@ -12,51 +12,59 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Game Audio Exclusions">
+  <StackPanel Spacing="24" Tag="Game Audio Exclusions">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-    <StackPanel Spacing="4">
-      <TextBlock Classes="settingsSectionTitle" Text="Game Audio Exclusions" />
-      <TextBlock Classes="settingsSectionDesc" Text="Apps here are removed from Game Audio. Chat Audio captures the selected app above." />
-      <Border Classes="settingsDivider" Margin="0,14,0,0" />
+    <StackPanel Spacing="6">
+      <TextBlock Classes="settingsSectionTitle" Text="Game audio exclusions" />
+      <TextBlock Classes="settingsSectionDesc" Text="Apps listed here are left out of the Game Audio track." />
     </StackPanel>
 
-    <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
-        <TextBlock Classes="settingsCardLabel" Text="EXCLUDED APPS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-          <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
-          <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
-          <Button Grid.Column="2" Content="Add" Click="AddSelectedProcessButton_OnClick" />
-        </Grid>
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-          <TextBox Name="ExcludedProcessTextBox" Classes="settingsInput" PlaceholderText="discord.exe" />
-          <Button Grid.Column="1" Content="Add Manual" Click="AddExcludedProcessButton_OnClick" />
-        </Grid>
-      </StackPanel>
-    </Border>
-
-    <Border Classes="listPane">
-      <ScrollViewer Classes="listScrollCompact">
-        <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
-          <ItemsControl.Styles>
-            <!-- The rule belongs between two rows, so the last one does not get
-                 to draw a line under itself with nothing beneath it. -->
-            <Style Selector="ContentPresenter:nth-last-child(1) > Border">
-              <Setter Property="BorderThickness" Value="0" />
-            </Style>
-          </ItemsControl.Styles>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Border BorderThickness="0,0,0,1" BorderBrush="{StaticResource DividerBrush}" Background="Transparent" Padding="12,6,12,10" VerticalAlignment="Top">
-                <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="{Binding}" Foreground="{StaticResource TextStrongBrush}" VerticalAlignment="Center" />
-                  <Button Grid.Column="1" Content="Remove" VerticalAlignment="Center" Click="RemoveExcludedProcessButton_OnClick" />
-                </Grid>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
-    </Border>
+    <StackPanel Classes="settingsGroup">
+      <TextBlock Classes="settingsGroupLabel" Text="EXCLUDED APPS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow static">
+            <StackPanel Spacing="10">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Add a running app" />
+                <TextBlock Classes="settingsRowDesc" Text="Pick an app that's open right now." />
+              </StackPanel>
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
+                <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                <Button Grid.Column="2" Classes="primaryButton" Content="Add" Click="AddSelectedProcessButton_OnClick" />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow static">
+            <StackPanel Spacing="10">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Add by name" />
+                <TextBlock Classes="settingsRowDesc" Text="Type the app's process name, including .exe." />
+              </StackPanel>
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Name="ExcludedProcessTextBox" Classes="settingsInput" PlaceholderText="discord.exe" />
+                <Button Grid.Column="1" Content="Add" Click="AddExcludedProcessButton_OnClick" />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <ScrollViewer Classes="listScrollCompact">
+            <ItemsControl ItemsSource="{Binding ExcludedProcesses}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Classes="settingsListItem">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                      <TextBlock Classes="settingsListItemText" Text="{Binding}" />
+                      <Button Grid.Column="1" Classes="linkButton" Content="Remove" VerticalAlignment="Center" Click="RemoveExcludedProcessButton_OnClick" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </StackPanel>
+      </Border>
+    </StackPanel>
   </StackPanel>
 </UserControl>

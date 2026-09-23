@@ -15,166 +15,213 @@
       </Grid>
     </DataTemplate>
   </UserControl.Resources>
-  <StackPanel Spacing="18" Tag="Video Overlays">
-    <StackPanel Spacing="4" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}">
-      <TextBlock Classes="settingsSectionTitle" Text="Video Overlays" />
+  <StackPanel Spacing="24" Tag="Video Overlays">
+    <StackPanel Spacing="6" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}">
+      <TextBlock Classes="settingsSectionTitle" Text="Video overlays" />
       <TextBlock Classes="settingsSectionDesc" Text="Selected sources are captured as editable layers until export. Camera audio is never recorded." />
-      <Border Classes="settingsDivider" Margin="0,14,0,0" />
     </StackPanel>
-    <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
-        <TextBlock Classes="settingsCardLabel" Text="VIDEO OVERLAYS" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}" />
-        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsGameScoped, ElementName=VideoOverlaysRoot}">
-          <TextBlock Classes="settingsRowTitle" Text="Video Overlays" VerticalAlignment="Center" />
-          <Button Grid.Column="1" Classes="linkButton" Content="Remove" Click="RemoveGameOverlays_OnClick" />
-        </Grid>
-        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
-          <StackPanel Spacing="2" VerticalAlignment="Center"><TextBlock Classes="settingsRowTitle" Text="Include virtual cameras" /><TextBlock Classes="settingsRowDescSm" Text="Refresh after connecting or changing a camera." /></StackPanel>
-          <ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludeVirtualCameras}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-          <Button Grid.Column="2" Content="Refresh" Click="Refresh_OnClick" VerticalAlignment="Center" />
-        </Grid>
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Overlay recording mode" />
-            <TextBlock Classes="settingsRowDescSm" Text="{Binding RecordingModeDescription}" TextWrapping="Wrap"
-                       MaxWidth="600" HorizontalAlignment="Left" TextAlignment="Left" />
-          </StackPanel>
-          <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" ItemsSource="{Binding RecordingModes}"
-                    SelectedItem="{Binding RecordingMode, Mode=TwoWay}" />
-        </Grid>
-        <Border Classes="settingsDivider" />
-        <TextBlock Classes="settingsRowDescSm" Text="{Binding SourceStatus}" TextWrapping="Wrap" />
-        <TextBlock Classes="settingsCardLabel" Margin="0,6,0,0" Text="VIDEO OVERLAY PREVIEW" />
-        <!-- One window per corner, seeded into editable clips. A corner used to be drawn twice - a fixed picker card over the
-             in. A corner used to be drawn twice - a fixed picker card over the
-             canvas plus a free-floating layer inside it - so the same camera
-             showed up twice at two different sizes. The window is the layer
-             now: it takes the aspect of whatever source is chosen, drags
-             around the canvas, and hangs its own dropdown just outside itself
-             so the rectangle stays an honest preview of the burned-in area. -->
-        <Grid x:Name="WidePreview" HorizontalAlignment="Center" MaxWidth="1200">
-          <controls:AspectRatioBox AspectRatio="1.7777777777777777">
-            <Border Classes="videoOverlayCanvas videoOverlayPreviewCanvas">
-              <Grid>
-                <!-- Corner layers may sit exactly on an encoded-frame edge. Keep
-                     their resize handles inside this preview's rounded outline:
-                     each handle extends five pixels beyond its layer bounds. -->
-                <ItemsControl x:Name="PreviewCanvas" Margin="8" Background="Transparent" ItemsSource="{Binding Slots}" ClipToBounds="False"
-                              PointerPressed="PreviewCanvas_OnPointerPressed" PointerMoved="PreviewCanvas_OnPointerMoved"
-                              PointerReleased="PreviewCanvas_OnPointerReleased" PointerCaptureLost="PreviewCanvas_OnPointerCaptureLost"
-                              SizeChanged="PreviewCanvas_OnSizeChanged">
-                  <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate><Canvas ClipToBounds="False" /></ItemsPanelTemplate>
-                  </ItemsControl.ItemsPanel>
-                  <ItemsControl.Styles>
-                    <Style Selector="ItemsControl > ContentPresenter" x:DataType="vm:VideoOverlaySlotViewModel">
-                      <Setter Property="Canvas.Left" Value="{Binding Left}" />
-                      <Setter Property="Canvas.Top" Value="{Binding Top}" />
-                    </Style>
-                  </ItemsControl.Styles>
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate DataType="vm:VideoOverlaySlotViewModel">
-                      <Panel Width="{Binding Width}" Height="{Binding Height}">
-                        <Border Classes="videoOverlayWindow" Classes.selected="{Binding IsSelected}" Classes.empty="{Binding IsEmpty}" Classes.keyboard="{Binding IsKeyboard}"
-                                PointerPressed="Window_OnPointerPressed">
-                          <Panel>
-                            <TextBlock Classes="videoOverlayEmptyLabel" Text="Empty" IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            <Panel IsVisible="{Binding IsCamera}">
-                              <controls:CameraPreviewControl DataContext="{Binding Overlay}" />
-                            </Panel>
-                            <controls:KeyboardOverlayPreview Layout="{Binding KeyboardLayout}" CustomBoard="{Binding KeyboardBoard}" UseSamplePressed="{Binding ShowSamplePressed}" PressedKeys="{Binding LivePressedKeys}" IsVisible="{Binding IsKeyboard}" IsHitTestVisible="False" />
-                            <TextBlock Classes="videoOverlayWindowLabel" Text="{Binding Label}" />
-                          </Panel>
-                        </Border>
-                        <Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="TopLeftCorner" />
-                        <Border Classes="videoOverlayHandle topRight" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="TopRightCorner" />
-                        <Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="BottomLeftCorner" />
-                        <Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="BottomRightCorner" />
-                        <ComboBox Classes="settingsInput compact overlaySourcePicker" HorizontalAlignment="Stretch"
-                                  VerticalAlignment="{Binding ChromeAlignment}" Margin="{Binding ChromeMargin}"
-                                  ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}"
-                                  SelectedItem="{Binding Source}" ToolTip.Tip="{Binding Source}" />
-                      </Panel>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
-              </Grid>
-            </Border>
-          </controls:AspectRatioBox>
-        </Grid>
-        <Grid x:Name="NarrowPickers" IsVisible="False" IsEnabled="{Binding ShowPickers}" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
-          <StackPanel Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopLeftSource}" /></StackPanel><StackPanel Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Top right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopRightSource}" /></StackPanel><StackPanel Grid.Row="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom left" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomLeftSource}" /></StackPanel><StackPanel Grid.Row="1" Grid.Column="1" Spacing="4"><TextBlock Classes="settingsRowTitleSm" Text="Bottom right" /><ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomRightSource}" /></StackPanel>
-        </Grid>
-        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10"><TextBlock Classes="settingsRowDescSm" Text="Drag a window to seed placement for new clips. Existing clips keep their own layout. White corners resize it." TextWrapping="Wrap" VerticalAlignment="Center" /><Button Grid.Column="1" Content="Reset camera" IsVisible="{Binding CameraCustomPosition}" Click="ResetCamera_OnClick" /><Button Grid.Column="2" Content="Reset input" IsVisible="{Binding KeyboardCustomPosition}" Click="ResetKeyboard_OnClick" /></Grid>
-        <Border Classes="settingsDivider" />
-        <StackPanel Spacing="12">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Spacing="2" VerticalAlignment="Center">
-            <TextBlock Classes="settingsCardLabel" Text="CUSTOM KEYS" />
-            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
-                       Text="Show only the keys you care about. Chosen keys are drawn packed together, not spread across a full board." />
-          </StackPanel>
-          <Button Grid.Column="1" Classes="primaryButton" Content="New key set" VerticalAlignment="Center" Click="NewKeySet_OnClick" />
-        </Grid>
-        <TextBlock Classes="settingsRowDescSm" IsVisible="{Binding HasNoCustomLayouts}"
-                   Text="No custom sets yet. Create one and it appears in every corner's source list." />
-        <ItemsControl ItemsSource="{Binding CustomLayouts}" IsVisible="{Binding !HasNoCustomLayouts}">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate DataType="settings:CustomKeyboardLayout">
-              <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,6">
-                <StackPanel Spacing="1" VerticalAlignment="Center">
-                  <TextBlock Classes="settingsRowTitleSm" Text="{Binding Name}" />
-                  <TextBlock Classes="settingsRowDescSm" Text="{Binding Keys.Count, StringFormat=\{0\} keys}" />
-                </StackPanel>
-                <Button Grid.Column="1" Classes="linkButton" Content="Edit" Tag="{Binding}" Click="EditKeySet_OnClick" />
-                <Button Grid.Column="2" Classes="linkButton" Content="Duplicate" Tag="{Binding}" Click="DuplicateKeySet_OnClick" />
-                <Button Grid.Column="3" Classes="linkButton" Content="Delete" Tag="{Binding}" Click="DeleteKeySet_OnClick" />
-              </Grid>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
 
-        <Border Classes="settingsDivider" IsVisible="{Binding IsLayoutEditorOpen}" />
-        <StackPanel Spacing="10" IsVisible="{Binding IsLayoutEditorOpen}">
-          <StackPanel Spacing="4">
-            <TextBlock Classes="settingsRowTitleSm" Text="Name" />
-            <TextBox Classes="settingsInput" Text="{Binding DraftName, Mode=TwoWay}" />
-          </StackPanel>
-          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
-            <Button Classes="primaryButton" Content="{Binding ListenButtonText}" Click="ListenKeys_OnClick" />
-            <TextBlock Grid.Column="1" Classes="settingsRowDescSm" VerticalAlignment="Center" TextWrapping="Wrap"
-                       Text="Press a key to add it. Release and press again to remove it. Click Stop when finished." />
-          </Grid>
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-              <TextBlock Classes="settingsRowTitle" Text="Show mouse" />
-              <TextBlock Classes="settingsRowDescSm" Text="Mouse buttons cannot be added by clicking - that is how you work this page." />
+    <StackPanel Classes="settingsGroup">
+      <TextBlock Classes="settingsGroupLabel" Text="VIDEO OVERLAYS" IsVisible="{Binding !IsGameScoped, ElementName=VideoOverlaysRoot}" />
+      <Grid Classes="settingsGroupHeader" ColumnDefinitions="*,Auto" IsVisible="{Binding IsGameScoped, ElementName=VideoOverlaysRoot}">
+        <TextBlock Classes="settingsGroupLabel" Text="VIDEO OVERLAYS" />
+        <Button Grid.Column="1" Classes="linkButton" Content="Remove" Click="RemoveGameOverlays_OnClick" />
+      </Grid>
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Include virtual cameras" />
+                <TextBlock Classes="settingsRowDesc" Text="Refresh after connecting or changing a camera." />
+                <Button Classes="settingsRowAction" Content="Refresh cameras" Click="Refresh_OnClick" />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding IncludeVirtualCameras}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Overlay recording mode" />
+                <TextBlock Classes="settingsRowDesc" Text="{Binding RecordingModeDescription}" />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Classes="settingsInput" Width="170" VerticalAlignment="Center" ItemsSource="{Binding RecordingModes}"
+                        SelectedItem="{Binding RecordingMode, Mode=TwoWay}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow static">
+            <StackPanel Spacing="14">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Preview" />
+                <TextBlock Classes="settingsRowDesc" Text="{Binding SourceStatus}" />
+              </StackPanel>
+              <!-- One window per corner, seeded into editable clips. A corner used
+                   to be drawn twice - a fixed picker card over the canvas plus a
+                   free-floating layer inside it - so the same camera showed up
+                   twice at two different sizes. The window is the layer now: it
+                   takes the aspect of whatever source is chosen, drags around the
+                   canvas, and hangs its own dropdown just outside itself so the
+                   rectangle stays an honest preview of the burned-in area. -->
+              <Grid x:Name="WidePreview" HorizontalAlignment="Center" MaxWidth="1200">
+                <controls:AspectRatioBox AspectRatio="1.7777777777777777">
+                  <Border Classes="videoOverlayCanvas videoOverlayPreviewCanvas">
+                    <Grid>
+                      <!-- Corner layers may sit exactly on an encoded-frame edge. Keep
+                           their resize handles inside this preview's rounded outline:
+                           each handle extends five pixels beyond its layer bounds. -->
+                      <ItemsControl x:Name="PreviewCanvas" Margin="8" Background="Transparent" ItemsSource="{Binding Slots}" ClipToBounds="False"
+                                    PointerPressed="PreviewCanvas_OnPointerPressed" PointerMoved="PreviewCanvas_OnPointerMoved"
+                                    PointerReleased="PreviewCanvas_OnPointerReleased" PointerCaptureLost="PreviewCanvas_OnPointerCaptureLost"
+                                    SizeChanged="PreviewCanvas_OnSizeChanged">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate><Canvas ClipToBounds="False" /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.Styles>
+                          <Style Selector="ItemsControl > ContentPresenter" x:DataType="vm:VideoOverlaySlotViewModel">
+                            <Setter Property="Canvas.Left" Value="{Binding Left}" />
+                            <Setter Property="Canvas.Top" Value="{Binding Top}" />
+                          </Style>
+                        </ItemsControl.Styles>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate DataType="vm:VideoOverlaySlotViewModel">
+                            <Panel Width="{Binding Width}" Height="{Binding Height}">
+                              <Border Classes="videoOverlayWindow" Classes.selected="{Binding IsSelected}" Classes.empty="{Binding IsEmpty}" Classes.keyboard="{Binding IsKeyboard}"
+                                      PointerPressed="Window_OnPointerPressed">
+                                <Panel>
+                                  <TextBlock Classes="videoOverlayEmptyLabel" Text="Empty" IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                  <Panel IsVisible="{Binding IsCamera}">
+                                    <controls:CameraPreviewControl DataContext="{Binding Overlay}" />
+                                  </Panel>
+                                  <controls:KeyboardOverlayPreview Layout="{Binding KeyboardLayout}" CustomBoard="{Binding KeyboardBoard}" UseSamplePressed="{Binding ShowSamplePressed}" PressedKeys="{Binding LivePressedKeys}" IsVisible="{Binding IsKeyboard}" IsHitTestVisible="False" />
+                                  <TextBlock Classes="videoOverlayWindowLabel" Text="{Binding Label}" />
+                                </Panel>
+                              </Border>
+                              <Border Classes="videoOverlayHandle topLeft" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="TopLeftCorner" />
+                              <Border Classes="videoOverlayHandle topRight" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="TopRightCorner" />
+                              <Border Classes="videoOverlayHandle bottomLeft" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="BottomLeftCorner" />
+                              <Border Classes="videoOverlayHandle bottomRight" IsVisible="{Binding IsSelected}" IsHitTestVisible="True" PointerPressed="Handle_OnPointerPressed" Cursor="BottomRightCorner" />
+                              <ComboBox Classes="settingsInput compact overlaySourcePicker" HorizontalAlignment="Stretch"
+                                        VerticalAlignment="{Binding ChromeAlignment}" Margin="{Binding ChromeMargin}"
+                                        ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}"
+                                        SelectedItem="{Binding Source}" ToolTip.Tip="{Binding Source}" />
+                            </Panel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Grid>
+                  </Border>
+                </controls:AspectRatioBox>
+              </Grid>
+              <Grid x:Name="NarrowPickers" IsVisible="False" IsEnabled="{Binding ShowPickers}" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="12">
+                <StackPanel Spacing="5">
+                  <TextBlock Classes="settingsFieldLabel" Text="Top left" />
+                  <ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopLeftSource}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="5">
+                  <TextBlock Classes="settingsFieldLabel" Text="Top right" />
+                  <ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding TopRightSource}" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Spacing="5">
+                  <TextBlock Classes="settingsFieldLabel" Text="Bottom left" />
+                  <ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomLeftSource}" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="1" Spacing="5">
+                  <TextBlock Classes="settingsFieldLabel" Text="Bottom right" />
+                  <ComboBox Classes="settingsInput overlaySourcePicker" ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}" SelectedItem="{Binding BottomRightSource}" />
+                </StackPanel>
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                <TextBlock Classes="settingsRowDesc" VerticalAlignment="Center" Text="Drag a window to set where it goes in new clips. Existing clips keep their own layout. The white corners resize it." />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <Button Content="Reset camera" IsVisible="{Binding CameraCustomPosition}" Click="ResetCamera_OnClick" />
+                  <Button Content="Reset input" IsVisible="{Binding KeyboardCustomPosition}" Click="ResetKeyboard_OnClick" />
+                </StackPanel>
+              </Grid>
             </StackPanel>
-            <ToggleSwitch Grid.Column="1" IsChecked="{Binding DraftShowMouse, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-          </Grid>
-          <ItemsControl ItemsSource="{Binding DraftKeys}">
-            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <StackPanel Classes="settingsGroup">
+      <TextBlock Classes="settingsGroupLabel" Text="CUSTOM KEYS" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Key sets" />
+                <TextBlock Classes="settingsRowDesc" Text="Show only the keys you care about. Chosen keys are drawn packed together, not spread across a full board." />
+              </StackPanel>
+              <Button Grid.Column="1" Classes="primaryButton" Content="New key set" VerticalAlignment="Center" Click="NewKeySet_OnClick" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsListItem" IsVisible="{Binding HasNoCustomLayouts}">
+            <TextBlock Classes="settingsRowDesc" VerticalAlignment="Center" Text="No custom sets yet. Create one and it appears in every corner's source list." />
+          </Border>
+          <ItemsControl ItemsSource="{Binding CustomLayouts}" IsVisible="{Binding !HasNoCustomLayouts}">
             <ItemsControl.ItemTemplate>
-              <DataTemplate DataType="settings:CustomKeyCap">
-                <Button Classes="keyChip" Tag="{Binding}" Click="RemoveKeySetKey_OnClick"
-                        Content="{Binding Label}" ToolTip.Tip="Remove" Margin="0,0,6,6" />
+              <DataTemplate DataType="settings:CustomKeyboardLayout">
+                <Border Classes="settingsListItem">
+                  <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">
+                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                      <TextBlock Classes="settingsListItemText" Text="{Binding Name}" />
+                      <TextBlock Classes="settingsRowDescSm" Text="{Binding Keys.Count, StringFormat=\{0\} keys}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="linkButton" Content="Edit" Tag="{Binding}" Click="EditKeySet_OnClick" VerticalAlignment="Center" />
+                    <Button Grid.Column="2" Classes="linkButton" Content="Duplicate" Tag="{Binding}" Click="DuplicateKeySet_OnClick" VerticalAlignment="Center" />
+                    <Button Grid.Column="3" Classes="linkButton" Content="Delete" Tag="{Binding}" Click="DeleteKeySet_OnClick" VerticalAlignment="Center" />
+                  </Grid>
+                </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-          <Border Classes="videoOverlayCanvas" Padding="10" HorizontalAlignment="Left">
-            <controls:AspectRatioBox AspectRatio="{Binding DraftAspect}" Width="360">
-              <controls:KeyboardOverlayPreview CustomBoard="{Binding DraftBoard}" PressedKeys="{Binding LivePressedKeys}" IsHitTestVisible="False" />
-            </controls:AspectRatioBox>
+
+          <Border Classes="settingsRowDivider" Margin="0" IsVisible="{Binding IsLayoutEditorOpen}" />
+          <Border Classes="settingsRow static" IsVisible="{Binding IsLayoutEditorOpen}">
+            <StackPanel Spacing="14">
+              <StackPanel Spacing="5" MaxWidth="440" HorizontalAlignment="Stretch">
+                <TextBlock Classes="settingsFieldLabel" Text="Name" />
+                <TextBox Classes="settingsInput" Text="{Binding DraftName, Mode=TwoWay}" />
+              </StackPanel>
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                <Button Classes="primaryButton" Content="{Binding ListenButtonText}" Click="ListenKeys_OnClick" />
+                <TextBlock Grid.Column="1" Classes="settingsRowDesc" VerticalAlignment="Center"
+                           Text="Press a key to add it. Release and press again to remove it. Click Stop when finished." />
+              </Grid>
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto" ColumnSpacing="24">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Show mouse" />
+                  <TextBlock Classes="settingsRowDesc" Text="Mouse buttons can't be added by clicking, since clicking is how you use this page." />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding DraftShowMouse, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+              </Grid>
+              <ItemsControl ItemsSource="{Binding DraftKeys}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate DataType="settings:CustomKeyCap">
+                    <Button Classes="keyChip" Tag="{Binding}" Click="RemoveKeySetKey_OnClick"
+                            Content="{Binding Label}" ToolTip.Tip="Remove" Margin="0,0,6,6" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <Border Classes="videoOverlayCanvas" Padding="10" HorizontalAlignment="Left">
+                <controls:AspectRatioBox AspectRatio="{Binding DraftAspect}" Width="360">
+                  <controls:KeyboardOverlayPreview CustomBoard="{Binding DraftBoard}" PressedKeys="{Binding LivePressedKeys}" IsHitTestVisible="False" />
+                </controls:AspectRatioBox>
+              </Border>
+              <TextBlock Classes="settingsRowError" Text="{Binding DraftError}"
+                         IsVisible="{Binding DraftError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button Content="Close" Click="CloseKeySet_OnClick" />
+                <Button Classes="primaryButton" Content="Save" Click="ApplyKeySet_OnClick" />
+              </StackPanel>
+            </StackPanel>
           </Border>
-          <TextBlock Classes="settingsRowDescSm" Foreground="{DynamicResource DangerBrush}" Text="{Binding DraftError}"
-                     IsVisible="{Binding DraftError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
-          <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
-            <Button Grid.Column="1" Content="Close" Click="CloseKeySet_OnClick" />
-            <Button Grid.Column="2" Classes="primaryButton" Content="Save" Click="ApplyKeySet_OnClick" />
-          </Grid>
         </StackPanel>
-        </StackPanel>
-      </StackPanel>
-    </Border>
+      </Border>
+    </StackPanel>
   </StackPanel>
 </UserControl>

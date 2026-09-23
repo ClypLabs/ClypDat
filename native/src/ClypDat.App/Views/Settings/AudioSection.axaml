@@ -12,193 +12,202 @@
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
-  <StackPanel Spacing="18" Tag="Audio">
+  <StackPanel Spacing="24" Tag="Audio">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-    <StackPanel Spacing="4">
-      <TextBlock Classes="settingsSectionTitle" Text="Recording Audio" />
-              <TextBlock Classes="settingsSectionDesc" Text="Choose the Windows mixer apps to capture. Every enabled app is saved as its own editable track." />
-      <Border Classes="settingsDivider" Margin="0,14,0,0" />
+    <StackPanel Spacing="6">
+      <TextBlock Classes="settingsSectionTitle" Text="Recording audio" />
+      <TextBlock Classes="settingsSectionDesc" Text="Choose the Windows mixer apps to capture. Every enabled app is saved as its own editable track." />
     </StackPanel>
 
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
-      <StackPanel Spacing="18">
-        <StackPanel Spacing="14" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
-          <!-- No card title here: the section heading directly above already
-               says "Recording Audio", so repeating it inside the card left two
-               identical titles stacked a few pixels apart. -->
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-              <TextBlock Classes="settingsRowTitle" Text="Audio Tracks" />
-              <TextBlock Classes="settingsRowDescSm" Text="Each row below is saved as its own editable track." />
-            </StackPanel>
-            <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" VerticalAlignment="Center" />
-          </Grid>
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
+      <TextBlock Classes="settingsGroupLabel" Text="AUDIO TRACKS" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Audio tracks" />
+                <TextBlock Classes="settingsRowDesc" Text="Each row below is saved as its own editable track. Apps playing in the Windows Volume Mixer appear under App tracks." />
+              </StackPanel>
+              <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" VerticalAlignment="Center" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
 
           <!-- Two lists, because the top two rows behave differently from the
                rest: they are always captured and cannot be switched off, so
                mixing them in made their permanently disabled toggles read as
                broken controls. -->
-          <StackPanel Spacing="7">
-            <TextBlock Classes="settingsCardLabel" Text="DEDICATED TRACKS" />
-            <Border Classes="audioProcessList">
-              <StackPanel Spacing="0">
-                <Border Classes="audioProcessRow enabledRow">
-                  <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
-                    <Border Classes="audioRowRail" />
-                    <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" ToolTip.Tip="Always captured" />
-                    <Border Grid.Column="2" Classes="audioIconTile">
-                      <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="17" Height="17" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
-                    <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
-                      <TextBlock Classes="audioTrackName" Text="Game Audio" />
-                      <TextBlock Classes="settingsRowDescSm" Text="Always on" />
+          <Border Classes="settingsRow static">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="settingsPickerLabel" Text="DEDICATED TRACKS" />
+                  <Border Classes="audioProcessList">
+                    <StackPanel Spacing="0">
+                      <Border Classes="audioProcessRow enabledRow">
+                        <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
+                          <Border Classes="audioRowRail" />
+                          <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" ToolTip.Tip="Always captured" />
+                          <Border Grid.Column="2" Classes="audioIconTile">
+                            <PathIcon Data="M4,19H20V21H4V19M6,3H18V17H6V3M8,5V15H16V5H8Z" Width="17" Height="17" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          </Border>
+                          <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Classes="audioTrackName" Text="Game Audio" />
+                            <TextBlock Classes="settingsRowDescSm" Text="Always on" />
+                          </StackPanel>
+                          <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding GameAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding GameAudioVolumePercent}" />
+                          <TextBlock Grid.Column="5" Classes="audioPercent" Text="{Binding GameAudioVolumePercent, StringFormat={}{0:0}%}" />
+                          <Button Grid.Column="6" Classes="volumeReset" Click="ResetGameAudioVolumeButton_OnClick" IsVisible="{Binding !IsGameAudioVolumeDefault}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
+                        </Grid>
+                      </Border>
+                      <Border Classes="audioProcessRow enabledRow">
+                        <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
+                          <Border Classes="audioRowRail" />
+                          <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" ToolTip.Tip="Always captured" />
+                          <Border Grid.Column="2" Classes="audioIconTile">
+                            <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="17" Height="17" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          </Border>
+                          <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Classes="audioTrackName" Text="Microphone" />
+                            <TextBlock Classes="settingsRowDescSm" Text="Always on" />
+                          </StackPanel>
+                          <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding MicrophoneVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding MicrophoneVolumePercent}" />
+                          <TextBlock Grid.Column="5" Classes="audioPercent" Text="{Binding MicrophoneVolumePercent, StringFormat={}{0:0}%}" />
+                          <Button Grid.Column="6" Classes="volumeReset" Click="ResetMicrophoneVolumeButton_OnClick" IsVisible="{Binding !IsMicrophoneVolumeDefault}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
+                        </Grid>
+                      </Border>
                     </StackPanel>
-                    <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding GameAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding GameAudioVolumePercent}" />
-                    <TextBlock Grid.Column="5" Classes="audioPercent" Text="{Binding GameAudioVolumePercent, StringFormat={}{0:0}%}" />
-                    <Button Grid.Column="6" Classes="volumeReset" Click="ResetGameAudioVolumeButton_OnClick" IsVisible="{Binding !IsGameAudioVolumeDefault}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
-                  </Grid>
-                </Border>
-                <Border Classes="audioProcessRow enabledRow">
-                  <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
-                    <Border Classes="audioRowRail" />
-                    <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" ToolTip.Tip="Always captured" />
-                    <Border Grid.Column="2" Classes="audioIconTile">
-                      <PathIcon Data="M12,14C13.66,14 15,12.66 15,11V5C15,3.34 13.66,2 12,2C10.34,2 9,3.34 9,5V11C9,12.66 10.34,14 12,14M17.3,11C17.3,14 14.76,16.1 12,16.1C9.24,16.1 6.7,14 6.7,11H5C5,14.41 7.72,17.23 11,17.72V21H13V17.72C16.28,17.23 19,14.41 19,11H17.3Z" Width="17" Height="17" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
-                    <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
-                      <TextBlock Classes="audioTrackName" Text="Microphone" />
-                      <TextBlock Classes="settingsRowDescSm" Text="Always on" />
-                    </StackPanel>
-                    <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Foreground="{Binding MicrophoneVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding MicrophoneVolumePercent}" />
-                    <TextBlock Grid.Column="5" Classes="audioPercent" Text="{Binding MicrophoneVolumePercent, StringFormat={}{0:0}%}" />
-                    <Button Grid.Column="6" Classes="volumeReset" Click="ResetMicrophoneVolumeButton_OnClick" IsVisible="{Binding !IsMicrophoneVolumeDefault}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
-                  </Grid>
-                </Border>
+                  </Border>
+            </StackPanel>
+          </Border>
+
+          <Border Classes="settingsRow static" Padding="20,0,20,18">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="settingsPickerLabel" Text="APP TRACKS" />
+                  <Border Classes="audioProcessList">
+                    <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Classes="audioProcessRow" Classes.enabledRow="{Binding IsEnabled}">
+                            <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
+                              <Border Classes="audioRowRail" IsVisible="{Binding IsEnabled}" />
+                              <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                              <Border Grid.Column="2" Classes="audioIconTile">
+                                <Grid>
+                                  <TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" FontWeight="Bold" />
+                                  <Image Source="{Binding Icon}" Stretch="Uniform" Margin="5" />
+                                </Grid>
+                              </Border>
+                              <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
+                                <TextBlock Classes="audioTrackName" Text="{Binding Name}" />
+                                <TextBlock Classes="settingsRowDescSm" Text="Separate app track" />
+                              </StackPanel>
+                              <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
+                              <TextBlock Grid.Column="5" Classes="audioPercent" IsEnabled="{Binding IsEnabled}" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" />
+                              <Button Grid.Column="6" Classes="volumeReset" Click="ResetAppVolumeButton_OnClick" IsVisible="{Binding !IsVolumeDefault}" IsEnabled="{Binding IsEnabled}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </Border>
+              <TextBlock Classes="settingsRowDescSm" Text="Enabled apps stay listed and are always separate tracks. Volume goes from 0 to 150% and starts at 100%." />
+            </StackPanel>
+          </Border>
+
+            <TextBlock Classes="settingsCardLabel" Text="AUDIO SOURCES" IsVisible="False" />
+            <StackPanel Spacing="6" IsVisible="False">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Classes="settingsRowTitle" Text="Chat Audio App" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+              <TextBlock Text="Multiple Apps" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" VerticalAlignment="Center" />
+                  <ToggleSwitch IsChecked="{Binding MultiChatAppEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Grid>
+
+              <StackPanel Spacing="6" IsVisible="{Binding !MultiChatAppEnabled}">
+                <TextBlock Classes="settingsRowDescSm" Text="Pick the app whose audio should be tagged Chat Audio in clips." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                  <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
+                  <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                </Grid>
               </StackPanel>
-            </Border>
-          </StackPanel>
 
-          <StackPanel Spacing="7">
-            <TextBlock Classes="settingsCardLabel" Text="APP TRACKS" />
-            <Border Classes="audioProcessList">
-              <ItemsControl ItemsSource="{Binding ActiveAudioProcesses}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Border Classes="audioProcessRow" Classes.enabledRow="{Binding IsEnabled}">
-                      <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
-                        <Border Classes="audioRowRail" IsVisible="{Binding IsEnabled}" />
-                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-                        <Border Grid.Column="2" Classes="audioIconTile">
-                          <Grid>
-                            <TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{StaticResource LinkBrush}" FontWeight="Bold" />
-                            <Image Source="{Binding Icon}" Stretch="Uniform" Margin="5" />
-                          </Grid>
-                        </Border>
-                        <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
-                          <TextBlock Classes="audioTrackName" Text="{Binding Name}" />
-                          <TextBlock Classes="settingsRowDescSm" Text="Separate app track" />
-                        </StackPanel>
-                        <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" IsEnabled="{Binding IsEnabled}" Foreground="{Binding VolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding VolumePercent}" />
-                        <TextBlock Grid.Column="5" Classes="audioPercent" IsEnabled="{Binding IsEnabled}" Text="{Binding VolumePercent, StringFormat={}{0:0}%}" />
-                        <Button Grid.Column="6" Classes="volumeReset" Click="ResetAppVolumeButton_OnClick" IsVisible="{Binding !IsVolumeDefault}" IsEnabled="{Binding IsEnabled}" ToolTip.Tip="Reset to 100%"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
-                      </Grid>
-                    </Border>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </Border>
-            <TextBlock Classes="settingsRowDescSm" Text="Applications currently in Windows Volume Mixer appear here. Enabled apps stay listed and are always separate tracks; volume supports 0–150% and starts at 100%." />
-          </StackPanel>
-        </StackPanel>
-
-        <TextBlock Classes="settingsCardLabel" Text="AUDIO SOURCES" IsVisible="False" />
-        <StackPanel Spacing="6" IsVisible="False">
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="settingsRowTitle" Text="Chat Audio App" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-          <TextBlock Text="Multiple Apps" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" VerticalAlignment="Center" />
-              <ToggleSwitch IsChecked="{Binding MultiChatAppEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+              <StackPanel Spacing="6" IsVisible="{Binding MultiChatAppEnabled}">
+                <TextBlock Classes="settingsRowDescSm" Text="Each app added here gets its own Chat Audio track in saved clips." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                  <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
+                  <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
+                  <Button Grid.Column="2" Content="Add" Click="AddSelectedChatProcessButton_OnClick" />
+                </Grid>
+                <ItemsControl ItemsSource="{Binding ChatAudioApps}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Classes="settingsCard" Padding="14,10" Margin="0,8,0,0">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBlock Text="{Binding}" Foreground="{StaticResource TextStrongBrush}" VerticalAlignment="Center" />
+                          <Button Grid.Column="1" Content="Remove" Click="RemoveChatAudioAppButton_OnClick" />
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
             </StackPanel>
-          </Grid>
-
-          <StackPanel Spacing="6" IsVisible="{Binding !MultiChatAppEnabled}">
-            <TextBlock Classes="settingsRowDescSm" Text="Pick the app whose audio should be tagged Chat Audio in clips." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-              <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
-              <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
-            </Grid>
-          </StackPanel>
-
-          <StackPanel Spacing="6" IsVisible="{Binding MultiChatAppEnabled}">
-            <TextBlock Classes="settingsRowDescSm" Text="Each app added here gets its own Chat Audio track in saved clips." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
-              <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedChatProcess}" HorizontalAlignment="Stretch" />
-              <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
-              <Button Grid.Column="2" Content="Add" Click="AddSelectedChatProcessButton_OnClick" />
-            </Grid>
-            <ItemsControl ItemsSource="{Binding ChatAudioApps}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <Border Classes="settingsCard" Padding="14,10" Margin="0,8,0,0">
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Text="{Binding}" Foreground="{StaticResource TextStrongBrush}" VerticalAlignment="Center" />
-                      <Button Grid.Column="1" Content="Remove" Click="RemoveChatAudioAppButton_OnClick" />
-                    </Grid>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
         </StackPanel>
+      </Border>
+    </StackPanel>
 
-      </StackPanel>
-    </Border>
-
-    <Border Classes="settingsCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Microphone}">
-      <StackPanel Spacing="18">
-        <StackPanel Spacing="6">
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="settingsRowTitle" Text="Microphone" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-          <TextBlock Text="Multiple Mics" Foreground="{StaticResource TextSubtleBrush}" FontSize="12" VerticalAlignment="Center" />
-              <ToggleSwitch IsChecked="{Binding MultiMicrophoneEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-            </StackPanel>
-          </Grid>
-
-          <StackPanel Spacing="6" IsVisible="{Binding !MultiMicrophoneEnabled}">
-            <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
-          </StackPanel>
-
-          <StackPanel Spacing="6" IsVisible="{Binding MultiMicrophoneEnabled}">
-            <TextBlock Classes="settingsRowDescSm" Text="Each microphone added here gets its own track in saved clips." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-              <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
-              <Button Grid.Column="1" Content="Add" Click="AddSelectedMicrophoneButton_OnClick" />
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Microphone}">
+      <TextBlock Classes="settingsGroupLabel" Text="MICROPHONE" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow" IsVisible="{Binding !MultiMicrophoneEnabled}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Microphone" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="The microphone recorded into your clips." />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Classes="settingsInput" Width="260" VerticalAlignment="Center" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" />
             </Grid>
-            <ItemsControl ItemsSource="{Binding SelectedMicrophones}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <Border Classes="settingsCard" Padding="14,10" Margin="0,8,0,0">
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextStrongBrush}" VerticalAlignment="Center" />
-                      <Button Grid.Column="1" Content="Remove" Click="RemoveMicrophoneButton_OnClick" />
-                    </Grid>
-                  </Border>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </StackPanel>
-
-          <Border Classes="settingsCard" Padding="16" Margin="0,6,0,0">
-            <StackPanel Spacing="16">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Spacing="2">
-                  <TextBlock Classes="settingsRowTitle" Text="Mic Test" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  <TextBlock Classes="settingsRowDescSm" Text="Check the level and noise gate before recording." />
+          </Border>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding !MultiMicrophoneEnabled}" />
+          <Border Classes="settingsRow">
+            <StackPanel Spacing="12">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Multiple microphones" />
+                  <TextBlock Classes="settingsRowDesc" Text="Each microphone added here gets its own track in saved clips." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding MultiMicrophoneEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" IsVisible="{Binding MultiMicrophoneEnabled}">
+                <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" HorizontalAlignment="Stretch" />
+                <Button Grid.Column="1" Classes="primaryButton" Content="Add" Click="AddSelectedMicrophoneButton_OnClick" />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <ItemsControl ItemsSource="{Binding SelectedMicrophones}" IsVisible="{Binding MultiMicrophoneEnabled}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Classes="settingsListItem">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                    <TextBlock Classes="settingsListItemText" Text="{Binding Name}" />
+                    <Button Grid.Column="1" Classes="linkButton" Content="Remove" VerticalAlignment="Center" Click="RemoveMicrophoneButton_OnClick" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow static">
+            <StackPanel Spacing="14">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Mic test" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Classes="settingsRowDesc" Text="Check the level and noise gate before recording." />
                 </StackPanel>
                 <Button Grid.Column="1" Content="{Binding MicTestButtonLabel}" Click="ToggleMicTestButton_OnClick" VerticalAlignment="Center" />
               </Grid>
-
               <controls:MicLevelMeter Height="22"
                                       LevelDb="{Binding MicTestLevelDb}"
                                       ThresholdDb="{Binding MicrophoneNoiseGateThresholdDb}"
@@ -207,52 +216,53 @@
                                       ToolTip.Tip="Green shows the current microphone level. The vertical line marks the noise gate threshold." />
             </StackPanel>
           </Border>
-
-          <Border Classes="settingsCard" Padding="16" Margin="0,6,0,0">
-            <StackPanel Spacing="16">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Text="Noise suppression" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  <TextBlock Classes="settingsRowDescSm" Text="Uses RNNoise to reduce steady background noise before the microphone is saved." />
-                </StackPanel>
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicrophoneNoiseSuppressionEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
-              </Grid>
-
-              <StackPanel Spacing="6" IsEnabled="{Binding MicrophoneNoiseSuppressionEnabled}">
-                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                  <StackPanel Spacing="2">
-                    <TextBlock Text="Noise gate" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                    <TextBlock Classes="settingsRowDescSm" Text="Mutes audio below this level after noise suppression. Leave it off unless background sound still gets through." />
-                  </StackPanel>
-                  <TextBlock Grid.Column="1" Text="{Binding MicrophoneNoiseGateThresholdDisplay}" Foreground="{StaticResource TextBrush}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" />
-                </Grid>
-                <Grid RowDefinitions="Auto,18" Margin="0,2,0,0">
-                  <Slider Grid.Row="0" Classes="volumeSlider" Minimum="{Binding MicrophoneNoiseGateFloorDb}" Maximum="{Binding MicrophoneNoiseGateMaximumDb}"
-                          SmallChange="1" LargeChange="5" TickFrequency="25" TickPlacement="BottomRight"
-                          Value="{Binding MicrophoneNoiseGateThresholdDb}" />
-                  <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,*,Auto,*,Auto" Margin="-2,0,-2,0">
-                    <TextBlock Text="-100 dB" Foreground="{StaticResource TextMutedBrush}" FontSize="10" VerticalAlignment="Bottom" />
-                    <TextBlock Grid.Column="2" Text="-75 dB" Foreground="{StaticResource TextMutedBrush}" FontSize="10" VerticalAlignment="Bottom" HorizontalAlignment="Center" />
-                    <TextBlock Grid.Column="4" Text="-50 dB" Foreground="{StaticResource TextMutedBrush}" FontSize="10" VerticalAlignment="Bottom" HorizontalAlignment="Center" />
-                    <TextBlock Grid.Column="6" Text="-25 dB" Foreground="{StaticResource TextMutedBrush}" FontSize="10" VerticalAlignment="Bottom" HorizontalAlignment="Right" />
-                  </Grid>
-                </Grid>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Noise suppression" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Uses RNNoise to reduce steady background noise before the microphone is saved." />
               </StackPanel>
-
-              <!-- Applies to the saved track, not to capture, so it
-                   takes effect on the next saved clip without needing
-                   the replay buffer restarted. -->
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Text="Mono microphone" Foreground="{StaticResource TextStrongBrush}" FontWeight="SemiBold" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                  <TextBlock Classes="settingsRowDescSm" Text="On records mono, which suits most headsets and desk mics. Turn off only for a genuine two-channel microphone." />
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicrophoneNoiseSuppressionEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow static" IsEnabled="{Binding MicrophoneNoiseSuppressionEnabled}">
+            <StackPanel Spacing="10">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Noise gate" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Classes="settingsRowDesc" Text="Mutes audio below this level after noise suppression. Leave it off unless background sound still gets through." />
                 </StackPanel>
-                <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicrophoneMonoInput}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Classes="settingsRowTitle" Text="{Binding MicrophoneNoiseGateThresholdDisplay}" VerticalAlignment="Center" />
+              </Grid>
+              <Grid RowDefinitions="Auto,18" MaxWidth="600" HorizontalAlignment="Stretch">
+                <Slider Grid.Row="0" Classes="volumeSlider" Minimum="{Binding MicrophoneNoiseGateFloorDb}" Maximum="{Binding MicrophoneNoiseGateMaximumDb}"
+                        SmallChange="1" LargeChange="5" TickFrequency="25" TickPlacement="BottomRight"
+                        Value="{Binding MicrophoneNoiseGateThresholdDb}" />
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,*,Auto,*,Auto" Margin="-2,0,-2,0">
+                  <TextBlock Classes="settingsPickerLabel" Text="-100 dB" VerticalAlignment="Bottom" />
+                  <TextBlock Grid.Column="2" Classes="settingsPickerLabel" Text="-75 dB" VerticalAlignment="Bottom" HorizontalAlignment="Center" />
+                  <TextBlock Grid.Column="4" Classes="settingsPickerLabel" Text="-50 dB" VerticalAlignment="Bottom" HorizontalAlignment="Center" />
+                  <TextBlock Grid.Column="6" Classes="settingsPickerLabel" Text="-25 dB" VerticalAlignment="Bottom" HorizontalAlignment="Right" />
+                </Grid>
               </Grid>
             </StackPanel>
           </Border>
+          <Border Classes="settingsRowDivider" />
+          <!-- Applies to the saved track, not to capture, so it takes effect on
+               the next saved clip without needing the replay buffer restarted. -->
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Mono microphone" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Records in mono, which suits most headsets and desk mics. Turn off only for a genuine two-channel microphone." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding MicrophoneMonoInput}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
         </StackPanel>
-      </StackPanel>
-    </Border>
+      </Border>
+    </StackPanel>
   </StackPanel>
 </UserControl>

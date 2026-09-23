@@ -32,12 +32,11 @@
     </MultiBinding>
   </UserControl.IsVisible>
 
-  <StackPanel Spacing="18" Tag="Connected Accounts">
+  <StackPanel Spacing="24" Tag="Connected Accounts">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
-    <StackPanel Spacing="4">
-      <TextBlock Classes="settingsSectionTitle" Text="Connected Accounts" />
-      <TextBlock Classes="settingsSectionDesc" Text="Manage ClypDat sign-in, Spotify, optional social accounts, and Xbox activity." />
-      <Border Classes="settingsDivider" Margin="0,14,0,0" />
+    <StackPanel Spacing="6">
+      <TextBlock Classes="settingsSectionTitle" Text="Connected accounts" />
+      <TextBlock Classes="settingsSectionDesc" Text="Manage ClypDat sign-in, Spotify, optional social accounts and Xbox activity." />
     </StackPanel>
     <!-- DataContext switches to the PolicyPause, so visibility lives on the wrapper. -->
     <Panel IsVisible="{Binding SpotifyPolicyBlocked}">
@@ -48,200 +47,223 @@
       <controls:PolicyPauseBanner DataContext="{Binding XboxPolicyPause}" />
     </Panel>
 
-    <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
-        <TextBlock Classes="settingsCardLabel" Text="CLYPDAT ACCOUNT" />
-        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
-          <!-- The Discord picture when the account has Discord linked; the
-               ClypDat mark otherwise, including while the picture downloads. -->
-          <Panel VerticalAlignment="Center">
-            <Border Width="40" Height="40" CornerRadius="12"
-                    Background="{StaticResource SurfaceHoverBrush}"
-                    BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
-                    IsVisible="{Binding !ClypDatHasAvatar}">
-              <Image Source="{DynamicResource AppLogoLarge}" Width="22" Height="22" RenderOptions.BitmapInterpolationMode="HighQuality"
-                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <!-- Picture and ring are the same 40x40 square, so the picture is
-                 centred and sits wholly inside the circle. GIF and WebP play. -->
-            <Panel Width="40" Height="40" IsVisible="{Binding ClypDatHasAvatar}">
-              <controls:AnimatedAvatarImage Source="{Binding ClypDatAvatar}" RenderOptions.BitmapInterpolationMode="HighQuality" />
-              <Ellipse Stroke="{StaticResource EdgeStrongBrush}" StrokeThickness="1" />
-            </Panel>
-          </Panel>
-          <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="{Binding ClypDatAccountTitle}" TextTrimming="CharacterEllipsis" />
-            <TextBlock Classes="settingsRowTitle" Text="{Binding ClypDatPairingCode}"
-                       IsVisible="{Binding ClypDatPairingCodeVisible}" />
-            <!-- Connected is a state, so it is a pill. Every other value of
-                 ClypDatAccountStatus is a sentence telling you what to do next,
-                 so it stays body text. -->
-            <Border Classes="statusPill ok" IsVisible="{Binding ClypDatAccountIsConnected}">
-              <StackPanel Orientation="Horizontal" Spacing="6">
-                <Ellipse />
-                <TextBlock Text="Signed in" />
+    <StackPanel Classes="settingsGroup">
+      <TextBlock Classes="settingsGroupLabel" Text="CLYPDAT ACCOUNT" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow static">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+              <!-- The Discord picture when the account has Discord linked; the
+                   ClypDat mark otherwise, including while the picture downloads. -->
+              <Panel VerticalAlignment="Center">
+                <Border Width="40" Height="40" CornerRadius="12"
+                        Background="{StaticResource SurfaceHoverBrush}"
+                        BorderBrush="{StaticResource EdgeStrongBrush}" BorderThickness="1"
+                        IsVisible="{Binding !ClypDatHasAvatar}">
+                  <Image Source="{DynamicResource AppLogoLarge}" Width="22" Height="22" RenderOptions.BitmapInterpolationMode="HighQuality"
+                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <!-- Picture and ring are the same 40x40 square, so the picture is
+                     centred and sits wholly inside the circle. GIF and WebP play. -->
+                <Panel Width="40" Height="40" IsVisible="{Binding ClypDatHasAvatar}">
+                  <controls:AnimatedAvatarImage Source="{Binding ClypDatAvatar}" RenderOptions.BitmapInterpolationMode="HighQuality" />
+                  <Ellipse Stroke="{StaticResource EdgeStrongBrush}" StrokeThickness="1" />
+                </Panel>
+              </Panel>
+              <StackPanel Grid.Column="1" Classes="settingsRowText" Spacing="5">
+                <TextBlock Classes="settingsRowTitle" Text="{Binding ClypDatAccountTitle}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="settingsRowTitle" Text="{Binding ClypDatPairingCode}"
+                           IsVisible="{Binding ClypDatPairingCodeVisible}" />
+                <!-- Connected is a state, so it is a pill. Every other value of
+                     ClypDatAccountStatus is a sentence telling you what to do next,
+                     so it stays body text. -->
+                <Border Classes="statusPill ok" IsVisible="{Binding ClypDatAccountIsConnected}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Ellipse />
+                    <TextBlock Text="Signed in" />
+                  </StackPanel>
+                </Border>
+                <TextBlock Classes="settingsRowDesc" Text="{Binding ClypDatAccountStatus}"
+                           IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
               </StackPanel>
-            </Border>
-            <TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountStatus}" TextWrapping="Wrap"
-                       IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}" />
-          </StackPanel>
-          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <!-- One button: clypdat.xyz asks the person to sign in (or make an
-                 account) first when they need to, then to confirm the code. -->
-            <Button Classes="primaryButton" Click="LinkClypDatButton_OnClick"
-                    IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}"
-                    IsEnabled="{Binding ClypDatAccountCanLink}">
-              <Grid>
-                <TextBlock Text="Sign in" IsVisible="{Binding !ClypDatLinkBusy}" VerticalAlignment="Center" />
-                <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding ClypDatLinkBusy}">
-                  <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                  <TextBlock Text="Waiting for your browser…" VerticalAlignment="Center" />
-                </StackPanel>
+              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <!-- One button: clypdat.xyz asks the person to sign in (or make an
+                     account) first when they need to, then to confirm the code. -->
+                <Button Classes="primaryButton" Click="LinkClypDatButton_OnClick"
+                        IsVisible="{Binding ClypDatAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}"
+                        IsEnabled="{Binding ClypDatAccountCanLink}">
+                  <Grid>
+                    <TextBlock Text="Sign in" IsVisible="{Binding !ClypDatLinkBusy}" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding ClypDatLinkBusy}">
+                      <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                      <TextBlock Text="Waiting for your browser…" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
+                <Button Content="Cancel" Click="CancelClypDatLinkButton_OnClick" IsVisible="{Binding ClypDatLinkBusy}"
+                        ToolTip.Tip="Stop waiting for the browser." />
+                <Button Content="Refresh" Click="RefreshClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}"
+                        ToolTip.Tip="Re-read your linked accounts and pull your current Discord name and picture. ClypDat also checks Discord every 30 minutes." />
+                <Button Content="Sign out" Click="UnlinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" />
+              </StackPanel>
+            </Grid>
+          </Border>
+          <Border Classes="settingsRow static" Padding="20,0,20,16" MinHeight="0" IsVisible="{Binding ClypDatServerUnavailable}">
+            <Border Classes="settingsNotice">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBlock Classes="settingsNoticeText" Text="{Binding ClypDatServerUnavailableText}" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="Service status" Click="ServiceStatusButton_OnClick" VerticalAlignment="Center"
+                        ToolTip.Tip="Open status.clypdat.xyz in your browser." />
               </Grid>
-            </Button>
-            <Button Content="Cancel" Click="CancelClypDatLinkButton_OnClick" IsVisible="{Binding ClypDatLinkBusy}"
-                    ToolTip.Tip="Stop waiting for the browser." />
-            <Button Content="Refresh" Click="RefreshClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}"
-                    ToolTip.Tip="Re-read your linked accounts and pull your current Discord name and picture. ClypDat also checks Discord every 30 minutes." />
-            <Button Content="Sign out" Click="UnlinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" />
-          </StackPanel>
-        </Grid>
-        <Border Classes="settingsNotice" IsVisible="{Binding ClypDatServerUnavailable}">
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-            <TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatServerUnavailableText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-            <Button Grid.Column="1" Content="Service status" Click="ServiceStatusButton_OnClick" VerticalAlignment="Center"
-                    ToolTip.Tip="Open status.clypdat.xyz in your browser." />
-          </Grid>
-        </Border>
-      </StackPanel>
-    </Border>
+            </Border>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
 
     <!-- Spotify needs no ClypDat account, so it is not inside the signed-in
          block below. It reads the Spotify app on this PC through Windows'
          media controls; signing in with Spotify is optional, because Spotify
          only lets a few approved accounts use ClypDat's sign-in. -->
-    <Border Classes="settingsCard">
-      <StackPanel Spacing="14">
-        <TextBlock Classes="settingsCardLabel" Text="SPOTIFY" />
-        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-          <Border Classes="providerBadge" Background="{StaticResource SpotifyBadgeBrush}" VerticalAlignment="Center">
-            <PathIcon Data="{StaticResource SpotifyMark}" Foreground="{StaticResource SpotifyBrandBrush}" />
-          </Border>
-          <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
-            <TextBlock Classes="settingsRowTitle" Text="Spotify" />
-            <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding !SpotifyIsConnected}"
-                       Text="Show the song, artist and cover playing while a clip was captured. Reads the Spotify app on this PC - no sign-in needed." />
-            <!-- The now-playing line doubles as the proof the connection is
-                 reading anything, the way the Xbox row uses the title it is
-                 currently polling. -->
-            <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding SpotifyIsConnected}">
-              <Border Classes="statusPill ok">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                  <Ellipse />
-                  <TextBlock Text="On" />
-                </StackPanel>
+    <StackPanel Classes="settingsGroup">
+      <TextBlock Classes="settingsGroupLabel" Text="SPOTIFY" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow static">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+              <Border Classes="providerBadge" Background="{StaticResource SpotifyBadgeBrush}" VerticalAlignment="Center">
+                <PathIcon Data="{StaticResource SpotifyMark}" Foreground="{StaticResource SpotifyBrandBrush}" />
               </Border>
-              <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyNowPlayingLabel}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="340" />
-              <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyTrackLength}" VerticalAlignment="Center" IsVisible="{Binding SpotifyHasTrack}" />
-            </StackPanel>
-            <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyAccountStatus}" TextWrapping="Wrap" IsVisible="{Binding SpotifyIsConnected}" />
-          </StackPanel>
-          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-            <Button Classes="primaryButton" Content="Turn on" Click="ConnectSpotifyButton_OnClick"
-                    IsVisible="{Binding !SpotifyIsConnected}" IsEnabled="{Binding SpotifyConnectEnabled}" />
-            <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}"
-                    IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="Choose where the track sits on your clips." />
-            <Button Content="Turn off" Click="DisconnectSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}"
-                    ToolTip.Tip="Stop reading Spotify, and forget the Spotify sign-in if there is one." />
-          </StackPanel>
-        </Grid>
-        <Border Classes="settingsNotice" IsVisible="{Binding SpotifyHasNotice}">
-          <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyNotice}" TextWrapping="Wrap" />
-        </Border>
-        <!-- Advanced: sign-in goes through the user's own Spotify developer
-             app. ClypDat's shared one could only ever take five people
-             (Spotify's Development Mode cap); with their own app each person
-             is its first user. SpotifyOwnAppDialog walks through making one. -->
-        <Border Classes="providerSetting" IsVisible="{Binding SpotifyIsConnected}">
-          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-              <TextBlock Classes="settingsRowTitleSm" Text="Advanced: use your own Spotify app" />
-              <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding !SpotifyAccountConnected}"
-                         Text="Also shows songs you play on your phone, the web player or another device, not just the Spotify app on this PC. Takes a couple of minutes with a free Spotify developer app (the Spotify account needs Premium)." />
-              <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" IsVisible="{Binding SpotifyAccountConnected}"
-                         Text="Signed in through your own Spotify app. Signing out keeps reading the Spotify app on this PC." />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-              <Button Content="Set up…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding !SpotifyHasOwnApp}"
-                      IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="A one-page guide to making your own Spotify app." />
-              <Button Click="SignInSpotifyButton_OnClick" IsEnabled="{Binding SpotifySignInEnabled}" IsVisible="{Binding SpotifyCanSignIn}">
-                <Grid>
-                  <TextBlock Text="Sign in" IsVisible="{Binding !SpotifyConnectBusy}" VerticalAlignment="Center" />
-                  <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding SpotifyConnectBusy}">
-                    <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                    <TextBlock Text="Waiting for Spotify…" VerticalAlignment="Center" />
-                  </StackPanel>
-                </Grid>
-              </Button>
-              <Button Content="Cancel" Click="CancelSpotifySignInButton_OnClick" IsVisible="{Binding SpotifyConnectBusy}"
-                      ToolTip.Tip="Stop waiting for the browser." />
-              <Button Content="Sign out" Click="SignOutSpotifyButton_OnClick" IsVisible="{Binding SpotifyAccountConnected}" />
-              <Button Content="Change app…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding SpotifyHasOwnApp}"
-                      ToolTip.Tip="Open the guide again, or forget this Spotify app." />
-            </StackPanel>
-          </Grid>
-        </Border>
-      </StackPanel>
-    </Border>
+              <StackPanel Grid.Column="1" Classes="settingsRowText" Spacing="5">
+                <TextBlock Classes="settingsRowTitle" Text="Spotify" />
+                <TextBlock Classes="settingsRowDesc" IsVisible="{Binding !SpotifyIsConnected}"
+                           Text="Show the song, artist and cover playing while a clip was captured. Reads the Spotify app on this PC, so no sign-in is needed." />
+                <!-- The now-playing line doubles as the proof the connection is
+                     reading anything, the way the Xbox row uses the title it is
+                     currently polling. -->
+                <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding SpotifyIsConnected}">
+                  <Border Classes="statusPill ok">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Ellipse />
+                      <TextBlock Text="On" />
+                    </StackPanel>
+                  </Border>
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyNowPlayingLabel}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="340" />
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding SpotifyTrackLength}" VerticalAlignment="Center" IsVisible="{Binding SpotifyHasTrack}" />
+                </StackPanel>
+                <TextBlock Classes="settingsRowDesc" Text="{Binding SpotifyAccountStatus}" IsVisible="{Binding SpotifyIsConnected}" />
+              </StackPanel>
+              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Classes="primaryButton" Content="Turn on" Click="ConnectSpotifyButton_OnClick"
+                        IsVisible="{Binding !SpotifyIsConnected}" IsEnabled="{Binding SpotifyConnectEnabled}" />
+                <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}"
+                        IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="Choose where the track sits on your clips." />
+                <Button Content="Turn off" Click="DisconnectSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}"
+                        ToolTip.Tip="Stop reading Spotify, and forget the Spotify sign-in if there is one." />
+              </StackPanel>
+            </Grid>
+          </Border>
+          <Border Classes="settingsRow static" Padding="20,0,20,16" MinHeight="0" IsVisible="{Binding SpotifyHasNotice}">
+            <Border Classes="settingsNotice">
+              <TextBlock Classes="settingsNoticeText" Text="{Binding SpotifyNotice}" />
+            </Border>
+          </Border>
+          <!-- Advanced: sign-in goes through the user's own Spotify developer
+               app. ClypDat's shared one could only ever take five people
+               (Spotify's Development Mode cap); with their own app each person
+               is its first user. SpotifyOwnAppDialog walks through making one. -->
+          <Border Classes="settingsRowDivider" IsVisible="{Binding SpotifyIsConnected}" />
+          <Border Classes="settingsRow" IsVisible="{Binding SpotifyIsConnected}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Advanced: use your own Spotify app" />
+                <TextBlock Classes="settingsRowDesc" IsVisible="{Binding !SpotifyAccountConnected}"
+                           Text="Also shows songs you play on your phone, the web player or another device, not just the Spotify app on this PC. Takes a couple of minutes with a free Spotify developer app (the Spotify account needs Premium)." />
+                <TextBlock Classes="settingsRowDesc" IsVisible="{Binding SpotifyAccountConnected}"
+                           Text="Signed in through your own Spotify app. Signing out keeps reading the Spotify app on this PC." />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Content="Set up…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding !SpotifyHasOwnApp}"
+                        IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="A one-page guide to making your own Spotify app." />
+                <Button Click="SignInSpotifyButton_OnClick" IsEnabled="{Binding SpotifySignInEnabled}" IsVisible="{Binding SpotifyCanSignIn}">
+                  <Grid>
+                    <TextBlock Text="Sign in" IsVisible="{Binding !SpotifyConnectBusy}" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding SpotifyConnectBusy}">
+                      <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                      <TextBlock Text="Waiting for Spotify…" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
+                <Button Content="Cancel" Click="CancelSpotifySignInButton_OnClick" IsVisible="{Binding SpotifyConnectBusy}"
+                        ToolTip.Tip="Stop waiting for the browser." />
+                <Button Content="Sign out" Click="SignOutSpotifyButton_OnClick" IsVisible="{Binding SpotifyAccountConnected}" />
+                <Button Content="Change app…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding SpotifyHasOwnApp}"
+                        ToolTip.Tip="Open the guide again, or forget this Spotify app." />
+              </StackPanel>
+            </Grid>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
 
-    <StackPanel Spacing="18" IsVisible="{Binding ClypDatAccountIsConnected}">
-      <Border Classes="settingsCard" IsVisible="{Binding HasAccountsToAdd}">
-        <StackPanel Spacing="14">
-          <TextBlock Classes="settingsCardLabel" Text="ADD AN ACCOUNT" />
-          <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Add Discord or optional Xbox activity. Both open clypdat.xyz in your browser." />
-          <StackPanel Spacing="10">
-            <Border Classes="providerRow" IsVisible="{Binding DiscordAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}">
-              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <Border Classes="providerBadge" Background="{StaticResource DiscordBadgeBrush}">
+    <StackPanel Spacing="24" IsVisible="{Binding ClypDatAccountIsConnected}">
+      <StackPanel Classes="settingsGroup" IsVisible="{Binding HasAccountsToAdd}">
+        <TextBlock Classes="settingsGroupLabel" Text="ADD AN ACCOUNT" />
+        <TextBlock Classes="settingsGroupDesc" Text="Add Discord or optional Xbox activity. Both open clypdat.xyz in your browser." />
+        <Border Classes="settingsGroupCard">
+          <StackPanel>
+            <Border Classes="settingsRow" IsVisible="{Binding DiscordAccountIsConnected, Converter={x:Static conv:BoolConverters.Not}}">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+                <Border Classes="providerBadge" Background="{StaticResource DiscordBadgeBrush}" VerticalAlignment="Center">
                   <PathIcon Data="{StaticResource DiscordMark}" Foreground="{StaticResource DiscordBrandBrush}" />
                 </Border>
-                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Classes="settingsRowText">
                   <TextBlock Classes="settingsRowTitle" Text="Discord" />
-                  <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap" Text="Sign in with Discord and show your Discord name and picture here." />
+                  <TextBlock Classes="settingsRowDesc" Text="Sign in with Discord and show your Discord name and picture here." />
                 </StackPanel>
                 <Button Grid.Column="2" VerticalAlignment="Center" Tag="discord" Content="Connect" Click="OpenSocialAccountButton_OnClick" />
               </Grid>
             </Border>
-            <Border Classes="providerRow" IsVisible="{Binding ClypDatXboxIsLinked, Converter={x:Static conv:BoolConverters.Not}}">
-              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <Border Classes="providerBadge" Background="{StaticResource XboxBadgeBrush}">
+            <Border Classes="settingsRowDivider">
+              <Border.IsVisible>
+                <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
+                  <Binding Path="!DiscordAccountIsConnected" />
+                  <Binding Path="!ClypDatXboxIsLinked" />
+                </MultiBinding>
+              </Border.IsVisible>
+            </Border>
+            <Border Classes="settingsRow" IsVisible="{Binding ClypDatXboxIsLinked, Converter={x:Static conv:BoolConverters.Not}}">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+                <Border Classes="providerBadge" Background="{StaticResource XboxBadgeBrush}" VerticalAlignment="Center">
                   <PathIcon Data="{StaticResource XboxMark}" Foreground="{StaticResource XboxBrandBrush}" />
                 </Border>
-                <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Classes="settingsRowText">
                   <TextBlock Classes="settingsRowTitle" Text="Xbox" />
-                  <TextBlock Classes="settingsRowDescSm" Text="Name Desktop Capture clips after the game you are playing on Xbox." />
+                  <TextBlock Classes="settingsRowDesc" Text="Name Desktop Capture clips after the game you're playing on Xbox." />
                 </StackPanel>
                 <Button Grid.Column="2" VerticalAlignment="Center" Content="Connect" Click="CreateClypDatButton_OnClick" />
               </Grid>
             </Border>
           </StackPanel>
-        </StackPanel>
-      </Border>
+        </Border>
+      </StackPanel>
 
-      <Border Classes="settingsCard" IsVisible="{Binding HasLinkedAccounts}">
-        <StackPanel Spacing="14">
-          <TextBlock Classes="settingsCardLabel" Text="CONNECTED" />
-          <TextBlock Classes="settingsRowDescSm" Text="Unlink here. Refresh after changing anything on clypdat.xyz in your browser." />
-          <Border Classes="settingsNotice" IsVisible="{Binding ClypDatAccountHasError}">
-            <TextBlock Classes="settingsRowDescSm" Text="{Binding ClypDatAccountError}" TextWrapping="Wrap" />
-          </Border>
-          <StackPanel Spacing="10">
-            <Border Classes="providerRow" IsVisible="{Binding DiscordAccountIsConnected}">
-              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                <Border Classes="providerBadge" Background="{StaticResource DiscordBadgeBrush}">
+      <StackPanel Classes="settingsGroup" IsVisible="{Binding HasLinkedAccounts}">
+        <TextBlock Classes="settingsGroupLabel" Text="CONNECTED" />
+        <TextBlock Classes="settingsGroupDesc" Text="Disconnect accounts here. Refresh your ClypDat account after changing anything on clypdat.xyz." />
+        <Border Classes="settingsGroupCard">
+          <StackPanel>
+            <Border Classes="settingsRow static" IsVisible="{Binding ClypDatAccountHasError}">
+              <Border Classes="settingsNotice">
+                <TextBlock Classes="settingsNoticeText" Text="{Binding ClypDatAccountError}" />
+              </Border>
+            </Border>
+            <Border Classes="settingsRow" IsVisible="{Binding DiscordAccountIsConnected}">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+                <Border Classes="providerBadge" Background="{StaticResource DiscordBadgeBrush}" VerticalAlignment="Center">
                   <PathIcon Data="{StaticResource DiscordMark}" Foreground="{StaticResource DiscordBrandBrush}" />
                 </Border>
-                <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Classes="settingsRowText" Spacing="5">
                   <TextBlock Classes="settingsRowTitle" Text="Discord" />
                   <Border Classes="statusPill ok">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -250,71 +272,73 @@
                     </StackPanel>
                   </Border>
                 </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                  <Button Tag="discord" Click="UnlinkSocialAccountButton_OnClick" IsEnabled="{Binding !DiscordUnlinkBusy}">
-                    <Grid>
-                      <TextBlock Text="Disconnect" IsVisible="{Binding !DiscordUnlinkBusy}" VerticalAlignment="Center" />
-                      <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding DiscordUnlinkBusy}">
-                        <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Disconnecting…" VerticalAlignment="Center" />
-                      </StackPanel>
-                    </Grid>
-                  </Button>
-                </StackPanel>
+                <Button Grid.Column="2" VerticalAlignment="Center" Tag="discord" Click="UnlinkSocialAccountButton_OnClick" IsEnabled="{Binding !DiscordUnlinkBusy}">
+                  <Grid>
+                    <TextBlock Text="Disconnect" IsVisible="{Binding !DiscordUnlinkBusy}" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding DiscordUnlinkBusy}">
+                      <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                      <TextBlock Text="Disconnecting…" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
               </Grid>
             </Border>
-            <!-- The one setting Xbox brings with it lives inside the Xbox row.
-                 It used to sit under the whole card, where it read as a card-wide
-                 option and left the card ending on a rule below an unrelated
-                 provider. Inside the row it inherits the row's visibility too, so
-                 it is present exactly when there is an Xbox account to apply it to. -->
-            <Border Classes="providerRow" IsVisible="{Binding ClypDatXboxIsLinked}">
-              <StackPanel Spacing="12">
-                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                  <Border Classes="providerBadge" Background="{StaticResource XboxBadgeBrush}">
-                    <PathIcon Data="{StaticResource XboxMark}" Foreground="{StaticResource XboxBrandBrush}" />
-                  </Border>
-                  <StackPanel Grid.Column="1" Spacing="5" VerticalAlignment="Center">
-                    <TextBlock Classes="settingsRowTitle" Text="Xbox" />
-                    <!-- The pill is the link state; what you are playing sits
-                         beside it. XboxCurrentTitle is what the activity poll
-                         actually fetches, and the toggle below names clips after
-                         it, so the row that owns that setting is where you check
-                         whether it is reading anything. -->
-                    <StackPanel Orientation="Horizontal" Spacing="10">
-                      <Border Classes="statusPill ok">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                          <Ellipse />
-                          <TextBlock Text="Connected" />
-                        </StackPanel>
-                      </Border>
-                      <TextBlock Classes="settingsRowDescSm" Text="{Binding XboxCurrentTitle}" VerticalAlignment="Center" />
-                    </StackPanel>
-                  </StackPanel>
-                  <Button Grid.Column="2" VerticalAlignment="Center" Click="UnlinkClypDatXboxButton_OnClick" IsEnabled="{Binding !XboxUnlinkBusy}">
-                    <Grid>
-                      <TextBlock Text="Disconnect" IsVisible="{Binding !XboxUnlinkBusy}" VerticalAlignment="Center" />
-                      <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding XboxUnlinkBusy}">
-                        <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Disconnecting…" VerticalAlignment="Center" />
-                      </StackPanel>
-                    </Grid>
-                  </Button>
-                </Grid>
-                <Border Classes="providerSetting">
-                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                    <StackPanel Spacing="2" VerticalAlignment="Center">
-                      <TextBlock Classes="settingsRowTitleSm" Text="Use Xbox activity for Desktop Capture" />
-                      <TextBlock Classes="settingsRowDescSm" Text="Names Desktop Capture clips after the game you are playing on Xbox. PC Game Capture stays higher priority." />
-                    </StackPanel>
-                      <ToggleSwitch Grid.Column="1" VerticalAlignment="Center" IsChecked="{Binding XboxActivityForDesktop}" IsEnabled="{Binding !XboxPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" />
-                  </Grid>
+            <Border Classes="settingsRowDivider">
+              <Border.IsVisible>
+                <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
+                  <Binding Path="DiscordAccountIsConnected" />
+                  <Binding Path="ClypDatXboxIsLinked" />
+                </MultiBinding>
+              </Border.IsVisible>
+            </Border>
+            <Border Classes="settingsRow" IsVisible="{Binding ClypDatXboxIsLinked}">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="14">
+                <Border Classes="providerBadge" Background="{StaticResource XboxBadgeBrush}" VerticalAlignment="Center">
+                  <PathIcon Data="{StaticResource XboxMark}" Foreground="{StaticResource XboxBrandBrush}" />
                 </Border>
-              </StackPanel>
+                <!-- The pill is the link state; what you are playing sits beside
+                     it. XboxCurrentTitle is what the activity poll actually
+                     fetches, and the toggle below names clips after it, so this
+                     row is where you check whether it is reading anything. -->
+                <StackPanel Grid.Column="1" Classes="settingsRowText" Spacing="5">
+                  <TextBlock Classes="settingsRowTitle" Text="Xbox" />
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Border Classes="statusPill ok">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse />
+                        <TextBlock Text="Connected" />
+                      </StackPanel>
+                    </Border>
+                    <TextBlock Classes="settingsRowDescSm" Text="{Binding XboxCurrentTitle}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </StackPanel>
+                <Button Grid.Column="2" VerticalAlignment="Center" Click="UnlinkClypDatXboxButton_OnClick" IsEnabled="{Binding !XboxUnlinkBusy}">
+                  <Grid>
+                    <TextBlock Text="Disconnect" IsVisible="{Binding !XboxUnlinkBusy}" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="7" IsVisible="{Binding XboxUnlinkBusy}">
+                      <controls:ClypDatLoader Width="14" Height="14" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" />
+                      <TextBlock Text="Disconnecting…" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
+              </Grid>
+            </Border>
+            <!-- The one setting Xbox brings with it sits right under the Xbox
+                 row, and shares its visibility: it is present exactly when there
+                 is an Xbox account to apply it to. -->
+            <Border Classes="settingsRowDivider" IsVisible="{Binding ClypDatXboxIsLinked}" />
+            <Border Classes="settingsRow" IsVisible="{Binding ClypDatXboxIsLinked}">
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Use Xbox activity for Desktop Capture" />
+                  <TextBlock Classes="settingsRowDesc" Text="Names Desktop Capture clips after the game you're playing on Xbox. PC Game Capture stays higher priority." />
+                </StackPanel>
+                <ToggleSwitch Grid.Column="1" IsChecked="{Binding XboxActivityForDesktop}" IsEnabled="{Binding !XboxPolicyBlocked}" OnContent="{x:Null}" OffContent="{x:Null}" />
+              </Grid>
             </Border>
           </StackPanel>
-        </StackPanel>
-      </Border>
+        </Border>
+      </StackPanel>
     </StackPanel>
   </StackPanel>
 </UserControl>
