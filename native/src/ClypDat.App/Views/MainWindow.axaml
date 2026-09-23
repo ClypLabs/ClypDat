@@ -52,10 +52,10 @@
                  HighQuality actually uses that detail. -->
             <Image Source="{DynamicResource AppLogoLarge}" Width="32" Height="32" RenderOptions.BitmapInterpolationMode="HighQuality" />
           </Button>
-          <Button x:Name="BackNavButton" Classes="linkButton" Click="BackNavButton_OnClick" ToolTip.Tip="Back" Padding="6" Margin="6,0,0,0">
+          <Button x:Name="BackNavButton" Classes="linkButton" Click="BackNavButton_OnClick" Padding="6" Margin="6,0,0,0">
             <PathIcon Data="M15.41,7.41L14,6l-6,6l6,6l1.41-1.41L10.83,12L15.41,7.41z" Width="16" Height="16" />
           </Button>
-          <Button x:Name="ForwardNavButton" Classes="linkButton" Click="ForwardNavButton_OnClick" ToolTip.Tip="Forward" Padding="6">
+          <Button x:Name="ForwardNavButton" Classes="linkButton" Click="ForwardNavButton_OnClick" Padding="6">
             <PathIcon Data="M8.59,16.59L10,18l6-6l-6-6L8.59,7.41L13.17,12L8.59,16.59z" Width="16" Height="16" />
           </Button>
           <Button Classes="linkButton" Click="RefreshButton_OnClick" ToolTip.Tip="Refresh library" Padding="6" Margin="4,0,0,0" IsVisible="{Binding IsLibraryVisible}">
@@ -292,15 +292,15 @@
              heading names the filter now, and the sidebar's All Games button
              clears it, so the chip was saying the same thing twice. -->
         <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="16,0,0,0">
-          <Button Classes="windowChromeButton" Click="MinimizeButton_OnClick" ToolTip.Tip="Minimize">
+          <Button Classes="windowChromeButton" Click="MinimizeButton_OnClick">
             <PathIcon Data="M19,13H5V11H19V13Z" Width="14" Height="14" />
           </Button>
-          <Button x:Name="MaximizeRestoreButton" Classes="windowChromeButton" Click="MaximizeRestoreButton_OnClick" ToolTip.Tip="Maximize">
+          <Button x:Name="MaximizeRestoreButton" Classes="windowChromeButton" Click="MaximizeRestoreButton_OnClick">
             <!-- Kept in sync with OnPropertyChanged's WindowState branch,
                  which swaps this for the restore glyph while maximized. -->
             <PathIcon Data="F0 M4,4H20V20H4V4z M6,6V18H18V6H6z" Width="14" Height="14" />
           </Button>
-          <Button Classes="windowChromeButton windowCloseButton" Click="CloseWindowButton_OnClick" ToolTip.Tip="Close">
+          <Button Classes="windowChromeButton windowCloseButton" Click="CloseWindowButton_OnClick">
             <PathIcon Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" Width="13" Height="13" />
           </Button>
         </StackPanel>
@@ -848,8 +848,7 @@
                 </TextBox.InnerLeftContent>
                 <TextBox.InnerRightContent>
                   <Button Classes="searchClear" Click="ClearLibrarySearchButton_OnClick"
-                          IsVisible="{Binding LibrarySearchText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
-                          ToolTip.Tip="Clear search">
+                          IsVisible="{Binding LibrarySearchText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
                     <Canvas Width="12" Height="12">
                       <Line StartPoint="1,1" EndPoint="11,11" Stroke="{StaticResource Text_8DA0B4}" StrokeThickness="1.6" StrokeLineCap="Round" />
                       <Line StartPoint="11,1" EndPoint="1,11" Stroke="{StaticResource Text_8DA0B4}" StrokeThickness="1.6" StrokeLineCap="Round" />
@@ -1129,7 +1128,6 @@
                                          Margin="-6,-2"
                                          HorizontalAlignment="Left"
                                          Cursor="Hand"
-                                         ToolTip.Tip="Filter by this game"
                                          PointerPressed="ClipGame_OnPointerPressed">
                                    <TextBlock Text="{Binding TileTopLabel}"
                                               Foreground="{StaticResource Text_8C98A7}"
@@ -1150,7 +1148,6 @@
                                              TextTrimming="CharacterEllipsis"
                                              Cursor="Hand"
                                              HorizontalAlignment="Left"
-                                             ToolTip.Tip="Click to rename"
                                              PointerPressed="ClipTitle_OnPointerPressed" />
                                 </Grid>
                                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -1172,7 +1169,6 @@
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                   <Button Classes="clipShareIconButton"
                                           IsEnabled="{Binding IsOpenable}"
-                                          ToolTip.Tip="Share this clip"
                                           Click="ClipCardShare_OnClick">
                                     <PathIcon Data="M18,16.08C17.24,16.08 16.56,16.38 16.04,16.85L8.91,12.7C8.96,12.47 9,12.24 9,12C9,11.76 8.96,11.53 8.91,11.3L15.96,7.19C16.5,7.69 17.21,8 18,8A3,3 0 0,0 21,5A3,3 0 0,0 18,2A3,3 0 0,0 15,5C15,5.24 15.04,5.47 15.09,5.7L8.04,9.81C7.5,9.31 6.79,9 6,9A3,3 0 0,0 3,12A3,3 0 0,0 6,15C6.79,15 7.5,14.69 8.04,14.19L15.16,18.34C15.11,18.55 15.08,18.77 15.08,19C15.08,20.61 16.39,21.91 18,21.91C19.61,21.91 20.92,20.61 20.92,19A2.92,2.92 0 0,0 18,16.08Z"
                                               Width="17" Height="17" Foreground="{StaticResource Text_C8D9E9}" />
@@ -1218,8 +1214,7 @@
                   HorizontalAlignment="Right"
                   VerticalAlignment="Bottom"
                   Margin="0,0,20,20"
-                  Click="ScrollToTopButton_OnClick"
-                  ToolTip.Tip="Scroll to top">
+                  Click="ScrollToTopButton_OnClick">
             <Button.IsVisible>
               <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
                 <Binding Path="ShowScrollToTopButton" />
@@ -1522,8 +1517,7 @@
                                     Padding="6,1"
                                     VerticalAlignment="Center"
                                     IsVisible="{Binding IsVolumeNonDefault}"
-                                    Click="TrackVolumeReset_OnClick"
-                                    ToolTip.Tip="Reset to 100%" />
+                                    Click="TrackVolumeReset_OnClick" />
                           </Grid>
                           <Border Grid.Row="1"
                                   Classes="muteToggle"
@@ -1534,8 +1528,7 @@
                                   Margin="0,5,0,0"
                                   IsVisible="{Binding IsAudio}"
                                   PointerPressed="TrackMuteToggle_OnPointerPressed"
-                                  Cursor="Hand"
-                                  ToolTip.Tip="Mute/unmute this track">
+                                  Cursor="Hand">
                             <PathIcon Width="14"
                                       Height="14"
                                       HorizontalAlignment="Center"
@@ -1697,8 +1690,7 @@
                             Cursor="SizeWestEast"
                             PointerPressed="TrimStartHandle_OnPointerPressed"
                             PointerMoved="TimelineSurface_OnPointerMoved"
-                            PointerReleased="TimelineSurface_OnPointerReleased"
-                            ToolTip.Tip="Drag to set trim start">
+                            PointerReleased="TimelineSurface_OnPointerReleased">
                       <!-- The rail IS the handle - a pill spanning the video
                            lane, with grip lines at its middle. There is no
                            separate cap on top of it any more: a marker above
@@ -1714,8 +1706,7 @@
                             Cursor="SizeWestEast"
                             PointerPressed="TrimEndHandle_OnPointerPressed"
                             PointerMoved="TimelineSurface_OnPointerMoved"
-                            PointerReleased="TimelineSurface_OnPointerReleased"
-                            ToolTip.Tip="Drag to set trim end">
+                            PointerReleased="TimelineSurface_OnPointerReleased">
                       <Border Classes="trimBar" />
                     </Border>
                   </Canvas>
@@ -1938,7 +1929,7 @@
                       <Grid ColumnDefinitions="*,Auto"><TextBlock Text="Show overlay" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" VerticalAlignment="Center" /><ToggleSwitch Grid.Column="1" IsChecked="{Binding SpotifyOverlayLayerVisible, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid>
                       <StackPanel Spacing="4" IsEnabled="{Binding SpotifyOverlayLayerVisible}">
                         <Grid ColumnDefinitions="*,Auto"><TextBlock Text="Rotation" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" /><TextBlock Grid.Column="1" Text="{Binding SpotifyOverlayRotationDegrees, StringFormat=\{0:0\}°}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" /></Grid>
-                        <Slider Minimum="-180" Maximum="180" Value="{Binding SpotifyOverlayRotationDegrees, Mode=TwoWay}" ToolTip.Tip="Rotation snaps every 15 degrees" />
+                        <Slider Minimum="-180" Maximum="180" Value="{Binding SpotifyOverlayRotationDegrees, Mode=TwoWay}" />
                       </StackPanel>
                       <Button Content="Reset layout" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Click="SpotifyOverlayReset_OnClick" />
                     </StackPanel>
@@ -1983,7 +1974,7 @@
             <StackPanel Spacing="8">
               <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                 <Button Content="Save Trim" Height="38" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                        IsEnabled="{Binding !IsExporting}" ToolTip.Tip="Replace the original clip with just the trimmed range"
+                        IsEnabled="{Binding !IsExporting}"
                         Click="SaveTrimButton_OnClick" />
                 <Button Grid.Column="1" Content="{Binding ExportButtonText}" Classes="primaryButton" Height="38"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" IsEnabled="{Binding !IsExporting}"
@@ -1992,12 +1983,10 @@
               <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
                 <Button Content="Share" Height="38" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                         IsEnabled="{Binding !IsExporting}"
-                        ToolTip.Tip="Re-encode to a size cap and drag the result straight into another app"
                         Click="ShareButton_OnClick" />
                 <Button Grid.Column="1" Classes="dangerButton" Content="Delete" Height="38"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                         IsEnabled="{Binding !IsExporting}"
-                        ToolTip.Tip="Delete this clip and close the editor"
                         Click="EditorDeleteButton_OnClick" />
               </Grid>
             </StackPanel>
@@ -2275,22 +2264,22 @@
                    the filled tiles: on a bar this wide a row of grey boxes is
                    the loudest thing on screen, and it is not the video. -->
               <StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Left" VerticalAlignment="Center">
-                <Button Classes="transportButton flatControl" Click="RestartButton_OnClick" ToolTip.Tip="Restart">
+                <Button Classes="transportButton flatControl" Click="RestartButton_OnClick">
                   <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
                 </Button>
-                <Button Classes="transportButton flatControl" Click="StepBackButton_OnClick" ToolTip.Tip="Step back">
+                <Button Classes="transportButton flatControl" Click="StepBackButton_OnClick">
                   <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M16 5v14L5 12Z" />
                 </Button>
-                <Button Classes="playButton flatControl" Click="PlayPauseButton_OnClick" ToolTip.Tip="Play/Pause">
+                <Button Classes="playButton flatControl" Click="PlayPauseButton_OnClick">
                   <Grid>
                     <PathIcon Width="18" Height="18" Foreground="{StaticResource Text_EDF4FB}" Data="M8 5v14l11-7z" IsVisible="{Binding !IsPlaying}" />
                     <PathIcon Width="18" Height="18" Foreground="{StaticResource Text_EDF4FB}" Data="M6 19h4V5H6v14zm8-14v14h4V5h-4z" IsVisible="{Binding IsPlaying}" />
                   </Grid>
                 </Button>
-                <Button Classes="transportButton flatControl" Click="StepForwardButton_OnClick" ToolTip.Tip="Step forward">
+                <Button Classes="transportButton flatControl" Click="StepForwardButton_OnClick">
                   <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M8 5v14l11-7z" />
                 </Button>
-                <Button Classes="transportButton flatControl" Click="EndButton_OnClick" ToolTip.Tip="End">
+                <Button Classes="transportButton flatControl" Click="EndButton_OnClick">
                   <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
                 </Button>
                 <!-- Elapsed / total. The bar carried no readout at all before,
@@ -2321,8 +2310,7 @@
                         Height="28"
                         VerticalAlignment="Center"
                         PointerPressed="MasterVolumeMuteToggle_OnPointerPressed"
-                        Cursor="Hand"
-                        ToolTip.Tip="Mute/unmute">
+                        Cursor="Hand">
                   <PathIcon Width="15"
                             Height="15"
                             HorizontalAlignment="Center"
@@ -2348,12 +2336,11 @@
                         Padding="6,1"
                         VerticalAlignment="Center"
                         IsEnabled="{Binding IsMasterVolumeNonDefault}"
-                        Click="MasterVolumeReset_OnClick"
-                        ToolTip.Tip="Reset to 100%" />
+                        Click="MasterVolumeReset_OnClick" />
                 <Border Width="1" Height="18" Background="#26FFFFFF" Margin="4,0" VerticalAlignment="Center" />
                 <!-- The exit-fullscreen glyph, not an X - an X on a playbar
                      reads as "close the clip". -->
-                <Button Classes="transportButton flatControl" Click="ExitVideoFullscreenButton_OnClick" ToolTip.Tip="Exit fullscreen (Esc)">
+                <Button Classes="transportButton flatControl" Click="ExitVideoFullscreenButton_OnClick">
                   <PathIcon Width="16" Height="16" Foreground="{StaticResource Text_C8D6E6}" Data="M5,16h3v3h2v-5H5V16z M8,8H5v2h5V5H8V8z M14,19h2v-3h3v-2h-5V19z M16,8V5h-2v5h5V8H16z" />
                 </Button>
               </StackPanel>

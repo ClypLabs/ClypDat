@@ -142,7 +142,7 @@ public sealed partial class MainWindow
         {
             Orientation = Orientation.Horizontal,
             Spacing = 12,
-            Margin = new Avalonia.Thickness(24, 20, 0, 18),
+            Margin = new Avalonia.Thickness(24, 19, 0, 19),
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
@@ -167,15 +167,14 @@ public sealed partial class MainWindow
             Classes = { "dialogClose" },
             Content = "✕",
             Width = 52,
-            Height = 56,
             FontSize = 12,
-            VerticalAlignment = VerticalAlignment.Top,
+            // Full header height, so the X sits on the logo and title centre line.
+            VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0)
         };
         Avalonia.Automation.AutomationProperties.SetName(closeButton, "Close Notice Board");
-        ToolTip.SetTip(closeButton, "Close");
         closeButton.Click += (_, _) => window.Close();
         Grid.SetColumn(closeButton, 1);
         titleBar.Children.Add(titleLeft);

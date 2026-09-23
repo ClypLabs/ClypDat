@@ -83,7 +83,6 @@
               <TextBlock Classes="aboutMeta" Text="·" IsVisible="{Binding HasAppCommit}" />
               <TextBlock Classes="settingsLink" Text="{Binding AppCommitDisplay}"
                          FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"
-                         ToolTip.Tip="View this build's commit on GitHub"
                          IsVisible="{Binding HasAppCommit}"
                          Tag="{Binding AppCommitUrl}"
                          PointerPressed="LicenseLinkText_OnPointerPressed" />
@@ -182,7 +181,7 @@
       <Border Classes="settingsGroupCard">
         <Border Classes="settingsRow static" Padding="20,18,8,6">
           <controls:ResponsiveUniformGrid MinimumItemWidth="212" MaximumColumns="4">
-            <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Stormanzanii" ToolTip.Tip="Open Arashii's GitHub profile" Click="CreditCard_OnClick">
+            <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Stormanzanii" Click="CreditCard_OnClick">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True" Background="{StaticResource SurfaceRaisedBrush}">
                   <Grid>
@@ -196,7 +195,7 @@
                 </StackPanel>
               </StackPanel>
             </Button>
-            <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/iPixelGalaxy" ToolTip.Tip="Open iPixelGalaxy's GitHub profile" Click="CreditCard_OnClick">
+            <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/iPixelGalaxy" Click="CreditCard_OnClick">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True" Background="{StaticResource SurfaceRaisedBrush}">
                   <Grid>
@@ -210,7 +209,7 @@
                 </StackPanel>
               </StackPanel>
             </Button>
-            <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Spikerko" ToolTip.Tip="Open Spikerko's GitHub profile" Click="CreditCard_OnClick">
+            <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Spikerko" Click="CreditCard_OnClick">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True" Background="{StaticResource SurfaceRaisedBrush}">
                   <Grid>
@@ -224,7 +223,7 @@
                 </StackPanel>
               </StackPanel>
             </Button>
-            <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://linktr.ee/corpsehusk" ToolTip.Tip="Open Corpsehusk's profile" Click="CreditCard_OnClick">
+            <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://linktr.ee/corpsehusk" Click="CreditCard_OnClick">
               <StackPanel Orientation="Horizontal" Spacing="12">
                 <Border Width="54" Height="54" CornerRadius="27" ClipToBounds="True">
                   <Image Source="avares://ClypDat/Assets/contributors/corpsehusk.png" Stretch="UniformToFill" />

@@ -100,10 +100,8 @@
                     </StackPanel>
                   </Grid>
                 </Button>
-                <Button Content="Cancel" Click="CancelClypDatLinkButton_OnClick" IsVisible="{Binding ClypDatLinkBusy}"
-                        ToolTip.Tip="Stop waiting for the browser." />
-                <Button Content="Refresh" Click="RefreshClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}"
-                        ToolTip.Tip="Re-read your linked accounts and pull your current Discord name and picture. ClypDat also checks Discord every 30 minutes." />
+                <Button Content="Cancel" Click="CancelClypDatLinkButton_OnClick" IsVisible="{Binding ClypDatLinkBusy}" />
+                <Button Content="Refresh" Click="RefreshClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" />
                 <Button Content="Sign out" Click="UnlinkClypDatButton_OnClick" IsVisible="{Binding ClypDatAccountIsConnected}" />
               </StackPanel>
             </Grid>
@@ -112,8 +110,7 @@
             <Border Classes="settingsNotice">
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <TextBlock Classes="settingsNoticeText" Text="{Binding ClypDatServerUnavailableText}" VerticalAlignment="Center" />
-                <Button Grid.Column="1" Content="Service status" Click="ServiceStatusButton_OnClick" VerticalAlignment="Center"
-                        ToolTip.Tip="Open status.clypdat.xyz in your browser." />
+                <Button Grid.Column="1" Content="Service status" Click="ServiceStatusButton_OnClick" VerticalAlignment="Center" />
               </Grid>
             </Border>
           </Border>
@@ -157,9 +154,8 @@
                 <Button Classes="primaryButton" Content="Turn on" Click="ConnectSpotifyButton_OnClick"
                         IsVisible="{Binding !SpotifyIsConnected}" IsEnabled="{Binding SpotifyConnectEnabled}" />
                 <Button Content="Configure" Click="ConfigureSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}"
-                        IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="Choose where the track sits on your clips." />
-                <Button Content="Turn off" Click="DisconnectSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}"
-                        ToolTip.Tip="Stop reading Spotify, and forget the Spotify sign-in if there is one." />
+                        IsEnabled="{Binding !SpotifyPolicyBlocked}" />
+                <Button Content="Turn off" Click="DisconnectSpotifyButton_OnClick" IsVisible="{Binding SpotifyIsConnected}" />
               </StackPanel>
             </Grid>
           </Border>
@@ -184,7 +180,7 @@
               </StackPanel>
               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <Button Content="Set up…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding !SpotifyHasOwnApp}"
-                        IsEnabled="{Binding !SpotifyPolicyBlocked}" ToolTip.Tip="A one-page guide to making your own Spotify app." />
+                        IsEnabled="{Binding !SpotifyPolicyBlocked}" />
                 <Button Click="SignInSpotifyButton_OnClick" IsEnabled="{Binding SpotifySignInEnabled}" IsVisible="{Binding SpotifyCanSignIn}">
                   <Grid>
                     <TextBlock Text="Sign in" IsVisible="{Binding !SpotifyConnectBusy}" VerticalAlignment="Center" />
@@ -194,11 +190,9 @@
                     </StackPanel>
                   </Grid>
                 </Button>
-                <Button Content="Cancel" Click="CancelSpotifySignInButton_OnClick" IsVisible="{Binding SpotifyConnectBusy}"
-                        ToolTip.Tip="Stop waiting for the browser." />
+                <Button Content="Cancel" Click="CancelSpotifySignInButton_OnClick" IsVisible="{Binding SpotifyConnectBusy}" />
                 <Button Content="Sign out" Click="SignOutSpotifyButton_OnClick" IsVisible="{Binding SpotifyAccountConnected}" />
-                <Button Content="Change app…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding SpotifyHasOwnApp}"
-                        ToolTip.Tip="Open the guide again, or forget this Spotify app." />
+                <Button Content="Change app…" Click="OpenSpotifyOwnAppButton_OnClick" IsVisible="{Binding SpotifyHasOwnApp}" />
               </StackPanel>
             </Grid>
           </Border>

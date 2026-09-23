@@ -19,8 +19,7 @@
             </TextBox.InnerLeftContent>
             <TextBox.InnerRightContent>
               <Button Classes="searchClear" Click="ClearSettingsSearchButton_OnClick"
-                      IsVisible="{Binding SettingsSearchText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
-                      ToolTip.Tip="Clear search">
+                      IsVisible="{Binding SettingsSearchText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
                 <Canvas Width="12" Height="12">
                   <Line StartPoint="1,1" EndPoint="11,11" Stroke="{StaticResource TextSubtleBrush}" StrokeThickness="1.6" StrokeLineCap="Round" />
                   <Line StartPoint="11,1" EndPoint="1,11" Stroke="{StaticResource TextSubtleBrush}" StrokeThickness="1.6" StrokeLineCap="Round" />

@@ -62,7 +62,6 @@ public sealed class TimedEffectEditor : StackPanel
     {
         var button = new Button { Content = label, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
         Grid.SetColumn(button, column);
-        ToolTip.SetTip(button, blur ? "Blur a region from the playhead for 3 seconds" : "Add a caption at the playhead for 3 seconds");
         button.Click += (_, _) => Run(() => _model?.RequestAddTimedEffect(blur));
         return button;
     }
@@ -181,7 +180,6 @@ public sealed class TimedEffectEditor : StackPanel
         });
         Grid.SetColumn(eye, 2);
         var delete = new Button { Content = "✕", Classes = { "linkButton" }, Padding = new Thickness(4, 1), FontSize = 11, VerticalAlignment = VerticalAlignment.Center };
-        ToolTip.SetTip(delete, "Delete (Del)");
         delete.Click += (_, _) => Run(() => _model?.RemoveTimedEffect(id));
         Grid.SetColumn(delete, 3);
         grid.Children.Add(badge);
@@ -214,10 +212,8 @@ public sealed class TimedEffectEditor : StackPanel
         BuildTiming();
         var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*"), ColumnSpacing = 8 };
         var duplicate = new Button { Content = "Duplicate", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
-        ToolTip.SetTip(duplicate, "Duplicate (Ctrl+D)");
         duplicate.Click += (_, _) => Run(() => { if (Selected is { } s) _model!.DuplicateTimedEffect(s.Id); });
         var delete = new Button { Content = "Delete", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
-        ToolTip.SetTip(delete, "Delete (Del)");
         delete.Click += (_, _) => Run(() => { if (Selected is { } s) _model!.RemoveTimedEffect(s.Id); });
         Grid.SetColumn(delete, 1);
         footer.Children.Add(duplicate);
@@ -249,7 +245,6 @@ public sealed class TimedEffectEditor : StackPanel
 
         var style = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
         var bold = new ToggleButton { Content = "B", FontWeight = FontWeight.Bold, MinWidth = 32 };
-        ToolTip.SetTip(bold, "Bold");
         bold.IsCheckedChanged += (_, _) => Apply(x => x with { Bold = bold.IsChecked == true });
         _sync.Add(() => bold.IsChecked = Selected?.Bold == true);
         style.Children.Add(bold);
@@ -308,7 +303,6 @@ public sealed class TimedEffectEditor : StackPanel
             Grid.SetRow(box, row);
             Grid.SetColumn(box, 1);
             var playhead = new Button { Content = "⌖ Playhead", FontSize = 11, Padding = new Thickness(8, 4) };
-            ToolTip.SetTip(playhead, $"Set {label.ToLowerInvariant()} to the playhead");
             playhead.Click += (_, _) => Apply(x => write(x, _model!.CurrentTime.TotalSeconds));
             Grid.SetRow(playhead, row);
             Grid.SetColumn(playhead, 2);
@@ -357,7 +351,6 @@ public sealed class TimedEffectEditor : StackPanel
                 Width = 22, Height = 22, Padding = new Thickness(0), Margin = new Thickness(0, 0, 6, 6), CornerRadius = new CornerRadius(11),
                 Background = new SolidColorBrush(Color.Parse(colour)), BorderBrush = Brushes.White
             };
-            ToolTip.SetTip(swatch, colour);
             swatch.Click += (_, _) => Apply(x => write(x, colour));
             swatches.Add((swatch, colour));
             row.Children.Add(swatch);

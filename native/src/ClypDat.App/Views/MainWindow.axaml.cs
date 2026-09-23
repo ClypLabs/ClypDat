@@ -5501,7 +5501,6 @@ public sealed partial class MainWindow : Window
             icon.Data = Geometry.Parse(isMaximized
                 ? "F0 M5,8H16V19H5V8z M7,10V17H14V10H7z M8,5H19V16H17V7H8V5z"
                 : "F0 M4,4H20V20H4V4z M6,6V18H18V6H6z");
-            ToolTip.SetTip(MaximizeRestoreButton, isMaximized ? "Restore" : "Maximize");
         }
     }
 
@@ -9910,11 +9909,10 @@ public sealed partial class MainWindow : Window
             Data = Geometry.Parse(data),
         };
 
-        Button TransportButton(string data, EventHandler<RoutedEventArgs> onClick, string? tip = null)
+        Button TransportButton(string data, EventHandler<RoutedEventArgs> onClick)
         {
             var button = new Button { Classes = { "transportButton", "flatControl" }, Content = Icon(data) };
             button.Click += onClick;
-            if (tip is not null) ToolTip.SetTip(button, tip);
             return button;
         }
 
@@ -9940,7 +9938,6 @@ public sealed partial class MainWindow : Window
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = muteIcon,
         };
-        ToolTip.SetTip(muteToggle, "Mute/unmute");
         muteToggle.PointerPressed += MasterVolumeMuteToggle_OnPointerPressed;
 
         var volumeSlider = new Slider
@@ -9989,11 +9986,11 @@ public sealed partial class MainWindow : Window
             Margin = new Thickness(0, -4, 0, 0),
             Children =
             {
-                TransportButton("M6 6h2v12H6zm3.5 6l8.5 6V6z", RestartButton_OnClick, "Restart"),
-                TransportButton("M16 5v14L5 12Z", StepBackButton_OnClick, "Step back"),
+                TransportButton("M6 6h2v12H6zm3.5 6l8.5 6V6z", RestartButton_OnClick),
+                TransportButton("M16 5v14L5 12Z", StepBackButton_OnClick),
                 playPauseButton,
-                TransportButton("M8 5v14l11-7z", StepForwardButton_OnClick, "Step forward"),
-                TransportButton("M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z", EndButton_OnClick, "End"),
+                TransportButton("M8 5v14l11-7z", StepForwardButton_OnClick),
+                TransportButton("M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z", EndButton_OnClick),
             },
         };
 
@@ -10026,7 +10023,6 @@ public sealed partial class MainWindow : Window
         };
         volumeResetButton.Bind(IsEnabledProperty, new Binding("IsMasterVolumeNonDefault"));
         volumeResetButton.Click += MasterVolumeReset_OnClick;
-        ToolTip.SetTip(volumeResetButton, "Reset to 100%");
 
         // The volume run is lifted as a unit rather than element by element, so
         // the mute tile, rail and percentage keep the alignment they already
@@ -10061,7 +10057,7 @@ public sealed partial class MainWindow : Window
             },
         };
 
-        var fullscreenButton = TransportButton("M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick, "Fullscreen");
+        var fullscreenButton = TransportButton("M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick);
         fullscreenButton.HorizontalAlignment = HorizontalAlignment.Right;
 
         // Scrub strip along the top edge, same control (and same handler) the

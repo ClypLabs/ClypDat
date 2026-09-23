@@ -103,8 +103,7 @@
               <Border Classes="settingsListItem">
                 <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                   <CheckBox IsThreeState="True" IsChecked="{Binding MedalImportSelectionState, Mode=OneWay}"
-                            IsEnabled="{Binding CanToggleMedalImportSelection}" Click="ToggleMedalImportSelection_OnClick"
-                            ToolTip.Tip="Select or deselect all importable Medal clips" VerticalAlignment="Center" />
+                            IsEnabled="{Binding CanToggleMedalImportSelection}" Click="ToggleMedalImportSelection_OnClick" VerticalAlignment="Center" />
                   <TextBlock Grid.Column="1" Classes="settingsRowDesc" Text="Select all" VerticalAlignment="Center" />
                   <Button Grid.Column="2" Content="Import selected" Click="ImportMedalButton_OnClick" Classes="primaryButton"
                           IsEnabled="{Binding !MedalImportInProgress}" VerticalAlignment="Center" />
@@ -178,7 +177,7 @@
             <StackPanel IsVisible="{Binding SteelSeriesScanned}">
               <Border Classes="settingsListItem">
                 <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                  <CheckBox IsThreeState="True" IsChecked="{Binding SteelSeriesImportSelectionState, Mode=OneWay}" IsEnabled="{Binding CanToggleSteelSeriesImportSelection}" Click="ToggleSteelSeriesImportSelection_OnClick" ToolTip.Tip="Select or deselect all SteelSeries clips" VerticalAlignment="Center" />
+                  <CheckBox IsThreeState="True" IsChecked="{Binding SteelSeriesImportSelectionState, Mode=OneWay}" IsEnabled="{Binding CanToggleSteelSeriesImportSelection}" Click="ToggleSteelSeriesImportSelection_OnClick" VerticalAlignment="Center" />
                   <TextBlock Grid.Column="1" Classes="settingsRowDesc" Text="Select all" VerticalAlignment="Center" />
                   <Button Grid.Column="2" Content="Import selected" Click="ImportSteelSeriesButton_OnClick" Classes="primaryButton" IsEnabled="{Binding !SteelSeriesImportInProgress}" VerticalAlignment="Center" />
                 </Grid>

@@ -105,7 +105,7 @@
                               <ComboBox Classes="settingsInput compact overlaySourcePicker" HorizontalAlignment="Stretch"
                                         VerticalAlignment="{Binding ChromeAlignment}" Margin="{Binding ChromeMargin}"
                                         ItemsSource="{Binding Sources}" ItemTemplate="{StaticResource OverlaySourceOptionTemplate}"
-                                        SelectedItem="{Binding Source}" ToolTip.Tip="{Binding Source}" />
+                                        SelectedItem="{Binding Source}" />
                             </Panel>
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -203,7 +203,7 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate DataType="settings:CustomKeyCap">
                     <Button Classes="keyChip" Tag="{Binding}" Click="RemoveKeySetKey_OnClick"
-                            Content="{Binding Label}" ToolTip.Tip="Remove" Margin="0,0,6,6" />
+                            Content="{Binding Label}" Margin="0,0,6,6" />
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>

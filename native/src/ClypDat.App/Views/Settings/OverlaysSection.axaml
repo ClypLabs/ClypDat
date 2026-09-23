@@ -110,8 +110,7 @@
                         Classes="linkButton"
                         Content="Preview"
                         VerticalAlignment="Center"
-                        Click="OverlayPreview_OnClick"
-                        ToolTip.Tip="Show the clip notification where it would appear" />
+                        Click="OverlayPreview_OnClick" />
               </Grid>
               <ListBox Classes="settingsPositionPicker" ItemsSource="{Binding ClipOverlayPositions}" SelectedItem="{Binding SelectedClipOverlayPosition}">
                 <ListBox.ItemTemplate>

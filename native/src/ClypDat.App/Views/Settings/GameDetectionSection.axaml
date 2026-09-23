@@ -133,6 +133,7 @@
          screen by the time the list it actually filters was in view. -->
     <StackPanel Classes="settingsGroup">
       <TextBlock Classes="settingsGroupLabel" Text="DETECTED GAMES" />
+      <TextBlock Classes="settingsGroupDesc" Text="Removing a game also stops ClypDat detecting it as a game again." />
       <Border Classes="settingsGroupCard">
         <StackPanel>
           <Border Classes="settingsRow static" Padding="20,14">
@@ -154,8 +155,7 @@
                              name-only row's title centres vertically. -->
                         <TextBlock Classes="settingsRowDescSm" Text="{Binding ProcessName}" IsVisible="{Binding ProcessName, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
                       </StackPanel>
-                      <Button Grid.Column="1" Classes="linkButton" Content="Remove" VerticalAlignment="Center" Click="RemoveGameButton_OnClick"
-                              ToolTip.Tip="Removes it from this list and stops ClypDat detecting it as a game again" />
+                      <Button Grid.Column="1" Classes="linkButton" Content="Remove" VerticalAlignment="Center" Click="RemoveGameButton_OnClick" />
                     </Grid>
                   </Border>
                 </DataTemplate>
