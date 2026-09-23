@@ -191,6 +191,21 @@ public sealed partial class MainWindow : Window
     private EditorHoverWarmup? _adoptingEditorHoverWarmup;
     private Task? _editorHoverStopTask;
     private static readonly TimeSpan EditorHoverWarmupMaximumDecode = TimeSpan.FromSeconds(2);
+    // Loading poster (EditorLoadingOverlay in MainWindow.axaml): the clip's
+    // thumbnail shows the moment it is clicked, and only an open still going
+    // after this long dims it and adds the spinner - a warm or fast open goes
+    // straight from poster to moving video without a spinner flash.
+    private static readonly TimeSpan EditorLoadingIndicatorDelay = TimeSpan.FromMilliseconds(150);
+    // Past every per-stage timeout (5s first picture, 1s/3s audio budget, 1.5s
+    // roll). An open still loading by now is stuck somewhere none of those
+    // cover - a LoadVideoAsync wedged behind the previous clip's stop, say -
+    // and would otherwise spin forever.
+    private static readonly TimeSpan EditorOpenStallTimeout = TimeSpan.FromSeconds(15);
+    private readonly DispatcherTimer _editorLoadingIndicatorTimer;
+    private bool _editorLoadingIndicatorDue;
+    private string? _editorLoadError;
+    private string? _editorLoadErrorDetail;
+    private ClypDatLoader? _editorLoadingSpinner;
     // Closing the window (the X button) hides to the tray instead of quitting,
     // so the replay buffer/Full Session keeps recording - matches the tray
     // icon's own "Open"/"Quit" menu, which otherwise had no way to actually be
@@ -337,6 +352,14 @@ public sealed partial class MainWindow : Window
         // feel like one action.
         _keyboardSeekSettleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
         _keyboardSeekSettleTimer.Tick += (_, _) => KeyboardSeekSettle();
+        _editorLoadingIndicatorTimer = new DispatcherTimer { Interval = EditorLoadingIndicatorDelay };
+        _editorLoadingIndicatorTimer.Tick += (_, _) =>
+        {
+            _editorLoadingIndicatorTimer.Stop();
+            _editorLoadingIndicatorDue = true;
+            if (ViewModel?.IsEditorVideoLoading == true) AppLog.Debug($"Editor loading indicator shown: {Path.GetFileName(ViewModel.SelectedVideoPath)}.");
+            SyncEditorLoadingOverlay();
+        };
         _gameDetectionTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _gameDetectionTimer.Tick += (_, _) => UpdateDetectedGame();
         // 5 minutes, not the 4 hours this used to be: ClypDat is usually left
@@ -414,6 +437,7 @@ public sealed partial class MainWindow : Window
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.ActiveGameDetection)) _ = UpdateVideoOverlaySettingsAsync();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVideoLoading)) RestartEditorLoadingIndicator();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
                         UpdateEditorSurfaceVisibility();
                     if (e.PropertyName is nameof(MainWindowViewModel.AutoClippingEnabled)
@@ -4424,6 +4448,23 @@ public sealed partial class MainWindow : Window
     // entirely invisible in the logs. Marked at each stage below.
     private async Task<bool> OpenClipCardAsync(ClipCardViewModel clip)
     {
+        try
+        {
+            return await OpenClipCardCoreAsync(clip);
+        }
+        catch (Exception error)
+        {
+            // Every card entry point is async void; unhandled, this reached the
+            // app-wide handler and left the editor half-open on a poster that
+            // never lifted.
+            AppLog.Error($"Clip open failed: {clip.Path}", error);
+            if (ViewModel?.IsEditorVisible == true) ShowEditorLoadError("This clip couldn't be opened.");
+            return false;
+        }
+    }
+
+    private async Task<bool> OpenClipCardCoreAsync(ClipCardViewModel clip)
+    {
         if (ViewModel is null) return false;
         var openClock = System.Diagnostics.Stopwatch.StartNew();
         var warmup = ClaimEditorHoverWarmup(clip.Path);
@@ -4465,6 +4506,96 @@ public sealed partial class MainWindow : Window
         EditorPanelRoot.IsEnabled = showEditor && !ViewModel.IsSelectedSpotifyProcessing;
         EditorPanelRoot.Margin = showEditor ? default : OffscreenPark;
         EditorVideoView.Margin = ViewModel.IsEditorVideoAreaVisible ? default : OffscreenPark;
+        SyncEditorLoadingOverlay();
+    }
+
+    // A new loading stretch starts the spinner delay over; the end of one
+    // (the video revealed) also clears any error it was showing.
+    private void RestartEditorLoadingIndicator()
+    {
+        _editorLoadingIndicatorTimer.Stop();
+        _editorLoadingIndicatorDue = false;
+        if (ViewModel?.IsEditorVideoLoading == true) _editorLoadingIndicatorTimer.Start();
+        else _editorLoadError = null;
+    }
+
+    // The poster itself binds to IsEditorVideoLoading. This decides what sits
+    // on it: nothing, the dimmed spinner once the delay has passed, or a
+    // failed open's message with Try again. The spinner is only in the tree
+    // while it shows - ClypDatLoader's compositor animations run for as long
+    // as it is attached, and the editor panel stays attached (parked) all the
+    // time the Library is up.
+    private void SyncEditorLoadingOverlay()
+    {
+        if (ViewModel is null) return;
+        var showing = ViewModel.IsEditorVideoLoading && ViewModel.IsEditorVisible && !ViewModel.IsSettingsVisible;
+        var error = showing ? _editorLoadError : null;
+        var spinner = showing && error is null && _editorLoadingIndicatorDue;
+        EditorLoadingScrim.Opacity = error is not null || spinner ? 1 : 0;
+        EditorLoadingSpinnerHost.Child = spinner
+            ? _editorLoadingSpinner ??= new ClypDatLoader { Width = 64, Height = 64, Foreground = Brushes.White }
+            : null;
+        EditorLoadErrorPanel.IsVisible = error is not null;
+        EditorLoadErrorText.Text = error ?? string.Empty;
+        EditorLoadErrorDetail.Text = _editorLoadErrorDetail ?? string.Empty;
+        EditorLoadErrorDetail.IsVisible = error is not null && !string.IsNullOrWhiteSpace(_editorLoadErrorDetail);
+        EditorLoadingOverlay.IsHitTestVisible = error is not null;
+    }
+
+    // Leaves the clip on its poster (re-parking the native view if it had been
+    // revealed, so no half-started picture shows through) with a message and
+    // Try again - never a spinner that runs forever, never a silent dead end.
+    private void ShowEditorLoadError(string message, string? detail = null)
+    {
+        if (ViewModel is null) return;
+        AppLog.Info($"Editor open failed on screen: path={ViewModel.SelectedVideoPath}, message={message}, detail={detail ?? "none"}");
+        ViewModel.IsPlaying = false;
+        ViewModel.IsEditorVideoLoading = true;
+        _editorLoadingIndicatorTimer.Stop();
+        _editorLoadError = message;
+        _editorLoadErrorDetail = detail;
+        SyncEditorLoadingOverlay();
+    }
+
+    private void EditorLoadRetryButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        RetryEditorLoad();
+    }
+
+    private void RetryEditorLoad()
+    {
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        AppLog.Info($"Editor open retried: {ViewModel.SelectedVideoPath}");
+        _editorLoadError = null;
+        RestartEditorLoadingIndicator();
+        SyncEditorLoadingOverlay();
+        QueueEditorPlayback();
+    }
+
+    // Starts the audio an open is about to wait on before the video load, not
+    // after it. See PlaybackSession.PrefetchOpeningAudio.
+    private static void PrefetchEditorOpeningAudio(MainWindowViewModel model)
+    {
+        var streams = model.TimelineTracks.Where(track => track.IsAudio).Select(track => track.StreamIndex).ToArray();
+        PlaybackSession.PrefetchOpeningAudio(model.SelectedVideoPath, streams, model.Duration, model.CurrentTime, "open");
+    }
+
+    private async Task WatchEditorOpenAsync(MainWindowViewModel model, string path, System.Diagnostics.Stopwatch openClock, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(EditorOpenStallTimeout, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (cancellationToken.IsCancellationRequested || !ReferenceEquals(ViewModel, model) || !model.IsEditorVideoLoading ||
+            _editorLoadError is not null || !string.Equals(model.SelectedVideoPath, path, StringComparison.OrdinalIgnoreCase)) return;
+        AppLog.Error($"Editor open stalled: path={path}, clickMs={openClock.ElapsedMilliseconds}, playback={_playback is not null}, composition={(_playback?.Composition is { } output ? DescribeCompositionStatus(output) : "none")}.");
+        ShowEditorLoadError("This clip is taking too long to load.");
     }
 
     private async void ClipContextExport_OnClick(object? sender, RoutedEventArgs e)
@@ -5072,14 +5203,18 @@ public sealed partial class MainWindow : Window
 
     private sealed class EditorHoverWarmup
     {
-        public EditorHoverWarmup(string path, string codec, TimeSpan start, bool replayArmed)
+        public EditorHoverWarmup(string path, string codec, TimeSpan start, bool replayArmed, IReadOnlyList<int> audioStreams, TimeSpan duration)
         {
             Path = path;
             Codec = codec;
             Start = start;
             ReplayArmed = replayArmed;
+            AudioStreams = audioStreams;
+            Duration = duration;
         }
 
+        public IReadOnlyList<int> AudioStreams { get; }
+        public TimeSpan Duration { get; }
         public string Path { get; }
         public string Codec { get; }
         public TimeSpan Start { get; }
@@ -5109,7 +5244,8 @@ public sealed partial class MainWindow : Window
         CancelEditorHoverWarmup();
         var range = clip.HoverPreviewRange;
         var warmup = new EditorHoverWarmup(clip.Path, clip.Media.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec ?? string.Empty,
-            range.Start, ViewModel.IsReplayRecording);
+            range.Start, ViewModel.IsReplayRecording,
+            MainWindowViewModel.PlayableAudioStreamIndexes(clip.Media.Tracks, clip.IsMedalImport), clip.Media.Duration);
         _editorHoverWarmup = warmup;
         _ = PrepareEditorHoverWarmupAsync(warmup);
     }
@@ -5179,6 +5315,13 @@ public sealed partial class MainWindow : Window
                 {
                     warmup.MarkFirstFrameReady();
                     AppLog.Debug($"Editor hover warm-up frame ready: {Path.GetFileName(warmup.Path)}.");
+                    // The pointer has stayed long enough to land a frame, so a
+                    // click is likely: have the first audio chunks extracted
+                    // before it comes. The chunk wait was most of what a warm
+                    // open still sat through (476ms of a 563ms open). Not while
+                    // a game runs - the extraction is ffmpeg CPU it would lose.
+                    if (!MemoryTrimmer.GameRunning)
+                        PlaybackSession.PrefetchOpeningAudio(warmup.Path, warmup.AudioStreams, warmup.Duration, warmup.Start, "hover");
                 }
             }
             catch (OperationCanceledException) { }
@@ -5494,6 +5637,9 @@ public sealed partial class MainWindow : Window
 
     private void FullscreenButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        // Fullscreen reparents the parked view into FullscreenVideoHost, which
+        // has no loading poster - it would show an empty black screen.
+        if (ViewModel is { IsVideoFullscreen: false, IsEditorVideoLoading: true }) return;
         if (ViewModel?.IsVideoFullscreen == true)
         {
             ExitVideoFullscreen();
@@ -6531,6 +6677,15 @@ public sealed partial class MainWindow : Window
     private async void PlayPauseButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || ViewModel.IsSelectedSpotifyProcessing) return;
+        // A failed open's poster answers play with another attempt.
+        if (_editorLoadError is not null)
+        {
+            RetryEditorLoad();
+            return;
+        }
+        // An open still bringing the clip up decides when it plays; a toggle
+        // here would only supersede its start and leave the poster up.
+        if (ViewModel.IsEditorVideoLoading) return;
         if (_playback is null)
         {
             // Goes through QueueEditorPlayback rather than calling
@@ -8554,6 +8709,16 @@ public sealed partial class MainWindow : Window
         // meant libvlc did not begin opening the file until the editor panel's
         // layout had already been serviced. Now the two overlap.
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
+        _editorLoadError = null;
+        // OpenMedia raises the loading flag, but one still up from an earlier
+        // open (the editor closed mid-load, say) raises no change, so this
+        // open's spinner delay is started over here.
+        RestartEditorLoadingIndicator();
+        SyncEditorLoadingOverlay();
+        // Before anything else, and on every entry point: the audio chunk wait
+        // used to begin only once the video had loaded.
+        PrefetchEditorOpeningAudio(ViewModel);
+        _ = WatchEditorOpenAsync(ViewModel, ViewModel.SelectedVideoPath, openClock, cts.Token);
         var claimedWarmup = _claimedEditorHoverWarmup;
         _claimedEditorHoverWarmup = null;
         if (claimedWarmup is not null)
@@ -8562,6 +8727,14 @@ public sealed partial class MainWindow : Window
             QueueClaimedEditorHoverWarmup(claimedWarmup, cts, openClock);
             return;
         }
+        QueueColdEditorPlayback(cts, openClock);
+    }
+
+    // An open with nothing warmed to adopt - and the fallback, on the same
+    // start token, when a claimed hover warm-up falls through underneath it.
+    private void QueueColdEditorPlayback(CancellationTokenSource cts, System.Diagnostics.Stopwatch openClock)
+    {
+        if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath) || cts.IsCancellationRequested) return;
         StopEditorPlayback(cancelQueuedStart: false, stopMode: PlaybackStopMode.Skip);
 
         // After that stop, not before: it releases any scope a previous open left
@@ -8620,6 +8793,7 @@ public sealed partial class MainWindow : Window
                 catch (Exception error)
                 {
                     AppLog.Error("Editor playback engine failed to start", error);
+                    if (!cts.IsCancellationRequested) ShowEditorLoadError("The video player couldn't start.", error.Message);
                     return;
                 }
 
@@ -8647,24 +8821,34 @@ public sealed partial class MainWindow : Window
             async () =>
             {
                 if (cts.IsCancellationRequested) return;
+                var openCold = false;
                 try
                 {
                     var session = await warmup.SessionReady.Task;
                     if (cts.IsCancellationRequested) return;
                     await StartEditorPlaybackAsync(session, warmup.VideoLoaded.Task, warmup.Codec, cts.Token, openClock, foregroundScope, warmup);
                 }
+                catch (OperationCanceledException) when (!cts.IsCancellationRequested)
+                {
+                    // The warm-up was torn down under the click - its hover
+                    // ended in the same instant, or a stop overtook it - but the
+                    // open itself still stands. Nothing else would lift the poster.
+                    AppLog.Info($"Editor hover warm-up cancelled before adoption; opening cold: {Path.GetFileName(warmup.Path)}.");
+                    openCold = true;
+                }
                 catch (OperationCanceledException)
                 {
                 }
                 catch (Exception error)
                 {
-                    AppLog.Error("Editor hover warm-up could not be adopted", error);
-                    if (!cts.IsCancellationRequested) await ShowMessageAsync("Playback unavailable", error.Message);
+                    AppLog.Error("Editor hover warm-up could not be adopted; opening cold", error);
+                    openCold = !cts.IsCancellationRequested;
                 }
                 finally
                 {
                     if (ReferenceEquals(_adoptingEditorHoverWarmup, warmup)) _adoptingEditorHoverWarmup = null;
                 }
+                if (openCold) QueueColdEditorPlayback(cts, openClock);
             },
             DispatcherPriority.Default);
     }
@@ -8722,18 +8906,15 @@ public sealed partial class MainWindow : Window
             // Reveal only a complete scene presented by this output generation.
             var videoReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var firstFrameClock = System.Diagnostics.Stopwatch.StartNew();
+            // First presentation no longer lifts the poster: the start sequence
+            // reveals the view just before the video plays (see
+            // EditorSeekCoordinator.StartAsync), so the clip goes from poster
+            // straight to moving video with its audio behind it. This only
+            // feeds the stall watchdog now.
             void ConfirmVideoReady(string source)
             {
                 if (!videoReady.TrySetResult()) return;
                 AppLog.Debug($"Editor {source} ready at {openClock.ElapsedMilliseconds}ms.");
-                Dispatcher.UIThread.Post(() =>
-                {
-                    if (cancellationToken.IsCancellationRequested) return;
-                    if (!ReferenceEquals(_playback, playback) || !ReferenceEquals(playback.Composition, openingComposition) ||
-                        !ReferenceEquals(ViewModel, openingViewModel) ||
-                        !string.Equals(ViewModel?.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase)) return;
-                    openingViewModel.IsEditorVideoLoading = false;
-                });
             }
             var cropMaskReapplied = 0;
             void OnVout(object? _, MediaPlayerVoutEventArgs args)
@@ -8780,10 +8961,9 @@ public sealed partial class MainWindow : Window
                 // trim boundary. Resuming there avoids turning the handoff
                 // into a fresh keyframe seek just to rewind that tiny amount.
                 ViewModel.CurrentTime = playback.Position;
-                ViewModel.IsEditorVideoLoading = false;
-                // Start the saved crop-guide render before dropping the
-                // placeholder. It races first presentation rather than
-                // visibly trailing an otherwise instant warm handoff.
+                // Start the saved crop-guide render before the reveal. It
+                // races first presentation rather than visibly trailing an
+                // otherwise instant warm handoff.
                 ApplyEditorEffectPreview();
                 ConfirmVideoReady("hover frame");
             }
@@ -8791,22 +8971,44 @@ public sealed partial class MainWindow : Window
             // rather than after coordinated transport commits.
             if (!resumeWarmFrame) ApplyEditorEffectPreview();
             var startPosition = resumeWarmFrame ? playback.Position : openingPosition;
-            var audioSetup = LoadEditorAudioAsync(playback, openingPath, videoCodec, audioTracks, cancellationToken, foregroundScope);
+            var audioSetup = LoadEditorAudioAsync(playback, openingPath, videoCodec, audioTracks, cancellationToken, foregroundScope, startPosition);
             RequestAnimationFrame(_ =>
             {
                 if (cancellationToken.IsCancellationRequested) return;
                 UpdateTimelineChrome();
                 AppLog.Debug($"Editor layout/timeline ready: clickMs={openClock.ElapsedMilliseconds}.");
             });
-            var startup = await playback.StartCoordinatedAsync(startPosition, cancellationToken, audioSetup, resumeWarmFrame);
-            AppLog.Debug($"Editor synchronized audio/video ready: clickMs={openClock.ElapsedMilliseconds}.");
-            if (!startup.Succeeded) return;
+            var startup = await playback.StartCoordinatedAsync(startPosition, cancellationToken, audioSetup, resumeWarmFrame,
+                token => RevealOpeningVideoAsync(playback, openingComposition, openingViewModel, openingPath, openClock, cancellationToken, token));
+            AppLog.Debug($"Editor synchronized audio/video ready: clickMs={openClock.ElapsedMilliseconds}, outcome={startup.Outcome}.");
+            // A newer open owns the poster from here.
+            if (!IsCurrentEditorOpen(playback, openingComposition, openingViewModel, openingPath, cancellationToken)) return;
+            switch (startup.Outcome)
+            {
+                case EditorPlaybackStartOutcome.Superseded:
+                    // A seek or a pause took the transport over from this
+                    // start. It owns playback now; only the poster is left.
+                    if (openingComposition?.HasPresentedPicture == true) openingViewModel.IsEditorVideoLoading = false;
+                    else ShowEditorLoadError("Playback was interrupted before this clip loaded.");
+                    return;
+                case EditorPlaybackStartOutcome.Failed:
+                    ShowEditorLoadError("This clip couldn't be played.");
+                    return;
+                case EditorPlaybackStartOutcome.RevealedPaused:
+                    // On screen, but the video never started moving: leave it
+                    // paused on its first frame rather than claim it plays.
+                    UpdateNativeComposition(openingViewModel, startup.Landed);
+                    ViewModel.CurrentTime = startup.Landed;
+                    ViewModel.IsPlaying = false;
+                    UpdateTimelineChrome();
+                    return;
+            }
             // StartCoordinatedAsync ends its seek generation. Submit the
             // selected clip's scene immediately afterwards, before any screen
             // placement or visibility gate can park its overlay window.
-            UpdateNativeComposition(openingViewModel, startup.Landed);
-            ViewModel.CurrentTime = startup.Landed;
-            StartPlayheadClock(startup.Landed);
+            UpdateNativeComposition(openingViewModel, startup.Anchor);
+            ViewModel.CurrentTime = startup.Anchor;
+            StartPlayheadClock(startup.Anchor);
             _endedAtTrimBoundary = false;
             ViewModel.IsPlaying = true;
             _playbackTimer.Start();
@@ -8819,23 +9021,85 @@ public sealed partial class MainWindow : Window
 
 
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Being superseded by a newer QueueEditorPlayback (the user
+            // opening another clip, or the same one again, before this load
+            // settled - routine right after cold boot while the library is
+            // still hydrating) is not a failure and must not surface an error
+            // for it.
+        }
         catch (OperationCanceledException)
         {
-            // Every other cancellation point above is a cooperative
-            // "if (cancellationToken.IsCancellationRequested) return;" - this
-            // is the one spot (Task.Delay) that throws instead. Being
-            // superseded by a newer QueueEditorPlayback (the user opening
-            // another clip, or the same one again, before this load settled -
-            // routine right after cold boot while the library is still
-            // hydrating) is not a failure and must not surface an error
-            // dialog for it.
+            // The load was cancelled underneath an open that still stands: a
+            // claimed hover warm-up torn down in the same instant, or a
+            // Spotify overlay mux that started on this file. Nothing else will
+            // lift the poster, so retry a warm-up cold once, or say so.
+            if (hoverWarmup is not null && _playbackStartCts is { } cts && cts.Token == cancellationToken)
+            {
+                AppLog.Info($"Editor warm video load cancelled under the open; opening cold: {Path.GetFileName(openingPath)}.");
+                QueueColdEditorPlayback(cts, openClock);
+            }
+            else if (IsCurrentEditorOpenPath(openingViewModel, openingPath, cancellationToken))
+            {
+                ShowEditorLoadError(SpotifyProcessingPaths.IsProcessing(openingPath)
+                    ? "Adding the Spotify overlay to this clip…"
+                    : "This clip couldn't be loaded.");
+            }
         }
         catch (Exception error)
         {
             AppLog.Error("Editor playback failed", error);
+            // Asked before the stop, which cancels this open's own token.
+            var stillCurrent = IsCurrentEditorOpenPath(openingViewModel, openingPath, cancellationToken);
             StopEditorPlayback();
-            await ShowMessageAsync("Playback unavailable", error.Message);
+            if (stillCurrent) ShowEditorLoadError("This clip couldn't be played.", error.Message);
         }
+    }
+
+    private bool IsCurrentEditorOpenPath(MainWindowViewModel openingViewModel, string openingPath, CancellationToken cancellationToken) =>
+        !cancellationToken.IsCancellationRequested && ReferenceEquals(ViewModel, openingViewModel) &&
+        string.Equals(openingViewModel.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase);
+
+    private bool IsCurrentEditorOpen(PlaybackSession playback, NativeVideoOutput? composition,
+        MainWindowViewModel openingViewModel, string openingPath, CancellationToken cancellationToken) =>
+        IsCurrentEditorOpenPath(openingViewModel, openingPath, cancellationToken) &&
+        ReferenceEquals(_playback, playback) && ReferenceEquals(playback.Composition, composition);
+
+    // The coordinator's reveal step (EditorSeekCoordinator.StartAsync): lift
+    // the poster so the native view is on screen, showing the landed frame,
+    // before the video is unpaused. The layout pass and the frame wait make
+    // sure the view has actually moved into place - unpausing first played the
+    // clip's opening frames while it was still parked offscreen.
+    private async Task<bool> RevealOpeningVideoAsync(PlaybackSession playback, NativeVideoOutput? composition,
+        MainWindowViewModel openingViewModel, string openingPath, System.Diagnostics.Stopwatch openClock,
+        CancellationToken openToken, CancellationToken token)
+    {
+        var revealed = await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (token.IsCancellationRequested || !IsCurrentEditorOpen(playback, composition, openingViewModel, openingPath, openToken)) return false;
+            openingViewModel.IsEditorVideoLoading = false;
+            UpdateLayout();
+            return true;
+        });
+        if (!revealed) return false;
+
+        var rendered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatcher.UIThread.Post(() => RequestAnimationFrame(_ => rendered.TrySetResult()));
+        try
+        {
+            // Bounded: a window hidden to the tray stops rendering, and the
+            // clip should still start.
+            await rendered.Task.WaitAsync(TimeSpan.FromMilliseconds(100), token).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+        }
+
+        var placement = await Dispatcher.UIThread.InvokeAsync(() =>
+            $"view={(EditorVideoView.Margin == default ? "on-screen" : "parked")}, size={EditorVideoView.Bounds.Width:0}x{EditorVideoView.Bounds.Height:0}");
+        AppLog.Debug($"Editor video revealed at {openClock.ElapsedMilliseconds}ms: {placement}.");
+        return !openToken.IsCancellationRequested;
     }
 
     private async Task RevealEditorVideoIfStalledAsync(Task videoReady, PlaybackSession playback,
@@ -8858,16 +9122,13 @@ public sealed partial class MainWindow : Window
                     !ReferenceEquals(playback.Composition, composition) || !ReferenceEquals(ViewModel, openingViewModel) ||
                     !string.Equals(ViewModel?.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase) ||
                     !openingViewModel.IsEditorVideoLoading) return;
-                if (composition?.HasPresentedPicture == true)
-                {
-                    openingViewModel.IsEditorVideoLoading = false;
-                    return;
-                }
+                // Presented after all: the start sequence owns the reveal.
+                if (composition?.HasPresentedPicture == true) return;
                 playback.Pause();
                 openingViewModel.IsPlaying = false;
                 var status = composition is null ? "none" : DescribeCompositionStatus(composition);
                 AppLog.Error($"Editor compositor did not present first picture: path={openingPath}, loading={openingViewModel.IsEditorVideoLoading}, {status}.");
-                _ = ShowMessageAsync("Video preview paused", "Preview could not render its first frame. Reopen the clip; if it persists, send the editor log from this attempt.");
+                ShowEditorLoadError("This clip's first frame didn't render.", "If it keeps happening, send the editor log from this attempt.");
             });
         }
     }
@@ -8891,11 +9152,12 @@ public sealed partial class MainWindow : Window
         string videoCodec,
         IReadOnlyList<AudioPreviewTrack> audioTracks,
         CancellationToken cancellationToken,
-        IDisposable? foregroundScope = null)
+        IDisposable? foregroundScope = null,
+        TimeSpan start = default)
     {
         try
         {
-            await playback.LoadAudioAsync(videoPath, audioTracks, ViewModel?.Duration ?? TimeSpan.Zero, cancellationToken);
+            await playback.LoadAudioAsync(videoPath, audioTracks, ViewModel?.Duration ?? TimeSpan.Zero, cancellationToken, start);
             if (cancellationToken.IsCancellationRequested || _playback != playback) return;
             // Warm the chunk cache at the clip's saved trim markers too -
             // jumping straight to a previously-set trim point is a common
@@ -9194,7 +9456,7 @@ public sealed partial class MainWindow : Window
         // - drop the window, build a fresh one - just produced a new window to
         // fail on, so the bar never came back after a restore.
         if (ViewModel is null || !IsVisible || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null ||
-            IsEditorSurfaceCovered)
+            ViewModel.IsEditorVideoLoading || IsEditorSurfaceCovered)
         {
             if (_editorHoverControlsWindow is { IsVisible: true })
             {

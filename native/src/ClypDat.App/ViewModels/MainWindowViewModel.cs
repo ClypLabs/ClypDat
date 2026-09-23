@@ -4223,11 +4223,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasSelectedThumbnail => SelectedThumbnail is not null;
 
-    // Drives a thumbnail placeholder over the editor's VideoView so opening a
-    // clip shows its (already-decoded) thumbnail immediately instead of a
-    // black frame for the second or so LibVLC needs to actually start
-    // rendering - see StartEditorPlaybackAsync/the VideoPlayer.Playing hookup
-    // in MainWindow.axaml.cs for where this gets set back to false.
+    // Drives the loading poster over the editor's VideoView (which stays
+    // parked offscreen meanwhile), so opening a clip shows its thumbnail
+    // immediately instead of a black frame. Cleared by the open's start
+    // sequence just before the video plays - see RevealOpeningVideoAsync in
+    // MainWindow.axaml.cs - so the poster goes straight to moving video.
     public bool IsEditorVideoLoading
     {
         get => _isEditorVideoLoading;
@@ -6842,10 +6842,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedVideoPath = string.Empty;
 
         // Closing the editor is the moment the app's largest caches - extracted
-        // audio chunks (up to 256MB) and decoded bitmaps - become dead weight.
-        // Off the UI thread: the trim does a blocking compacting gen2
-        // collection and must not be part of the close transition.
-        MemoryTrimmer.RequestTrim("editor closed");
+        // audio chunks and decoded bitmaps - become dead weight. Deferred until
+        // the Library has sat idle: the trim clears those caches and does a
+        // blocking compacting gen2 collection, and the next clip open usually
+        // follows the close within a second or two.
+        MemoryTrimmer.RequestEditorClosedTrim();
     }
 
     public void OpenSettings()
@@ -9325,25 +9326,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         var hasVideo = false;
         var audioIndex = 0;
-        // Medal usually exports two audio streams: a full pre-mix ("All
-        // Audio" - game+mic+everything combined) first, then a second,
-        // narrower one ("All PC Audio") after it. The pre-mix just duplicates
-        // content the other track(s) already carry, so for a Medal import it's
-        // dropped before it's ever added to TimelineTracks - not shown, not
-        // muted, not selectable, just never exists as far as the editor or
-        // playback (which builds its audio list FROM TimelineTracks, see
-        // MainWindow.axaml.cs's StartEditorPlaybackAsync) are concerned.
-        //
-        // Only when there IS something else to fall back on, though. A Medal
-        // clip exported with everything mixed down to a single track has that
-        // one track AS its audio, and dropping it left the clip silent with an
-        // empty timeline - the import looked broken rather than mixed.
-        var medalAudioTrackCount = isMedalImport
-            ? media.Tracks.Count(track => track.Type == "audio")
-            : 0;
-        var dropMedalPreMix = medalAudioTrackCount > 1;
-        var skippedMedalPreMixTrack = false;
-        var timelineAudioTrackCount = media.Tracks.Count(track => track.Type == "audio") - (dropMedalPreMix ? 1 : 0);
+        var playableAudioStreams = PlayableAudioStreamIndexes(media.Tracks, isMedalImport);
+        var timelineAudioTrackCount = playableAudioStreams.Count;
         // Video is not an audio track. Keep the standard roomy audio lanes
         // through Game Audio, Chat/Discord, and Microphone; compact only when
         // a fourth audio stream such as Spotify is present.
@@ -9354,11 +9338,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         foreach (var track in media.Tracks)
         {
             if (track.Type == "subtitle") continue;
-            if (dropMedalPreMix && track.Type == "audio" && !skippedMedalPreMixTrack)
-            {
-                skippedMedalPreMixTrack = true;
-                continue;
-            }
+            if (track.Type == "audio" && !playableAudioStreams.Contains(track.Index)) continue;
 
             var label = track.Type == "audio"
                 ? AudioLaneLabel(track.Label, audioIndex)
@@ -9430,6 +9410,26 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // path was reading the PRE-rewrite bytes, so it must be restarted rather
         // than left to finish and publish into the new lanes.
         StartWaveformLoad(media, everyAudioLanePainted, carriedPeaksStillValid);
+    }
+
+    // Medal usually exports two audio streams: a full pre-mix ("All Audio" -
+    // game+mic+everything combined) first, then a second, narrower one ("All PC
+    // Audio") after it. The pre-mix just duplicates content the other track(s)
+    // already carry, so for a Medal import it's dropped before it's ever added
+    // to TimelineTracks - not shown, not muted, not selectable, just never
+    // exists as far as the editor or playback (which builds its audio list FROM
+    // TimelineTracks, see MainWindow.axaml.cs's StartEditorPlaybackAsync) are
+    // concerned. The Library hover asks the same question to know which audio
+    // to extract ahead of a click, before any lanes exist.
+    //
+    // Only when there IS something else to fall back on, though. A Medal clip
+    // exported with everything mixed down to a single track has that one track
+    // AS its audio, and dropping it left the clip silent with an empty timeline
+    // - the import looked broken rather than mixed.
+    internal static IReadOnlyList<int> PlayableAudioStreamIndexes(IEnumerable<MediaTrackInfo> tracks, bool isMedalImport)
+    {
+        var audio = tracks.Where(track => track.Type == "audio").Select(track => track.Index).ToArray();
+        return isMedalImport && audio.Length > 1 ? audio[1..] : audio;
     }
 
     // The lanes may keep their painted peaks only while they still describe the

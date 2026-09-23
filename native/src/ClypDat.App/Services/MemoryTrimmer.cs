@@ -15,7 +15,8 @@ namespace ClypDat.App.Services;
 // to reduce Task Manager's working-set number.
 public static class MemoryTrimmer
 {
-    // Set by MainWindow for diagnostics and possible future cleanup policy.
+    // Set by the view model while the editor is showing. An open editor keeps
+    // its caches through a trim and never gets the blocking collection.
     public static volatile bool EditorOpen;
 
     // Whether a game is actually detected right now. This, not Recording, is
@@ -58,6 +59,7 @@ public static class MemoryTrimmer
     // packets in StopAsync. Those are not ordered against each other, and a
     // collection that runs while the ring is still rooted reclaims nothing.
     private static readonly TimeSpan StopSettleDelay = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan EditorClosedSettleDelay = TimeSpan.FromSeconds(20);
 
     private static int _started;
     private static readonly AutoResetEvent TrimRequested = new(false);
@@ -173,11 +175,18 @@ public static class MemoryTrimmer
 
             var beforeManaged = GC.GetTotalMemory(false);
             var beforeGen2 = GC.CollectionCount(2);
-            // Only a game in the foreground buys the gentle path now.
-            var deferred = Recording && GameRunning;
+            // A game in the foreground buys the gentle path, and so does an
+            // open editor: the blocking compaction measured 99-163ms, which is
+            // longer than the 120ms WASAPI buffer, so it was audible as a
+            // dropout in whatever clip was playing.
+            var editorOpen = EditorOpen;
+            var (clearCaches, deferred) = ResolveTrimMode(editorOpen, Recording, GameRunning);
 
-            AudioChunkCache.Clear();
-            BitmapCache.Clear();
+            if (clearCaches)
+            {
+                AudioChunkCache.Clear();
+                BitmapCache.Clear();
+            }
 
             if (deferred)
             {
@@ -204,7 +213,7 @@ public static class MemoryTrimmer
             // run yet at this point - a before/after heap size there prints the
             // same number twice and reads as "the trim reclaimed nothing".
             var managed = deferred
-                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - game running)"
+                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - {(editorOpen ? "editor open, caches kept" : "game running")})"
                 : $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}";
             AppLog.Info(
                 $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, {managed}, mode={(deferred ? "background" : "compacting")}, gen2Delta={GC.CollectionCount(2) - beforeGen2}, coalesced={coalesced}, elapsedMs={stopwatch.ElapsedMilliseconds}.");
@@ -213,6 +222,26 @@ public static class MemoryTrimmer
         {
             AppLog.Error($"Memory trim failed ({reason})", error);
         }
+    }
+
+    // The caches are the open clip's working set while the editor is up -
+    // clearing them made the next seek or re-open extract its audio all over
+    // again - and a blocking collection there is an audible dropout.
+    internal static (bool ClearCaches, bool Deferred) ResolveTrimMode(bool editorOpen, bool recording, bool gameRunning) =>
+        (!editorOpen, editorOpen || (recording && gameRunning));
+
+    // Closing the editor is often followed straight away by opening the next
+    // clip. Trimming at once cost that open its audio chunks, its thumbnail and
+    // a blocking collection in the middle of the click, so wait for the
+    // Library to actually sit idle first.
+    public static void RequestEditorClosedTrim()
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(EditorClosedSettleDelay).ConfigureAwait(false);
+            if (EditorOpen) return;
+            RequestTrim("editor closed");
+        });
     }
 
     private static void RequestStoppedRecordingTrim()

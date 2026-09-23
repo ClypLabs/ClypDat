@@ -76,18 +76,39 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     private long _starvedFrames;
     private bool _disposed;
 
-    public ChunkedAudioReader(string inputPath, int streamIndex, TimeSpan duration, string cacheKey)
+    // `start` is where playback will begin. The first chunk scheduled is the
+    // one that position needs: prefetching chunk 0 regardless meant a clip
+    // trimmed to start past 30s queued a whole extra high-priority extraction
+    // per track ahead of the chunk it was actually waiting on.
+    public ChunkedAudioReader(string inputPath, int streamIndex, TimeSpan duration, string cacheKey, TimeSpan start = default)
     {
         _inputPath = inputPath;
         _streamIndex = streamIndex;
         _cacheKey = cacheKey;
-        // Duration can transiently be unknown while a clip is still being
-        // probed - better to keep producing (silent) audio and let the video
-        // player's own end-of-media stop playback than to declare EOF at 0s.
-        var effectiveDuration = duration > TimeSpan.Zero ? duration : TimeSpan.FromHours(12);
-        _totalFrames = (long)(effectiveDuration.TotalSeconds * SampleRate);
-        Prefetch(TimeSpan.Zero);
+        _totalFrames = TotalFramesFor(duration);
+        Prefetch(start);
     }
+
+    // Duration can transiently be unknown while a clip is still being probed -
+    // better to keep producing (silent) audio and let the video player's own
+    // end-of-media stop playback than to declare EOF at 0s.
+    private static long TotalFramesFor(TimeSpan duration)
+    {
+        var effectiveDuration = duration > TimeSpan.Zero ? duration : TimeSpan.FromHours(12);
+        return (long)(effectiveDuration.TotalSeconds * SampleRate);
+    }
+
+    // Starts extracting the chunk playback from `start` will need first,
+    // before any reader for the track exists - from a Library hover or the
+    // click itself, so the extraction overlaps the video load instead of
+    // queueing behind it. The reader built later joins the same flight through
+    // InFlightExtractions, or finds the chunk already in AudioChunkCache.
+    // Always priority work: a reader that joins a lookahead flight would sit
+    // parked behind other lookahead for no reason.
+    public static Task PrefetchStartChunk(string inputPath, int streamIndex, TimeSpan duration, TimeSpan start, string cacheKey) =>
+        ScheduleExtraction(inputPath, streamIndex, cacheKey, TotalFramesFor(duration), ChunkIndexAt(start), priority: true);
+
+    private static int ChunkIndexAt(TimeSpan time) => (int)(Math.Max(0, time.TotalSeconds) / ChunkSeconds);
 
     public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
 
@@ -117,7 +138,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     // a moment - are as common as forward playback), without blocking.
     public void Prefetch(TimeSpan time)
     {
-        var chunkIndex = (int)(Math.Max(0, time.TotalSeconds) / ChunkSeconds);
+        var chunkIndex = ChunkIndexAt(time);
         if (Interlocked.Exchange(ref _lastPrefetchedChunk, chunkIndex) == chunkIndex) return;
         ScheduleExtraction(chunkIndex, priority: true);
         ScheduleExtraction(chunkIndex + 1, priority: false);
@@ -128,7 +149,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     // share this flight, so cancelling one seek must not starve another.
     internal async Task<bool> EnsureReadyAsync(TimeSpan time, CancellationToken cancellationToken = default)
     {
-        var chunkIndex = (int)(Math.Max(0, time.TotalSeconds) / ChunkSeconds);
+        var chunkIndex = ChunkIndexAt(time);
         if (AudioChunkCache.Contains(_cacheKey, chunkIndex)) return true;
         await ScheduleExtraction(chunkIndex, priority: true).WaitAsync(cancellationToken).ConfigureAwait(false);
         return AudioChunkCache.Contains(_cacheKey, chunkIndex);
@@ -279,13 +300,16 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         _openChunkIndex = -1;
     }
 
-    private Task ScheduleExtraction(int chunkIndex, bool priority)
-    {
-        if (chunkIndex < 0 || (long)chunkIndex * ChunkFrames >= _totalFrames) return Task.CompletedTask;
-        if (AudioChunkCache.Contains(_cacheKey, chunkIndex)) return Task.CompletedTask;
+    private Task ScheduleExtraction(int chunkIndex, bool priority) =>
+        ScheduleExtraction(_inputPath, _streamIndex, _cacheKey, _totalFrames, chunkIndex, priority);
 
-        var isNetwork = PlaybackSession.IsNetworkPath(_inputPath);
-        var flightKey = $"{_cacheKey}-c{chunkIndex:0000}";
+    private static Task ScheduleExtraction(string inputPath, int streamIndex, string cacheKey, long totalFrames, int chunkIndex, bool priority)
+    {
+        if (chunkIndex < 0 || (long)chunkIndex * ChunkFrames >= totalFrames) return Task.CompletedTask;
+        if (AudioChunkCache.Contains(cacheKey, chunkIndex)) return Task.CompletedTask;
+
+        var isNetwork = PlaybackSession.IsNetworkPath(inputPath);
+        var flightKey = $"{cacheKey}-c{chunkIndex:0000}";
         return InFlightExtractions.GetOrAdd(flightKey, _ =>
         {
             if (priority) Interlocked.Increment(ref _pendingPriority);
@@ -311,7 +335,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
                             await NetworkExtractionGate.WaitAsync().ConfigureAwait(false);
                             networkEntered = true;
                         }
-                        if (!AudioChunkCache.Contains(_cacheKey, chunkIndex)) await ExtractChunkAsync(chunkIndex);
+                        if (!AudioChunkCache.Contains(cacheKey, chunkIndex)) await ExtractChunkAsync(inputPath, streamIndex, cacheKey, chunkIndex);
                     }
                     finally
                     {
@@ -328,7 +352,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
         });
     }
 
-    private async Task ExtractChunkAsync(int chunkIndex)
+    private static async Task ExtractChunkAsync(string inputPath, int streamIndex, string cacheKey, int chunkIndex)
     {
         var startInfo = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
         {
@@ -347,8 +371,8 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             "-threads", "1",
             "-ss", (chunkIndex * ChunkSeconds).ToString(),
             "-t", ChunkSeconds.ToString(),
-            "-i", _inputPath,
-            "-map", $"0:{_streamIndex}",
+            "-i", inputPath,
+            "-map", $"0:{streamIndex}",
             "-vn",
             "-sn",
             "-ac", Channels.ToString(),
@@ -378,7 +402,7 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             var pcmBuffer = new byte[81920];
             int pcmRead;
             var truncated = false;
-            using var timeoutCts = new CancellationTokenSource(PlaybackSession.IsNetworkPath(_inputPath) ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(10));
+            using var timeoutCts = new CancellationTokenSource(PlaybackSession.IsNetworkPath(inputPath) ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(10));
             try
             {
                 while ((pcmRead = await process.StandardOutput.BaseStream.ReadAsync(pcmBuffer, timeoutCts.Token)) > 0)
@@ -396,13 +420,13 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
             catch (OperationCanceledException)
             {
                 try { process.Kill(entireProcessTree: true); } catch { }
-                AppLog.Info($"Editor audio chunk extract timeout: stream={_streamIndex}, chunk={chunkIndex}, timeoutMs={(PlaybackSession.IsNetworkPath(_inputPath) ? 30000 : 10000)}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
+                AppLog.Info($"Editor audio chunk extract timeout: stream={streamIndex}, chunk={chunkIndex}, timeoutMs={(PlaybackSession.IsNetworkPath(inputPath) ? 30000 : 10000)}, network={PlaybackSession.IsNetworkPath(inputPath)}.");
                 return;
             }
 
             if (truncated)
             {
-                AppLog.Error($"Editor audio chunk exceeded {MaximumChunkPcmBytes / (1024 * 1024)}MB: input={_inputPath}, stream={_streamIndex}, chunk={chunkIndex}.");
+                AppLog.Error($"Editor audio chunk exceeded {MaximumChunkPcmBytes / (1024 * 1024)}MB: input={inputPath}, stream={streamIndex}, chunk={chunkIndex}.");
                 return;
             }
 
@@ -411,20 +435,20 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
 
             if (process.ExitCode != 0 || pcm.Length == 0)
             {
-                AppLog.Error($"Editor audio chunk extract failed: input={_inputPath}, stream={_streamIndex}, chunk={chunkIndex}: {error.Trim()}");
+                AppLog.Error($"Editor audio chunk extract failed: input={inputPath}, stream={streamIndex}, chunk={chunkIndex}: {error.Trim()}");
                 return;
             }
 
-            AudioChunkCache.Store(_cacheKey, chunkIndex, pcm.ToArray());
+            AudioChunkCache.Store(cacheKey, chunkIndex, pcm.ToArray());
             // Per-chunk extraction time is the primary network-drive health
             // metric: local NVMe lands well under 200ms; a share that takes
             // multiple seconds per chunk is what audio starvation reports
             // trace back to.
-            AppLog.Debug($"Editor audio chunk extracted: stream={_streamIndex}, chunk={chunkIndex}, ms={clock.ElapsedMilliseconds}, bytes={pcm.Length}, network={PlaybackSession.IsNetworkPath(_inputPath)}.");
+            AppLog.Debug($"Editor audio chunk extracted: stream={streamIndex}, chunk={chunkIndex}, ms={clock.ElapsedMilliseconds}, bytes={pcm.Length}, network={PlaybackSession.IsNetworkPath(inputPath)}.");
         }
         catch (Exception error)
         {
-            AppLog.Error($"Editor audio chunk extract failed: input={_inputPath}, stream={_streamIndex}, chunk={chunkIndex}", error);
+            AppLog.Error($"Editor audio chunk extract failed: input={inputPath}, stream={streamIndex}, chunk={chunkIndex}", error);
         }
     }
 }

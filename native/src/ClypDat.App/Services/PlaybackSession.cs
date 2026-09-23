@@ -470,7 +470,7 @@ public sealed class PlaybackSession : IDisposable
     // (see ChunkedAudioReader), so this only records what to build readers
     // from and constructs the output; audio is ready near-instantly even for
     // an hour-long clip instead of waiting on a full-track WAV extract.
-    public Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, TimeSpan duration, CancellationToken cancellationToken) => Task.Run(() =>
+    public Task LoadAudioAsync(string path, IReadOnlyList<AudioPreviewTrack> audioTracks, TimeSpan duration, CancellationToken cancellationToken, TimeSpan start = default) => Task.Run(() =>
     {
         using var load = _loadGate.Enter(cancellationToken);
         using var processingRead = SpotifyProcessingPaths.TryRead(path);
@@ -489,18 +489,47 @@ public sealed class PlaybackSession : IDisposable
         }
 
         AppLog.Debug($"Editor audio loaded (chunked): streams={string.Join(",", _audioStreamIndexes.OrderBy(key => key))}, volumes={string.Join(",", _audioVolumes.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value:0}%"))}.");
-        RebuildAudioOutput();
+        RebuildAudioOutput(start);
     }, cancellationToken);
 
-    private void RebuildAudioOutput()
+    // Starts extracting the audio an editor open is about to wait on, ahead of
+    // LoadAudioAsync - which only runs once the video load has finished, and
+    // behind the same load gate. Called on a Library hover and on the click
+    // itself, so audio and video now load side by side instead of one after
+    // the other (measured 146-476ms of chunk extraction that used to follow the
+    // video load). The readers LoadAudioAsync builds join these flights.
+    public static void PrefetchOpeningAudio(string path, IReadOnlyList<int> streamIndexes, TimeSpan duration, TimeSpan start, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(path) || streamIndexes.Count == 0) return;
+        var streams = streamIndexes.ToArray();
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                // AudioCacheKey stats the file - never on the UI thread.
+                foreach (var stream in streams)
+                {
+                    _ = ChunkedAudioReader.PrefetchStartChunk(path, stream, duration, start, AudioCacheKey(path, stream));
+                }
+                AppLog.Debug($"Editor audio prefetch ({reason}): streams={string.Join(",", streams)}, start={start.TotalSeconds:0.###}s, file={Path.GetFileName(path)}.");
+            }
+            catch (Exception error)
+            {
+                AppLog.Debug($"Editor audio prefetch ({reason}) skipped: {error.Message}");
+            }
+        });
+    }
+
+    private void RebuildAudioOutput(TimeSpan? start = null)
     {
         DisposeAudioOutput();
         if (_audioStreamIndexes.Count == 0 || string.IsNullOrEmpty(_audioInputPath)) return;
 
+        var readerStart = start ?? _lastRequestedPosition;
         var providers = new List<ISampleProvider>();
         foreach (var streamIndex in _audioStreamIndexes)
         {
-            var reader = new ChunkedAudioReader(_audioInputPath, streamIndex, _audioDuration, AudioCacheKey(_audioInputPath, streamIndex));
+            var reader = new ChunkedAudioReader(_audioInputPath, streamIndex, _audioDuration, AudioCacheKey(_audioInputPath, streamIndex), readerStart);
             var volume = new VolumeSampleProvider(reader)
             {
                 Volume = VolumeCurve(_audioVolumes.GetValueOrDefault(streamIndex, 100))
@@ -558,7 +587,9 @@ public sealed class PlaybackSession : IDisposable
         PlayFrom(Position);
     }
 
-    internal async Task<EditorPlaybackStartResult> StartCoordinatedAsync(TimeSpan time, CancellationToken cancellationToken = default, Task? audioSetup = null, bool reusePresentedFrame = false)
+    // `reveal` takes the editor view off its loading poster; the coordinator
+    // calls it after the first frame has landed and before the video starts.
+    internal async Task<EditorPlaybackStartResult> StartCoordinatedAsync(TimeSpan time, CancellationToken cancellationToken = default, Task? audioSetup = null, bool reusePresentedFrame = false, Func<CancellationToken, Task<bool>>? reveal = null)
     {
         var generation = Interlocked.Increment(ref _seekVersion);
         Interlocked.Increment(ref _playVersion);
@@ -572,8 +603,10 @@ public sealed class PlaybackSession : IDisposable
         try
         {
             var startId = $"{GetHashCode():x}:{generation}";
-            var result = await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation, audioSetup, reusePresentedFrame), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken).ConfigureAwait(false);
-            if (result.Succeeded) ResumeOverlayClock(result.Landed);
+            var result = await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation, audioSetup, reusePresentedFrame, reveal), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken).ConfigureAwait(false);
+            // The coordinator resumed the overlay clock at its audio anchor; a
+            // video that never rolled was left paused, so stop claiming to play.
+            if (result.Outcome == EditorPlaybackStartOutcome.RevealedPaused && generation == Interlocked.Read(ref _seekVersion)) _shouldPlay = false;
             return result;
         }
         finally { _isSeeking = false; _seekLock.Release(); }
@@ -1299,7 +1332,7 @@ public sealed class PlaybackSession : IDisposable
         _audioDriftHandler = null;
     }
 
-    private sealed class PlaybackSeekTransport(PlaybackSession session, long generation, Task? audioSetup = null, bool reusePresentedFrame = false) : IEditorSeekTransport
+    private sealed class PlaybackSeekTransport(PlaybackSession session, long generation, Task? audioSetup = null, bool reusePresentedFrame = false, Func<CancellationToken, Task<bool>>? reveal = null) : IEditorSeekTransport
     {
         private TimeSpan _audioAnchor;
         public bool CanReusePresentedFrame(TimeSpan target) => reusePresentedFrame && IsPaused &&
@@ -1314,6 +1347,19 @@ public sealed class PlaybackSession : IDisposable
 
         public bool IsPaused => session.VideoPlayer.State == VLCState.Paused;
         public TimeSpan Position => TimeSpan.FromMilliseconds(Math.Max(0, session.VideoPlayer.Time));
+        public TimeSpan LivePosition => session.TryGetOverlayPosition(out var position) ? position : Position;
+        public ulong PresentedPicture => session.Composition?.PresentedPictureId ?? 0;
+        public Task<bool> RevealAsync(CancellationToken token) => reveal is null ? Task.FromResult(true) : reveal(token);
+
+        public void PlayVideo()
+        {
+            lock (session._transportLock) session.VideoPlayer.SetPause(false);
+        }
+
+        public void ResumeClock(TimeSpan anchor)
+        {
+            lock (session._transportLock) session.ResumeOverlayClock(anchor);
+        }
         public int AudioTrackCount => session._audioSources.Count;
         public double PlaybackRate => session._playbackRate;
         public string VideoState => session.VideoPlayer.State.ToString();
@@ -1535,8 +1581,15 @@ public sealed class PlaybackSession : IDisposable
         previous.PlaybackStopped += OnStopped;
         try
         {
-            previous.Stop();
-            stopped.Wait(TimeSpan.FromMilliseconds(300));
+            // An output that is already stopped has no render thread left to
+            // wind down, and Stop() on it raises no PlaybackStopped - so the
+            // wait below always ran its full 300ms for nothing, and the next
+            // open's RebuildAudioOutput sat behind it.
+            if (previous.PlaybackState != PlaybackState.Stopped)
+            {
+                previous.Stop();
+                stopped.Wait(TimeSpan.FromMilliseconds(300));
+            }
         }
         catch
         {
@@ -1554,7 +1607,7 @@ public sealed class PlaybackSession : IDisposable
         return (float)Math.Clamp(percent / 100d, 0, 1.5);
     }
 
-    private static string AudioCacheKey(string inputPath, int streamIndex)
+    internal static string AudioCacheKey(string inputPath, int streamIndex)
     {
         var info = new FileInfo(inputPath);
         var input = string.Join(

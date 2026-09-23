@@ -171,6 +171,24 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
     {
         lock (_gate) return _token != 0 && Adopt(_token, _generation) != 0;
     }
+    // Id of the picture on screen for this output generation, 0 when none or
+    // unreadable. It changes only when a new picture is presented - a redraw
+    // of a paused one (resize, the view moving) keeps it - so it is how an
+    // open tells a video that has actually started moving from one that has
+    // merely been asked to.
+    internal ulong PresentedPictureId
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var status = new Status { Size = (uint)sizeof(Status), Version = Abi };
+                return _token != 0 && Query(_token, &status) != 0 && status.Failed == 0 && status.Generation == _generation
+                    ? status.PresentedPicture
+                    : 0;
+            }
+        }
+    }
     internal bool HasPresentedPicture
     {
         get
