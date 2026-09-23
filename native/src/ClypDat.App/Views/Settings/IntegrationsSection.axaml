@@ -108,7 +108,7 @@
               </StackPanel>
             </Grid>
           </Border>
-          <Border Classes="settingsRow static" Padding="24,0,24,18" MinHeight="0" IsVisible="{Binding ClypDatServerUnavailable}">
+          <Border Classes="settingsRow static" Padding="20,0,20,16" MinHeight="0" IsVisible="{Binding ClypDatServerUnavailable}">
             <Border Classes="settingsNotice">
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
                 <TextBlock Classes="settingsNoticeText" Text="{Binding ClypDatServerUnavailableText}" VerticalAlignment="Center" />
@@ -163,7 +163,7 @@
               </StackPanel>
             </Grid>
           </Border>
-          <Border Classes="settingsRow static" Padding="24,0,24,18" MinHeight="0" IsVisible="{Binding SpotifyHasNotice}">
+          <Border Classes="settingsRow static" Padding="20,0,20,16" MinHeight="0" IsVisible="{Binding SpotifyHasNotice}">
             <Border Classes="settingsNotice">
               <TextBlock Classes="settingsNoticeText" Text="{Binding SpotifyNotice}" />
             </Border>

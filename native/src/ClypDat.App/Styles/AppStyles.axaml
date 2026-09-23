@@ -2910,15 +2910,18 @@
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
 
-  <!-- No padding: rows run edge to edge so their hover fills the card, and the
-       clip keeps that fill inside the rounded corners. No whole-card lift
-       either - the row under the pointer is what lights up now. -->
+  <!-- A 4px inset rather than rows running edge to edge: children paint over
+       the Border's own outline, so a row's hover fill drawn right up to the
+       card covered the outline at every rounded corner. Inset, each row lights
+       up as its own rounded highlight inside the card and the outline stays
+       whole. No whole-card lift either - the row under the pointer is what
+       lights up. -->
   <Style Selector="Border.settingsGroupCard">
     <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="14" />
-    <Setter Property="Padding" Value="0" />
+    <Setter Property="Padding" Value="4" />
     <Setter Property="ClipToBounds" Value="True" />
   </Style>
 
@@ -2928,8 +2931,9 @@
     <!-- Zero-alpha version of the hover fill, so the transition animates only
          alpha rather than flashing through white on the way out. -->
     <Setter Property="Background" Value="{StaticResource Surface_0016212B}" />
-    <Setter Property="Padding" Value="24,18" />
-    <Setter Property="MinHeight" Value="68" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="20,16" />
+    <Setter Property="MinHeight" Value="64" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.1" />
@@ -2946,7 +2950,7 @@
   </Style>
   <Style Selector="Border.settingsRowDivider">
     <Setter Property="Height" Value="1" />
-    <Setter Property="Margin" Value="24,0" />
+    <Setter Property="Margin" Value="20,0" />
     <Setter Property="Background" Value="{StaticResource DividerBrush}" />
   </Style>
   <Style Selector="Border.settingsRow Grid.settingsRowGrid">
@@ -2988,7 +2992,7 @@
     <Setter Property="Background" Value="{StaticResource Surface_0016212B}" />
     <Setter Property="BorderBrush" Value="{StaticResource DividerBrush}" />
     <Setter Property="BorderThickness" Value="0,1,0,0" />
-    <Setter Property="Padding" Value="24,12" />
+    <Setter Property="Padding" Value="20,12" />
     <Setter Property="MinHeight" Value="54" />
     <Setter Property="Transitions">
       <Transitions>
@@ -3012,7 +3016,7 @@
   <Style Selector="TextBlock.settingsEmptyText">
     <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
     <Setter Property="FontSize" Value="13.5" />
-    <Setter Property="Margin" Value="24,16" />
+    <Setter Property="Margin" Value="20,16" />
     <Setter Property="TextWrapping" Value="Wrap" />
   </Style>
 

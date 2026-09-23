@@ -179,7 +179,7 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
 
-          <Border Classes="settingsRowDivider" Margin="0" IsVisible="{Binding IsLayoutEditorOpen}" />
+          <Border Classes="settingsRowDivider" Margin="20,0" IsVisible="{Binding IsLayoutEditorOpen}" />
           <Border Classes="settingsRow static" IsVisible="{Binding IsLayoutEditorOpen}">
             <StackPanel Spacing="14">
               <StackPanel Spacing="5">

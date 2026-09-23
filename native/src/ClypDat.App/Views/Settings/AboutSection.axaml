@@ -63,7 +63,7 @@
     </StackPanel>
 
     <Border Classes="settingsGroupCard">
-      <Border Classes="settingsRow static" Padding="24,20">
+      <Border Classes="settingsRow static" Padding="20,18">
         <!-- Grid, not a horizontal StackPanel: a StackPanel offers its children
              infinite width, so the description below never wraps and is clipped
              by the card instead. -->
@@ -180,7 +180,7 @@
       <TextBlock Classes="settingsGroupLabel" Text="CREDITS" />
       <TextBlock Classes="settingsGroupDesc" Text="People who contributed to ClypDat." />
       <Border Classes="settingsGroupCard">
-        <Border Classes="settingsRow static" Padding="24,22,12,10">
+        <Border Classes="settingsRow static" Padding="20,18,8,6">
           <controls:ResponsiveUniformGrid MinimumItemWidth="212" MaximumColumns="4">
             <Button Classes="creditCard" Margin="0,0,12,12" Tag="https://github.com/Stormanzanii" ToolTip.Tip="Open Arashii's GitHub profile" Click="CreditCard_OnClick">
               <StackPanel Orientation="Horizontal" Spacing="12">

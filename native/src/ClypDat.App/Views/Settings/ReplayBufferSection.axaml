@@ -228,7 +228,7 @@
               </Grid>
             </Border>
 
-            <Border Classes="settingsRow static" IsVisible="{Binding ReplayQualityRestartRequired}" MinHeight="0" Padding="24,0,24,18">
+            <Border Classes="settingsRow static" IsVisible="{Binding ReplayQualityRestartRequired}" MinHeight="0" Padding="20,0,20,16">
               <TextBlock Classes="settingsRowWarning" Text="Restart the replay buffer to apply changed quality or encoder settings." />
             </Border>
           </StackPanel>

@@ -46,7 +46,7 @@
               <Button Grid.Column="1" Content="Browse…" Click="BrowseCustomGameButton_OnClick" VerticalAlignment="Center" />
             </Grid>
           </Border>
-          <Border Classes="settingsRow static" Padding="24,0,24,18" MinHeight="0" IsVisible="{Binding GameAdditionError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
+          <Border Classes="settingsRow static" Padding="20,0,20,16" MinHeight="0" IsVisible="{Binding GameAdditionError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}">
             <TextBlock Classes="settingsRowError" Text="{Binding GameAdditionError}" />
           </Border>
         </StackPanel>
@@ -135,7 +135,7 @@
       <TextBlock Classes="settingsGroupLabel" Text="DETECTED GAMES" />
       <Border Classes="settingsGroupCard">
         <StackPanel>
-          <Border Classes="settingsRow static" Padding="24,16">
+          <Border Classes="settingsRow static" Padding="20,14">
             <TextBox Classes="settingsInput" PlaceholderText="Search games" Text="{Binding GameSearchText}" />
           </Border>
           <ScrollViewer Classes="listScroll">
