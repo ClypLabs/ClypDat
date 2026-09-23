@@ -101,11 +101,27 @@ async function main() {
   // silver fills the canvas to its edges and only the charcoal window is
   // rounded: Discord's mask becomes the frame's outer curve at every radius.
   const discordSize = 1024;
+  const discordTile = (title, artwork) => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${discordSize}" height="${discordSize}" viewBox="0 0 ${discordSize} ${discordSize}"><title>${title}</title><defs><linearGradient id="silver-edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef2f6"/><stop offset="1" stop-color="#7f8b97"/></linearGradient></defs><rect width="${discordSize}" height="${discordSize}" fill="url(#silver-edge)"/><rect x="40" y="40" width="944" height="944" rx="190" fill="#17191c"/>${artwork}</svg>`;
   const discordMark = 921;
   const discordX = (discordSize / 2 - (left + right + 1) / 2 * discordMark / info.width).toFixed(6);
   const discordY = (discordSize / 2 - (top + bottom + 1) / 2 * discordMark / info.height).toFixed(6);
-  const discordSvg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${discordSize}" height="${discordSize}" viewBox="0 0 ${discordSize} ${discordSize}"><title>ClypDat — Discord</title><defs><linearGradient id="silver-edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef2f6"/><stop offset="1" stop-color="#7f8b97"/></linearGradient></defs><rect width="${discordSize}" height="${discordSize}" fill="url(#silver-edge)"/><rect x="40" y="40" width="944" height="944" rx="190" fill="#17191c"/><image x="${discordX}" y="${discordY}" width="${discordMark}" height="${discordMark}" xlink:href="data:image/png;base64,${mark.toString('base64')}"/></svg>`;
+  const discordSvg = discordTile('ClypDat — Discord', `<image x="${discordX}" y="${discordY}" width="${discordMark}" height="${discordMark}" xlink:href="data:image/png;base64,${mark.toString('base64')}"/>`);
   await sharp(Buffer.from(discordSvg)).png(pngOptions).toFile(path.join(app, 'assets/branding/clypdat-discord.png'));
+
+  // The classic application's art gets the same frame. Its hexagon mark only
+  // exists as a 256px raster (clypdat-classic-256.png), so it is redrawn as
+  // vector: two regular hexagons in 256px units, black halo under an off-white
+  // band, round joins. Rendered at 256px these match the raster to about one
+  // level in 255 per pixel. The mark stands 720px tall, about the share of the
+  // tile it fills on clypdat-classic.ico.
+  const classicScale = 720 / (2 * (104 + 38 / 2));
+  const hexagon = radius => 'M' + [0, 1, 2, 3, 4, 5].map(i => {
+    const angle = (i * 60 - 90) * Math.PI / 180;
+    return `${(discordSize / 2 + radius * classicScale * Math.cos(angle)).toFixed(3)} ${(discordSize / 2 + radius * classicScale * Math.sin(angle)).toFixed(3)}`;
+  }).join('L') + 'Z';
+  const hexRing = (radius, band, halo) => `<path d="${hexagon(radius)}" stroke="#000000" stroke-width="${(halo * classicScale).toFixed(3)}"/><path d="${hexagon(radius)}" stroke="#F5F8FC" stroke-width="${(band * classicScale).toFixed(3)}"/>`;
+  const classicDiscordSvg = discordTile('ClypDat Classic — Discord', `<g fill="none" stroke-linejoin="round">${hexRing(104, 25, 38)}${hexRing(53, 14, 28)}</g>`);
+  await sharp(Buffer.from(classicDiscordSvg)).png(pngOptions).toFile(path.join(app, 'assets/branding/clypdat-classic-discord.png'));
 
   const transparentFrames = [];
   const frames = [];

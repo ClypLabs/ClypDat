@@ -83,16 +83,30 @@ test('desktop icon carries the Silver Edge tile at every frame size', async () =
 // Discord rounds Rich Presence art itself, at a radius that differs by
 // surface. Silver to the canvas corners means its mask cuts the outer curve
 // of the frame rather than slicing through a rounded stroke.
-test('Discord asset keeps its frame under Discord corner masks', async () => {
-  const { data, info } = await sharp(asset('branding/clypdat-discord.png')).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  assert.deepEqual([info.width, info.height], [1024, 1024]);
+test('Discord assets keep their frame under Discord corner masks', async () => {
+  for (const name of ['clypdat-discord.png', 'clypdat-classic-discord.png']) {
+    const { data, info } = await sharp(asset(`branding/${name}`)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    assert.deepEqual([info.width, info.height], [1024, 1024]);
+    const pixel = (x, y) => Array.from(data.subarray((y * info.width + x) * 4, (y * info.width + x) * 4 + 4));
+    const silver = ([r, g, b, a]) => a === 255 && Math.min(r, g, b) > 100;
+    for (const [x, y] of [[0, 0], [1023, 0], [0, 1023], [1023, 1023]]) assert.ok(silver(pixel(x, y)), `${name} corner ${x},${y} must be opaque silver`);
+    // A 25% mask meets the diagonal 75px in from each corner; the silver band
+    // must still continue past it before the charcoal window starts.
+    for (const [x, y] of [[85, 85], [938, 85], [85, 938], [938, 938]]) assert.ok(silver(pixel(x, y)), `${name} diagonal ${x},${y} must stay silver inside a 25% mask`);
+    assert.deepEqual(pixel(512, 60), [0x17, 0x19, 0x1c, 255], `${name} charcoal window sits inside the frame`);
+  }
+});
+
+test('classic Discord asset carries the hexagon mark', async () => {
+  const { data, info } = await sharp(asset('branding/clypdat-classic-discord.png')).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   const pixel = (x, y) => Array.from(data.subarray((y * info.width + x) * 4, (y * info.width + x) * 4 + 4));
-  const silver = ([r, g, b, a]) => a === 255 && Math.min(r, g, b) > 100;
-  for (const [x, y] of [[0, 0], [1023, 0], [0, 1023], [1023, 1023]]) assert.ok(silver(pixel(x, y)), `corner ${x},${y} must be opaque silver`);
-  // A 25% mask meets the diagonal 75px in from each corner; the silver band
-  // must still continue past it before the charcoal window starts.
-  for (const [x, y] of [[85, 85], [938, 85], [85, 938], [938, 938]]) assert.ok(silver(pixel(x, y)), `diagonal ${x},${y} must stay silver inside a 25% mask`);
-  assert.deepEqual(pixel(512, 60), [0x17, 0x19, 0x1c, 255], 'charcoal window sits inside the frame');
+  // Outer ring top vertex, inner ring top vertex, the open centre, and the
+  // halo gap between the two rings.
+  const scale = 720 / 246;
+  assert.deepEqual(pixel(512, Math.round(512 - 104 * scale)), [0xf5, 0xf8, 0xfc, 255]);
+  assert.deepEqual(pixel(512, Math.round(512 - 53 * scale)), [0xf5, 0xf8, 0xfc, 255]);
+  assert.deepEqual(pixel(512, 512), [0x17, 0x19, 0x1c, 255]);
+  assert.deepEqual(pixel(Math.round(512 - 65.5 * scale), 512), [0x17, 0x19, 0x1c, 255]);
 });
 
 test('every in-app dark mark stays an unframed transparent symbol', async () => {
