@@ -350,6 +350,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         PublishHealth(health);
         if (!_fatalHealthPolicy.Observe(health)) return;
 
+        AppLog.Error($"Capture health recovery triggered: backend={health.Backend}, source={health.CaptureMode}, state={health.State}, failure={health.LastFailure}, encoder={health.Encoder}, adapter={health.AdapterDescription}, inputFps={health.InputFrameRate:F1}, uniqueFps={health.UniqueFrameRate:F1}, outputFps={health.OutputFrameRate:F1}, targetFps={health.TargetFrameRate}, queue={health.QueueDepth}/{health.EncodeQueueCapacity}, dropped={health.DroppedFrames}, submissionStalled={health.EncoderSubmissionStalled}, stage={health.BottleneckStage}, recovery={health.PipelineRecoveryAction}, attempt={health.RecoveryAttempt}, paused={health.CapturePaused}.");
+
         if (Interlocked.CompareExchange(ref _fatalHealthRecoveryUsed, 1, 0) == 0)
         {
             AppLog.Info("Capture worker health fatal for three windows; restarting worker once.");
