@@ -7669,6 +7669,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             ?? "Sign in through your browser. New to ClypDat? You can make an account there.";
     public string ClypDatXboxStatus => _clypDatSnapshot.IsConnected ? "Linked through ClypDat" : "No Xbox account linked.";
     public bool ClypDatAccountIsConnected => _clypDatAccount.IsAuthenticated;
+    internal Task<string> GetDiagnosticUploadTokenAsync(CancellationToken cancellationToken) =>
+        _clypDatAccount.GetSupportTokenAsync(cancellationToken);
     public string ClypDatPairingCode => _clypDatAccount.ConnectionCode ?? string.Empty;
     public bool ClypDatPairingCodeVisible => _clypDatAccount.ConnectionCode is not null;
     public bool ClypDatXboxIsLinked => _clypDatSnapshot.IsConnected;

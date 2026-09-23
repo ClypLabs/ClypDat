@@ -5,7 +5,7 @@ using ClypDat.App.ViewModels;
 
 namespace ClypDat.App.Views;
 
-public enum HelpSupportAction { Changelog, Updates, Faq, Bug, Feature, Discord, Diagnostics, Logs }
+public enum HelpSupportAction { Changelog, Updates, Faq, Bug, Feature, Discord, Diagnostics, SendDiagnostics, Logs }
 
 public sealed class HelpSupportCard(
     HelpSupportAction action, string title, string description, string buttonLabel, string icon,
@@ -15,6 +15,8 @@ public sealed class HelpSupportCard(
     public string Title { get; } = title;
     public string Description { get; } = description;
     public string ButtonLabel { get; } = buttonLabel;
+    public HelpSupportCard? SecondaryAction { get; init; }
+    public bool HasSecondaryAction => SecondaryAction is not null;
     public Geometry Icon { get; } = Geometry.Parse(icon);
     public Geometry ActionIcon { get; } = Geometry.Parse(external
         ? "M4,12 L12,4 M5,4 H12 V11"
@@ -56,8 +58,12 @@ public sealed partial class HelpSupportView : UserControl
 
     public IReadOnlyList<HelpSupportCard> SelfHelp { get; } =
     [
-        new(HelpSupportAction.Diagnostics, "Export diagnostic bundle", "Save a ZIP of logs and diagnostics to share with a bug report.",
-            "Export bundle", "M4,3 H20 V7 H4 Z M6,7 V21 H18 V7 M12,10 V17 M9,14 L12,17 L15,14", busyLabel: "Exporting…"),
+        new(HelpSupportAction.SendDiagnostics, "Diagnostic bundle", "Send recent logs privately to ClypDat, or save a full ZIP locally.",
+            "Send diagnostics", "M4,3 H20 V7 H4 Z M6,7 V21 H18 V7 M12,10 V17 M9,14 L12,17 L15,14")
+        {
+            SecondaryAction = new(HelpSupportAction.Diagnostics, "Export diagnostic bundle", "", "Export ZIP",
+                "M12,3 V17 M8,13 L12,17 L16,13", busyLabel: "Exporting…")
+        },
         new(HelpSupportAction.Logs, "Open logs", "Browse ClypDat's log files on your computer.",
             "Open logs", "M3,6 V20 H21 V8 H11 L8,4 H3 Z M3,8 H21")
     ];

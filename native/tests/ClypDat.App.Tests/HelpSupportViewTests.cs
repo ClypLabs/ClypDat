@@ -42,7 +42,7 @@ public sealed class HelpSupportViewTests
                     Assert.NotEqual(AppThemeService.Brush("PanelBgBrush", "#101820").ToString(), surface.ToString());
                     Assert.Equal(new Thickness(1), card.BorderThickness);
 
-                    var button = card.GetVisualDescendants().OfType<Button>().Single();
+                    var button = card.GetVisualDescendants().OfType<Button>().Single(b => ReferenceEquals(b.Tag, card.DataContext));
                     Assert.True(button.Focusable);
                     Assert.True(KeyboardNavigation.GetIsTabStop(button));
                     var position = button.TranslatePoint(default, card)!.Value;
@@ -90,7 +90,7 @@ public sealed class HelpSupportViewTests
                     Assert.NotEqual(AppThemeService.Brush("PanelBgBrush", "#101820").ToString(), card.Background.ToString());
                 }
 
-                var button = card.GetVisualDescendants().OfType<Button>().Single();
+                var button = card.GetVisualDescendants().OfType<Button>().Single(b => ReferenceEquals(b.Tag, card.DataContext));
                 var cardBounds = card.Bounds;
                 view.News[0].IsBusy = true;
                 window.UpdateLayout();

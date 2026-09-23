@@ -96,6 +96,13 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private bool IsLiveActivityNeeded => LiveActivityNeeded?.Invoke() ?? true;
     private (bool Xbox, bool Google, bool Discord) LinkSignature => (_snapshot.IsConnected, _snapshot.GoogleConnected, _snapshot.DiscordConnected);
     public bool IsAuthenticated => _token is { ExpiresAt: var expiresAt } && expiresAt > DateTimeOffset.UtcNow;
+    internal async Task<string> GetSupportTokenAsync(CancellationToken cancellationToken)
+    {
+        await MaybeRenewAsync(cancellationToken).ConfigureAwait(false);
+        return IsAuthenticated && _token is { } token
+            ? token.AccessToken
+            : throw new InvalidOperationException("Link your ClypDat account before sending diagnostics.");
+    }
     public bool IsConnecting => _connectCts is not null;
     public event EventHandler<XboxActivitySnapshot>? Changed;
 

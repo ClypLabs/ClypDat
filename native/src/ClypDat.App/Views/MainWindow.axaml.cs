@@ -2059,6 +2059,7 @@ public sealed partial class MainWindow : Window
                 case HelpSupportAction.Feature: SuggestFeature(); break;
                 case HelpSupportAction.Discord: OpenSupportUrl("https://discord.gg/jt3eJf238t"); break;
                 case HelpSupportAction.Diagnostics: await ExportCaptureDiagnosticsAsync(); break;
+                case HelpSupportAction.SendDiagnostics: await ShowSendDiagnosticsAsync(); break;
                 case HelpSupportAction.Logs: AppLog.OpenFolder(); break;
             }
         }

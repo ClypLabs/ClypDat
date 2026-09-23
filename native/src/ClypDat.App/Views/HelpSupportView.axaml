@@ -104,10 +104,16 @@
             <TextBlock Classes="helpTitle" Text="{Binding Title}" />
             <TextBlock Classes="helpDescription" Text="{Binding Description}" />
           </StackPanel>
-          <Button Grid.Row="1" Grid.Column="1" Classes="helpAction" Margin="0,12,0,0"
+          <WrapPanel Grid.Row="1" Grid.Column="1" Margin="0,8,0,-4" Orientation="Horizontal">
+          <Button Classes="helpAction" Margin="0,4,8,4"
                   HorizontalAlignment="Left" Click="Action_OnClick" Tag="{Binding}"
                   IsEnabled="{Binding !IsBusy}" Content="{Binding}" ContentTemplate="{StaticResource ActionContent}"
                   AutomationProperties.Name="{Binding ButtonLabel}" />
+          <Button Classes="helpAction" Margin="0,4,0,4" HorizontalAlignment="Left"
+                  IsVisible="{Binding HasSecondaryAction}" Click="Action_OnClick" Tag="{Binding SecondaryAction}"
+                  IsEnabled="{Binding !SecondaryAction.IsBusy}" Content="{Binding SecondaryAction}"
+                  ContentTemplate="{StaticResource ActionContent}" AutomationProperties.Name="{Binding SecondaryAction.ButtonLabel}" />
+          </WrapPanel>
         </Grid>
       </Border>
     </DataTemplate>
