@@ -190,7 +190,7 @@ public sealed class AppSettings
     // rail rather than hidden.
     public List<string> GameRailOrder { get; set; } = new();
     public string ClipOverlayPosition { get; set; } = "Top Right";
-    public string ClipOverlayVolume { get; set; } = "Medium";
+    public string ClipOverlayVolume { get; set; } = "High";
     // Editor's master output volume (fullscreen playbar slider) - separate
     // from TrackVolumes (per-clip, per-track mix levels stored in
     // ClipEditSettings), this is a single global preference like any media

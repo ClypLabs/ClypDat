@@ -166,7 +166,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _activeReplayCapturePaused;
     private readonly ReplayFrameRateDisplaySmoother _replayFrameRateDisplaySmoother = new();
     private string _selectedClipOverlayPosition = "Top Right";
-    private string _selectedClipOverlayVolume = "Medium";
+    private string _selectedClipOverlayVolume = "High";
     private string _selectedClipFileNameScheme = ClipFileNaming.StandardScheme;
     private string _customClipFileNameTemplate = string.Empty;
     private string _clipFileNamePreview = string.Empty;
@@ -346,7 +346,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
         _selectedSpotifyOverlayPosition = ClipOverlayPositions.FirstOrDefault(position =>
             string.Equals(position, Settings.SpotifyOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Bottom Left";
-        _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "Medium";
+        _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "High";
         _selectedClipFileNameScheme = ClipFileNameSchemes.FirstOrDefault(item => string.Equals(item.Value, Settings.ClipFileNameScheme, StringComparison.OrdinalIgnoreCase))?.Value ?? ClipFileNaming.StandardScheme;
         _customClipFileNameTemplate = Settings.CustomClipFileNameTemplate;
         _masterVolumePercent = Settings.EditorMasterVolume;

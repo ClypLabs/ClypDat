@@ -9,8 +9,9 @@ public static class ClipNotificationSound
         var gain = volumeLevel switch
         {
             "Low" => 0.035f,
-            "High" => 0.16f,
-            _ => 0.08f
+            "Medium" => 0.08f,
+            // High is the default, so anything unrecognised plays at it too.
+            _ => 0.16f
         };
 
         try
