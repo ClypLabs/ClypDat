@@ -16,10 +16,6 @@
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="6">
       <TextBlock Classes="settingsSectionTitle" Text="Replay buffer" />
-      <StackPanel Orientation="Horizontal" Spacing="7" ToolTip.Tip="{Binding RecordingDetail}" AutomationProperties.HelpText="{Binding RecordingDetail}">
-        <Ellipse Width="7" Height="7" Fill="{Binding RecordingDotColor}" Opacity="{Binding RecordingDotOpacity}" IsVisible="{Binding RecordingDotVisible}" VerticalAlignment="Center" />
-        <TextBlock Classes="settingsFieldLabel" Text="{Binding RecorderStatus}" />
-      </StackPanel>
       <TextBlock Classes="settingsSectionDesc" Text="Control how ClypDat records in the background and which capture backend it uses." />
     </StackPanel>
 

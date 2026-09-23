@@ -137,11 +137,12 @@ public sealed partial class MainWindow
             TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent }
         };
 
-        var titleBar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Avalonia.Thickness(24, 20, 16, 18) };
+        var titleBar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
         var titleLeft = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 12,
+            Margin = new Avalonia.Thickness(24, 20, 0, 18),
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
@@ -158,7 +159,21 @@ public sealed partial class MainWindow
                 } }
             }
         };
-        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 32, Height = 32, FontSize = 12, VerticalAlignment = VerticalAlignment.Top, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(8) };
+        // The same corner close every other popup has (CreateChromelessDialog):
+        // flush to the card's top-right corner, rounded to match it, quiet
+        // until hovered - not the red window-caption button.
+        var closeButton = new Button
+        {
+            Classes = { "dialogClose" },
+            Content = "✕",
+            Width = 52,
+            Height = 56,
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Top,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0)
+        };
         Avalonia.Automation.AutomationProperties.SetName(closeButton, "Close Notice Board");
         ToolTip.SetTip(closeButton, "Close");
         closeButton.Click += (_, _) => window.Close();

@@ -8239,13 +8239,11 @@ public sealed partial class MainWindow : Window
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
         CancellationTokenSource? downloadCts = null;
-        // Background/BorderThickness/CornerRadius/Foreground/Padding come from
-        // the windowChromeButton/windowCloseButton classes now, not local
-        // values - those classes carry the flat template that makes the red
-        // hover actually paint instead of only flashing on pointer-exit (see
-        // AppStyles.axaml). Width/Height stay local: this dialog's 40px
-        // titlebar is shorter than the main window's 48px chrome row.
-        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
+        // The corner close every popup shares (dialogClose, as in
+        // CreateChromelessDialog) rather than the main window's red caption
+        // button: it is a dialog, not a window chrome row. Sized to this
+        // dialog's 48px title bar.
+        var closeButton = new Button { Classes = { "dialogClose" }, Content = "✕", Width = 52, Height = 48, Margin = new Avalonia.Thickness(0), FontSize = 12, VerticalAlignment = VerticalAlignment.Top, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
         // downloadCts is null until Update Now starts one - X used to just
         // close the window while DownloadAndRestartAsync kept running
         // undisturbed in the background (nothing was ever cancelling it), so
@@ -8618,7 +8616,7 @@ public sealed partial class MainWindow : Window
         var titleText = new TextBlock { Text = "You're up to date", Foreground = AppThemeService.Brush("Text_B9C6D4", "#B9C6D4"), FontSize = 12, FontWeight = Avalonia.Media.FontWeight.SemiBold, Margin = new Avalonia.Thickness(8, 2, 0, 0), VerticalAlignment = VerticalAlignment.Center };
         var titleLeft = new StackPanel { Orientation = Orientation.Horizontal, Children = { titleIcon, titleText } };
         Grid.SetColumn(titleLeft, 0);
-        var closeButton = new Button { Classes = { "windowChromeButton", "windowCloseButton" }, Content = "✕", Width = 40, Height = 40, Margin = new Avalonia.Thickness(0), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
+        var closeButton = new Button { Classes = { "dialogClose" }, Content = "✕", Width = 52, Height = 48, Margin = new Avalonia.Thickness(0), FontSize = 12, VerticalAlignment = VerticalAlignment.Top, HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, CornerRadius = new Avalonia.CornerRadius(0, 11, 0, 0) };
         closeButton.Click += (_, _) => window.Close();
         Grid.SetColumn(closeButton, 2);
         titleBar.Children.Add(titleLeft);
