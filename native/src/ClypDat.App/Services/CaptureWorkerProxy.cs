@@ -17,6 +17,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private readonly List<DateTime> _failures = new();
     private readonly CaptureHealthRecoveryPolicy _fatalHealthPolicy = new();
     private NamedPipeClientStream? _pipe;
+    private Stream? _healthConnection;
     private Process? _process;
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Worker");
     private CancellationTokenSource? _recoveryCancellation;
@@ -268,12 +269,12 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                 if (message.Type == "response") { TaskCompletionSource<JsonElement>? completion; lock (_pending) _pending.TryGetValue(message.RequestId, out completion); completion?.TrySetResult(message.Payload); continue; }
                 switch (message.Type)
                 {
-                    case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => HandleWorkerHealth(health)); break;
+                    case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => HandleWorkerHealth(pipe, generation, health)); break;
                     case "recording-state":
                         if (message.Payload.TryGetProperty("recording", out var recording))
-                            Dispatcher.UIThread.Post(() => SetRecording(recording.GetBoolean()));
+                            Dispatcher.UIThread.Post(() => { if (IsCurrentConnection(pipe, generation)) SetRecording(recording.GetBoolean()); });
                         break;
-                    case "recording-stopped": Dispatcher.UIThread.Post(() => { if (!_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
+                    case "recording-stopped": Dispatcher.UIThread.Post(() => { if (IsCurrentConnection(pipe, generation) && !_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
                     case "save-started":
                         var started = message.Payload.Deserialize<ReplaySaveStarted>();
                         if (started is not null)
@@ -345,16 +346,32 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         }
     }
 
-    private void HandleWorkerHealth(ReplayCaptureHealth health)
+    private bool IsCurrentConnection(Stream pipe, long generation) =>
+        !_disposed && ReferenceEquals(_pipe, pipe) && generation == Volatile.Read(ref _generation);
+
+    internal void HandleWorkerHealth(Stream pipe, long generation, ReplayCaptureHealth health)
     {
+        // UI callbacks already queued by the lost connection can arrive after
+        // KillWorker. They must not consume the replacement worker's recovery.
+        if (!IsCurrentConnection(pipe, generation)) return;
+        if (!ReferenceEquals(_healthConnection, pipe))
+        {
+            _healthConnection = pipe;
+            _fatalHealthPolicy.Reset();
+        }
         PublishHealth(health);
+        if (!_desiredRecording)
+        {
+            _fatalHealthPolicy.Reset();
+            return;
+        }
         if (!_fatalHealthPolicy.Observe(health)) return;
 
         AppLog.Error($"Capture health recovery triggered: backend={health.Backend}, source={health.CaptureMode}, state={health.State}, failure={health.LastFailure}, encoder={health.Encoder}, adapter={health.AdapterDescription}, inputFps={health.InputFrameRate:F1}, uniqueFps={health.UniqueFrameRate:F1}, outputFps={health.OutputFrameRate:F1}, targetFps={health.TargetFrameRate}, queue={health.QueueDepth}/{health.EncodeQueueCapacity}, dropped={health.DroppedFrames}, submissionStalled={health.EncoderSubmissionStalled}, stage={health.BottleneckStage}, recovery={health.PipelineRecoveryAction}, attempt={health.RecoveryAttempt}, paused={health.CapturePaused}.");
 
         if (Interlocked.CompareExchange(ref _fatalHealthRecoveryUsed, 1, 0) == 0)
         {
-            AppLog.Info("Capture worker health fatal for three windows; restarting worker once.");
+            AppLog.Info("Capture worker health requested recovery; restarting worker once.");
             KillWorker();
             BeginRecovery(Volatile.Read(ref _generation), "fatal encoder health", ExitCode());
             return;
@@ -362,7 +379,9 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
         _desiredRecording = false;
         RecoveryHealth(1, _health.RecentWorkerFailureCount, _health.LastWorkerExitCode, null, true, ReplayRecoveryStopReason.CapturePipelineStall,
-            "Capture output remained below 1 FPS with a full encoder queue; recording stopped.");
+            string.IsNullOrWhiteSpace(health.LastFailure)
+                ? "Capture throughput remained unhealthy after worker recovery; recording stopped."
+                : $"Capture failed after worker recovery: {health.LastFailure}");
         SetRecording(false);
         RecordingStopped?.Invoke(this, EventArgs.Empty);
     }
