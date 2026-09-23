@@ -54,6 +54,7 @@ public sealed class PlaybackSession : IDisposable
     private string? _cropMaskPath;
     private Media? _videoMedia;
     internal string? LoadedPath { get; private set; }
+    internal bool IsNetworkSource => IsNetworkPath(LoadedPath ?? string.Empty);
     private volatile bool _disposed;
     private readonly CancellationTokenSource _disposeCts = new();
     // Generous on purpose: a preview decode holding _seekLock is bounded work, and
@@ -589,7 +590,7 @@ public sealed class PlaybackSession : IDisposable
 
     // `reveal` takes the editor view off its loading poster; the coordinator
     // calls it after the first frame has landed and before the video starts.
-    internal async Task<EditorPlaybackStartResult> StartCoordinatedAsync(TimeSpan time, CancellationToken cancellationToken = default, Task? audioSetup = null, bool reusePresentedFrame = false, Func<CancellationToken, Task<bool>>? reveal = null)
+    internal async Task<EditorPlaybackStartResult> StartCoordinatedAsync(TimeSpan time, CancellationToken cancellationToken = default, Task? audioSetup = null, bool reusePresentedFrame = false, Func<CancellationToken, Task<bool>>? reveal = null, TimeSpan? startupTimeout = null)
     {
         var generation = Interlocked.Increment(ref _seekVersion);
         Interlocked.Increment(ref _playVersion);
@@ -599,17 +600,41 @@ public sealed class PlaybackSession : IDisposable
         _lastRequestedPosition = time < TimeSpan.Zero ? TimeSpan.Zero : time;
         _isSeeking = true;
         ForceVideoSilent();
-        await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var acquired = false;
         try
         {
+            await _seekLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = true;
             var startId = $"{GetHashCode():x}:{generation}";
-            var result = await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation, audioSetup, reusePresentedFrame, reveal), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken).ConfigureAwait(false);
+            var result = await _seekCoordinator.StartAsync(new PlaybackSeekTransport(this, generation, audioSetup, reusePresentedFrame, reveal), _lastRequestedPosition, startId, () => generation == Interlocked.Read(ref _seekVersion) && !_disposed, cancellationToken, startupTimeout).ConfigureAwait(false);
             // The coordinator resumed the overlay clock at its audio anchor; a
             // video that never rolled was left paused, so stop claiming to play.
-            if (result.Outcome == EditorPlaybackStartOutcome.RevealedPaused && generation == Interlocked.Read(ref _seekVersion)) _shouldPlay = false;
+            if ((result.Outcome is EditorPlaybackStartOutcome.RevealedPaused or EditorPlaybackStartOutcome.Failed) &&
+                generation == Interlocked.Read(ref _seekVersion)) _shouldPlay = false;
+            if (result.Outcome == EditorPlaybackStartOutcome.Failed)
+            {
+                var native = Composition is { } output && output.TryReadStatus(out var status)
+                    ? $"decoded={status.DecodedPicture}, presented={status.PresentedPicture}, attached={status.Attached}, nativeFailed={status.Failed}"
+                    : "nativeStatus=unavailable";
+                AppLog.Error($"Editor startup failed: stage={result.Failure}, network={IsNetworkSource}, state={VideoPlayer.State}, vout={VideoPlayer.VoutCount}, {native}.");
+            }
             return result;
         }
-        finally { _isSeeking = false; _seekLock.Release(); }
+        catch (OperationCanceledException)
+        {
+            if (generation == Interlocked.Read(ref _seekVersion))
+            {
+                _shouldPlay = false;
+                new PlaybackSeekTransport(this, generation).StopAudio();
+                VideoPlayer.SetPause(true);
+            }
+            throw;
+        }
+        finally
+        {
+            if (generation == Interlocked.Read(ref _seekVersion)) _isSeeking = false;
+            if (acquired) _seekLock.Release();
+        }
     }
 
     public void PlayFrom(TimeSpan time)
@@ -1363,7 +1388,7 @@ public sealed class PlaybackSession : IDisposable
         public int AudioTrackCount => session._audioSources.Count;
         public double PlaybackRate => session._playbackRate;
         public string VideoState => session.VideoPlayer.State.ToString();
-        public bool IsNetworkSource => IsNetworkPath(session._audioInputPath);
+        public bool IsNetworkSource => session.IsNetworkSource;
 
         public async Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default)
         {
@@ -1403,7 +1428,7 @@ public sealed class PlaybackSession : IDisposable
                     session.Composition?.BindPlayer(session.VideoPlayer);
                     session.VideoPlayer.Play();
                 }
-                else if (session.VideoPlayer.State != VLCState.Paused && !session.VideoPlayer.IsPlaying)
+                else if (session.VideoPlayer.State == VLCState.NothingSpecial)
                 {
                     // A just-loaded LibVLC player is often NothingSpecial;
                     // it must be started once before a pause/Time sequence is

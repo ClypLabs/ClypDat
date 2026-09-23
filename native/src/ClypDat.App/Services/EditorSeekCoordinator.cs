@@ -103,28 +103,41 @@ internal sealed class EditorSeekCoordinator
     // Audio that misses the budget joins late through StartDeferredAsync. That
     // never starts WASAPI before its chunk exists, so there is no silent gap -
     // the reader only plays silence when it is started on a missing chunk.
-    public async Task<EditorPlaybackStartResult> StartAsync(IEditorSeekTransport transport, TimeSpan target, string startId, Func<bool> isCurrent, CancellationToken cancellationToken)
+    public async Task<EditorPlaybackStartResult> StartAsync(IEditorSeekTransport transport, TimeSpan target, string startId, Func<bool> isCurrent, CancellationToken cancellationToken, TimeSpan? startupTimeout = null)
     {
         target = target < TimeSpan.Zero ? TimeSpan.Zero : target;
         var clock = Stopwatch.StartNew();
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var limit = startupTimeout ?? TimeSpan.FromSeconds(15);
+        deadline.CancelAfter(limit > TimeSpan.Zero ? limit : TimeSpan.Zero);
+        var token = deadline.Token;
+        var failure = EditorPlaybackStartFailure.PauseTimeout;
+        EditorPlaybackStartResult Fail(EditorPlaybackStartFailure reason)
+        {
+            if (isCurrent()) { transport.StopAudio(); transport.PauseVideo(); }
+            transport.LogError($"start={startId} failed: stage={reason}, ms={clock.ElapsedMilliseconds}, network={transport.IsNetworkSource}, state={transport.VideoState}, position={transport.Position.TotalSeconds:0.###}s, presented={transport.PresentedPicture}.");
+            return EditorPlaybackStartResult.FailedResult with { Failure = reason };
+        }
         EditorPlaybackStartResult Superseded() { transport.LogDebug($"start={startId} superseded: ms={clock.ElapsedMilliseconds}."); return EditorPlaybackStartResult.SupersededResult; }
         if (!isCurrent()) return Superseded();
+        if (limit <= TimeSpan.Zero) return Fail(EditorPlaybackStartFailure.DeadlineExceeded);
         transport.LogDebug($"start={startId} prepare: target={target.TotalSeconds:0.###}s, tracks={transport.AudioTrackCount}.");
         var preparation = transport.PrepareAudioAsync(target, startId, cancellationToken);
         try
         {
-            var landed = transport.CanReusePresentedFrame(target) ? target : await LandAsync(transport, target, startId, isCurrent, cancellationToken).ConfigureAwait(false);
-            if (landed is null) return !isCurrent() ? Superseded() : EditorPlaybackStartResult.FailedResult;
+            var landed = transport.CanReusePresentedFrame(target) ? target : await LandAsync(transport, target, startId, isCurrent, token,
+                transport.IsNetworkSource ? () => limit - clock.Elapsed : null, reason => failure = reason).ConfigureAwait(false);
+            if (landed is null) return !isCurrent() ? Superseded() : Fail(clock.Elapsed >= limit ? EditorPlaybackStartFailure.DeadlineExceeded : failure);
 
             // Polled rather than awaited so a seek or a newer open supersedes
             // this within one interval instead of holding the seek lock for a
             // whole extraction.
             var budget = (transport.IsNetworkSource ? _networkStartAudioBudget : _startAudioBudget) - clock.Elapsed;
-            await WaitUntilAsync(() => preparation.IsCompleted, isCurrent, cancellationToken, budget > TimeSpan.Zero ? budget : TimeSpan.Zero).ConfigureAwait(false);
+            await WaitUntilAsync(() => preparation.IsCompleted, isCurrent, token, budget > TimeSpan.Zero ? budget : TimeSpan.Zero).ConfigureAwait(false);
             if (!isCurrent()) return Superseded();
             var audio = AudioOutcome(transport, preparation, startId);
 
-            if (!await transport.RevealAsync(cancellationToken).ConfigureAwait(false) || !isCurrent()) return Superseded();
+            if (!await transport.RevealAsync(token).ConfigureAwait(false) || !isCurrent()) return Superseded();
             // Read after the reveal: re-showing the parked picture in its new
             // place is a redraw, not a new picture, but a straggling landing
             // decode must not count as the video moving.
@@ -133,7 +146,7 @@ internal sealed class EditorSeekCoordinator
             var baseline = transport.PresentedPicture;
             var basePosition = transport.Position;
             transport.PlayVideo();
-            var moved = await WaitUntilAsync(() => transport.PresentedPicture > baseline || transport.Position - basePosition >= TimeSpan.FromMilliseconds(20), isCurrent, cancellationToken, _rollTimeout).ConfigureAwait(false);
+            var moved = await WaitUntilAsync(() => transport.PresentedPicture > baseline || transport.Position - basePosition >= TimeSpan.FromMilliseconds(20), isCurrent, token, _rollTimeout).ConfigureAwait(false);
             if (!isCurrent()) return Superseded();
             if (!moved)
             {
@@ -146,16 +159,19 @@ internal sealed class EditorSeekCoordinator
             var anchor = moving > landed.Value + FirstMotionLead ? moving : landed.Value + FirstMotionLead;
             transport.ResumeClock(anchor);
             if (audio.ReadyTracks > 0) transport.StartDeferredAudio(anchor, startId);
-            else if (audio.Pending) _ = StartDeferredAsync(transport, preparation, target, startId, isCurrent);
+            else if (audio.Pending) _ = StartDeferredAsync(transport, preparation, target, startId, () => !cancellationToken.IsCancellationRequested && isCurrent());
             transport.LogDebug($"start={startId} commit: landed={landed.Value.TotalSeconds:0.###}s, anchor={anchor.TotalSeconds:0.###}s, audio={(audio.ReadyTracks > 0 ? "after-motion" : audio.Pending ? "deferred" : "silent")}, ready={audio.ReadyTracks}, failed={audio.FailedTracks}, ms={clock.ElapsedMilliseconds}.");
             return new(audio.Pending ? EditorPlaybackStartOutcome.AudioPending : EditorPlaybackStartOutcome.Playing, landed.Value, anchor, audio);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            return !isCurrent() ? Superseded() : Fail(EditorPlaybackStartFailure.DeadlineExceeded);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error)
         {
             transport.LogError($"start={startId} failed: {error.Message}");
-            if (isCurrent()) { transport.StopAudio(); transport.PauseVideo(); }
-            return EditorPlaybackStartResult.FailedResult;
+            return Fail(EditorPlaybackStartFailure.PlayerError);
         }
     }
 
@@ -170,7 +186,8 @@ internal sealed class EditorSeekCoordinator
         return new AudioPreparationResult(0, transport.AudioTrackCount, false);
     }
 
-    private async Task<TimeSpan?> LandAsync(IEditorSeekTransport transport, TimeSpan target, string id, Func<bool> current, CancellationToken token)
+    private async Task<TimeSpan?> LandAsync(IEditorSeekTransport transport, TimeSpan target, string id, Func<bool> current, CancellationToken token,
+        Func<TimeSpan>? remainingStartup = null, Action<EditorPlaybackStartFailure>? failed = null)
     {
         // The player parks on its landing frame after a scrub preview, so a
         // settling seek to that same frame has nothing to decode. Writing the
@@ -191,9 +208,20 @@ internal sealed class EditorSeekCoordinator
             if (!current()) return null;
             var clock = Stopwatch.StartNew();
             transport.PauseVideo();
-            if (!await WaitUntilAsync(() => transport.IsPaused, current, token).ConfigureAwait(false)) continue;
+            // Pause requests issued while VLC opens/buffers can be ignored.
+            // Reassert only once playable; never restart an input still opening.
+            var paused = await WaitUntilAsync(() =>
+            {
+                if (transport.IsPaused || transport.VideoState == "Error") return true;
+                if (transport.VideoState == "Playing") transport.PauseVideo();
+                return transport.IsPaused;
+            }, current, token, remainingStartup?.Invoke()).ConfigureAwait(false);
+            if (!current()) return null;
+            if (transport.VideoState == "Error") { failed?.Invoke(EditorPlaybackStartFailure.PlayerError); return null; }
+            if (!paused || !transport.IsPaused) { failed?.Invoke(EditorPlaybackStartFailure.PauseTimeout); continue; }
             transport.WritePosition(target);
-            if (!await transport.PresentAsync(target, current, token).ConfigureAwait(false)) continue;
+            if (!await transport.PresentAsync(target, current, token).ConfigureAwait(false))
+            { failed?.Invoke(EditorPlaybackStartFailure.PresentationTimeout); continue; }
             if (!current()) return null;
             transport.LogDebug($"seek={id} video-presented: attempt={attempt}, requested={target.TotalSeconds:0.###}s, presentationMs={clock.ElapsedMilliseconds}.");
             return target;
@@ -218,8 +246,9 @@ internal interface IEditorSeekTransport
   int AudioTrackCount { get; } double PlaybackRate { get; } string VideoState { get; } bool IsNetworkSource { get; } Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default); void StopAudio(); void PauseVideo(); void ResetVideo(); void WritePosition(TimeSpan target); void CommitPaused(TimeSpan position); void CommitPlaying(TimeSpan position, string seekId); void CommitVideoOnly(); void StartDeferredAudio(TimeSpan position, string seekId); void LogDebug(string line); void LogInfo(string line); void LogError(string line); }
 internal readonly record struct AudioPreparationResult(int ReadyTracks, int FailedTracks, bool Pending) { public static AudioPreparationResult PendingResult => new(0, 0, true); }
 internal readonly record struct EditorSeekResult(bool Succeeded, bool Resumed, bool Superseded, TimeSpan Landed, TimeSpan AudioAnchor) { public static EditorSeekResult FailedResult => new(false,false,false,default,default); public static EditorSeekResult SupersededResult => new(false,false,true,default,default); }
+internal enum EditorPlaybackStartFailure { None, PauseTimeout, PresentationTimeout, DeadlineExceeded, PlayerError }
 internal enum EditorPlaybackStartOutcome { Playing, AudioPending, RevealedPaused, Failed, Superseded }
-internal readonly record struct EditorPlaybackStartResult(EditorPlaybackStartOutcome Outcome, TimeSpan Landed, TimeSpan Anchor, AudioPreparationResult Audio)
+internal readonly record struct EditorPlaybackStartResult(EditorPlaybackStartOutcome Outcome, TimeSpan Landed, TimeSpan Anchor, AudioPreparationResult Audio, EditorPlaybackStartFailure Failure = EditorPlaybackStartFailure.None)
 {
     public bool Succeeded => Outcome is EditorPlaybackStartOutcome.Playing or EditorPlaybackStartOutcome.AudioPending;
     public bool Superseded => Outcome == EditorPlaybackStartOutcome.Superseded;

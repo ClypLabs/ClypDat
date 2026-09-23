@@ -265,6 +265,112 @@ public sealed class EditorSeekCoordinatorTests
         Assert.Equal(1, transport.AudioStarts);
     }
 
+    [Fact]
+    public async Task Startup_NetworkOpeningLongerThanSeekBudget_StillPresents()
+    {
+        var transport = new RecoveryTransport { IsNetworkSource = true, OpeningDelay = TimeSpan.FromMilliseconds(150) };
+        var coordinator = new EditorSeekCoordinator(attemptTimeout: TimeSpan.FromMilliseconds(20));
+        var result = await coordinator.StartAsync(transport, TimeSpan.Zero, "network-open", () => true, CancellationToken.None);
+        Assert.True(result.Succeeded);
+        Assert.True(transport.Presented);
+        Assert.Equal(1, transport.Reveals);
+    }
+
+    [Fact]
+    public async Task Startup_PauseIgnoredWhileOpening_ReassertsWhenPlayable()
+    {
+        var transport = new RecoveryTransport { OpeningDelay = TimeSpan.FromMilliseconds(80), IgnoreOpeningPause = true };
+        var coordinator = new EditorSeekCoordinator(attemptTimeout: TimeSpan.FromMilliseconds(120));
+        var result = await coordinator.StartAsync(transport, TimeSpan.Zero, "pause-race", () => true, CancellationToken.None);
+        Assert.True(result.Succeeded);
+        Assert.True(transport.Presented);
+        Assert.Contains(transport.DebugLines, line => line.Contains("video-presented: attempt=1"));
+    }
+
+    [Fact]
+    public async Task Startup_NetworkDeadline_StopsWithoutRevealOrAudio()
+    {
+        var transport = new RecoveryTransport { IsNetworkSource = true, OpeningDelay = TimeSpan.FromMinutes(1) };
+        var result = await new EditorSeekCoordinator().StartAsync(transport, TimeSpan.Zero, "deadline", () => true,
+            CancellationToken.None, startupTimeout: TimeSpan.FromMilliseconds(80));
+        Assert.Equal(EditorPlaybackStartOutcome.Failed, result.Outcome);
+        Assert.Equal(EditorPlaybackStartFailure.DeadlineExceeded, result.Failure);
+        Assert.Equal(0, transport.Reveals);
+        Assert.Equal(0, transport.AudioStarts);
+        Assert.Contains(transport.Errors, line => line.Contains("stage=DeadlineExceeded"));
+    }
+
+    [Fact]
+    public async Task Startup_LocalPauseFailure_KeepsShortWaitAndReason()
+    {
+        var transport = new RecoveryTransport { OpeningDelay = TimeSpan.FromMinutes(1) };
+        var result = await new EditorSeekCoordinator(attemptTimeout: TimeSpan.FromMilliseconds(15))
+            .StartAsync(transport, TimeSpan.Zero, "local", () => true, CancellationToken.None);
+        Assert.Equal(EditorPlaybackStartFailure.PauseTimeout, result.Failure);
+        Assert.Equal(0, transport.Reveals);
+    }
+
+    [Fact]
+    public async Task Startup_NetworkCancelled_CannotRevealOrStartAudio()
+    {
+        var transport = new RecoveryTransport { IsNetworkSource = true, OpeningDelay = TimeSpan.FromMinutes(1) };
+        using var cancellation = new CancellationTokenSource();
+        var start = new EditorSeekCoordinator().StartAsync(transport, TimeSpan.Zero, "cancel", () => true, cancellation.Token);
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => start);
+        Assert.Equal(0, transport.Reveals);
+        Assert.Equal(0, transport.AudioStarts);
+    }
+
+    [Fact]
+    public async Task Startup_NetworkSuperseded_DoesNotPauseNewOwner()
+    {
+        var transport = new RecoveryTransport { IsNetworkSource = true, OpeningDelay = TimeSpan.FromMinutes(1) };
+        var current = true;
+        var start = new EditorSeekCoordinator().StartAsync(transport, TimeSpan.Zero, "old", () => current, CancellationToken.None);
+        current = false;
+        var pauses = transport.Pauses;
+        var result = await start;
+        Assert.True(result.Superseded);
+        Assert.Equal(pauses, transport.Pauses);
+        Assert.Equal(0, transport.Reveals);
+    }
+
+    [Fact]
+    public async Task Startup_AbandonedAfterVideoStarts_NeverJoinsLateAudio()
+    {
+        var audio = new TaskCompletionSource<AudioPreparationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transport = new RecoveryTransport(audio.Task);
+        using var cancellation = new CancellationTokenSource();
+        var result = await new EditorSeekCoordinator(startAudioBudget: TimeSpan.Zero)
+            .StartAsync(transport, TimeSpan.Zero, "late-audio", () => true, cancellation.Token);
+        Assert.Equal(EditorPlaybackStartOutcome.AudioPending, result.Outcome);
+        cancellation.Cancel();
+        audio.SetResult(new AudioPreparationResult(1, 0, false));
+        await Task.Delay(50);
+        Assert.Equal(0, transport.AudioStarts);
+    }
+
+    [Fact]
+    public void NetworkClassification_UsesVideoBeforeAudioExists()
+    {
+        var session = (PlaybackSession)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(PlaybackSession));
+        typeof(PlaybackSession).GetField("<LoadedPath>k__BackingField", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .SetValue(session, @"\\media-server\clips\sample.mp4");
+        Assert.True(session.IsNetworkSource);
+    }
+
+    [Fact]
+    public async Task Startup_DeadlineAlreadySpent_DoesNotRevealEvenReadyFrame()
+    {
+        var transport = new RecoveryTransport { ReusesPresentedFrame = true };
+        var result = await new EditorSeekCoordinator().StartAsync(transport, TimeSpan.Zero, "expired", () => true,
+            CancellationToken.None, startupTimeout: TimeSpan.Zero);
+        Assert.Equal(EditorPlaybackStartFailure.DeadlineExceeded, result.Failure);
+        Assert.Equal(0, transport.Reveals);
+        Assert.Equal(0, transport.AudioStarts);
+    }
+
     private sealed class RecoveryTransport : IEditorSeekTransport
     {
         private readonly bool _videoRolls;
@@ -273,6 +379,9 @@ public sealed class EditorSeekCoordinatorTests
         private TimeSpan _position;
         private ulong _picture;
         public List<string> Calls { get; } = [];
+        public List<string> DebugLines { get; } = [];
+        public List<string> Errors { get; } = [];
+        public int Pauses { get; private set; }
         public bool ReusesPresentedFrame { get; init; }
         public bool CanReusePresentedFrame(TimeSpan target) => ReusesPresentedFrame;
         // The player is already parked on the requested frame, so the seek has
@@ -299,7 +408,12 @@ public sealed class EditorSeekCoordinatorTests
             _presents = presents;
         }
 
-        public bool IsPaused { get; private set; } = true;
+        private bool _paused = true;
+        private readonly System.Diagnostics.Stopwatch _opening = new();
+        public TimeSpan OpeningDelay { get; init; }
+        public bool IgnoreOpeningPause { get; init; }
+        private bool Opening => OpeningDelay > TimeSpan.Zero && (!_opening.IsRunning || _opening.Elapsed < OpeningDelay);
+        public bool IsPaused { get => !Opening && _paused; private set => _paused = value; }
         public TimeSpan Position => _position;
         public TimeSpan LivePosition => _position;
         public ulong PresentedPicture => _picture;
@@ -331,14 +445,19 @@ public sealed class EditorSeekCoordinatorTests
         }
         public int AudioTrackCount => 1;
         public double PlaybackRate => 1;
-        public string VideoState => IsPaused ? "Paused" : "Playing";
-        public bool IsNetworkSource => false;
+        public string VideoState => Opening ? "Opening" : IsPaused ? "Paused" : "Playing";
+        public bool IsNetworkSource { get; init; }
         public int AudioStarts { get; private set; }
 
         public Task<AudioPreparationResult> PrepareAudioAsync(TimeSpan target, string seekId, CancellationToken cancellationToken = default) => _preparation;
 
         public void StopAudio() { }
-        public void PauseVideo() => IsPaused = true;
+        public void PauseVideo()
+        {
+            Pauses++;
+            _opening.Start();
+            IsPaused = !(IgnoreOpeningPause && Opening);
+        }
         public void ResetVideo() => IsPaused = true;
 
         public void WritePosition(TimeSpan target) { Calls.Add("write"); Writes++; _position = target; }
@@ -364,8 +483,8 @@ public sealed class EditorSeekCoordinatorTests
             AudioStarts++;
         }
 
-        public void LogDebug(string line) { }
+        public void LogDebug(string line) => DebugLines.Add(line);
         public void LogInfo(string line) { }
-        public void LogError(string line) { }
+        public void LogError(string line) => Errors.Add(line);
     }
 }
