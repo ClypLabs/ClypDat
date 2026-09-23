@@ -1349,6 +1349,9 @@
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:pointerover">
     <Setter Property="Background" Value="{StaticResource Surface_223341}" />
   </Style>
+  <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.onboardingQualityPresetCards ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{StaticResource Surface_223341}" />
+  </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
   </Style>
@@ -1359,13 +1362,6 @@
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
     <Setter Property="BorderBrush" Value="{StaticResource Surface_405668}" />
-  </Style>
-  <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Transitions">
-      <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.18" />
-      </Transitions>
-    </Setter>
   </Style>
   <!-- Custom title-bar min/maximize/close buttons - replace Windows' own
        caption buttons (WindowDecorations="None" on
@@ -1735,15 +1731,21 @@
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="FontSize" Value="14" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <!-- Foreground only. A Background transition here faded through white:
+         the selected pill is Transparent (white at zero alpha) so the
+         accent indicator shows through, and BrushTransition interpolates RGB. -->
     <Setter Property="Transitions">
       <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.16" />
-        <BrushTransition Property="BorderBrush" Duration="0:0:0.16" />
         <BrushTransition Property="Foreground" Duration="0:0:0.16" />
       </Transitions>
     </Setter>
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem:pointerover">
+    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+  </Style>
+  <!-- Fluent paints its own translucent white over the presenter on hover
+       and press; name the colour here so that never shows through. -->
+  <Style Selector="ListBox.pillGroup ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.pillGroup ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="ListBox.pillGroup /template/ Border#PART_SelectionIndicator">
@@ -1976,13 +1978,6 @@
     <Setter Property="CornerRadius" Value="9" />
     <Setter Property="ZIndex" Value="1" />
   </Style>
-  <Style Selector="ListBox.qualityPresetCards ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Transitions">
-      <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.18" />
-      </Transitions>
-    </Setter>
-  </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem">
     <Setter Property="MinHeight" Value="88" />
     <Setter Property="Margin" Value="0,0,10,8" />
@@ -1997,6 +1992,9 @@
     <Setter Property="HorizontalAlignment" Value="Stretch" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_22303D}" />
+  </Style>
+  <Style Selector="ListBox.qualityPresetCards ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.qualityPresetCards ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource Surface_22303D}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected">
@@ -3251,12 +3249,6 @@
     <Setter Property="BorderBrush" Value="{StaticResource EdgeBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Transitions">
-      <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.18" />
-        <BrushTransition Property="BorderBrush" Duration="0:0:0.18" />
-      </Transitions>
-    </Setter>
   </Style>
   <Style Selector="ListBox.settingsPositionPicker /template/ Border#PART_SelectionIndicator">
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
@@ -3264,7 +3256,7 @@
     <Setter Property="CornerRadius" Value="8" />
     <Setter Property="ZIndex" Value="1" />
   </Style>
-  <Style Selector="ListBox.settingsPositionPicker ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+  <Style Selector="ListBox.settingsPositionPicker ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.settingsPositionPicker ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
     <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
