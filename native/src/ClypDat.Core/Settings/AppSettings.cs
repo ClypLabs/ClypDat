@@ -98,6 +98,7 @@ public sealed class AppSettings
     // re-derived from the values at launch, so Custom at 1080p/60/20M came
     // back as High because those numbers are exactly High's.
     public bool ReplayQualityCustom { get; set; }
+    public ReplayQualitySnapshot? ReplayCustomQuality { get; set; }
     public string ReplayBackend { get; set; } = "Native";
     public string ExportVideoCodec { get; set; } = "H.264";
     // Was "Ctrl+Shift+F9" before schema 13; AppSettingsMigrations moves untouched installs over.
@@ -449,6 +450,7 @@ public sealed class CustomGameProfile
     // Same as the global ReplayQualityCustom: Custom survives a restart even
     // when its values happen to equal a preset's.
     public bool ReplayQualityCustom { get; set; }
+    public ReplayQualitySnapshot? ReplayCustomQuality { get; set; }
     // Per-game opt-out: accepting intentional 4K capture for one game must
     // not suppress the warning for another game's separate override.
     public bool HideQualityWarning { get; set; }
@@ -550,3 +552,6 @@ public sealed class AutoClipGameSettings
     public int ListenerPort { get; set; }
     public Dictionary<string, bool> Events { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
+
+// The editable quality values have their own slot while a built-in preset is active.
+public sealed record ReplayQualitySnapshot(int MaxHeight, int FrameRate, int BitrateMbps, bool BitrateFollowsRecommendation = false);

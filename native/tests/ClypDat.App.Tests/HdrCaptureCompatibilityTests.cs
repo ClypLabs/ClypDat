@@ -44,6 +44,15 @@ public sealed class HdrCaptureCompatibilityTests
         Assert.Equal("HDR status unknown", HdrCompatibilityPresentation.Resolve(received.HdrCompatibilityStatus, true));
     }
 
+    [Theory]
+    [InlineData(ReplayHdrCompatibilityStatus.Unavailable, false, "HDR not supported")]
+    [InlineData(ReplayHdrCompatibilityStatus.SdrDisplay, false, "HDR not supported")]
+    [InlineData(ReplayHdrCompatibilityStatus.Unavailable, true, "HDR status unknown")]
+    [InlineData(ReplayHdrCompatibilityStatus.SdrDisplay, true, "SDR display")]
+    [InlineData(ReplayHdrCompatibilityStatus.ConversionActive, false, "HDR conversion active")]
+    public void KnownUnsupportedDisplaysHaveAnExplicitLabel(ReplayHdrCompatibilityStatus status, bool supported, string expected) =>
+        Assert.Equal(expected, HdrCompatibilityPresentation.Resolve(status, true, supported));
+
     [Fact]
     public void ClearedOrReconnectedHealthDoesNotRetainSdrStatus()
     {

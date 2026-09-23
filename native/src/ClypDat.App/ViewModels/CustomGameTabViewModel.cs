@@ -267,14 +267,16 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         set
         {
             if (value is null || ReferenceEquals(_selectedQualityPreset, value)) return;
+            if (SelectedQualityPreset?.IsCustom == true && !value.IsCustom)
+                Profile.ReplayCustomQuality = new(Profile.ReplayMaxHeight, Profile.ReplayFrameRate, Profile.ReplayBitrateMbps);
+            var restore = value.IsCustom && SelectedQualityPreset?.IsCustom != true ? Profile.ReplayCustomQuality : null;
             _selectedQualityPreset = value;
             Profile.ReplayQualityCustom = value.IsCustom;
-            if (value.IsCustom) _save();
-            if (!value.IsCustom)
+            if (!value.IsCustom || restore is not null)
             {
-                Profile.ReplayMaxHeight = value.Height;
-                Profile.ReplayFrameRate = value.FrameRate;
-                Profile.ReplayBitrateMbps = value.Bitrate;
+                Profile.ReplayMaxHeight = restore?.MaxHeight ?? value.Height;
+                Profile.ReplayFrameRate = restore?.FrameRate ?? value.FrameRate;
+                Profile.ReplayBitrateMbps = restore?.BitrateMbps ?? value.Bitrate;
                 _qualityWarningAcknowledged = false;
                 OnPropertyChanged(nameof(ReplayMaxHeight));
                 OnPropertyChanged(nameof(ReplayFrameRate));
@@ -287,6 +289,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
 
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsCustomQuality));
+            if (value.IsCustom && restore is null) _save();
         }
     }
 

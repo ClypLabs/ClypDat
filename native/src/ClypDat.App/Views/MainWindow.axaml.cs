@@ -2072,13 +2072,14 @@ public sealed partial class MainWindow : Window
 
     private void ReportBug()
     {
-        var body = $"## Summary\n\n## Steps to reproduce\n1. \n\n## Expected behavior\n\n## Actual behavior\n\n---\nClypDat version: {AppUpdateService.CurrentVersion}\nBuild: {GetBuildIdentifier()}";
+        var body = SupportIssueDrafts.Bug(AppUpdateService.CurrentVersion.ToString(), GetBuildIdentifier(),
+            System.Runtime.InteropServices.RuntimeInformation.OSDescription, ViewModel?.Settings);
         OpenIssueDraft("Bug report", body);
     }
 
     private void SuggestFeature()
     {
-        var body = $"## Problem this would solve\n\n## Proposed solution\n\n---\nClypDat version: {AppUpdateService.CurrentVersion}\nBuild: {GetBuildIdentifier()}";
+        var body = SupportIssueDrafts.Feature(AppUpdateService.CurrentVersion.ToString(), GetBuildIdentifier());
         OpenIssueDraft("Feature request", body);
     }
 

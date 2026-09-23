@@ -261,7 +261,7 @@
                   <TextBlock Classes="settingsRowDesc" Text="Uses the Recording quality settings above. Format changes apply to the next Full Session." />
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding FullSessionFormatRecommendation}" IsVisible="{Binding !IsFullSessionMp4}" />
                 </StackPanel>
-                <ComboBox Grid.Column="1" Classes="settingsInput" Width="190" VerticalAlignment="Center" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
+                <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="240" HorizontalAlignment="Right" VerticalAlignment="Center" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
               </Grid>
               <Border Classes="settingsNotice" IsVisible="{Binding FullSessionFormatSelection.IsWarningVisible}">
                 <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">

@@ -1324,13 +1324,6 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="ItemsPanel"><ItemsPanelTemplate><UniformGrid Columns="2" Rows="2" /></ItemsPanelTemplate></Setter>
-    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
-  </Style>
-  <Style Selector="ListBox.onboardingQualityPresetCards /template/ Border#PART_SelectionIndicator">
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="BorderThickness" Value="2" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="ZIndex" Value="1" />
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem">
     <Setter Property="MinHeight" Value="76" />
@@ -1354,6 +1347,7 @@
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:focus">
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
@@ -1361,7 +1355,7 @@
   </Style>
   <Style Selector="ListBox.onboardingQualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_405668}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <!-- Custom title-bar min/maximize/close buttons - replace Windows' own
        caption buttons (WindowDecorations="None" on
@@ -1965,13 +1959,6 @@
         <controls:ResponsiveUniformGrid MinimumItemWidth="180" MaximumColumns="4" />
       </ItemsPanelTemplate>
     </Setter>
-    <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
-  </Style>
-  <Style Selector="ListBox.qualityPresetCards /template/ Border#PART_SelectionIndicator">
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="BorderThickness" Value="1.5" />
-    <Setter Property="CornerRadius" Value="9" />
-    <Setter Property="ZIndex" Value="1" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem">
     <Setter Property="MinHeight" Value="88" />
@@ -1994,7 +1981,7 @@
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
-    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="{StaticResource Text_FFFFFF}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover">
@@ -2002,7 +1989,7 @@
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource Surface_303840}" />
-    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="ListBox.qualityPresetCards ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource Surface_39434C}" />

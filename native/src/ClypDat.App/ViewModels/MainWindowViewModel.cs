@@ -1893,6 +1893,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _selectedDesktopMonitor, value) || value is null) return;
             Settings.ReplayDesktopMonitorDeviceName = value.DeviceName;
+            OnPropertyChanged(nameof(ReplayHdrCompatibilityStatus));
             OnPropertyChanged(nameof(ReplayBufferStateSummary));
             RefreshReplayRowSummaries();
             RefreshRecordingPresentation();
@@ -1943,6 +1944,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             SaveSettings();
         }
         OnPropertyChanged(nameof(SelectedDesktopMonitor));
+        OnPropertyChanged(nameof(ReplayHdrCompatibilityStatus));
         OnPropertyChanged(nameof(ReplayBufferStateSummary));
         RefreshReplayRowSummaries();
         RefreshRecordingPresentation();
@@ -2077,8 +2079,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (value is null) return;
             if (value.IsCustom)
             {
+                if (!CustomReplayQualitySelected && Settings.ReplayCustomQuality is { } custom)
+                {
+                    Settings.ReplayMaxHeight = custom.MaxHeight;
+                    Settings.ReplayFrameRate = ReplayFrameRatePolicy.NormalizePersisted(custom.FrameRate);
+                    Settings.ReplayBitrateMbps = custom.BitrateMbps;
+                    _selectedReplayFrameRate = Settings.ReplayFrameRate;
+                    _replayBitrateFollowsRecommendation = custom.BitrateFollowsRecommendation;
+                    if (!ReplayResolutions.Any(option => option.Height == custom.MaxHeight))
+                        ReplayResolutions.Add(new ResolutionOption($"Custom ({custom.MaxHeight}p)", custom.MaxHeight));
+                    if (!ReplayBitrateOptions.Contains($"{custom.BitrateMbps}M")) ReplayBitrateOptions.Add($"{custom.BitrateMbps}M");
+                }
                 CustomReplayQualitySelected = true;
                 _selectedReplayQualityPreset = value;
+                OnPropertyChanged(nameof(SelectedReplayResolution));
+                OnPropertyChanged(nameof(SelectedReplayFrameRate));
+                OnPropertyChanged(nameof(SelectedReplayBitrateOption));
+                NotifyReplayBitrateRecommendation();
+                UpdateReplayQualityRestartRequired();
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(IsCustomReplayQuality));
                 NotifyReplayQualityWarning();
@@ -2086,6 +2104,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
+            if (CustomReplayQualitySelected)
+                Settings.ReplayCustomQuality = new(Settings.ReplayMaxHeight, Settings.ReplayFrameRate,
+                    Settings.ReplayBitrateMbps, _replayBitrateFollowsRecommendation);
             CustomReplayQualitySelected = false;
             _replayBitrateFollowsRecommendation = false;
             _selectedReplayQualityPreset = value;
@@ -2399,7 +2420,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public string ReplayHdrCompatibilityStatus => HdrCompatibilityPresentation.Resolve(
-        _recordingHealth.HdrCompatibilityStatus, Settings.ReplayHdrCompatibilityEnabled);
+        _recordingHealth.HdrCompatibilityStatus, Settings.ReplayHdrCompatibilityEnabled,
+        Settings.ReplayHdrCompatibilityEnabled && _recordingHealth.HdrCompatibilityStatus is
+            ClypDat.Capture.Abstractions.ReplayHdrCompatibilityStatus.Unavailable or ClypDat.Capture.Abstractions.ReplayHdrCompatibilityStatus.SdrDisplay
+            ? HdrCaptureCompatibility.GetDisplayHdrSupport(IsEffectiveDesktopCapture ? SelectedDesktopMonitor : null) : null);
 
     private void UpdateReplayQualityRestartRequired()
     {
@@ -5454,6 +5478,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             Dispatcher.UIThread.Post(SaveSettings);
             return;
         }
+        if (CustomReplayQualitySelected)
+            Settings.ReplayCustomQuality = new(Settings.ReplayMaxHeight, Settings.ReplayFrameRate,
+                Settings.ReplayBitrateMbps, _replayBitrateFollowsRecommendation);
         if (!AppSettingsStore.Save(Settings))
             AppLog.Error($"Settings persistence failed: {AppSettingsStore.LastSaveError}");
         RecordingSettingsSaved?.Invoke();

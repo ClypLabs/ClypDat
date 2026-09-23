@@ -4,8 +4,10 @@ namespace ClypDat.App.Services;
 
 internal static class HdrCompatibilityPresentation
 {
-    internal static string Resolve(ReplayHdrCompatibilityStatus status, bool enabled) =>
-        !enabled ? "Off" : status switch
+    internal static string Resolve(ReplayHdrCompatibilityStatus status, bool enabled, bool? displaySupportsHdr = null) =>
+        !enabled ? "Off" : displaySupportsHdr == false &&
+            status is ReplayHdrCompatibilityStatus.Unavailable or ReplayHdrCompatibilityStatus.SdrDisplay
+            ? "HDR not supported" : status switch
         {
             ReplayHdrCompatibilityStatus.SdrDisplay => "SDR display",
             ReplayHdrCompatibilityStatus.PreparingConversion => "Preparing SDR conversion",

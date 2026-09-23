@@ -21,7 +21,7 @@ internal static class HdrCaptureCompatibility
 
     public static DisplayProfile GetDisplayProfile(ID3D11Device device, nint monitor)
     {
-        var colourAvailable = TryGetDisplayConfigColour(monitor, out var detectedWhite, out var hdrEnabled);
+        var colourAvailable = TryGetDisplayConfigColour(monitor, out var detectedWhite, out var hdrEnabled, out _);
         var white = colourAvailable ? detectedWhite : 80f;
         if (colourAvailable)
         {
@@ -59,10 +59,27 @@ internal static class HdrCaptureCompatibility
     internal static bool IsHdrActive(uint advancedColorValue) =>
         (advancedColorValue & 0x2) != 0 && (advancedColorValue & 0x4) == 0;
 
-    private static bool TryGetDisplayConfigColour(nint monitor, out float whiteNits, out bool hdrEnabled)
+    internal static bool? GetDisplayHdrSupport(DesktopMonitorOption? display = null)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        var monitor = display is null
+            ? MonitorFromWindow(GetForegroundWindow(), 2)
+            : MonitorFromPoint(new MonitorPoint { X = display.X + display.Width / 2, Y = display.Y + display.Height / 2 }, 2);
+        TryGetDisplayConfigColour(monitor, out _, out _, out var supported);
+        return supported;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MonitorPoint { public int X; public int Y; }
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern nint MonitorFromWindow(nint window, uint flags);
+    [DllImport("user32.dll")] private static extern nint MonitorFromPoint(MonitorPoint point, uint flags);
+
+    private static bool TryGetDisplayConfigColour(nint monitor, out float whiteNits, out bool hdrEnabled, out bool? hdrSupported)
     {
         whiteNits = 80;
         hdrEnabled = false;
+        hdrSupported = null;
         try
         {
             var monitorName = new MonitorInfoEx { DeviceName = string.Empty };
@@ -92,6 +109,8 @@ internal static class HdrCaptureCompatibility
                 var target = paths[i].TargetInfo;
                 var colour = new DisplayConfigAdvancedColorInfo { Header = Header(9, Marshal.SizeOf<DisplayConfigAdvancedColorInfo>(), target.AdapterId, target.Id) };
                 if (DisplayConfigGetDeviceInfo(ref colour) != 0) return false;
+                // Capability is known even when this SDR display has no HDR white-level data.
+                hdrSupported = (colour.Value & 0x1) != 0;
                 var white = new DisplayConfigSdrWhiteLevel { Header = Header(11, Marshal.SizeOf<DisplayConfigSdrWhiteLevel>(), target.AdapterId, target.Id) };
                 if (DisplayConfigGetDeviceInfo(ref white) != 0 || white.SdrWhiteLevel < 1) return false;
                 hdrEnabled = IsHdrActive(colour.Value);
