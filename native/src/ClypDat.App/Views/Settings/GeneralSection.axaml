@@ -127,30 +127,40 @@
       <Border Classes="settingsGroupCard">
         <StackPanel>
           <Border Classes="settingsRow static" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter='Naming scheme|Template|Clip Filenames'}">
-            <StackPanel Spacing="12">
-              <StackPanel Classes="settingsRowText">
-                <TextBlock Classes="settingsRowTitle" Text="Naming scheme" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                <TextBlock Classes="settingsRowDesc" Text="Choose how newly saved clips are named. Windows replaces unsupported filename characters, such as colons, with hyphens." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              </StackPanel>
-              <ComboBox Classes="settingsInput" MaxWidth="440" HorizontalAlignment="Stretch" ItemsSource="{Binding ClipFileNameSchemes}" SelectedValue="{Binding SelectedClipFileNameScheme}" SelectedValueBinding="{Binding Value}">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate>
-                    <TextBlock Text="{Binding Label}" />
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-              <StackPanel Spacing="6" MaxWidth="440" HorizontalAlignment="Stretch" IsVisible="{Binding IsCustomClipFileNameScheme}">
-                <TextBlock Classes="settingsFieldLabel">Template: {title}, {game}, {datetime:format}</TextBlock>
+            <StackPanel Spacing="16">
+              <!-- Same shape as every other row - words left, control right -
+                   rather than a full-width dropdown stacked under the text,
+                   which left most of the row empty beside a narrow control. -->
+              <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+                <StackPanel Classes="settingsRowText">
+                  <TextBlock Classes="settingsRowTitle" Text="Naming scheme" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                  <TextBlock Classes="settingsRowDesc" Text="Choose how newly saved clips are named. Windows replaces unsupported filename characters, such as colons, with hyphens." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                </StackPanel>
+                <ComboBox Grid.Column="1" Classes="settingsInput" Width="240" VerticalAlignment="Center" ItemsSource="{Binding ClipFileNameSchemes}" SelectedValue="{Binding SelectedClipFileNameScheme}" SelectedValueBinding="{Binding Value}">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </Grid>
+              <StackPanel Spacing="8" IsVisible="{Binding IsCustomClipFileNameScheme}">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                  <TextBlock Classes="settingsFieldLabel" VerticalAlignment="Center">Template: {title}, {game}, {datetime:format}</TextBlock>
+                  <TextBlock Grid.Column="1" Classes="settingsLink" Text="Date and time format help" VerticalAlignment="Center" Tag="https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings" PointerPressed="LicenseLinkText_OnPointerPressed" />
+                </Grid>
                 <TextBox Classes="settingsInput" Text="{Binding CustomClipFileNameTemplate}" PlaceholderText="{}{datetime:yyyy-MM-dd HH-mm-ss} - {title}" />
                 <TextBlock Classes="settingsRowError" Text="{Binding ClipFileNameTemplateError}" IsVisible="{Binding HasClipFileNameTemplateError}" />
-                <TextBlock Classes="settingsLink" Text="Date and time format help" Tag="https://learn.microsoft.com/en-us/dotnet/standard/base-types/custom-date-and-time-format-strings" PointerPressed="LicenseLinkText_OnPointerPressed" />
               </StackPanel>
-              <StackPanel Spacing="6" MaxWidth="440" HorizontalAlignment="Stretch">
-                <TextBlock Classes="settingsFieldLabel" Text="Preview" />
-                <Border Classes="settingsInset">
-                  <TextBlock Text="{Binding ClipFileNamePreview}" />
-                </Border>
-              </StackPanel>
+              <!-- The result, read back in one line across the row: what a clip
+                   saved right now would be called. -->
+              <Border Classes="settingsInset" Padding="14,11">
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16">
+                  <TextBlock Classes="settingsFieldLabel" Text="Preview" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="1" Text="{Binding ClipFileNamePreview}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                             ToolTip.Tip="{Binding ClipFileNamePreview}" />
+                </Grid>
+              </Border>
             </StackPanel>
           </Border>
           <Border Classes="settingsRowDivider" IsVisible="{Binding !IsSettingsSearchActive}" />

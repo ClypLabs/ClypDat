@@ -182,7 +182,7 @@
           <Border Classes="settingsRowDivider" Margin="0" IsVisible="{Binding IsLayoutEditorOpen}" />
           <Border Classes="settingsRow static" IsVisible="{Binding IsLayoutEditorOpen}">
             <StackPanel Spacing="14">
-              <StackPanel Spacing="5" MaxWidth="440" HorizontalAlignment="Stretch">
+              <StackPanel Spacing="5">
                 <TextBlock Classes="settingsFieldLabel" Text="Name" />
                 <TextBox Classes="settingsInput" Text="{Binding DraftName, Mode=TwoWay}" />
               </StackPanel>

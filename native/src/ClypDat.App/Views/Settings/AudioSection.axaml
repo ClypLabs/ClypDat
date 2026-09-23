@@ -236,7 +236,7 @@
                 </StackPanel>
                 <TextBlock Grid.Column="1" Classes="settingsRowTitle" Text="{Binding MicrophoneNoiseGateThresholdDisplay}" VerticalAlignment="Center" />
               </Grid>
-              <Grid RowDefinitions="Auto,18" MaxWidth="600" HorizontalAlignment="Stretch">
+              <Grid RowDefinitions="Auto,18">
                 <Slider Grid.Row="0" Classes="volumeSlider" Minimum="{Binding MicrophoneNoiseGateFloorDb}" Maximum="{Binding MicrophoneNoiseGateMaximumDb}"
                         SmallChange="1" LargeChange="5" TickFrequency="25" TickPlacement="BottomRight"
                         Value="{Binding MicrophoneNoiseGateThresholdDb}" />
