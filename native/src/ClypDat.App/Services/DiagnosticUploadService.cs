@@ -13,14 +13,18 @@ internal static class DiagnosticUploadService
         MaxResponseContentBufferSize = 16 * 1024
     };
 
-    public static Task<string> SendAsync(string token, string path, string message, Guid reportId,
-        IProgress<double>? progress, CancellationToken cancellationToken) =>
-        SendAsync(Client, token, path, message, reportId, progress, cancellationToken);
+    internal static bool IsValidContactEmail(string? value) => value?.Trim() is { Length: > 0 and <= 254 } email &&
+        System.Text.RegularExpressions.Regex.IsMatch(email, @"^[^\s@<>""(),;:]+@[^\s@<>""(),;:.]+(?:\.[^\s@<>""(),;:.]+)+$");
 
-    internal static async Task<string> SendAsync(HttpClient client, string token, string path, string message,
-        Guid reportId, IProgress<double>? progress, CancellationToken cancellationToken)
+    public static Task<string> SendAsync(string? token, string path, string message, Guid reportId,
+        IProgress<double>? progress, CancellationToken cancellationToken, string? email = null) =>
+        SendAsync(Client, token, path, message, reportId, progress, cancellationToken, email);
+
+    internal static async Task<string> SendAsync(HttpClient client, string? token, string path, string message,
+        Guid reportId, IProgress<double>? progress, CancellationToken cancellationToken, string? email = null)
     {
-        if (string.IsNullOrWhiteSpace(token)) throw new InvalidOperationException("Link your ClypDat account before sending diagnostics.");
+        var guest = string.IsNullOrWhiteSpace(token);
+        if (guest && !IsValidContactEmail(email)) throw new InvalidOperationException("Enter a valid email address so we can contact you.");
         if (message.Trim().Length < 10 || message.Length > 2000) throw new InvalidOperationException("Describe the issue in 10 to 2000 characters.");
         var length = new FileInfo(path).Length;
         if (length > MaximumBytes) throw new InvalidOperationException("The bundle is too large to send. Use Export ZIP to save it locally.");
@@ -31,9 +35,10 @@ internal static class DiagnosticUploadService
         body.Add(new StringContent(message.Trim()), "message");
         body.Add(new StringContent(AppUpdateService.CurrentVersion.ToString()), "version");
         body.Add(new StringContent(revision), "build");
+        if (guest) body.Add(new StringContent(email!.Trim().ToLowerInvariant()), "email");
         body.Add(new UploadContent(path, length, progress), "bundle", "diagnostics.zip");
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/support") { Content = body };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (!guest) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
             throw new InvalidOperationException("Your sign-in has expired. Reconnect your ClypDat account in Settings, then try again.");

@@ -11,18 +11,7 @@ public sealed partial class MainWindow
     private async Task ShowSendDiagnosticsAsync()
     {
         if (ViewModel is null) return;
-        if (!ViewModel.ClypDatAccountIsConnected)
-        {
-            if (await ShowModalDialogAsync<bool>(CreateDialog("Link an account to send diagnostics",
-                "Connect your ClypDat account in Settings > Connected Accounts, then return here to send your report.",
-                true, "Open settings")))
-            {
-                ViewModel.CloseHelp(restoreEditor: false);
-                ViewModel.OpenSettings();
-                ViewModel.SelectedSettingsSection = "Connected Accounts";
-            }
-            return;
-        }
+        var guest = !ViewModel.ClypDatAccountIsConnected;
 
         var (dialog, body) = CreateChromelessDialog("Send diagnostics", centerTitle: false);
         dialog.Width = 560;
@@ -32,6 +21,21 @@ public sealed partial class MainWindow
             AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 110, MaxHeight = 200, MaxLength = 2000,
             PlaceholderText = "What happened? What were you doing when it happened?"
         };
+        var email = new TextBox { PlaceholderText = "you@example.com", MaxLength = 254 };
+        if (guest)
+        {
+            body.Children.Add(new TextBlock
+            {
+                Text = "Your email (required)", FontSize = 15, FontWeight = FontWeight.SemiBold,
+                Foreground = AppThemeService.Brush("TextStrongBrush", "#EDF4FB")
+            });
+            body.Children.Add(email);
+            body.Children.Add(new TextBlock
+            {
+                Text = "So we can contact you about this report. No account needed.", FontSize = 12,
+                Foreground = AppThemeService.Brush("TextSubtleBrush", "#9FB2C6"), TextWrapping = TextWrapping.Wrap
+            });
+        }
         var status = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = AppThemeService.Brush("TextSubtleBrush", "#9FB2C6") };
         var progressBar = new ProgressBar { Minimum = 0, Maximum = 100, Height = 4, IsVisible = false };
         var receipt = new TextBox { IsReadOnly = true, IsVisible = false };
@@ -45,7 +49,7 @@ public sealed partial class MainWindow
         body.Children.Add(message);
         body.Children.Add(new TextBlock
         {
-            Text = "Sends your description, recent logs with common personal details redacted, capture health, and OS details to ClypDat's private support inbox. Your linked account identifies the report. Recordings are not included. Reports expire after 30 days.",
+            Text = "Sends your description, recent logs with common personal details redacted, capture health, and OS details to ClypDat's private support inbox. Your account or supplied email identifies the report. Recordings are not included. Reports expire after 30 days.",
             TextWrapping = TextWrapping.Wrap, FontSize = 12,
             Foreground = AppThemeService.Brush("TextSubtleBrush", "#9FB2C6")
         });
@@ -63,8 +67,12 @@ public sealed partial class MainWindow
         var uploading = false;
         string? bundlePath = null;
         string? submittedMessage = null;
+        string? submittedEmail = null;
         var reportId = Guid.NewGuid();
-        message.TextChanged += (_, _) => send.IsEnabled = !uploading && message.Text?.Trim().Length >= 10;
+        void UpdateSendEnabled() => send.IsEnabled = !uploading && message.Text?.Trim().Length >= 10 &&
+            (!guest || DiagnosticUploadService.IsValidContactEmail(email.Text));
+        message.TextChanged += (_, _) => UpdateSendEnabled();
+        email.TextChanged += (_, _) => UpdateSendEnabled();
         close.Click += (_, _) => dialog.Close();
         dialog.Closed += (_, _) => { closed = true; cancellation.Cancel(); };
         var token = cancellation.Token;
@@ -74,15 +82,18 @@ public sealed partial class MainWindow
             uploading = true;
             send.IsEnabled = false;
             message.IsEnabled = false;
+            email.IsEnabled = false;
             progressBar.IsVisible = true;
             progressBar.IsIndeterminate = true;
             status.Text = "Preparing recent diagnostics…";
             try
             {
                 var text = message.Text!.Trim();
-                if (submittedMessage is not null && submittedMessage != text) reportId = Guid.NewGuid();
+                var contactEmail = guest ? email.Text?.Trim().ToLowerInvariant() : null;
+                if (submittedMessage is not null && (submittedMessage != text || submittedEmail != contactEmail)) reportId = Guid.NewGuid();
+                submittedEmail = contactEmail;
                 submittedMessage = text;
-                var accountToken = await ViewModel.GetDiagnosticUploadTokenAsync(token);
+                var accountToken = guest ? null : await ViewModel.GetDiagnosticUploadTokenAsync(token);
                 bundlePath ??= await Task.Run(() => CaptureDiagnosticBundle.CreateForUpload(_replayBuffer, _cs2GsiListener), token);
                 token.ThrowIfCancellationRequested();
                 progressBar.IsIndeterminate = false;
@@ -92,7 +103,7 @@ public sealed partial class MainWindow
                     progressBar.Value = percent;
                     status.Text = percent < 100 ? $"Sending diagnostics… {percent:0}%" : "Waiting for confirmation…";
                 });
-                var id = await DiagnosticUploadService.SendAsync(accountToken, bundlePath, text, reportId, progress, token);
+                var id = await DiagnosticUploadService.SendAsync(accountToken, bundlePath, text, reportId, progress, token, contactEmail);
                 if (closed) return;
                 status.Text = "Diagnostics received. Keep this report ID if you contact support.";
                 receipt.Text = id;
@@ -117,8 +128,9 @@ public sealed partial class MainWindow
                 {
                     progressBar.IsVisible = false;
                     send.Content = "Retry";
-                    send.IsEnabled = true;
                     message.IsEnabled = true;
+                    email.IsEnabled = true;
+                    UpdateSendEnabled();
                 }
             }
         };

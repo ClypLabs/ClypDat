@@ -110,6 +110,46 @@ public sealed class DiagnosticUploadTests
         public void Report(double value) => Values.Add(value);
     }
 
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("invalid", false)]
+    [InlineData("a@b", false)]
+    [InlineData("a@b..com", false)]
+    [InlineData("Name <a@example.com>", false)]
+    [InlineData("a@example.com\nb@example.com", false)]
+    [InlineData(" Guest@Example.com ", true)]
+    [InlineData("guest+support@example.com.au", true)]
+    public void ContactEmailValidation(string? email, bool valid) =>
+        Assert.Equal(valid, DiagnosticUploadService.IsValidContactEmail(email));
+
+    [Fact]
+    public async Task GuestUploadRequiresEmail_AndSendsNoAccountCredentials()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, $"diagnostic-upload-{Guid.NewGuid():N}.zip");
+        var id = Guid.NewGuid();
+        await File.WriteAllBytesAsync(path, new byte[32]);
+        var calls = 0;
+        try
+        {
+            using var client = new HttpClient(new Handler(async (request, token) =>
+            {
+                calls++;
+                Assert.Null(request.Headers.Authorization);
+                var body = await request.Content!.ReadAsStringAsync(token);
+                Assert.Contains("guest@example.com", body);
+                return new HttpResponseMessage(HttpStatusCode.Created) { Content = new StringContent($"{{\"id\":\"{id}\"}}") };
+            })) { BaseAddress = new Uri("https://clypdat.test/") };
+            await Assert.ThrowsAsync<InvalidOperationException>(() => DiagnosticUploadService.SendAsync(client, null,
+                path, "A useful description of the issue.", id, null, CancellationToken.None));
+            Assert.Equal(0, calls);
+            Assert.Equal(id.ToString(), await DiagnosticUploadService.SendAsync(client, null, path,
+                "A useful description of the issue.", id, null, CancellationToken.None, " Guest@Example.com "));
+            Assert.Equal(1, calls);
+        }
+        finally { File.Delete(path); }
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => send(request, token);
