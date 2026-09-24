@@ -439,24 +439,117 @@ void planned_adapter_selection(){
     CHECK(confirmed.health.zero_copy_status=="confirmed"&&!confirmed.health.zero_copy_probe_passed);
     CHECK(confirmed.health.capture_adapter_vendor==kAdapterVendorNvidia&&confirmed.health.surface_capacity==7);
 }
-// An encoder that accepts frames but never returns packets hits the plan's
-// in-flight cap, not the old 43-frame ceiling.
-void planned_retained_limit(){
+// Encoder doubles on a real GPU pipeline so pool surfaces are genuine. The
+// probe can hold every frame it accepts (pinning pool surfaces), refuse input
+// (EAGAIN), or accept input without ever producing output.
+struct PressureProbe {
+    std::mutex mutex;
+    std::deque<int64_t> pending;
+    std::vector<AVFrame*> held;
+    bool hold = false, busy = false, stuck = false, flushing = false;
+    void release() { std::lock_guard lock(mutex); for (auto* frame : held) av_frame_free(&frame); held.clear(); hold = false; }
+    ~PressureProbe() { for (auto* frame : held) av_frame_free(&frame); }
+};
+CodecCalls probe_calls(std::shared_ptr<PressureProbe> probe) {
+    CodecCalls calls;
+    calls.send = [probe](AVCodecContext*, const AVFrame* frame) {
+        std::lock_guard lock(probe->mutex);
+        if (!frame) { probe->flushing = true; return 0; }
+        if (probe->busy) return AVERROR(EAGAIN);
+        if (probe->hold) probe->held.push_back(av_frame_clone(frame));
+        if (!probe->stuck) probe->pending.push_back(frame->pts);
+        return 0;
+    };
+    calls.receive = [probe](AVCodecContext*, AVPacket* packet) {
+        std::lock_guard lock(probe->mutex);
+        if (probe->pending.empty()) return probe->flushing ? AVERROR_EOF : AVERROR(EAGAIN);
+        packet->pts = packet->dts = probe->pending.front(); packet->flags = AV_PKT_FLAG_KEY; probe->pending.pop_front();
+        return 0;
+    };
+    return calls;
+}
+template<class Predicate> bool wait_health(RecordingCapture& capture, Predicate predicate, std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) { if (predicate(capture.health())) return true; std::this_thread::sleep_for(10ms); }
+    return predicate(capture.health());
+}
+std::string pressure_state(const RecordingCaptureHealth& h) {
+    return "drops=" + std::to_string(h.backpressure_drops) + " busy=" + std::to_string(h.encoder_busy_drops) + " retained=" + std::to_string(h.retained_pressure_drops) +
+        " pool=" + std::to_string(h.pool_pressure_drops) + " stalls=" + std::to_string(h.encoder_stall_recoveries) + " fallbacks=" + std::to_string(h.gpu_conversion_fallbacks) +
+        " generation=" + std::to_string(h.generation) + " allocated=" + std::to_string(h.surfaces_allocated) + "/" + std::to_string(h.surface_capacity) + " error=" + h.error;
+}
+// Every planned surface held by the encoder is pool backpressure: counted
+// drops, no CPU conversion fallback, no growth, no restart.
+void pool_backpressure(){
+    auto probe = std::make_shared<PressureProbe>(); probe->hold = true;
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;
+    RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_nvenc",false,true}};
+    dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t){return std::make_unique<VideoEncoder>(value,probe_calls(probe));};
+    std::atomic<uint64_t> packets{0};RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){++packets;};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+    if(!wait_health(capture,[](const auto& h){return h.pool_pressure_drops>=3;},3s))throw std::runtime_error("No pool backpressure: "+pressure_state(capture.health()));
+    auto pressured=capture.health();
+    if(pressured.gpu_conversion_fallbacks||pressured.restart_required||!pressured.error.empty()||pressured.surfaces_allocated>pressured.surface_capacity)
+        throw std::runtime_error("Pool pressure misclassified: "+pressure_state(pressured));
+    CHECK(pressured.surface_capacity==7&&pressured.backpressure_wait_max_ms<40);
+    probe->release();const auto resumed=packets.load();
+    if(!wait_health(capture,[&](const auto&){return packets.load()>=resumed+30;},3s))throw std::runtime_error("Pool pressure did not clear: "+pressure_state(capture.health()));
+    CHECK(capture.stop());const auto health=capture.health();
+    if(!health.error.empty()||health.encoder_stall_recoveries||health.gpu_conversion_fallbacks||health.generation!=1)throw std::runtime_error("Pool pressure recovery: "+pressure_state(health));
+}
+// EAGAIN the encoder cannot drain is a bounded wait and a counted drop.
+void busy_backpressure(){
+    auto probe = std::make_shared<PressureProbe>();
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;
+    RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_nvenc",false,true}};
+    dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t){return std::make_unique<VideoEncoder>(value,probe_calls(probe));};
+    std::atomic<uint64_t> packets{0};RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){++packets;};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+    CHECK(wait_health(capture,[&](const auto&){return packets.load()>=30;},5s));
+    { std::lock_guard lock(probe->mutex); probe->busy=true; }
+    if(!wait_health(capture,[](const auto& h){return h.encoder_busy_drops>=5;},3s))throw std::runtime_error("No busy backpressure: "+pressure_state(capture.health()));
+    auto pressured=capture.health();
+    if(pressured.restart_required||!pressured.error.empty()||pressured.generation!=1)throw std::runtime_error("Busy pressure escalated: "+pressure_state(pressured));
+    CHECK(pressured.backpressure_wait_max_ms>=10&&pressured.backpressure_wait_max_ms<60);
+    { std::lock_guard lock(probe->mutex); probe->busy=false; }
+    const auto resumed=packets.load();
+    if(!wait_health(capture,[&](const auto&){return packets.load()>=resumed+30;},3s))throw std::runtime_error("Busy pressure did not clear: "+pressure_state(capture.health()));
+    CHECK(capture.stop());const auto health=capture.health();
+    if(!health.error.empty()||health.encoder_stall_recoveries||health.generation!=1)throw std::runtime_error("Busy pressure recovery: "+pressure_state(health));
+}
+// An encoder that accepts frames but never outputs: retained-budget drops,
+// then after the stall bound it is replaced by the next candidate.
+void stuck_encoder_recovery(){
+    auto probe = std::make_shared<PressureProbe>(); probe->stuck = true;
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;config.nvenc_delay=4;
+    RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_nvenc",false,true},{"h264_nvenc",false,true}};
+    dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t candidate){
+        return candidate==0?std::make_unique<VideoEncoder>(value,probe_calls(probe)):std::make_unique<VideoEncoder>(value);};
+    std::atomic<uint64_t> second{0};RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto generation,Packet,int64_t,bool){if(generation->id==2)++second;};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+    CHECK(wait_health(capture,[](const auto& h){return h.retained_pressure_drops>=5;},3s));
+    auto pressured=capture.health();
+    if(pressured.restart_required||pressured.generation!=1||pressured.submitted!=5||pressured.max_in_flight!=5)throw std::runtime_error("Retained pressure escalated early: "+pressure_state(pressured));
+    if(!wait_health(capture,[&](const auto&){return second.load()>=30;},6s))throw std::runtime_error("Stuck encoder not replaced: "+pressure_state(capture.health()));
+    CHECK(capture.stop());const auto health=capture.health();
+    if(!health.error.empty()||health.encoder_stall_recoveries!=1||health.generation!=2)throw std::runtime_error("Stuck encoder recovery: "+pressure_state(health));
+}
+// With no candidate left, a genuinely stuck encoder still ends in a restart,
+// but only after the stall bound, never on the first exhausted frame.
+void stuck_encoder_without_fallback(){
+    auto probe = std::make_shared<PressureProbe>(); probe->stuck = true;
     RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;config.nvenc_delay=4;
     RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_nvenc",false,true}};
-    dependencies.open_encoder=[](const VideoEncoderConfig& value,size_t){CodecCalls calls;
-        calls.send=[](AVCodecContext*,const AVFrame*){return 0;};calls.receive=[](AVCodecContext*,AVPacket*){return AVERROR(EAGAIN);};
-        return std::make_unique<VideoEncoder>(value,std::move(calls));};
+    dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t){return std::make_unique<VideoEncoder>(value,probe_calls(probe));};
     RecordingCaptureCallbacks callbacks;
     RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
-    const auto deadline=std::chrono::steady_clock::now()+5s;
-    while(!capture.health().restart_required&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(10ms);
-    const auto health=capture.health();CHECK(health.restart_required);
-    CHECK(health.error.find("exhausted retained surfaces")!=std::string::npos);
-    CHECK(health.max_in_flight==5&&health.submitted==5&&health.surfaces_allocated<=health.surface_capacity);
+    CHECK(wait_health(capture,[](const auto& h){return h.retained_pressure_drops>=5;},3s));
+    const auto early=capture.health();CHECK(!early.restart_required&&early.submitted==5&&early.surfaces_allocated<=early.surface_capacity);
+    if(!wait_health(capture,[](const auto& h){return h.restart_required;},5s))throw std::runtime_error("Stuck encoder never escalated: "+pressure_state(capture.health()));
+    const auto health=capture.health();
+    CHECK(health.error.find("No compatible recording encoder available")!=std::string::npos);
     capture.stop();
 }
-
 // WGC-like delivery: the game finishes frames at game_fps (jittered); each
 // display refresh with a new game frame yields one frame stamped at that
 // refresh and delivered after a callback delay. Microseconds.
@@ -625,7 +718,7 @@ int main(int argc,char**argv) {
         roundtrip(fps,variable);
         if(gpu){roundtrip(fps,variable,true,false);roundtrip(fps,variable,true,true);}
     }
-    blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();planned_adapter_selection();planned_retained_limit();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
+    blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();planned_adapter_selection();pool_backpressure();busy_backpressure();stuck_encoder_recovery();stuck_encoder_without_fallback();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

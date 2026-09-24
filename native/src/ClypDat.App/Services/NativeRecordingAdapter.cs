@@ -224,7 +224,8 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
         {
             NativeEngineVersion = 3, EncodeQueueCapacity = (int)native.QueueCapacity, ConfiguredFrameRate = configuration.FrameRate,
             FrameRateMode = configuration.FrameRateMode, EncoderProfile = configuration.EncoderProfile, CapturePaused = native.Paused != 0,
-            TotalDroppedFrames = checked((long)native.Replaced), EncodeQueueReplacements = checked((long)native.Replaced), SaveInProgress = Volatile.Read(ref _saving) != 0,
+            TotalDroppedFrames = checked((long)native.Replaced + (long)Number(details, "backpressureDrops")), EncodeQueueReplacements = checked((long)native.Replaced),
+            SourceDeliveredFrameRate = Number(details, "wgcDeliveredFps"), SaveInProgress = Volatile.Read(ref _saving) != 0,
             StartupPhase = native.Encoded == 0 ? ReplayCaptureStartupPhase.OpeningEncoder : ReplayCaptureStartupPhase.Ready,
             PipelineRecoveryAction = native.RestartRequired != 0 ? ReplayPipelineRecoveryAction.RestartWorker : ReplayPipelineRecoveryAction.None,
             EncodeQueueAge = TimeSpan.FromMilliseconds(Number(details, "queueAgeMs")),
@@ -268,7 +269,8 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                 $"completion p50={Number(details, "completionP50Ms"):F1} p95={Number(details, "completionP95Ms"):F1} max={Number(details, "completionMaxMs"):F1}ms submission p50={Number(details, "submissionP50Ms"):F2} p95={Number(details, "submissionP95Ms"):F2} max={Number(details, "submissionMaxMs"):F2}ms; " +
                 $"wgc callbacks={Number(details, "wgcCallbackFps"):F1} delivered={Number(details, "wgcDeliveredFps"):F1} overwritten={Number(details, "wgcOverwrittenFps"):F1}/s; " +
                 $"acquired={Number(details, "acquiredFps"):F1} selection={Text(details, "frameSelection")} queue={Number(details, "sourceQueueDepth")}/{Number(details, "sourceQueueCapacity")} peak={Number(details, "sourceQueuePeak")} selectionDropped={Number(details, "selectionDroppedFps"):F1}/s duplicates={Number(details, "duplicateFps"):F1}/s replaced={Number(details, "pacingReplacedFps"):F1}/s; " +
-                $"captureLatency p50={Number(details, "captureLatencyP50Ms"):F1} p95={Number(details, "captureLatencyP95Ms"):F1}ms.");
+                $"captureLatency p50={Number(details, "captureLatencyP50Ms"):F1} p95={Number(details, "captureLatencyP95Ms"):F1}ms; " +
+                $"backpressure drops={Number(details, "backpressureDrops")} ({Number(details, "backpressureDropFps"):F1}/s) busy={Number(details, "encoderBusyDrops")} retained={Number(details, "retainedPressureDrops")} pool={Number(details, "poolPressureDrops")} waitMax={Number(details, "backpressureWaitMaxMs"):F1}ms stallRecoveries={Number(details, "encoderStallRecoveries")}.");
         }
         if (health.FullSession.State == FullSessionState.Recording && health.FullSession.OutputPath.Length > 0)
         {

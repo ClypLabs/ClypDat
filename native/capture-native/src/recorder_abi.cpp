@@ -235,6 +235,10 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"sourceQueueDepth\":" << h.source_queue_depth << ",\"sourceQueuePeak\":" << h.source_queue_peak
         << ",\"sourceQueueCapacity\":" << h.source_queue_capacity
         << ",\"captureLatencyP50Ms\":" << h.capture_latency_p50_ms << ",\"captureLatencyP95Ms\":" << h.capture_latency_p95_ms
+        << ",\"backpressureDrops\":" << h.backpressure_drops << ",\"encoderBusyDrops\":" << h.encoder_busy_drops
+        << ",\"retainedPressureDrops\":" << h.retained_pressure_drops << ",\"poolPressureDrops\":" << h.pool_pressure_drops
+        << ",\"backpressureDropFps\":" << h.backpressure_drop_fps << ",\"backpressureWaitMaxMs\":" << h.backpressure_wait_max_ms
+        << ",\"encoderStallRecoveries\":" << h.encoder_stall_recoveries
         << ",\"overloadWindows\":" << h.overload_windows << ",\"qualifiedWindows\":" << h.qualified_windows
         << ",\"hardwareInput\":" << (h.hardware_input ? "true" : "false") << ",\"hdr\":" << (h.hdr ? "true" : "false")
         << ",\"frameRateProtected\":" << (h.frame_rate_protected ? "true" : "false")

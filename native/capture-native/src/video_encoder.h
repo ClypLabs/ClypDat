@@ -34,12 +34,21 @@ struct VideoEncoderConfig {
     std::vector<std::pair<std::string, std::string>> resource_options;
 };
 
+enum class SubmitStatus { Accepted, Busy };
+struct SubmitResult { SubmitStatus status = SubmitStatus::Accepted; std::vector<Packet> packets; };
+
 // Single encoding thread owns this object. Packets are transferred to history
 // by value; FFmpeg retains each submitted reference-counted surface as needed.
 class VideoEncoder {
 public:
     explicit VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls = {});
+    // EAGAIN that draining cannot clear returns Busy: the frame was not
+    // accepted, FFmpeg holds no reference to it and the encoder stays usable.
+    SubmitResult try_submit(const AVFrame& frame);
+    // Strict form: Busy is a failure that closes the encoder.
     std::vector<Packet> submit(const AVFrame& frame);
+    // Packets the encoder has ready, without sending input.
+    std::vector<Packet> drain_ready();
     std::vector<Packet> finish();
     const AVCodecContext& context() const { return *context_; }
     const std::vector<std::string>& unsupported_options() const { return unsupported_options_; }

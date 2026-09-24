@@ -160,6 +160,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Constant;
     private int _activeReplayTargetFrameRate;
     private double _activeReplaySourceFrameRate;
+    private string _activeReplaySourceName = "Source";
     private double _activeReplayOutputFrameRate;
     private double _activeReplayUniqueGameFrameRate;
     private ReplayCaptureStartupPhase _activeReplayStartupPhase;
@@ -2246,7 +2247,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         ? "Video capture paused."
         : _activeReplayStartupPhase == ReplayCaptureStartupPhase.WaitingForForeground
         ? "Waiting for game foreground before replay frames begin."
-        : $"{(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")}: output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS; source {_activeReplaySourceFrameRate:0.0} FPS; fresh visual FPS {_activeReplayUniqueGameFrameRate:0.0}.";
+        : $"{(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")}: Output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS · {_activeReplaySourceName} {_activeReplaySourceFrameRate:0.0} FPS · Fresh {_activeReplayUniqueGameFrameRate:0.0} FPS";
 
     public ReplayVideoCodecOption SelectedReplayVideoCodec
     {
@@ -2469,7 +2470,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(health.FrameRateMode);
         _activeReplayTargetFrameRate = health.TargetFrameRate;
-        _activeReplaySourceFrameRate = health.InputFrameRate;
+        // What the capture backend delivered, not what pacing acquired.
+        _activeReplaySourceFrameRate = health.SourceDeliveredFrameRate > 0 ? health.SourceDeliveredFrameRate : health.InputFrameRate;
+        _activeReplaySourceName = health.CaptureMode.Contains("Graphics Capture", StringComparison.OrdinalIgnoreCase) ? "WGC" :
+            health.CaptureMode.Contains("Duplication", StringComparison.OrdinalIgnoreCase) ? "DXGI" : "Source";
         _activeReplayStartupPhase = health.StartupPhase;
         _activeReplayCapturePaused = health.CapturePaused;
         var displayedRates = _replayFrameRateDisplaySmoother.Update(health);
@@ -2492,6 +2496,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _activeReplayTargetFrameRate = 0;
         _activeReplayCapturePaused = false;
         _activeReplaySourceFrameRate = 0;
+        _activeReplaySourceName = "Source";
         _activeReplayOutputFrameRate = 0;
         _activeReplayUniqueGameFrameRate = 0;
         _activeReplayStartupPhase = ReplayCaptureStartupPhase.None;

@@ -46,10 +46,51 @@ void retries_same_frame(bool flush) {
     }
 }
 
+// EAGAIN that draining cannot clear is backpressure: the frame is refused,
+// the encoder stays open, and it accepts input once it has room again.
+void busy_is_not_failure() {
+    AVFrame frame{};
+    frame.width = 64;
+    frame.height = 48;
+    frame.format = AV_PIX_FMT_NV12;
+    bool busy = true, flushing = false;
+    int sends = 0, pending = 0;
+    clypdat::CodecCalls calls;
+    calls.send = [&](AVCodecContext*, const AVFrame* submitted) {
+        ++sends;
+        if (!submitted) { flushing = true; return 0; }
+        return busy ? AVERROR(EAGAIN) : 0;
+    };
+    calls.receive = [&](AVCodecContext*, AVPacket* packet) {
+        if (pending) { --pending; packet->pts = 7; return 0; }
+        return flushing ? AVERROR_EOF : AVERROR(EAGAIN);
+    };
+    clypdat::VideoEncoder encoder({ 64, 48, 60, 5 }, calls);
+    auto refused = encoder.try_submit(frame);
+    CHECK(refused.status == clypdat::SubmitStatus::Busy && refused.packets.empty() && sends == 1);
+    CHECK(encoder.drain_ready().empty());
+    // Output drained but still no room: Busy, and the drained packet is kept.
+    pending = 1;
+    auto progressed = encoder.try_submit(frame);
+    CHECK(progressed.status == clypdat::SubmitStatus::Busy && progressed.packets.size() == 1 && sends == 3);
+    busy = false;
+    auto accepted = encoder.try_submit(frame);
+    CHECK(accepted.status == clypdat::SubmitStatus::Accepted && sends == 4);
+    CHECK(encoder.finish().empty() && flushing);
+    // Receive errors while draining still close the encoder.
+    clypdat::CodecCalls failing;
+    failing.send = [](AVCodecContext*, const AVFrame*) { return 0; };
+    failing.receive = [](AVCodecContext*, AVPacket*) { return AVERROR(EIO); };
+    clypdat::VideoEncoder broken({ 64, 48, 60, 5 }, failing);
+    must_throw([&] { broken.drain_ready(); });
+    must_throw([&] { broken.try_submit(frame); });
+}
+
 int main() {
     av_log_set_level(AV_LOG_ERROR);
     retries_same_frame(false);
     retries_same_frame(true);
+    busy_is_not_failure();
     AVFrame frame{};
     frame.width = 64;
     frame.height = 48;

@@ -122,6 +122,9 @@ public sealed record ReplayCaptureHealth(
 {
     public FullSessionStatus FullSession { get; init; } = new(FullSessionState.Off);
     public long TotalDroppedFrames { get; init; }
+    // Frames the capture source handed over per second (WGC or DXGI), before
+    // pacing chooses which of them become output frames.
+    public double SourceDeliveredFrameRate { get; init; }
     public int PeakQueueDepth { get; init; }
     public DateTime? LastDegradedUtc { get; init; }
     // init property rather than a positional parameter: backends that can't

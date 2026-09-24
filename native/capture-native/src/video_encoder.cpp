@@ -125,13 +125,40 @@ void VideoEncoder::send(const AVFrame* frame, std::vector<Packet>& packets) {
     checked(result, "Submit recording frame");
 }
 
-std::vector<Packet> VideoEncoder::submit(const AVFrame& frame) {
+SubmitResult VideoEncoder::try_submit(const AVFrame& frame) {
     if (finished_ || failed_) throw std::logic_error("Recording encoder is closed");
     if (frame.width != context_->width || frame.height != context_->height || frame.format != context_->pix_fmt)
         throw std::invalid_argument("Recording frame does not match the encoder");
     try {
+        SubmitResult result;
+        int code = calls_.send(context_.get(), &frame);
+        if (code == AVERROR(EAGAIN)) {
+            const auto before = result.packets.size();
+            if (receive(result.packets) == AVERROR_EOF) throw std::runtime_error("Recording encoder ended before drain");
+            // No output freed input space: report pressure, keep the frame ours.
+            if (result.packets.size() == before) { result.status = SubmitStatus::Busy; return result; }
+            code = calls_.send(context_.get(), &frame);
+            if (code == AVERROR(EAGAIN)) { result.status = SubmitStatus::Busy; return result; }
+        }
+        checked(code, "Submit recording frame");
+        if (receive(result.packets) == AVERROR_EOF) throw std::runtime_error("Recording encoder ended before drain");
+        return result;
+    } catch (...) { failed_ = true; throw; }
+}
+
+std::vector<Packet> VideoEncoder::submit(const AVFrame& frame) {
+    auto result = try_submit(frame);
+    if (result.status == SubmitStatus::Busy) {
+        failed_ = true;
+        throw std::runtime_error("Recording encoder made no progress after EAGAIN");
+    }
+    return std::move(result.packets);
+}
+
+std::vector<Packet> VideoEncoder::drain_ready() {
+    if (finished_ || failed_) throw std::logic_error("Recording encoder is closed");
+    try {
         std::vector<Packet> packets;
-        send(&frame, packets);
         if (receive(packets) == AVERROR_EOF) throw std::runtime_error("Recording encoder ended before drain");
         return packets;
     } catch (...) { failed_ = true; throw; }

@@ -104,6 +104,12 @@ struct RecordingCaptureHealth {
     int source_queue_depth = 0, source_queue_peak = 0, source_queue_capacity = 0;
     double capture_latency_p50_ms = 0, capture_latency_p95_ms = 0;
     std::string frame_selection;
+    // Bounded encoder backpressure: ticks dropped after a bounded wait because
+    // the encoder was busy, owned its whole in-flight budget, or every planned
+    // pool surface was in flight. Never counted as GPU conversion fallbacks.
+    uint64_t backpressure_drops = 0, encoder_busy_drops = 0, retained_pressure_drops = 0, pool_pressure_drops = 0;
+    uint64_t encoder_stall_recoveries = 0;
+    double backpressure_drop_fps = 0, backpressure_wait_max_ms = 0;
     double queue_age_ms = 0, processing_ms = 0, submission_ms = 0, completion_ms = 0;
     double texture_readback_ms=0,video_processor_ms=0,software_convert_ms=0,hardware_upload_ms=0,overlay_compose_ms=0;
     uint64_t gpu_conversion_fallbacks=0;
@@ -164,6 +170,9 @@ std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& 
 
 // Pure policy functions are also used by the recording threads and fixtures.
 int capture_queue_capacity(int fps);
+// Continuous backpressure without an accepted frame for this long means the
+// encoder is stuck; it is replaced like a failed encoder.
+inline constexpr int64_t kRecordingEncoderStallUs = 2000000;
 int64_t capture_final_hold(bool variable, int64_t previous_duration, int64_t hold);
 CaptureRect capture_aspect_fit(int source_width, int source_height, int width, int height);
 bool capture_variable_deadline(int64_t now, int64_t interval, int64_t& scheduled);
