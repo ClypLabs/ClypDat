@@ -1,9 +1,12 @@
 #pragma once
 #include "recording_capture.h"
 #include "recording_audio.h"
-#include <mutex>
+#include <array>
 #include <deque>
+#include <functional>
 #include <future>
+#include <mutex>
+#include <vector>
 
 namespace clypdat {
 struct HistoryPacket { std::shared_ptr<const CaptureGeneration> generation; std::shared_ptr<const AVPacket> packet; int64_t acquired_us=0; bool fresh=true; };
@@ -17,14 +20,47 @@ struct VideoSnapshot {
     uint64_t generation=0;
     bool frozen=false;
 };
+struct VideoHistoryOptions {
+    // Tests and benchmarks: the original pruning, a scan of every retained
+    // packet on each append.
+    bool reference_pruning = false;
+};
+// Pruning work since construction, and the retained packets and keyframes
+// now. examined counts packets the full scan visited or keyframe index
+// entries the incremental path compared; slow_scans counts appends that
+// scanned the whole keyframe index because keyframe PTS went backwards.
+struct VideoHistoryStats {
+    uint64_t appended = 0, examined = 0, pruned = 0, slow_scans = 0;
+    size_t packets = 0, keyframes = 0, keyframes_peak = 0;
+    // Mutex hold per append: total, maximum, and the most recent appends.
+    uint64_t hold_ns_total = 0, hold_ns_max = 0;
+    std::vector<uint32_t> recent_hold_ns;
+};
+// Keeps the newest keyframe at or before (latest PTS - retention), in append
+// order, and every packet after it, so a save can always start on the GOP
+// preceding its window. With no such keyframe nothing is pruned.
 class VideoHistory {
 public:
-    explicit VideoHistory(int64_t retention_us);
+    explicit VideoHistory(int64_t retention_us, VideoHistoryOptions options = {});
     void append(std::shared_ptr<const CaptureGeneration> generation, Packet packet, int64_t acquired_us=0, bool fresh=true);
     VideoSnapshot snapshot(int64_t start_us,int64_t end_us,bool start_at_or_after=false,bool variable_frame_rate=false,int fps=60) const;
     void clear();
+    VideoHistoryStats stats() const;
+    // Tests: reads the retained packets under the history lock.
+    void inspect(const std::function<void(const std::deque<HistoryPacket>&)>& reader) const;
 private:
+    struct Keyframe { uint64_t sequence; int64_t pts_us; };
     mutable std::mutex mutex_; std::deque<HistoryPacket> packets_; int64_t retention_us_;
+    VideoHistoryOptions options_;
+    // Every keyframe in packets_, oldest first. Sequences are absolute:
+    // packets_[i] was appended as front_sequence_ + i.
+    std::deque<Keyframe> keyframes_;
+    uint64_t front_sequence_ = 0, next_sequence_ = 0;
+    // Adjacent keyframes whose PTS goes backwards. While there are none the
+    // keyframes at or before any cutoff are a prefix of keyframes_.
+    size_t pts_inversions_ = 0;
+    VideoHistoryStats stats_;
+    std::array<uint32_t, 1024> hold_ns_{}; size_t holds_ = 0;
 };
 struct ReplaySaveRequest {
     std::string id;

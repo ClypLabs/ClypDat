@@ -46,7 +46,7 @@ struct RecorderSession::State {
     std::string session_error;
     std::vector<std::future<bool>> closing_sessions;
     explicit State(RecorderSessionConfig value) : config(std::move(value)),
-        video(int64_t(config.history_seconds) * 1000000) {}
+        video(int64_t(config.history_seconds) * 1000000, config.video_history) {}
     void notify(uint32_t mask) {
         { std::lock_guard lock(event_mutex); event_mask |= mask; ++event_sequence; }
         event_ready.notify_all();
@@ -384,6 +384,7 @@ std::optional<CapturePixels> RecorderSession::detector_frame() const { std::lock
 void RecorderSession::detector_regions(std::array<CaptureNormalizedRect, 3> regions, bool enabled, bool counter_mask) {
     state_->capture->set_detector_regions(regions, enabled, counter_mask);
 }
+VideoHistoryStats RecorderSession::video_history_stats() const { return state_->video.stats(); }
 std::optional<RecordingDetectorSnapshot> RecorderSession::detector_snapshot() const {
     std::lock_guard lock(state_->mutex); return state_->detector_regions;
 }

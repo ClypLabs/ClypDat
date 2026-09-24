@@ -10,6 +10,7 @@ namespace clypdat {
 struct RecorderSessionConfig {
     RecordingCaptureConfig capture;
     int history_seconds = 60;
+    VideoHistoryOptions video_history;
     std::filesystem::path work_directory, ffmpeg;
     std::vector<WasapiConfig> audio_sources;
     std::vector<AudioLaneConfig> audio_lanes;
@@ -39,6 +40,7 @@ public:
     void pause(bool value);
     void frame_rate(int value);
     RecordingCaptureHealth health() const;
+    VideoHistoryStats video_history_stats() const;
     void submit_pcm(PcmBlock block);
     void save(const std::string& id, int64_t start_us, int64_t end_us,
         const std::filesystem::path& output);

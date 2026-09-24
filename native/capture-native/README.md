@@ -38,6 +38,13 @@ hashes detector output for captured game frames so two builds can be compared,
 and `ClypDat.Capture.Native.DetectorBench <seconds> <stage|reference|off|idle>`
 measures detector cost on the pipeline with a generated 4K source.
 
+The replay history prunes incrementally from a keyframe index, keeping the
+same packets as the original full scan, which the tests run alongside it.
+`ClypDat.Capture.Native.VideoHistoryTests --bench` compares their cost, and
+`ClypDat.Capture.Native.ReplaySaveCheck <seconds> <work dir> <ffmpeg.exe>
+[--reference]` records the primary monitor through a RecorderSession, saves
+the whole history and checks the clip decodes, seeks and stays in sync.
+
 The [five-round generated media comparison](RECORDING-COMPARISON.md) reports
 CPU time, save time, working set and private bytes for managed and native
 recorders. Local fixture clips and per-run JSON remain under `.local/`.

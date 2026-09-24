@@ -158,6 +158,13 @@ if(CLYPDAT_TEST_GPU)
     add_test(NAME ClypDat.Capture.Native.GpuOverlayPipeline COMMAND ClypDat.Capture.Native.OverlayPipelineTests --gpu)
 endif()
 
+add_executable(ClypDat.Capture.Native.VideoHistoryTests tests/video_history_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.VideoHistoryTests PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.VideoHistoryTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.VideoHistoryTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.VideoHistory COMMAND ClypDat.Capture.Native.VideoHistoryTests)
+
 add_executable(ClypDat.Capture.Native.DetectorTests tests/detector_stage_tests.cpp)
 target_link_libraries(ClypDat.Capture.Native.DetectorTests PRIVATE RecorderCore windowscodecs)
 target_compile_definitions(ClypDat.Capture.Native.DetectorTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -180,4 +187,11 @@ add_executable(ClypDat.Capture.Native.DetectorBench tests/detector_bench.cpp)
 target_link_libraries(ClypDat.Capture.Native.DetectorBench PRIVATE RecorderCore)
 target_compile_definitions(ClypDat.Capture.Native.DetectorBench PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 set_target_properties(ClypDat.Capture.Native.DetectorBench PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# Manual: production replay history and save check on the primary monitor.
+add_executable(ClypDat.Capture.Native.ReplaySaveCheck tests/replay_save_check.cpp)
+target_link_libraries(ClypDat.Capture.Native.ReplaySaveCheck PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.ReplaySaveCheck PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.ReplaySaveCheck PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

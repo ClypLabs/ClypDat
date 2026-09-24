@@ -2,6 +2,7 @@
 #include "recording_process.h"
 #include <Windows.h>
 #include <algorithm>
+#include <chrono>
 #include <condition_variable>
 #include <fstream>
 #include <map>
@@ -27,15 +28,52 @@ void header(AVFormatContext* format,bool fragmented){AVDictionary* options=nullp
 int64_t packet_us(const HistoryPacket& packet,int64_t timestamp){return av_rescale_q(timestamp,packet.generation->time_base,{1,1000000});}
 bool compatible(const CaptureGeneration& a,const CaptureGeneration& b){return a.codec->codec_id==b.codec->codec_id&&a.codec->width==b.codec->width&&a.codec->height==b.codec->height&&a.codec->extradata_size==b.codec->extradata_size&&(a.codec->extradata_size==0||memcmp(a.codec->extradata,b.codec->extradata,a.codec->extradata_size)==0);}
 }
-VideoHistory::VideoHistory(int64_t retention):retention_us_(retention){if(retention<=0)throw std::invalid_argument("Invalid video retention");}
+VideoHistory::VideoHistory(int64_t retention,VideoHistoryOptions options):retention_us_(retention),options_(options){if(retention<=0)throw std::invalid_argument("Invalid video retention");}
+// The recorder's PTS strictly increase within a session: one frame pacer per
+// capture run, shared by every encoder generation, and no B-frames. Keyframe
+// PTS that go backwards are still handled exactly, by scanning the keyframe
+// index until the inversion has been pruned.
 void VideoHistory::append(std::shared_ptr<const CaptureGeneration> generation,Packet packet,int64_t acquired_us,bool fresh){
     if(!generation||!generation->codec||!packet)throw std::invalid_argument("Invalid video packet");
     std::shared_ptr<const AVPacket> owned(packet.release(),[](const AVPacket* p){auto mutable_packet=const_cast<AVPacket*>(p);av_packet_free(&mutable_packet);});
-    std::lock_guard lock(mutex_);packets_.push_back({std::move(generation),std::move(owned),acquired_us,fresh});
-    auto cutoff=packet_us(packets_.back(),packets_.back().packet->pts)-retention_us_;
-    // Keep the preceding GOP. Pruning to an arbitrary packet breaks safe cuts.
-    size_t keep=0;for(size_t i=0;i<packets_.size();++i)if((packets_[i].packet->flags&AV_PKT_FLAG_KEY)&&packet_us(packets_[i],packets_[i].packet->pts)<=cutoff)keep=i;
-    while(keep--)packets_.pop_front();
+    HistoryPacket item{std::move(generation),std::move(owned),acquired_us,fresh};
+    const auto pts_us=packet_us(item,item.packet->pts);const bool key=(item.packet->flags&AV_PKT_FLAG_KEY)!=0;
+    // Pruned packets are freed after the lock is released.
+    std::vector<HistoryPacket> released;
+    std::lock_guard lock(mutex_);const auto held=std::chrono::steady_clock::now();
+    packets_.push_back(std::move(item));
+    const auto cutoff=pts_us-retention_us_;
+    if(options_.reference_pruning){
+        // Keep the preceding GOP. Pruning to an arbitrary packet breaks safe cuts.
+        size_t keep=0;for(size_t i=0;i<packets_.size();++i)if((packets_[i].packet->flags&AV_PKT_FLAG_KEY)&&packet_us(packets_[i],packets_[i].packet->pts)<=cutoff)keep=i;
+        stats_.examined+=packets_.size();stats_.pruned+=keep;
+        while(keep--)packets_.pop_front();
+    }else{
+        if(key){
+            try{keyframes_.push_back({next_sequence_,pts_us});}catch(...){packets_.pop_back();throw;}
+            if(keyframes_.size()>1&&keyframes_[keyframes_.size()-2].pts_us>pts_us)++pts_inversions_;
+        }
+        ++next_sequence_;
+        // The newest keyframe at or before the cutoff in append order, as a
+        // scan of every packet would choose it.
+        size_t chosen=SIZE_MAX;
+        if(!pts_inversions_){
+            for(size_t i=0;i<keyframes_.size();++i){++stats_.examined;if(keyframes_[i].pts_us>cutoff)break;chosen=i;}
+        }else{
+            ++stats_.slow_scans;stats_.examined+=keyframes_.size();
+            for(size_t i=0;i<keyframes_.size();++i)if(keyframes_[i].pts_us<=cutoff)chosen=i;
+        }
+        if(chosen!=SIZE_MAX){
+            const auto keep=keyframes_[chosen].sequence;released.reserve(size_t(keep-front_sequence_));
+            for(size_t i=0;i<chosen;++i){if(keyframes_[0].pts_us>keyframes_[1].pts_us)--pts_inversions_;keyframes_.pop_front();}
+            for(;front_sequence_<keep;++front_sequence_){released.push_back(std::move(packets_.front()));packets_.pop_front();}
+            stats_.pruned+=released.size();
+        }
+        stats_.keyframes_peak=std::max(stats_.keyframes_peak,keyframes_.size());
+    }
+    ++stats_.appended;
+    const auto hold=uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-held).count());
+    stats_.hold_ns_total+=hold;stats_.hold_ns_max=std::max(stats_.hold_ns_max,hold);hold_ns_[holds_++%hold_ns_.size()]=uint32_t(std::min<uint64_t>(hold,UINT32_MAX));
 }
 VideoSnapshot VideoHistory::snapshot(int64_t start,int64_t end,bool start_at_or_after,bool variable,int fps)const{
     std::lock_guard lock(mutex_);if(packets_.empty()||end<=start)throw std::runtime_error("No video available for save");
@@ -65,7 +103,17 @@ VideoSnapshot VideoHistory::snapshot(int64_t start,int64_t end,bool start_at_or_
     for(size_t i=0;i<result.packets.size();++i){auto& item=result.packets[i];auto pts=packet_us(item,item.packet->pts);auto duration=i+1<result.packets.size()?packet_us(result.packets[i+1],result.packets[i+1].packet->pts)-pts:final_hold;result.overlay_mappings.push_back({source(item),duration,pts-first_pts});}
     return result;
 }
-void VideoHistory::clear(){std::lock_guard lock(mutex_);packets_.clear();}
+void VideoHistory::clear(){
+    std::deque<HistoryPacket> released;std::lock_guard lock(mutex_);
+    released.swap(packets_);keyframes_.clear();front_sequence_=next_sequence_=0;pts_inversions_=0;
+}
+VideoHistoryStats VideoHistory::stats()const{
+    std::lock_guard lock(mutex_);auto result=stats_;result.packets=packets_.size();result.keyframes=keyframes_.size();
+    const auto count=std::min(holds_,hold_ns_.size());result.recent_hold_ns.reserve(count);
+    for(size_t i=holds_-count;i<holds_;++i)result.recent_hold_ns.push_back(hold_ns_[i%hold_ns_.size()]);
+    return result;
+}
+void VideoHistory::inspect(const std::function<void(const std::deque<HistoryPacket>&)>& reader)const{std::lock_guard lock(mutex_);reader(packets_);}
 void remux_video(const VideoSnapshot& video,const std::filesystem::path& output,const std::atomic_bool& cancel,bool fragmented){
     if(video.packets.empty())throw std::runtime_error("Empty video snapshot");
     Format format;open_output(format,output);auto* stream=avformat_new_stream(format.value,nullptr);if(!stream)throw std::bad_alloc();
