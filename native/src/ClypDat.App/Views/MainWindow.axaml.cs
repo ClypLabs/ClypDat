@@ -3465,7 +3465,11 @@ public sealed partial class MainWindow : Window
 
     private void ShowClipNotification(string trigger, string text, bool playSound, bool saveStart = false, bool saveCompletion = false, Guid? saveId = null, DateTime? requestedUtc = null)
     {
-        if (ViewModel is null) return;
+        if (ViewModel is null)
+        {
+            AppLog.Info($"Clip overlay skipped: trigger={trigger}, id={saveId}, reason=no-view-model.");
+            return;
+        }
         try
         {
             ShowClipOverlay(trigger, ViewModel.Settings.ClipOverlayPosition, text, playSound, saveStart, saveCompletion,
@@ -4234,8 +4238,8 @@ public sealed partial class MainWindow : Window
         var soundVolume = playSound && ViewModel?.Settings.EnableClipOverlaySound == true
             ? ViewModel.Settings.ClipOverlayVolume
             : null;
-        var target = ClipOverlayTargeting.ResolvePrimary();
-        AppLog.Info($"Clip overlay publish: id={workflowId}, trigger={trigger}, stage={(saveCompletion ? 1 : 0)}, monitor={target.DeviceName}, reason={target.ReasonLabel}.");
+        var target = ClipOverlayTargeting.Resolve(ClipOverlayHints());
+        AppLog.Info($"Clip overlay publish: id={workflowId}, trigger={trigger}, stage={(saveCompletion ? 1 : 0)}, kind={kind}, monitor={target.DeviceName}, reason={target.ReasonLabel}.");
         ClipNotifications.Publish(new ClipOverlayEvent(
             workflowId,
             saveCompletion ? 1 : 0,
@@ -4252,6 +4256,22 @@ public sealed partial class MainWindow : Window
             Hotkey: string.IsNullOrWhiteSpace(hotkey) ? null : hotkey,
             HotkeyHint: hotkeyHint,
             SoundVolume: soundVolume));
+    }
+
+    // Where the user is playing, as far as ClypDat knows right now: the
+    // detected game's window, the window or monitor replay is capturing, and
+    // the desktop-capture monitor when capturing the desktop.
+    private ClipOverlayTargetHints ClipOverlayHints()
+    {
+        var active = _activeReplayConfigSnapshot;
+        var detection = ViewModel?.ActiveGameDetection;
+        var desktop = ViewModel?.IsEffectiveDesktopCapture == true;
+        var capturingDesktop = active is not null && string.Equals(active.CaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase);
+        return new ClipOverlayTargetHints(
+            GameWindow: detection is { IsDetected: true } ? detection.WindowHandle : 0,
+            CaptureWindow: active is { GameWindowHandle: not 0 } && !capturingDesktop ? (nint)active.GameWindowHandle : 0,
+            CaptureMonitorDeviceName: capturingDesktop ? active!.CaptureMonitorDeviceName : null,
+            DesktopMonitorDeviceName: desktop ? ViewModel!.Settings.ReplayDesktopMonitorDeviceName : null);
     }
 
     private void ReplayBuffer_OnRecordingStopped(object? sender, EventArgs e)
