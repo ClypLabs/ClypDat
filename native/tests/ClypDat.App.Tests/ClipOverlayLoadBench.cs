@@ -213,8 +213,11 @@ public sealed class ClipOverlayLoadBench(ITestOutputHelper output)
             _thread = new Thread(() =>
             {
                 _threadId = GetCurrentThreadId();
-                Handle = CreateWindowEx(0x00000008 | 0x08000000 | 0x00000080, "STATIC", "ClypDat overlay bench game", 0x80000000, bounds.X, bounds.Y, bounds.Width, bounds.Height, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
-                SetWindowPos(Handle, new IntPtr(-1), bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0010 | 0x0040);
+                // Zero-alpha layered and click-through: topmost for the z-order,
+                // invisible on the display.
+                Handle = CreateWindowEx(0x00000008 | 0x08000000 | 0x00000080 | 0x00080000 | 0x00000020, "STATIC", "ClypDat overlay bench game", 0x80000000, bounds.X, bounds.Y, 64, 64, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                SetLayeredWindowAttributes(Handle, 0, 0, 0x2);
+                SetWindowPos(Handle, new IntPtr(-1), bounds.X, bounds.Y, 64, 64, 0x0010 | 0x0040);
                 ready.Set();
                 while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0) DispatchMessage(ref message);
                 DestroyWindow(Handle);
@@ -227,6 +230,7 @@ public sealed class ClipOverlayLoadBench(ITestOutputHelper output)
         [StructLayout(LayoutKind.Sequential)] private struct NativeMessage { public IntPtr Window; public uint Value; public IntPtr WParam, LParam; public uint Time; public int X, Y; public uint Private; }
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr CreateWindowEx(int extendedStyle, string className, string windowName, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr parameter);
         [DllImport("user32.dll")] private static extern bool DestroyWindow(IntPtr window);
+        [DllImport("user32.dll")] private static extern bool SetLayeredWindowAttributes(IntPtr window, uint colorKey, byte alpha, uint flags);
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
         [DllImport("user32.dll")] private static extern int GetMessage(out NativeMessage message, IntPtr window, uint minimum, uint maximum);
         [DllImport("user32.dll")] private static extern IntPtr DispatchMessage(ref NativeMessage message);

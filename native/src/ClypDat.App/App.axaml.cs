@@ -105,12 +105,13 @@ public sealed partial class App : Application
             // Alt+F4 (or End task) on any other ClypDat window - export and
             // share progress, confirms, settings dialogs - is an app quit too,
             // not a way to close that dialog and drop the work behind it.
+            // Message boxes are the exception: nothing is behind them.
             Window.WindowOpenedEvent.AddClassHandler(typeof(Window), (sender, _) =>
             {
                 if (sender is not Window window || window is MainWindow or ClosingSafelyWindow) return;
                 window.Closing += (_, e) =>
                 {
-                    if (_mainWindow is not { } main || main.AllowRealClose || e.IsProgrammatic || e.CloseReason != WindowCloseReason.WindowClosing) return;
+                    if (_mainWindow is not { } main || !DialogCloseQuitPolicy.QuitsApp(window, e.IsProgrammatic, e.CloseReason, main.AllowRealClose)) return;
                     e.Cancel = true;
                     _ = main.QuitAsync("dialog-close");
                 };

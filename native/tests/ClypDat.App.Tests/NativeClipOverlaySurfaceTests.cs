@@ -643,6 +643,9 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
     private static extern bool DestroyWindow(IntPtr window);
 
     [DllImport("user32.dll")]
+    private static extern bool SetLayeredWindowAttributes(IntPtr window, uint colorKey, byte alpha, uint flags);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
@@ -707,11 +710,16 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         return false;
     }
 
-    // A borderless topmost stand-in for a fullscreen game, on its own thread
-    // with a message loop, as a game's window would be.
+    // A topmost stand-in for a borderless game, on its own thread with a
+    // message loop, as a game's window would be. Layered at zero alpha and
+    // click-through: visible and topmost as far as Windows' z-order and
+    // monitor lookups go, invisible and inert on the actual display, so the
+    // suite never flashes over whoever is using the machine.
     private sealed class BorderlessTopmostWindow : IDisposable
     {
         private static readonly IntPtr HwndTopmost = new(-1);
+        // Small: only its z-order and the monitor it is on matter.
+        private const int GameSize = 64;
         private readonly Thread _thread;
         private uint _threadId;
         private int _raises;
@@ -721,8 +729,12 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
             _thread = new Thread(() =>
             {
                 _threadId = GetCurrentThreadId();
-                Handle = CreateWindowEx(0x00000008 | 0x08000000 | 0x00000080, "STATIC", "ClypDat overlay test game", 0x80000000, bounds.X, bounds.Y, bounds.Width, bounds.Height, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
-                if (Handle != IntPtr.Zero) SetWindowPos(Handle, HwndTopmost, bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0010 | 0x0040);
+                Handle = CreateWindowEx(0x00000008 | 0x08000000 | 0x00000080 | 0x00080000 | 0x00000020, "STATIC", "ClypDat overlay test game", 0x80000000, bounds.X, bounds.Y, GameSize, GameSize, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                if (Handle != IntPtr.Zero)
+                {
+                    SetLayeredWindowAttributes(Handle, 0, 0, 0x2);
+                    SetWindowPos(Handle, HwndTopmost, bounds.X, bounds.Y, GameSize, GameSize, 0x0010 | 0x0040);
+                }
                 ready.Set();
                 while (GetMessage(out var message, IntPtr.Zero, 0, 0) > 0) DispatchMessage(ref message);
                 if (Handle != IntPtr.Zero) DestroyWindow(Handle);

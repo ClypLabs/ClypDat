@@ -69,6 +69,16 @@ public sealed record CaptureWorkerSaveResult(
     string? Error = null,
     Guid? SaveId = null,
     DateTime? RequestedUtc = null);
+// A save refused because another is still running. The native recorder says
+// the same without the full stop, and its message reaches the app verbatim.
+public static class CaptureWorkerSaveErrors
+{
+    public const string Busy = "A replay save is already in progress.";
+
+    public static bool IsBusy(string? error)
+        => error is not null && string.Equals(error.Trim().TrimEnd('.'), Busy.TrimEnd('.'), StringComparison.Ordinal);
+}
+
 public sealed record CaptureWorkerSaveAcknowledgement(
     [property: JsonPropertyName("saveId")] Guid? SaveId,
     [property: JsonPropertyName("path")] string Path);

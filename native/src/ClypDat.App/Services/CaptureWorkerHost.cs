@@ -502,7 +502,7 @@ internal static class CaptureWorkerHost
         await SendEventAsync("save-started", new ReplaySaveStarted(saveId, requestedUtc));
         if (!await SaveGate.WaitAsync(0, cancellationToken))
         {
-            var busy = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, "A replay save is already in progress.", saveId, requestedUtc);
+            var busy = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, CaptureWorkerSaveErrors.Busy, saveId, requestedUtc);
             await SendEventAsync("save-failed", busy);
             return busy;
         }

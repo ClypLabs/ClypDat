@@ -1093,7 +1093,12 @@ public sealed partial class MainWindow : Window
             ShutdownGuard.EndKeyed(guardKey);
             ViewModel?.ReleaseSpotifySave(completed.SaveId);
             ShowClipNotification("save-failed", "Clip Failed", playSound: false, saveCompletion: true, saveId: completed.SaveId, requestedUtc: completed.RequestedUtc);
-            Dispatcher.UIThread.Post(async () => await ShowMessageAsync("Clip Failed", completed.Error));
+            // A press refused because a save is already running needs no
+            // dialog: that save carries on, and the card says this one was
+            // refused. A burst of presses used to stack one modal per press.
+            if (CaptureWorkerSaveErrors.IsBusy(completed.Error))
+                AppLog.Info($"Clip save refused while another save runs: id={completed.SaveId}; no dialog.");
+            else Dispatcher.UIThread.Post(async () => await ShowMessageAsync("Clip Failed", completed.Error));
             return;
         }
         if (string.IsNullOrWhiteSpace(completed.Path))
@@ -7849,6 +7854,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         var dialog = CreateDialog(title, message, false);
+        DialogCloseQuitPolicy.MarkMessageBox(dialog);
         try
         {
             await ShowModalDialogAsync<bool>(dialog);

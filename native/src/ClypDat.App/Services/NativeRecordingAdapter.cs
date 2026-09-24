@@ -324,7 +324,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
     public async Task<string> SaveReplayAsync(string outputFolder, CancellationToken cancellationToken = default,
         string? titleOverride = null, ReplayClipWindow? clipWindow = null, string? gameDisplayNameOverride = null, Guid? saveId = null)
     {
-        if (Interlocked.CompareExchange(ref _saving, 1, 0) != 0) throw new InvalidOperationException("A replay save is already in progress.");
+        if (Interlocked.CompareExchange(ref _saving, 1, 0) != 0) throw new InvalidOperationException(CaptureWorkerSaveErrors.Busy);
         NativeRecorderSession? session = null; var retained = false; var accepted = false; var terminal = false;
         var id = saveId ?? Guid.NewGuid();
         try
