@@ -6,8 +6,7 @@
 #include <vector>
 
 // Backend-independent encoder resource policy. Pure arithmetic: no FFmpeg,
-// D3D11 or encoder state. The recorder applies NVENC, AMF and QSV plans;
-// software plans are not consumed yet.
+// D3D11 or encoder state. The recorder applies every backend's plan.
 namespace clypdat {
 enum class EncoderVendor { Nvidia, Amd, Intel, Software };
 enum class EncoderCodec { H264, AV1 };

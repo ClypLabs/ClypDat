@@ -1,4 +1,5 @@
 #include "recording_capture.h"
+#include "readback_stage.h"
 #include <Windows.h>
 #include <avrt.h>
 #include <d3d11_4.h>
@@ -65,9 +66,9 @@ EncoderPolicy recording_encoder_policy(const RecordingCaptureConfig& config) {
 }
 std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& config,
     const RecordingEncoderCandidate& candidate, uint32_t adapter_vendor, bool overlay_stage) {
-    // libx264 keeps its legacy resource sizing for now.
     const bool nvenc = candidate.name.ends_with("_nvenc"), amf = candidate.name.ends_with("_amf"), qsv = candidate.name.ends_with("_qsv");
-    if (!nvenc && !amf && !qsv) return std::nullopt;
+    const bool software = candidate.name == "libx264";
+    if (!nvenc && !amf && !qsv && !software) return std::nullopt;
     EncoderRequest request;
     request.codec = candidate.name.starts_with("av1") ? EncoderCodec::AV1 : EncoderCodec::H264;
     request.pixel_format = EncoderPixelFormat::NV12;
@@ -83,7 +84,7 @@ std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& 
     // FFmpeg keeps MFX's QueryIOSurf result private, so QSV's suggested input
     // count stays unknown here; the plan reserves one surface beyond
     // async_depth for it (EncoderPolicy::qsv_suggested_slack).
-    const auto vendor = nvenc ? EncoderVendor::Nvidia : amf ? EncoderVendor::Amd : EncoderVendor::Intel;
+    const auto vendor = nvenc ? EncoderVendor::Nvidia : amf ? EncoderVendor::Amd : qsv ? EncoderVendor::Intel : EncoderVendor::Software;
     return encoder_backend(vendor).plan(request, candidate.d3d11, recording_encoder_policy(config));
 }
 int64_t capture_final_hold(bool variable, int64_t previous, int64_t hold) {
@@ -160,7 +161,6 @@ bool RecordingRecoveryTimeline::safe_start(int64_t begin,int64_t end,int64_t& re
     return result<end;
 }
 namespace {
-struct FrameDeleter { void operator()(AVFrame* p) const { av_frame_free(&p); } };
 class CaptureThreadScheduling{
     int previous_=THREAD_PRIORITY_NORMAL;HANDLE mmcss_=nullptr;
 public:
@@ -171,7 +171,10 @@ public:
     }
     ~CaptureThreadScheduling(){if(mmcss_)AvRevertMmThreadCharacteristics(mmcss_);if(previous_!=THREAD_PRIORITY_ERROR_RETURN)SetThreadPriority(GetCurrentThread(),previous_);}
 };
-using Frame = std::unique_ptr<AVFrame, FrameDeleter>;
+using Frame = OwnedFrame;
+double since_ms(std::chrono::steady_clock::time_point started) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+}
 void check(int result, const char* what) {
     if (result >= 0) return;
     char text[AV_ERROR_MAX_STRING_SIZE]{}; av_strerror(result, text, sizeof(text));
@@ -189,6 +192,9 @@ struct BufferDeleter { void operator()(AVBufferRef* p) const { av_buffer_unref(&
 // Every planned surface is in flight. This is encoder backpressure, not a
 // GPU conversion failure, so it never triggers the CPU conversion fallback.
 struct SurfacePoolExhausted : std::runtime_error { using std::runtime_error::runtime_error; };
+// Every readback CPU frame is still referenced, by the encoder or FFmpeg.
+// Also backpressure, never a GPU conversion failure.
+struct ReadbackExhausted : std::runtime_error { using std::runtime_error::runtime_error; };
 using Buffer = std::unique_ptr<AVBufferRef, BufferDeleter>;
 class GpuProcessor {
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
@@ -426,6 +432,12 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     int64_t last_pts = -1, last_detector = INT64_MIN / 2;
     std::unique_ptr<VideoEncoder> encoder;
     std::unique_ptr<GpuProcessor> gpu;
+    // Readback candidates only; zero-copy candidates never create one.
+    std::unique_ptr<ReadbackStage> readback;
+    // Frames staged for readback, oldest first, matching readback->pending().
+    struct Staged { int64_t pts, acquired_us; uint64_t source_sequence; };
+    std::deque<Staged> readback_staged;
+    std::deque<double> readback_times, readback_map_waits;
     std::shared_ptr<CaptureGeneration> generation;
     size_t active_candidate = 0;
     std::vector<Candidate> encoder_candidates;
@@ -556,7 +568,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                     if (!gpu) gpu = std::make_unique<GpuProcessor>(source->d3d_device(), config.width, config.height, fps, capacity,
                         qsv_frames, dependencies.qsv_frames);
                     ec.hardware_frames = gpu->frames.get();
-                } else if (!recovering) ensure_conversion(capacity);
+                } else if (!recovering) { ensure_conversion(capacity); ensure_readback(plan); }
                 auto replacement = dependencies.open_encoder?dependencies.open_encoder(ec,i):std::make_unique<VideoEncoder>(ec);
                 if(!replacement)throw std::runtime_error("Recording encoder factory returned no encoder");
                 if (encoder) { try { emit(encoder->finish()); } catch (...) {} }
@@ -571,7 +583,11 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 next->codec = std::shared_ptr<const AVCodecParameters>(parameters, CaptureCodecParametersDeleter{});
                 check(avcodec_parameters_from_context(parameters, &encoder->context()), "Copy recording codec parameters");
                 generation = std::move(next);
-                retained_limit = size_t(plan ? plan->max_in_flight : legacy_surface_capacity(config.fps));
+                // libx264 plans no encoder-owned frames, but the frame being
+                // submitted stays on the ledger until its packet emerges.
+                retained_limit = size_t(plan ? std::max(plan->max_in_flight, 1) : legacy_surface_capacity(config.fps));
+                // Zero-copy plans keep no CPU staging resources.
+                if (candidate.d3d11 && !recovering) { readback.reset(); readback_staged.clear(); }
                 { std::lock_guard lock(mutex); status.generation = generation->id; status.encoder = candidate.name;
                   status.hardware_input = candidate.d3d11; status.surface_capacity = candidate.d3d11 ? (gpu ? gpu->capacity() : capacity) : 0;
                   status.hdr = status.source_details.hdr_display;
@@ -581,6 +597,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                   status.encoder_vendor.clear(); status.requested_codec.clear(); status.effective_codec.clear(); status.zero_copy_status.clear();
                   status.zero_copy_probe_passed = false; status.encoder_slots = status.encoder_delay = status.output_delay_frames = status.max_in_flight = 0;
                   status.pool_bytes = 0;
+                  status.readback_staging_slots = readback ? readback->staging_slots() : 0;
+                  status.readback_cpu_frames = readback ? readback->cpu_frames() : 0;
                   if (plan) {
                       status.encoder_vendor = encoder_vendor_name(plan->vendor);
                       status.requested_codec = encoder_codec_name(plan->requested_codec); status.effective_codec = encoder_codec_name(plan->effective_codec);
@@ -607,6 +625,49 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         try { gpu = std::make_unique<GpuProcessor>(device, config.width, config.height, fps, capacity); gpu_initialization_error.clear(); }
         catch (const std::exception& error) { gpu_initialization_error = error.what(); std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
         catch (...) { gpu_initialization_error = "Unknown GPU processor initialization error"; std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
+    }
+    // The readback pipeline sized by the plan: staging textures only when the
+    // GPU converts, CPU frames always. Kept while it still fits, so frames
+    // staged for a failed encoder reach its replacement.
+    void ensure_readback(const std::optional<EncoderPlan>& plan) {
+        auto* device = gpu && !gpu->qsv() && !config.disable_gpu_processing ? source->d3d_device() : nullptr;
+        const int staging = device ? (plan ? plan->staging_slots : 2) : 0, frames = plan ? plan->cpu_frames : 2;
+        // A fresh open never inherits frames staged by an earlier session.
+        while (readback && readback->pending()) readback->drop_oldest();
+        readback_staged.clear();
+        if (readback && readback->device() == device && readback->width() == config.width && readback->height() == config.height &&
+            readback->staging_slots() == staging && readback->cpu_frames() == frames) return;
+        readback.reset();
+        try { readback = std::make_unique<ReadbackStage>(device, config.width, config.height, AV_PIX_FMT_NV12, staging, frames); }
+        catch (const std::exception& error) {
+            // Without staging textures, GPU frames are read back synchronously
+            // into the same reusable CPU frames.
+            readback = std::make_unique<ReadbackStage>(nullptr, config.width, config.height, AV_PIX_FMT_NV12, 0, frames);
+            std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = error.what();
+        }
+        std::lock_guard lock(mutex); status.frame_allocations += readback->allocations();
+        status.readback_staging_peak = status.readback_cpu_frames_peak = 0;
+    }
+    void note_readback() {
+        if (!readback) return;
+        const int staged = readback->pending(), used = readback->cpu_frames_in_use();
+        std::lock_guard lock(mutex);
+        status.readback_staging_in_use = staged; status.readback_staging_peak = std::max(status.readback_staging_peak, staged);
+        status.readback_cpu_frames_in_use = used; status.readback_cpu_frames_peak = std::max(status.readback_cpu_frames_peak, used);
+    }
+    // A CPU frame for a system-memory encoder: a reusable readback frame, or
+    // a new allocation when the candidate has no readback pipeline.
+    Frame cpu_frame() {
+        if (readback) {
+            auto frame = readback->acquire();
+            if (!frame) throw ReadbackExhausted("Every recording readback CPU frame is still in use");
+            note_readback(); return frame;
+        }
+        Frame frame(av_frame_alloc()); if (!frame) throw std::bad_alloc();
+        frame->format = AV_PIX_FMT_NV12; frame->width = config.width; frame->height = config.height;
+        check(av_frame_get_buffer(frame.get(), 32), "Allocate recording frame");
+        std::lock_guard lock(mutex); ++status.frame_allocations;
+        return frame;
     }
     void acquisition() {
         struct StopSource { RecordingFrameSource* source; ~StopSource(){try{source->stop();}catch(...){}} } source_owner{source.get()};
@@ -699,6 +760,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         status.submission_p95_ms = percentile(submission_times,.95); status.completion_p95_ms = percentile(completion_times,.95);
         status.submission_p50_ms = percentile(submission_times,.5); status.completion_p50_ms = percentile(completion_times,.5);
         status.capture_latency_p50_ms = percentile(capture_latencies,.5); status.capture_latency_p95_ms = percentile(capture_latencies,.95);
+        status.readback_p50_ms = percentile(readback_times,.5); status.readback_p95_ms = percentile(readback_times,.95);
+        status.readback_map_wait_p50_ms = percentile(readback_map_waits,.5); status.readback_map_wait_p95_ms = percentile(readback_map_waits,.95);
         if(processing_stage_samples){
             const double samples=double(processing_stage_samples);
             status.texture_readback_ms=readback_ms_sum/samples;status.video_processor_ms=video_processor_ms_sum/samples;
@@ -897,13 +960,18 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             if(pixels){auto owned=*pixels;detector(owned);}
         }
     }
-    Frame convert(const CapturePixels& pixels, int64_t pts,SwsContext*& conversion) {
-        Frame frame(av_frame_alloc()); if (!frame) throw std::bad_alloc();
-        frame->format = AV_PIX_FMT_NV12; frame->width = config.width; frame->height = config.height;
+    // Converts into `frame` when given (every row is rewritten), otherwise
+    // into a new allocation.
+    Frame convert(const CapturePixels& pixels, int64_t pts,SwsContext*& conversion,Frame frame={}) {
+        if (!frame) {
+            frame.reset(av_frame_alloc()); if (!frame) throw std::bad_alloc();
+            frame->format = AV_PIX_FMT_NV12; frame->width = config.width; frame->height = config.height;
+            check(av_frame_get_buffer(frame.get(), 32), "Allocate recording frame");
+        } else if (frame->format != AV_PIX_FMT_NV12 || frame->width != config.width || frame->height != config.height)
+            throw std::logic_error("Recording CPU frame does not match the output");
         frame->pts = pts; frame->duration = 1000000 / fps.load();
         frame->color_range = AVCOL_RANGE_MPEG; frame->colorspace = AVCOL_SPC_BT709;
         frame->color_primaries = AVCOL_PRI_BT709; frame->color_trc = AVCOL_TRC_BT709;
-        check(av_frame_get_buffer(frame.get(), 32), "Allocate recording frame");
         for (int y = 0; y < config.height; ++y) memset(frame->data[0] + size_t(y) * frame->linesize[0], 16, config.width);
         for (int y = 0; y < config.height / 2; ++y) memset(frame->data[1] + size_t(y) * frame->linesize[1], 128, config.width);
         const auto fit = capture_aspect_fit(pixels.width, pixels.height, config.width, config.height);
@@ -928,8 +996,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         }
         return frame;
     }
-    Frame convert(const CapturePixels& pixels,int64_t pts){return convert(pixels,pts,scaler);}
-    enum class Pressure { EncoderBusy, Retained, Pool };
+    Frame convert(const CapturePixels& pixels,int64_t pts){return convert(pixels,pts,scaler,cpu_frame());}
+    enum class Pressure { EncoderBusy, Retained, Pool, Readback };
     struct PressureTimer {
         HANDLE handle = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
         ~PressureTimer() { if (handle) CloseHandle(handle); }
@@ -963,6 +1031,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         { std::lock_guard lock(mutex); ++status.backpressure_drops;
           if (kind == Pressure::EncoderBusy) ++status.encoder_busy_drops;
           else if (kind == Pressure::Retained) ++status.retained_pressure_drops;
+          else if (kind == Pressure::Readback) ++status.readback_pressure_drops;
           else ++status.pool_pressure_drops;
           status.backpressure_wait_max_ms = std::max(status.backpressure_wait_max_ms, double(waited_us) / 1000); }
         if (!pressure_since) { pressure_since = current; return; }
@@ -972,17 +1041,116 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         std::lock_guard lock(mutex); ++status.encoder_stall_recoveries;
     }
     void forget(int64_t pts) { retained_surfaces.erase(pts); submitted.erase(pts); submitted_at.erase(pts); }
+    // Stage timings and processing path of one encoding step.
+    struct Tick {
+        int64_t started = 0;
+        double readback_ms = 0, video_processor_ms = 0, software_convert_ms = 0, hardware_upload_ms = 0, overlay_ms = 0;
+        std::string path;
+    };
+    // Encoding-thread state: whether the next frame must be a keyframe, the
+    // last submitted source frame, and the timer for bounded waits.
+    struct EncodingState { bool first = true; uint64_t last_sequence = 0; PressureTimer timer; };
+    bool overlay_active() const { return callbacks.compose_nv12 && (!callbacks.overlay_enabled || callbacks.overlay_enabled()); }
+    // GPU frames of the active candidate go through the staged readback.
+    bool staging_readback() const { return readback && readback->staging_slots() && !encoder_candidates[active_candidate].d3d11; }
+    void note_readback_time(double total_ms, double map_wait_ms, bool stalled) {
+        std::lock_guard lock(mutex);
+        readback_times.push_back(total_ms); if (readback_times.size() > 240) readback_times.pop_front();
+        readback_map_waits.push_back(map_wait_ms); if (readback_map_waits.size() > 240) readback_map_waits.pop_front();
+        if (stalled) ++status.readback_map_stalls;
+    }
+    // Submits one frame, retrying Busy within one output interval; a frame
+    // still refused is dropped as backpressure.
+    void submit_frame(Frame frame, const Staged& meta, EncodingState& state, const Tick& tick) {
+        if (state.first) frame->pict_type = AV_PICTURE_TYPE_I;
+        const bool fresh = meta.source_sequence != state.last_sequence;
+        auto track = [&] {
+            // Only hardware surfaces are kept alive here. Encoders copy
+            // system-memory frames or hold their own reference, so a readback
+            // CPU frame is free again as soon as they let it go.
+            Frame retained;
+            if (frame->hw_frames_ctx) { retained.reset(av_frame_clone(frame.get())); if (!retained) throw std::bad_alloc(); }
+            retained_surfaces[meta.pts] = std::move(retained);
+            submitted[meta.pts] = {meta.acquired_us, fresh}; submitted_at[meta.pts] = now();
+        };
+        track();
+        const auto submit_started = now();
+        { std::lock_guard lock(mutex); status.processing_ms = double(submit_started-tick.started)/1000;
+            status.processing_max_ms=std::max(status.processing_max_ms,status.processing_ms);
+            readback_ms_sum+=tick.readback_ms;video_processor_ms_sum+=tick.video_processor_ms;software_convert_ms_sum+=tick.software_convert_ms;
+            hardware_upload_ms_sum+=tick.hardware_upload_ms;overlay_compose_ms_sum+=tick.overlay_ms;++processing_stage_samples;
+            if(!tick.path.empty())status.processing_path=tick.path;
+            status.surfaces_in_use_peak=std::max(status.surfaces_in_use_peak,int(submitted.size()));
+            if(gpu)status.surfaces_allocated=gpu->allocated(); }
+        SubmitResult result;
+        try {
+            result = encoder->try_submit(*frame); emit(std::move(result.packets));
+            // Busy: the encoder refused this frame and holds no reference.
+            // Retry within one output interval, then drop the tick.
+            const int64_t budget = 1000000 / fps.load();
+            while (result.status == SubmitStatus::Busy && now() - submit_started < budget) {
+                state.timer.pause(1000);
+                result = encoder->try_submit(*frame); emit(std::move(result.packets));
+            }
+        }
+        catch (...) {
+            replace_encoder(state.first); frame->pict_type = AV_PICTURE_TYPE_I;
+            track();
+            result = encoder->try_submit(*frame); emit(std::move(result.packets));
+        }
+        const auto submitted_done = now();
+        if (result.status == SubmitStatus::Busy) {
+            forget(meta.pts);
+            record_pressure(Pressure::EncoderBusy, submitted_done - submit_started, state.first);
+            return;
+        }
+        state.first = false; state.last_sequence = meta.source_sequence; pressure_since = 0;
+        const double duration = double(submitted_done-submit_started)/1000;
+        { std::lock_guard lock(mutex); ++status.submitted; status.submission_ms = duration;status.submission_max_ms=std::max(status.submission_max_ms,duration);
+            submission_times.push_back(duration); if(submission_times.size()>240)submission_times.pop_front(); }
+    }
+    // Reads the oldest staged frame back and submits it. With every CPU frame
+    // still held, waits at most one output interval for the encoder to
+    // release one, then drops that staged frame as readback backpressure.
+    void read_staged(EncodingState& state, Tick tick) {
+        int64_t waited = 0;
+        if (!readback->cpu_frame_available() &&
+            (!relieve([&] { return readback->cpu_frame_available(); }, state.timer, waited, state.first) || !readback->cpu_frame_available())) {
+            readback->drop_oldest(); readback_staged.pop_front(); note_readback();
+            record_pressure(Pressure::Readback, waited, state.first);
+            return;
+        }
+        auto result = readback->read();
+        const auto meta = readback_staged.front(); readback_staged.pop_front();
+        note_readback();
+        tick.readback_ms += result.map_wait_ms + result.copy_ms;
+        note_readback_time(result.map_wait_ms + result.copy_ms, result.map_wait_ms, result.stalled);
+        Frame frame(result.frame.release());
+        if (overlay_active()) {
+            const auto started = std::chrono::steady_clock::now();
+            callbacks.compose_nv12(*frame); tick.overlay_ms += since_ms(started);
+        }
+        submit_frame(std::move(frame), meta, state, tick);
+    }
     void encoding() {
-        bool first = true;
-        uint64_t last_encoded_sequence=0;
-        const PressureTimer timer;
+        EncodingState state;
         while (true) {
             Work work;
-            { std::unique_lock lock(mutex); changed.wait(lock, [&] { return !queue.empty() || pacing_finished || (stopping && threads <= 1); });
+            { std::unique_lock lock(mutex);
+              const auto ready = [&] { return !queue.empty() || pacing_finished || (stopping && threads <= 1); };
+              // A staged frame waits for the next one so its readback overlaps
+              // that frame's GPU work; with none arriving soon it is read now.
+              if (!readback_staged.empty() && !changed.wait_for(lock, std::chrono::microseconds(2000000 / fps.load()), ready)) {
+                  lock.unlock();
+                  Tick tick; tick.started = now();
+                  while (!readback_staged.empty()) read_staged(state, tick);
+                  continue;
+              }
+              changed.wait(lock, ready);
               if (queue.empty()) { if (pacing_finished || stopping) break; continue; }
               work = std::move(queue.front()); queue.pop_front(); status.queue_depth = int(queue.size()); }
             if (switch_requested.exchange(false)) {
-                try { open_encoder(true); first = true; }
+                try { open_encoder(true); state.first = true; }
                 catch (const std::exception&) {
                     if (config.protect_frame_rate) {
                         const auto old = fps.load(); const int reduced = old > 90 ? 90 : old > 60 ? 60 : 30;
@@ -990,15 +1158,15 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                     }
                 }
             }
-            const auto process_started = now();
-            { std::lock_guard lock(mutex); status.queue_age_ms = std::max(0.0, double(process_started-work.scheduled_us)/1000);
+            Tick tick; tick.started = now();
+            { std::lock_guard lock(mutex); status.queue_age_ms = std::max(0.0, double(tick.started-work.scheduled_us)/1000);
                 status.queue_age_max_ms=std::max(status.queue_age_max_ms,status.queue_age_ms); }
             // The encoder owns its whole in-flight budget: wait a bounded time
             // for it to release a frame before spending a pool surface.
             if (retained_surfaces.size() >= retained_limit) {
                 int64_t waited = 0;
-                if (!relieve([&] { return retained_surfaces.size() < retained_limit; }, timer, waited, first)) {
-                    record_pressure(Pressure::Retained, waited, first); continue;
+                if (!relieve([&] { return retained_surfaces.size() < retained_limit; }, state.timer, waited, state.first)) {
+                    record_pressure(Pressure::Retained, waited, state.first); continue;
                 }
             }
             CapturePixels source_copy;
@@ -1009,62 +1177,65 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             if(pixels->texture){source_copy=*pixels;pixels=&source_copy;}
             if (callbacks.compose) { capture_copy_texture_pixels(*pixels); composed = *pixels; composed.timestamp_us = work.pts;
                 callbacks.compose(composed); composed.texture.reset(); pixels = &composed; }
-            double readback_ms=0,video_processor_ms=0,software_convert_ms=0,hardware_upload_ms=0,overlay_ms=0;
-            std::string processing_path;
-            auto elapsed_ms=[](auto started){return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();};
             // Pool exhaustion escapes as SurfacePoolExhausted from every path,
-            // including the fallback upload and the overlay upload.
+            // including the fallback upload and the overlay upload; readback
+            // CPU frame exhaustion as ReadbackExhausted.
             auto produce = [&]() -> Frame {
                 Frame frame;
+                const bool zero_copy = encoder_candidates[active_candidate].d3d11;
                 if (gpu && pixels->texture && !config.disable_gpu_processing) {
                     try {
                         const auto started=std::chrono::steady_clock::now();
                         frame = gpu->convert(*pixels, work.pts);
-                        video_processor_ms=elapsed_ms(started);
-                        processing_path=!encoder_candidates[active_candidate].d3d11?"d3d11-video-processor-readback":
-                            gpu->qsv()?"d3d11-video-processor-qsv":"d3d11-video-processor";
-                        if(!encoder_candidates[active_candidate].d3d11){
+                        tick.video_processor_ms=since_ms(started);
+                        tick.path=!zero_copy?"d3d11-video-processor-readback":gpu->qsv()?"d3d11-video-processor-qsv":"d3d11-video-processor";
+                        // Without staging textures, read back now into a reusable CPU frame.
+                        if(!zero_copy&&!staging_readback()){
                             const auto readback_started=std::chrono::steady_clock::now();
-                            Frame software(av_frame_alloc());if(!software)throw std::bad_alloc();
+                            Frame software=cpu_frame();
                             check(av_hwframe_transfer_data(software.get(),frame.get(),0),"Read processed recording NV12");
                             check(av_frame_copy_props(software.get(),frame.get()),"Copy processed recording timestamps");frame=std::move(software);
-                            readback_ms+=elapsed_ms(readback_started);
+                            const double readback_ms=since_ms(readback_started);tick.readback_ms+=readback_ms;note_readback_time(readback_ms,readback_ms,false);
                         }
                     } catch (const SurfacePoolExhausted&) {
                         throw;
+                    } catch (const ReadbackExhausted&) {
+                        throw;
                     } catch (const std::exception& error) {
                         { std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks;status.gpu_conversion_fallback_error=error.what(); }
-                        const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);readback_ms+=elapsed_ms(readback_started);
-                        const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);software_convert_ms=elapsed_ms(convert_started);
-                        processing_path=encoder_candidates[active_candidate].d3d11?"gpu-fallback-cpu-convert-d3d11-upload":"gpu-fallback-cpu-convert";
-                        if(encoder_candidates[active_candidate].d3d11){const auto upload_started=std::chrono::steady_clock::now();frame=gpu->upload(*frame);hardware_upload_ms=elapsed_ms(upload_started);}
+                        const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);tick.readback_ms+=since_ms(readback_started);
+                        const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);tick.software_convert_ms=since_ms(convert_started);
+                        tick.path=zero_copy?"gpu-fallback-cpu-convert-d3d11-upload":"gpu-fallback-cpu-convert";
+                        if(zero_copy){const auto upload_started=std::chrono::steady_clock::now();frame=gpu->upload(*frame);tick.hardware_upload_ms=since_ms(upload_started);}
                     } catch (...) {
                         { std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks;status.gpu_conversion_fallback_error="Unknown GPU conversion error"; }
-                        const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);readback_ms+=elapsed_ms(readback_started);
-                        const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);software_convert_ms=elapsed_ms(convert_started);
-                        processing_path=encoder_candidates[active_candidate].d3d11?"gpu-fallback-cpu-convert-d3d11-upload":"gpu-fallback-cpu-convert";
-                        if(encoder_candidates[active_candidate].d3d11){const auto upload_started=std::chrono::steady_clock::now();frame=gpu->upload(*frame);hardware_upload_ms=elapsed_ms(upload_started);}
+                        const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);tick.readback_ms+=since_ms(readback_started);
+                        const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);tick.software_convert_ms=since_ms(convert_started);
+                        tick.path=zero_copy?"gpu-fallback-cpu-convert-d3d11-upload":"gpu-fallback-cpu-convert";
+                        if(zero_copy){const auto upload_started=std::chrono::steady_clock::now();frame=gpu->upload(*frame);tick.hardware_upload_ms=since_ms(upload_started);}
                     }
                 } else {
-                    if(pixels->texture){const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);readback_ms=elapsed_ms(readback_started);}
-                    const auto convert_started=std::chrono::steady_clock::now();frame = convert(*pixels, work.pts);software_convert_ms=elapsed_ms(convert_started);
-                    processing_path=encoder_candidates[active_candidate].d3d11?"cpu-convert-d3d11-upload":"cpu-convert";
-                    if (encoder_candidates[active_candidate].d3d11) {const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*frame);hardware_upload_ms=elapsed_ms(upload_started);}
+                    if(pixels->texture){const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);tick.readback_ms=since_ms(readback_started);}
+                    const auto convert_started=std::chrono::steady_clock::now();frame = convert(*pixels, work.pts);tick.software_convert_ms=since_ms(convert_started);
+                    tick.path=zero_copy?"cpu-convert-d3d11-upload":"cpu-convert";
+                    if (zero_copy) {const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*frame);tick.hardware_upload_ms=since_ms(upload_started);}
                 }
-                if (callbacks.compose_nv12&&(!callbacks.overlay_enabled||callbacks.overlay_enabled())) {
+                // Staged frames get their overlay once read back.
+                if (overlay_active() && !(frame->format == AV_PIX_FMT_D3D11 && staging_readback())) {
                     const auto overlay_started=std::chrono::steady_clock::now();
                     if (frame->format == AV_PIX_FMT_D3D11 || frame->format == AV_PIX_FMT_QSV) {
                         Frame software(av_frame_alloc()); if (!software) throw std::bad_alloc();
                         check(av_hwframe_transfer_data(software.get(), frame.get(), 0), "Download recording overlay canvas");
+                        { std::lock_guard lock(mutex); ++status.frame_allocations; }
                         check(av_frame_copy_props(software.get(), frame.get()), "Copy recording overlay timing");
-                        callbacks.compose_nv12(*software); const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*software);hardware_upload_ms+=elapsed_ms(upload_started);
+                        callbacks.compose_nv12(*software); const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*software);tick.hardware_upload_ms+=since_ms(upload_started);
                     } else callbacks.compose_nv12(*frame);
-                    overlay_ms=elapsed_ms(overlay_started);
+                    tick.overlay_ms=since_ms(overlay_started);
                 }
                 return frame;
             };
             Frame frame;
-            bool pool_dropped = false;
+            bool dropped = false;
             for (int attempt = 0; !frame; ++attempt) {
                 try { frame = produce(); }
                 catch (const SurfacePoolExhausted&) {
@@ -1072,54 +1243,28 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                     // then drop this tick. No CPU fallback, no extra surface.
                     const auto held = retained_surfaces.size();
                     int64_t waited = 0;
-                    if (attempt == 0 && relieve([&] { return retained_surfaces.size() < held; }, timer, waited, first)) continue;
-                    record_pressure(Pressure::Pool, waited, first); pool_dropped = true; break;
+                    if (attempt == 0 && relieve([&] { return retained_surfaces.size() < held; }, state.timer, waited, state.first)) continue;
+                    record_pressure(Pressure::Pool, waited, state.first); dropped = true; break;
+                } catch (const ReadbackExhausted&) {
+                    // The same bounded wait for a CPU frame; never a new one.
+                    int64_t waited = 0;
+                    if (attempt == 0 && relieve([&] { return readback && readback->cpu_frame_available(); }, state.timer, waited, state.first)) continue;
+                    record_pressure(Pressure::Readback, waited, state.first); dropped = true; break;
                 }
             }
-            if (pool_dropped) continue;
-            if (first) frame->pict_type = AV_PICTURE_TYPE_I;
-            const bool fresh = work.source_sequence != last_encoded_sequence;
-            auto track = [&] {
-                Frame retained(av_frame_clone(frame.get()));if(!retained)throw std::bad_alloc();
-                retained_surfaces[work.pts]=std::move(retained);
-                submitted[work.pts] = {work.acquired_us, fresh}; submitted_at[work.pts] = now();
-            };
-            track();
-            const auto submit_started = now();
-            { std::lock_guard lock(mutex); status.processing_ms = double(submit_started-process_started)/1000;
-                status.processing_max_ms=std::max(status.processing_max_ms,status.processing_ms);
-                readback_ms_sum+=readback_ms;video_processor_ms_sum+=video_processor_ms;software_convert_ms_sum+=software_convert_ms;
-                hardware_upload_ms_sum+=hardware_upload_ms;overlay_compose_ms_sum+=overlay_ms;++processing_stage_samples;
-                status.processing_path=processing_path;
-                status.surfaces_in_use_peak=std::max(status.surfaces_in_use_peak,int(submitted.size()));
-                if(gpu)status.surfaces_allocated=gpu->allocated(); }
-            SubmitResult result;
-            try {
-                result = encoder->try_submit(*frame); emit(std::move(result.packets));
-                // Busy: the encoder refused this frame and holds no reference.
-                // Retry within one output interval, then drop the tick.
-                const int64_t budget = 1000000 / fps.load();
-                while (result.status == SubmitStatus::Busy && now() - submit_started < budget) {
-                    timer.pause(1000);
-                    result = encoder->try_submit(*frame); emit(std::move(result.packets));
-                }
-            }
-            catch (...) {
-                replace_encoder(first); frame->pict_type = AV_PICTURE_TYPE_I;
-                track();
-                result = encoder->try_submit(*frame); emit(std::move(result.packets));
-            }
-            const auto submitted_done = now();
-            if (result.status == SubmitStatus::Busy) {
-                forget(work.pts);
-                record_pressure(Pressure::EncoderBusy, submitted_done - submit_started, first);
+            if (dropped) continue;
+            const Staged meta{work.pts, work.acquired_us, work.source_sequence};
+            if (frame->format == AV_PIX_FMT_D3D11 && staging_readback()) {
+                readback->stage(*frame); frame.reset(); readback_staged.push_back(meta); note_readback();
+                // Read back all but the newest staged frame: the GPU copies
+                // this frame while the CPU reads the previous one.
+                while (readback->pending() >= readback->staging_slots()) read_staged(state, tick);
                 continue;
             }
-            first = false; last_encoded_sequence = work.source_sequence; pressure_since = 0;
-            const double duration = double(submitted_done-submit_started)/1000;
-            { std::lock_guard lock(mutex); ++status.submitted; status.submission_ms = duration;status.submission_max_ms=std::max(status.submission_max_ms,duration);
-                submission_times.push_back(duration); if(submission_times.size()>240)submission_times.pop_front(); }
+            submit_frame(std::move(frame), meta, state, tick);
         }
+        Tick tick; tick.started = now();
+        while (!readback_staged.empty()) read_staged(state, tick);
         emit(encoder->finish());
     }
 };

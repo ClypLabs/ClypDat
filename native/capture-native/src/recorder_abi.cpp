@@ -228,6 +228,13 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"captureAdapterVendor\":" << h.capture_adapter_vendor
         << ",\"submissionP50Ms\":" << h.submission_p50_ms << ",\"completionP50Ms\":" << h.completion_p50_ms
         << ",\"packetPayloadBytes\":" << h.packet_payload_bytes << ",\"packetBufferBytes\":" << h.packet_buffer_bytes
+        << ",\"readbackStagingSlots\":" << h.readback_staging_slots << ",\"readbackStagingInUse\":" << h.readback_staging_in_use
+        << ",\"readbackStagingPeak\":" << h.readback_staging_peak << ",\"readbackCpuFrames\":" << h.readback_cpu_frames
+        << ",\"readbackCpuFramesInUse\":" << h.readback_cpu_frames_in_use << ",\"readbackCpuFramesPeak\":" << h.readback_cpu_frames_peak
+        << ",\"readbackP50Ms\":" << h.readback_p50_ms << ",\"readbackP95Ms\":" << h.readback_p95_ms
+        << ",\"readbackMapWaitP50Ms\":" << h.readback_map_wait_p50_ms << ",\"readbackMapWaitP95Ms\":" << h.readback_map_wait_p95_ms
+        << ",\"readbackMapStalls\":" << h.readback_map_stalls << ",\"readbackPressureDrops\":" << h.readback_pressure_drops
+        << ",\"frameAllocations\":" << h.frame_allocations
         << ",\"wgcCallbackFps\":" << h.wgc_callback_fps << ",\"wgcDeliveredFps\":" << h.wgc_delivered_fps
         << ",\"wgcOverwrittenFps\":" << h.wgc_overwritten_fps
         << ",\"acquiredFps\":" << h.input_fps << ",\"duplicateFps\":" << h.duplicate_fps

@@ -1,4 +1,5 @@
 #include "recording_capture.h"
+#include "readback_stage.h"
 #include "recording_save.h"
 #include <atomic>
 #include <cstdlib>
@@ -14,6 +15,9 @@
 #include <d3d11_4.h>
 #include <wrl/client.h>
 #include <DirectXPackedVector.h>
+#include <dxgi1_4.h>
+#include <iomanip>
+#include <psapi.h>
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
@@ -280,6 +284,8 @@ void gpu_4k_to_1440p(int fps){
     CHECK(health.surface_capacity==expected->pool_capacity&&health.pool_capacity==expected->pool_capacity);
     CHECK(health.surface_capacity<legacy_surface_capacity(fps));
     CHECK(health.surfaces_allocated<=health.surface_capacity&&health.surfaces_in_use_peak<=expected->max_in_flight);
+    // Zero-copy keeps no staging textures or CPU frames and allocates none per frame.
+    CHECK(health.readback_staging_slots==0&&health.readback_cpu_frames==0&&health.frame_allocations==0);
     CHECK(health.encoder_slots==expected->encoder_slots&&health.max_in_flight==expected->max_in_flight);
     if(fps==90)CHECK(health.encoder_slots==8&&health.encoder_delay==6&&health.max_in_flight==7&&health.surface_capacity==9);
     std::cout<<"4K-to-1440p@"<<fps<<" plan: slots="<<health.encoder_slots<<" delay="<<health.encoder_delay<<" pool="<<health.surface_capacity
@@ -395,8 +401,11 @@ void recording_encoder_plans(){
     // Unknown adapter: plannable, but only unverified.
     const auto unknown=plan_recording_encoder(config,zero_copy,0,false);CHECK(unknown);
     CHECK(unknown->zero_copy_status==ZeroCopyStatus::Unverified&&!unknown->confirmed()&&unknown->pool_capacity==9);
-    // libx264 has no policy consumer yet and keeps its legacy runtime path.
-    CHECK(!plan_recording_encoder(config,{"libx264",false,false},kAdapterVendorNvidia,false));
+    // libx264 plans the software readback pipeline: two conversion targets,
+    // two staging textures and two CPU frames at every rate.
+    const auto software=plan_recording_encoder(config,{"libx264",false,false},kAdapterVendorNvidia,false);
+    CHECK(software&&software->vendor==EncoderVendor::Software&&software->needs_cpu_staging&&!software->zero_copy);
+    CHECK(software->pool_capacity==2&&software->staging_slots==2&&software->cpu_frames==2&&software->max_in_flight==0);
     const auto av1=plan_recording_encoder(config,{"av1_nvenc",false,true},kAdapterVendorNvidia,false);
     CHECK(av1&&av1->requested_codec==EncoderCodec::AV1&&av1->effective_codec==EncoderCodec::AV1&&av1->codec_name=="av1_nvenc");
     // Delay override: configured value first, environment second, one final delay.
@@ -671,6 +680,7 @@ void amf_zero_copy_plan(){
     CHECK(h.encoder_planned&&h.encoder_vendor=="amd"&&h.zero_copy_status=="confirmed"&&h.hardware_input&&h.processing_path=="d3d11-video-processor");
     CHECK(h.encoder_slots==4&&h.max_in_flight==4&&h.surface_capacity==6&&h.pool_capacity==6);
     CHECK(h.surfaces_allocated<=6&&h.surfaces_in_use_peak<=4&&h.gpu_conversion_fallbacks==0);
+    CHECK(h.readback_staging_slots==0&&h.readback_cpu_frames==0&&h.frame_allocations==0);
     // Unknown adapter: the real open is the probe; the plan stays unverified.
     const auto unknown=amf_run(0u);
     CHECK(unknown.attempted==std::vector<size_t>({0})&&unknown.health.zero_copy_status=="unverified"&&unknown.health.zero_copy_probe_passed);
@@ -682,6 +692,7 @@ void amf_zero_copy_plan(){
     CHECK((readback.resource_options==std::vector<std::pair<std::string,std::string>>{{"async_depth","4"},{"bf","0"},{"preanalysis","0"}}));
     CHECK(!foreign.health.hardware_input&&foreign.health.zero_copy_status=="not-used"&&foreign.health.pool_capacity==2&&foreign.health.surface_capacity==0);
     CHECK(foreign.health.processing_path=="d3d11-video-processor-readback"&&foreign.health.max_in_flight==4);
+    CHECK(foreign.health.readback_staging_slots==2&&foreign.health.readback_cpu_frames==2&&foreign.health.frame_allocations==4);
 }
 // A frame from any other frames context is rejected before FFmpeg sees it,
 // instead of reaching amfenc's av_assert0. The check is opt-in.
@@ -870,6 +881,7 @@ void qsv_zero_copy_plan(){
     CHECK(h.encoder_planned&&h.encoder_vendor=="intel"&&h.zero_copy_status=="confirmed"&&h.hardware_input&&h.processing_path=="d3d11-video-processor-qsv");
     CHECK(h.encoder_slots==4&&h.max_in_flight==4&&h.output_delay_frames==4&&h.surface_capacity==7&&h.pool_capacity==7);
     CHECK(h.surfaces_allocated<=7&&h.surfaces_in_use_peak<=4&&h.gpu_conversion_fallbacks==0);
+    CHECK(h.readback_staging_slots==0&&h.readback_cpu_frames==0&&h.frame_allocations==0);
     // Only exact-size packets reach history: payload plus FFmpeg's padding.
     CHECK(confirmed.oversized==0&&h.packet_buffer_bytes==h.packet_payload_bytes+h.encoded*AV_INPUT_BUFFER_PADDING_SIZE);
     // Unknown adapter: the real open is the probe; the plan stays unverified.
@@ -883,6 +895,7 @@ void qsv_zero_copy_plan(){
     CHECK((readback.resource_options==std::vector<std::pair<std::string,std::string>>{{"async_depth","4"}}));
     CHECK(!foreign.health.hardware_input&&foreign.health.zero_copy_status=="not-used"&&foreign.health.pool_capacity==2&&foreign.health.surface_capacity==0);
     CHECK(foreign.health.processing_path=="d3d11-video-processor-readback"&&foreign.health.max_in_flight==4&&foreign.oversized==0);
+    CHECK(foreign.health.readback_staging_slots==2&&foreign.health.readback_cpu_frames==2&&foreign.health.frame_allocations==4);
     // The real derivation on a non-Intel capture device fails during
     // initialisation, before any encoder opens, and readback QSV follows,
     // whether the adapter was unknown or wrongly reported as Intel.
@@ -928,6 +941,152 @@ void qsv_backpressure(){
     if(!health.error.empty()||health.encoder_stall_recoveries!=1||health.generation!=2||health.encoder_vendor!="intel"||
         health.processing_path!="d3d11-video-processor-qsv"||oversized.load())throw std::runtime_error("QSV recovery: "+pressure_state(health));
 }
+size_t decode_all(const CaptureGeneration& generation,const std::vector<Packet>& packets,int width,int height){
+    CodecContext decoder(avcodec_alloc_context3(avcodec_find_decoder(generation.codec->codec_id)));
+    CHECK(decoder&&avcodec_parameters_to_context(decoder.get(),generation.codec.get())==0&&avcodec_open2(decoder.get(),decoder->codec,nullptr)==0);
+    AVFrame* frame=av_frame_alloc();CHECK(frame);size_t decoded=0;
+    auto receive=[&]{while(avcodec_receive_frame(decoder.get(),frame)==0){CHECK(frame->width==width&&frame->height==height);++decoded;av_frame_unref(frame);}};
+    for(const auto& packet:packets){CHECK(avcodec_send_packet(decoder.get(),packet.get())==0);receive();}
+    CHECK(avcodec_send_packet(decoder.get(),nullptr)==0);receive();av_frame_free(&frame);
+    return decoded;
+}
+// The readback stage's fixed resources: a staged frame comes back one call
+// later with its own pixels and properties, always through the same two CPU
+// frames and two staging textures. A held CPU frame is never overwritten, and
+// a full stage refuses rather than grows.
+void readback_stage_reuse(){
+    BufferRef device;CHECK(av_hwdevice_ctx_create(&device.p,AV_HWDEVICE_TYPE_D3D11VA,nullptr,nullptr,0)>=0);
+    auto* d3d=static_cast<AVD3D11VADeviceContext*>(reinterpret_cast<AVHWDeviceContext*>(device.p->data)->hwctx)->device;
+    for(const auto format:{AV_PIX_FMT_NV12,AV_PIX_FMT_P010}){
+        const bool deep=format==AV_PIX_FMT_P010;
+        BufferRef frames{av_hwframe_ctx_alloc(device.p)};CHECK(frames.p);
+        auto* ctx=reinterpret_cast<AVHWFramesContext*>(frames.p->data);ctx->format=AV_PIX_FMT_D3D11;ctx->sw_format=format;ctx->width=256;ctx->height=144;
+        static_cast<AVD3D11VAFramesContext*>(ctx->hwctx)->BindFlags=D3D11_BIND_SHADER_RESOURCE;CHECK(av_hwframe_ctx_init(frames.p)>=0);
+        // Luma and chroma encode the frame index, in 8 or 16 bits.
+        auto luma=[&](int index){return deep?(64+index)<<6:16+index;};
+        auto chroma=[&](int index){return deep?(512+index)<<6:100+index;};
+        auto sample=[&](const AVFrame& frame,int plane,int x,int y){const auto* row=frame.data[plane]+size_t(y)*frame.linesize[plane];
+            return deep?int(reinterpret_cast<const uint16_t*>(row)[x]):int(row[x]);};
+        auto gpu_frame=[&](int index){
+            OwnedFrame cpu(av_frame_alloc());CHECK(cpu);cpu->format=format;cpu->width=256;cpu->height=144;CHECK(av_frame_get_buffer(cpu.get(),0)>=0);
+            for(int plane=0;plane<2;++plane)for(int y=0;y<(plane?72:144);++y){auto* row=cpu->data[plane]+size_t(y)*cpu->linesize[plane];
+                for(int x=0;x<256;++x){const int value=plane?chroma(index):luma(index);if(deep)reinterpret_cast<uint16_t*>(row)[x]=uint16_t(value);else row[x]=uint8_t(value);}}
+            OwnedFrame gpu(av_frame_alloc());CHECK(gpu&&av_hwframe_get_buffer(frames.p,gpu.get(),0)>=0&&av_hwframe_transfer_data(gpu.get(),cpu.get(),0)>=0);
+            gpu->pts=1000*index;gpu->duration=16667;gpu->color_range=AVCOL_RANGE_MPEG;gpu->colorspace=AVCOL_SPC_BT709;
+            CHECK(av_frame_new_side_data(gpu.get(),AV_FRAME_DATA_SEI_UNREGISTERED,20));
+            return gpu;};
+        auto matches=[&](const AVFrame& frame,int index){
+            return frame.pts==1000*index&&frame.duration==16667&&frame.color_range==AVCOL_RANGE_MPEG&&frame.colorspace==AVCOL_SPC_BT709&&
+                av_frame_get_side_data(&frame,AV_FRAME_DATA_SEI_UNREGISTERED)&&frame.format==format&&frame.width==256&&frame.height==144&&
+                sample(frame,0,0,0)==luma(index)&&sample(frame,0,255,143)==luma(index)&&sample(frame,1,0,0)==chroma(index)&&sample(frame,1,255,71)==chroma(index);};
+        ReadbackStage stage(d3d,256,144,format,2,2);
+        CHECK(stage.allocations()==4&&stage.staging_slots()==2&&stage.cpu_frames()==2&&stage.pending()==0&&stage.device()==d3d);
+        std::set<uint8_t*> payloads;
+        for(int index=0;index<12;++index){
+            {auto source=gpu_frame(index);stage.stage(*source);}
+            if(index==0){CHECK(stage.pending()==1);continue;}
+            CHECK(stage.pending()==2);
+            // Frame N-1 comes back while frame N is still staged.
+            auto result=stage.read();CHECK(result.frame&&stage.pending()==1&&matches(*result.frame,index-1));
+            payloads.insert(result.frame->data[0]);
+        }
+        CHECK(payloads.size()<=2&&stage.allocations()==4);
+        // Both CPU frames held: nothing is overwritten and the staged frame waits.
+        auto held=stage.acquire(),other=stage.acquire();
+        CHECK(held&&other&&!stage.acquire()&&!stage.cpu_frame_available()&&stage.cpu_frames_in_use()==2);
+        CHECK(!stage.read().frame&&stage.pending()==1);
+        {auto next=gpu_frame(12);stage.stage(*next);}CHECK(stage.pending()==2);
+        bool full=false;{auto extra=gpu_frame(13);try{stage.stage(*extra);}catch(const std::logic_error&){full=true;}}CHECK(full);
+        stage.drop_oldest();CHECK(stage.pending()==1);
+        held.reset();CHECK(stage.cpu_frames_in_use()==1);
+        auto last=stage.read();CHECK(last.frame&&matches(*last.frame,12)&&stage.pending()==0&&stage.allocations()==4);
+    }
+    // Without a device the stage serves CPU frames only.
+    ReadbackStage cpu(nullptr,256,144,AV_PIX_FMT_NV12,0,2);
+    CHECK(cpu.staging_slots()==0&&cpu.cpu_frames()==2&&cpu.allocations()==2&&cpu.acquire());
+    bool refused=false;try{ReadbackStage invalid(nullptr,256,144,AV_PIX_FMT_NV12,2,2);}catch(const std::invalid_argument&){refused=true;}CHECK(refused);
+}
+struct ReadbackRun{RecordingCaptureHealth warm,paused,health;std::vector<Packet> packets;std::shared_ptr<const CaptureGeneration> generation;std::vector<VideoEncoderConfig> opened;uint64_t oversized=0;};
+// A readback candidate through the real capture, pacing and encoding threads:
+// warm up, run, pause (the idle flush reads back the last staged frame), stop.
+ReadbackRun readback_run(std::vector<RecordingEncoderCandidate> candidates,std::optional<uint32_t> adapter,bool gpu,
+    std::function<std::unique_ptr<VideoEncoder>(const VideoEncoderConfig&)> factory={},bool variable=false){
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;config.variable_frame_rate=variable;
+    RecordingCaptureDependencies dependencies;dependencies.candidates=std::move(candidates);dependencies.adapter_vendor=adapter;
+    ReadbackRun run;std::mutex mutex;
+    dependencies.open_encoder=[&](const VideoEncoderConfig& value,size_t){run.opened.push_back(value);return factory?factory(value):std::make_unique<VideoEncoder>(value);};
+    RecordingCaptureCallbacks callbacks;callbacks.generation=[&](auto generation){std::lock_guard lock(mutex);run.generation=generation;};
+    callbacks.packet=[&](auto,Packet packet,int64_t,bool){std::lock_guard lock(mutex);if(!exact_size(*packet))++run.oversized;run.packets.push_back(std::move(packet));};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,gpu),std::move(dependencies));capture.start();
+    std::this_thread::sleep_for(1500ms);run.warm=capture.health();
+    std::this_thread::sleep_for(1500ms);capture.pause(true);
+    // Encoders with an output delay may still hold packets; nothing may stay staged.
+    if(!wait_health(capture,[](const auto& h){return h.paused&&h.readback_staging_in_use==0;},1s))
+        throw std::runtime_error("Readback not flushed on pause: "+pressure_state(capture.health()));
+    run.paused=capture.health();
+    CHECK(capture.stop());run.health=capture.health();if(!run.health.error.empty())throw std::runtime_error(run.health.error);
+    return run;
+}
+// Every packet belongs to a submitted frame, in pts order, and after warm-up
+// the pipeline allocates nothing.
+void check_readback_run(const ReadbackRun& run,int staging,const char* path){
+    const auto& h=run.health;
+    if(h.processing_path!=path||h.readback_staging_slots!=staging||h.readback_cpu_frames!=2||h.readback_staging_peak>staging||h.readback_cpu_frames_peak>2||
+        h.frame_allocations!=uint64_t(staging+2)||run.warm.frame_allocations!=h.frame_allocations||h.readback_pressure_drops||h.gpu_conversion_fallbacks||h.hardware_input)
+        throw std::runtime_error(std::string("Readback run ")+path+": staging="+std::to_string(h.readback_staging_slots)+" peak="+std::to_string(h.readback_staging_peak)+
+            " cpu="+std::to_string(h.readback_cpu_frames)+" peak="+std::to_string(h.readback_cpu_frames_peak)+" allocations="+std::to_string(run.warm.frame_allocations)+
+            "->"+std::to_string(h.frame_allocations)+" path="+h.processing_path+" "+pressure_state(h));
+    CHECK(run.packets.size()==h.encoded&&h.encoded==h.submitted&&h.encoded>=120&&h.output_fps>0);
+    for(size_t i=1;i<run.packets.size();++i)CHECK(run.packets[i]->pts>run.packets[i-1]->pts);
+    CHECK(run.packets.front()->flags&AV_PKT_FLAG_KEY);
+    if(staging)CHECK(h.readback_p50_ms>0&&h.readback_p95_ms>=h.readback_p50_ms);
+}
+void readback_pipeline(){
+    // NVENC system-memory readback, CFR and VFR, decoded.
+    for(const bool variable:{false,true}){
+        const auto run=readback_run({{"h264_nvenc",false,false}},std::nullopt,true,{},variable);
+        check_readback_run(run,2,"d3d11-video-processor-readback");
+        CHECK(!run.opened.front().hardware_frames&&run.health.encoder_vendor=="nvidia"&&run.health.zero_copy_status=="not-used");
+        CHECK(decode_all(*run.generation,run.packets,256,144)==run.packets.size());
+        std::cout<<"NVENC readback "<<(variable?"VFR":"CFR")<<": output="<<run.health.output_fps<<" readbackP50="<<run.health.readback_p50_ms<<"ms p95="<<run.health.readback_p95_ms
+            <<"ms mapWaitP95="<<run.health.readback_map_wait_p95_ms<<"ms stalls="<<run.health.readback_map_stalls<<" allocations="<<run.health.frame_allocations<<"\n";
+    }
+    // libx264 from GPU frames and from CPU frames (no staging textures).
+    const auto x264=readback_run({{"libx264"}},std::nullopt,true);
+    check_readback_run(x264,2,"d3d11-video-processor-readback");
+    CHECK(x264.health.encoder_planned&&x264.health.encoder_vendor=="software"&&x264.health.surface_capacity==0&&x264.health.pool_capacity==2);
+    CHECK(decode_all(*x264.generation,x264.packets,256,144)==x264.packets.size());
+    check_readback_run(readback_run({{"libx264"}},std::nullopt,false),0,"cpu-convert");
+    // AMF readback keeps its plan's options and flags on the shared pipeline.
+    const auto amf=readback_run({{"h264_amf",false,false}},kAdapterVendorNvidia,true,[](const VideoEncoderConfig& value){return stand_in_encoder(value);});
+    check_readback_run(amf,2,"d3d11-video-processor-readback");
+    const auto& amf_config=amf.opened.front();
+    CHECK(amf_config.name=="h264_amf"&&!amf_config.hardware_frames&&(amf_config.codec_flags&AV_CODEC_FLAG_LOW_DELAY)&&amf.health.encoder_vendor=="amd");
+    CHECK((amf_config.resource_options==std::vector<std::pair<std::string,std::string>>{{"async_depth","4"},{"bf","0"},{"preanalysis","0"}}));
+    // QSV readback still right-sizes VBV-sized packets.
+    const auto qsv=readback_run({{"h264_qsv",true,false}},kAdapterVendorNvidia,true,[](const VideoEncoderConfig& value){return stand_in_encoder(value,vbv_packets());});
+    check_readback_run(qsv,2,"d3d11-video-processor-readback");
+    CHECK(qsv.opened.front().right_size_packets&&qsv.oversized==0&&qsv.health.encoder_vendor=="intel");
+}
+// An encoder holding every CPU frame: counted readback drops after a bounded
+// wait, no new staging textures or CPU frames, no GPU fallback, no restart.
+void readback_pressure(){
+    auto probe=std::make_shared<PressureProbe>();probe->hold=true;
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;
+    RecordingCaptureDependencies dependencies;dependencies.candidates={{"libx264"}};
+    dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t){return std::make_unique<VideoEncoder>(value,probe_calls(probe));};
+    std::atomic<uint64_t> packets{0};RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){++packets;};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+    if(!wait_health(capture,[](const auto& h){return h.readback_pressure_drops>=3;},3s))throw std::runtime_error("No readback backpressure: "+pressure_state(capture.health()));
+    const auto pressured=capture.health();
+    if(pressured.gpu_conversion_fallbacks||pressured.restart_required||pressured.pool_pressure_drops||pressured.frame_allocations!=4||
+        pressured.readback_cpu_frames_peak!=2||pressured.readback_staging_peak>2||pressured.backpressure_wait_max_ms>=40)
+        throw std::runtime_error("Readback pressure misclassified: "+pressure_state(pressured)+" allocations="+std::to_string(pressured.frame_allocations));
+    probe->release();const auto resumed=packets.load();
+    if(!wait_health(capture,[&](const auto&){return packets.load()>=resumed+30;},3s))throw std::runtime_error("Readback pressure did not clear: "+pressure_state(capture.health()));
+    CHECK(capture.stop());const auto health=capture.health();
+    if(!health.error.empty()||health.encoder_stall_recoveries||health.generation!=1||health.frame_allocations!=4)throw std::runtime_error("Readback pressure recovery: "+pressure_state(health));
+}
 // Intel hardware only, run by hand with --qsv: real QSV zero-copy and
 // readback encodes on every Intel adapter. Other machines report a skip.
 int qsv_hardware(){
@@ -956,12 +1115,7 @@ int qsv_hardware(){
             CHECK(h.encoder_vendor=="intel"&&h.hardware_input==zero_copy&&h.zero_copy_status==(zero_copy?"confirmed":"not-used"));
             CHECK(h.processing_path==(zero_copy?"d3d11-video-processor-qsv":"d3d11-video-processor-readback"));
             CHECK(oversized==0&&!packets.empty()&&(packets.front()->flags&AV_PKT_FLAG_KEY)&&h.gpu_conversion_fallbacks==0);
-            CodecContext decoder(avcodec_alloc_context3(avcodec_find_decoder(generation->codec->codec_id)));
-            CHECK(decoder&&avcodec_parameters_to_context(decoder.get(),generation->codec.get())==0&&avcodec_open2(decoder.get(),decoder->codec,nullptr)==0);
-            AVFrame* frame=av_frame_alloc();CHECK(frame);size_t decoded=0;
-            auto receive=[&]{while(avcodec_receive_frame(decoder.get(),frame)==0){CHECK(frame->width==1920&&frame->height==1080);++decoded;av_frame_unref(frame);}};
-            for(const auto& packet:packets){CHECK(avcodec_send_packet(decoder.get(),packet.get())==0);receive();}
-            CHECK(avcodec_send_packet(decoder.get(),nullptr)==0);receive();av_frame_free(&frame);CHECK(decoded==packets.size());
+            const auto decoded=decode_all(*generation,packets,1920,1080);CHECK(decoded==packets.size());
             std::cout<<label<<": output="<<h.output_fps<<" fresh="<<h.unique_fps<<" completionP50="<<h.completion_p50_ms<<"ms p95="<<h.completion_p95_ms
                 <<"ms pool="<<h.surface_capacity<<" allocated="<<h.surfaces_allocated<<" peak="<<h.surfaces_in_use_peak<<" maxInFlight="<<h.max_in_flight
                 <<" drops="<<h.backpressure_drops<<" payload="<<h.packet_payload_bytes<<" buffer="<<h.packet_buffer_bytes<<" decoded="<<decoded<<"\n";
@@ -1117,11 +1271,51 @@ void gpu_generation_failover(){
     for(const auto& generation:generations)CHECK(generation->codec->codec_id==AV_CODEC_ID_H264&&generation->codec->extradata_size>0);
     writer.reset();for(const auto& file:files)decode_saved_session(file);
 }
+// Manual benchmark: --readback-bench <encoder> <width> <height> <fps>. Forced
+// readback from a generated 4K GPU source; one line of steady-state metrics
+// measured over 8 s after a 3 s warm-up.
+int readback_bench(const std::string& encoder,int width,int height,int fps){
+    RecordingCaptureConfig config;config.width=width;config.height=height;config.fps=fps;config.bitrate_mbps=25;
+    RecordingCaptureDependencies dependencies;dependencies.candidates={{encoder,false,false}};
+    std::atomic<uint64_t> packets{0};RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){++packets;};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(fps,true,3840,2160),std::move(dependencies));capture.start();
+    std::this_thread::sleep_for(3s);
+    struct Sample{uint64_t cpu;DWORD faults;size_t private_ws,commit;};
+    auto sample=[]{FILETIME created{},exited{},kernel{},user{};GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user);
+        auto ticks=[](FILETIME t){return (uint64_t(t.dwHighDateTime)<<32)|t.dwLowDateTime;};
+        PROCESS_MEMORY_COUNTERS_EX2 memory{};GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory));
+        return Sample{ticks(kernel)+ticks(user),memory.PageFaultCount,memory.PrivateWorkingSetSize,memory.PrivateUsage};};
+    const auto warm=capture.health();const auto before=sample();const auto started=std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(8s);
+    const auto after=sample();const double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+    const auto h=capture.health();
+    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;Microsoft::WRL::ComPtr<IDXGIAdapter3> adapter3;
+    DXGI_QUERY_VIDEO_MEMORY_INFO local{},shared{};
+    if(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))&&SUCCEEDED(factory->EnumAdapters1(0,&adapter))&&SUCCEEDED(adapter.As(&adapter3))){
+        adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&local);adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,&shared);}
+    CHECK(capture.stop());
+    if(!capture.health().error.empty())throw std::runtime_error("Readback bench: "+capture.health().error);
+    const double mb=1024.0*1024.0;
+    std::cout<<std::fixed<<std::setprecision(2)<<encoder<<" "<<width<<"x"<<height<<"@"<<fps<<": path="<<h.processing_path
+        <<" cpu="<<double(after.cpu-before.cpu)/1e7/seconds*100<<"% faults/s="<<double(after.faults-before.faults)/seconds
+        <<" privateWS="<<double(after.private_ws)/mb<<"MB commit="<<double(after.commit)/mb<<"MB dedicated="<<double(local.CurrentUsage)/mb
+        <<"MB shared="<<double(shared.CurrentUsage)/mb<<"MB output="<<h.output_fps<<" fresh="<<h.unique_fps<<" readbackAvg="<<h.texture_readback_ms
+        <<"ms submission p50="<<h.submission_p50_ms<<" p95="<<h.submission_p95_ms<<"ms completion p50="<<h.completion_p50_ms<<" p95="<<h.completion_p95_ms
+        <<"ms drops="<<(h.backpressure_drops-warm.backpressure_drops)+(h.replaced-warm.replaced)<<"\n";
+#if __has_include("readback_stage.h")
+    std::cout<<"  readback p50="<<h.readback_p50_ms<<" p95="<<h.readback_p95_ms<<"ms mapWait p50="<<h.readback_map_wait_p50_ms<<" p95="<<h.readback_map_wait_p95_ms
+        <<"ms stalls="<<(h.readback_map_stalls-warm.readback_map_stalls)<<" staging="<<h.readback_staging_peak<<"/"<<h.readback_staging_slots
+        <<" cpuFrames="<<h.readback_cpu_frames_peak<<"/"<<h.readback_cpu_frames<<" allocationsAfterWarmup="<<(h.frame_allocations-warm.frame_allocations)
+        <<" readbackDrops="<<h.readback_pressure_drops<<"\n";
+#endif
+    return 0;
+}
 int main(int argc,char**argv) {
     try{
     av_log_set_level(AV_LOG_ERROR);
     if(argc>1&&std::string_view(argv[1])=="--4k-gpu"){gpu_4k_to_1440p(90);return 0;}
     if(argc>1&&std::string_view(argv[1])=="--qsv")return qsv_hardware();
+    if(argc>5&&std::string_view(argv[1])=="--readback-bench")return readback_bench(argv[2],std::atoi(argv[3]),std::atoi(argv[4]),std::atoi(argv[5]));
     CHECK(capture_queue_capacity(30)==4);CHECK(capture_queue_capacity(120)==15);
     CHECK(capture_final_hold(true,16667,500000)==33334);CHECK(capture_final_hold(false,16667,500000)==16667);
     auto fit=capture_aspect_fit(1920,1200,1920,1080); CHECK(fit.width==1728&&fit.height==1080&&fit.x==96);
@@ -1139,7 +1333,8 @@ int main(int argc,char**argv) {
         if(gpu){roundtrip(fps,variable,true,false);roundtrip(fps,variable,true,true);}
     }
     blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();planned_adapter_selection();pool_backpressure();busy_backpressure();stuck_encoder_recovery();stuck_encoder_without_fallback();amf_zero_copy_plan();amf_frame_context_ownership();amf_backpressure();
-        qsv_surface_mapping();qsv_derivation();qsv_zero_copy_plan();qsv_backpressure();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
+        qsv_surface_mapping();qsv_derivation();qsv_zero_copy_plan();qsv_backpressure();
+        readback_stage_reuse();readback_pipeline();readback_pressure();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

@@ -147,7 +147,7 @@ void nvenc_readback_and_tuning() {
     const auto p = plan(EncoderVendor::Nvidia, request(2560, 1440, 90), false);
     CHECK(p.input == EncoderInput::SystemFrames && p.needs_cpu_staging && !p.zero_copy && p.zero_copy_status == ZeroCopyStatus::NotUsed);
     CHECK(option(p, "surfaces") == "4" && option(p, "delay") == "3" && p.max_in_flight == 4);
-    CHECK(p.staging_slots == 2 && p.cpu_frames == 1 && !p.stages.input_shares_conversion && p.ffmpeg_hold == 0);
+    CHECK(p.staging_slots == 2 && p.cpu_frames == 2 && !p.stages.input_shares_conversion && p.ffmpeg_hold == 0);
     CHECK(p.stages.encoder_input_surfaces == 4 && p.stages.conversion_surfaces == 2 && p.pool_capacity == 2);
     // Budget and bounds are policy, not constants.
     EncoderPolicy wide; wide.latency_budget_ms = 120; wide.nvenc_max_delay = 12;
@@ -286,7 +286,7 @@ void software_fallback() {
     for (const auto& s : scenarios) {
         const auto p = plan(EncoderVendor::Software, request(s.width, s.height, s.fps), false);
         CHECK(p.codec_name == "libx264" && p.input == EncoderInput::SystemFrames && p.needs_cpu_staging);
-        CHECK(p.max_in_flight == 0 && p.output_delay_frames == 0 && p.staging_slots == 2 && p.cpu_frames == 1);
+        CHECK(p.max_in_flight == 0 && p.output_delay_frames == 0 && p.staging_slots == 2 && p.cpu_frames == 2);
         CHECK(p.pool_capacity == 2 && p.stages.packet_buffers == 0 && p.options.empty());
     }
     infeasible([] { plan(EncoderVendor::Software, request(1920, 1080, 60), true); });

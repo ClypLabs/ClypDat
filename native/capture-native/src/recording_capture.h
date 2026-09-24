@@ -105,8 +105,9 @@ struct RecordingCaptureHealth {
     double capture_latency_p50_ms = 0, capture_latency_p95_ms = 0;
     std::string frame_selection;
     // Bounded encoder backpressure: ticks dropped after a bounded wait because
-    // the encoder was busy, owned its whole in-flight budget, or every planned
-    // pool surface was in flight. Never counted as GPU conversion fallbacks.
+    // the encoder was busy, owned its whole in-flight budget, every planned
+    // pool surface was in flight, or every readback CPU frame was still held
+    // (readback_pressure_drops). Never counted as GPU conversion fallbacks.
     uint64_t backpressure_drops = 0, encoder_busy_drops = 0, retained_pressure_drops = 0, pool_pressure_drops = 0;
     uint64_t encoder_stall_recoveries = 0;
     double backpressure_drop_fps = 0, backpressure_wait_max_ms = 0;
@@ -117,8 +118,8 @@ struct RecordingCaptureHealth {
     double submission_p95_ms = 0, completion_p95_ms = 0;
     double queue_age_max_ms=0,processing_max_ms=0,submission_max_ms=0,completion_max_ms=0;
     int surfaces_in_use = 0, surface_capacity = 0;
-    // Active EncoderPlan; encoder_planned is false for candidates still on
-    // their legacy resource sizing (libx264).
+    // Active EncoderPlan; encoder_planned is false only for an encoder no
+    // backend plans.
     bool encoder_planned = false, zero_copy_probe_passed = false;
     std::string encoder_vendor, requested_codec, effective_codec, zero_copy_status;
     int encoder_slots = 0, encoder_delay = 0, output_delay_frames = 0, max_in_flight = 0, pool_capacity = 0;
@@ -128,6 +129,16 @@ struct RecordingCaptureHealth {
     double submission_p50_ms = 0, completion_p50_ms = 0;
     // Encoded bytes of every emitted packet and the buffer bytes backing them.
     uint64_t packet_payload_bytes = 0, packet_buffer_bytes = 0;
+    // System-memory readback for libx264 and the hardware readback forms; zero
+    // on zero-copy paths. Staging textures hold GPU frames awaiting readback;
+    // a CPU frame is in use while filled, submitted or held by the encoder.
+    int readback_staging_slots = 0, readback_staging_in_use = 0, readback_staging_peak = 0;
+    int readback_cpu_frames = 0, readback_cpu_frames_in_use = 0, readback_cpu_frames_peak = 0;
+    double readback_p50_ms = 0, readback_p95_ms = 0, readback_map_wait_p50_ms = 0, readback_map_wait_p95_ms = 0;
+    uint64_t readback_map_stalls = 0, readback_pressure_drops = 0;
+    // Large frame allocations by the encoding thread: readback resources when
+    // they are created, plus any CPU frame or download a path allocates per frame.
+    uint64_t frame_allocations = 0;
     int overload_windows = 0, qualified_windows = 0;
     bool hardware_input = false, hdr = false, frame_rate_protected = false;
     RecordingSourceHealth source_details;
@@ -186,7 +197,7 @@ AVBufferRef* capture_create_qsv_frames(AVBufferRef* d3d11_device, int width, int
 uint32_t d3d11_adapter_vendor(ID3D11Device* device);
 EncoderPolicy recording_encoder_policy(const RecordingCaptureConfig& config);
 // Plan for a recording candidate, sized for the configured maximum frame rate.
-// nullopt for libx264, which is not planned yet; throws EncoderPlanInfeasible when
+// nullopt for an encoder no backend plans; throws EncoderPlanInfeasible when
 // the candidate cannot run on this adapter or within its limits.
 std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& config,
     const RecordingEncoderCandidate& candidate, uint32_t adapter_vendor, bool overlay_stage);

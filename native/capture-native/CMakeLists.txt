@@ -22,6 +22,7 @@ endforeach()
 add_library(RecorderCore STATIC
     src/video_encoder.cpp src/video_encoder.h
     src/encoder_backend.cpp src/encoder_backend.h
+    src/readback_stage.cpp src/readback_stage.h
     src/recording_capture.cpp src/recording_capture.h
     src/recording_windows_source.cpp
     src/recording_audio.cpp src/recording_audio.h

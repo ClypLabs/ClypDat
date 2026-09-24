@@ -25,7 +25,10 @@ void finish(EncoderPlan& plan, const EncoderRequest& request, const EncoderPolic
     s.input_shares_conversion = plan.zero_copy;
     const int overlay = request.overlay_stage ? 1 : 0;
     s.conversion_surfaces = (plan.zero_copy ? policy.conversion_slots : policy.readback_conversion_slots) + overlay;
-    if (plan.needs_cpu_staging) { plan.staging_slots = policy.readback_staging_slots; plan.cpu_frames = 1; }
+    // Readback: one CPU frame being filled plus the one FFmpeg may still hold
+    // (NVENC ctx->frame on EAGAIN, avcodec buffer_frame). Only zero-copy
+    // plans have that hold on a pool surface instead.
+    if (plan.needs_cpu_staging) { plan.staging_slots = policy.readback_staging_slots; plan.cpu_frames = 1 + policy.ffmpeg_hold; }
     plan.ffmpeg_hold = plan.zero_copy ? policy.ffmpeg_hold : 0;
     plan.pool_capacity = encoder_pool_requirement(s, plan.ffmpeg_hold);
     feasible(plan.pool_capacity <= plan.max_distinct_textures, "Encoder pool exceeds the distinct texture limit");
