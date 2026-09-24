@@ -257,10 +257,6 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     uint64_t previous_recoveries=0;
     uint64_t previous_unique=0,previous_source_delivered=0;
     int transport_shortfall_windows=0;
-    int source_low_windows=0;
-    bool source_warmup_ignored=false,wgc_fallback_committed=false,dxgi_fallback_committed=false;
-    uint64_t previous_wgc_delivered=0;
-    std::atomic<int> source_switch_requested{0};
     RecordingRecoveryTimeline recovery;
     SwsContext* scaler = nullptr;
     SwsContext* detector_scaler = nullptr;
@@ -375,14 +371,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         int applied_fps = 0;
         int64_t refresh_checked = 0;
         int64_t last_recovery = 0;
+        bool backend_fallback_attempted = false;
         while (!stopping) {
-            const int source_switch=source_switch_requested.exchange(0);
-            if(source_switch&&source->switch_backend(source_switch==2)){
-                std::lock_guard lock(mutex);latest.reset();status.source=source->name();++status.source_recoveries;
-                recovery.observe(true,false,now());
-                source_warmup_ignored=false;source_low_windows=0;
-                if(source_switch==2)dxgi_fallback_committed=true;else wgc_fallback_committed=true;
-            }
             const int requested = fps;
             if (applied_fps != requested || now()-refresh_checked>=1000000) {
                 source->set_frame_rate(requested); applied_fps = requested; refresh_checked=now();
@@ -404,7 +394,17 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 // indefinitely while saves appear healthy.
                 if((!last_recovery||current-last_recovery>30000000)&&source->recover()){
                     last_recovery=current;std::lock_guard lock(mutex);++status.source_recoveries;latest.reset();
-                    status.source=source->name();recovery.observe(true,false,current);continue;
+                    status.source=source->name();status.source_details=source->diagnostics();
+                    previous_source_delivered=0;recovery.observe(true,false,current);continue;
+                }
+                if(!backend_fallback_attempted){
+                    const bool switch_to_wgc=std::string(source->name())!="Windows Graphics Capture";
+                    if(source->switch_backend(switch_to_wgc)){
+                        backend_fallback_attempted=true;last_recovery=current;
+                        std::lock_guard lock(mutex);++status.source_recoveries;latest.reset();
+                        status.source=source->name();status.source_details=source->diagnostics();
+                        previous_source_delivered=0;recovery.observe(true,false,current);continue;
+                    }
                 }
                 throw;
             }
@@ -442,15 +442,6 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             processing_stage_samples=0;
         }
         const bool pressured = status.queue_depth * 4 >= status.queue_capacity * 3;
-        if(!status.paused&&!saving&&!pressured&&source->foreground()){
-            const bool wgc=status.source=="Windows Graphics Capture";
-            const double source_rate=wgc?double(status.source_details.frames_delivered-previous_wgc_delivered)*1000000/elapsed:status.input_fps;
-            if(!source_warmup_ignored)source_warmup_ignored=true;
-            else if(source_rate<fps.load()*(wgc?.99:.5)){
-                if(++source_low_windows>=3&&((wgc&&!wgc_fallback_committed)||(!wgc&&!dxgi_fallback_committed)))source_switch_requested=wgc?1:2;
-            }else source_low_windows=0;
-        }else{source_warmup_ignored=false;source_low_windows=0;}
-        previous_wgc_delivered=status.source_details.frames_delivered;
         const bool overloaded = !status.paused && !saving && pressured && status.replaced > previous_dropped && status.output_fps < fps.load() * .99;
         status.overload_windows = overloaded ? status.overload_windows + 1 : 0;
         status.qualified_windows = !status.paused && !pressured && status.output_fps >= fps.load() * .99 ? status.qualified_windows + 1 : 0;

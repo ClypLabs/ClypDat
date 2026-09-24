@@ -116,6 +116,15 @@ public:
         } catch (...) { context->Unmap(staging.Get(), 0); throw; }
         context->Unmap(staging.Get(), 0); return true;
     }
+    void write(ID3D11Texture2D* texture, const CapturePixels& input, CaptureRect destination) {
+        std::lock_guard lock(mutex);
+        if (input.width != destination.width || input.height != destination.height ||
+            input.stride < input.width * 4 || input.bgra.size() < size_t(input.stride) * input.height)
+            throw std::runtime_error("Invalid cursor update pixels");
+        D3D11_BOX box{UINT(destination.x), UINT(destination.y), 0,
+            UINT(destination.x + destination.width), UINT(destination.y + destination.height), 1};
+        context->UpdateSubresource(texture, 0, &box, input.bgra.data(), UINT(input.stride), 0);
+    }
 };
 bool window_eligible(HWND hwnd, bool background_allowed) {
     if (!hwnd) return true;
@@ -148,28 +157,39 @@ DisplayProfile display_profile(HMONITOR monitor){
     }
     return{};
 }
-void draw_cursor(CapturePixels& pixels, int origin_x, int origin_y) {
+bool draw_cursor(Device& gpu, ID3D11Texture2D* texture, int width, int height, int origin_x, int origin_y) {
     CURSORINFO cursor{sizeof(CURSORINFO)};
-    if (!GetCursorInfo(&cursor) || !(cursor.flags & CURSOR_SHOWING)) return;
-    ICONINFO icon{}; if (!GetIconInfo(cursor.hCursor, &icon)) return;
+    if (!GetCursorInfo(&cursor) || !(cursor.flags & CURSOR_SHOWING)) return false;
+    ICONINFO icon{}; if (!GetIconInfo(cursor.hCursor, &icon)) return false;
     struct IconCleanup { ICONINFO& i; ~IconCleanup(){ if(i.hbmColor)DeleteObject(i.hbmColor);if(i.hbmMask)DeleteObject(i.hbmMask); } } cleanup{icon};
     const int x = cursor.ptScreenPos.x - origin_x - int(icon.xHotspot);
     const int y = cursor.ptScreenPos.y - origin_y - int(icon.yHotspot);
-    if (x > pixels.width || y > pixels.height) return;
+    BITMAP shape_info{};
+    const auto shape = icon.hbmColor ? icon.hbmColor : icon.hbmMask;
+    if (!shape || GetObjectW(shape, sizeof(shape_info), &shape_info) != sizeof(shape_info)) return false;
+    const int cursor_width = shape_info.bmWidth;
+    const int cursor_height = icon.hbmColor ? shape_info.bmHeight : shape_info.bmHeight / 2;
+    const int left = std::max(0, x), top = std::max(0, y);
+    const int right = std::min(width, x + cursor_width), bottom = std::min(height, y + cursor_height);
+    if (right <= left || bottom <= top) return false;
+    CapturePixels pixels; pixels.width = right - left; pixels.height = bottom - top; pixels.stride = pixels.width * 4;
+    if (!gpu.read(texture, pixels, {left, top, pixels.width, pixels.height})) return false;
     BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth = pixels.width; info.bmiHeader.biHeight = -pixels.height;
     info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
-    void* data = nullptr; HDC dc = CreateCompatibleDC(nullptr); if (!dc) return;
-    HBITMAP bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &data, nullptr, 0);
-    if (!bitmap) { DeleteDC(dc); return; }
-    auto old = SelectObject(dc, bitmap);
+    void* data = nullptr; HDC dc = CreateCompatibleDC(nullptr); if (!dc) return false;
+    HBITMAP dib = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &data, nullptr, 0);
+    if (!dib) { DeleteDC(dc); return false; }
+    auto old = SelectObject(dc, dib);
     for (int row = 0; row < pixels.height; ++row) std::memcpy(static_cast<uint8_t*>(data) + size_t(row) * pixels.width * 4,
         pixels.bgra.data() + size_t(row) * pixels.stride, size_t(pixels.width) * 4);
-    DrawIconEx(dc, x, y, cursor.hCursor, 0, 0, 0, nullptr, DI_NORMAL);
+    DrawIconEx(dc, x - left, y - top, cursor.hCursor, cursor_width, cursor_height, 0, nullptr, DI_NORMAL);
     GdiFlush();
     for (int row = 0; row < pixels.height; ++row) std::memcpy(pixels.bgra.data() + size_t(row) * pixels.stride,
         static_cast<uint8_t*>(data) + size_t(row) * pixels.width * 4, size_t(pixels.width) * 4);
-    SelectObject(dc, old); DeleteObject(bitmap); DeleteDC(dc);
+    SelectObject(dc, old); DeleteObject(dib); DeleteDC(dc);
+    gpu.write(texture, pixels, {left, top, pixels.width, pixels.height});
+    return true;
 }
 
 class WgcSource final : public RecordingFrameSource {
@@ -333,6 +353,8 @@ class DxgiSource final : public RecordingFrameSource {
     RECT desktop_{};
     CaptureRect stable_{}, candidate_{};
     int crop_samples_ = 0;
+    double cursor_composition_ms_ = 0;
+    uint64_t cursor_composition_samples_ = 0;
 public:
     explicit DxgiSource(const RecordingCaptureConfig& config,ID3D11Device* existing=nullptr) : config_(config),gpu_(existing,config.d3d_debug) { open(); }
     void open() {
@@ -402,8 +424,12 @@ public:
         pixels.width = crop.width; pixels.height = crop.height; pixels.stride = crop.width * 4;
         pixels.texture = std::shared_ptr<ID3D11Texture2D>(owned.Detach(), [](auto* p){p->Release();});
         if (config_.capture_cursor) {
-            if (!gpu_.read(pixels.texture.get(), pixels)) return false;
-            draw_cursor(pixels, desktop_.left + crop.x, desktop_.top + crop.y); pixels.texture.reset();
+            const auto cursor_started = std::chrono::steady_clock::now();
+            draw_cursor(gpu_, pixels.texture.get(), pixels.width, pixels.height,
+                desktop_.left + crop.x, desktop_.top + crop.y);
+            cursor_composition_ms_ += std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - cursor_started).count();
+            ++cursor_composition_samples_;
         }
         return true;
     }
@@ -412,6 +438,8 @@ public:
     void stop() override { duplication_.Reset(); }
     RecordingSourceHealth diagnostics() const override {
         auto result=gpu_.diagnostics;result.display_profile_available=config_.display_profile_available;
+        result.cursor_composition_ms = cursor_composition_samples_
+            ? cursor_composition_ms_ / double(cursor_composition_samples_) : 0;
         result.hdr_display=config_.display_hdr;result.hdr_conversion=config_.capture_hdr;result.sdr_white_nits=config_.sdr_white_nits;return result;
     }
     bool recover() override { try{open();return true;}catch(...){return false;} }

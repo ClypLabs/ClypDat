@@ -5947,9 +5947,14 @@ public sealed partial class MainWindow : Window
 
     internal async void ExportCaptureDiagnosticsButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button button) button.IsEnabled = false;
+        var button = sender as Button;
+        var previousContent = button?.Content;
+        if (button is not null) { button.IsEnabled = false; button.Content = "Exporting…"; }
         try { await ExportCaptureDiagnosticsAsync(); }
-        finally { if (sender is Button completedButton) completedButton.IsEnabled = true; }
+        finally
+        {
+            if (button is not null) { button.Content = previousContent; button.IsEnabled = true; }
+        }
     }
 
     private Task? _diagnosticExportTask;

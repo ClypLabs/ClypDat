@@ -23,6 +23,8 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
     private ReplayCaptureHealth _health = ReplayCaptureHealth.Unknown("Native C++");
     private int _saving;
     private long _lastNativeDiagnosticLogTicks;
+    private string? _lastLoggedCaptureSource;
+    private long _lastLoggedSourceRecoveries = -1;
     private bool _recording;
     private volatile bool _lastFrozen;
     private string _fullSessionPath = "";
@@ -210,12 +212,13 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
     private void PublishHealth(ReplayBufferConfig configuration, NativeRecorderSession.Health native, JsonElement details)
     {
         var error = Text(details, "error");
+        var captureSource = Text(details, "source");
         var state = native.RestartRequired != 0 || error.Length > 0 ? ReplayCaptureState.Failed : native.Running == 0 ? ReplayCaptureState.Stopped :
             native.Encoded == 0 ? ReplayCaptureState.Starting : ReplayCaptureState.Healthy;
         var fullError = Text(details, "fullSessionError");
         var fullState = fullError.Length > 0 ? FullSessionState.Failed : Bool(details, "fullSessionRunning") ? FullSessionState.Recording :
             Bool(details, "fullSessionFinished") ? FullSessionState.Completed : configuration.FullSessionRecordingEnabled ? FullSessionState.Starting : FullSessionState.Off;
-        var health = new ReplayCaptureHealth("Native C++", Text(details, "source"), state, (int)native.ActiveFps,
+        var health = new ReplayCaptureHealth("Native C++", captureSource, state, (int)native.ActiveFps,
             Number(details, "inputFps"), Number(details, "uniqueFps"), Number(details, "outputFps"),
             (long)Number(details, "duplicates"), checked((long)native.Replaced), (int)native.QueueDepth, Text(details, "encoder"), Text(details, "adapter"), error, DateTime.UtcNow)
         {
@@ -247,12 +250,19 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
         };
         lock (_gate) _health = health;
         HealthChanged?.Invoke(this, health);
+        var sourceRecoveries = (long)Number(details, "sourceRecoveries");
+        if (_lastLoggedCaptureSource is { } previousSource && previousSource != captureSource)
+            AppLog.Info($"Capture backend changed from '{previousSource}' to '{captureSource}' after source recovery; sourceRecoveries={sourceRecoveries}.");
+        else if (_lastLoggedSourceRecoveries >= 0 && sourceRecoveries > _lastLoggedSourceRecoveries)
+            AppLog.Info($"Capture source recovered on '{captureSource}'; sourceRecoveries={sourceRecoveries}.");
+        _lastLoggedCaptureSource = captureSource;
+        _lastLoggedSourceRecoveries = sourceRecoveries;
         var diagnosticNow = Stopwatch.GetTimestamp();
         var previousDiagnostic = Volatile.Read(ref _lastNativeDiagnosticLogTicks);
         if (diagnosticNow - previousDiagnostic >= Stopwatch.Frequency &&
             Interlocked.CompareExchange(ref _lastNativeDiagnosticLogTicks, diagnosticNow, previousDiagnostic) == previousDiagnostic)
         {
-            AppLog.Debug($"Native capture: input={health.InputFrameRate:F1} fresh={health.UniqueFrameRate:F1} output={health.OutputFrameRate:F1}fps; queue={health.QueueDepth}/{health.EncodeQueueCapacity}; dropped={health.TotalDroppedFrames}; processingMax={health.ProcessingMaxMs:F2}ms path={health.ProcessingPath}; readback={health.TextureReadbackMs:F2}ms videoProcessor={health.VideoProcessorMs:F2}ms softwareConvert={health.SoftwareConvertMs:F2}ms upload={health.HardwareUploadMs:F2}ms overlay={health.OverlayComposeMs:F2}ms; GPU fallbacks={health.GpuConversionFallbacks} error='{health.GpuConversionFallbackError}' processGpuPriority={health.ProcessGpuPriority?.ToString() ?? "unavailable"}.");
+            AppLog.Debug($"Native capture: source={captureSource}; input={health.InputFrameRate:F1} fresh={health.UniqueFrameRate:F1} output={health.OutputFrameRate:F1}fps; queue={health.QueueDepth}/{health.EncodeQueueCapacity}; dropped={health.TotalDroppedFrames}; processingMax={health.ProcessingMaxMs:F2}ms path={health.ProcessingPath}; readback={health.TextureReadbackMs:F2}ms sourceCursorComposition={Number(details, "sourceCursorCompositionMs"):F2}ms videoProcessor={health.VideoProcessorMs:F2}ms softwareConvert={health.SoftwareConvertMs:F2}ms upload={health.HardwareUploadMs:F2}ms overlay={health.OverlayComposeMs:F2}ms; GPU fallbacks={health.GpuConversionFallbacks} error='{health.GpuConversionFallbackError}' processGpuPriority={health.ProcessGpuPriority?.ToString() ?? "unavailable"}.");
         }
         if (health.FullSession.State == FullSessionState.Recording && health.FullSession.OutputPath.Length > 0)
         {

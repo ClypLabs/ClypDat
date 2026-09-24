@@ -230,6 +230,7 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"sdrWhiteNits\":" << h.source_details.sdr_white_nits
         << ",\"sourceCallbacks\":" << h.source_details.callbacks << ",\"sourceDelivered\":" << h.source_details.frames_delivered
         << ",\"sourceOverwritten\":" << h.source_details.overwritten << ",\"sourceResizes\":" << h.source_details.resizes
+        << ",\"sourceCursorCompositionMs\":" << h.source_details.cursor_composition_ms
         << ",\"requestedInterval100ns\":" << h.source_details.requested_interval_100ns
         << ",\"appliedInterval100ns\":" << h.source_details.applied_interval_100ns
         << ",\"updateIntervalAvailable\":" << (h.source_details.update_interval_available ? "true" : "false")

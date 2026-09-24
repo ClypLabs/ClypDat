@@ -77,6 +77,56 @@ public sealed class CaptureDiagnosticBundleTests
         }
     }
 
+    [Fact]
+    public void Create_FullExportKeepsHistoryAndRedactsUtf8ContentPastReaderBufferBoundary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ClypDat-CaptureDiagnosticBundleTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var log = Path.Combine(root, "clypdat-history.log");
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var content = string.Join(Environment.NewLine, Enumerable.Repeat("history line", 70_000)) +
+            Environment.NewLine + new string('x', 4090) + userProfile + "-秘密-token";
+        File.WriteAllText(log, content);
+
+        try
+        {
+            var bundle = CaptureDiagnosticBundle.Create(null, null, root, DateTime.Now);
+            using var archive = ZipFile.OpenRead(bundle);
+            var exported = ReadEntry(archive, "logs/clypdat-history.log");
+            Assert.StartsWith("history line" + Environment.NewLine, exported, StringComparison.Ordinal);
+            Assert.Contains(new string('x', 4090) + "%USERPROFILE%-秘密-token", exported, StringComparison.Ordinal);
+            Assert.Contains("%USERPROFILE%-秘密-token", exported, StringComparison.Ordinal);
+            Assert.DoesNotContain(userProfile, exported, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreateForUpload_RetainsRecentByteLimitAndTruncationNotice()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ClypDat-CaptureDiagnosticBundleTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var log = Path.Combine(root, "clypdat-upload.log");
+        File.WriteAllText(log, new string('a', 600_000) + Environment.NewLine + "recent evidence");
+
+        try
+        {
+            var bundle = CaptureDiagnosticBundle.Create(null, null, root, DateTime.Now, recentOnly: true);
+            using var archive = ZipFile.OpenRead(bundle);
+            var exported = ReadEntry(archive, "logs/clypdat-upload.log");
+            Assert.Contains("[Earlier log content omitted from upload]", exported, StringComparison.Ordinal);
+            Assert.EndsWith("recent evidence", exported, StringComparison.Ordinal);
+            Assert.DoesNotContain(new string('a', 100), exported, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string ReadEntry(ZipArchive archive, string name)
     {
         var entry = archive.GetEntry(name);

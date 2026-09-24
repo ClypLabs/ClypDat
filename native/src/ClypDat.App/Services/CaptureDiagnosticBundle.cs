@@ -1,5 +1,7 @@
 using System.IO.Compression;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using ClypDat.Capture.Abstractions;
 
@@ -21,8 +23,24 @@ public static class CaptureDiagnosticBundle
         bool recentOnly = false)
     {
         Directory.CreateDirectory(logFolder);
+        var stopwatch = Stopwatch.StartNew();
         var path = Path.Combine(logFolder, $"clypdat-capture-diagnostics-{now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}.zip");
         var partialPath = $"{path}.partial";
+        var skippedLogs = new List<string>();
+        var redactions = GetRedactions();
+        var appLogs = Directory.EnumerateFiles(logFolder, "clypdat*.log");
+        if (recentOnly) appLogs = appLogs.OrderByDescending(File.GetLastWriteTimeUtc).Take(4);
+        var logs = appLogs
+            .Concat(new[] { Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "capture-worker.log") })
+            .Where(File.Exists);
+        var snapshots = new List<LogSnapshot>();
+        foreach (var log in logs.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try { snapshots.Add(new LogSnapshot(log, new FileInfo(log).Length)); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            { skippedLogs.Add($"{Path.GetFileName(log)} ({error.GetType().Name})"); }
+        }
+        var sourceBytes = snapshots.Sum(snapshot => Math.Min(snapshot.Length, recentOnly ? 512 * 1024L : long.MaxValue));
 
         try
         {
@@ -48,24 +66,21 @@ public static class CaptureDiagnosticBundle
                     recentLogsOnly = true, maximumAppLogs = 4, maximumBytesPerLog = 512 * 1024
                 });
 
-                var skippedLogs = new List<string>();
-                var appLogs = Directory.EnumerateFiles(logFolder, "clypdat*.log");
-                if (recentOnly) appLogs = appLogs.OrderByDescending(File.GetLastWriteTimeUtc).Take(4);
-                var logs = appLogs
-                    .Concat(new[] { Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "capture-worker.log") })
-                    .Where(File.Exists);
-                foreach (var log in logs.Distinct(StringComparer.OrdinalIgnoreCase))
+                foreach (var snapshot in snapshots)
                 {
                     try
                     {
-                        var contents = ReadLog(log, recentOnly ? 512 * 1024 : null);
-                        var entry = archive.CreateEntry($"logs/{Path.GetFileName(log)}", CompressionLevel.Optimal);
+                        var maximumBytes = recentOnly ? 512 * 1024L : long.MaxValue;
+                        var start = Math.Max(0, snapshot.Length - maximumBytes);
+                        var readLength = snapshot.Length - start;
+                        var entry = archive.CreateEntry($"logs/{Path.GetFileName(snapshot.Path)}",
+                            recentOnly ? CompressionLevel.Optimal : CompressionLevel.Fastest);
                         using var output = new StreamWriter(entry.Open());
-                        output.Write(Scrub(contents));
+                        StreamLog(snapshot, start, readLength, output, redactions);
                     }
                     catch (Exception error) when (error is IOException or UnauthorizedAccessException)
                     {
-                        skippedLogs.Add($"{Path.GetFileName(log)} ({error.GetType().Name})");
+                        skippedLogs.Add($"{Path.GetFileName(snapshot.Path)} ({error.GetType().Name})");
                     }
                 }
 
@@ -94,34 +109,97 @@ public static class CaptureDiagnosticBundle
             throw;
         }
 
-        AppLog.Info($"Capture diagnostic bundle created: {path}.");
+        stopwatch.Stop();
+        var archiveBytes = new FileInfo(path).Length;
+        AppLog.Info($"Capture diagnostic bundle created: {path}; sourceBytes={sourceBytes} archiveBytes={archiveBytes} elapsedMs={stopwatch.Elapsed.TotalMilliseconds:F0}.");
         return path;
     }
 
-    private static string ReadLog(string path, int? maximumBytes = null)
+    private sealed record LogSnapshot(string Path, long Length);
+
+    private static void StreamLog(LogSnapshot snapshot, long start, long length, TextWriter output,
+        IReadOnlyList<(string Value, string Token)> redactions)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        if (maximumBytes is { } limit)
+        using var file = new FileStream(snapshot.Path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        file.Seek(start, SeekOrigin.Begin);
+        using var limited = new SnapshotReadStream(file, length);
+        using var reader = new StreamReader(limited);
+        if (start > 0)
         {
-            // Snapshot the end so a log being appended to cannot grow this read.
-            var length = (int)Math.Min(stream.Length, limit);
-            var truncated = stream.Length > length;
-            stream.Seek(-length, SeekOrigin.End);
-            var bytes = new byte[length];
-            var read = 0;
-            while (read < length)
-            {
-                var count = stream.Read(bytes, read, length - read);
-                if (count == 0) break;
-                read += count;
-            }
-            var text = System.Text.Encoding.UTF8.GetString(bytes, 0, read);
-            if (!truncated) return text;
-            var newline = text.IndexOf('\n');
-            return "[Earlier log content omitted from upload]\n" + (newline >= 0 ? text[(newline + 1)..] : string.Empty);
+            int skipped;
+            while ((skipped = reader.Read()) >= 0 && skipped is not ('\r' or '\n')) { }
+            if (skipped == '\r' && reader.Peek() == '\n') _ = reader.Read();
+            output.WriteLine("[Earlier log content omitted from upload]");
         }
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+        var line = new StringBuilder();
+        int character;
+        while ((character = reader.Read()) >= 0)
+        {
+            if (character is '\r' or '\n')
+            {
+                output.Write(Scrub(line.ToString(), redactions));
+                output.Write((char)character);
+                if (character == '\r' && reader.Peek() == '\n') output.Write((char)reader.Read());
+                line.Clear();
+            }
+            else line.Append((char)character);
+        }
+        if (line.Length > 0) output.Write(Scrub(line.ToString(), redactions));
+    }
+
+    private sealed class SnapshotReadStream : Stream
+    {
+        private readonly Stream _inner;
+        private readonly long _length;
+        private long _remaining;
+        public SnapshotReadStream(Stream inner, long length) { _inner = inner; _length = length; _remaining = length; }
+        public override bool CanRead => _inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => _length;
+        public override long Position { get => _length - _remaining; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            count = (int)Math.Min(count, _remaining);
+            if (count <= 0) return 0;
+            var read = _inner.Read(buffer, offset, count);
+            _remaining -= read;
+            return read;
+        }
+        public override int Read(Span<byte> buffer)
+        {
+            var count = (int)Math.Min(buffer.Length, _remaining);
+            if (count <= 0) return 0;
+            var read = _inner.Read(buffer[..count]);
+            _remaining -= read;
+            return read;
+        }
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing) { if (disposing) _inner.Dispose(); base.Dispose(disposing); }
+    }
+
+    private static IReadOnlyList<(string Value, string Token)> GetRedactions()
+    {
+        var replacements = new List<(string Value, string Token)>();
+        void Add(string? candidate, string token)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && candidate.Length > 2) replacements.Add((candidate, token));
+        }
+        try
+        {
+            var settings = ClypDat.Core.Settings.AppSettingsStore.Load();
+            Add(settings.LibraryFolder, "%LIBRARY%");
+            Add(settings.FullSessionRecordingFolder, "%FULLSESSION%");
+        }
+        catch { }
+        Add(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "%USERPROFILE%");
+        Add(Environment.MachineName, "%MACHINE%");
+        Add(Environment.UserName, "%USERNAME%");
+        return replacements.OrderByDescending(pair => pair.Value.Length).ToArray();
     }
 
     private static void WriteJson<T>(ZipArchive archive, string name, T value)
@@ -138,31 +216,9 @@ public static class CaptureDiagnosticBundle
     //
     // Longest-first ordering matters: replacing a short value that is a substring of a
     // longer path first would leave the longer one unscrubbed.
-    private static string Scrub(string value)
+    private static string Scrub(string value, IReadOnlyList<(string Value, string Token)> replacements)
     {
-        var replacements = new List<(string Value, string Token)>();
-
-        void Add(string? candidate, string token)
-        {
-            if (!string.IsNullOrWhiteSpace(candidate) && candidate.Length > 2) replacements.Add((candidate, token));
-        }
-
-        try
-        {
-            var settings = ClypDat.Core.Settings.AppSettingsStore.Load();
-            Add(settings.LibraryFolder, "%LIBRARY%");
-            Add(settings.FullSessionRecordingFolder, "%FULLSESSION%");
-        }
-        catch
-        {
-            // Diagnostics must not fail because settings could not be read.
-        }
-
-        Add(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "%USERPROFILE%");
-        Add(Environment.MachineName, "%MACHINE%");
-        Add(Environment.UserName, "%USERNAME%");
-
-        foreach (var (candidate, token) in replacements.OrderByDescending(pair => pair.Value.Length))
+        foreach (var (candidate, token) in replacements)
         {
             value = value.Replace(candidate, token, StringComparison.OrdinalIgnoreCase);
         }

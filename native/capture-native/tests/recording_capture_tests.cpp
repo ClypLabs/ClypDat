@@ -57,6 +57,62 @@ public:
     void set_frame_rate(int fps) override { fps_=fps; }
     ID3D11Device* d3d_device() const override {return device_.Get();}
 };
+class StartupDipSource final : public RecordingFrameSource {
+    std::chrono::steady_clock::time_point started_ = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point next_ = started_;
+    int index_ = 0;
+public:
+    bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
+        const auto current = std::chrono::steady_clock::now();
+        if (current < next_) {
+            std::this_thread::sleep_for(std::min(timeout,
+                std::chrono::duration_cast<std::chrono::milliseconds>(next_ - current) + 1ms));
+            return false;
+        }
+        const bool warmup = current - started_ < 4200ms;
+        next_ += std::chrono::microseconds(warmup ? 33333 : 4167);
+        pixels.width = 128; pixels.height = 72; pixels.stride = 128 * 4;
+        pixels.bgra.resize(size_t(pixels.stride) * pixels.height);
+        for (int y = 0; y < pixels.height; ++y) for (int x = 0; x < pixels.width; ++x) {
+            auto* pixel = pixels.bgra.data() + size_t(y) * pixels.stride + x * 4;
+            pixel[0] = uint8_t(x + index_); pixel[1] = uint8_t(y + index_ * 3);
+            pixel[2] = uint8_t(x + y + index_); pixel[3] = 255;
+        }
+        ++index_;
+        return true;
+    }
+    bool eligible() const override { return true; }
+    const char* name() const override { return "generated startup dip fixture"; }
+    int switch_attempts = 0;
+    bool switch_backend(bool) override { ++switch_attempts; return false; }
+};
+void startup_source_dip_does_not_switch_backend() {
+    RecordingCaptureConfig config; config.width = 128; config.height = 72; config.fps = 90; config.cpu_encoder = true;
+    std::mutex mutex; std::condition_variable changed; uint64_t packets = 0;
+    RecordingCaptureCallbacks callbacks;
+    callbacks.packet = [&](auto, Packet, int64_t, bool) {
+        std::lock_guard lock(mutex); ++packets; changed.notify_all();
+    };
+    auto source = std::make_unique<StartupDipSource>();
+    auto* source_state = source.get();
+    RecordingCapture capture(config, callbacks, std::move(source)); capture.start();
+    {
+        std::unique_lock lock(mutex);
+        CHECK(changed.wait_for(lock, 7s, [&] { return packets >= 450; }));
+    }
+    const auto recovered_deadline = std::chrono::steady_clock::now() + 2s;
+    while (capture.health().input_fps <= 180 && std::chrono::steady_clock::now() < recovered_deadline)
+        std::this_thread::sleep_for(20ms);
+    CHECK(capture.stop());
+    const auto health = capture.health();
+    CHECK(source_state->switch_attempts == 0);
+    if (health.input_fps <= 180) throw std::runtime_error("Startup dip did not recover: input=" +
+        std::to_string(health.input_fps) + " fresh=" + std::to_string(health.unique_fps) +
+        " output=" + std::to_string(health.output_fps) + " switchAttempts=" + std::to_string(source_state->switch_attempts));
+    CHECK(health.output_fps >= 85);
+    CHECK(health.source == "generated startup dip fixture");
+    CHECK(health.error.empty());
+}
 void roundtrip(int fps, bool variable,bool gpu=false,bool av1=false) {
     RecordingCaptureConfig config; config.width=128; config.height=72; config.fps=fps; config.cpu_encoder=true;
     config.variable_frame_rate=variable; config.monotonic_anchor_us=4000000;config.cpu_encoder=!gpu;config.av1=av1;
@@ -258,7 +314,7 @@ int main(int argc,char**argv) {
         roundtrip(fps,variable);
         if(gpu){roundtrip(fps,variable,true,false);roundtrip(fps,variable,true,true);}
     }
-    blocked_writer();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
+    blocked_writer();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

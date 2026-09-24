@@ -30,6 +30,7 @@ struct RecordingSourceHealth {
     uint64_t callbacks = 0, frames_delivered = 0, overwritten = 0, resizes = 0;
     int64_t requested_interval_100ns = 0, applied_interval_100ns = 0;
     double display_refresh_hz = 0;
+    double cursor_composition_ms = 0;
     uint64_t adapter_luid = 0;
     std::wstring adapter;
     bool update_interval_available = false;
