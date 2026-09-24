@@ -1,6 +1,7 @@
 #pragma once
 #include "video_encoder.h"
 #include "encoder_backend.h"
+#include "recording_overlays.h"
 #include <chrono>
 #include <array>
 #include <cstdint>
@@ -147,6 +148,9 @@ struct RecordingCaptureHealth {
     uint64_t frame_allocations = 0;
     int overload_windows = 0, qualified_windows = 0;
     bool hardware_input = false, hdr = false, frame_rate_protected = false;
+    // Burned overlays: the capture fills the composition path, CPU round trips
+    // and GPU figures; the recorder session fills sources and render states.
+    OverlayHealth overlay;
     RecordingSourceHealth source_details;
 };
 struct CaptureCodecParametersDeleter { void operator()(AVCodecParameters* p) const { avcodec_parameters_free(&p); } };
@@ -165,8 +169,16 @@ struct RecordingCaptureCallbacks {
     std::function<void(const std::string&)> failure;
     // Native compositor only; invoked before conversion/encode on owned BGRA.
     std::function<void(CapturePixels&)> compose;
+    // CPU overlay composition on system-memory frames (and the zero-copy
+    // fallback when the GPU compositor is unavailable).
     std::function<void(AVFrame&)> compose_nv12;
     std::function<bool()> overlay_enabled;
+    // The burned layers for the frame at `pts`, read once per frame and
+    // composed on the GPU on zero-copy paths, on the CPU otherwise;
+    // overlay_composed reports what was drawn. Without overlay_frame the
+    // capture falls back to compose_nv12.
+    std::function<OverlayFrame(int64_t pts)> overlay_frame;
+    std::function<void(int64_t pts, const OverlayFrame& layers, OverlayCompositionResult drawn)> overlay_composed;
 };
 // Native construction seams only. The DLL never accepts these overrides.
 struct RecordingEncoderCandidate { std::string name; bool low_power=false,d3d11=false; };
@@ -178,6 +190,9 @@ struct RecordingCaptureDependencies {
     // Replaces capture_create_qsv_frames for QSV zero-copy candidates. Tests
     // on non-Intel machines return D3D11 frames to drive the same path.
     std::function<AVBufferRef*(AVBufferRef* d3d11_device, int width, int height)> qsv_frames;
+    // Reports the GPU overlay compositor unavailable, as a driver without
+    // BGRA video-processor support would.
+    bool disable_gpu_overlays = false;
 };
 // Resource sizing used by candidates that do not consume an EncoderPlan yet.
 int legacy_surface_capacity(int fps);

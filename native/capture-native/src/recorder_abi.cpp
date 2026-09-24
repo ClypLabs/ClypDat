@@ -235,6 +235,21 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"readbackMapWaitP50Ms\":" << h.readback_map_wait_p50_ms << ",\"readbackMapWaitP95Ms\":" << h.readback_map_wait_p95_ms
         << ",\"readbackMapStalls\":" << h.readback_map_stalls << ",\"readbackPressureDrops\":" << h.readback_pressure_drops
         << ",\"frameAllocations\":" << h.frame_allocations
+        << ",\"overlayEnabled\":" << (h.overlay.enabled ? "true" : "false") << ",\"overlayState\":" << quoted(h.overlay.state)
+        << ",\"overlayPath\":" << quoted(h.overlay.path)
+        << ",\"overlayCameraRequested\":" << (h.overlay.camera_requested ? "true" : "false")
+        << ",\"overlayCameraReady\":" << (h.overlay.camera_ready ? "true" : "false")
+        << ",\"overlayCameraStale\":" << (h.overlay.camera_stale ? "true" : "false")
+        << ",\"overlayCameraGeneration\":" << h.overlay.camera_generation
+        << ",\"overlayKeyboardRequested\":" << (h.overlay.keyboard_requested ? "true" : "false")
+        << ",\"overlayKeyboardReady\":" << (h.overlay.keyboard_ready ? "true" : "false")
+        << ",\"overlayKeyboardRevision\":" << h.overlay.keyboard_revision << ",\"overlaySettingsRevision\":" << h.overlay.settings_revision
+        << ",\"overlayCameraFrames\":" << h.overlay.camera_frames << ",\"overlayKeyboardFrames\":" << h.overlay.keyboard_frames
+        << ",\"overlaySkippedFrames\":" << h.overlay.skipped_frames << ",\"overlayLastSkipReason\":" << quoted(h.overlay.last_skip_reason)
+        << ",\"overlayLastRenderedUs\":" << h.overlay.last_rendered_us << ",\"overlayFailure\":" << quoted(h.overlay.failure)
+        << ",\"overlayGpuUploads\":" << h.overlay.gpu_uploads << ",\"overlayGpuUploadFailures\":" << h.overlay.gpu_upload_failures
+        << ",\"overlayGpuFailure\":" << quoted(h.overlay.gpu_failure) << ",\"overlayCpuRoundTrips\":" << h.overlay.cpu_roundtrips
+        << ",\"overlayGpuP50Ms\":" << h.overlay.gpu_p50_ms << ",\"overlayGpuP95Ms\":" << h.overlay.gpu_p95_ms
         << ",\"wgcCallbackFps\":" << h.wgc_callback_fps << ",\"wgcDeliveredFps\":" << h.wgc_delivered_fps
         << ",\"wgcOverwrittenFps\":" << h.wgc_overwritten_fps
         << ",\"acquiredFps\":" << h.input_fps << ",\"duplicateFps\":" << h.duplicate_fps

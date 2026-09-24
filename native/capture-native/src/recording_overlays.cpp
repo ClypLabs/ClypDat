@@ -117,7 +117,7 @@ void OverlayHistory::retention(int64_t duration_us) {
 }
 void OverlayHistory::reset(bool burned) {
     std::lock_guard lock(mutex_); burned_ = burned; ++camera_generation_; settings_.clear(); artwork_.clear();
-    camera_frame_.reset(); camera_segments_.clear();
+    camera_frame_.reset(); camera_segments_.clear(); camera_stopped_ = false; camera_failure_.clear();
 }
 bool OverlayHistory::apply(OverlaySettingsNative settings) {
     auto valid = [](const OverlayTransformNative& t) { return std::isfinite(t.x) && std::isfinite(t.y) && std::isfinite(t.width) && t.width > 0; };
@@ -143,12 +143,41 @@ bool OverlayHistory::set_artwork(std::shared_ptr<const OverlayBitmap> bitmap) {
     // shared immutable revision. Editable playback rasterizes the input index.
     artwork_.clear(); artwork_.push_back(std::move(bitmap)); return true;
 }
-uint64_t OverlayHistory::replace_camera() { std::lock_guard lock(mutex_); camera_frame_.reset(); return ++camera_generation_; }
+// A new generation never shows the previous camera's frame.
+uint64_t OverlayHistory::replace_camera(bool reconnect) {
+    std::lock_guard lock(mutex_); camera_frame_.reset(); camera_stopped_ = false;
+    if (!reconnect) camera_failure_.clear();
+    return ++camera_generation_;
+}
 bool OverlayHistory::camera_frame(uint64_t generation, std::shared_ptr<const OverlayBitmap> frame) {
     if (!frame) return false;
     std::lock_guard lock(mutex_);
     if (generation != camera_generation_) return false;
-    camera_frame_ = std::move(frame); return true;
+    camera_frame_ = std::move(frame); camera_failure_.clear(); return true;
+}
+void OverlayHistory::camera_failed(std::string failure) {
+    std::lock_guard lock(mutex_); camera_frame_.reset(); camera_stopped_ = true; camera_failure_ = std::move(failure);
+}
+void OverlayHistory::camera_stopped(uint64_t generation, std::string failure) {
+    std::lock_guard lock(mutex_);
+    if (generation != camera_generation_) return;
+    camera_stopped_ = true; camera_failure_ = std::move(failure);
+}
+OverlayFrame OverlayHistory::frame(int64_t now_us) const {
+    std::lock_guard lock(mutex_);
+    OverlayFrame result;
+    result.burned = burned_; result.camera_generation = camera_generation_;
+    if (!burned_ || settings_.empty()) return result;
+    const auto& settings = settings_.back();
+    result.settings_revision = settings.revision;
+    result.camera = {!settings.camera_moniker.empty(), camera_stopped_ ? nullptr : camera_frame_, settings.camera_transform};
+    result.keyboard = {_stricmp(settings.keyboard_layout.c_str(), "None") != 0, artwork_.empty() ? nullptr : artwork_.back(), settings.keyboard_transform};
+    result.keyboard_revision = result.keyboard.bitmap ? result.keyboard.bitmap->revision : 0;
+    if (result.camera.requested) {
+        result.camera_failure = camera_failure_; result.camera_stopped = camera_stopped_;
+        result.camera_stale = result.camera.bitmap && now_us - result.camera.bitmap->at_us > kCameraStaleUs;
+    }
+    return result;
 }
 void OverlayHistory::camera_segment(CameraSegmentNative segment) {
     std::vector<CameraSegmentNative> retired;
@@ -194,12 +223,9 @@ OverlaySnapshot OverlayHistory::snapshot(int64_t start_us, int64_t end_us) const
     return result;
 }
 namespace {
-struct Bounds { int x, y, width, height; };
+using Bounds = OverlayPlacement;
 Bounds bounds(const OverlayBitmap& bitmap, const OverlayTransformNative& transform, int width, int height) {
-    int w = static_cast<int>(std::clamp(std::round(transform.width * width), 1., static_cast<double>(width)));
-    int h = static_cast<int>(std::clamp(std::round(static_cast<double>(w) * bitmap.height / bitmap.width), 1., static_cast<double>(height)));
-    return {static_cast<int>(std::clamp(std::round(transform.x * width), 0., static_cast<double>(width-w))),
-        static_cast<int>(std::clamp(std::round(transform.y * height), 0., static_cast<double>(height-h))),w,h};
+    return overlay_placement(bitmap, transform, width, height);
 }
 std::array<int,4> sample(const OverlayBitmap& bitmap, const Bounds& b, int x, int y) {
     if (x < b.x || y < b.y || x >= b.x+b.width || y >= b.y+b.height) return {};
@@ -231,20 +257,24 @@ void blend_nv12(AVFrame& target, const OverlayBitmap& bitmap, const OverlayTrans
     }
 }
 }
-OverlayCompositionResult OverlayHistory::compose(AVFrame& frame) const {
-    std::shared_ptr<const OverlayBitmap> camera, keyboard;
-    OverlayTransformNative camera_transform,keyboard_transform; bool camera_enabled=false,keyboard_enabled=false;
-    { std::lock_guard lock(mutex_); if (!burned_ || settings_.empty()) return {};
-      const auto& settings=settings_.back(); camera_transform=settings.camera_transform; keyboard_transform=settings.keyboard_transform;
-      camera_enabled=!settings.camera_moniker.empty(); keyboard_enabled=_stricmp(settings.keyboard_layout.c_str(),"None")!=0;
-      camera=camera_frame_; if (!artwork_.empty()) keyboard=artwork_.back(); }
+OverlayPlacement overlay_placement(const OverlayBitmap& bitmap, const OverlayTransformNative& transform, int width, int height) {
+    int w = static_cast<int>(std::clamp(std::round(transform.width * width), 1., static_cast<double>(width)));
+    int h = static_cast<int>(std::clamp(std::round(static_cast<double>(w) * bitmap.height / bitmap.width), 1., static_cast<double>(height)));
+    return {static_cast<int>(std::clamp(std::round(transform.x * width), 0., static_cast<double>(width-w))),
+        static_cast<int>(std::clamp(std::round(transform.y * height), 0., static_cast<double>(height-h))),w,h};
+}
+OverlayCompositionResult compose_overlay_nv12(AVFrame& frame, const OverlayFrame& layers) {
+    if (!layers.drawable()) return {};
     if (frame.format != AV_PIX_FMT_NV12 || frame.width <= 0 || frame.height <= 0 || (frame.width&1) || (frame.height&1))
         throw std::invalid_argument("Overlay composition requires an even NV12 frame");
     if (av_frame_make_writable(&frame) < 0) throw std::runtime_error("Overlay frame is not writable");
     OverlayCompositionResult result;
-    if (camera_enabled && camera) { blend_nv12(frame,*camera,camera_transform); result.camera=true; }
-    if (keyboard_enabled && keyboard) { blend_nv12(frame,*keyboard,keyboard_transform); result.keyboard=true; }
+    if (layers.camera.requested && layers.camera.bitmap) { blend_nv12(frame,*layers.camera.bitmap,layers.camera.transform); result.camera=true; }
+    if (layers.keyboard.requested && layers.keyboard.bitmap) { blend_nv12(frame,*layers.keyboard.bitmap,layers.keyboard.transform); result.keyboard=true; }
     return result;
+}
+OverlayCompositionResult OverlayHistory::compose(AVFrame& frame) const {
+    return compose_overlay_nv12(frame, this->frame(frame.pts));
 }
 OverlayCompositionResult OverlayHistory::compose_bgra(uint8_t* pixels, size_t bytes, int width, int height, int stride) const {
     std::shared_ptr<const OverlayBitmap> camera, keyboard;

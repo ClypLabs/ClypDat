@@ -1,5 +1,6 @@
 #include "recording_capture.h"
 #include "readback_stage.h"
+#include "overlay_compositor.h"
 #include <Windows.h>
 #include <avrt.h>
 #include <d3d11_4.h>
@@ -11,6 +12,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cctype>
@@ -207,6 +209,58 @@ struct SurfacePoolExhausted : std::runtime_error { using std::runtime_error::run
 // Also backpressure, never a GPU conversion failure.
 struct ReadbackExhausted : std::runtime_error { using std::runtime_error::runtime_error; };
 using Buffer = std::unique_ptr<AVBufferRef, BufferDeleter>;
+using Microsoft::WRL::ComPtr;
+void check_hr(HRESULT value, const char* text) {
+    if (SUCCEEDED(value)) return;
+    char code[16]{}; std::snprintf(code, sizeof(code), "0x%08X", unsigned(value));
+    throw std::runtime_error(std::string(text) + " (hr=" + code + ")");
+}
+// GPU time between begin() and end(), from timestamp queries read a few
+// frames later without flushing, so the CPU never waits on them. A result
+// not ready when its slot comes round again is dropped.
+class GpuTimer {
+    struct Slot { ComPtr<ID3D11Query> disjoint, begin, end; bool pending = false; };
+    ComPtr<ID3D11DeviceContext> context_;
+    std::array<Slot, 8> slots_;
+    size_t next_ = 0;
+    bool open_ = false;
+    std::vector<double> ready_;
+public:
+    GpuTimer(ID3D11Device* device, ID3D11DeviceContext* context) : context_(context) {
+        D3D11_QUERY_DESC disjoint{D3D11_QUERY_TIMESTAMP_DISJOINT, 0}, stamp{D3D11_QUERY_TIMESTAMP, 0};
+        for (auto& slot : slots_) {
+            check_hr(device->CreateQuery(&disjoint, &slot.disjoint), "Create overlay GPU timer");
+            check_hr(device->CreateQuery(&stamp, &slot.begin), "Create overlay GPU timestamp");
+            check_hr(device->CreateQuery(&stamp, &slot.end), "Create overlay GPU timestamp");
+        }
+    }
+    void begin() {
+        collect();
+        auto& slot = slots_[next_];
+        context_->Begin(slot.disjoint.Get()); context_->End(slot.begin.Get()); open_ = true;
+    }
+    void end() {
+        if (!open_) return;
+        auto& slot = slots_[next_];
+        context_->End(slot.end.Get()); context_->End(slot.disjoint.Get());
+        slot.pending = true; open_ = false; next_ = (next_ + 1) % slots_.size();
+    }
+    // Completed measurements since the last call, in milliseconds.
+    std::vector<double> take() { collect(); return std::exchange(ready_, {}); }
+private:
+    void collect() {
+        for (auto& slot : slots_) {
+            if (!slot.pending) continue;
+            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT clock{}; UINT64 first = 0, last = 0;
+            if (context_->GetData(slot.disjoint.Get(), &clock, sizeof(clock), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) continue;
+            slot.pending = false;
+            if (clock.Disjoint || !clock.Frequency ||
+                context_->GetData(slot.begin.Get(), &first, sizeof(first), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK ||
+                context_->GetData(slot.end.Get(), &last, sizeof(last), D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK || last < first) continue;
+            ready_.push_back(double(last - first) * 1000 / double(clock.Frequency));
+        }
+    }
+};
 class GpuProcessor {
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_;
@@ -223,6 +277,23 @@ class GpuProcessor {
     // so a new surface past capacity is refused.
     std::map<std::pair<void*, intptr_t>, CaptureSurfaceTarget> surfaces_;
     std::vector<CaptureSurfaceTarget> targets_;
+    // Burned overlays: the source is scaled into an output-sized BGRA canvas,
+    // the layers are drawn onto it, and the canvas is converted to the pool
+    // surface. Made on first use and kept; the canvas-to-surface views are
+    // kept per pool surface.
+    struct Overlays {
+        std::unique_ptr<OverlayCompositor> compositor;
+        ComPtr<ID3D11Texture2D> canvas;
+        ComPtr<ID3D11RenderTargetView> target;
+        ComPtr<ID3D11VideoProcessorOutputView> scaled; // Canvas as output of processor_.
+        ComPtr<ID3D11VideoProcessorEnumerator> enumerator;
+        ComPtr<ID3D11VideoProcessor> processor;
+        ComPtr<ID3D11VideoProcessorInputView> input;
+        std::map<std::pair<void*, intptr_t>, ComPtr<ID3D11VideoProcessorOutputView>> outputs;
+        std::unique_ptr<GpuTimer> timer;
+    };
+    std::unique_ptr<Overlays> overlays_;
+    std::string overlay_failure_;
     static std::pair<void*, intptr_t> surface_key(const AVFrame* frame) {
         // QSV frames carry their mfxFrameSurface1 in data[3].
         if (frame->format == AV_PIX_FMT_QSV) return {frame->data[3], 0};
@@ -259,6 +330,41 @@ public:
     int allocated() const { return int(surfaces_.size()); }
     // QSV frames over D3D11 children instead of D3D11 frames.
     bool qsv() const { return qsv_; }
+    // Why burned overlays cannot be drawn on this device; empty while they can.
+    const std::string& overlay_failure() const { return overlay_failure_; }
+    OverlayCompositor::Stats overlay_stats() const { return overlays_ && overlays_->compositor ? overlays_->compositor->stats() : OverlayCompositor::Stats{}; }
+    std::vector<double> overlay_gpu_times() { return overlays_ && overlays_->timer ? overlays_->timer->take() : std::vector<double>{}; }
+    // Prepares GPU overlay composition once. False, with overlay_failure()
+    // set, when this device cannot compose; that answer is kept.
+    bool overlays_ready() {
+        if (overlays_) return true;
+        if (!overlay_failure_.empty()) return false;
+        try {
+            auto made = std::make_unique<Overlays>();
+            made->compositor = std::make_unique<OverlayCompositor>(device_.Get());
+            D3D11_TEXTURE2D_DESC desc{};
+            desc.Width = UINT(width_); desc.Height = UINT(height_); desc.MipLevels = 1; desc.ArraySize = 1;
+            desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM; desc.SampleDesc.Count = 1; desc.Usage = D3D11_USAGE_DEFAULT;
+            desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+            check_hr(device_->CreateTexture2D(&desc, nullptr, &made->canvas), "Create overlay canvas");
+            check_hr(device_->CreateRenderTargetView(made->canvas.Get(), nullptr, &made->target), "Create overlay canvas target");
+            D3D11_VIDEO_PROCESSOR_CONTENT_DESC content{}; content.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
+            content.InputWidth = content.OutputWidth = UINT(width_); content.InputHeight = content.OutputHeight = UINT(height_);
+            content.InputFrameRate = content.OutputFrameRate = {UINT(fps_), 1}; content.Usage = D3D11_VIDEO_USAGE_OPTIMAL_SPEED;
+            check_hr(video_->CreateVideoProcessorEnumerator(&content, &made->enumerator), "Create overlay canvas processor enumerator");
+            UINT canvas_support = 0, surface_support = 0;
+            check_hr(made->enumerator->CheckVideoProcessorFormat(DXGI_FORMAT_B8G8R8A8_UNORM, &canvas_support), "Check overlay canvas format");
+            check_hr(made->enumerator->CheckVideoProcessorFormat(DXGI_FORMAT_NV12, &surface_support), "Check overlay surface format");
+            if (!(canvas_support & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_INPUT) || !(surface_support & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT))
+                throw std::runtime_error("Video processor cannot convert a BGRA overlay canvas to NV12");
+            check_hr(video_->CreateVideoProcessor(made->enumerator.Get(), 0, &made->processor), "Create overlay canvas processor");
+            D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC input{}; input.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
+            check_hr(video_->CreateVideoProcessorInputView(made->canvas.Get(), made->enumerator.Get(), &input, &made->input), "Create overlay canvas input view");
+            try { made->timer = std::make_unique<GpuTimer>(device_.Get(), immediate_.Get()); } catch (const std::exception&) {}
+            overlays_ = std::move(made);
+            return true;
+        } catch (const std::exception& error) { overlay_failure_ = error.what(); return false; }
+    }
     GpuProcessor(ID3D11Device* input, int width, int height, int fps, int capacity, bool qsv = false,
         const std::function<AVBufferRef*(AVBufferRef*, int, int)>& qsv_frames = {}) :
         device_(input), width_(width), height_(height), fps_(fps), capacity_(capacity), qsv_(qsv) {
@@ -302,7 +408,11 @@ public:
         }
         throw std::runtime_error("Recording D3D11 surface pools unavailable");
     }
-    Frame convert(const CapturePixels& pixels, int64_t pts) {
+    // Converts `pixels` into a pool surface. With `layers` that have something
+    // to draw, and overlays_ready(), the layers are composed on the GPU and
+    // `drawn` says which were. A failing composition disables GPU overlays
+    // (overlay_failure()) and the frame is converted without them.
+    Frame convert(const CapturePixels& pixels, int64_t pts, const OverlayFrame* layers = nullptr, OverlayCompositionResult* drawn = nullptr) {
         if (!pixels.texture) throw std::runtime_error("Recording frame has no GPU texture");
         struct Lock { ID3D11Multithread* p; Lock(ID3D11Multithread* v):p(v){if(p)p->Enter();} ~Lock(){if(p)p->Leave();} } lock(multithread_.Get());
         auto hr = [](HRESULT value, const char* text) { if (FAILED(value)) { char code[16]{};std::snprintf(code,sizeof(code),"0x%08X",unsigned(value));throw std::runtime_error(std::string(text)+" (hr="+code+")"); } };
@@ -317,6 +427,7 @@ public:
                 hr(video_->CreateVideoProcessorEnumerator(&desc, &enumerator_), "Create recording video processor enumerator");}
             hr(video_->CreateVideoProcessor(enumerator_.Get(), 0, &processor_), "Create recording video processor");
             source_width_ = pixels.width; source_height_ = pixels.height;
+            if (overlays_) overlays_->scaled.Reset(); // Belongs to the old enumerator.
         }
         Frame frame(av_frame_alloc()); if (!frame) throw std::bad_alloc();
         acquire(frame.get(), "Allocate recording hardware surface");
@@ -334,12 +445,27 @@ public:
         // The render target this pool surface stands for: the D3D11 frame
         // itself, or a QSV surface's D3D11 child, which MFX crops to width x
         // height from its 16-aligned texture.
-        const auto target = surfaces_.at(surface_key(frame.get()));
+        const auto key = surface_key(frame.get());
+        const auto target = surfaces_.at(key);
         D3D11_TEXTURE2D_DESC td{}; target.texture->GetDesc(&td);
         D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC od{};
         if (td.ArraySize > 1) { od.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2DARRAY;
             od.Texture2DArray.FirstArraySlice = target.slice; od.Texture2DArray.ArraySize = 1; }
         else od.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+        if (layers && layers->drawable() && overlays_) {
+            try {
+                const auto result = composite(*input.Get(), pixels, key, target, od, *layers);
+                if (drawn) *drawn = result;
+                immediate_->Flush();
+                stamp(*frame, pts);
+                return frame;
+            } catch (const std::exception& error) {
+                // Straight to the plain conversion below; later frames take
+                // the CPU composition fallback.
+                overlay_failure_ = std::string("GPU overlay composition failed: ") + error.what();
+                overlays_.reset();
+            }
+        }
         hr(video_->CreateVideoProcessorOutputView(target.texture, enumerator_.Get(), &od, &output), "Create recording video output view");
         const auto fit = capture_aspect_fit(pixels.width, pixels.height, width_, height_);
         RECT source{0, 0, pixels.width, pixels.height}, destination{fit.x, fit.y, fit.x + fit.width, fit.y + fit.height}, canvas{0,0,width_,height_};
@@ -361,11 +487,60 @@ public:
         // blocking bitstream lock; left batched, the write can sit behind a
         // capture-thread call that needs the device lock NVENC holds.
         immediate_->Flush();
-        frame->pts = pts; frame->duration = 1000000 / fps_;
-        frame->color_range = AVCOL_RANGE_MPEG; frame->colorspace = AVCOL_SPC_BT709;
-        frame->color_primaries = AVCOL_PRI_BT709; frame->color_trc = AVCOL_TRC_BT709;
+        stamp(*frame, pts);
         return frame;
     }
+private:
+    void stamp(AVFrame& frame, int64_t pts) const {
+        frame.pts = pts; frame.duration = 1000000 / fps_;
+        frame.color_range = AVCOL_RANGE_MPEG; frame.colorspace = AVCOL_SPC_BT709;
+        frame.color_primaries = AVCOL_PRI_BT709; frame.color_trc = AVCOL_TRC_BT709;
+    }
+    // Source to BGRA canvas (full-range RGB, black bars), layers drawn onto
+    // the canvas, canvas to the NV12 surface (BT.709 limited): the colour
+    // conversion the single pass does, with the layers in between.
+    OverlayCompositionResult composite(ID3D11VideoProcessorInputView& input, const CapturePixels& pixels,
+        const std::pair<void*, intptr_t>& key, const CaptureSurfaceTarget& target, const D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC& surface_view,
+        const OverlayFrame& layers) {
+        auto& o = *overlays_;
+        if (!o.scaled) {
+            D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC view{}; view.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
+            check_hr(video_->CreateVideoProcessorOutputView(o.canvas.Get(), enumerator_.Get(), &view, &o.scaled), "Create overlay canvas output view");
+        }
+        auto& output = o.outputs[key];
+        if (!output) check_hr(video_->CreateVideoProcessorOutputView(target.texture, o.enumerator.Get(), &surface_view, &output), "Create overlay surface output view");
+        const auto fit = capture_aspect_fit(pixels.width, pixels.height, width_, height_);
+        RECT source{0, 0, pixels.width, pixels.height}, destination{fit.x, fit.y, fit.x + fit.width, fit.y + fit.height}, canvas{0, 0, width_, height_};
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE rgb_full{}, video_range{};
+        rgb_full.YCbCr_Matrix = 1; rgb_full.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_0_255;
+        video_range.YCbCr_Matrix = 1; video_range.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+        auto configure = [&](ID3D11VideoProcessor* processor, const RECT& from, const RECT& to, const D3D11_VIDEO_PROCESSOR_COLOR_SPACE& out) {
+            context_->VideoProcessorSetStreamSourceRect(processor, 0, TRUE, &from);
+            context_->VideoProcessorSetStreamDestRect(processor, 0, TRUE, &to);
+            context_->VideoProcessorSetOutputTargetRect(processor, TRUE, &canvas);
+            context_->VideoProcessorSetStreamAutoProcessingMode(processor, 0, FALSE);
+            context_->VideoProcessorSetStreamFrameFormat(processor, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
+            context_->VideoProcessorSetStreamColorSpace(processor, 0, &rgb_full);
+            context_->VideoProcessorSetOutputColorSpace(processor, &out);
+        };
+        configure(processor_.Get(), source, destination, rgb_full);
+        D3D11_VIDEO_COLOR black{}; black.RGBA = {0, 0, 0, 1};
+        context_->VideoProcessorSetOutputBackgroundColor(processor_.Get(), FALSE, &black);
+        D3D11_VIDEO_PROCESSOR_STREAM scaled{}; scaled.Enable = TRUE; scaled.pInputSurface = &input;
+        check_hr(context_->VideoProcessorBlt(processor_.Get(), o.scaled.Get(), 0, 1, &scaled), "Scale recording frame onto overlay canvas");
+        // Timestamp queries see the draw; the video processor passes around
+        // it can run on another engine where they are not visible.
+        if (o.timer) o.timer->begin();
+        const auto result = o.compositor->draw(o.target.Get(), width_, height_, layers);
+        if (o.timer) o.timer->end();
+        configure(o.processor.Get(), canvas, canvas, video_range);
+        D3D11_VIDEO_COLOR background{}; background.YCbCr = {16.f / 255.f, 128.f / 255.f, 128.f / 255.f, 1};
+        context_->VideoProcessorSetOutputBackgroundColor(o.processor.Get(), TRUE, &background);
+        D3D11_VIDEO_PROCESSOR_STREAM converted{}; converted.Enable = TRUE; converted.pInputSurface = o.input.Get();
+        check_hr(context_->VideoProcessorBlt(o.processor.Get(), output.Get(), 0, 1, &converted), "Convert overlay canvas to recording surface");
+        return result;
+    }
+public:
     Frame upload(const AVFrame& software) {
         Frame frame(av_frame_alloc()); if (!frame) throw std::bad_alloc();
         acquire(frame.get(), "Allocate recording upload surface");
@@ -449,6 +624,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     struct Staged { int64_t pts, acquired_us; uint64_t source_sequence; };
     std::deque<Staged> readback_staged;
     std::deque<double> readback_times, readback_map_waits;
+    std::deque<double> overlay_gpu_times;
+    // Encoding thread; mirrored into status.overlay when they change.
+    std::string overlay_path = "off", overlay_gpu_failure;
     std::shared_ptr<CaptureGeneration> generation;
     size_t active_candidate = 0;
     std::vector<Candidate> encoder_candidates;
@@ -773,6 +951,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         status.capture_latency_p50_ms = percentile(capture_latencies,.5); status.capture_latency_p95_ms = percentile(capture_latencies,.95);
         status.readback_p50_ms = percentile(readback_times,.5); status.readback_p95_ms = percentile(readback_times,.95);
         status.readback_map_wait_p50_ms = percentile(readback_map_waits,.5); status.readback_map_wait_p95_ms = percentile(readback_map_waits,.95);
+        status.overlay.gpu_p50_ms = percentile(overlay_gpu_times,.5); status.overlay.gpu_p95_ms = percentile(overlay_gpu_times,.95);
         if(processing_stage_samples){
             const double samples=double(processing_stage_samples);
             status.texture_readback_ms=readback_ms_sum/samples;status.video_processor_ms=video_processor_ms_sum/samples;
@@ -1061,7 +1240,39 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     // Encoding-thread state: whether the next frame must be a keyframe, the
     // last submitted source frame, and the timer for bounded waits.
     struct EncodingState { bool first = true; uint64_t last_sequence = 0; PressureTimer timer; };
-    bool overlay_active() const { return callbacks.compose_nv12 && (!callbacks.overlay_enabled || callbacks.overlay_enabled()); }
+    bool overlay_active() const {
+        return (callbacks.overlay_frame || callbacks.compose_nv12) && (!callbacks.overlay_enabled || callbacks.overlay_enabled());
+    }
+    void set_overlay_path(const char* path) {
+        if (overlay_path == path) return;
+        overlay_path = path; std::lock_guard lock(mutex); status.overlay.path = path;
+    }
+    // Whether zero-copy frames get their burned overlays on the GPU. Why not
+    // is reported as the overlay GPU failure.
+    bool gpu_overlays() {
+        if (!gpu || !callbacks.overlay_frame) return false;
+        const std::string failure = dependencies.disable_gpu_overlays ? "GPU overlay compositor disabled" :
+            gpu->overlays_ready() ? "" : gpu->overlay_failure();
+        if (failure != overlay_gpu_failure) { overlay_gpu_failure = failure; std::lock_guard lock(mutex); status.overlay.gpu_failure = failure; }
+        return failure.empty();
+    }
+    // One frame's overlays are done: reported to the session with the GPU
+    // compositor's figures when it drew them.
+    void overlays_done(int64_t pts, const OverlayFrame& layers, OverlayCompositionResult drawn, const char* path) {
+        set_overlay_path(path);
+        if (callbacks.overlay_composed) callbacks.overlay_composed(pts, layers, drawn);
+        if (overlay_path != "gpu") return;
+        const auto stats = gpu->overlay_stats(); auto times = gpu->overlay_gpu_times();
+        std::lock_guard lock(mutex);
+        status.overlay.gpu_uploads = stats.uploads; status.overlay.gpu_upload_failures = stats.upload_failures;
+        for (const double value : times) { overlay_gpu_times.push_back(value); if (overlay_gpu_times.size() > 240) overlay_gpu_times.pop_front(); }
+    }
+    // Composes burned overlays into a system-memory frame.
+    void compose_cpu(AVFrame& frame, int64_t pts, const char* path) {
+        if (!callbacks.overlay_frame) { callbacks.compose_nv12(frame); set_overlay_path(path); return; }
+        const auto layers = callbacks.overlay_frame(pts);
+        overlays_done(pts, layers, compose_overlay_nv12(frame, layers), path);
+    }
     // GPU frames of the active candidate go through the staged readback.
     bool staging_readback() const { return readback && readback->staging_slots() && !encoder_candidates[active_candidate].d3d11; }
     void note_readback_time(double total_ms, double map_wait_ms, bool stalled) {
@@ -1139,8 +1350,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         Frame frame(result.frame.release());
         if (overlay_active()) {
             const auto started = std::chrono::steady_clock::now();
-            callbacks.compose_nv12(*frame); tick.overlay_ms += since_ms(started);
-        }
+            compose_cpu(*frame, meta.pts, "cpu"); tick.overlay_ms += since_ms(started);
+        } else set_overlay_path("off");
         submit_frame(std::move(frame), meta, state, tick);
     }
     void encoding() {
@@ -1194,10 +1405,27 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             auto produce = [&]() -> Frame {
                 Frame frame;
                 const bool zero_copy = encoder_candidates[active_candidate].d3d11;
+                const bool overlays = overlay_active();
+                if (!overlays) set_overlay_path("off");
+                bool overlaid = false; // This frame's overlays are done.
+                // A frame converted on the CPU gets its overlays before any
+                // upload, never through a later download.
+                auto compose_software = [&] {
+                    if (!overlays) return;
+                    const auto started = std::chrono::steady_clock::now();
+                    compose_cpu(*frame, work.pts, zero_copy ? "cpu-fallback" : "cpu"); overlaid = true;
+                    tick.overlay_ms += since_ms(started);
+                };
                 if (gpu && pixels->texture && !config.disable_gpu_processing) {
                     try {
                         const auto started=std::chrono::steady_clock::now();
-                        frame = gpu->convert(*pixels, work.pts);
+                        // Zero-copy frames get their overlays drawn on the GPU.
+                        const bool on_gpu = zero_copy && overlays && gpu_overlays();
+                        OverlayFrame layers; OverlayCompositionResult drawn;
+                        if (on_gpu) layers = callbacks.overlay_frame(work.pts);
+                        frame = gpu->convert(*pixels, work.pts, on_gpu ? &layers : nullptr, &drawn);
+                        // A composition that failed on this frame leaves it to the CPU fallback below.
+                        if (on_gpu && gpu->overlay_failure().empty()) { overlays_done(work.pts, layers, drawn, "gpu"); overlaid = true; }
                         tick.video_processor_ms=since_ms(started);
                         tick.path=!zero_copy?"d3d11-video-processor-readback":gpu->qsv()?"d3d11-video-processor-qsv":"d3d11-video-processor";
                         // Without staging textures, read back now into a reusable CPU frame.
@@ -1217,31 +1445,42 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                         const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);tick.readback_ms+=since_ms(readback_started);
                         const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);tick.software_convert_ms=since_ms(convert_started);
                         tick.path=zero_copy?"gpu-fallback-cpu-convert-d3d11-upload":"gpu-fallback-cpu-convert";
+                        compose_software();
                         if(zero_copy){const auto upload_started=std::chrono::steady_clock::now();frame=gpu->upload(*frame);tick.hardware_upload_ms=since_ms(upload_started);}
                     } catch (...) {
                         { std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks;status.gpu_conversion_fallback_error="Unknown GPU conversion error"; }
                         const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);tick.readback_ms+=since_ms(readback_started);
                         const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);tick.software_convert_ms=since_ms(convert_started);
                         tick.path=zero_copy?"gpu-fallback-cpu-convert-d3d11-upload":"gpu-fallback-cpu-convert";
+                        compose_software();
                         if(zero_copy){const auto upload_started=std::chrono::steady_clock::now();frame=gpu->upload(*frame);tick.hardware_upload_ms=since_ms(upload_started);}
                     }
                 } else {
                     if(pixels->texture){const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);tick.readback_ms=since_ms(readback_started);}
                     const auto convert_started=std::chrono::steady_clock::now();frame = convert(*pixels, work.pts);tick.software_convert_ms=since_ms(convert_started);
                     tick.path=zero_copy?"cpu-convert-d3d11-upload":"cpu-convert";
+                    compose_software();
                     if (zero_copy) {const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*frame);tick.hardware_upload_ms=since_ms(upload_started);}
                 }
-                // Staged frames get their overlay once read back.
-                if (overlay_active() && !(frame->format == AV_PIX_FMT_D3D11 && staging_readback())) {
+                // Staged frames get their overlays once read back.
+                if (overlays && !overlaid && !(frame->format == AV_PIX_FMT_D3D11 && staging_readback())) {
                     const auto overlay_started=std::chrono::steady_clock::now();
                     if (frame->format == AV_PIX_FMT_D3D11 || frame->format == AV_PIX_FMT_QSV) {
-                        Frame software(av_frame_alloc()); if (!software) throw std::bad_alloc();
-                        check(av_hwframe_transfer_data(software.get(), frame.get(), 0), "Download recording overlay canvas");
-                        { std::lock_guard lock(mutex); ++status.frame_allocations; }
-                        check(av_frame_copy_props(software.get(), frame.get()), "Copy recording overlay timing");
-                        callbacks.compose_nv12(*software); const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*software);tick.hardware_upload_ms+=since_ms(upload_started);
-                    } else callbacks.compose_nv12(*frame);
-                    tick.overlay_ms=since_ms(overlay_started);
+                        // Zero-copy without the GPU compositor: a CPU round
+                        // trip, and only for a frame with something to draw.
+                        OverlayFrame layers; if (callbacks.overlay_frame) layers = callbacks.overlay_frame(work.pts);
+                        OverlayCompositionResult drawn;
+                        if (!callbacks.overlay_frame || layers.drawable()) {
+                            Frame software(av_frame_alloc()); if (!software) throw std::bad_alloc();
+                            check(av_hwframe_transfer_data(software.get(), frame.get(), 0), "Download recording overlay canvas");
+                            { std::lock_guard lock(mutex); ++status.frame_allocations; ++status.overlay.cpu_roundtrips; }
+                            check(av_frame_copy_props(software.get(), frame.get()), "Copy recording overlay timing");
+                            if (callbacks.overlay_frame) drawn = compose_overlay_nv12(*software, layers); else callbacks.compose_nv12(*software);
+                            const auto upload_started=std::chrono::steady_clock::now();frame = gpu->upload(*software);tick.hardware_upload_ms+=since_ms(upload_started);
+                        }
+                        if (callbacks.overlay_frame) overlays_done(work.pts, layers, drawn, "cpu-fallback"); else set_overlay_path("cpu-fallback");
+                    } else compose_cpu(*frame, work.pts, "cpu");
+                    tick.overlay_ms+=since_ms(overlay_started);
                 }
                 return frame;
             };

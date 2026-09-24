@@ -40,12 +40,12 @@ public:
     std::mutex mutex;
     ComPtr<ID3D11VertexShader> hdr_vertex;
     ComPtr<ID3D11PixelShader> hdr_pixel;
+    ComPtr<ID3D11Multithread> multithread;
     RecordingSourceHealth diagnostics;
     explicit Device(ID3D11Device* existing=nullptr,bool debug=false) : device(existing) {
         if(existing)existing->GetImmediateContext(&context);
         else checked(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT|(debug?D3D11_CREATE_DEVICE_DEBUG:0),
             nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &context), "Create recording D3D11 device");
-        ComPtr<ID3D11Multithread> multithread;
         if (SUCCEEDED(context.As(&multithread))) multithread->SetMultithreadProtected(TRUE);
         ComPtr<IDXGIDevice> dxgi;ComPtr<IDXGIAdapter> adapter;
         if(SUCCEEDED(device.As(&dxgi))&&SUCCEEDED(dxgi->GetAdapter(&adapter))){DXGI_ADAPTER_DESC desc{};
@@ -83,6 +83,9 @@ public:
     // so no reference to the capture API's buffer outlives it.
     void tone_map(ID3D11Texture2D* input, ID3D11Texture2D* output, float white, ID3D11RenderTargetView* view = nullptr) {
         std::lock_guard lock(mutex);
+        // The draw's pipeline state must not interleave with the encoder
+        // thread's overlay draws on the same immediate context.
+        struct Enter { ID3D11Multithread* p; explicit Enter(ID3D11Multithread* v) : p(v) { if (p) p->Enter(); } ~Enter() { if (p) p->Leave(); } } device_lock(multithread.Get());
         D3D11_TEXTURE2D_DESC desc{}; output->GetDesc(&desc);
         if (!hdr_vertex) {
             const std::string shader =

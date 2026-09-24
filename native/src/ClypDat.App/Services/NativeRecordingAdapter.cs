@@ -25,6 +25,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
     private long _lastNativeDiagnosticLogTicks;
     private string? _lastLoggedCaptureSource;
     private long _lastLoggedSourceRecoveries = -1;
+    private string _lastLoggedOverlayState = "";
     private bool _recording;
     private volatile bool _lastFrozen;
     private string _fullSessionPath = "";
@@ -258,6 +259,22 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             AppLog.Info($"Capture source recovered on '{captureSource}'; sourceRecoveries={sourceRecoveries}.");
         _lastLoggedCaptureSource = captureSource;
         _lastLoggedSourceRecoveries = sourceRecoveries;
+        // Burned overlays that are enabled but not drawn say why, once per change.
+        var overlayState = Text(details, "overlayState");
+        var overlayReason = overlayState switch
+        {
+            "failed" => Text(details, "overlayFailure"),
+            "source-not-ready" => Text(details, "overlayLastSkipReason"),
+            _ => ""
+        };
+        var overlayGpuFailure = Text(details, "overlayGpuFailure");
+        var overlayLog = $"{overlayState}|{Text(details, "overlayPath")}|{overlayReason}|{overlayGpuFailure}";
+        if (overlayState.Length > 0 && overlayLog != _lastLoggedOverlayState)
+        {
+            _lastLoggedOverlayState = overlayLog;
+            AppLog.Info($"Burned overlays: state={overlayState} path={Text(details, "overlayPath")}" +
+                (overlayReason.Length > 0 ? $" reason='{overlayReason}'" : "") + (overlayGpuFailure.Length > 0 ? $" gpuFailure='{overlayGpuFailure}'" : "") + ".");
+        }
         var diagnosticNow = Stopwatch.GetTimestamp();
         var previousDiagnostic = Volatile.Read(ref _lastNativeDiagnosticLogTicks);
         if (diagnosticNow - previousDiagnostic >= Stopwatch.Frequency &&
@@ -274,7 +291,11 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                 $"owned textures={Number(details, "sourceOwnedTexturesLeased")}/{Number(details, "sourceOwnedTextureCapacity")} peak={Number(details, "sourceOwnedTexturesPeak")} allocated={Number(details, "sourceOwnedTexturesAllocated")} drops={Number(details, "sourceOwnedTexturePressureDrops")} copy p50={Number(details, "sourceCopyP50Ms"):F3} p95={Number(details, "sourceCopyP95Ms"):F3}ms; " +
                 $"acquired={Number(details, "acquiredFps"):F1} selection={Text(details, "frameSelection")} queue={Number(details, "sourceQueueDepth")}/{Number(details, "sourceQueueCapacity")} peak={Number(details, "sourceQueuePeak")} selectionDropped={Number(details, "selectionDroppedFps"):F1}/s duplicates={Number(details, "duplicateFps"):F1}/s replaced={Number(details, "pacingReplacedFps"):F1}/s; " +
                 $"captureLatency p50={Number(details, "captureLatencyP50Ms"):F1} p95={Number(details, "captureLatencyP95Ms"):F1}ms; " +
-                $"backpressure drops={Number(details, "backpressureDrops")} ({Number(details, "backpressureDropFps"):F1}/s) busy={Number(details, "encoderBusyDrops")} retained={Number(details, "retainedPressureDrops")} pool={Number(details, "poolPressureDrops")} waitMax={Number(details, "backpressureWaitMaxMs"):F1}ms stallRecoveries={Number(details, "encoderStallRecoveries")}.");
+                $"backpressure drops={Number(details, "backpressureDrops")} ({Number(details, "backpressureDropFps"):F1}/s) busy={Number(details, "encoderBusyDrops")} retained={Number(details, "retainedPressureDrops")} pool={Number(details, "poolPressureDrops")} waitMax={Number(details, "backpressureWaitMaxMs"):F1}ms stallRecoveries={Number(details, "encoderStallRecoveries")}; " +
+                $"overlays state={overlayState} path={Text(details, "overlayPath")} revision={Number(details, "overlaySettingsRevision")} camera={Bool(details, "overlayCameraRequested")}/{Bool(details, "overlayCameraReady")} generation={Number(details, "overlayCameraGeneration")} stale={Bool(details, "overlayCameraStale")} " +
+                $"keyboard={Bool(details, "overlayKeyboardRequested")}/{Bool(details, "overlayKeyboardReady")} artwork={Number(details, "overlayKeyboardRevision")} frames camera={Number(details, "overlayCameraFrames")} keyboard={Number(details, "overlayKeyboardFrames")} skipped={Number(details, "overlaySkippedFrames")} " +
+                $"lastSkip='{Text(details, "overlayLastSkipReason")}' failure='{Text(details, "overlayFailure")}' lastRenderedUs={Number(details, "overlayLastRenderedUs")} gpu uploads={Number(details, "overlayGpuUploads")} uploadFailures={Number(details, "overlayGpuUploadFailures")} " +
+                $"draw p50={Number(details, "overlayGpuP50Ms"):F3} p95={Number(details, "overlayGpuP95Ms"):F3}ms cpuRoundTrips={Number(details, "overlayCpuRoundTrips")} gpuFailure='{overlayGpuFailure}'.");
         }
         if (health.FullSession.State == FullSessionState.Recording && health.FullSession.OutputPath.Length > 0)
         {

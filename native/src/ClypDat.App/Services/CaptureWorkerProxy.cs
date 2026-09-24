@@ -187,9 +187,23 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public async Task UpdateVideoOverlaySettingsAsync(OverlayCaptureSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        _videoOverlaySettings = settings with { Revision = Interlocked.Increment(ref _videoOverlayRevision), AppliedAtUtc = MonotonicClock.UtcNow };
+        _videoOverlaySettings = settings with { Revision = NextOverlayRevision(ref _videoOverlayRevision), AppliedAtUtc = MonotonicClock.UtcNow };
         await EnsureAttachedAsync(cancellationToken);
         Accept(await SendAsync<CaptureWorkerAck>("video-overlays", _videoOverlaySettings, cancellationToken), "apply video overlays");
+    }
+
+    // Overlay revisions order settings across app instances too. The worker
+    // outlives the app, so a relaunched app's first change must be newer than
+    // anything the previous instance sent; the high-resolution timestamp is
+    // shared by every process since boot.
+    internal static long NextOverlayRevision(ref long last)
+    {
+        while (true)
+        {
+            var previous = Volatile.Read(ref last);
+            var next = Math.Max(previous + 1, Stopwatch.GetTimestamp());
+            if (Interlocked.CompareExchange(ref last, next, previous) == previous) return next;
+        }
     }
 
     public void Dispose() { _disposed = true; _desiredRecording = false; CancelRecovery(false); Disconnect(); }

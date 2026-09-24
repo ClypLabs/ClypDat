@@ -42,6 +42,41 @@ void camera_snapshots() {
     try { finalize_camera_snapshot(snapshot,ffmpeg,root/L"cancelled",cancel); } catch(const std::exception&) { cancelled=true; }
     CHECK(cancelled);
 }
+// The layers a video frame gets: a camera that lags keeps its last frame and
+// reports stale; one that ended shows nothing and says why until its
+// reconnect delivers a frame of a new generation. Frames of earlier
+// generations are refused.
+void camera_layers() {
+    auto overlays = std::make_shared<OverlayHistory>(std::make_shared<InputHistory>());
+    overlays->reset(true);
+    OverlaySettingsNative settings; settings.revision = 1; settings.camera_moniker = L"camera"; settings.keyboard_layout = "Full";
+    CHECK(overlays->apply(settings));
+    auto frame = overlays->frame(0);
+    CHECK(frame.any_requested() && !frame.drawable() && !frame.camera.bitmap && !frame.keyboard.bitmap && frame.settings_revision == 1);
+    std::vector<uint8_t> pixels(16, 255);
+    auto image = [&](uint64_t revision, int64_t at) { return OverlayBitmap::copy(2, 2, 8, pixels.data(), pixels.size(), revision, at, false); };
+    CHECK(overlays->set_artwork(image(5, 0)));
+    frame = overlays->frame(0); CHECK(frame.keyboard.bitmap && frame.keyboard_revision == 5 && frame.drawable());
+    const auto first = overlays->replace_camera();
+    CHECK(overlays->camera_frame(first, image(1, 1000000)));
+    frame = overlays->frame(2000000); CHECK(frame.camera.bitmap && !frame.camera_stale && frame.camera_generation == first);
+    frame = overlays->frame(1000000 + kCameraStaleUs + 1); CHECK(frame.camera.bitmap && frame.camera_stale);
+    overlays->camera_stopped(first + 1, "other generation"); CHECK(overlays->frame(2000000).camera.bitmap);
+    overlays->camera_stopped(first, "unplugged");
+    frame = overlays->frame(2000000);
+    CHECK(!frame.camera.bitmap && frame.camera_stopped && frame.camera_failure == "unplugged" && !frame.camera_stale && frame.keyboard.bitmap);
+    const auto second = overlays->replace_camera(true);
+    CHECK(second == first + 1 && !overlays->camera_frame(first, image(2, 3000000)));
+    frame = overlays->frame(3000000); CHECK(!frame.camera.bitmap && !frame.camera_stopped && frame.camera_failure == "unplugged");
+    CHECK(overlays->camera_frame(second, image(3, 3000000)));
+    frame = overlays->frame(3000000); CHECK(frame.camera.bitmap && frame.camera.bitmap->revision == 3 && frame.camera_failure.empty());
+    overlays->camera_failed("could not start");
+    frame = overlays->frame(3000000); CHECK(!frame.camera.bitmap && frame.camera_failure == "could not start");
+    overlays->replace_camera(); CHECK(overlays->frame(3000000).camera_failure.empty());
+    settings.revision = 2; settings.camera_moniker.clear(); settings.keyboard_layout = "None"; CHECK(overlays->apply(settings));
+    CHECK(!overlays->frame(3000000).any_requested());
+    overlays->reset(false); CHECK(!overlays->frame(0).burned);
+}
 int main() {
     auto modes=camera_preview_modes("pixel_format=yuyv422 min s=640x480 fps=30 max s=1920x1080 fps=30\n"
         "vcodec=mjpeg min s=640x360 fps=60 max s=1280x720 fps=60\n"
@@ -99,5 +134,6 @@ int main() {
     overlays->reset(false); CHECK(!overlays->compose_bgra(target.data(),target.size(),2,2,8).keyboard);
     CHECK(saved.camera_segments.size()==2 && saved.artwork[0]->bgra[0]==255);
     camera_snapshots();
+    camera_layers();
     std::cout << "Native input history, immutable snapshots, camera generations and overlay composition passed\n";
 }

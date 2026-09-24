@@ -56,12 +56,31 @@ struct RecordingCamera::State {
                 if(offset==partial.size()) {
                     history->camera_frame(generation,OverlayBitmap::copy(640,360,640*4,partial.data(),partial.size(),++sequence,clock(),false));
                     offset=0;
+                    if(sequence==1) { std::lock_guard lock(mutex); failure.clear(); }
                 }
             }
         } catch(const std::exception& exception) { std::lock_guard lock(mutex); failure=exception.what(); cancel=true; }
         catch(...) { std::lock_guard lock(mutex); failure="Camera frame allocation failed."; cancel=true; }
     }
+    // Recording cameras reconnect: a camera that ends on its own is started
+    // again under a new generation after a growing delay, reset once one
+    // delivered frames. Settings previews end instead.
     void run(const std::filesystem::path& ffmpeg,const std::filesystem::path& root,const std::wstring& moniker,bool editable,bool settings_preview) noexcept {
+        static constexpr std::array<int,4> delays_ms{1000,2000,5000,10000};
+        size_t attempts=0;
+        while(true) {
+            attempt(ffmpeg,root,moniker,editable,settings_preview);
+            if(settings_preview || cancel) break;
+            if(sequence.load()>0) attempts=0;
+            const auto resume=std::chrono::steady_clock::now()+std::chrono::milliseconds(delays_ms[std::min(attempts++,delays_ms.size()-1)]);
+            while(!cancel && std::chrono::steady_clock::now()<resume) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            if(cancel) break;
+            std::lock_guard lock(mutex);
+            offset=0; sequence=0; generation=history->replace_camera(true);
+        }
+        { std::lock_guard lock(mutex); done=true; } changed.notify_all();
+    }
+    void attempt(const std::filesystem::path& ffmpeg,const std::filesystem::path& root,const std::wstring& moniker,bool editable,bool settings_preview) noexcept {
         std::jthread watcher;
         std::atomic_bool process_done=false;
         HANDLE notification=INVALID_HANDLE_VALUE;
@@ -103,7 +122,7 @@ struct RecordingCamera::State {
                     offset=0;
                 }
                 if(!cancel) { std::lock_guard lock(mutex); failure=sequence.load()==0?"Camera stopped before delivering frames.":"Camera preview stopped."; }
-                { std::lock_guard lock(mutex); done=true; } changed.notify_all(); return;
+                return;
             }
             if(editable) {
                 std::filesystem::create_directories(root);
@@ -143,14 +162,15 @@ struct RecordingCamera::State {
             const std::vector<std::wstring> preview{L"-map",L"0:v:0",L"-an",L"-vf",filter,L"-vsync",L"0",L"-f",L"rawvideo",L"-pix_fmt",L"bgra",L"pipe:1"};
             arguments.insert(arguments.end(),preview.begin(),preview.end());
             ProcessRunner::run(ffmpeg,arguments,cancel,std::chrono::milliseconds::zero(),[this](const uint8_t* data,size_t count) { bytes(data,count); });
-            if(!cancel && sequence==0) { std::lock_guard lock(mutex); failure="Camera stopped before delivering frames."; }
+            if(!cancel) { std::lock_guard lock(mutex); if(failure.empty()) failure=sequence==0?"Camera stopped before delivering frames.":"Camera stopped."; }
         } catch(const std::exception& exception) { if(!cancel) { std::lock_guard lock(mutex); failure=exception.what(); } }
         catch(...) { std::lock_guard lock(mutex); failure="Camera capture failed."; }
         process_done=true;
         if(watcher.joinable()) watcher.join();
         if(notification!=INVALID_HANDLE_VALUE) FindCloseChangeNotification(notification);
         try { history->complete_camera(generation,clock()); } catch(...) {}
-        { std::lock_guard lock(mutex); done=true; } changed.notify_all();
+        // A camera that ends on its own is no longer shown, and says why.
+        if(!cancel) try { std::string reason; { std::lock_guard lock(mutex); reason=failure; } history->camera_stopped(generation,std::move(reason)); } catch(...) {}
     }
 };
 RecordingCamera::RecordingCamera(std::shared_ptr<OverlayHistory> history,OverlayClock clock):state_(std::make_shared<State>()) {

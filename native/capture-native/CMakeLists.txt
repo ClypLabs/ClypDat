@@ -23,6 +23,7 @@ add_library(RecorderCore STATIC
     src/video_encoder.cpp src/video_encoder.h
     src/encoder_backend.cpp src/encoder_backend.h
     src/readback_stage.cpp src/readback_stage.h
+    src/overlay_compositor.cpp src/overlay_compositor.h
     src/recording_capture.cpp src/recording_capture.h
     src/recording_windows_source.cpp
     src/recording_audio.cpp src/recording_audio.h
@@ -145,3 +146,13 @@ target_link_libraries(ClypDat.Capture.Native.OverlayTests PRIVATE RecorderCore)
 set_target_properties(ClypDat.Capture.Native.OverlayTests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_test(NAME ClypDat.Capture.Native.Overlays COMMAND ClypDat.Capture.Native.OverlayTests)
+
+add_executable(ClypDat.Capture.Native.OverlayPipelineTests tests/overlay_gpu_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.OverlayPipelineTests PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.OverlayPipelineTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.OverlayPipelineTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.OverlayPipeline COMMAND ClypDat.Capture.Native.OverlayPipelineTests)
+if(CLYPDAT_TEST_GPU)
+    add_test(NAME ClypDat.Capture.Native.GpuOverlayPipeline COMMAND ClypDat.Capture.Native.OverlayPipelineTests --gpu)
+endif()

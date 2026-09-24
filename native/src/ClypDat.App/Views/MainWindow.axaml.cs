@@ -156,6 +156,9 @@ public sealed partial class MainWindow : Window
     private bool _workerCrashMessageShown;
     private ReplayBufferConfig? _replayConfigSnapshot;
     private ReplayBufferConfig? _activeReplayConfigSnapshot;
+    // Burned or editable overlay layers: last sent to the worker, and the
+    // mode the running replay session was started with.
+    private string? _sentOverlayRecordingMode, _activeOverlayRecordingMode;
     private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private CustomGameTabViewModel? _hotkeyCaptureCustomGame;
@@ -3164,6 +3167,7 @@ public sealed partial class MainWindow : Window
             CaptureBackgroundWorkGate.EndCapture();
             _activeReplayTargetIdentity = string.Empty;
             _activeReplayConfigSnapshot = null;
+            _activeOverlayRecordingMode = null;
             _encoderTuning.EndSession();
             ViewModel.ClearReplayEncoderHealth();
             ViewModel.IsReplaySuspended = false;
@@ -3217,6 +3221,7 @@ public sealed partial class MainWindow : Window
             AppLog.Info("Replay started.");
             var activeConfig = _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable after start.");
             _activeReplayConfigSnapshot = activeConfig;
+            _activeOverlayRecordingMode = _sentOverlayRecordingMode;
             _activeReplayTargetIdentity = ReplayTargetIdentity(activeConfig);
             _encoderTuning.BeginSession(activeConfig.EncoderProfile, activeConfig.FrameRate, activeConfig.MaxHeight,
                 activeConfig.AdaptiveFrameRateProtectionEnabled);
@@ -3244,6 +3249,7 @@ public sealed partial class MainWindow : Window
             AppLog.Error("Replay start failed", error);
             CaptureBackgroundWorkGate.EndCapture();
             _activeReplayConfigSnapshot = null;
+            _activeOverlayRecordingMode = null;
             ViewModel.IsReplayRecording = false;
             // IsReplayRecording's setter is a no-op when the value doesn't change
             // (e.g. a second consecutive failed start while already false), which
@@ -7652,12 +7658,18 @@ public sealed partial class MainWindow : Window
             // The key sets go with it: the worker is a separate process with no
             // view of app settings, so a custom selection has to arrive already
             // resolved to caps or it reaches the worker as nothing at all.
-            await worker.UpdateVideoOverlaySettingsAsync(
-                CustomGameSettingsResolver.ResolveOverlays(ViewModel.Settings,
+            var settings = CustomGameSettingsResolver.ResolveOverlays(ViewModel.Settings,
                     ViewModel.IsEffectiveDesktopCapture ? null :
                     string.IsNullOrWhiteSpace(ViewModel.ActiveGameDetection.DetectionKey)
                         ? ViewModel.ActiveGameDetection.ExeName : ViewModel.ActiveGameDetection.DetectionKey)
-                    .ToCaptureSettings(ViewModel.Settings.CustomKeyboardLayouts));
+                .ToCaptureSettings(ViewModel.Settings.CustomKeyboardLayouts);
+            await worker.UpdateVideoOverlaySettingsAsync(settings);
+            _sentOverlayRecordingMode = settings.RecordingMode;
+            if (OverlayRecordingModeRestart.Required(ViewModel.IsReplayRecording, _replayTransitioning, _activeOverlayRecordingMode, settings.RecordingMode))
+            {
+                AppLog.Info($"Overlay recording mode changed to {settings.RecordingMode}; restarting replay to apply it.");
+                ScheduleReplayRestart();
+            }
         }
         catch (Exception error)
         {

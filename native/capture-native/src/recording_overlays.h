@@ -106,6 +106,52 @@ struct OverlaySnapshot {
     std::vector<CameraSegmentNative> camera_segments;
 };
 struct OverlayCompositionResult { bool camera = false, keyboard = false; };
+// One burned overlay layer as the video frame should show it. A requested
+// layer with no bitmap is not ready and is skipped, never drawn from an
+// earlier source.
+struct OverlayLayer {
+    bool requested = false;
+    std::shared_ptr<const OverlayBitmap> bitmap;
+    OverlayTransformNative transform;
+};
+// The burned layers for one video frame, read under one lock. The camera
+// keeps its last frame while it merely lags (`camera_stale`); a camera that
+// ended shows nothing, with `camera_failure` saying why, until a reconnect
+// delivers a frame of its new generation.
+struct OverlayFrame {
+    bool burned = false;
+    uint64_t settings_revision = 0, camera_generation = 0, keyboard_revision = 0;
+    OverlayLayer camera, keyboard;
+    bool camera_stale = false, camera_stopped = false;
+    std::string camera_failure;
+    bool any_requested() const { return burned && (camera.requested || keyboard.requested); }
+    bool drawable() const { return burned && ((camera.requested && camera.bitmap) || (keyboard.requested && keyboard.bitmap)); }
+};
+// Where a layer lands in a width x height frame: its normalized transform,
+// aspect kept, clamped inside the frame. Shared by the CPU and GPU paths.
+struct OverlayPlacement { int x = 0, y = 0, width = 0, height = 0; };
+OverlayPlacement overlay_placement(const OverlayBitmap& bitmap, const OverlayTransformNative& transform, int width, int height);
+// Frames without a new camera frame for this long report the camera stale.
+inline constexpr int64_t kCameraStaleUs = 2000000;
+// CPU reference composition into NV12, in the video's BT.709 limited range.
+// Camera below keyboard; nearest-texel mapping; alpha per bitmap.
+OverlayCompositionResult compose_overlay_nv12(AVFrame& frame, const OverlayFrame& layers);
+// Burned-overlay diagnostics. The recorder session fills the source and
+// render states; the capture fills the composition path and GPU figures.
+struct OverlayHealth {
+    bool enabled = false, camera_requested = false, camera_ready = false, camera_stale = false;
+    bool keyboard_requested = false, keyboard_ready = false;
+    uint64_t settings_revision = 0, camera_generation = 0, keyboard_revision = 0;
+    uint64_t camera_frames = 0, keyboard_frames = 0, skipped_frames = 0; // Video frames.
+    uint64_t gpu_uploads = 0, gpu_upload_failures = 0, cpu_roundtrips = 0;
+    int64_t last_rendered_us = 0;
+    // disabled, source-not-ready, ready, rendered, stale or failed.
+    std::string state = "disabled";
+    // off, gpu, cpu (readback encoders) or cpu-fallback (zero-copy without the GPU compositor).
+    std::string path = "off";
+    std::string last_skip_reason, failure, gpu_failure;
+    double gpu_p50_ms = 0, gpu_p95_ms = 0; // GPU time of the overlay draw.
+};
 class OverlayHistory {
 public:
     explicit OverlayHistory(std::shared_ptr<InputHistory> input);
@@ -113,11 +159,20 @@ public:
     void retention(int64_t duration_us);
     bool apply(OverlaySettingsNative settings);
     bool set_artwork(std::shared_ptr<const OverlayBitmap> bitmap);
-    uint64_t replace_camera();
+    // A new camera generation; frames of earlier ones are never shown again.
+    // A reconnect keeps the failure that ended the previous generation until
+    // the new one delivers a frame.
+    uint64_t replace_camera(bool reconnect = false);
     bool camera_frame(uint64_t generation, std::shared_ptr<const OverlayBitmap> frame);
     void camera_segment(CameraSegmentNative segment);
     void complete_camera(uint64_t generation, int64_t end_us);
     std::shared_ptr<const OverlayBitmap> preview() const;
+    // The layers the frame composed at `now_us` shows.
+    OverlayFrame frame(int64_t now_us) const;
+    // The camera of `generation` ended; its last frame is stale from here.
+    void camera_stopped(uint64_t generation, std::string failure);
+    // The current camera could not start.
+    void camera_failed(std::string failure);
     OverlaySnapshot snapshot(int64_t start_us, int64_t end_us) const;
     OverlayCompositionResult compose(AVFrame& frame) const;
     OverlayCompositionResult compose_bgra(uint8_t* pixels, size_t bytes, int width, int height, int stride) const;
@@ -129,6 +184,8 @@ private:
     std::vector<OverlaySettingsNative> settings_;
     std::vector<std::shared_ptr<const OverlayBitmap>> artwork_;
     std::shared_ptr<const OverlayBitmap> camera_frame_;
+    bool camera_stopped_ = false;
+    std::string camera_failure_;
     std::vector<CameraSegmentNative> camera_segments_;
     int64_t retention_us_ = 1200000000;
 };

@@ -33,6 +33,13 @@ struct RecorderSession::State {
     std::optional<RecordingDetectorSnapshot> detector_regions;
     std::map<int64_t, OverlayCompositionResult> compositions;
     std::deque<std::pair<int64_t, OverlayCompositionResult>> composed_packets;
+    // What burned overlay composition did, frame by frame.
+    struct OverlayTally {
+        uint64_t camera_frames = 0, keyboard_frames = 0, skipped_frames = 0;
+        int64_t last_rendered_us = 0, last_composed_us = 0;
+        bool last_complete = false; // The last frame drew every requested layer.
+        std::string last_skip_reason;
+    } overlay_tally;
     std::shared_ptr<FullSessionWriter> session;
     std::filesystem::path active_session_path;
     std::vector<RecorderClosedSession> completed_sessions;
@@ -50,6 +57,37 @@ struct RecorderSession::State {
         static auto* retained = new std::vector<std::shared_ptr<State>>;
         std::lock_guard lock(retained_mutex);
         retained->push_back(state);
+    }
+    // Why a requested layer was not drawn on a frame.
+    static std::string skip_reason(const OverlayFrame& layers, OverlayCompositionResult drawn) {
+        if (layers.camera.requested && !drawn.camera) {
+            if (!layers.camera.bitmap) return layers.camera_failure.empty() ? "Camera has no frame yet." : "Camera unavailable: " + layers.camera_failure;
+            return "Camera frame could not be drawn.";
+        }
+        if (layers.keyboard.requested && !drawn.keyboard)
+            return layers.keyboard.bitmap ? "Keyboard artwork could not be drawn." : "Keyboard artwork is not ready.";
+        return {};
+    }
+    void composed(int64_t pts, const OverlayFrame& layers, OverlayCompositionResult drawn) {
+        std::lock_guard lock(mutex);
+        compositions[pts] = drawn;
+        // Frames dropped before encoding never reach a packet.
+        while (compositions.begin()->first < pts - 10000000) compositions.erase(compositions.begin());
+        if (!layers.any_requested()) return;
+        auto& tally = overlay_tally;
+        tally.camera_frames += drawn.camera; tally.keyboard_frames += drawn.keyboard;
+        tally.last_composed_us = pts;
+        auto reason = skip_reason(layers, drawn);
+        tally.last_complete = reason.empty();
+        if (!reason.empty()) { ++tally.skipped_frames; tally.last_skip_reason = std::move(reason); }
+        if (drawn.camera || drawn.keyboard) tally.last_rendered_us = pts;
+    }
+    void start_camera(const OverlaySettingsNative& settings) {
+        try {
+            if (!camera->start(config.ffmpeg, config.work_directory / L"camera", settings.camera_moniker, !settings.burned))
+                overlays->camera_failed("Camera did not stop in time to restart.");
+        } catch (const std::exception& error) { overlays->camera_failed(std::string("Camera could not start: ") + error.what()); }
+        catch (...) { overlays->camera_failed("Camera could not start."); }
     }
     int64_t now() const {
         LARGE_INTEGER tick{}; QueryPerformanceCounter(&tick);
@@ -143,11 +181,9 @@ RecorderSession::RecorderSession(RecorderSessionConfig config, std::unique_ptr<R
         }
     };
     callbacks.failure = [weak](const std::string&) { if (auto state = weak.lock()) state->notify(1); };
-    callbacks.compose_nv12 = [weak](AVFrame& frame) {
-        if (auto p = weak.lock()) {
-            const auto result = p->overlays->compose(frame);
-            std::lock_guard lock(p->mutex); p->compositions[frame.pts] = result;
-        }
+    callbacks.overlay_frame = [weak](int64_t pts) { auto p = weak.lock(); return p ? p->overlays->frame(pts) : OverlayFrame{}; };
+    callbacks.overlay_composed = [weak](int64_t pts, const OverlayFrame& layers, OverlayCompositionResult drawn) {
+        if (auto p = weak.lock()) p->composed(pts, layers, drawn);
     };
     callbacks.overlay_enabled = [weak] { auto p = weak.lock(); return p && p->burned.load(); };
     if (s->config.audio_graph) s->graph = std::make_unique<AudioGraph>(*s->config.audio_graph,
@@ -167,9 +203,8 @@ void RecorderSession::start() {
     s->started = true;
     if (s->graph) s->graph->start();
     if (s->config.capture_input) s->raw_input->start();
-    if (!s->config.overlays.camera_moniker.empty())
-        s->camera->start(s->config.ffmpeg, s->config.work_directory / L"camera",
-            s->config.overlays.camera_moniker, !s->config.overlays.burned);
+    // A camera that cannot start is reported, never a failed session.
+    if (!s->config.overlays.camera_moniker.empty()) s->start_camera(s->config.overlays);
     std::weak_ptr<State> weak = s;
     for (auto source : s->config.audio_sources) {
         source.qpc_anchor = s->config.capture.qpc_anchor;
@@ -222,6 +257,25 @@ void RecorderSession::pause(bool value) { state_->capture->pause(value); }
 void RecorderSession::frame_rate(int value) { state_->capture->request_frame_rate(value); }
 RecordingCaptureHealth RecorderSession::health() const {
     auto result = state_->capture->health();
+    const auto current = state_->now();
+    const auto layers = state_->overlays->frame(current);
+    auto& overlay = result.overlay;
+    overlay.enabled = layers.any_requested();
+    overlay.camera_requested = layers.burned && layers.camera.requested; overlay.camera_ready = overlay.camera_requested && layers.camera.bitmap;
+    overlay.camera_stale = layers.camera_stale;
+    overlay.keyboard_requested = layers.burned && layers.keyboard.requested; overlay.keyboard_ready = overlay.keyboard_requested && layers.keyboard.bitmap;
+    overlay.settings_revision = layers.settings_revision; overlay.camera_generation = layers.camera_generation;
+    overlay.keyboard_revision = layers.keyboard_revision;
+    overlay.failure = overlay.camera_requested ? layers.camera_failure : std::string{};
+    State::OverlayTally tally; { std::lock_guard lock(state_->mutex); tally = state_->overlay_tally; }
+    overlay.camera_frames = tally.camera_frames; overlay.keyboard_frames = tally.keyboard_frames;
+    overlay.skipped_frames = tally.skipped_frames; overlay.last_skip_reason = tally.last_skip_reason;
+    overlay.last_rendered_us = tally.last_rendered_us;
+    const bool ready = (!overlay.camera_requested || overlay.camera_ready) && (!overlay.keyboard_requested || overlay.keyboard_ready);
+    overlay.state = !overlay.enabled ? "disabled" :
+        overlay.camera_requested && !overlay.camera_ready && !layers.camera_failure.empty() ? "failed" :
+        !ready ? "source-not-ready" : layers.camera_stale ? "stale" :
+        tally.last_complete && current - tally.last_composed_us < 1000000 ? "rendered" : "ready";
     if (state_->restart_required) {
         result.restart_required = true;
         if (result.error.empty()) result.error = "Native recorder shutdown requires a worker restart; resources retained.";
@@ -316,9 +370,8 @@ void RecorderSession::overlay_settings(OverlaySettingsNative settings) {
     s->config.overlays = settings;
     s->notify(32);
     if (camera_changed && s->started && !s->stopped) {
-    if (!s->camera->stop()) { s->restart_required = true; State::retain(s); s->notify(1); return; }
-        if (!settings.camera_moniker.empty()) s->camera->start(s->config.ffmpeg,
-            s->config.work_directory / L"camera", settings.camera_moniker, !settings.burned);
+        if (!s->camera->stop()) { s->restart_required = true; State::retain(s); s->notify(1); return; }
+        if (!settings.camera_moniker.empty()) s->start_camera(settings);
     }
 }
 bool RecorderSession::artwork(std::shared_ptr<const OverlayBitmap> value) { return state_->overlays->set_artwork(std::move(value)); }

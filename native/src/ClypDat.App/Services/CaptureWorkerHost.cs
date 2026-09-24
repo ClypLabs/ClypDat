@@ -249,6 +249,18 @@ internal static class CaptureWorkerHost
         }
     }
 
+    // An attach carries the app's latest overlay settings, and they apply to
+    // a buffer that is already recording as well: an app relaunched onto a
+    // running worker must not leave it on the previous instance's overlays.
+    // Settings without a revision mean the app has sent none yet; the
+    // worker keeps its own.
+    internal static OverlayCaptureSettings ApplyAttachOverlays(OverlayCaptureSettings current, OverlayCaptureSettings? requested, object? buffer)
+    {
+        if (requested is not { Revision: > 0 }) return current;
+        if (buffer is IVideoOverlaySettingsReceiver receiver) receiver.SetVideoOverlaySettings(requested);
+        return requested;
+    }
+
     private static async Task AttachAsync(Stream client, CaptureWorkerEnvelope message, CancellationToken cancellationToken)
     {
         await CaptureLifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -262,7 +274,7 @@ internal static class CaptureWorkerHost
                 var config = request.Configuration ?? throw new InvalidDataException("Invalid replay configuration.");
                 // Apply before creating/starting a recorder. A reconnect therefore
                 // cannot create a camera-less interval while its UI restores state.
-                if (request.Overlays is not null) _videoOverlays = request.Overlays;
+                _videoOverlays = ApplyAttachOverlays(_videoOverlays, request.Overlays, _buffer);
                 var configChanged = !string.Equals(ConfigIdentity(_config), ConfigIdentity(config), StringComparison.Ordinal);
                 if (_buffer is not null && configChanged && !_buffer.IsRecording)
                 {
