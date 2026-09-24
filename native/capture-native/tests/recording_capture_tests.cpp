@@ -14,6 +14,8 @@
 #include <DirectXPackedVector.h>
 extern "C" {
 #include <libavformat/avformat.h>
+#include <libavutil/hwcontext.h>
+#include <libavutil/hwcontext_d3d11va.h>
 }
 
 #define CHECK(x) do { if (!(x)) throw std::runtime_error("Capture assertion: " #x); } while (false)
@@ -392,7 +394,7 @@ void recording_encoder_plans(){
     const auto unknown=plan_recording_encoder(config,zero_copy,0,false);CHECK(unknown);
     CHECK(unknown->zero_copy_status==ZeroCopyStatus::Unverified&&!unknown->confirmed()&&unknown->pool_capacity==9);
     // Candidates without a policy consumer keep their legacy runtime path.
-    for(const auto name:{"h264_amf","av1_amf","h264_qsv","av1_qsv","libx264"})CHECK(!plan_recording_encoder(config,{name,false,false},kAdapterVendorNvidia,false));
+    for(const auto name:{"h264_qsv","av1_qsv","libx264"})CHECK(!plan_recording_encoder(config,{name,false,false},kAdapterVendorNvidia,false));
     const auto av1=plan_recording_encoder(config,{"av1_nvenc",false,true},kAdapterVendorNvidia,false);
     CHECK(av1&&av1->requested_codec==EncoderCodec::AV1&&av1->effective_codec==EncoderCodec::AV1&&av1->codec_name=="av1_nvenc");
     // Delay override: configured value first, environment second, one final delay.
@@ -410,6 +412,47 @@ void recording_encoder_plans(){
     for(int fps:{30,60,90,120}){config.fps=fps;const auto rate=plan_recording_encoder(config,zero_copy,kAdapterVendorNvidia,false);
         CHECK(rate&&rate->pool_capacity==pools[index++]&&rate->pool_capacity<=kNvencRegisteredResources);check_encoder_plan(*rate);}
     CHECK(d3d11_adapter_vendor(nullptr)==0);
+}
+
+// AMF plans come from the recording configuration and capture adapter; the
+// NVENC plan is untouched by them.
+void amf_recording_plans(){
+    _putenv_s("CLYPDAT_NVENC_DELAY","");
+    RecordingCaptureConfig config;config.width=2560;config.height=1440;config.bitrate_mbps=25;
+    const RecordingEncoderCandidate zero_copy{"h264_amf",false,true},readback{"h264_amf",false,false};
+    const int depths[]={3,4,6,8};int index=0;
+    for(int fps:{30,60,90,120}){
+        config.fps=fps;const int depth=depths[index++];
+        const auto p=plan_recording_encoder(config,zero_copy,kAdapterVendorAmd,false);CHECK(p);
+        CHECK(p->vendor==EncoderVendor::Amd&&p->codec_name=="h264_amf"&&p->input==EncoderInput::D3D11Frames);
+        CHECK(p->zero_copy&&p->zero_copy_status==ZeroCopyStatus::Confirmed&&p->frames_from_encoder_ctx&&!p->needs_cpu_staging);
+        CHECK(p->low_delay_flag&&p->output_delay_frames==0&&p->encoder_slots==depth&&p->max_in_flight==depth&&p->pool_capacity==depth+2);
+        CHECK((p->options==std::vector<std::pair<std::string,std::string>>{{"async_depth",std::to_string(depth)},{"bf","0"},{"preanalysis","0"}}));
+        check_encoder_plan(*p);
+    }
+    config.fps=90;
+    CHECK(plan_recording_encoder(config,zero_copy,kAdapterVendorAmd,true)->pool_capacity==9);
+    // Foreign adapter: zero-copy is infeasible; the readback plan still sizes AMF.
+    bool skipped=false;try{plan_recording_encoder(config,zero_copy,kAdapterVendorNvidia,false);}catch(const EncoderPlanInfeasible&){skipped=true;}CHECK(skipped);
+    skipped=false;try{plan_recording_encoder(config,zero_copy,kAdapterVendorIntel,false);}catch(const EncoderPlanInfeasible&){skipped=true;}CHECK(skipped);
+    const auto copy=plan_recording_encoder(config,readback,kAdapterVendorNvidia,false);CHECK(copy);
+    CHECK(!copy->zero_copy&&copy->zero_copy_status==ZeroCopyStatus::NotUsed&&copy->needs_cpu_staging&&!copy->frames_from_encoder_ctx);
+    CHECK(copy->input==EncoderInput::SystemFrames&&copy->pool_capacity==2&&copy->max_in_flight==6&&copy->low_delay_flag);
+    // Unknown adapter: probe allowed, never confirmed by being unknown.
+    const auto unknown=plan_recording_encoder(config,zero_copy,0,false);CHECK(unknown);
+    CHECK(unknown->zero_copy_status==ZeroCopyStatus::Unverified&&!unknown->confirmed()&&unknown->pool_capacity==8);
+    const auto av1=plan_recording_encoder(config,{"av1_amf",false,true},kAdapterVendorAmd,false);
+    CHECK(av1&&av1->codec_name=="av1_amf"&&av1->requested_codec==EncoderCodec::AV1&&av1->effective_codec==EncoderCodec::AV1);
+    // NVENC resource values are unchanged.
+    const auto nvenc=plan_recording_encoder(config,{"h264_nvenc",false,true},kAdapterVendorNvidia,false);
+    CHECK(nvenc->encoder_slots==8&&nvenc->max_in_flight==7&&nvenc->pool_capacity==9&&!nvenc->low_delay_flag&&!nvenc->frames_from_encoder_ctx);
+    // Candidate order: each vendor tries zero-copy before readback.
+    auto names=[](const std::vector<RecordingEncoderCandidate>& list){std::vector<std::string> result;
+        for(const auto& c:list)result.push_back(c.name+(c.d3d11?"+d3d11":"")+(c.low_power?"+lp":""));return result;};
+    CHECK((names(recording_encoder_candidates(false,false))==std::vector<std::string>{"h264_nvenc+d3d11","h264_nvenc","h264_amf+d3d11","h264_amf","h264_qsv+lp","h264_qsv","libx264"}));
+    CHECK((names(recording_encoder_candidates(false,true))==std::vector<std::string>{"av1_nvenc+d3d11","h264_nvenc+d3d11","av1_nvenc","h264_nvenc",
+        "av1_amf+d3d11","av1_amf","av1_qsv+lp","av1_qsv","h264_amf+d3d11","h264_amf","h264_qsv+lp","h264_qsv","libx264"}));
+    CHECK((names(recording_encoder_candidates(true,false))==std::vector<std::string>{"libx264"}));
 }
 struct PlannedRun{RecordingCaptureHealth health;std::vector<size_t> attempted;std::vector<VideoEncoderConfig> opened;uint64_t packets=0;};
 PlannedRun planned_run(std::optional<uint32_t> adapter,std::vector<RecordingEncoderCandidate> candidates){
@@ -549,6 +592,102 @@ void stuck_encoder_without_fallback(){
     const auto health=capture.health();
     CHECK(health.error.find("No compatible recording encoder available")!=std::string::npos);
     capture.stop();
+}
+
+// AMF cannot open on this NVIDIA machine. An NVENC context stands in for the
+// encoder while RecordingCapture runs the real AMF plan: options, low-delay
+// flag, frame-context ownership, pool and in-flight limits, backpressure.
+std::unique_ptr<VideoEncoder> amf_stand_in(VideoEncoderConfig value,CodecCalls calls={}){
+    const bool hardware=value.hardware_frames!=nullptr;
+    value.name=hardware?"h264_nvenc":"libx264";value.resource_options.clear();value.codec_flags=0;
+    return std::make_unique<VideoEncoder>(value,std::move(calls));
+}
+struct AmfRun{RecordingCaptureHealth health;std::vector<size_t> attempted;std::vector<VideoEncoderConfig> opened;};
+AmfRun amf_run(std::optional<uint32_t> adapter){
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;
+    RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_amf",false,true},{"h264_amf",false,false}};dependencies.adapter_vendor=adapter;
+    AmfRun run;std::atomic<uint64_t> packets{0};
+    dependencies.open_encoder=[&](const VideoEncoderConfig& value,size_t candidate){run.attempted.push_back(candidate);run.opened.push_back(value);return amf_stand_in(value);};
+    RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){++packets;};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+    if(!wait_health(capture,[&](const auto&){return packets.load()>=60;},5s))throw std::runtime_error("AMF plan run stalled: "+pressure_state(capture.health()));
+    CHECK(capture.stop());run.health=capture.health();if(!run.health.error.empty())throw std::runtime_error(run.health.error);
+    return run;
+}
+void amf_zero_copy_plan(){
+    const auto confirmed=amf_run(kAdapterVendorAmd);
+    CHECK(confirmed.attempted==std::vector<size_t>({0}));
+    const auto& opened=confirmed.opened.front();
+    CHECK(opened.name=="h264_amf"&&opened.hardware_frames&&opened.require_encoder_frames&&(opened.codec_flags&AV_CODEC_FLAG_LOW_DELAY));
+    CHECK((opened.resource_options==std::vector<std::pair<std::string,std::string>>{{"async_depth","4"},{"bf","0"},{"preanalysis","0"}}));
+    const auto& h=confirmed.health;
+    CHECK(h.encoder_planned&&h.encoder_vendor=="amd"&&h.zero_copy_status=="confirmed"&&h.hardware_input&&h.processing_path=="d3d11-video-processor");
+    CHECK(h.encoder_slots==4&&h.max_in_flight==4&&h.surface_capacity==6&&h.pool_capacity==6);
+    CHECK(h.surfaces_allocated<=6&&h.surfaces_in_use_peak<=4&&h.gpu_conversion_fallbacks==0);
+    // Unknown adapter: the real open is the probe; the plan stays unverified.
+    const auto unknown=amf_run(0u);
+    CHECK(unknown.attempted==std::vector<size_t>({0})&&unknown.health.zero_copy_status=="unverified"&&unknown.health.zero_copy_probe_passed);
+    // Foreign adapter: zero-copy is skipped before opening; readback AMF records.
+    const auto foreign=amf_run(kAdapterVendorNvidia);
+    CHECK(foreign.attempted==std::vector<size_t>({1}));
+    const auto& readback=foreign.opened.front();
+    CHECK(readback.name=="h264_amf"&&!readback.hardware_frames&&!readback.require_encoder_frames&&(readback.codec_flags&AV_CODEC_FLAG_LOW_DELAY));
+    CHECK((readback.resource_options==std::vector<std::pair<std::string,std::string>>{{"async_depth","4"},{"bf","0"},{"preanalysis","0"}}));
+    CHECK(!foreign.health.hardware_input&&foreign.health.zero_copy_status=="not-used"&&foreign.health.pool_capacity==2&&foreign.health.surface_capacity==0);
+    CHECK(foreign.health.processing_path=="d3d11-video-processor-readback"&&foreign.health.max_in_flight==4);
+}
+// A frame from any other frames context is rejected before FFmpeg sees it,
+// instead of reaching amfenc's av_assert0. The check is opt-in.
+void amf_frame_context_ownership(){
+    AVBufferRef* raw=nullptr;CHECK(av_hwdevice_ctx_create(&raw,AV_HWDEVICE_TYPE_D3D11VA,nullptr,nullptr,0)>=0);
+    struct Unref{AVBufferRef* p;~Unref(){av_buffer_unref(&p);}} device{raw};
+    auto frames=[&]{AVBufferRef* ref=av_hwframe_ctx_alloc(device.p);CHECK(ref);auto* ctx=reinterpret_cast<AVHWFramesContext*>(ref->data);
+        ctx->format=AV_PIX_FMT_D3D11;ctx->sw_format=AV_PIX_FMT_NV12;ctx->width=256;ctx->height=144;
+        static_cast<AVD3D11VAFramesContext*>(ctx->hwctx)->BindFlags=D3D11_BIND_RENDER_TARGET;CHECK(av_hwframe_ctx_init(ref)>=0);return ref;};
+    Unref owned{frames()},foreign{frames()};
+    auto frame_from=[](AVBufferRef* ctx){AVFrame* frame=av_frame_alloc();CHECK(frame&&av_hwframe_get_buffer(ctx,frame,0)>=0);return frame;};
+    int sends=0;CodecCalls calls;calls.send=[&](AVCodecContext*,const AVFrame* frame){if(frame)++sends;return 0;};
+    calls.receive=[](AVCodecContext*,AVPacket*){return AVERROR(EAGAIN);};
+    for(const bool require:{true,false}){
+        VideoEncoderConfig config;config.width=256;config.height=144;config.fps=60;config.bitrate_mbps=5;config.name="h264_nvenc";
+        config.hardware_frames=owned.p;config.require_encoder_frames=require;sends=0;
+        VideoEncoder encoder(config,calls);AVFrame* wrong=frame_from(foreign.p);AVFrame* right=frame_from(owned.p);
+        bool rejected=false;try{encoder.try_submit(*wrong);}catch(const std::invalid_argument&){rejected=true;}
+        CHECK(rejected==require&&sends==(require?0:1));
+        CHECK(encoder.try_submit(*right).status==SubmitStatus::Accepted&&sends==(require?1:2));
+        av_frame_free(&wrong);av_frame_free(&right);
+    }
+}
+// Bounded backpressure uses the AMF plan's budgets: in-flight cap 4 and pool
+// 6 at 60 fps, then stuck-encoder replacement by the next AMF candidate.
+void amf_backpressure(){
+    {
+        auto probe=std::make_shared<PressureProbe>();probe->hold=true;
+        RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;
+        RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_amf",false,true}};dependencies.adapter_vendor=kAdapterVendorAmd;
+        dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t){return amf_stand_in(value,probe_calls(probe));};
+        std::atomic<uint64_t> packets{0};RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){++packets;};
+        RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+        if(!wait_health(capture,[](const auto& h){return h.pool_pressure_drops>=3;},3s))throw std::runtime_error("No AMF pool backpressure: "+pressure_state(capture.health()));
+        const auto pressured=capture.health();
+        if(pressured.gpu_conversion_fallbacks||pressured.restart_required||pressured.surfaces_allocated>6||pressured.surface_capacity!=6)
+            throw std::runtime_error("AMF pool pressure misclassified: "+pressure_state(pressured));
+        probe->release();const auto resumed=packets.load();
+        if(!wait_health(capture,[&](const auto&){return packets.load()>=resumed+30;},3s))throw std::runtime_error("AMF pool pressure did not clear: "+pressure_state(capture.health()));
+        CHECK(capture.stop());CHECK(capture.health().error.empty()&&capture.health().encoder_stall_recoveries==0);
+    }
+    auto probe=std::make_shared<PressureProbe>();probe->stuck=true;
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;
+    RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_amf",false,true},{"h264_amf",false,true}};dependencies.adapter_vendor=kAdapterVendorAmd;
+    dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t candidate){return candidate==0?amf_stand_in(value,probe_calls(probe)):amf_stand_in(value);};
+    std::atomic<uint64_t> second{0};RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto generation,Packet,int64_t,bool){if(generation->id==2)++second;};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+    CHECK(wait_health(capture,[](const auto& h){return h.retained_pressure_drops>=5;},3s));
+    const auto pressured=capture.health();
+    if(pressured.restart_required||pressured.submitted!=4||pressured.max_in_flight!=4)throw std::runtime_error("AMF retained pressure: "+pressure_state(pressured));
+    if(!wait_health(capture,[&](const auto&){return second.load()>=30;},6s))throw std::runtime_error("Stuck AMF encoder not replaced: "+pressure_state(capture.health()));
+    CHECK(capture.stop());const auto health=capture.health();
+    if(!health.error.empty()||health.encoder_stall_recoveries!=1||health.generation!=2||health.encoder_vendor!="amd")throw std::runtime_error("AMF recovery: "+pressure_state(health));
 }
 // WGC-like delivery: the game finishes frames at game_fps (jittered); each
 // display refresh with a new game frame yields one frame stamped at that
@@ -711,14 +850,14 @@ int main(int argc,char**argv) {
     RecordingRecoveryTimeline recovery;recovery.observe(true,false,4000000);int64_t safe=0;CHECK(!recovery.safe_start(0,60000000,safe));
     recovery.observe(false,false,11000000);CHECK(!recovery.safe_start(0,60000000,safe));recovery.observe(false,false,12000000);CHECK(recovery.safe_start(0,60000000,safe));CHECK(safe==12000000);
     CHECK(!capture_transport_shortfall(true,true,90,54));
-    recording_encoder_plans();
+    recording_encoder_plans();amf_recording_plans();
     frame_selection_policy();fresh_frame_delivery();
     const bool gpu=argc>1&&std::string_view(argv[1])=="--gpu";
     for(int fps:{30,60,90,120})for(bool variable:{false,true}){
         roundtrip(fps,variable);
         if(gpu){roundtrip(fps,variable,true,false);roundtrip(fps,variable,true,true);}
     }
-    blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();planned_adapter_selection();pool_backpressure();busy_backpressure();stuck_encoder_recovery();stuck_encoder_without_fallback();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
+    blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();planned_adapter_selection();pool_backpressure();busy_backpressure();stuck_encoder_recovery();stuck_encoder_without_fallback();amf_zero_copy_plan();amf_frame_context_ownership();amf_backpressure();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

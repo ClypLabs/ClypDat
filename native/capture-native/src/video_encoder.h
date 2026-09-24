@@ -32,6 +32,10 @@ struct VideoEncoderConfig {
     // EncoderPlan resource options (surfaces, delay, async_depth, ...), applied
     // after the vendor quality defaults. Empty leaves FFmpeg's own defaults.
     std::vector<std::pair<std::string, std::string>> resource_options;
+    int codec_flags = 0; // OR'd into AVCodecContext::flags (AV_CODEC_FLAG_LOW_DELAY for AMF).
+    // Hardware frames must come from hardware_frames itself. AMF asserts this
+    // inside FFmpeg; checking first turns an abort into an exception.
+    bool require_encoder_frames = false;
 };
 
 enum class SubmitStatus { Accepted, Busy };
@@ -58,6 +62,7 @@ private:
     CodecContext context_;
     CodecCalls calls_;
     std::vector<std::string> unsupported_options_;
+    bool require_encoder_frames_ = false;
     bool finished_ = false;
     bool failed_ = false;
 };

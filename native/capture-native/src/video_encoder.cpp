@@ -28,7 +28,7 @@ bool runtime_versions_match() {
         swscale_version() == LIBSWSCALE_VERSION_INT;
 }
 
-VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) : calls_(std::move(calls)) {
+VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) : calls_(std::move(calls)), require_encoder_frames_(config.require_encoder_frames) {
     if (!runtime_versions_match()) throw std::runtime_error("Bundled FFmpeg runtime does not match the recording SDK");
     if (config.width <= 0 || config.height <= 0 || (config.width & 1) || (config.height & 1) ||
         config.fps < 30 || config.fps > 120 || !calls_.send || !calls_.receive)
@@ -56,7 +56,7 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
     context.rc_max_rate = context.bit_rate;
     context.gop_size = config.fps;
     context.max_b_frames = 0;
-    context.flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    context.flags |= AV_CODEC_FLAG_GLOBAL_HEADER | config.codec_flags;
     if (config.hardware_frames) {
         const auto* frames = reinterpret_cast<const AVHWFramesContext*>(config.hardware_frames->data);
         if (!frames || frames->format != AV_PIX_FMT_D3D11 || frames->sw_format != AV_PIX_FMT_NV12)
@@ -129,6 +129,9 @@ SubmitResult VideoEncoder::try_submit(const AVFrame& frame) {
     if (finished_ || failed_) throw std::logic_error("Recording encoder is closed");
     if (frame.width != context_->width || frame.height != context_->height || frame.format != context_->pix_fmt)
         throw std::invalid_argument("Recording frame does not match the encoder");
+    if (require_encoder_frames_ && context_->hw_frames_ctx &&
+        (!frame.hw_frames_ctx || frame.hw_frames_ctx->data != context_->hw_frames_ctx->data))
+        throw std::invalid_argument("Recording frame does not come from the encoder's frames context");
     try {
         SubmitResult result;
         int code = calls_.send(context_.get(), &frame);

@@ -24,6 +24,24 @@ extern "C" {
 namespace clypdat {
 int capture_queue_capacity(int fps) { return std::clamp((std::clamp(fps, 30, 120) + 7) / 8, 4, 15); }
 int legacy_surface_capacity(int fps) { return std::clamp((fps + 1) / 2, 16, 60) + capture_queue_capacity(fps) + 5; }
+std::vector<RecordingEncoderCandidate> recording_encoder_candidates(bool cpu, bool av1) {
+    if (cpu) return {{"libx264"}};
+    std::vector<RecordingEncoderCandidate> result;
+    // Cross-codec NVENC precedence is intentional and matches production.
+    if (av1) result.push_back({"av1_nvenc", false, true});
+    result.push_back({"h264_nvenc", false, true});
+    if (av1) result.push_back({"av1_nvenc"});
+    result.push_back({"h264_nvenc"});
+    // AMF zero-copy is planned only on an AMD capture adapter; elsewhere the
+    // plan is infeasible and the readback AMF candidate follows.
+    if (av1) {
+        result.push_back({"av1_amf", false, true}); result.push_back({"av1_amf"});
+        result.push_back({"av1_qsv", true}); result.push_back({"av1_qsv"});
+    }
+    result.push_back({"h264_amf", false, true}); result.push_back({"h264_amf"});
+    result.push_back({"h264_qsv", true}); result.push_back({"h264_qsv"});
+    result.push_back({"libx264"}); return result;
+}
 uint32_t d3d11_adapter_vendor(ID3D11Device* device) {
     if (!device) return 0;
     Microsoft::WRL::ComPtr<IDXGIDevice> dxgi; Microsoft::WRL::ComPtr<IDXGIAdapter> adapter; DXGI_ADAPTER_DESC desc{};
@@ -45,7 +63,9 @@ EncoderPolicy recording_encoder_policy(const RecordingCaptureConfig& config) {
 }
 std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& config,
     const RecordingEncoderCandidate& candidate, uint32_t adapter_vendor, bool overlay_stage) {
-    if (!candidate.name.ends_with("_nvenc")) return std::nullopt;
+    // QSV and libx264 keep their legacy resource sizing for now.
+    const bool nvenc = candidate.name.ends_with("_nvenc"), amf = candidate.name.ends_with("_amf");
+    if (!nvenc && !amf) return std::nullopt;
     EncoderRequest request;
     request.codec = candidate.name.starts_with("av1") ? EncoderCodec::AV1 : EncoderCodec::H264;
     request.pixel_format = EncoderPixelFormat::NV12;
@@ -58,7 +78,7 @@ std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& 
     request.adapter_vendor = adapter_vendor;
     request.overlay_stage = overlay_stage;
     request.capture_buffers = 3; request.pacing_queue = capture_queue_capacity(config.fps);
-    return encoder_backend(EncoderVendor::Nvidia).plan(request, candidate.d3d11, recording_encoder_policy(config));
+    return encoder_backend(nvenc ? EncoderVendor::Nvidia : EncoderVendor::Amd).plan(request, candidate.d3d11, recording_encoder_policy(config));
 }
 int64_t capture_final_hold(bool variable, int64_t previous, int64_t hold) {
     const auto cadence = std::max<int64_t>(1, previous);
@@ -152,20 +172,6 @@ void check(int result, const char* what) {
     throw std::runtime_error(std::string(what) + ": " + text);
 }
 using Candidate=RecordingEncoderCandidate;
-std::vector<Candidate> candidates(bool cpu, bool av1) {
-    if (cpu) return {{"libx264"}};
-    std::vector<Candidate> result;
-    // Cross-codec NVENC precedence is intentional and matches production.
-    if (av1) result.push_back({"av1_nvenc", false, true});
-    result.push_back({"h264_nvenc", false, true});
-    if (av1) result.push_back({"av1_nvenc"});
-    result.push_back({"h264_nvenc"});
-    if (av1) {
-        result.push_back({"av1_amf"}); result.push_back({"av1_qsv", true}); result.push_back({"av1_qsv"});
-    }
-    result.push_back({"h264_amf"}); result.push_back({"h264_qsv", true}); result.push_back({"h264_qsv"});
-    result.push_back({"libx264"}); return result;
-}
 bool valid_pixels(const CapturePixels& p) {
     return p.width > 0 && p.height > 0 && p.width <= 16384 && p.height <= 16384 &&
         p.stride >= int64_t(p.width) * 4 && (p.texture || uint64_t(p.stride) * p.height <= p.bgra.size());
@@ -377,7 +383,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         if (!config.qpc_anchor) config.qpc_anchor = counter.QuadPart;
         if (config.qpc_frequency <= 0) throw std::invalid_argument("Invalid recording clock frequency");
         fps = config.fps; status.active_fps = config.fps; status.queue_capacity = capture_queue_capacity(config.fps);
-        encoder_candidates = dependencies.candidates.empty()?candidates(config.cpu_encoder, config.av1):dependencies.candidates;
+        encoder_candidates = dependencies.candidates.empty()?recording_encoder_candidates(config.cpu_encoder, config.av1):dependencies.candidates;
         failed_candidates.resize(encoder_candidates.size());
     }
     ~State() { sws_freeContext(scaler);sws_freeContext(detector_scaler); }
@@ -447,7 +453,11 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 const int capacity = plan ? plan->pool_capacity : legacy_surface_capacity(config.fps);
                 VideoEncoderConfig ec; ec.width = config.width; ec.height = config.height; ec.fps = fps;
                 ec.bitrate_mbps = config.bitrate_mbps; ec.name = candidate.name; ec.low_power = candidate.low_power;
-                if (plan) ec.resource_options = plan->options;
+                if (plan) {
+                    ec.resource_options = plan->options;
+                    if (plan->low_delay_flag) ec.codec_flags |= AV_CODEC_FLAG_LOW_DELAY;
+                    ec.require_encoder_frames = plan->frames_from_encoder_ctx;
+                }
                 if (candidate.d3d11) {
                     // A recovering encoder may still own surfaces of the current pool.
                     if (gpu && !recovering && gpu->capacity() != capacity) gpu.reset();

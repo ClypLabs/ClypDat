@@ -159,6 +159,9 @@ struct RecordingCaptureDependencies {
 };
 // Resource sizing used by candidates that do not consume an EncoderPlan yet.
 int legacy_surface_capacity(int fps);
+// Production candidate order: NVENC, then AMF, then QSV, then libx264. Each
+// hardware vendor tries D3D11 zero-copy before its readback form.
+std::vector<RecordingEncoderCandidate> recording_encoder_candidates(bool cpu, bool av1);
 // DXGI VendorId of the device's adapter; 0 when it cannot be read.
 uint32_t d3d11_adapter_vendor(ID3D11Device* device);
 EncoderPolicy recording_encoder_policy(const RecordingCaptureConfig& config);
