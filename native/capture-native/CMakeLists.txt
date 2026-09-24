@@ -21,6 +21,7 @@ endforeach()
 
 add_library(RecorderCore STATIC
     src/video_encoder.cpp src/video_encoder.h
+    src/encoder_backend.cpp src/encoder_backend.h
     src/recording_capture.cpp src/recording_capture.h
     src/recording_windows_source.cpp
     src/recording_audio.cpp src/recording_audio.h
@@ -103,6 +104,12 @@ target_link_libraries(ClypDat.Capture.Native.EncoderTests PRIVATE RecorderCore)
 set_target_properties(ClypDat.Capture.Native.EncoderTests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_test(NAME ClypDat.Capture.Native.EncoderFailures COMMAND ClypDat.Capture.Native.EncoderTests)
+
+add_executable(ClypDat.Capture.Native.EncoderPolicyTests tests/encoder_backend_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.EncoderPolicyTests PRIVATE RecorderCore)
+set_target_properties(ClypDat.Capture.Native.EncoderPolicyTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.EncoderPolicy COMMAND ClypDat.Capture.Native.EncoderPolicyTests)
 
 add_executable(ClypDat.Capture.Native.CaptureTests tests/recording_capture_tests.cpp)
 target_link_libraries(ClypDat.Capture.Native.CaptureTests PRIVATE RecorderCore)
