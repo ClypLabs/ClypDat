@@ -165,7 +165,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private double _activeReplayUniqueGameFrameRate;
     private ReplayCaptureStartupPhase _activeReplayStartupPhase;
     private bool _activeReplayCapturePaused;
-    private readonly ReplayFrameRateDisplaySmoother _replayFrameRateDisplaySmoother = new();
     private string _selectedClipOverlayPosition = "Top Right";
     private string _selectedClipOverlayVolume = "High";
     private string _selectedClipFileNameScheme = ClipFileNaming.StandardScheme;
@@ -2487,15 +2486,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         _activeReplayFrameTimingMode = ReplayFrameTimingPolicy.Normalize(health.FrameRateMode);
         _activeReplayTargetFrameRate = health.TargetFrameRate;
-        // What the capture backend delivered, not what pacing acquired.
-        _activeReplaySourceFrameRate = health.SourceDeliveredFrameRate > 0 ? health.SourceDeliveredFrameRate : health.InputFrameRate;
         _activeReplaySourceName = health.CaptureMode.Contains("Graphics Capture", StringComparison.OrdinalIgnoreCase) ? "WGC" :
             health.CaptureMode.Contains("Duplication", StringComparison.OrdinalIgnoreCase) ? "DXGI" : "Source";
         _activeReplayStartupPhase = health.StartupPhase;
         _activeReplayCapturePaused = health.CapturePaused;
-        var displayedRates = _replayFrameRateDisplaySmoother.Update(health);
-        _activeReplayOutputFrameRate = displayedRates.OutputFrameRate;
-        _activeReplayUniqueGameFrameRate = displayedRates.UniqueFrameRate;
+        // Raw rates of one native health window, so all three change together.
+        _activeReplayOutputFrameRate = health.OutputFrameRate;
+        // What the capture backend delivered, not what pacing acquired.
+        _activeReplaySourceFrameRate = health.SourceDeliveredFrameRate > 0 ? health.SourceDeliveredFrameRate : health.InputFrameRate;
+        _activeReplayUniqueGameFrameRate = health.UniqueFrameRate;
         OnPropertyChanged(nameof(ReplayEncoderModeStatus));
         OnPropertyChanged(nameof(ReplayFrameTimingMetrics));
         OnPropertyChanged(nameof(IsReplayArming));
@@ -2507,7 +2506,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         _recordingHealth = ReplayCaptureHealth.Unknown("Native");
         RefreshRecordingPresentation();
-        _replayFrameRateDisplaySmoother.Reset();
         _activeReplayEncoder = string.Empty;
         _activeReplayAdapter = string.Empty;
         _activeReplayTargetFrameRate = 0;
@@ -2527,7 +2525,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void MarkReplayBufferRestarted()
     {
-        _replayFrameRateDisplaySmoother.Reset();
         _activeReplayMaxHeight = Settings.ReplayMaxHeight;
         _activeReplayFrameRate = Settings.ReplayFrameRate;
         _activeReplayEncoderSignature = EncoderSignature;
