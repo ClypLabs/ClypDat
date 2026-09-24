@@ -1,5 +1,6 @@
 #pragma once
 #include "video_encoder.h"
+#include "encoder_backend.h"
 #include <chrono>
 #include <array>
 #include <cstdint>
@@ -96,6 +97,15 @@ struct RecordingCaptureHealth {
     double submission_p95_ms = 0, completion_p95_ms = 0;
     double queue_age_max_ms=0,processing_max_ms=0,submission_max_ms=0,completion_max_ms=0;
     int surfaces_in_use = 0, surface_capacity = 0;
+    // Active EncoderPlan; encoder_planned is false for candidates still on
+    // their legacy resource sizing (AMF, QSV, libx264).
+    bool encoder_planned = false, zero_copy_probe_passed = false;
+    std::string encoder_vendor, requested_codec, effective_codec, zero_copy_status;
+    int encoder_slots = 0, encoder_delay = 0, output_delay_frames = 0, max_in_flight = 0, pool_capacity = 0;
+    int surfaces_allocated = 0, surfaces_in_use_peak = 0;
+    uint64_t pool_bytes = 0;
+    uint32_t capture_adapter_vendor = 0;
+    double submission_p50_ms = 0, completion_p50_ms = 0;
     int overload_windows = 0, qualified_windows = 0;
     bool hardware_input = false, hdr = false, frame_rate_protected = false;
     RecordingSourceHealth source_details;
@@ -125,7 +135,18 @@ struct RecordingCaptureDependencies {
     std::vector<RecordingEncoderCandidate> candidates;
     std::function<std::unique_ptr<VideoEncoder>(const VideoEncoderConfig&,size_t candidate)> open_encoder;
     std::function<int64_t()> monotonic_clock;
+    std::optional<uint32_t> adapter_vendor; // Replaces the capture device's DXGI VendorId.
 };
+// Resource sizing used by candidates that do not consume an EncoderPlan yet.
+int legacy_surface_capacity(int fps);
+// DXGI VendorId of the device's adapter; 0 when it cannot be read.
+uint32_t d3d11_adapter_vendor(ID3D11Device* device);
+EncoderPolicy recording_encoder_policy(const RecordingCaptureConfig& config);
+// Plan for a recording candidate, sized for the configured maximum frame rate.
+// nullopt for candidates not planned yet; throws EncoderPlanInfeasible when
+// the candidate cannot run on this adapter or within its limits.
+std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& config,
+    const RecordingEncoderCandidate& candidate, uint32_t adapter_vendor, bool overlay_stage);
 
 // Pure policy functions are also used by the recording threads and fixtures.
 int capture_queue_capacity(int fps);

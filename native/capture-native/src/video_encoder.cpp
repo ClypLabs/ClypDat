@@ -7,7 +7,6 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 #include <algorithm>
-#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -75,14 +74,6 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         option("preset", "p1");
         if (name == "h264_nvenc") option("profile", "high");
         option("tune", "ll");
-        option("surfaces", std::to_string(std::clamp((config.fps + 1) / 2, 16, 60)));
-        if(config.nvenc_delay==4||config.nvenc_delay==8)option("delay",std::to_string(config.nvenc_delay));
-        char* delay = nullptr;
-        size_t length = 0;
-        if (_dupenv_s(&delay, &length, "CLYPDAT_NVENC_DELAY") == 0 && delay) {
-            const std::unique_ptr<char, decltype(&std::free)> owned(delay, &std::free);
-            if (config.nvenc_delay!=4&&config.nvenc_delay!=8&&(std::string(delay) == "4" || std::string(delay) == "8")) option("delay", delay);
-        }
         option("spatial-aq", "0");
         option("temporal-aq", "0");
         option("rc-lookahead", "0");
@@ -104,6 +95,8 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         option("tune", "zerolatency");
         option("bitrate", std::to_string(context.bit_rate));
     }
+    // Surface and delay counts come only from the resource plan.
+    for (const auto& [key, value] : config.resource_options) option(key.c_str(), value);
     checked(avcodec_open2(&context, codec, nullptr), "Open recording encoder");
 }
 

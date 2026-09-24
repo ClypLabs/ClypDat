@@ -17,11 +17,49 @@ extern "C" {
 #include <deque>
 #include <mutex>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <thread>
 
 namespace clypdat {
 int capture_queue_capacity(int fps) { return std::clamp((std::clamp(fps, 30, 120) + 7) / 8, 4, 15); }
+int legacy_surface_capacity(int fps) { return std::clamp((fps + 1) / 2, 16, 60) + capture_queue_capacity(fps) + 5; }
+uint32_t d3d11_adapter_vendor(ID3D11Device* device) {
+    if (!device) return 0;
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgi; Microsoft::WRL::ComPtr<IDXGIAdapter> adapter; DXGI_ADAPTER_DESC desc{};
+    if (FAILED(device->QueryInterface(IID_PPV_ARGS(&dxgi))) || FAILED(dxgi->GetAdapter(&adapter)) || FAILED(adapter->GetDesc(&desc))) return 0;
+    return desc.VendorId;
+}
+EncoderPolicy recording_encoder_policy(const RecordingCaptureConfig& config) {
+    // The configured diagnostic delay wins; the environment is the fallback.
+    // Both feed the plan, which owns the one delay the encoder receives.
+    EncoderPolicy policy;
+    int delay = config.nvenc_delay == 4 || config.nvenc_delay == 8 ? config.nvenc_delay : 0;
+    char* value = nullptr; size_t length = 0;
+    if (!delay && _dupenv_s(&value, &length, "CLYPDAT_NVENC_DELAY") == 0 && value) {
+        const std::unique_ptr<char, decltype(&std::free)> owned(value, &std::free);
+        const std::string text(value); delay = text == "4" ? 4 : text == "8" ? 8 : 0;
+    }
+    policy.nvenc_delay_override = delay;
+    return policy;
+}
+std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& config,
+    const RecordingEncoderCandidate& candidate, uint32_t adapter_vendor, bool overlay_stage) {
+    if (!candidate.name.ends_with("_nvenc")) return std::nullopt;
+    EncoderRequest request;
+    request.codec = candidate.name.starts_with("av1") ? EncoderCodec::AV1 : EncoderCodec::H264;
+    request.pixel_format = EncoderPixelFormat::NV12;
+    request.allow_codec_fallback = false;
+    request.width = config.width; request.height = config.height;
+    // Size for the configured ceiling; adaptive reductions fit, and a later
+    // return to the configured rate cannot exceed the pool.
+    request.fps = config.fps;
+    request.bitrate_mbps = std::clamp(config.bitrate_mbps, 5, 100);
+    request.adapter_vendor = adapter_vendor;
+    request.overlay_stage = overlay_stage;
+    request.capture_buffers = 3; request.pacing_queue = capture_queue_capacity(config.fps);
+    return encoder_backend(EncoderVendor::Nvidia).plan(request, candidate.d3d11, recording_encoder_policy(config));
+}
 int64_t capture_final_hold(bool variable, int64_t previous, int64_t hold) {
     const auto cadence = std::max<int64_t>(1, previous);
     return variable ? std::clamp<int64_t>(hold, 1, cadence * 2) : cadence;
@@ -120,10 +158,26 @@ class GpuProcessor {
     Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator> enumerator_;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessor> processor_;
     int source_width_ = 0, source_height_ = 0;
-    int width_, height_, fps_;
+    int width_, height_, fps_, capacity_;
+    // Distinct pool surfaces handed out. A dynamic pool grows only when every
+    // surface is outstanding, so a new surface past capacity is refused.
+    std::set<std::pair<void*, intptr_t>> surfaces_;
+    void acquire(AVFrame* frame, const char* what) {
+        check(av_hwframe_get_buffer(frames.get(), frame, 0), what);
+        const std::pair<void*, intptr_t> key{frame->data[0], reinterpret_cast<intptr_t>(frame->data[1])};
+        if (surfaces_.contains(key)) return;
+        if (int(surfaces_.size()) >= capacity_) {
+            av_frame_unref(frame);
+            throw std::runtime_error("Recording hardware surface pool exceeded its planned capacity of " + std::to_string(capacity_));
+        }
+        surfaces_.insert(key);
+    }
 public:
     Buffer device, frames;
-    GpuProcessor(ID3D11Device* input, int width, int height, int fps) : device_(input), width_(width), height_(height), fps_(fps) {
+    int capacity() const { return capacity_; }
+    int allocated() const { return int(surfaces_.size()); }
+    GpuProcessor(ID3D11Device* input, int width, int height, int fps, int capacity) : device_(input), width_(width), height_(height), fps_(fps), capacity_(capacity) {
+        if (capacity < 1) throw std::invalid_argument("Recording surface pool capacity must be positive");
         if (!input) throw std::runtime_error("D3D11 recording source unavailable");
         if (FAILED(input->QueryInterface(IID_PPV_ARGS(&video_)))) throw std::runtime_error("D3D11 video processing unavailable");
         Microsoft::WRL::ComPtr<ID3D11DeviceContext> immediate; input->GetImmediateContext(&immediate);
@@ -135,9 +189,9 @@ public:
         auto* d3d = static_cast<AVD3D11VADeviceContext*>(hw->hwctx);
         d3d->device = input; input->AddRef();
         check(av_hwdevice_ctx_init(device.get()), "Initialize recording hardware device");
-        const int capacity = std::clamp((fps + 1) / 2, 16, 60) + capture_queue_capacity(fps) + 5;
         // Dynamic individual textures first, fixed array pool only when dynamic
-        // allocation is unavailable. Qualify an actual surface before opening.
+        // allocation is unavailable. Prewarming the bounded working set
+        // qualifies the format and bind flags before the encoder opens.
         for (const int pool_size : {0, capacity}) {
             frames.reset(av_hwframe_ctx_alloc(device.get())); if (!frames) throw std::bad_alloc();
             auto* fc = reinterpret_cast<AVHWFramesContext*>(frames->data);
@@ -145,9 +199,10 @@ public:
             fc->width = width; fc->height = height; fc->initial_pool_size = pool_size;
             auto* df = static_cast<AVD3D11VAFramesContext*>(fc->hwctx); df->BindFlags = D3D11_BIND_RENDER_TARGET;
             if (av_hwframe_ctx_init(frames.get()) < 0) continue;
-            std::vector<Frame> probes;bool usable=true;
+            std::vector<Frame> probes;bool usable=true;surfaces_.clear();
             for(int i=0;i<capacity;++i){Frame probe(av_frame_alloc());if(!probe)throw std::bad_alloc();
-                if(av_hwframe_get_buffer(frames.get(),probe.get(),0)<0){usable=false;break;}probes.push_back(std::move(probe));}
+                if(av_hwframe_get_buffer(frames.get(),probe.get(),0)<0){usable=false;break;}
+                surfaces_.insert({probe->data[0],reinterpret_cast<intptr_t>(probe->data[1])});probes.push_back(std::move(probe));}
             if(usable)return;
         }
         throw std::runtime_error("Recording D3D11 surface pools unavailable");
@@ -169,7 +224,7 @@ public:
             source_width_ = pixels.width; source_height_ = pixels.height;
         }
         Frame frame(av_frame_alloc()); if (!frame) throw std::bad_alloc();
-        check(av_hwframe_get_buffer(frames.get(), frame.get(), 0), "Allocate recording hardware surface");
+        acquire(frame.get(), "Allocate recording hardware surface");
         Microsoft::WRL::ComPtr<ID3D11VideoProcessorInputView> input;
         Microsoft::WRL::ComPtr<ID3D11VideoProcessorOutputView> output;
         D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC id{}; id.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
@@ -210,7 +265,7 @@ public:
     }
     Frame upload(const AVFrame& software) {
         Frame frame(av_frame_alloc()); if (!frame) throw std::bad_alloc();
-        check(av_hwframe_get_buffer(frames.get(), frame.get(), 0), "Allocate recording upload surface");
+        acquire(frame.get(), "Allocate recording upload surface");
         check(av_hwframe_transfer_data(frame.get(), &software, 0), "Upload recording processed frame");
         check(av_frame_copy_props(frame.get(), &software), "Copy recording frame metadata"); return frame;
     }
@@ -247,6 +302,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     std::map<int64_t, std::pair<int64_t, bool>> submitted;
     std::map<int64_t, int64_t> submitted_at;
     std::map<int64_t, Frame> retained_surfaces;
+    size_t retained_limit = 0; // Frames the active encoder may own at once.
     std::deque<double> submission_times, completion_times;
     double readback_ms_sum=0,video_processor_ms_sum=0,software_convert_ms_sum=0,hardware_upload_ms_sum=0,overlay_compose_ms_sum=0;
     uint64_t processing_stage_samples=0;
@@ -329,6 +385,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         const bool old_hardware = encoder && active_candidate < encoder_candidates.size() &&
             encoder_candidates[active_candidate].name != "libx264";
         const bool old_d3d11 = encoder && encoder_candidates[active_candidate].d3d11;
+        const uint32_t adapter_vendor = dependencies.adapter_vendor ? *dependencies.adapter_vendor : d3d11_adapter_vendor(source->d3d_device());
+        const bool overlay_stage = callbacks.compose_nv12 && (!callbacks.overlay_enabled || callbacks.overlay_enabled());
         std::string failures;
         for (size_t i = recovering ? active_candidate + 1 : 0; i < encoder_candidates.size(); ++i) {
             if (failed_candidates[i]) continue;
@@ -336,13 +394,19 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             const auto codec = candidate.name.starts_with("av1") ? AV_CODEC_ID_AV1 : AV_CODEC_ID_H264;
             if (recovering && (codec != old_codec || candidate.d3d11 != old_d3d11 || (old_hardware && candidate.name == "libx264"))) continue;
             try {
+                // An infeasible plan, such as zero-copy on a non-NVIDIA capture
+                // adapter, only skips this candidate.
+                const auto plan = plan_recording_encoder(config, candidate, adapter_vendor, overlay_stage);
+                const int capacity = plan ? plan->pool_capacity : legacy_surface_capacity(config.fps);
                 VideoEncoderConfig ec; ec.width = config.width; ec.height = config.height; ec.fps = fps;
                 ec.bitrate_mbps = config.bitrate_mbps; ec.name = candidate.name; ec.low_power = candidate.low_power;
-                ec.nvenc_delay=config.nvenc_delay;
+                if (plan) ec.resource_options = plan->options;
                 if (candidate.d3d11) {
-                    if (!gpu) gpu = std::make_unique<GpuProcessor>(source->d3d_device(), config.width, config.height, fps);
+                    // A recovering encoder may still own surfaces of the current pool.
+                    if (gpu && !recovering && gpu->capacity() != capacity) gpu.reset();
+                    if (!gpu) gpu = std::make_unique<GpuProcessor>(source->d3d_device(), config.width, config.height, fps, capacity);
                     ec.hardware_frames = gpu->frames.get();
-                }
+                } else if (!recovering) ensure_conversion(capacity);
                 auto replacement = dependencies.open_encoder?dependencies.open_encoder(ec,i):std::make_unique<VideoEncoder>(ec);
                 if(!replacement)throw std::runtime_error("Recording encoder factory returned no encoder");
                 if (encoder) { try { emit(encoder->finish()); } catch (...) {} }
@@ -357,14 +421,42 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 next->codec = std::shared_ptr<const AVCodecParameters>(parameters, CaptureCodecParametersDeleter{});
                 check(avcodec_parameters_from_context(parameters, &encoder->context()), "Copy recording codec parameters");
                 generation = std::move(next);
+                retained_limit = size_t(plan ? plan->max_in_flight : legacy_surface_capacity(config.fps));
                 { std::lock_guard lock(mutex); status.generation = generation->id; status.encoder = candidate.name;
-                  status.hardware_input = candidate.d3d11; status.surface_capacity = candidate.d3d11 ? std::clamp((config.fps + 1) / 2,16,60) + capture_queue_capacity(config.fps) + 5 : 0;
-                  status.hdr = status.source_details.hdr_display; }
+                  status.hardware_input = candidate.d3d11; status.surface_capacity = candidate.d3d11 ? (gpu ? gpu->capacity() : capacity) : 0;
+                  status.hdr = status.source_details.hdr_display;
+                  status.capture_adapter_vendor = adapter_vendor; status.encoder_planned = bool(plan);
+                  status.pool_capacity = plan ? plan->pool_capacity : 0;
+                  status.surfaces_allocated = gpu ? gpu->allocated() : 0; status.surfaces_in_use = 0; status.surfaces_in_use_peak = 0;
+                  status.encoder_vendor.clear(); status.requested_codec.clear(); status.effective_codec.clear(); status.zero_copy_status.clear();
+                  status.zero_copy_probe_passed = false; status.encoder_slots = status.encoder_delay = status.output_delay_frames = status.max_in_flight = 0;
+                  status.pool_bytes = 0;
+                  if (plan) {
+                      status.encoder_vendor = encoder_vendor_name(plan->vendor);
+                      status.requested_codec = encoder_codec_name(plan->requested_codec); status.effective_codec = encoder_codec_name(plan->effective_codec);
+                      status.zero_copy_status = zero_copy_status_name(plan->zero_copy_status);
+                      // The opened encoder is the probe for an unverified adapter;
+                      // the plan itself stays unverified.
+                      status.zero_copy_probe_passed = plan->zero_copy_status == ZeroCopyStatus::Unverified;
+                      status.encoder_slots = plan->encoder_slots; status.output_delay_frames = plan->output_delay_frames;
+                      for (const auto& [key, value] : plan->options) if (key == "delay") status.encoder_delay = std::stoi(value);
+                      status.max_in_flight = plan->max_in_flight; status.pool_bytes = plan->pool_bytes;
+                  } }
                 if (callbacks.generation) callbacks.generation(generation);
                 return;
             } catch (const std::exception& e) { failed_candidates[i] = true; failures += candidate.name + ": " + e.what() + "\n"; }
         }
         throw std::runtime_error("No compatible recording encoder available: " + failures);
+    }
+    // Readback candidates keep a GPU converter when the source has a device;
+    // without one they use CPU conversion, as before.
+    void ensure_conversion(int capacity) {
+        auto* device = source->d3d_device();
+        if (!device || (gpu && gpu->capacity() == capacity)) return;
+        gpu.reset();
+        try { gpu = std::make_unique<GpuProcessor>(device, config.width, config.height, fps, capacity); gpu_initialization_error.clear(); }
+        catch (const std::exception& error) { gpu_initialization_error = error.what(); std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
+        catch (...) { gpu_initialization_error = "Unknown GPU processor initialization error"; std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
     }
     void acquisition() {
         struct StopSource { RecordingFrameSource* source; ~StopSource(){try{source->stop();}catch(...){}} } source_owner{source.get()};
@@ -427,12 +519,13 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         status.input_fps = double(status.acquired - previous_acquired) * 1000000 / elapsed;
         status.unique_fps = double(status.unique_frames-previous_unique)*1000000/elapsed;previous_unique=status.unique_frames;
         status.output_fps = double(status.encoded - previous_encoded) * 1000000 / elapsed;
-        auto percentile = [](const std::deque<double>& values) {
+        auto percentile = [](const std::deque<double>& values,double rank) {
             if (values.empty()) return 0.0;
             std::vector<double> sorted(values.begin(),values.end()); std::sort(sorted.begin(),sorted.end());
-            return sorted[size_t(std::ceil(sorted.size()*.95))-1];
+            return sorted[std::max<size_t>(1,size_t(std::ceil(sorted.size()*rank)))-1];
         };
-        status.submission_p95_ms = percentile(submission_times); status.completion_p95_ms = percentile(completion_times);
+        status.submission_p95_ms = percentile(submission_times,.95); status.completion_p95_ms = percentile(completion_times,.95);
+        status.submission_p50_ms = percentile(submission_times,.5); status.completion_p50_ms = percentile(completion_times,.5);
         if(processing_stage_samples){
             const double samples=double(processing_stage_samples);
             status.texture_readback_ms=readback_ms_sum/samples;status.video_processor_ms=video_processor_ms_sum/samples;
@@ -708,7 +801,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             if (first) { frame->pict_type = AV_PICTURE_TYPE_I; first = false; }
             // The opened pool keeps its configured capacity when pacing is
             // reduced. Pending vendor output may still own the larger count.
-            const auto retained_limit=size_t(std::clamp((config.fps+1)/2,16,60)+capture_queue_capacity(config.fps)+5);
+            // The active plan bounds encoder-owned frames; unplanned candidates
+            // keep their legacy ceiling. Exceeding it still restarts the worker.
             if(retained_surfaces.size()>=retained_limit)throw std::runtime_error("Recording encoder exhausted retained surfaces; restart worker");
             Frame retained(av_frame_clone(frame.get()));if(!retained)throw std::bad_alloc();
             retained_surfaces[work.pts]=std::move(retained);
@@ -720,7 +814,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 status.processing_max_ms=std::max(status.processing_max_ms,status.processing_ms);++status.submitted;
                 readback_ms_sum+=readback_ms;video_processor_ms_sum+=video_processor_ms;software_convert_ms_sum+=software_convert_ms;
                 hardware_upload_ms_sum+=hardware_upload_ms;overlay_compose_ms_sum+=overlay_ms;++processing_stage_samples;
-                status.processing_path=processing_path; }
+                status.processing_path=processing_path;
+                status.surfaces_in_use_peak=std::max(status.surfaces_in_use_peak,int(submitted.size()));
+                if(gpu)status.surfaces_allocated=gpu->allocated(); }
             try {
                 auto packets = encoder->submit(*frame);
                 const double duration = double(now()-submit_started)/1000;
@@ -756,11 +852,6 @@ void RecordingCapture::start() {
         const int height=std::clamp(s->config.max_height,480,2160);
         const int width=std::max(2,int(std::nearbyint(height*double(bounds.width)/bounds.height)));
         s->config.width=width+(width&1);s->config.height=height+(height&1);
-    }
-    if(!s->gpu&&s->source->d3d_device()){
-        try{s->gpu=std::make_unique<GpuProcessor>(s->source->d3d_device(),s->config.width,s->config.height,s->fps);s->gpu_initialization_error.clear();}
-        catch(const std::exception& error){s->gpu_initialization_error=error.what();std::lock_guard lock(s->mutex);++s->status.gpu_conversion_fallbacks;s->status.gpu_conversion_fallback_error=s->gpu_initialization_error;}
-        catch(...){s->gpu_initialization_error="Unknown GPU processor initialization error";std::lock_guard lock(s->mutex);++s->status.gpu_conversion_fallbacks;s->status.gpu_conversion_fallback_error=s->gpu_initialization_error;}
     }
     s->fps=s->config.fps;s->user_paused=false;
     std::fill(s->failed_candidates.begin(),s->failed_candidates.end(),false);

@@ -11,7 +11,8 @@ void validate_policy(const EncoderPolicy& p) {
     require(p.latency_budget_ms > 0 && p.nvenc_min_delay >= 1 && p.nvenc_min_delay <= p.nvenc_max_delay &&
         p.nvenc_surface_slack >= 1 && p.amf_min_depth >= 1 && p.amf_min_depth <= p.amf_max_depth &&
         p.qsv_min_depth >= 1 && p.qsv_min_depth <= p.qsv_max_depth && p.qsv_suggested_slack >= 0 &&
-        p.conversion_slots >= 1 && p.readback_conversion_slots >= 1 && p.readback_staging_slots >= 1 && p.ffmpeg_hold >= 0,
+        p.conversion_slots >= 1 && p.readback_conversion_slots >= 1 && p.readback_staging_slots >= 1 && p.ffmpeg_hold >= 0 &&
+        p.nvenc_delay_override >= 0 && p.nvenc_delay_override < kNvencRegisteredResources,
         "Invalid encoder resource policy");
 }
 std::string text(int value) { return std::to_string(value); }
@@ -75,12 +76,19 @@ public:
         int structural = std::max(4, interval * 4);
         if (l) structural = std::max(structural, l + interval + 1 + 4);
         feasible(structural <= kNvencRegisteredResources, "NVENC surfaces exceed the registered resource limit");
-        int delay = std::clamp(frames_for_latency(request.fps, policy.latency_budget_ms), policy.nvenc_min_delay, policy.nvenc_max_delay);
-        if (l) delay = std::max(delay, l + interval + 4);
+        const int override_delay = policy.nvenc_delay_override;
+        int delay = override_delay ? override_delay :
+            std::clamp(frames_for_latency(request.fps, policy.latency_budget_ms), policy.nvenc_min_delay, policy.nvenc_max_delay);
+        if (l) {
+            feasible(!override_delay || override_delay >= l + interval + 4, "NVENC delay override is below the lookahead requirement");
+            delay = std::max(delay, l + interval + 4);
+        }
         // Without zero-copy every surface is also an NVENC system-memory input
-        // buffer, so keep the structural minimum there.
-        const int surfaces = std::min(zero_copy ? std::max(structural, delay + policy.nvenc_surface_slack) : structural,
-            kNvencRegisteredResources);
+        // buffer, so keep the structural minimum unless a delay needs more.
+        const int wanted = zero_copy ? std::max(structural, delay + policy.nvenc_surface_slack) :
+            override_delay ? std::max(structural, delay + 1) : structural;
+        const int surfaces = std::min(wanted, kNvencRegisteredResources);
+        feasible(!override_delay || delay <= surfaces - 1, "NVENC delay override exceeds the registered surface limit");
         delay = std::min(delay, surfaces - 1);
         feasible(!l || delay >= l + interval + 4, "NVENC lookahead exceeds registered surface limit");
         plan.min_encoder_slots = structural;
@@ -239,6 +247,18 @@ void validate_encoder_request(const EncoderRequest& r) {
         r.fps >= 30 && r.fps <= 120 && r.bitrate_mbps > 0 && r.b_frames >= 0 && r.b_frames <= 4 &&
         r.lookahead >= 0 && r.lookahead <= 100 && r.capture_buffers >= 0 && r.pacing_queue >= 0,
         "Invalid encoder resource request");
+}
+const char* encoder_vendor_name(EncoderVendor vendor) {
+    switch (vendor) {
+    case EncoderVendor::Nvidia: return "nvidia";
+    case EncoderVendor::Amd: return "amd";
+    case EncoderVendor::Intel: return "intel";
+    default: return "software";
+    }
+}
+const char* encoder_codec_name(EncoderCodec codec) { return codec == EncoderCodec::AV1 ? "av1" : "h264"; }
+const char* zero_copy_status_name(ZeroCopyStatus status) {
+    return status == ZeroCopyStatus::Confirmed ? "confirmed" : status == ZeroCopyStatus::Unverified ? "unverified" : "not-used";
 }
 void check_encoder_plan(const EncoderPlan& p) {
     const auto& s = p.stages;

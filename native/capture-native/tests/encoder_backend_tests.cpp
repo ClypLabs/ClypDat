@@ -158,6 +158,36 @@ void nvenc_readback_and_tuning() {
     CHECK(option(small, "delay") == "2" && option(small, "surfaces") == "4" && small.max_in_flight == 3);
 }
 
+// An explicit NVENC delay replaces the latency budget and is honoured exactly.
+void nvenc_delay_override() {
+    EncoderPolicy policy; policy.nvenc_delay_override = 4;
+    const auto four = plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(2560, 1440, 90)), true, policy);
+    CHECK(option(four, "delay") == "4" && option(four, "surfaces") == "6" && four.max_in_flight == 5 && four.pool_capacity == 7);
+    policy.nvenc_delay_override = 8;
+    const auto eight = plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(2560, 1440, 90)), true, policy);
+    CHECK(option(eight, "delay") == "8" && option(eight, "surfaces") == "10" && eight.max_in_flight == 9 && eight.pool_capacity == 11);
+    // Readback keeps structural surfaces but grows them for the override.
+    const auto readback = plan(EncoderVendor::Nvidia, request(2560, 1440, 90), false, policy);
+    CHECK(option(readback, "delay") == "8" && option(readback, "surfaces") == "9" && readback.max_in_flight == 9);
+    policy.nvenc_delay_override = 2;
+    const auto small = plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(1920, 1080, 120)), true, policy);
+    CHECK(option(small, "delay") == "2" && option(small, "surfaces") == "4" && small.max_in_flight == 3);
+    // Largest override whose pool still fits: 62 in flight + 1 + 1.
+    policy.nvenc_delay_override = 61;
+    CHECK(plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(1920, 1080, 60)), true, policy).pool_capacity == 64);
+    policy.nvenc_delay_override = 62;
+    infeasible([&] { plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(1920, 1080, 60)), true, policy); });
+    // Too small for lookahead is rejected rather than silently raised.
+    policy.nvenc_delay_override = 8;
+    infeasible([&] { plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(1920, 1080, 60, 0, 10)), true, policy); });
+    policy.nvenc_delay_override = 16;
+    CHECK(option(plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(1920, 1080, 60, 0, 10)), true, policy), "delay") == "16");
+    policy.nvenc_delay_override = 64;
+    invalid([&] { plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(1920, 1080, 60)), true, policy); });
+    policy.nvenc_delay_override = -1;
+    invalid([&] { plan(EncoderVendor::Nvidia, on(EncoderVendor::Nvidia, request(1920, 1080, 60)), true, policy); });
+}
+
 void amf_depth() {
     const int expected[][2] = {{4, 6}, {4, 6}, {6, 8}, {8, 10}, {4, 6}};
     for (size_t i = 0; i < std::size(scenarios); ++i) {
@@ -388,6 +418,7 @@ int main() {
     nvenc_reordering_and_lookahead();
     nvenc_resource_limits();
     nvenc_readback_and_tuning();
+    nvenc_delay_override();
     amf_depth();
     amf_invariants();
     qsv_depth();

@@ -6,6 +6,7 @@ extern "C" {
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace clypdat {
@@ -28,7 +29,9 @@ struct VideoEncoderConfig {
     std::string name = "libx264";
     bool low_power = false;
     AVBufferRef* hardware_frames = nullptr; // Retained by the opened context.
-    int nvenc_delay = 0;
+    // EncoderPlan resource options (surfaces, delay, async_depth, ...), applied
+    // after the vendor quality defaults. Empty leaves FFmpeg's own defaults.
+    std::vector<std::pair<std::string, std::string>> resource_options;
 };
 
 // Single encoding thread owns this object. Packets are transferred to history

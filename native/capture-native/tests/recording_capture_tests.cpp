@@ -1,6 +1,7 @@
 #include "recording_capture.h"
 #include "recording_save.h"
 #include <atomic>
+#include <cstdlib>
 #include <chrono>
 #include <condition_variable>
 #include <iostream>
@@ -241,11 +242,17 @@ void blocked_writer(){
     CHECK(!capture.stop(10ms));CHECK(capture.health().restart_required);
     {std::lock_guard lock(mutex);released=true;}changed.notify_all();CHECK(capture.stop(3s));
 }
+std::string resource_option(const VideoEncoderConfig& config,const std::string& key){
+    for(const auto& [name,value]:config.resource_options)if(name==key)return value;
+    return {};
+}
 void gpu_4k_to_1440p(int fps){
     RecordingCaptureConfig config;config.width=2560;config.height=1440;config.fps=fps;
     std::mutex mutex;std::condition_variable changed;uint64_t packets=0;
     RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){std::lock_guard lock(mutex);++packets;changed.notify_all();};
-    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(fps,true,3840,2160));capture.start();
+    std::vector<VideoEncoderConfig> opened;RecordingCaptureDependencies dependencies;
+    dependencies.open_encoder=[&](const VideoEncoderConfig& value,size_t){opened.push_back(value);return std::make_unique<VideoEncoder>(value);};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(fps,true,3840,2160),std::move(dependencies));capture.start();
     bool reached=false;{std::unique_lock lock(mutex);reached=changed.wait_for(lock,5s,[&]{return packets>=size_t(fps*2);});}
     if(!reached){capture.stop();const auto stalled=capture.health();std::lock_guard lock(mutex);
         throw std::runtime_error("4K-to-1440p "+std::to_string(fps)+" FPS GPU capture timed out: packets="+std::to_string(packets)+" acquired="+std::to_string(stalled.acquired)+" encoded="+std::to_string(stalled.encoded)+" input="+std::to_string(stalled.input_fps)+" output="+std::to_string(stalled.output_fps)+" queue="+std::to_string(stalled.queue_depth)+" drops="+std::to_string(stalled.replaced)+" path="+stalled.processing_path+" fallback="+stalled.gpu_conversion_fallback_error+" error="+stalled.error);}
@@ -256,6 +263,19 @@ void gpu_4k_to_1440p(int fps){
     CHECK(health.gpu_conversion_fallbacks==0);
     CHECK(health.output_fps>=fps*.9);CHECK(health.queue_depth<health.queue_capacity);
     CHECK(health.processing_ms<1000.0/fps);
+    // The encoder and pool follow the plan, never the old (fps+1)/2 formula.
+    const auto expected=plan_recording_encoder(config,{"h264_nvenc",false,true},kAdapterVendorNvidia,false);CHECK(expected);
+    CHECK(!opened.empty()&&opened.front().name=="h264_nvenc"&&opened.front().resource_options==expected->options);
+    CHECK(resource_option(opened.front(),"surfaces")==std::to_string(expected->encoder_slots));
+    CHECK(expected->encoder_slots<std::clamp((fps+1)/2,16,60));
+    CHECK(health.encoder_planned&&health.zero_copy_status=="confirmed"&&health.capture_adapter_vendor==kAdapterVendorNvidia);
+    CHECK(health.surface_capacity==expected->pool_capacity&&health.pool_capacity==expected->pool_capacity);
+    CHECK(health.surface_capacity<legacy_surface_capacity(fps));
+    CHECK(health.surfaces_allocated<=health.surface_capacity&&health.surfaces_in_use_peak<=expected->max_in_flight);
+    CHECK(health.encoder_slots==expected->encoder_slots&&health.max_in_flight==expected->max_in_flight);
+    if(fps==90)CHECK(health.encoder_slots==8&&health.encoder_delay==6&&health.max_in_flight==7&&health.surface_capacity==9);
+    std::cout<<"4K-to-1440p@"<<fps<<" plan: slots="<<health.encoder_slots<<" delay="<<health.encoder_delay<<" pool="<<health.surface_capacity
+        <<" allocated="<<health.surfaces_allocated<<" peak="<<health.surfaces_in_use_peak<<" completionP50="<<health.completion_p50_ms<<"ms\n";
     std::cout<<"4K-to-1440p@"<<fps<<" GPU capture: input="<<health.input_fps<<" output="<<health.output_fps
         <<" processing="<<health.processing_ms<<"ms videoProcessor="<<health.video_processor_ms<<"ms dropped="<<health.replaced<<"\n";
 }
@@ -341,6 +361,97 @@ void decode_saved_session(const std::filesystem::path& path){
     CHECK(avcodec_send_packet(raw,nullptr)>=0);receive();av_frame_free(&frame);CHECK(count>=15);
     CHECK(av_seek_frame(input,-1,input->duration/2,AVSEEK_FLAG_BACKWARD)>=0);
 }
+
+// Plans follow the recording configuration; pacing depth, adaptive rate and
+// candidate order never size the NV12 pool.
+void recording_encoder_plans(){
+    _putenv_s("CLYPDAT_NVENC_DELAY","");
+    RecordingCaptureConfig config;config.width=2560;config.height=1440;config.fps=90;config.bitrate_mbps=25;
+    const RecordingEncoderCandidate zero_copy{"h264_nvenc",false,true},readback{"h264_nvenc",false,false};
+    const auto plan=plan_recording_encoder(config,zero_copy,kAdapterVendorNvidia,false);CHECK(plan);
+    CHECK(plan->encoder_slots==8&&plan->output_delay_frames==6&&plan->max_in_flight==7&&plan->pool_capacity==9);
+    CHECK(plan->zero_copy_status==ZeroCopyStatus::Confirmed&&plan->requested_codec==EncoderCodec::H264&&!plan->codec_fallback());
+    CHECK(plan->pool_bytes==9ull*2560*1440*3/2&&plan->stages.pacing_queue==capture_queue_capacity(90));
+    CHECK((plan->options==std::vector<std::pair<std::string,std::string>>{{"surfaces","8"},{"delay","6"}}));
+    CHECK(legacy_surface_capacity(90)==62&&plan->pool_capacity<legacy_surface_capacity(90));
+    // The pacing queue is reported, never pooled.
+    EncoderRequest shallow;shallow.width=2560;shallow.height=1440;shallow.fps=90;shallow.bitrate_mbps=25;
+    shallow.adapter_vendor=kAdapterVendorNvidia;shallow.pacing_queue=0;
+    CHECK(encoder_backend(EncoderVendor::Nvidia).plan(shallow,true).pool_capacity==plan->pool_capacity);
+    // Burned overlays reserve one conversion surface.
+    CHECK(plan_recording_encoder(config,zero_copy,kAdapterVendorNvidia,true)->pool_capacity==10);
+    // A foreign adapter cannot feed D3D11 NVENC; the readback candidate still plans.
+    bool skipped=false;try{plan_recording_encoder(config,zero_copy,kAdapterVendorAmd,false);}catch(const EncoderPlanInfeasible&){skipped=true;}CHECK(skipped);
+    const auto copy=plan_recording_encoder(config,readback,kAdapterVendorAmd,false);CHECK(copy);
+    CHECK(!copy->zero_copy&&copy->zero_copy_status==ZeroCopyStatus::NotUsed&&copy->needs_cpu_staging);
+    // Unknown adapter: plannable, but only unverified.
+    const auto unknown=plan_recording_encoder(config,zero_copy,0,false);CHECK(unknown);
+    CHECK(unknown->zero_copy_status==ZeroCopyStatus::Unverified&&!unknown->confirmed()&&unknown->pool_capacity==9);
+    // Candidates without a policy consumer keep their legacy runtime path.
+    for(const auto name:{"h264_amf","av1_amf","h264_qsv","av1_qsv","libx264"})CHECK(!plan_recording_encoder(config,{name,false,false},kAdapterVendorNvidia,false));
+    const auto av1=plan_recording_encoder(config,{"av1_nvenc",false,true},kAdapterVendorNvidia,false);
+    CHECK(av1&&av1->requested_codec==EncoderCodec::AV1&&av1->effective_codec==EncoderCodec::AV1&&av1->codec_name=="av1_nvenc");
+    // Delay override: configured value first, environment second, one final delay.
+    config.nvenc_delay=4;const auto four=plan_recording_encoder(config,zero_copy,kAdapterVendorNvidia,false);
+    CHECK((four->options==std::vector<std::pair<std::string,std::string>>{{"surfaces","6"},{"delay","4"}})&&four->pool_capacity==7);
+    config.nvenc_delay=8;const auto eight=plan_recording_encoder(config,zero_copy,kAdapterVendorNvidia,false);
+    CHECK((eight->options==std::vector<std::pair<std::string,std::string>>{{"surfaces","10"},{"delay","8"}})&&eight->pool_capacity==11);
+    config.nvenc_delay=0;_putenv_s("CLYPDAT_NVENC_DELAY","8");
+    CHECK(recording_encoder_policy(config).nvenc_delay_override==8);
+    config.nvenc_delay=4;CHECK(recording_encoder_policy(config).nvenc_delay_override==4);
+    config.nvenc_delay=0;_putenv_s("CLYPDAT_NVENC_DELAY","5");CHECK(recording_encoder_policy(config).nvenc_delay_override==0);
+    _putenv_s("CLYPDAT_NVENC_DELAY","");
+    // The configured ceiling sizes every supported rate.
+    const int pools[]={7,7,9,11};int index=0;
+    for(int fps:{30,60,90,120}){config.fps=fps;const auto rate=plan_recording_encoder(config,zero_copy,kAdapterVendorNvidia,false);
+        CHECK(rate&&rate->pool_capacity==pools[index++]&&rate->pool_capacity<=kNvencRegisteredResources);check_encoder_plan(*rate);}
+    CHECK(d3d11_adapter_vendor(nullptr)==0);
+}
+struct PlannedRun{RecordingCaptureHealth health;std::vector<size_t> attempted;std::vector<VideoEncoderConfig> opened;uint64_t packets=0;};
+PlannedRun planned_run(std::optional<uint32_t> adapter,std::vector<RecordingEncoderCandidate> candidates){
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;
+    RecordingCaptureDependencies dependencies;dependencies.candidates=std::move(candidates);dependencies.adapter_vendor=adapter;
+    PlannedRun run;std::mutex mutex;std::condition_variable changed;
+    dependencies.open_encoder=[&](const VideoEncoderConfig& value,size_t candidate){run.attempted.push_back(candidate);run.opened.push_back(value);return std::make_unique<VideoEncoder>(value);};
+    RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){std::lock_guard lock(mutex);++run.packets;changed.notify_all();};
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+    {std::unique_lock lock(mutex);if(!changed.wait_for(lock,5s,[&]{return run.packets>=60;}))throw std::runtime_error("Planned run stalled: "+capture.health().error);}
+    CHECK(capture.stop());run.health=capture.health();if(!run.health.error.empty())throw std::runtime_error(run.health.error);
+    return run;
+}
+void planned_adapter_selection(){
+    const RecordingEncoderCandidate zero_copy{"h264_nvenc",false,true},readback{"h264_nvenc",false,false};
+    // Mismatch: D3D11 NVENC is skipped before opening; readback NVENC records.
+    auto mismatch=planned_run(kAdapterVendorAmd,{zero_copy,readback});
+    CHECK(mismatch.attempted==std::vector<size_t>({1}));CHECK(!mismatch.health.hardware_input&&mismatch.health.encoder_planned);
+    CHECK(mismatch.health.zero_copy_status=="not-used"&&mismatch.health.capture_adapter_vendor==kAdapterVendorAmd);
+    CHECK(mismatch.opened.front().hardware_frames==nullptr&&resource_option(mismatch.opened.front(),"surfaces")=="4");
+    // Unknown: the real open is the probe; the plan stays unverified.
+    auto unknown=planned_run(0u,{zero_copy,readback});
+    CHECK(unknown.attempted==std::vector<size_t>({0}));CHECK(unknown.health.hardware_input);
+    CHECK(unknown.health.zero_copy_status=="unverified"&&unknown.health.zero_copy_probe_passed);
+    // Confirmed from the real device.
+    auto confirmed=planned_run(std::nullopt,{zero_copy,readback});
+    CHECK(confirmed.health.zero_copy_status=="confirmed"&&!confirmed.health.zero_copy_probe_passed);
+    CHECK(confirmed.health.capture_adapter_vendor==kAdapterVendorNvidia&&confirmed.health.surface_capacity==7);
+}
+// An encoder that accepts frames but never returns packets hits the plan's
+// in-flight cap, not the old 43-frame ceiling.
+void planned_retained_limit(){
+    RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;config.nvenc_delay=4;
+    RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_nvenc",false,true}};
+    dependencies.open_encoder=[](const VideoEncoderConfig& value,size_t){CodecCalls calls;
+        calls.send=[](AVCodecContext*,const AVFrame*){return 0;};calls.receive=[](AVCodecContext*,AVPacket*){return AVERROR(EAGAIN);};
+        return std::make_unique<VideoEncoder>(value,std::move(calls));};
+    RecordingCaptureCallbacks callbacks;
+    RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
+    const auto deadline=std::chrono::steady_clock::now()+5s;
+    while(!capture.health().restart_required&&std::chrono::steady_clock::now()<deadline)std::this_thread::sleep_for(10ms);
+    const auto health=capture.health();CHECK(health.restart_required);
+    CHECK(health.error.find("exhausted retained surfaces")!=std::string::npos);
+    CHECK(health.max_in_flight==5&&health.submitted==5&&health.surfaces_allocated<=health.surface_capacity);
+    capture.stop();
+}
 void gpu_generation_failover(){
     const auto base=std::filesystem::current_path();const auto root=base/(L"capture-generation-fixture-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
     CHECK(std::filesystem::create_directory(root));
@@ -391,12 +502,13 @@ int main(int argc,char**argv) {
     RecordingRecoveryTimeline recovery;recovery.observe(true,false,4000000);int64_t safe=0;CHECK(!recovery.safe_start(0,60000000,safe));
     recovery.observe(false,false,11000000);CHECK(!recovery.safe_start(0,60000000,safe));recovery.observe(false,false,12000000);CHECK(recovery.safe_start(0,60000000,safe));CHECK(safe==12000000);
     CHECK(!capture_transport_shortfall(true,true,90,54));
+    recording_encoder_plans();
     const bool gpu=argc>1&&std::string_view(argv[1])=="--gpu";
     for(int fps:{30,60,90,120})for(bool variable:{false,true}){
         roundtrip(fps,variable);
         if(gpu){roundtrip(fps,variable,true,false);roundtrip(fps,variable,true,true);}
     }
-    blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
+    blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();planned_adapter_selection();planned_retained_limit();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

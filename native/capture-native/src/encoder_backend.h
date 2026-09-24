@@ -6,7 +6,8 @@
 #include <vector>
 
 // Backend-independent encoder resource policy. Pure arithmetic: no FFmpeg,
-// D3D11 or encoder state. The runtime does not consume these plans yet.
+// D3D11 or encoder state. The recorder applies NVENC plans; AMF, QSV and
+// software plans are not consumed yet.
 namespace clypdat {
 enum class EncoderVendor { Nvidia, Amd, Intel, Software };
 enum class EncoderCodec { H264, AV1 };
@@ -23,7 +24,8 @@ enum class ZeroCopyStatus { NotUsed, Confirmed, Unverified };
 inline constexpr uint32_t kAdapterVendorNvidia = 0x10DE, kAdapterVendorAmd = 0x1002, kAdapterVendorIntel = 0x8086;
 // FFmpeg nvenc.h MAX_REGISTERED_FRAMES; more distinct inputs thrash registration.
 inline constexpr int kNvencRegisteredResources = 64;
-// FFmpeg hwcontext_d3d11va.c MAX_ARRAY_SIZE; fixed pools are clamped to this.
+// FFmpeg hwcontext_d3d11va.c MAX_ARRAY_SIZE. FFmpeg silently shrinks larger
+// fixed pools, so plans that need more surfaces are rejected as infeasible.
 inline constexpr int kD3D11TextureArrayLimit = 64;
 // FFmpeg amfenc async_depth range: MAX_LOOKAHEAD_DEPTH + 1.
 inline constexpr int kAmfMaxAsyncDepth = 42;
@@ -52,6 +54,9 @@ struct EncoderRequest {
 struct EncoderPolicy {
     int latency_budget_ms = 60;
     int nvenc_min_delay = 4, nvenc_max_delay = 8, nvenc_surface_slack = 2;
+    // Explicit NVENC `delay` replacing the latency-budget value; 0 keeps the
+    // budget. Plans that cannot honour it exactly are infeasible.
+    int nvenc_delay_override = 0;
     int amf_min_depth = 3, amf_max_depth = 8;
     int qsv_min_depth = 3, qsv_max_depth = 6, qsv_suggested_slack = 1;
     int conversion_slots = 1, readback_conversion_slots = 2, readback_staging_slots = 2;
@@ -131,6 +136,9 @@ uint64_t frame_bytes(EncoderPixelFormat format, int width, int height, int align
 // Sum of the stages that hold pool surfaces; capture and pacing never count.
 int encoder_pool_requirement(const EncoderStages& stages, int ffmpeg_hold);
 void validate_encoder_request(const EncoderRequest& request);
+const char* encoder_vendor_name(EncoderVendor vendor);
+const char* encoder_codec_name(EncoderCodec codec);
+const char* zero_copy_status_name(ZeroCopyStatus status);
 // Throws std::logic_error when a plan breaks its resource invariants.
 void check_encoder_plan(const EncoderPlan& plan);
 }

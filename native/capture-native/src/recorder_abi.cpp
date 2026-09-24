@@ -218,6 +218,15 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"queueAgeMaxMs\":" << h.queue_age_max_ms << ",\"processingMaxMs\":" << h.processing_max_ms
         << ",\"submissionMaxMs\":" << h.submission_max_ms << ",\"completionMaxMs\":" << h.completion_max_ms
         << ",\"surfacesInUse\":" << h.surfaces_in_use << ",\"surfaceCapacity\":" << h.surface_capacity
+        << ",\"surfacesInUsePeak\":" << h.surfaces_in_use_peak << ",\"surfacesAllocated\":" << h.surfaces_allocated
+        << ",\"encoderPlanned\":" << (h.encoder_planned ? "true" : "false")
+        << ",\"encoderVendor\":" << quoted(h.encoder_vendor) << ",\"requestedCodec\":" << quoted(h.requested_codec)
+        << ",\"effectiveCodec\":" << quoted(h.effective_codec) << ",\"encoderSlots\":" << h.encoder_slots
+        << ",\"encoderDelay\":" << h.encoder_delay << ",\"outputDelayFrames\":" << h.output_delay_frames
+        << ",\"maxInFlight\":" << h.max_in_flight << ",\"poolCapacity\":" << h.pool_capacity << ",\"poolBytes\":" << h.pool_bytes
+        << ",\"zeroCopyStatus\":" << quoted(h.zero_copy_status) << ",\"zeroCopyProbePassed\":" << (h.zero_copy_probe_passed ? "true" : "false")
+        << ",\"captureAdapterVendor\":" << h.capture_adapter_vendor
+        << ",\"submissionP50Ms\":" << h.submission_p50_ms << ",\"completionP50Ms\":" << h.completion_p50_ms
         << ",\"overloadWindows\":" << h.overload_windows << ",\"qualifiedWindows\":" << h.qualified_windows
         << ",\"hardwareInput\":" << (h.hardware_input ? "true" : "false") << ",\"hdr\":" << (h.hdr ? "true" : "false")
         << ",\"frameRateProtected\":" << (h.frame_rate_protected ? "true" : "false")
