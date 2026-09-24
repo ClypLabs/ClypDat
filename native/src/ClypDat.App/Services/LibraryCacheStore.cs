@@ -49,7 +49,12 @@ internal sealed class LibraryCacheStore
                 try
                 {
                     var entry = JsonSerializer.Deserialize<CachedClipState>(reader.GetString(0), JsonOptions);
-                    if (entry is not null && !string.IsNullOrWhiteSpace(entry.Media.Path)) entries.Add(entry);
+                    if (entry is not null
+                        && !string.IsNullOrWhiteSpace(entry.Media.Path)
+                        && !MediaProbeService.IsRecorderStagingFile(entry.Media.Path))
+                    {
+                        entries.Add(entry);
+                    }
                 }
                 catch
                 {
@@ -73,6 +78,7 @@ internal sealed class LibraryCacheStore
         try
         {
             var uniqueEntries = entries
+                .Where(entry => !MediaProbeService.IsRecorderStagingFile(entry.Media.Path))
                 .GroupBy(entry => entry.Media.Path, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToArray();

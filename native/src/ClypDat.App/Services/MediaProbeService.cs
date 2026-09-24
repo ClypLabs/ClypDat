@@ -69,6 +69,7 @@ public sealed class MediaProbeService
 
     public static bool IsVideoFile(string path)
     {
+        if (IsRecorderStagingFile(path)) return false;
         if (RecordingFileOwnership.IsActive(path)) return false;
         if (!VideoExtensions.Contains(Path.GetExtension(path))) return false;
 
@@ -84,6 +85,13 @@ public sealed class MediaProbeService
             if (name[0] == '.') return false;
         }
         return true;
+    }
+
+    internal static bool IsRecorderStagingFile(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        return VideoExtensions.Any(extension =>
+            fileName.EndsWith($"{extension}.partial{extension}", StringComparison.OrdinalIgnoreCase));
     }
 
     // Returns FileInfo, not paths: the directory enumeration already carries
