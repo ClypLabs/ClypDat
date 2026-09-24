@@ -1260,6 +1260,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _cardColumns, value);
     }
 
+    // Replay is armed but capture is held stopped for an unavailable display
+    // or session; IsReplayRecording stays true throughout.
+    public bool IsReplaySuspended
+    {
+        get => _isReplaySuspended;
+        set
+        {
+            if (!SetProperty(ref _isReplaySuspended, value)) return;
+            OnPropertyChanged(nameof(IsReplayArming));
+            OnPropertyChanged(nameof(IsReplayReady));
+            RefreshRecordingPresentation();
+        }
+    }
+    private bool _isReplaySuspended;
+
     public bool IsReplayRecording
     {
         get => _isReplayRecording;
@@ -1309,7 +1324,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private void RefreshRecordingPresentation()
     {
         _recordingPresentation = RecordingPresentation.Resolve(_recordingHealth, IsReplayRecording, ReplayBufferEnabled,
-            _recorderStatus.Contains("Saving Session", StringComparison.Ordinal) || _recorderStatus.Contains("Stopping", StringComparison.Ordinal));
+            _recorderStatus.Contains("Saving Session", StringComparison.Ordinal) || _recorderStatus.Contains("Stopping", StringComparison.Ordinal),
+            IsReplaySuspended);
         if (_recordingPresentation.Flash)
         {
             if (_recordingFlashTimer is null)
@@ -2232,12 +2248,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool IsReplayArming => _isReplayRecording && _activeReplayStartupPhase is
+    public bool IsReplayArming => _isReplayRecording && !_isReplaySuspended && _activeReplayStartupPhase is
         ReplayCaptureStartupPhase.WaitingForForeground or
         ReplayCaptureStartupPhase.OpeningEncoder or
         ReplayCaptureStartupPhase.Fallback;
 
-    public bool IsReplayReady => _isReplayRecording && !IsReplayArming;
+    // Suspended replay is armed but holds no video to save.
+    public bool IsReplayReady => _isReplayRecording && !_isReplaySuspended && !IsReplayArming;
 
     public string ReplayFrameTimingDescription => SelectedReplayFrameTiming.Description;
 

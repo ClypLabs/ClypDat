@@ -851,7 +851,7 @@ public sealed partial class MainWindow : Window
                 TaskContinuationOptions.OnlyOnRanToCompletion,
                 TaskScheduler.FromCurrentSynchronizationContext());
         }
-        else if (ShouldRecordReplay(detection) && _replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        else if (ReplayAutoStart.ShouldStart(ShouldRecordReplay(detection), _replayBuffer, _replayTransitioning))
         {
             _ = StartReplayBufferAsync(showErrors: false);
         }
@@ -969,6 +969,14 @@ public sealed partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             if (!ReferenceEquals(_replayBuffer, buffer) || ViewModel is null) return;
+            // A display-off or locked-session suspension keeps replay armed:
+            // IsReplayRecording stays true and only the suspension changes.
+            var suspended = buffer is IReplayCaptureWorkerEvents { IsCaptureSuspended: true };
+            if (suspended && !ViewModel.IsReplaySuspended)
+                AppLog.Info("Replay suspended: the display or session is unavailable. Replay stays on and resumes automatically.");
+            else if (!suspended && ViewModel.IsReplaySuspended && buffer.IsRecording)
+                AppLog.Info("Replay resumed: the display or session is available again.");
+            ViewModel.IsReplaySuspended = suspended;
             ViewModel.IsReplayRecording = buffer.IsRecording;
             if (!buffer.IsRecording) UpdateRecorderStatusFromState();
             UpdateDetectorPackAutoClipStates();
@@ -3086,7 +3094,7 @@ public sealed partial class MainWindow : Window
             if (_replayBuffer is { IsRecording: true }) await StopReplayBufferAsync();
             return;
         }
-        if (_replayBuffer is { IsRecording: false } && !_replayTransitioning)
+        if (ReplayAutoStart.ShouldStart(true, _replayBuffer, _replayTransitioning))
         {
             await StartReplayBufferAsync(showErrors: false);
             return;
@@ -3158,6 +3166,7 @@ public sealed partial class MainWindow : Window
             _activeReplayConfigSnapshot = null;
             _encoderTuning.EndSession();
             ViewModel.ClearReplayEncoderHealth();
+            ViewModel.IsReplaySuspended = false;
             ViewModel.IsReplayRecording = false;
             ViewModel.RecorderStatus = ReplayIdleStatus;
         }
@@ -3287,6 +3296,15 @@ public sealed partial class MainWindow : Window
             if (ViewModel is null) return false;
             ViewModel.IsSavingReplayClip = true;
             InitializeReplayServices();
+            // Suspended capture keeps replay on but holds no video: the
+            // existing no-save policy, with the reason named.
+            if (_replayBuffer is IReplayCaptureWorkerEvents { IsCaptureSuspended: true })
+            {
+                if (isAutoClip) return false;
+                ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
+                await ShowMessageAsync("Clip failed", CaptureWorkerProxy.SuspendedSaveMessage);
+                return false;
+            }
             if (_replayBuffer is null || !_replayBuffer.IsRecording)
             {
                 if (!isAutoClip) ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);

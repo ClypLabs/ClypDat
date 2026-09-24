@@ -25,7 +25,11 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private long _generation;
     private long _lostGeneration = -1;
     private double _durationSeconds;
-    private bool _isRecording, _desiredRecording, _paused;
+    // _isRecording is the replay's armed state as the app sees it: true while
+    // the worker captures, and also while it holds capture suspended for an
+    // unavailable display or session (_suspended). Only a user stop, the
+    // crash-loop breaker or a failed recovery disarms it.
+    private bool _isRecording, _suspended, _desiredRecording, _paused;
     private int? _frameRate;
     private int _fatalHealthRecoveryUsed;
     private string _hotkey = string.Empty;
@@ -40,6 +44,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
 
     public CaptureWorkerProxy(Func<ReplayBufferConfig> configProvider) => _configProvider = configProvider;
     public bool IsRecording => _isRecording;
+    public bool IsCaptureSuspended => _suspended;
     public TimeSpan Duration => TimeSpan.FromSeconds(Math.Max(0, _durationSeconds));
     public bool LastSaveVideoWasFrozen => false;
     public event EventHandler? RecordingStopped;
@@ -74,12 +79,13 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             if (!string.Equals(attach.ConfigIdentity, ReplayBufferConfigIdentity.Serialize(config), StringComparison.Ordinal)) throw new InvalidOperationException("Capture worker did not apply requested capture configuration.");
         }
         ApplyAttach(attach, config, false);
+        // An armed worker, capturing or suspended, needs no start: a suspended
+        // one restarts capture by itself when the display or session returns.
         if (!_isRecording)
         {
             var started = await SendAsync<CaptureWorkerStartAck>("start", new { }, cancellationToken);
             if (!started.Accepted) throw new InvalidOperationException($"Capture worker failed to start capture: {started.Error}");
-            if (started.FullSession is { } session) PublishHealth(_health with { FullSession = session });
-            SetRecording(started.Recording);
+            ApplyStartAck(started);
         }
     }
 
@@ -96,6 +102,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     {
         if (_recovery is { IsCompleted: false } || _health.State == ReplayCaptureState.Recovering) throw new InvalidOperationException("Replay is recovering; retry after recording resumes.");
         if (!_desiredRecording || _health.State == ReplayCaptureState.Failed) throw new InvalidOperationException("Replay is not recording; no video can be saved.");
+        // Capture stops while suspended, so there is no replay history to save.
+        if (_suspended) throw new InvalidOperationException(SuspendedSaveMessage);
         await EnsureAttachedAsync(cancellationToken);
         var identity = saveId.GetValueOrDefault();
         if (identity == Guid.Empty) identity = Guid.NewGuid();
@@ -227,13 +235,32 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         finally { _connectionGate.Release(); }
     }
 
+    internal const string SuspendedSaveMessage = "Replay is suspended while the display or session is unavailable, so there is no video to save.";
     private Task<CaptureWorkerAttachResponse> AttachAsync(ReplayBufferConfig config, CancellationToken token)
         => SendAsync<CaptureWorkerAttachResponse>("attach", new CaptureWorkerAttachRequest(config, _videoOverlaySettings), token);
-    private void ApplyAttach(CaptureWorkerAttachResponse attach, ReplayBufferConfig config, bool preserveRecording)
+    internal void ApplyAttach(CaptureWorkerAttachResponse attach, ReplayBufferConfig config, bool preserveRecording)
     {
         _durationSeconds = config.DurationSeconds;
-        if (!preserveRecording) SetRecording(attach.Recording);
+        if (!preserveRecording)
+        {
+            // The worker outlives the app: one still armed (capturing, or
+            // suspended with capture requested) carries the user's intent.
+            if (attach.Recording || attach.Suspended) _desiredRecording = true;
+            ApplyWorkerState(attach.Recording, attach.Suspended);
+        }
         PublishHealth(attach.Health with { RecoveryAttempt = _health.RecoveryAttempt, RecentWorkerFailureCount = _health.RecentWorkerFailureCount, LastWorkerExitCode = _health.LastWorkerExitCode });
+    }
+    internal void ApplyStartAck(CaptureWorkerStartAck started)
+    {
+        if (started.FullSession is { } session) PublishHealth(_health with { FullSession = session });
+        ApplyWorkerState(started.Recording, started.Suspended);
+    }
+    // A worker report of capture: active, or suspended for availability. A
+    // suspension holds the armed state only while the user still wants replay.
+    private void ApplyWorkerState(bool recording, bool suspended)
+    {
+        var held = !recording && suspended && _desiredRecording;
+        SetState(recording || held, held);
     }
     private static void Accept(CaptureWorkerAck ack, string operation) { if (!ack.Accepted) throw new InvalidOperationException($"Capture worker failed to {operation}: {ack.Error}"); }
 
@@ -272,7 +299,11 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                     case "health": var health = message.Payload.Deserialize<ReplayCaptureHealth>(); if (health is not null) Dispatcher.UIThread.Post(() => HandleWorkerHealth(pipe, generation, health)); break;
                     case "recording-state":
                         if (message.Payload.TryGetProperty("recording", out var recording))
-                            Dispatcher.UIThread.Post(() => { if (IsCurrentConnection(pipe, generation)) SetRecording(recording.GetBoolean()); });
+                        {
+                            var suspended = message.Payload.TryGetProperty("suspended", out var held) && held.ValueKind == JsonValueKind.True;
+                            var active = recording.GetBoolean();
+                            Dispatcher.UIThread.Post(() => HandleRecordingState(pipe, generation, active, suspended));
+                        }
                         break;
                     case "recording-stopped": Dispatcher.UIThread.Post(() => { if (IsCurrentConnection(pipe, generation) && !_desiredRecording) { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); } }); break;
                     case "save-started":
@@ -346,6 +377,11 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         }
     }
 
+    internal void HandleRecordingState(Stream pipe, long generation, bool recording, bool suspended)
+    {
+        if (IsCurrentConnection(pipe, generation)) ApplyWorkerState(recording, suspended);
+    }
+
     private bool IsCurrentConnection(Stream pipe, long generation) =>
         !_disposed && ReferenceEquals(_pipe, pipe) && generation == Volatile.Read(ref _generation);
 
@@ -360,7 +396,8 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             _fatalHealthPolicy.Reset();
         }
         PublishHealth(health);
-        if (!_desiredRecording)
+        // Suspended capture is stopped on purpose: throughput is not a fault.
+        if (!_desiredRecording || _suspended)
         {
             _fatalHealthPolicy.Reset();
             return;
@@ -423,19 +460,26 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         await SendAsync<CaptureWorkerAck>("pause", new { paused = _paused }, token);
         Accept(await SendAsync<CaptureWorkerAck>("auto-clip-policy", new { gameId = _autoClipGameId, enabled = _autoClipEnabled, enabledEventIds = _autoClipEventIds }, token), "restore auto-clip policy");
         if (_frameRate is int frameRate) await SendAsync<CaptureWorkerAck>("frame-rate", new { frameRate }, token);
-        if (_desiredRecording && !attach.Recording)
+        // A worker that kept capture requested through a suspension resumes on its own.
+        if (_desiredRecording && !attach.Recording && !attach.Suspended)
         {
             var started = await SendAsync<CaptureWorkerStartAck>("start", new { }, token);
             if (!started.Accepted) throw new InvalidOperationException($"Capture worker failed to restart capture: {started.Error}");
-            if (started.FullSession is { } session) PublishHealth(_health with { FullSession = session });
-            SetRecording(started.Recording);
+            ApplyStartAck(started);
         }
+        else if (attach.Suspended) ApplyWorkerState(false, true);
     }
 
     private void Breaker(int count, int? exitCode)
     { _desiredRecording = false; RecoveryHealth(RetryDelays.Length, count, exitCode, null, true, ReplayRecoveryStopReason.WorkerCrashLoop, "Capture worker crashed repeatedly."); Dispatcher.UIThread.Post(() => { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); }); AppLog.Info("Capture worker recovery breaker opened."); }
     private void RecoveryHealth(int attempt, int count, int? exitCode, DateTime? retry, bool breaker, ReplayRecoveryStopReason stopReason, string failure) => PublishHealth(_health with { State = breaker ? ReplayCaptureState.Failed : ReplayCaptureState.Recovering, RecoveryAttempt = attempt, RecentWorkerFailureCount = count, LastWorkerExitCode = exitCode, NextWorkerRetryUtc = retry, WorkerCrashLoopDetected = stopReason == ReplayRecoveryStopReason.WorkerCrashLoop, RecoveryStopReason = stopReason, LastFailure = failure, UpdatedUtc = DateTime.UtcNow });
-    private void SetRecording(bool value) { if (_isRecording == value) return; _isRecording = value; RecordingStateChanged?.Invoke(this, EventArgs.Empty); }
+    private void SetRecording(bool value) => SetState(value, false);
+    private void SetState(bool armed, bool suspended)
+    {
+        if (_isRecording == armed && _suspended == suspended) return;
+        _isRecording = armed; _suspended = suspended;
+        RecordingStateChanged?.Invoke(this, EventArgs.Empty);
+    }
     private void PublishHealth(ReplayCaptureHealth health) { _health = health; HealthChanged?.Invoke(this, health); }
     private void ResetHealth() => PublishHealth(ReplayCaptureHealth.Unknown("Worker"));
     private void FailPending() { lock (_pending) foreach (var item in _pending.Values) item.TrySetException(new IOException("Capture worker connection closed.")); }

@@ -262,6 +262,9 @@ public interface IFullSessionRecorderLifecycle
 
 public interface IReplayCaptureWorkerEvents
 {
+    // Replay stays armed (IsRecording) while the worker holds capture stopped
+    // for an unavailable display or session; it resumes without a new start.
+    bool IsCaptureSuspended => false;
     event EventHandler<string>? FullSessionClosed;
     event EventHandler? RecordingStateChanged;
     event EventHandler<ReplaySaveStarted>? SaveStarted;

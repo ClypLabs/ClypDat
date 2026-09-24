@@ -175,9 +175,8 @@ internal static class CaptureWorkerHost
                     await AttachAsync(client, message, cancellationToken);
                     break;
                 case "start":
-                    Lifecycle.Request(true);
-                    await StartCaptureIfAvailableAsync(cancellationToken);
-                    await ReplyAsync(client, message, new CaptureWorkerStartAck(true, _buffer?.IsRecording == true, FullSession: GetHealth().FullSession), cancellationToken);
+                    var started = await RequestCaptureAsync(Lifecycle, () => _buffer?.IsRecording == true, () => GetHealth().FullSession, cancellationToken);
+                    await ReplyAsync(client, message, started, cancellationToken);
                     break;
                 case "stop":
                     Lifecycle.Request(false);
@@ -304,7 +303,8 @@ internal static class CaptureWorkerHost
                     _buffer?.IsRecording == true,
                     ConfigIdentity(_config),
                     GetHealth(),
-                    DrainUnacknowledgedSaves(UnacknowledgedSaves));
+                    DrainUnacknowledgedSaves(UnacknowledgedSaves),
+                    Lifecycle.Suspended);
                 await ReplyAsync(client, message, response, cancellationToken);
             }
             finally { SaveGate.Release(); }
@@ -322,8 +322,16 @@ internal static class CaptureWorkerHost
         }
     }
 
-    private static Task StartCaptureIfAvailableAsync(CancellationToken cancellationToken)
-        => Lifecycle.ReconcileAsync(cancellationToken);
+    // Arms capture. With the display or session unavailable it stays
+    // suspended, reported as such, until the availability monitor's wake
+    // reconciles and starts it once; nothing here retries.
+    internal static async Task<CaptureWorkerStartAck> RequestCaptureAsync(CaptureLifecycleCoordinator lifecycle,
+        Func<bool> recording, Func<FullSessionStatus?> fullSession, CancellationToken cancellationToken)
+    {
+        lifecycle.Request(true);
+        await lifecycle.ReconcileAsync(cancellationToken).ConfigureAwait(false);
+        return new CaptureWorkerStartAck(true, recording(), FullSession: fullSession(), Suspended: lifecycle.Suspended);
+    }
 
     private static Task StopCaptureAfterSavesAsync(CancellationToken cancellationToken)
         => Lifecycle.ReconcileAsync(cancellationToken);

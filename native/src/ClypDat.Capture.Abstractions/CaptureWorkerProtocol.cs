@@ -51,13 +51,17 @@ public sealed record CaptureWorkerEnvelope(
     JsonElement Payload);
 
 public sealed record CaptureWorkerAck(bool Accepted, string Error = "");
-public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "", FullSessionStatus? FullSession = null);
+// Suspended: capture is requested but held stopped while the display or
+// session is unavailable. The worker restarts it by itself when they return;
+// the replay stays armed meanwhile.
+public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "", FullSessionStatus? FullSession = null, bool Suspended = false);
 public sealed record CaptureWorkerHandshake(int Version, string ClientId);
 public sealed record CaptureWorkerAttachResponse(
     bool Recording,
     string ConfigIdentity,
     ReplayCaptureHealth Health,
-    IReadOnlyList<CaptureWorkerSaveResult> UnacknowledgedSaves);
+    IReadOnlyList<CaptureWorkerSaveResult> UnacknowledgedSaves,
+    bool Suspended = false);
 public sealed record CaptureWorkerSaveResult(
     string Path,
     string? Title,

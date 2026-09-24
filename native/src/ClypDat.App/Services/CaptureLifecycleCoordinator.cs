@@ -13,6 +13,9 @@ internal sealed class CaptureLifecycleCoordinator(
     private long _completedStopRevision;
     public bool Requested { get { lock (_state) return _requested; } }
     public bool Available { get { lock (_state) return _available; } }
+    // Requested but held stopped for an unavailable display or session. The
+    // request stands: reconciling on wake starts capture exactly once.
+    public bool Suspended { get { lock (_state) return _requested && !_available; } }
 
     public void Request(bool requested)
     {
@@ -48,7 +51,7 @@ internal sealed class CaptureLifecycleCoordinator(
                     try { if (isRecording()) await stop(token).ConfigureAwait(false); }
                     finally { saves.Release(); }
                     _completedStopRevision = stopRevision;
-                    completed(false, !Available);
+                    completed(false, Suspended);
                     // Wake or disable may have arrived during either wait.
                     continue;
                 }
