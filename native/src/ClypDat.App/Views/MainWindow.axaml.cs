@@ -860,7 +860,6 @@ public sealed partial class MainWindow : Window
             ReconcileReplayTarget();
         }
 
-        UpdateCapturePauseState(detection);
         TryShowGameRecordingNotification(detection);
     }
 
@@ -942,22 +941,6 @@ public sealed partial class MainWindow : Window
         ViewModel.RemoveIgnoredGameExecutable(executableName);
         _gameDetector.ApplyUserIgnoredExecutables(ViewModel.Settings.IgnoredGameExecutables);
         UpdateDetectedGame();
-    }
-
-    private void UpdateCapturePauseState(GameDetection detection)
-    {
-        if (ViewModel?.IsEffectiveDesktopCapture == true)
-        {
-            _replayBuffer?.SetCapturePaused(false);
-            return;
-        }
-        if (_replayBuffer is not { IsRecording: true }) return;
-        // A background game must be treated the same way regardless of its
-        // executable name. This preserves the replay ring while preventing the
-        // capture health watchdog from mistaking an intentional privacy pause
-        // for a failed source.
-        var shouldPause = detection.IsDetected && !detection.IsForeground;
-        _replayBuffer.SetCapturePaused(shouldPause);
     }
 
     // Encoder tuning may lower live frame pacing temporarily. User-selected
@@ -1249,7 +1232,7 @@ public sealed partial class MainWindow : Window
         _workerCrashMessageShown = false;
         if (ViewModel is not null && ViewModel.IsReplayRecording)
             ViewModel.RecorderStatus = ViewModel.IsReplayArming ? "Replay Arming" :
-                health.CapturePaused ? "Replay Paused" :
+                health.CapturePaused ? "Video Capture Paused" :
                 health.CaptureMode.Contains("Graphics Capture", StringComparison.OrdinalIgnoreCase) ? "Replay WGC Recovery" :
                 "Replay On";
     }

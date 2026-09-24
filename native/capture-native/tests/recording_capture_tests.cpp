@@ -86,6 +86,88 @@ public:
     int switch_attempts = 0;
     bool switch_backend(bool) override { ++switch_attempts; return false; }
 };
+class EligibilitySource final : public RecordingFrameSource {
+    bool dxgi_;
+    std::atomic<bool> foreground_{false};
+    std::atomic<bool> capturable_{true};
+    std::chrono::steady_clock::time_point next_ = std::chrono::steady_clock::now();
+    int index_ = 0;
+public:
+    explicit EligibilitySource(bool dxgi) : dxgi_(dxgi) {}
+    bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
+        const auto current = std::chrono::steady_clock::now();
+        if (current < next_) {
+            std::this_thread::sleep_for(std::min(timeout,
+                std::chrono::duration_cast<std::chrono::milliseconds>(next_ - current) + 1ms));
+            return false;
+        }
+        next_ = current + 33333us;
+        pixels.width = 128; pixels.height = 72; pixels.stride = 512;
+        pixels.bgra.resize(size_t(pixels.stride) * pixels.height);
+        for (size_t i = 0; i < pixels.bgra.size(); i += 4) {
+            pixels.bgra[i] = uint8_t(index_); pixels.bgra[i + 1] = 96;
+            pixels.bgra[i + 2] = 180; pixels.bgra[i + 3] = 255;
+        }
+        ++index_;
+        return true;
+    }
+    bool eligible() const override { return capturable_ && (!dxgi_ || foreground_); }
+    bool foreground() const override { return foreground_; }
+    const char* name() const override { return dxgi_ ? "generated DXGI eligibility fixture" : "generated WGC eligibility fixture"; }
+    void set_foreground(bool value) { foreground_ = value; }
+    void set_capturable(bool value) { capturable_ = value; }
+};
+void source_eligibility_controls_capture_pause() {
+    RecordingCaptureConfig config; config.width = 128; config.height = 72; config.fps = 30; config.cpu_encoder = true;
+    std::mutex mutex; std::condition_variable changed; std::atomic<uint64_t> packets = 0;
+    RecordingCaptureCallbacks callbacks;
+    callbacks.packet = [&](auto, Packet, int64_t, bool) {
+        ++packets; changed.notify_all();
+    };
+    auto wgc = std::make_unique<EligibilitySource>(false);
+    auto* wgc_state = wgc.get();
+    RecordingCapture capture(config, callbacks, std::move(wgc)); capture.start();
+    auto wait_for_packets = [&](uint64_t target) {
+        std::unique_lock lock(mutex);
+        CHECK(changed.wait_for(lock, 4s, [&] { return packets >= target; }));
+    };
+    wait_for_packets(12);
+    auto health = capture.health();
+    const auto metrics_deadline = std::chrono::steady_clock::now() + 3s;
+    while ((health.input_fps <= 0 || health.output_fps <= 0) && std::chrono::steady_clock::now() < metrics_deadline) {
+        std::this_thread::sleep_for(20ms); health = capture.health();
+    }
+    CHECK(!health.paused); CHECK(health.input_fps > 0); CHECK(health.output_fps > 0);
+    wgc_state->set_foreground(false); // WGC must keep delivering while backgrounded.
+    wait_for_packets(24);
+    CHECK(!capture.health().paused);
+    capture.pause(true);
+    const auto paused_deadline = std::chrono::steady_clock::now() + 2s;
+    while (!capture.health().paused && std::chrono::steady_clock::now() < paused_deadline) std::this_thread::sleep_for(10ms);
+    CHECK(capture.health().paused);
+    capture.pause(false);
+    wait_for_packets(30);
+    wgc_state->set_capturable(false);
+    const auto ineligible_deadline = std::chrono::steady_clock::now() + 2s;
+    while (!capture.health().paused && std::chrono::steady_clock::now() < ineligible_deadline) std::this_thread::sleep_for(10ms);
+    CHECK(capture.health().paused);
+    const auto paused_packets = packets.load();
+    wgc_state->set_capturable(true);
+    wait_for_packets(paused_packets + 6);
+    CHECK(!capture.health().paused);
+    CHECK(capture.stop());
+
+    auto dxgi = std::make_unique<EligibilitySource>(true);
+    auto* dxgi_state = dxgi.get(); packets = 0;
+    RecordingCapture dxgi_capture(config, callbacks, std::move(dxgi)); dxgi_capture.start();
+    const auto background_deadline = std::chrono::steady_clock::now() + 2s;
+    while (!dxgi_capture.health().paused && std::chrono::steady_clock::now() < background_deadline) std::this_thread::sleep_for(10ms);
+    CHECK(dxgi_capture.health().paused);
+    dxgi_state->set_foreground(true);
+    wait_for_packets(6);
+    CHECK(!dxgi_capture.health().paused);
+    CHECK(dxgi_capture.stop());
+}
 void startup_source_dip_does_not_switch_backend() {
     RecordingCaptureConfig config; config.width = 128; config.height = 72; config.fps = 90; config.cpu_encoder = true;
     std::mutex mutex; std::condition_variable changed; uint64_t packets = 0;
@@ -314,7 +396,7 @@ int main(int argc,char**argv) {
         roundtrip(fps,variable);
         if(gpu){roundtrip(fps,variable,true,false);roundtrip(fps,variable,true,true);}
     }
-    blocked_writer();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
+    blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

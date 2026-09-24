@@ -2243,7 +2243,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string ReplayFrameTimingMetrics => _activeReplayTargetFrameRate <= 0
         ? string.Empty
         : _activeReplayCapturePaused
-        ? "Replay paused while game is backgrounded. Fresh FPS is not a capture-health sample."
+        ? "Video capture paused."
         : _activeReplayStartupPhase == ReplayCaptureStartupPhase.WaitingForForeground
         ? "Waiting for game foreground before replay frames begin."
         : $"{(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")}: output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS; source {_activeReplaySourceFrameRate:0.0} FPS; fresh visual FPS {_activeReplayUniqueGameFrameRate:0.0}.";

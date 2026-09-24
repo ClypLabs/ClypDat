@@ -139,7 +139,7 @@ public sealed class FullSessionPolicyTests
         };
         var presentation = RecordingPresentation.Resolve(health, true, true);
         Assert.Equal(label, presentation.Label); Assert.Equal(flash, presentation.Flash); Assert.Equal(color, presentation.DotColor);
-        if (paused) Assert.Contains("Paused:", presentation.Detail);
+        if (paused) Assert.Contains("Video capture paused.", presentation.Detail);
         if (state == FullSessionState.Failed) Assert.Contains("disk full", presentation.Detail);
     }
 
