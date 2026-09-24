@@ -93,6 +93,31 @@ int64_t RecordingFramePacer::next(int64_t elapsed,bool advanced,int64_t interval
     last_=std::max(last_+1,pts);return last_;
 }
 bool capture_transport_shortfall(bool captured,bool wgc,double target,double sampled){return captured&&!wgc&&target>0&&sampled<target*.99;}
+std::optional<size_t> capture_select_frame(const std::vector<CaptureFrameStamp>& queued, uint64_t consumed, int64_t target_us) {
+    std::optional<size_t> best;
+    uint64_t best_distance = 0;
+    for (size_t i = 0; i < queued.size(); ++i) {
+        if (queued[i].sequence <= consumed) continue;
+        const auto distance = uint64_t(std::llabs(queued[i].timestamp_us - target_us));
+        if (!best || distance < best_distance) { best = i; best_distance = distance; }
+    }
+    return best;
+}
+void apply_capture_environment(RecordingCaptureConfig& config) {
+    auto read = [](const char* name) {
+        char* value = nullptr; size_t length = 0;
+        if (_dupenv_s(&value, &length, name) != 0 || !value) return std::string{};
+        const std::unique_ptr<char, decltype(&std::free)> owned(value, &std::free);
+        return std::string(value);
+    };
+    const auto selection = read("CLYPDAT_FRAME_SELECTION");
+    if (selection == "timestamp" || selection == "newest") config.frame_selection = selection;
+    auto depth = [&](const char* name, int& target) {
+        const auto text = read(name);
+        if (text.size() == 1 && text[0] >= '1' && text[0] <= '8') target = text[0] - '0';
+    };
+    depth("CLYPDAT_SOURCE_QUEUE_DEPTH", config.source_queue_depth);
+}
 void RecordingRecoveryTimeline::observe(bool unhealthy,bool paused,int64_t now){
     if(paused){healthy_windows_=0;return;}
     if(unhealthy){healthy_windows_=0;if(outages_.empty()||outages_.back().end)outages_.push_back({now,{}});return;}
@@ -155,6 +180,7 @@ class GpuProcessor {
     Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_;
     Microsoft::WRL::ComPtr<ID3D11VideoContext> context_;
     Microsoft::WRL::ComPtr<ID3D11Multithread> multithread_;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> immediate_;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator> enumerator_;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessor> processor_;
     int source_width_ = 0, source_height_ = 0;
@@ -182,7 +208,7 @@ public:
         if (FAILED(input->QueryInterface(IID_PPV_ARGS(&video_)))) throw std::runtime_error("D3D11 video processing unavailable");
         Microsoft::WRL::ComPtr<ID3D11DeviceContext> immediate; input->GetImmediateContext(&immediate);
         if (FAILED(immediate.As(&context_))) throw std::runtime_error("D3D11 video context unavailable");
-        immediate.As(&multithread_);
+        immediate.As(&multithread_); immediate_ = immediate;
         device.reset(av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA));
         if (!device) throw std::bad_alloc();
         auto* hw = reinterpret_cast<AVHWDeviceContext*>(device->data);
@@ -258,6 +284,10 @@ public:
         context_->VideoProcessorSetOutputBackgroundColor(processor_.Get(), TRUE, &background);
         D3D11_VIDEO_PROCESSOR_STREAM stream{}; stream.Enable = TRUE; stream.pInputSurface = input.Get();
         hr(context_->VideoProcessorBlt(processor_.Get(), output.Get(), 0, 1, &stream), "Process recording GPU frame");
+        // Submit the conversion now. NVENC waits for this surface in its
+        // blocking bitstream lock; left batched, the write can sit behind a
+        // capture-thread call that needs the device lock NVENC holds.
+        immediate_->Flush();
         frame->pts = pts; frame->duration = 1000000 / fps_;
         frame->color_range = AVCOL_RANGE_MPEG; frame->colorspace = AVCOL_SPC_BT709;
         frame->color_primaries = AVCOL_PRI_BT709; frame->color_trc = AVCOL_TRC_BT709;
@@ -284,7 +314,14 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     RecordingCaptureHealth status;
     std::shared_ptr<CapturePixels> latest;
     uint64_t sequence = 0;
-    struct Work { std::shared_ptr<CapturePixels> pixels; int64_t pts; bool fresh;int64_t acquired_us;uint64_t source_sequence; };
+    // Recent acquisitions for timestamp selection, oldest first. Bounded by
+    // config.source_queue_depth; frames at or below consumed are spent.
+    struct Acquired { std::shared_ptr<CapturePixels> pixels; uint64_t sequence; };
+    std::deque<Acquired> recent;
+    uint64_t consumed = 0;
+    // acquired_us is the source time the tick samples; scheduled_us is when
+    // pacing issued it, used for queue age.
+    struct Work { std::shared_ptr<CapturePixels> pixels; int64_t pts; bool fresh;int64_t acquired_us;uint64_t source_sequence;int64_t scheduled_us; };
     std::deque<Work> queue;
     std::atomic<bool> stopping{false}, user_paused{false};
     std::atomic<int> fps{60};
@@ -303,7 +340,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     std::map<int64_t, int64_t> submitted_at;
     std::map<int64_t, Frame> retained_surfaces;
     size_t retained_limit = 0; // Frames the active encoder may own at once.
-    std::deque<double> submission_times, completion_times;
+    std::deque<double> submission_times, completion_times, capture_latencies;
     double readback_ms_sum=0,video_processor_ms_sum=0,software_convert_ms_sum=0,hardware_upload_ms_sum=0,overlay_compose_ms_sum=0;
     uint64_t processing_stage_samples=0;
     int64_t health_window = 0;
@@ -312,6 +349,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     uint64_t previous_acquired = 0, previous_encoded = 0, previous_dropped = 0;
     uint64_t previous_recoveries=0;
     uint64_t previous_unique=0,previous_source_delivered=0;
+    uint64_t previous_duplicates=0,previous_replaced=0,previous_selection_dropped=0;
+    uint64_t previous_wgc_callbacks=0,previous_wgc_delivered=0,previous_wgc_overwritten=0;
     int transport_shortfall_windows=0;
     RecordingRecoveryTimeline recovery;
     SwsContext* scaler = nullptr;
@@ -322,6 +361,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         : config(std::move(c)), callbacks(std::move(cb)),dependencies(std::move(deps)), source(std::move(s)) {
         injected_source = bool(source);
         std::transform(config.pacing_policy.begin(),config.pacing_policy.end(),config.pacing_policy.begin(),[](unsigned char c){return char(std::tolower(c));});
+        apply_capture_environment(config);
+        config.source_queue_depth=std::clamp(config.source_queue_depth,1,8);
+        if(config.frame_selection!="newest")config.frame_selection="timestamp";
+        status.frame_selection=config.frame_selection;status.source_queue_capacity=config.frame_selection=="newest"?1:config.source_queue_depth;
         if (config.width <= 0 || config.height <= 0 || config.width > 16384 || config.height > 16384 ||
             (config.width & 1) || (config.height & 1) || config.fps < 30 || config.fps > 120)
             throw std::invalid_argument("Invalid recording capture configuration");
@@ -472,7 +515,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             }
             observe_health();
             if (user_paused || !source->eligible()) {
-                { std::lock_guard lock(mutex); latest.reset(); status.paused = true; }
+                { std::lock_guard lock(mutex); latest.reset(); recent.clear(); status.source_queue_depth = 0; status.paused = true; }
                 std::unique_lock lock(mutex); changed.wait_for(lock, std::chrono::milliseconds(20), [&] { return stopping.load(); });
                 continue;
             }
@@ -485,7 +528,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 // repeated failure inside the original 30s window cannot loop
                 // indefinitely while saves appear healthy.
                 if((!last_recovery||current-last_recovery>30000000)&&source->recover()){
-                    last_recovery=current;std::lock_guard lock(mutex);++status.source_recoveries;latest.reset();
+                    last_recovery=current;std::lock_guard lock(mutex);++status.source_recoveries;latest.reset();recent.clear();
                     status.source=source->name();status.source_details=source->diagnostics();
                     previous_source_delivered=0;recovery.observe(true,false,current);continue;
                 }
@@ -493,7 +536,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                     const bool switch_to_wgc=std::string(source->name())!="Windows Graphics Capture";
                     if(source->switch_backend(switch_to_wgc)){
                         backend_fallback_attempted=true;last_recovery=current;
-                        std::lock_guard lock(mutex);++status.source_recoveries;latest.reset();
+                        std::lock_guard lock(mutex);++status.source_recoveries;latest.reset();recent.clear();
                         status.source=source->name();status.source_details=source->diagnostics();
                         previous_source_delivered=0;recovery.observe(true,false,current);continue;
                     }
@@ -506,7 +549,17 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             if (!valid_pixels(pixels)) throw std::runtime_error("Capture source returned invalid frame storage");
             if (!pixels.timestamp_us) pixels.timestamp_us = now();
             { std::lock_guard lock(mutex); latest = std::make_shared<CapturePixels>(std::move(pixels));
-              ++sequence; ++status.acquired; status.paused = false; }
+              ++sequence; ++status.acquired; status.paused = false;
+              if (config.frame_selection != "newest") {
+                  recent.push_back({latest, sequence});
+                  // Overflow drops the oldest; it counts only if never output.
+                  while (recent.size() > size_t(config.source_queue_depth)) {
+                      if (recent.front().sequence > consumed) ++status.selection_dropped;
+                      recent.pop_front();
+                  }
+                  status.source_queue_depth = int(recent.size());
+                  status.source_queue_peak = std::max(status.source_queue_peak, status.source_queue_depth);
+              } }
             changed.notify_all();
         }
     }
@@ -519,6 +572,17 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         status.input_fps = double(status.acquired - previous_acquired) * 1000000 / elapsed;
         status.unique_fps = double(status.unique_frames-previous_unique)*1000000/elapsed;previous_unique=status.unique_frames;
         status.output_fps = double(status.encoded - previous_encoded) * 1000000 / elapsed;
+        auto rate = [&](uint64_t value, uint64_t& previous) {
+            const double result = value >= previous ? double(value - previous) * 1000000 / elapsed : 0;
+            previous = value; return result;
+        };
+        status.duplicate_fps = rate(status.duplicates, previous_duplicates);
+        status.replaced_fps = rate(status.replaced, previous_replaced);
+        status.selection_dropped_fps = rate(status.selection_dropped, previous_selection_dropped);
+        // Source counters restart with a recreated source; rate() reads 0 then.
+        status.wgc_callback_fps = rate(status.source_details.callbacks, previous_wgc_callbacks);
+        status.wgc_delivered_fps = rate(status.source_details.frames_delivered, previous_wgc_delivered);
+        status.wgc_overwritten_fps = rate(status.source_details.overwritten, previous_wgc_overwritten);
         auto percentile = [](const std::deque<double>& values,double rank) {
             if (values.empty()) return 0.0;
             std::vector<double> sorted(values.begin(),values.end()); std::sort(sorted.begin(),sorted.end());
@@ -526,6 +590,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         };
         status.submission_p95_ms = percentile(submission_times,.95); status.completion_p95_ms = percentile(completion_times,.95);
         status.submission_p50_ms = percentile(submission_times,.5); status.completion_p50_ms = percentile(completion_times,.5);
+        status.capture_latency_p50_ms = percentile(capture_latencies,.5); status.capture_latency_p95_ms = percentile(capture_latencies,.95);
         if(processing_stage_samples){
             const double samples=double(processing_stage_samples);
             status.texture_readback_ms=readback_ms_sum/samples;status.video_processor_ms=video_processor_ms_sum/samples;
@@ -579,7 +644,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             }
             changed.wait_for(lock,std::chrono::microseconds(microseconds));
         };
-        uint64_t consumed = 0;
+        std::shared_ptr<CapturePixels> held;
+        uint64_t held_sequence = 0;
+        std::vector<CaptureFrameStamp> stamps;
+        { std::lock_guard lock(mutex); consumed = 0; }
         int64_t scheduled = now();
         const int64_t origin=scheduled;
         double constant_deadline=double(scheduled);
@@ -590,6 +658,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             const int64_t current = now();
             std::unique_lock lock(mutex);
             if (!latest || user_paused || status.paused) {
+                held.reset();
                 scheduled = current;constant_deadline=double(current); changed.wait_for(lock, std::chrono::milliseconds(5)); continue;
             }
             int64_t intervals=1;
@@ -610,14 +679,41 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 if(legacy_catchup_remaining--<=0){constant_deadline=double(current);legacy_catchup_remaining=std::clamp(fps.load()/4,4,60);continue;}
                 constant_deadline=next;
             }
-            const bool fresh = sequence != consumed;
+            bool fresh = false;
+            int64_t sample_us = current, elapsed = current - origin;
+            if (config.frame_selection == "newest") {
+                fresh = sequence != consumed;
+                held = latest; held_sequence = sequence; consumed = sequence;
+            } else {
+                // Sample one output interval back so a frame that lands just
+                // after its tick still gets that tick instead of being
+                // overwritten by its successor.
+                const int64_t delay = int64_t(std::llround(1000000.0 / fps.load()));
+                sample_us = current - delay;
+                stamps.clear();
+                for (const auto& item : recent) stamps.push_back({item.sequence, item.pixels->timestamp_us});
+                if (const auto pick = capture_select_frame(stamps, consumed, sample_us)) {
+                    for (size_t i = 0; i < *pick; ++i) if (recent[i].sequence > consumed) ++status.selection_dropped;
+                    held = recent[*pick].pixels; held_sequence = recent[*pick].sequence; consumed = held_sequence;
+                    recent.erase(recent.begin(), recent.begin() + std::ptrdiff_t(*pick) + 1);
+                    status.source_queue_depth = int(recent.size());
+                    fresh = true;
+                    // VFR stamps the frame's own capture time, bounded to this tick.
+                    if (config.variable_frame_rate)
+                        elapsed = std::clamp(held->timestamp_us, sample_us - delay, current) - origin;
+                }
+            }
+            if (!held) continue;
             if (!fresh) ++status.duplicates;
-            consumed = sequence;
+            else {
+                capture_latencies.push_back(double(current - held->timestamp_us) / 1000);
+                if (capture_latencies.size() > 240) capture_latencies.pop_front();
+            }
             pacer.set_frame_rate(fps);
-            const auto pts = origin+pacer.next(current-origin,fresh,intervals); last_pts = pts;
+            const auto pts = origin+pacer.next(elapsed,fresh,intervals); last_pts = pts;
             const size_t capacity = static_cast<size_t>(capture_queue_capacity(fps));
             while (queue.size() >= capacity) { queue.pop_front(); ++status.replaced; }
-            queue.push_back({latest, pts, fresh,current,sequence}); status.queue_depth = int(queue.size()); status.queue_capacity = int(capacity);
+            queue.push_back({held, pts, fresh, sample_us, held_sequence, current}); status.queue_depth = int(queue.size()); status.queue_capacity = int(capacity);
             lock.unlock(); changed.notify_all();
         }
         { std::lock_guard lock(mutex); pacing_finished = true; }
@@ -742,7 +838,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 }
             }
             const auto process_started = now();
-            { std::lock_guard lock(mutex); status.queue_age_ms = std::max(0.0, double(process_started-work.acquired_us)/1000);
+            { std::lock_guard lock(mutex); status.queue_age_ms = std::max(0.0, double(process_started-work.scheduled_us)/1000);
                 status.queue_age_max_ms=std::max(status.queue_age_max_ms,status.queue_age_ms); }
             CapturePixels source_copy;
             CapturePixels composed;
@@ -857,7 +953,8 @@ void RecordingCapture::start() {
     std::fill(s->failed_candidates.begin(),s->failed_candidates.end(),false);
     s->open_encoder(false);
     std::lock_guard lock(s->mutex);
-    s->stopping = false; s->pacing_finished = false; s->queue.clear(); s->latest.reset(); s->sequence = 0;
+    s->stopping = false; s->pacing_finished = false; s->queue.clear(); s->latest.reset(); s->recent.clear(); s->consumed = 0; s->sequence = 0;
+    s->status.source_queue_depth = 0; s->status.source_queue_peak = 0;
     s->session_started=s->now();s->health_window=0;s->last_tuning_decision=0;s->clean_since=0;s->severe_windows.clear();
     s->status.running = true; s->status.source = s->source->name(); s->status.error.clear(); s->status.restart_required = false;
     s->status.output_width=s->config.width;s->status.output_height=s->config.height;

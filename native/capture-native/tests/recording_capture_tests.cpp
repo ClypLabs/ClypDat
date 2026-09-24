@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <iostream>
 #include <mutex>
+#include <random>
 #include <stdexcept>
 #include <thread>
 #include <d3d11_4.h>
@@ -211,7 +212,10 @@ void roundtrip(int fps, bool variable,bool gpu=false,bool av1=false) {
     };
     RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(fps,gpu));
     capture.start();
-    {std::unique_lock lock(mutex); CHECK(ready.wait_for(lock,5s,[&]{return packets.size()>=size_t(fps/3);}));}
+    {std::unique_lock lock(mutex);if(!ready.wait_for(lock,5s,[&]{return packets.size()>=size_t(fps/3);})){const auto h=capture.health();
+        throw std::runtime_error("Roundtrip stalled fps="+std::to_string(fps)+" variable="+std::to_string(variable)+" gpu="+std::to_string(gpu)+" av1="+std::to_string(av1)+
+            " packets="+std::to_string(packets.size())+" acquired="+std::to_string(h.acquired)+" submitted="+std::to_string(h.submitted)+" encoded="+std::to_string(h.encoded)+
+            " duplicates="+std::to_string(h.duplicates)+" queue="+std::to_string(h.queue_depth)+" sourceQueue="+std::to_string(h.source_queue_depth)+" encoder="+h.encoder+" error="+h.error);}}
     capture.pause(true); capture.request_frame_rate(30);
     CHECK(capture.stop()); CHECK(!capture.health().running); CHECK(capture.health().detector_copies==0);
     if(!capture.health().error.empty())throw std::runtime_error("Roundtrip fps="+std::to_string(fps)+" gpu="+std::to_string(gpu)+" av1="+std::to_string(av1)+": "+capture.health().error);
@@ -452,6 +456,118 @@ void planned_retained_limit(){
     CHECK(health.max_in_flight==5&&health.submitted==5&&health.surfaces_allocated<=health.surface_capacity);
     capture.stop();
 }
+
+// WGC-like delivery: the game finishes frames at game_fps (jittered); each
+// display refresh with a new game frame yields one frame stamped at that
+// refresh and delivered after a callback delay. Microseconds.
+struct Delivery { int64_t stamp, arrival; };
+std::vector<Delivery> wgc_schedule(double game_fps,double refresh,double seconds,uint32_t seed){
+    std::mt19937 rng(seed);std::uniform_real_distribution<double> render(-.15,.15),callback(200,1500);
+    std::vector<double> completes;for(double t=0;t<seconds;t+=(1/game_fps)*(1+render(rng)))completes.push_back(t);
+    std::vector<Delivery> frames;size_t next=0;int64_t shown=-1;
+    for(int64_t v=0;double(v)/refresh<seconds;++v){
+        const double vsync=double(v)/refresh;while(next<completes.size()&&completes[next]<=vsync)++next;
+        if(int64_t(next)-1>shown){shown=int64_t(next)-1;const auto stamp=int64_t(vsync*1e6);frames.push_back({stamp,stamp+int64_t(callback(rng))});}
+    }
+    return frames;
+}
+// Replays the pacing selection offline, exactly as RecordingCapture does.
+double simulated_fresh(const std::vector<Delivery>& frames,int target,double seconds,bool timestamp,int depth,uint32_t seed){
+    std::mt19937 rng(seed);std::uniform_int_distribution<int> wake(-300,300);
+    const double interval=1e6/target;std::deque<CaptureFrameStamp> queue;uint64_t consumed=0;size_t next=0;int fresh=0;
+    for(int64_t k=1;double(k)*interval<seconds*1e6;++k){
+        const int64_t tick=int64_t(double(k)*interval)+wake(rng);
+        while(next<frames.size()&&frames[next].arrival<=tick){queue.push_back({next+1,frames[next].stamp});++next;
+            while(queue.size()>size_t(depth))queue.pop_front();}
+        if(!timestamp){if(!queue.empty()&&queue.back().sequence>consumed){consumed=queue.back().sequence;++fresh;}queue.clear();continue;}
+        const std::vector<CaptureFrameStamp> view(queue.begin(),queue.end());
+        if(const auto pick=capture_select_frame(view,consumed,tick-int64_t(std::llround(interval)))){
+            consumed=view[*pick].sequence;++fresh;queue.erase(queue.begin(),queue.begin()+std::ptrdiff_t(*pick)+1);}
+    }
+    return fresh/seconds;
+}
+void frame_selection_policy(){
+    // Nearest to target among unconsumed frames; ties prefer the older one.
+    const std::vector<CaptureFrameStamp> queued{{3,1000},{4,2000},{5,3000}};
+    CHECK(capture_select_frame(queued,2,2100)==std::optional<size_t>(1));
+    CHECK(capture_select_frame(queued,2,2500)==std::optional<size_t>(1));
+    CHECK(capture_select_frame(queued,4,1000)==std::optional<size_t>(2));
+    CHECK(!capture_select_frame(queued,5,2000));CHECK(!capture_select_frame({},0,0));
+    // Refresh relationships: target, display Hz, game fps.
+    struct Case{int target;double refresh,game;};
+    const Case cases[]={{60,60,60},{60,144,60},{60,144,90},{90,120,150},{90,144,150},{90,165,150},{90,240,150},{90,240,95},{90,240,90},
+        {90,240,240},{120,144,200},{120,165,200},{120,240,200},{120,240,125}};
+    for(const auto& c:cases){
+        const double seconds=20;const auto frames=wgc_schedule(c.game,c.refresh,seconds,7);
+        const double delivered=frames.size()/seconds,expected=std::min(delivered,double(c.target));
+        const double newest=simulated_fresh(frames,c.target,seconds,false,1,11),selected=simulated_fresh(frames,c.target,seconds,true,2,11);
+        std::cout<<"selection "<<c.target<<"fps@"<<c.refresh<<"Hz game="<<c.game<<": delivered="<<delivered<<" newest="<<newest<<" timestamp="<<selected<<"\n";
+        if(selected<expected*.985-.5||selected+.2<newest)throw std::runtime_error("Timestamp selection lost fresh frames at "+std::to_string(c.target)+"fps/"+std::to_string(int(c.refresh))+"Hz");
+    }
+}
+// Emulated WGC delivery through the real capture, pacing and encoder threads.
+// A high-resolution timer keeps callback timing close to the schedule;
+// sleep_for would batch deliveries on the default 15.6 ms Windows tick.
+class DeliveredSource final : public RecordingFrameSource {
+    std::vector<Delivery> frames_;size_t next_=0;int64_t base_;std::function<int64_t()> clock_;
+    HANDLE timer_=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
+    void pause(int64_t microseconds){LARGE_INTEGER due{};due.QuadPart=-microseconds*10;
+        if(timer_&&SetWaitableTimer(timer_,&due,0,nullptr,nullptr,FALSE))WaitForSingleObject(timer_,INFINITE);
+        else std::this_thread::sleep_for(std::chrono::microseconds(microseconds));}
+public:
+    DeliveredSource(std::vector<Delivery> frames,int64_t base,std::function<int64_t()> clock):frames_(std::move(frames)),base_(base),clock_(std::move(clock)){}
+    ~DeliveredSource()override{if(timer_)CloseHandle(timer_);}
+    bool acquire(CapturePixels& pixels,std::chrono::milliseconds timeout)override{
+        if(next_>=frames_.size()){pause(timeout.count()*1000);return false;}
+        const auto wait=base_+frames_[next_].arrival-clock_();
+        if(wait>0){if(wait>timeout.count()*1000){pause(timeout.count()*1000);return false;}pause(wait);}
+        pixels.width=128;pixels.height=72;pixels.stride=512;pixels.bgra.assign(size_t(512)*72,uint8_t(next_));
+        for(size_t i=3;i<pixels.bgra.size();i+=4)pixels.bgra[i]=255;
+        pixels.timestamp_us=base_+frames_[next_].stamp;++next_;return true;
+    }
+    bool eligible()const override{return true;}
+    const char* name()const override{return "emulated WGC delivery fixture";}
+};
+RecordingCaptureHealth delivered_run(const std::vector<Delivery>& frames,int fps,bool variable,const std::string& selection){
+    const auto started=std::chrono::steady_clock::now();
+    auto clock=[started]{return int64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-started).count())+10000000;};
+    RecordingCaptureConfig config;config.width=128;config.height=72;config.fps=fps;config.cpu_encoder=true;config.variable_frame_rate=variable;
+    config.frame_selection=selection;config.monotonic_anchor_us=10000000;
+    RecordingCaptureDependencies dependencies;dependencies.monotonic_clock=clock;
+    std::mutex mutex;int64_t previous=-1;bool ordered=true;uint64_t packets=0;
+    RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet packet,int64_t,bool){std::lock_guard lock(mutex);ordered&=packet->pts>previous;previous=packet->pts;++packets;};
+    RecordingCapture capture(config,callbacks,std::make_unique<DeliveredSource>(frames,clock()+100000,clock),std::move(dependencies));capture.start();
+    // Average the two steady-state health windows after warm-up.
+    RecordingCaptureHealth best;double fresh=0,duplicates=0,dropped=0;
+    for(int second=0;second<4;++second){std::this_thread::sleep_for(1s);if(second>=2){best=capture.health();fresh+=best.unique_fps/2;duplicates+=best.duplicate_fps/2;dropped+=best.selection_dropped_fps/2;}}
+    best.unique_fps=fresh;best.duplicate_fps=duplicates;best.selection_dropped_fps=dropped;
+    CHECK(capture.stop());const auto health=capture.health();if(!health.error.empty())throw std::runtime_error(health.error);
+    CHECK(ordered&&packets>0);best.frame_selection=health.frame_selection;best.source_queue_capacity=health.source_queue_capacity;
+    return best;
+}
+void fresh_frame_delivery(){
+    // 90 fps target, 240 Hz display, game slightly above target: every output
+    // tick has a distinct source frame available.
+    const auto frames=wgc_schedule(95,240,6,23);
+    for(const bool variable:{false,true}){
+        const auto selected=delivered_run(frames,90,variable,"timestamp");
+        const auto newest=delivered_run(frames,90,variable,"newest");
+        std::cout<<(variable?"VFR":"CFR")<<" 90fps@240Hz game=95: timestamp acquired="<<selected.input_fps<<" fresh="<<selected.unique_fps
+            <<" duplicates="<<selected.duplicate_fps<<" dropped="<<selected.selection_dropped_fps<<" latencyP95="<<selected.capture_latency_p95_ms
+            <<"ms; newest fresh="<<newest.unique_fps<<" duplicates="<<newest.duplicate_fps<<"\n";
+        CHECK(selected.frame_selection=="timestamp"&&selected.source_queue_capacity==2&&newest.frame_selection=="newest");
+        if(selected.unique_fps<86)throw std::runtime_error("Timestamp selection fresh FPS "+std::to_string(selected.unique_fps));
+        CHECK(selected.source_queue_peak<=2);CHECK(selected.capture_latency_p95_ms<40);
+    }
+    // Other refresh relationships, CFR: 60 fps on 144 Hz and 120 fps on 240 Hz.
+    struct Case{int target;double refresh,game;};
+    for(const auto& c:{Case{60,144,70},Case{120,240,130}}){
+        const auto selected=delivered_run(wgc_schedule(c.game,c.refresh,6,31),c.target,false,"timestamp");
+        std::cout<<"CFR "<<c.target<<"fps@"<<c.refresh<<"Hz game="<<c.game<<": acquired="<<selected.input_fps<<" fresh="<<selected.unique_fps
+            <<" duplicates="<<selected.duplicate_fps<<"\n";
+        if(selected.unique_fps<c.target*.95)throw std::runtime_error("Timestamp selection fresh FPS "+std::to_string(selected.unique_fps)+" at "+std::to_string(c.target));
+    }
+}
 void gpu_generation_failover(){
     const auto base=std::filesystem::current_path();const auto root=base/(L"capture-generation-fixture-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
     CHECK(std::filesystem::create_directory(root));
@@ -503,6 +619,7 @@ int main(int argc,char**argv) {
     recovery.observe(false,false,11000000);CHECK(!recovery.safe_start(0,60000000,safe));recovery.observe(false,false,12000000);CHECK(recovery.safe_start(0,60000000,safe));CHECK(safe==12000000);
     CHECK(!capture_transport_shortfall(true,true,90,54));
     recording_encoder_plans();
+    frame_selection_policy();fresh_frame_delivery();
     const bool gpu=argc>1&&std::string_view(argv[1])=="--gpu";
     for(int fps:{30,60,90,120})for(bool variable:{false,true}){
         roundtrip(fps,variable);

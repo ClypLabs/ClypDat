@@ -28,6 +28,7 @@ struct CapturePixels {
     std::shared_ptr<ID3D11Texture2D> texture;
 };
 struct RecordingSourceHealth {
+    // overwritten counts delivered frames dropped before acquisition consumed them.
     uint64_t callbacks = 0, frames_delivered = 0, overwritten = 0, resizes = 0;
     int64_t requested_interval_100ns = 0, applied_interval_100ns = 0;
     double display_refresh_hz = 0;
@@ -71,6 +72,11 @@ struct RecordingCaptureConfig {
     bool d3d_debug=false;
     int nvenc_delay=0;
     std::string pacing_policy="latest";
+    // "timestamp" gives each output tick the queued source frame nearest one
+    // output interval back, so rate-matched sources keep distinct frames;
+    // "newest" keeps single-slot newest-frame sampling for comparison.
+    std::string frame_selection="timestamp";
+    int source_queue_depth=2;
     std::wstring target_executable,target_title,target_class;
     float sdr_white_nits = 80;
     int64_t qpc_anchor = 0, qpc_frequency = 0, monotonic_anchor_us = 0;
@@ -89,7 +95,15 @@ struct RecordingCaptureHealth {
     std::string source, encoder, error;
     uint64_t duplicates = 0, submitted = 0, source_recoveries = 0;
     uint64_t unique_frames=0;
+    // input_fps counts frames the acquisition thread took from the source;
+    // the wgc_* rates come from the capture callback itself.
     double input_fps = 0, unique_fps = 0, output_fps = 0;
+    double wgc_callback_fps = 0, wgc_delivered_fps = 0, wgc_overwritten_fps = 0;
+    double duplicate_fps = 0, replaced_fps = 0, selection_dropped_fps = 0;
+    uint64_t selection_dropped = 0;
+    int source_queue_depth = 0, source_queue_peak = 0, source_queue_capacity = 0;
+    double capture_latency_p50_ms = 0, capture_latency_p95_ms = 0;
+    std::string frame_selection;
     double queue_age_ms = 0, processing_ms = 0, submission_ms = 0, completion_ms = 0;
     double texture_readback_ms=0,video_processor_ms=0,software_convert_ms=0,hardware_upload_ms=0,overlay_compose_ms=0;
     uint64_t gpu_conversion_fallbacks=0;
@@ -173,6 +187,13 @@ public:
     bool safe_start(int64_t requested_start,int64_t requested_end,int64_t& safe_start)const;
 };
 bool capture_transport_shortfall(bool captured,bool wgc,double target,double sampled);
+struct CaptureFrameStamp { uint64_t sequence = 0; int64_t timestamp_us = 0; };
+// Queued frame nearest target_us among frames newer than consumed; ties
+// prefer the older frame. nullopt when nothing newer is queued.
+std::optional<size_t> capture_select_frame(const std::vector<CaptureFrameStamp>& queued, uint64_t consumed, int64_t target_us);
+// Diagnostic overrides: CLYPDAT_FRAME_SELECTION and CLYPDAT_SOURCE_QUEUE_DEPTH.
+// Out-of-range values are ignored.
+void apply_capture_environment(RecordingCaptureConfig& config);
 
 class RecordingCapture {
 public:

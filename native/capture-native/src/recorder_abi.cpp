@@ -227,6 +227,14 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"zeroCopyStatus\":" << quoted(h.zero_copy_status) << ",\"zeroCopyProbePassed\":" << (h.zero_copy_probe_passed ? "true" : "false")
         << ",\"captureAdapterVendor\":" << h.capture_adapter_vendor
         << ",\"submissionP50Ms\":" << h.submission_p50_ms << ",\"completionP50Ms\":" << h.completion_p50_ms
+        << ",\"wgcCallbackFps\":" << h.wgc_callback_fps << ",\"wgcDeliveredFps\":" << h.wgc_delivered_fps
+        << ",\"wgcOverwrittenFps\":" << h.wgc_overwritten_fps
+        << ",\"acquiredFps\":" << h.input_fps << ",\"duplicateFps\":" << h.duplicate_fps
+        << ",\"pacingReplacedFps\":" << h.replaced_fps << ",\"selectionDroppedFps\":" << h.selection_dropped_fps
+        << ",\"selectionDropped\":" << h.selection_dropped << ",\"frameSelection\":" << quoted(h.frame_selection)
+        << ",\"sourceQueueDepth\":" << h.source_queue_depth << ",\"sourceQueuePeak\":" << h.source_queue_peak
+        << ",\"sourceQueueCapacity\":" << h.source_queue_capacity
+        << ",\"captureLatencyP50Ms\":" << h.capture_latency_p50_ms << ",\"captureLatencyP95Ms\":" << h.capture_latency_p95_ms
         << ",\"overloadWindows\":" << h.overload_windows << ",\"qualifiedWindows\":" << h.qualified_windows
         << ",\"hardwareInput\":" << (h.hardware_input ? "true" : "false") << ",\"hdr\":" << (h.hdr ? "true" : "false")
         << ",\"frameRateProtected\":" << (h.frame_rate_protected ? "true" : "false")
