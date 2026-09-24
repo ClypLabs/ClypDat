@@ -146,6 +146,17 @@ struct RecordingCaptureHealth {
     // Large frame allocations by the encoding thread: readback resources when
     // they are created, plus any CPU frame or download a path allocates per frame.
     uint64_t frame_allocations = 0;
+    // Auto-clip detector (DetectorStage): samples delivered, due samples
+    // skipped by stop, samples that fell back to the full-frame path, and per
+    // sample GPU copy, readback and conversion times and bytes read back.
+    // Its textures and CPU buffers are allocated only when it builds for a
+    // new source, canvas or layout; allocations_after_warmup counts rebuilds.
+    uint64_t detector_samples = 0, detector_skipped = 0, detector_fallbacks = 0;
+    double detector_sample_fps = 0, detector_bytes_per_sample = 0;
+    double detector_gpu_p50_ms = 0, detector_gpu_p95_ms = 0, detector_readback_p50_ms = 0, detector_readback_p95_ms = 0;
+    double detector_convert_p50_ms = 0, detector_convert_p95_ms = 0;
+    uint64_t detector_textures_allocated = 0, detector_buffers_allocated = 0, detector_builds = 0, detector_allocations_after_warmup = 0;
+    uint64_t detector_readback_bytes = 0;
     int overload_windows = 0, qualified_windows = 0;
     bool hardware_input = false, hdr = false, frame_rate_protected = false;
     // Burned overlays: the capture fills the composition path, CPU round trips
@@ -193,6 +204,12 @@ struct RecordingCaptureDependencies {
     // Reports the GPU overlay compositor unavailable, as a driver without
     // BGRA video-processor support would.
     bool disable_gpu_overlays = false;
+    // Runs the detector's full-frame path instead of DetectorStage's region
+    // readback (benchmarks and tests).
+    bool reference_detector = false;
+    // Tests: true holds the detector's readback as if the GPU copy were
+    // still running.
+    std::function<bool()> detector_readback_pending;
 };
 // Resource sizing used by candidates that do not consume an EncoderPlan yet.
 int legacy_surface_capacity(int fps);

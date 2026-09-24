@@ -29,6 +29,15 @@ input devices. The native tests cover generated H.264/AV1 at 30, 60, 90 and
 HDR conversion, detector crops, overlay timing, suppression, shutdown and
 recovery.
 
+The auto-clip detector (`DetectorStage`) reads back only the source pixels its
+three regions depend on, into one reused staging texture, and converts only the
+output rows they cover with the same swscale context and filter as the
+full-canvas conversion, so region and mask bytes match it exactly. Two manual
+tools check that: `ClypDat.Capture.Native.DetectorCorpus <frames dir> <out.tsv>`
+hashes detector output for captured game frames so two builds can be compared,
+and `ClypDat.Capture.Native.DetectorBench <seconds> <stage|reference|off|idle>`
+measures detector cost on the pipeline with a generated 4K source.
+
 The [five-round generated media comparison](RECORDING-COMPARISON.md) reports
 CPU time, save time, working set and private bytes for managed and native
 recorders. Local fixture clips and per-run JSON remain under `.local/`.

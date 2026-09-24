@@ -235,6 +235,14 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"readbackMapWaitP50Ms\":" << h.readback_map_wait_p50_ms << ",\"readbackMapWaitP95Ms\":" << h.readback_map_wait_p95_ms
         << ",\"readbackMapStalls\":" << h.readback_map_stalls << ",\"readbackPressureDrops\":" << h.readback_pressure_drops
         << ",\"frameAllocations\":" << h.frame_allocations
+        << ",\"detectorSamples\":" << h.detector_samples << ",\"detectorSampleFps\":" << h.detector_sample_fps
+        << ",\"detectorSkipped\":" << h.detector_skipped << ",\"detectorFallbacks\":" << h.detector_fallbacks
+        << ",\"detectorGpuP50Ms\":" << h.detector_gpu_p50_ms << ",\"detectorGpuP95Ms\":" << h.detector_gpu_p95_ms
+        << ",\"detectorReadbackP50Ms\":" << h.detector_readback_p50_ms << ",\"detectorReadbackP95Ms\":" << h.detector_readback_p95_ms
+        << ",\"detectorConvertP50Ms\":" << h.detector_convert_p50_ms << ",\"detectorConvertP95Ms\":" << h.detector_convert_p95_ms
+        << ",\"detectorBytesPerSample\":" << h.detector_bytes_per_sample << ",\"detectorReadbackBytes\":" << h.detector_readback_bytes
+        << ",\"detectorTexturesAllocated\":" << h.detector_textures_allocated << ",\"detectorBuffersAllocated\":" << h.detector_buffers_allocated
+        << ",\"detectorBuilds\":" << h.detector_builds << ",\"detectorAllocationsAfterWarmup\":" << h.detector_allocations_after_warmup
         << ",\"overlayEnabled\":" << (h.overlay.enabled ? "true" : "false") << ",\"overlayState\":" << quoted(h.overlay.state)
         << ",\"overlayPath\":" << quoted(h.overlay.path)
         << ",\"overlayCameraRequested\":" << (h.overlay.camera_requested ? "true" : "false")

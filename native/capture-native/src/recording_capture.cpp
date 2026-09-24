@@ -1,5 +1,6 @@
 #include "recording_capture.h"
 #include "readback_stage.h"
+#include "detector_stage.h"
 #include "overlay_compositor.h"
 #include <Windows.h>
 #include <avrt.h>
@@ -650,7 +651,17 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     int transport_shortfall_windows=0;
     RecordingRecoveryTimeline recovery;
     SwsContext* scaler = nullptr;
-    SwsContext* detector_scaler = nullptr;
+    // Detection thread only.
+    DetectorStage detector_stage;
+    // The detection thread sleeps on detector_wake until a detector is
+    // configured (detector_version changes) and acquisition delivers a frame
+    // at or past detector_due_us while it wants one.
+    std::condition_variable detector_wake;
+    uint64_t detector_version = 0;
+    bool detector_wants_frame = false, detector_frame_ready = false;
+    int64_t detector_due_us = 0;
+    std::deque<double> detector_gpu_times, detector_readback_times, detector_convert_times;
+    uint64_t previous_detector_samples = 0;
     std::string gpu_initialization_error;
 
     State(RecordingCaptureConfig c, RecordingCaptureCallbacks cb, std::unique_ptr<RecordingFrameSource> s,RecordingCaptureDependencies deps={})
@@ -671,8 +682,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         fps = config.fps; status.active_fps = config.fps; status.queue_capacity = capture_queue_capacity(config.fps);
         encoder_candidates = dependencies.candidates.empty()?recording_encoder_candidates(config.cpu_encoder, config.av1):dependencies.candidates;
         failed_candidates.resize(encoder_candidates.size());
+        detector_stage.reference = dependencies.reference_detector; detector_stage.readback_pending = dependencies.detector_readback_pending;
     }
-    ~State() { sws_freeContext(scaler);sws_freeContext(detector_scaler); }
+    ~State() { sws_freeContext(scaler); }
     int64_t now() const {
         if(dependencies.monotonic_clock)return dependencies.monotonic_clock();
         LARGE_INTEGER ticks{}; QueryPerformanceCounter(&ticks);
@@ -682,13 +694,17 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     }
     void fail(const std::string& message) noexcept {
         { std::lock_guard lock(mutex); status.error = message; status.restart_required = true; }
-        stopping = true; changed.notify_all();
+        stopping = true; changed.notify_all(); wake_detector();
         try { if (callbacks.failure) callbacks.failure(message); } catch (...) {}
     }
-    template<class F> void launch(F action) {
+    // Taking the mutex orders this after a detection thread that has checked
+    // its wait condition but not yet slept, so the notification is not lost.
+    void wake_detector() { { std::lock_guard lock(mutex); } detector_wake.notify_all(); }
+    template<class F> void launch(F action, const wchar_t* name) {
         ++threads;
         try {
-            std::thread([self = shared_from_this(), action] {
+            std::thread([self = shared_from_this(), action, name] {
+                SetThreadDescription(GetCurrentThread(), name);
                 {
                 CaptureThreadScheduling scheduling(action!=&State::detection);
                 try { (self.get()->*action)(); }
@@ -905,7 +921,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             if (user_paused || !source->eligible()) continue;
             if (!valid_pixels(pixels)) throw std::runtime_error("Capture source returned invalid frame storage");
             if (!pixels.timestamp_us) pixels.timestamp_us = now();
+            bool detector_due = false;
             { std::lock_guard lock(mutex); latest = std::make_shared<CapturePixels>(std::move(pixels));
+              if (detector_wants_frame && latest->timestamp_us >= detector_due_us) { detector_wants_frame = false; detector_frame_ready = detector_due = true; }
               ++sequence; ++status.acquired; status.paused = false;
               if (config.frame_selection != "newest") {
                   recent.push_back({latest, sequence});
@@ -918,6 +936,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                   status.source_queue_peak = std::max(status.source_queue_peak, status.source_queue_depth);
               } }
             changed.notify_all();
+            if (detector_due) detector_wake.notify_one();
         }
     }
     void observe_health() {
@@ -952,6 +971,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         status.readback_p50_ms = percentile(readback_times,.5); status.readback_p95_ms = percentile(readback_times,.95);
         status.readback_map_wait_p50_ms = percentile(readback_map_waits,.5); status.readback_map_wait_p95_ms = percentile(readback_map_waits,.95);
         status.overlay.gpu_p50_ms = percentile(overlay_gpu_times,.5); status.overlay.gpu_p95_ms = percentile(overlay_gpu_times,.95);
+        status.detector_sample_fps = rate(status.detector_samples, previous_detector_samples);
+        status.detector_gpu_p50_ms = percentile(detector_gpu_times,.5); status.detector_gpu_p95_ms = percentile(detector_gpu_times,.95);
+        status.detector_readback_p50_ms = percentile(detector_readback_times,.5); status.detector_readback_p95_ms = percentile(detector_readback_times,.95);
+        status.detector_convert_p50_ms = percentile(detector_convert_times,.5); status.detector_convert_p95_ms = percentile(detector_convert_times,.95);
         if(processing_stage_samples){
             const double samples=double(processing_stage_samples);
             status.texture_readback_ms=readback_ms_sum/samples;status.video_processor_ms=video_processor_ms_sum/samples;
@@ -1081,50 +1104,44 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         { std::lock_guard lock(mutex); pacing_finished = true; }
         changed.notify_all();
     }
+    // The mutex is held. Detection runs only for a 16:9 canvas at least 1000
+    // rows tall with a normalized or legacy detector configured.
+    bool detector_configured() const {
+        if (config.height < 1000 || std::abs(double(config.width) / config.height - 16.0 / 9.0) > .01) return false;
+        return (config.detector_enabled && callbacks.detector_snapshot) || (!config.detector_regions.empty() && callbacks.detector);
+    }
+    void sample_detector(const CapturePixels& pixels) {
+        DetectorRequest request;
+        { std::lock_guard lock(mutex); request = {config.width, config.height, config.detector_normalized, config.detector_counter_mask}; }
+        RecordingDetectorSnapshot snapshot;
+        if (!detector_stage.sample(pixels, request, [&] { return stopping.load(); }, snapshot)) {
+            std::lock_guard lock(mutex); ++status.detector_skipped; return;
+        }
+        last_detector = pixels.timestamp_us;
+        {
+            std::lock_guard lock(mutex); ++status.detector_copies;
+            const auto& counters = detector_stage.counters(); const auto& timing = detector_stage.timing();
+            status.detector_samples = counters.samples; status.detector_fallbacks = counters.fallbacks;
+            status.detector_textures_allocated = counters.gpu_textures_allocated; status.detector_buffers_allocated = counters.cpu_buffers_allocated;
+            status.detector_builds = counters.staging_rebuilds; status.detector_allocations_after_warmup = counters.allocations_after_warmup;
+            status.detector_readback_bytes = counters.readback_bytes;
+            status.detector_bytes_per_sample = counters.samples ? double(counters.readback_bytes) / counters.samples : 0;
+            for (auto [times, value] : {std::pair{&detector_gpu_times, timing.gpu_ms}, std::pair{&detector_readback_times, timing.readback_ms},
+                std::pair{&detector_convert_times, timing.convert_ms}}) { times->push_back(value); if (times->size() > 60) times->pop_front(); }
+        }
+        callbacks.detector_snapshot(std::move(snapshot));
+    }
+    // Legacy full-canvas BGRA detector copy.
     void detector(CapturePixels& pixels) {
         std::vector<CaptureRect> regions, masks; int width, height;
-        bool normalized=false,counter_mask=false;
-        std::array<CaptureNormalizedRect,3> normalized_regions{};
         {
             std::lock_guard lock(mutex);
-            normalized=config.detector_enabled&&bool(callbacks.detector_snapshot);
-            if ((!normalized&&(config.detector_regions.empty() || !callbacks.detector)) || pixels.timestamp_us - last_detector < 500000) return;
+            if (config.detector_regions.empty() || !callbacks.detector || pixels.timestamp_us - last_detector < 500000) return;
             if (config.height < 1000 || std::abs(double(config.width) / config.height - 16.0 / 9.0) > .01) return;
             regions = config.detector_regions; masks = config.detector_masks;
             width = config.detector_width; height = config.detector_height;
-            normalized_regions=config.detector_normalized;counter_mask=config.detector_counter_mask;
         }
         if(!capture_copy_texture_pixels_nonblocking(pixels,[&]{return stopping.load();}))return;
-        if(normalized){
-            auto canvas=convert(pixels,pixels.timestamp_us,detector_scaler);
-            RecordingDetectorSnapshot snapshot;snapshot.timestamp_us=pixels.timestamp_us;
-            for(size_t i=0;i<3;++i){
-                const auto& region=normalized_regions[i];
-                CaptureRect rect;
-                rect.x=std::clamp(int(std::nearbyint(region.x*config.width)),0,config.width-1);
-                rect.y=std::clamp(int(std::nearbyint(region.y*config.height)),0,config.height-1);
-                rect.width=std::clamp(int(std::nearbyint(region.width*config.width)),1,config.width-rect.x);
-                rect.height=std::clamp(int(std::nearbyint(region.height*config.height)),1,config.height-rect.y);
-                auto& image=snapshot.regions[i];image.width=rect.width;image.height=rect.height;image.pixels.resize(size_t(rect.width)*rect.height);
-                for(int y=0;y<rect.height;++y)std::copy_n(canvas->data[0]+size_t(rect.y+y)*canvas->linesize[0]+rect.x,
-                    rect.width,image.pixels.data()+size_t(y)*rect.width);
-                if(i==2&&counter_mask){
-                    auto& mask=snapshot.third_mask;mask.width=rect.width;mask.height=rect.height;mask.pixels.resize(image.pixels.size());
-                    for(int y=0;y<rect.height;++y)for(int x=0;x<rect.width;++x){
-                        const auto uv=canvas->data[1]+size_t((rect.y+y)/2)*canvas->linesize[1]+((rect.x+x)/2)*2;
-                        const double luma=(image.pixels[size_t(y)*rect.width+x]-16)*(255.0/219),u=uv[0]-128,v=uv[1]-128;
-                        const double r=std::clamp(luma+1.792741*v,0.0,255.0),g=std::clamp(luma-.213249*u-.532909*v,0.0,255.0),b=std::clamp(luma+2.112402*u,0.0,255.0);
-                        const bool skull=int64_t(x)*308<int64_t(rect.width)*120;
-                        const bool pink=skull&&r>70&&r>1.6*g&&r>b+35&&b>.15*r;
-                        const bool gold=skull&&r>140&&g>130&&b<.45*std::min(r,g)&&std::abs(r-g)<80;
-                        const bool yellow=r>140&&g>130&&b<.45*std::min(r,g)&&std::abs(r-g)<35;
-                        mask.pixels[size_t(y)*rect.width+x]=(pink||gold||yellow)?255:0;
-                    }
-                }
-            }
-            last_detector=pixels.timestamp_us;{std::lock_guard lock(mutex);++status.detector_copies;}
-            callbacks.detector_snapshot(std::move(snapshot));return;
-        }
         if (width <= 0 || height <= 0) { width = pixels.width; height = pixels.height; }
         CapturePixels output; output.width = width; output.height = height; output.stride = width * 4;
         output.timestamp_us = pixels.timestamp_us; output.bgra.resize(size_t(output.stride) * height);
@@ -1139,16 +1156,33 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         { std::lock_guard lock(mutex); ++status.detector_copies; }
         callbacks.detector(std::move(output));
     }
+    // Sleeps until a detector is configured and a frame 500 ms (source time)
+    // past the last sample exists: acquisition wakes it when that frame
+    // arrives, set_detector_regions and stop wake it directly. The stage's
+    // resources are released while no detector is configured.
     void detection(){
+        std::unique_lock lock(mutex);
+        bool resources = false;
         while(!stopping){
-            std::shared_ptr<CapturePixels> pixels;
-            {std::unique_lock lock(mutex);
-                changed.wait_for(lock,std::chrono::milliseconds(25),[&]{return stopping.load();});
-                if(stopping)break;
-                if(((config.detector_enabled&&callbacks.detector_snapshot)||(!config.detector_regions.empty()&&callbacks.detector))&&!status.paused)pixels=latest;
+            const auto version = detector_version;
+            std::shared_ptr<CapturePixels> pixels; bool normalized = false;
+            if (detector_configured()) {
+                if (!status.paused && latest && latest->timestamp_us - last_detector >= 500000) {
+                    pixels = latest; normalized = config.detector_enabled && bool(callbacks.detector_snapshot);
+                } else { detector_due_us = last_detector + 500000; detector_wants_frame = true; }
+            } else if (resources) {
+                lock.unlock(); detector_stage.release(); resources = false; lock.lock(); continue;
             }
-            if(pixels){auto owned=*pixels;detector(owned);}
+            if (!pixels) {
+                detector_wake.wait(lock, [&] { return stopping.load() || detector_version != version || detector_frame_ready; });
+                detector_frame_ready = detector_wants_frame = false; continue;
+            }
+            lock.unlock();
+            if (normalized) { sample_detector(*pixels); resources = true; }
+            else { auto owned = *pixels; detector(owned); }
+            lock.lock();
         }
+        detector_wants_frame = false;
     }
     // Converts into `frame` when given (every row is rewritten), otherwise
     // into a new allocation.
@@ -1544,11 +1578,12 @@ void RecordingCapture::start() {
     s->session_started=s->now();s->health_window=0;s->last_tuning_decision=0;s->clean_since=0;s->severe_windows.clear();
     s->status.running = true; s->status.source = s->source->name(); s->status.error.clear(); s->status.restart_required = false;
     s->status.output_width=s->config.width;s->status.output_height=s->config.height;
-    try { s->launch(&State::acquisition); s->launch(&State::pacing); s->launch(&State::encoding); s->launch(&State::detection); }
-    catch (...) { s->stopping = true; s->pacing_finished = true; s->changed.notify_all(); throw; }
+    try { s->launch(&State::acquisition, L"ClypDat capture acquisition"); s->launch(&State::pacing, L"ClypDat capture pacing");
+          s->launch(&State::encoding, L"ClypDat capture encoding"); s->launch(&State::detection, L"ClypDat capture detection"); }
+    catch (...) { s->stopping = true; s->pacing_finished = true; s->changed.notify_all(); s->detector_wake.notify_all(); throw; }
 }
 bool RecordingCapture::stop(std::chrono::milliseconds timeout) {
-    auto s = state_; s->stopping = true; s->changed.notify_all();
+    auto s = state_; s->stopping = true; s->changed.notify_all(); s->wake_detector();
     std::unique_lock lock(s->mutex);
     if (!s->changed.wait_for(lock, timeout, [&] { return s->threads == 0; })) {
         s->status.restart_required = true; s->status.error = "Native recording shutdown timed out; restart worker"; return false;
@@ -1566,14 +1601,17 @@ void RecordingCapture::request_frame_rate(int requested) {
 }
 void RecordingCapture::set_detector_regions(std::vector<CaptureRect> regions, std::vector<CaptureRect> masks, int w, int h) {
     if (w < 0 || h < 0 || w > 16384 || h > 16384) throw std::invalid_argument("Invalid detector dimensions");
-    std::lock_guard lock(state_->mutex); state_->config.detector_regions = std::move(regions);
-    state_->config.detector_masks = std::move(masks); state_->config.detector_width = w; state_->config.detector_height = h;
+    { std::lock_guard lock(state_->mutex); state_->config.detector_regions = std::move(regions);
+      state_->config.detector_masks = std::move(masks); state_->config.detector_width = w; state_->config.detector_height = h; ++state_->detector_version; }
+    state_->detector_wake.notify_all();
 }
 void RecordingCapture::set_detector_regions(const std::array<CaptureNormalizedRect,3>& regions,bool enabled,bool counter_mask){
     for(const auto& region:regions)if(!std::isfinite(region.x)||!std::isfinite(region.y)||!std::isfinite(region.width)||!std::isfinite(region.height)||
         region.x<0||region.y<0||region.width<0||region.height<0||region.x>1||region.y>1||region.width>1||region.height>1)
         throw std::invalid_argument("Invalid normalized detector region");
-    std::lock_guard lock(state_->mutex);state_->config.detector_normalized=regions;state_->config.detector_enabled=enabled;state_->config.detector_counter_mask=counter_mask;
+    { std::lock_guard lock(state_->mutex);state_->config.detector_normalized=regions;state_->config.detector_enabled=enabled;state_->config.detector_counter_mask=counter_mask;
+      ++state_->detector_version; }
+    state_->detector_wake.notify_all();
 }
 RecordingCaptureHealth RecordingCapture::health() const { std::lock_guard lock(state_->mutex); return state_->status; }
 bool RecordingCapture::safe_save_start(int64_t begin,int64_t end,int64_t& result)const{

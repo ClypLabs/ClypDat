@@ -23,6 +23,7 @@ add_library(RecorderCore STATIC
     src/video_encoder.cpp src/video_encoder.h
     src/encoder_backend.cpp src/encoder_backend.h
     src/readback_stage.cpp src/readback_stage.h
+    src/detector_stage.cpp src/detector_stage.h
     src/overlay_compositor.cpp src/overlay_compositor.h
     src/recording_capture.cpp src/recording_capture.h
     src/recording_windows_source.cpp
@@ -156,3 +157,27 @@ add_test(NAME ClypDat.Capture.Native.OverlayPipeline COMMAND ClypDat.Capture.Nat
 if(CLYPDAT_TEST_GPU)
     add_test(NAME ClypDat.Capture.Native.GpuOverlayPipeline COMMAND ClypDat.Capture.Native.OverlayPipelineTests --gpu)
 endif()
+
+add_executable(ClypDat.Capture.Native.DetectorTests tests/detector_stage_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.DetectorTests PRIVATE RecorderCore windowscodecs)
+target_compile_definitions(ClypDat.Capture.Native.DetectorTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.DetectorTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.DetectorStage COMMAND ClypDat.Capture.Native.DetectorTests)
+if(CLYPDAT_TEST_GPU)
+    add_test(NAME ClypDat.Capture.Native.GpuDetectorStage COMMAND ClypDat.Capture.Native.DetectorTests --gpu)
+endif()
+
+# Manual: detector regression corpus over captured game frames (see the file).
+add_executable(ClypDat.Capture.Native.DetectorCorpus tests/detector_corpus.cpp)
+target_link_libraries(ClypDat.Capture.Native.DetectorCorpus PRIVATE RecorderCore windowscodecs)
+target_compile_definitions(ClypDat.Capture.Native.DetectorCorpus PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.DetectorCorpus PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# Manual: detector cost on the capture pipeline with a generated 4K source.
+add_executable(ClypDat.Capture.Native.DetectorBench tests/detector_bench.cpp)
+target_link_libraries(ClypDat.Capture.Native.DetectorBench PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.DetectorBench PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.DetectorBench PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
