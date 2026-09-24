@@ -227,6 +227,7 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"zeroCopyStatus\":" << quoted(h.zero_copy_status) << ",\"zeroCopyProbePassed\":" << (h.zero_copy_probe_passed ? "true" : "false")
         << ",\"captureAdapterVendor\":" << h.capture_adapter_vendor
         << ",\"submissionP50Ms\":" << h.submission_p50_ms << ",\"completionP50Ms\":" << h.completion_p50_ms
+        << ",\"packetPayloadBytes\":" << h.packet_payload_bytes << ",\"packetBufferBytes\":" << h.packet_buffer_bytes
         << ",\"wgcCallbackFps\":" << h.wgc_callback_fps << ",\"wgcDeliveredFps\":" << h.wgc_delivered_fps
         << ",\"wgcOverwrittenFps\":" << h.wgc_overwritten_fps
         << ",\"acquiredFps\":" << h.input_fps << ",\"duplicateFps\":" << h.duplicate_fps

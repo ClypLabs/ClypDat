@@ -17,7 +17,6 @@ extern "C" {
 #include <deque>
 #include <mutex>
 #include <map>
-#include <set>
 #include <stdexcept>
 #include <thread>
 
@@ -32,13 +31,16 @@ std::vector<RecordingEncoderCandidate> recording_encoder_candidates(bool cpu, bo
     result.push_back({"h264_nvenc", false, true});
     if (av1) result.push_back({"av1_nvenc"});
     result.push_back({"h264_nvenc"});
-    // AMF zero-copy is planned only on an AMD capture adapter; elsewhere the
-    // plan is infeasible and the readback AMF candidate follows.
+    // AMF and QSV zero-copy are planned only on their own vendor's capture
+    // adapter; elsewhere the plan is infeasible and the readback form follows.
+    // QSV tries low-power (VDEnc) before the full encoder in both forms.
     if (av1) {
         result.push_back({"av1_amf", false, true}); result.push_back({"av1_amf"});
+        result.push_back({"av1_qsv", true, true}); result.push_back({"av1_qsv", false, true});
         result.push_back({"av1_qsv", true}); result.push_back({"av1_qsv"});
     }
     result.push_back({"h264_amf", false, true}); result.push_back({"h264_amf"});
+    result.push_back({"h264_qsv", true, true}); result.push_back({"h264_qsv", false, true});
     result.push_back({"h264_qsv", true}); result.push_back({"h264_qsv"});
     result.push_back({"libx264"}); return result;
 }
@@ -63,9 +65,9 @@ EncoderPolicy recording_encoder_policy(const RecordingCaptureConfig& config) {
 }
 std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& config,
     const RecordingEncoderCandidate& candidate, uint32_t adapter_vendor, bool overlay_stage) {
-    // QSV and libx264 keep their legacy resource sizing for now.
-    const bool nvenc = candidate.name.ends_with("_nvenc"), amf = candidate.name.ends_with("_amf");
-    if (!nvenc && !amf) return std::nullopt;
+    // libx264 keeps its legacy resource sizing for now.
+    const bool nvenc = candidate.name.ends_with("_nvenc"), amf = candidate.name.ends_with("_amf"), qsv = candidate.name.ends_with("_qsv");
+    if (!nvenc && !amf && !qsv) return std::nullopt;
     EncoderRequest request;
     request.codec = candidate.name.starts_with("av1") ? EncoderCodec::AV1 : EncoderCodec::H264;
     request.pixel_format = EncoderPixelFormat::NV12;
@@ -78,7 +80,11 @@ std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& 
     request.adapter_vendor = adapter_vendor;
     request.overlay_stage = overlay_stage;
     request.capture_buffers = 3; request.pacing_queue = capture_queue_capacity(config.fps);
-    return encoder_backend(nvenc ? EncoderVendor::Nvidia : EncoderVendor::Amd).plan(request, candidate.d3d11, recording_encoder_policy(config));
+    // FFmpeg keeps MFX's QueryIOSurf result private, so QSV's suggested input
+    // count stays unknown here; the plan reserves one surface beyond
+    // async_depth for it (EncoderPolicy::qsv_suggested_slack).
+    const auto vendor = nvenc ? EncoderVendor::Nvidia : amf ? EncoderVendor::Amd : EncoderVendor::Intel;
+    return encoder_backend(vendor).plan(request, candidate.d3d11, recording_encoder_policy(config));
 }
 int64_t capture_final_hold(bool variable, int64_t previous, int64_t hold) {
     const auto cadence = std::max<int64_t>(1, previous);
@@ -194,24 +200,51 @@ class GpuProcessor {
     Microsoft::WRL::ComPtr<ID3D11VideoProcessor> processor_;
     int source_width_ = 0, source_height_ = 0;
     int width_, height_, fps_, capacity_;
-    // Distinct pool surfaces handed out. A dynamic pool grows only when every
-    // surface is outstanding, so a new surface past capacity is refused.
-    std::set<std::pair<void*, intptr_t>> surfaces_;
+    bool qsv_ = false;
+    // Distinct pool surfaces handed out, each with the D3D11 render target
+    // behind it. A dynamic pool grows only when every surface is outstanding,
+    // so a new surface past capacity is refused.
+    std::map<std::pair<void*, intptr_t>, CaptureSurfaceTarget> surfaces_;
+    std::vector<CaptureSurfaceTarget> targets_;
+    static std::pair<void*, intptr_t> surface_key(const AVFrame* frame) {
+        // QSV frames carry their mfxFrameSurface1 in data[3].
+        if (frame->format == AV_PIX_FMT_QSV) return {frame->data[3], 0};
+        return {frame->data[0], reinterpret_cast<intptr_t>(frame->data[1])};
+    }
+    // A QSV surface's D3D11 child. The QSV pool owns that texture, so it
+    // outlives the mapping.
+    static CaptureSurfaceTarget surface_target(const AVFrame* frame) {
+        if (frame->format != AV_PIX_FMT_QSV) return capture_surface_target(*frame);
+        Frame mapped(av_frame_alloc()); if (!mapped) throw std::bad_alloc();
+        mapped->format = AV_PIX_FMT_D3D11;
+        check(av_hwframe_map(mapped.get(), frame, AV_HWFRAME_MAP_WRITE | AV_HWFRAME_MAP_OVERWRITE), "Map recording QSV surface to D3D11");
+        return capture_surface_target(*mapped);
+    }
+    std::string exhausted() const { return "Recording hardware surface pool exceeded its planned capacity of " + std::to_string(capacity_); }
     void acquire(AVFrame* frame, const char* what) {
-        check(av_hwframe_get_buffer(frames.get(), frame, 0), what);
-        const std::pair<void*, intptr_t> key{frame->data[0], reinterpret_cast<intptr_t>(frame->data[1])};
+        const int result = av_hwframe_get_buffer(frames.get(), frame, 0);
+        // A fixed pool refuses once every surface is out: the same
+        // backpressure as the planned cap on a dynamic pool.
+        if (result == AVERROR(ENOMEM) && int(surfaces_.size()) >= capacity_) throw SurfacePoolExhausted(exhausted());
+        check(result, what);
+        const auto key = surface_key(frame);
         if (surfaces_.contains(key)) return;
-        if (int(surfaces_.size()) >= capacity_) {
-            av_frame_unref(frame);
-            throw SurfacePoolExhausted("Recording hardware surface pool exceeded its planned capacity of " + std::to_string(capacity_));
-        }
-        surfaces_.insert(key);
+        if (int(surfaces_.size()) >= capacity_) { av_frame_unref(frame); throw SurfacePoolExhausted(exhausted()); }
+        try {
+            auto targets = targets_; targets.push_back(surface_target(frame));
+            capture_check_render_targets(targets, width_, height_);
+            surfaces_.emplace(key, targets.back()); targets_ = std::move(targets);
+        } catch (...) { av_frame_unref(frame); throw; }
     }
 public:
     Buffer device, frames;
     int capacity() const { return capacity_; }
     int allocated() const { return int(surfaces_.size()); }
-    GpuProcessor(ID3D11Device* input, int width, int height, int fps, int capacity) : device_(input), width_(width), height_(height), fps_(fps), capacity_(capacity) {
+    // QSV frames over D3D11 children instead of D3D11 frames.
+    bool qsv() const { return qsv_; }
+    GpuProcessor(ID3D11Device* input, int width, int height, int fps, int capacity, bool qsv = false,
+        const std::function<AVBufferRef*(AVBufferRef*, int, int)>& qsv_frames = {}) :
+        device_(input), width_(width), height_(height), fps_(fps), capacity_(capacity), qsv_(qsv) {
         if (capacity < 1) throw std::invalid_argument("Recording surface pool capacity must be positive");
         if (!input) throw std::runtime_error("D3D11 recording source unavailable");
         if (FAILED(input->QueryInterface(IID_PPV_ARGS(&video_)))) throw std::runtime_error("D3D11 video processing unavailable");
@@ -224,9 +257,23 @@ public:
         auto* d3d = static_cast<AVD3D11VADeviceContext*>(hw->hwctx);
         d3d->device = input; input->AddRef();
         check(av_hwdevice_ctx_init(device.get()), "Initialize recording hardware device");
+        // Prewarming the bounded working set qualifies the format and bind
+        // flags, and that every surface is its own render target, before the
+        // encoder opens.
+        auto prewarm = [&] {
+            std::vector<Frame> probes; surfaces_.clear(); targets_.clear();
+            for (int i = 0; i < capacity; ++i) {
+                Frame probe(av_frame_alloc()); if (!probe) throw std::bad_alloc();
+                acquire(probe.get(), "Prewarm recording hardware surface"); probes.push_back(std::move(probe));
+            }
+        };
+        if (qsv) {
+            frames.reset(qsv_frames ? qsv_frames(device.get(), width, height) : capture_create_qsv_frames(device.get(), width, height));
+            if (!frames) throw std::runtime_error("Recording QSV frames unavailable");
+            prewarm(); return;
+        }
         // Dynamic individual textures first, fixed array pool only when dynamic
-        // allocation is unavailable. Prewarming the bounded working set
-        // qualifies the format and bind flags before the encoder opens.
+        // allocation is unavailable.
         for (const int pool_size : {0, capacity}) {
             frames.reset(av_hwframe_ctx_alloc(device.get())); if (!frames) throw std::bad_alloc();
             auto* fc = reinterpret_cast<AVHWFramesContext*>(frames->data);
@@ -234,11 +281,7 @@ public:
             fc->width = width; fc->height = height; fc->initial_pool_size = pool_size;
             auto* df = static_cast<AVD3D11VAFramesContext*>(fc->hwctx); df->BindFlags = D3D11_BIND_RENDER_TARGET;
             if (av_hwframe_ctx_init(frames.get()) < 0) continue;
-            std::vector<Frame> probes;bool usable=true;surfaces_.clear();
-            for(int i=0;i<capacity;++i){Frame probe(av_frame_alloc());if(!probe)throw std::bad_alloc();
-                if(av_hwframe_get_buffer(frames.get(),probe.get(),0)<0){usable=false;break;}
-                surfaces_.insert({probe->data[0],reinterpret_cast<intptr_t>(probe->data[1])});probes.push_back(std::move(probe));}
-            if(usable)return;
+            try { prewarm(); return; } catch (const std::exception&) {}
         }
         throw std::runtime_error("Recording D3D11 surface pools unavailable");
     }
@@ -271,12 +314,16 @@ public:
                 unsigned(input_view_result),unsigned(source_desc.Format),unsigned(format_support),unsigned(support_result),source_desc.Width,source_desc.Height,source_desc.BindFlags);
             throw std::runtime_error(error);
         }
-        auto* texture = reinterpret_cast<ID3D11Texture2D*>(frame->data[0]); D3D11_TEXTURE2D_DESC td{}; texture->GetDesc(&td);
+        // The render target this pool surface stands for: the D3D11 frame
+        // itself, or a QSV surface's D3D11 child, which MFX crops to width x
+        // height from its 16-aligned texture.
+        const auto target = surfaces_.at(surface_key(frame.get()));
+        D3D11_TEXTURE2D_DESC td{}; target.texture->GetDesc(&td);
         D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC od{};
         if (td.ArraySize > 1) { od.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2DARRAY;
-            od.Texture2DArray.FirstArraySlice = UINT(reinterpret_cast<uintptr_t>(frame->data[1])); od.Texture2DArray.ArraySize = 1; }
+            od.Texture2DArray.FirstArraySlice = target.slice; od.Texture2DArray.ArraySize = 1; }
         else od.ViewDimension = D3D11_VPOV_DIMENSION_TEXTURE2D;
-        hr(video_->CreateVideoProcessorOutputView(texture, enumerator_.Get(), &od, &output), "Create recording video output view");
+        hr(video_->CreateVideoProcessorOutputView(target.texture, enumerator_.Get(), &od, &output), "Create recording video output view");
         const auto fit = capture_aspect_fit(pixels.width, pixels.height, width_, height_);
         RECT source{0, 0, pixels.width, pixels.height}, destination{fit.x, fit.y, fit.x + fit.width, fit.y + fit.height}, canvas{0,0,width_,height_};
         context_->VideoProcessorSetStreamSourceRect(processor_.Get(), 0, TRUE, &source);
@@ -309,6 +356,44 @@ public:
         check(av_frame_copy_props(frame.get(), &software), "Copy recording frame metadata"); return frame;
     }
 };
+}
+CaptureSurfaceTarget capture_surface_target(const AVFrame& frame) {
+    if (frame.format != AV_PIX_FMT_D3D11 || !frame.data[0]) throw std::invalid_argument("Recording surface is not a D3D11 frame");
+    return {reinterpret_cast<ID3D11Texture2D*>(frame.data[0]), unsigned(reinterpret_cast<uintptr_t>(frame.data[1]))};
+}
+void capture_check_render_targets(const std::vector<CaptureSurfaceTarget>& targets, int width, int height) {
+    for (size_t i = 0; i < targets.size(); ++i) {
+        const auto& target = targets[i];
+        if (!target.texture) throw std::runtime_error("Recording surface has no D3D11 texture");
+        D3D11_TEXTURE2D_DESC desc{}; target.texture->GetDesc(&desc);
+        if (desc.Format != DXGI_FORMAT_NV12 || !(desc.BindFlags & D3D11_BIND_RENDER_TARGET))
+            throw std::runtime_error("Recording surface is not an NV12 render target");
+        if (desc.Width < UINT(width) || desc.Height < UINT(height)) throw std::runtime_error("Recording surface is smaller than the output");
+        if (target.slice >= desc.ArraySize) throw std::runtime_error("Recording surface slice is outside its texture");
+        for (size_t j = 0; j < i; ++j)
+            if (targets[j] == target) throw std::runtime_error("Recording pool surfaces share one D3D11 render target");
+    }
+}
+AVBufferRef* capture_create_qsv_frames(AVBufferRef* d3d11_device, int width, int height) {
+    AVBufferRef* derived = nullptr;
+    // The QSV session is created on the D3D11 device's own adapter; there is
+    // no cross-adapter derivation.
+    check(av_hwdevice_ctx_create_derived(&derived, AV_HWDEVICE_TYPE_QSV, d3d11_device, 0), "Derive QSV device from the recording D3D11 device");
+    const Buffer device(derived);
+    Buffer frames(av_hwframe_ctx_alloc(device.get())); if (!frames) throw std::bad_alloc();
+    auto* fc = reinterpret_cast<AVHWFramesContext*>(frames->data);
+    fc->format = AV_PIX_FMT_QSV; fc->sw_format = AV_PIX_FMT_NV12; fc->width = width; fc->height = height;
+    // A dynamic pool gives every surface its own D3D11 child texture; the
+    // GpuProcessor caps it at the plan's capacity and prewarms all of it.
+    // FFmpeg 8.1.2's fixed QSV pool instead puts every child in one
+    // render-target array and hands MFX {array, MFX_INFINITE}, so every
+    // surface would alias slice 0 (hwcontext_qsv.c qsv_init_child_ctx and
+    // qsv_map_from). frame_type 0 makes D3D11 children
+    // MFX_MEMTYPE_VIDEO_MEMORY_PROCESSOR_TARGET, i.e. D3D11_BIND_RENDER_TARGET,
+    // which capture_check_render_targets verifies on every surface.
+    fc->initial_pool_size = 0;
+    check(av_hwframe_ctx_init(frames.get()), "Initialize recording QSV frames");
+    return frames.release();
 }
 
 struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::State> {
@@ -425,8 +510,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             if (issued != submitted_at.end()) submitted_at.erase(issued);
             submitted.erase(mapping);
             retained_surfaces.erase(packet->pts);
+            const auto payload = uint64_t(packet->size), backing = packet->buf ? uint64_t(packet->buf->size) : payload;
             if (callbacks.packet) callbacks.packet(generation, std::move(packet), acquired, fresh);
             std::lock_guard lock(mutex); ++status.encoded;
+            status.packet_payload_bytes += payload; status.packet_buffer_bytes += backing;
             if(fresh)++status.unique_frames;
             status.completion_ms = latency; completion_times.push_back(latency); if (completion_times.size() > 240) completion_times.pop_front();
             status.completion_max_ms=std::max(status.completion_max_ms,latency);
@@ -447,9 +534,13 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             const auto codec = candidate.name.starts_with("av1") ? AV_CODEC_ID_AV1 : AV_CODEC_ID_H264;
             if (recovering && (codec != old_codec || candidate.d3d11 != old_d3d11 || (old_hardware && candidate.name == "libx264"))) continue;
             try {
-                // An infeasible plan, such as zero-copy on a non-NVIDIA capture
-                // adapter, only skips this candidate.
+                // An infeasible plan, such as zero-copy on another vendor's
+                // capture adapter, only skips this candidate.
                 const auto plan = plan_recording_encoder(config, candidate, adapter_vendor, overlay_stage);
+                const bool qsv_frames = plan && plan->input == EncoderInput::QsvFrames;
+                // Recovery keeps the outgoing encoder's surfaces, so it cannot
+                // change between D3D11 and QSV frames.
+                if (recovering && candidate.d3d11 && gpu && gpu->qsv() != qsv_frames) continue;
                 const int capacity = plan ? plan->pool_capacity : legacy_surface_capacity(config.fps);
                 VideoEncoderConfig ec; ec.width = config.width; ec.height = config.height; ec.fps = fps;
                 ec.bitrate_mbps = config.bitrate_mbps; ec.name = candidate.name; ec.low_power = candidate.low_power;
@@ -457,11 +548,13 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                     ec.resource_options = plan->options;
                     if (plan->low_delay_flag) ec.codec_flags |= AV_CODEC_FLAG_LOW_DELAY;
                     ec.require_encoder_frames = plan->frames_from_encoder_ctx;
+                    ec.right_size_packets = plan->right_size_packets;
                 }
                 if (candidate.d3d11) {
                     // A recovering encoder may still own surfaces of the current pool.
-                    if (gpu && !recovering && gpu->capacity() != capacity) gpu.reset();
-                    if (!gpu) gpu = std::make_unique<GpuProcessor>(source->d3d_device(), config.width, config.height, fps, capacity);
+                    if (gpu && !recovering && (gpu->capacity() != capacity || gpu->qsv() != qsv_frames)) gpu.reset();
+                    if (!gpu) gpu = std::make_unique<GpuProcessor>(source->d3d_device(), config.width, config.height, fps, capacity,
+                        qsv_frames, dependencies.qsv_frames);
                     ec.hardware_frames = gpu->frames.get();
                 } else if (!recovering) ensure_conversion(capacity);
                 auto replacement = dependencies.open_encoder?dependencies.open_encoder(ec,i):std::make_unique<VideoEncoder>(ec);
@@ -509,7 +602,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     // without one they use CPU conversion, as before.
     void ensure_conversion(int capacity) {
         auto* device = source->d3d_device();
-        if (!device || (gpu && gpu->capacity() == capacity)) return;
+        if (!device || (gpu && !gpu->qsv() && gpu->capacity() == capacity)) return;
         gpu.reset();
         try { gpu = std::make_unique<GpuProcessor>(device, config.width, config.height, fps, capacity); gpu_initialization_error.clear(); }
         catch (const std::exception& error) { gpu_initialization_error = error.what(); std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
@@ -928,7 +1021,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                         const auto started=std::chrono::steady_clock::now();
                         frame = gpu->convert(*pixels, work.pts);
                         video_processor_ms=elapsed_ms(started);
-                        processing_path=encoder_candidates[active_candidate].d3d11?"d3d11-video-processor":"d3d11-video-processor-readback";
+                        processing_path=!encoder_candidates[active_candidate].d3d11?"d3d11-video-processor-readback":
+                            gpu->qsv()?"d3d11-video-processor-qsv":"d3d11-video-processor";
                         if(!encoder_candidates[active_candidate].d3d11){
                             const auto readback_started=std::chrono::steady_clock::now();
                             Frame software(av_frame_alloc());if(!software)throw std::bad_alloc();
@@ -959,7 +1053,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 }
                 if (callbacks.compose_nv12&&(!callbacks.overlay_enabled||callbacks.overlay_enabled())) {
                     const auto overlay_started=std::chrono::steady_clock::now();
-                    if (frame->format == AV_PIX_FMT_D3D11) {
+                    if (frame->format == AV_PIX_FMT_D3D11 || frame->format == AV_PIX_FMT_QSV) {
                         Frame software(av_frame_alloc()); if (!software) throw std::bad_alloc();
                         check(av_hwframe_transfer_data(software.get(), frame.get(), 0), "Download recording overlay canvas");
                         check(av_frame_copy_props(software.get(), frame.get()), "Copy recording overlay timing");

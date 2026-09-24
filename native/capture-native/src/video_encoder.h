@@ -28,7 +28,9 @@ struct VideoEncoderConfig {
     int bitrate_mbps = 20;
     std::string name = "libx264";
     bool low_power = false;
-    AVBufferRef* hardware_frames = nullptr; // Retained by the opened context.
+    // NV12 frames context: QSV frames for *_qsv encoders, D3D11 frames for the
+    // other hardware encoders. Retained by the opened context.
+    AVBufferRef* hardware_frames = nullptr;
     // EncoderPlan resource options (surfaces, delay, async_depth, ...), applied
     // after the vendor quality defaults. Empty leaves FFmpeg's own defaults.
     std::vector<std::pair<std::string, std::string>> resource_options;
@@ -36,6 +38,10 @@ struct VideoEncoderConfig {
     // Hardware frames must come from hardware_frames itself. AMF asserts this
     // inside FFmpeg; checking first turns an abort into an exception.
     bool require_encoder_frames = false;
+    // Copy every packet into an exact-size buffer before it leaves the
+    // encoder. QSV allocates each packet at its VBV size and only shrinks
+    // `size`, so history would otherwise pin the whole allocation.
+    bool right_size_packets = false;
 };
 
 enum class SubmitStatus { Accepted, Busy };
@@ -63,6 +69,7 @@ private:
     CodecCalls calls_;
     std::vector<std::string> unsupported_options_;
     bool require_encoder_frames_ = false;
+    bool right_size_packets_ = false;
     bool finished_ = false;
     bool failed_ = false;
 };

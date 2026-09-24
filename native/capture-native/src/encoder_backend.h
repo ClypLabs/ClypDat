@@ -6,7 +6,7 @@
 #include <vector>
 
 // Backend-independent encoder resource policy. Pure arithmetic: no FFmpeg,
-// D3D11 or encoder state. The recorder applies NVENC plans; AMF, QSV and
+// D3D11 or encoder state. The recorder applies NVENC, AMF and QSV plans;
 // software plans are not consumed yet.
 namespace clypdat {
 enum class EncoderVendor { Nvidia, Amd, Intel, Software };
@@ -45,6 +45,10 @@ struct EncoderRequest {
     int b_frames = 0, lookahead = 0;
     uint32_t adapter_vendor = 0; // DXGI VendorId of the capture device; 0 when unknown.
     bool overlay_stage = false;  // Burned overlays upload one more surface.
+    // Input surfaces the driver suggests (MFX NumFrameSuggested); 0 when
+    // unknown. Only QSV reads it: a larger value grows the pool up to the
+    // distinct texture limit, and beyond it the plan is infeasible.
+    int suggested_input_surfaces = 0;
     // Reported so every stage stays visible; never folded into encoder pools.
     int capture_buffers = 3, pacing_queue = 0;
 };

@@ -118,7 +118,7 @@ struct RecordingCaptureHealth {
     double queue_age_max_ms=0,processing_max_ms=0,submission_max_ms=0,completion_max_ms=0;
     int surfaces_in_use = 0, surface_capacity = 0;
     // Active EncoderPlan; encoder_planned is false for candidates still on
-    // their legacy resource sizing (AMF, QSV, libx264).
+    // their legacy resource sizing (libx264).
     bool encoder_planned = false, zero_copy_probe_passed = false;
     std::string encoder_vendor, requested_codec, effective_codec, zero_copy_status;
     int encoder_slots = 0, encoder_delay = 0, output_delay_frames = 0, max_in_flight = 0, pool_capacity = 0;
@@ -126,6 +126,8 @@ struct RecordingCaptureHealth {
     uint64_t pool_bytes = 0;
     uint32_t capture_adapter_vendor = 0;
     double submission_p50_ms = 0, completion_p50_ms = 0;
+    // Encoded bytes of every emitted packet and the buffer bytes backing them.
+    uint64_t packet_payload_bytes = 0, packet_buffer_bytes = 0;
     int overload_windows = 0, qualified_windows = 0;
     bool hardware_input = false, hdr = false, frame_rate_protected = false;
     RecordingSourceHealth source_details;
@@ -156,17 +158,35 @@ struct RecordingCaptureDependencies {
     std::function<std::unique_ptr<VideoEncoder>(const VideoEncoderConfig&,size_t candidate)> open_encoder;
     std::function<int64_t()> monotonic_clock;
     std::optional<uint32_t> adapter_vendor; // Replaces the capture device's DXGI VendorId.
+    // Replaces capture_create_qsv_frames for QSV zero-copy candidates. Tests
+    // on non-Intel machines return D3D11 frames to drive the same path.
+    std::function<AVBufferRef*(AVBufferRef* d3d11_device, int width, int height)> qsv_frames;
 };
 // Resource sizing used by candidates that do not consume an EncoderPlan yet.
 int legacy_surface_capacity(int fps);
 // Production candidate order: NVENC, then AMF, then QSV, then libx264. Each
-// hardware vendor tries D3D11 zero-copy before its readback form.
+// hardware vendor tries zero-copy before its readback form.
 std::vector<RecordingEncoderCandidate> recording_encoder_candidates(bool cpu, bool av1);
+// D3D11 texture and array slice behind a D3D11 hardware frame. Individual
+// textures report slice 0.
+struct CaptureSurfaceTarget {
+    ID3D11Texture2D* texture = nullptr;
+    unsigned slice = 0;
+    bool operator==(const CaptureSurfaceTarget&) const = default;
+};
+CaptureSurfaceTarget capture_surface_target(const AVFrame& d3d11_frame);
+// Every pool surface must be its own NV12 render target covering width x
+// height. Throws std::runtime_error at the first surface that is not.
+void capture_check_render_targets(const std::vector<CaptureSurfaceTarget>& targets, int width, int height);
+// QSV NV12 frames whose D3D11 children live on the given D3D11VA device.
+// Throws when no QSV runtime serves that device's adapter. Caller owns the
+// returned reference.
+AVBufferRef* capture_create_qsv_frames(AVBufferRef* d3d11_device, int width, int height);
 // DXGI VendorId of the device's adapter; 0 when it cannot be read.
 uint32_t d3d11_adapter_vendor(ID3D11Device* device);
 EncoderPolicy recording_encoder_policy(const RecordingCaptureConfig& config);
 // Plan for a recording candidate, sized for the configured maximum frame rate.
-// nullopt for candidates not planned yet; throws EncoderPlanInfeasible when
+// nullopt for libx264, which is not planned yet; throws EncoderPlanInfeasible when
 // the candidate cannot run on this adapter or within its limits.
 std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& config,
     const RecordingEncoderCandidate& candidate, uint32_t adapter_vendor, bool overlay_stage);

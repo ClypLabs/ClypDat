@@ -7,6 +7,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 #include <utility>
 
@@ -18,6 +19,16 @@ void checked(int result, const char* operation) {
     av_strerror(result, message, sizeof(message));
     throw std::runtime_error(std::string(operation) + ": " + message);
 }
+// The payload in a buffer of its own size plus FFmpeg's input padding, with
+// timing, flags and side data. The source's allocation goes with the source.
+Packet exact_packet(const AVPacket& source) {
+    Packet exact(av_packet_alloc());
+    if (!exact) throw std::bad_alloc();
+    checked(av_new_packet(exact.get(), source.size), "Allocate exact recording packet");
+    if (source.size) std::memcpy(exact->data, source.data, size_t(source.size));
+    checked(av_packet_copy_props(exact.get(), &source), "Copy recording packet properties");
+    return exact;
+}
 }
 
 bool runtime_versions_match() {
@@ -28,7 +39,8 @@ bool runtime_versions_match() {
         swscale_version() == LIBSWSCALE_VERSION_INT;
 }
 
-VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) : calls_(std::move(calls)), require_encoder_frames_(config.require_encoder_frames) {
+VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) : calls_(std::move(calls)),
+    require_encoder_frames_(config.require_encoder_frames), right_size_packets_(config.right_size_packets) {
     if (!runtime_versions_match()) throw std::runtime_error("Bundled FFmpeg runtime does not match the recording SDK");
     if (config.width <= 0 || config.height <= 0 || (config.width & 1) || (config.height & 1) ||
         config.fps < 30 || config.fps > 120 || !calls_.send || !calls_.receive)
@@ -59,9 +71,12 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
     context.flags |= AV_CODEC_FLAG_GLOBAL_HEADER | config.codec_flags;
     if (config.hardware_frames) {
         const auto* frames = reinterpret_cast<const AVHWFramesContext*>(config.hardware_frames->data);
-        if (!frames || frames->format != AV_PIX_FMT_D3D11 || frames->sw_format != AV_PIX_FMT_NV12)
-            throw std::invalid_argument("Recording requires D3D11 NV12 hardware frames");
-        context.pix_fmt = AV_PIX_FMT_D3D11;
+        // qsvenc accepts only QSV frames; NVENC and AMF only D3D11 frames.
+        const auto format = name.ends_with("_qsv") ? AV_PIX_FMT_QSV : AV_PIX_FMT_D3D11;
+        if (!frames || frames->format != format || frames->sw_format != AV_PIX_FMT_NV12)
+            throw std::invalid_argument(format == AV_PIX_FMT_QSV ? "QSV recording requires QSV NV12 hardware frames" :
+                "Recording requires D3D11 NV12 hardware frames");
+        context.pix_fmt = format;
         context.hw_frames_ctx = av_buffer_ref(config.hardware_frames);
         context.hw_device_ctx = av_buffer_ref(frames->device_ref);
         if (!context.hw_frames_ctx || !context.hw_device_ctx) throw std::bad_alloc();
@@ -88,7 +103,6 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         option("preset", "veryfast");
         option("rc_mode", "cbr");
         option("forced_idr", "1");
-        option("async_depth", "4");
         if (config.low_power) option("low_power", "1");
     } else {
         option("preset", "ultrafast");
@@ -107,7 +121,7 @@ int VideoEncoder::receive(std::vector<Packet>& packets) {
         const int result = calls_.receive(context_.get(), packet.get());
         if (result == AVERROR(EAGAIN) || result == AVERROR_EOF) return result;
         checked(result, "Receive recording packet");
-        packets.push_back(std::move(packet));
+        packets.push_back(right_size_packets_ ? exact_packet(*packet) : std::move(packet));
     }
 }
 

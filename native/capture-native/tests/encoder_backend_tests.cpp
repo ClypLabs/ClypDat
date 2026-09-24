@@ -259,6 +259,27 @@ void qsv_depth() {
     CHECK(readback.pool_capacity == 2 && readback.stages.encoder_input_surfaces == 5);
     // Locked inputs beyond the texture-array limit cannot be pooled.
     infeasible([] { plan(EncoderVendor::Intel, on(EncoderVendor::Intel, request(1920, 1080, 60, 4, 60))); });
+    // A driver-suggested input count below the base changes nothing; above it
+    // the pool grows to hold it, never past the distinct texture limit.
+    auto suggested = on(EncoderVendor::Intel, request(2560, 1440, 90));
+    suggested.suggested_input_surfaces = 5;
+    CHECK(plan(EncoderVendor::Intel, suggested).pool_capacity == 9);
+    suggested.suggested_input_surfaces = 12;
+    const auto grown = plan(EncoderVendor::Intel, suggested);
+    CHECK(grown.stages.encoder_input_surfaces == 12 && grown.pool_capacity == 14 && grown.max_in_flight == 6);
+    CHECK(option(grown, "async_depth") == "6" && grown.pool_bytes == 14ull * 2560 * 1440 * 3 / 2);
+    CHECK(plan(EncoderVendor::Intel, suggested, false).pool_capacity == 2); // Readback pools hold no encoder input.
+    suggested.suggested_input_surfaces = 62;
+    CHECK(plan(EncoderVendor::Intel, suggested).pool_capacity == kD3D11TextureArrayLimit);
+    suggested.suggested_input_surfaces = 63;
+    infeasible([&] { plan(EncoderVendor::Intel, suggested); });
+    suggested.suggested_input_surfaces = -1;
+    invalid([&] { plan(EncoderVendor::Intel, suggested); });
+    // Only MFX reports a suggestion; NVENC and AMF plans ignore it.
+    auto nvenc = on(EncoderVendor::Nvidia, request(2560, 1440, 90)); nvenc.suggested_input_surfaces = 40;
+    CHECK(plan(EncoderVendor::Nvidia, nvenc).pool_capacity == 9);
+    auto amf = on(EncoderVendor::Amd, request(2560, 1440, 90)); amf.suggested_input_surfaces = 40;
+    CHECK(plan(EncoderVendor::Amd, amf).pool_capacity == 8);
 }
 
 void software_fallback() {

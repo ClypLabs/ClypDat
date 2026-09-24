@@ -173,8 +173,9 @@ public:
                 std::pair<std::string, std::string>{"look_ahead", "1"});
             plan.options.push_back({"look_ahead_depth", text(l)});
         }
-        // Locked inputs plus one surface for MFX NumFrameSuggested headroom.
-        finish(plan, request, policy, plan.max_in_flight + policy.qsv_suggested_slack, depth);
+        // Locked inputs plus one surface for MFX NumFrameSuggested headroom,
+        // or the driver's own suggestion when it is known and larger.
+        finish(plan, request, policy, std::max(plan.max_in_flight + policy.qsv_suggested_slack, request.suggested_input_surfaces), depth);
         return plan;
     }
 };
@@ -245,7 +246,8 @@ int encoder_pool_requirement(const EncoderStages& s, int ffmpeg_hold) {
 void validate_encoder_request(const EncoderRequest& r) {
     require(r.width >= 2 && r.height >= 2 && r.width <= 16384 && r.height <= 16384 && !(r.width & 1) && !(r.height & 1) &&
         r.fps >= 30 && r.fps <= 120 && r.bitrate_mbps > 0 && r.b_frames >= 0 && r.b_frames <= 4 &&
-        r.lookahead >= 0 && r.lookahead <= 100 && r.capture_buffers >= 0 && r.pacing_queue >= 0,
+        r.lookahead >= 0 && r.lookahead <= 100 && r.capture_buffers >= 0 && r.pacing_queue >= 0 &&
+        r.suggested_input_surfaces >= 0 && r.suggested_input_surfaces <= 1024,
         "Invalid encoder resource request");
 }
 const char* encoder_vendor_name(EncoderVendor vendor) {

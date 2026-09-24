@@ -86,11 +86,67 @@ void busy_is_not_failure() {
     must_throw([&] { broken.try_submit(frame); });
 }
 
+// QSV allocates every packet at its VBV size and only shrinks `size`. With
+// right-sizing only an exact-size copy leaves the encoder, on submission and
+// on drain, with timing, flags and side data intact.
+void right_sized_packets() {
+    constexpr int vbv = 3125000, payload = 35000;
+    AVFrame frame{};
+    frame.width = 64;
+    frame.height = 48;
+    frame.format = AV_PIX_FMT_NV12;
+    for (const bool right_size : { true, false }) {
+        int pending = 0, produced = 0;
+        bool flushing = false;
+        clypdat::CodecCalls calls;
+        calls.send = [&](AVCodecContext*, const AVFrame* submitted) {
+            if (submitted) ++pending; else flushing = true;
+            return 0;
+        };
+        calls.receive = [&](AVCodecContext*, AVPacket* packet) {
+            if (!pending) return flushing ? AVERROR_EOF : AVERROR(EAGAIN);
+            --pending;
+            if (av_new_packet(packet, vbv) < 0) return AVERROR(ENOMEM);
+            for (int i = 0; i < payload; ++i) packet->data[i] = uint8_t(i * 7 + produced);
+            packet->size = payload;
+            packet->pts = 9000 + produced; packet->dts = 8000 + produced; packet->duration = 16667;
+            packet->flags = produced ? 0 : AV_PKT_FLAG_KEY; packet->time_base = { 1, 1000000 };
+            auto* stats = av_packet_new_side_data(packet, AV_PKT_DATA_QUALITY_STATS, 8);
+            if (!stats) return AVERROR(ENOMEM);
+            for (int i = 0; i < 8; ++i) stats[i] = uint8_t(i + produced);
+            ++produced;
+            return 0;
+        };
+        clypdat::VideoEncoderConfig config{ 64, 48, 60, 5 };
+        config.right_size_packets = right_size;
+        clypdat::VideoEncoder encoder(config, calls);
+        auto packets = encoder.submit(frame);
+        CHECK(packets.size() == 1);
+        ++pending; // One more packet surfaces only while draining.
+        for (auto& packet : encoder.finish()) packets.push_back(std::move(packet));
+        CHECK(packets.size() == 2);
+        for (int index = 0; index < 2; ++index) {
+            const auto& packet = packets[size_t(index)];
+            CHECK(packet->size == payload && packet->buf && packet->data == packet->buf->data);
+            CHECK(packet->buf->size == size_t(right_size ? payload : vbv) + AV_INPUT_BUFFER_PADDING_SIZE);
+            for (int i = 0; i < payload; ++i) CHECK(packet->data[i] == uint8_t(i * 7 + index));
+            CHECK(packet->pts == 9000 + index && packet->dts == 8000 + index && packet->duration == 16667);
+            CHECK(bool(packet->flags & AV_PKT_FLAG_KEY) == (index == 0));
+            CHECK(packet->time_base.num == 1 && packet->time_base.den == 1000000);
+            size_t size = 0;
+            const auto* stats = av_packet_get_side_data(packet.get(), AV_PKT_DATA_QUALITY_STATS, &size);
+            CHECK(stats && size == 8);
+            for (int i = 0; i < 8; ++i) CHECK(stats[i] == uint8_t(i + index));
+        }
+    }
+}
+
 int main() {
     av_log_set_level(AV_LOG_ERROR);
     retries_same_frame(false);
     retries_same_frame(true);
     busy_is_not_failure();
+    right_sized_packets();
     AVFrame frame{};
     frame.width = 64;
     frame.height = 48;
