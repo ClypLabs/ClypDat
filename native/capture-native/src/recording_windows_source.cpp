@@ -1,4 +1,5 @@
 #include "recording_capture.h"
+#include "captured_frames.h"
 #include <Windows.h>
 #include <d3d11.h>
 #include <d3d11_4.h>
@@ -15,6 +16,9 @@
 #include <condition_variable>
 #include <cmath>
 #include <cstring>
+#include <deque>
+#include <map>
+#include <vector>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -55,8 +59,8 @@ public:
             }
         }
     }
+    // A new owned BGRA copy of `input`, tone-mapped when it is FP16.
     ComPtr<ID3D11Texture2D> copy(ID3D11Texture2D* input, float white) {
-        std::lock_guard lock(mutex);
         D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
         const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
         desc.Usage = D3D11_USAGE_DEFAULT; desc.CPUAccessFlags = 0; desc.MiscFlags = 0;
@@ -64,7 +68,22 @@ public:
         if (hdr) desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         ComPtr<ID3D11Texture2D> owned;
         checked(device->CreateTexture2D(&desc, nullptr, &owned), "Allocate owned recording texture");
-        if (!hdr) { context->CopyResource(owned.Get(), input); return owned; }
+        if (!hdr) copy_into(owned.Get(), input, nullptr);
+        else tone_map(input, owned.Get(), white);
+        return owned;
+    }
+    // Copies `input`, or the `box` of it, to the origin of `output`.
+    void copy_into(ID3D11Texture2D* output, ID3D11Texture2D* input, const D3D11_BOX* box) {
+        std::lock_guard lock(mutex);
+        if (box) context->CopySubresourceRegion(output, 0, 0, 0, 0, input, 0, box);
+        else context->CopyResource(output, input);
+    }
+    // Tone-maps FP16 `input` into the same-size BGRA `output`. `view` may be a
+    // cached render-target view of `output`; the input view is made per call
+    // so no reference to the capture API's buffer outlives it.
+    void tone_map(ID3D11Texture2D* input, ID3D11Texture2D* output, float white, ID3D11RenderTargetView* view = nullptr) {
+        std::lock_guard lock(mutex);
+        D3D11_TEXTURE2D_DESC desc{}; output->GetDesc(&desc);
         if (!hdr_vertex) {
             const std::string shader =
                 "struct V{float4 p:SV_Position;}; V VS(uint id:SV_VertexID){V o;o.p=float4(id==2?3:-1,id==1?3:-1,0,1);return o;}"
@@ -79,18 +98,17 @@ public:
             checked(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &hdr_pixel), "Create recording HDR pixel shader");
         }
         ComPtr<ID3D11ShaderResourceView> source;
-        ComPtr<ID3D11RenderTargetView> target;
+        ComPtr<ID3D11RenderTargetView> created;
         checked(device->CreateShaderResourceView(input, nullptr, &source), "Create recording HDR input view");
-        checked(device->CreateRenderTargetView(owned.Get(), nullptr, &target), "Create recording HDR output view");
+        if (!view) { checked(device->CreateRenderTargetView(output, nullptr, &created), "Create recording HDR output view"); view = created.Get(); }
         D3D11_VIEWPORT viewport{0,0,float(desc.Width),float(desc.Height),0,1};
-        auto raw_target = target.Get(); auto raw_source = source.Get();
+        auto raw_target = view; auto raw_source = source.Get();
         context->OMSetRenderTargets(1, &raw_target, nullptr); context->RSSetViewports(1, &viewport);
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context->VSSetShader(hdr_vertex.Get(), nullptr, 0); context->PSSetShader(hdr_pixel.Get(), nullptr, 0);
         context->PSSetShaderResources(0, 1, &raw_source); context->Draw(3, 0);
         raw_target = nullptr; raw_source = nullptr;
         context->OMSetRenderTargets(1, &raw_target, nullptr); context->PSSetShaderResources(0, 1, &raw_source);
-        return owned;
     }
     bool read(ID3D11Texture2D* texture, CapturePixels& output, CaptureRect crop = {}) {
         std::lock_guard lock(mutex);
@@ -192,16 +210,24 @@ bool draw_cursor(Device& gpu, ID3D11Texture2D* texture, int width, int height, i
     return true;
 }
 
+// The monitor-relative capture region WGC frames are cropped to; empty for
+// windows and whole monitors.
+CaptureRect wgc_region(const RecordingCaptureConfig& config) {
+    if (config.window || config.capture_region.width <= 0 || config.capture_region.height <= 0) return {};
+    auto monitor = reinterpret_cast<HMONITOR>(config.monitor);
+    if (!monitor) monitor = MonitorFromPoint(POINT{}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO info{sizeof(MONITORINFO)};
+    RECT desktop{}; if (GetMonitorInfoW(monitor, &info)) desktop = info.rcMonitor;
+    return {config.capture_region.x - desktop.left, config.capture_region.y - desktop.top, config.capture_region.width, config.capture_region.height};
+}
 class WgcSource final : public RecordingFrameSource {
     struct Shared {
         Device gpu;
-        explicit Shared(ID3D11Device* device,bool debug):gpu(device,debug){}
+        // Pooled owned copies; the WGC buffer is released as soon as its copy is queued.
+        CapturedFrameStore frames;
+        Shared(ID3D11Device* device, bool debug, int capacity, float white, CaptureRect region)
+            : gpu(device, debug), frames(gpu.device.Get(), capacity, white, region) {}
         std::mutex mutex;
-        std::condition_variable changed;
-        ComPtr<ID3D11Texture2D> latest;
-        int64_t stamp = 0;
-        bool closed = false;
-        std::string error;
         RecordingSourceHealth diagnostics;
     };
     RecordingCaptureConfig config_;
@@ -211,9 +237,9 @@ class WgcSource final : public RecordingFrameSource {
     Direct3D11CaptureFramePool pool_{nullptr};
     GraphicsCaptureSession session_{nullptr};
     winrt::event_token arrived_{}, closed_{};
-    RECT desktop_{};
 public:
-    explicit WgcSource(const RecordingCaptureConfig& config,ID3D11Device* existing=nullptr) : config_(config),shared_(std::make_shared<Shared>(existing,config.d3d_debug)) {
+    explicit WgcSource(const RecordingCaptureConfig& config,ID3D11Device* existing=nullptr) : config_(config),
+        shared_(std::make_shared<Shared>(existing, config.d3d_debug, capture_source_texture_capacity(config.source_queue_depth), config.sdr_white_nits, wgc_region(config))) {
         // WinRT capture is agile; initialization may already belong to the
         // native worker. RPC_E_CHANGED_MODE is harmless for this API.
         const HRESULT init = RoInitialize(RO_INIT_MULTITHREADED);
@@ -229,15 +255,14 @@ public:
         else {
             auto monitor = reinterpret_cast<HMONITOR>(config.monitor);
             if (!monitor) monitor = MonitorFromPoint(POINT{}, MONITOR_DEFAULTTOPRIMARY);
-            MONITORINFO monitor_info{sizeof(MONITORINFO)};if(GetMonitorInfoW(monitor,&monitor_info))desktop_=monitor_info.rcMonitor;
             checked(interop->CreateForMonitor(monitor, winrt::guid_of<GraphicsCaptureItem>(), winrt::put_abi(item_)), "Create monitor capture item");
         }
         const auto size = item_.Size();
         if (size.Width <= 0 || size.Height <= 0) throw std::runtime_error("Capture target has no pixels");
         const auto format = config.capture_hdr ? DirectXPixelFormat::R16G16B16A16Float : DirectXPixelFormat::B8G8R8A8UIntNormalized;
         pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(direct_device_, format, 3, size);
-        auto shared = shared_; auto direct = direct_device_; const auto white = config.sdr_white_nits;
-        arrived_ = pool_.FrameArrived([shared, direct, format, white](const Direct3D11CaptureFramePool& pool, auto&&) {
+        auto shared = shared_; auto direct = direct_device_;
+        arrived_ = pool_.FrameArrived([shared, direct, format](const Direct3D11CaptureFramePool& pool, auto&&) {
             try {
                 {std::lock_guard lock(shared->mutex);++shared->diagnostics.callbacks;}
                 auto frame = pool.TryGetNextFrame();
@@ -254,21 +279,20 @@ public:
                             pool.Recreate(direct, format, 3, content);
                         break;
                     }
-                    auto owned = shared->gpu.copy(texture.Get(), white);
+                    // The copy goes to a pooled texture (none free: counted
+                    // and dropped), so the WGC buffer is released at once.
                     const auto timestamp = frame.SystemRelativeTime().count() / 10;
-                    frame.Close();
-                    { std::lock_guard lock(shared->mutex); ++shared->diagnostics.frames_delivered;
-                      if(shared->latest)++shared->diagnostics.overwritten;
-                      shared->latest = std::move(owned); shared->stamp = timestamp; }
-                    shared->changed.notify_all(); frame = pool.TryGetNextFrame();
+                    shared->frames.deliver(texture.Get(), timestamp);
+                    texture.Reset(); frame.Close();
+                    frame = pool.TryGetNextFrame();
                 }
             } catch (const std::exception& e) {
-                std::lock_guard lock(shared->mutex); shared->error = e.what(); shared->changed.notify_all();
+                shared->frames.fail(e.what());
             } catch (...) {
-                std::lock_guard lock(shared->mutex); shared->error = "Windows Graphics Capture frame callback failed"; shared->changed.notify_all();
+                shared->frames.fail("Windows Graphics Capture frame callback failed");
             }
         });
-        closed_ = item_.Closed([shared](auto&&, auto&&) { std::lock_guard lock(shared->mutex); shared->closed = true; shared->latest.Reset(); shared->changed.notify_all(); });
+        closed_ = item_.Closed([shared](auto&&, auto&&) { shared->frames.close(); });
         session_ = pool_.CreateCaptureSession(item_);
         try { session_.IsCursorCaptureEnabled(config.capture_cursor); } catch (...) {}
         try { session_.IsBorderRequired(false); } catch (...) {}
@@ -281,31 +305,17 @@ public:
             session_=nullptr;pool_=nullptr;item_=nullptr; } catch (...) {}
     }
     bool eligible() const override {
-        std::lock_guard lock(shared_->mutex);
-        return !shared_->closed && window_eligible(reinterpret_cast<HWND>(config_.window), true);
+        return !shared_->frames.closed() && window_eligible(reinterpret_cast<HWND>(config_.window), true);
     }
     bool foreground() const override {return window_eligible(reinterpret_cast<HWND>(config_.window),false);}
     bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
-        ComPtr<ID3D11Texture2D> owned; int64_t stamp;
-        { std::unique_lock lock(shared_->mutex);
-          shared_->changed.wait_for(lock, timeout, [&] { return shared_->latest || shared_->closed || !shared_->error.empty(); });
-          if (!shared_->error.empty()) throw std::runtime_error(shared_->error);
-          if (!shared_->latest) return false; owned = std::move(shared_->latest); stamp = shared_->stamp; }
-        if (!eligible()) return false;
+        // The store already cropped a capture region; the pooled copy returns
+        // to the pool when the last CapturePixels owner releases it.
+        int64_t stamp = 0;
+        if (!shared_->frames.take(pixels, stamp, timeout)) return false;
+        if (!eligible()) { pixels.texture.reset(); return false; }
         pixels.timestamp_us = config_.monotonic_anchor_us + stamp - config_.qpc_anchor / config_.qpc_frequency * 1000000 -
             config_.qpc_anchor % config_.qpc_frequency * 1000000 / config_.qpc_frequency;
-        D3D11_TEXTURE2D_DESC desc{}; owned->GetDesc(&desc);
-        if(!config_.window&&config_.capture_region.width>0&&config_.capture_region.height>0){
-            const auto& region=config_.capture_region;
-            const int x=region.x-desktop_.left,y=region.y-desktop_.top;
-            if(x<0||y<0||int64_t(x)+region.width>desc.Width||int64_t(y)+region.height>desc.Height)return false;
-            auto cropped_desc=desc;cropped_desc.Width=region.width;cropped_desc.Height=region.height;
-            ComPtr<ID3D11Texture2D> cropped;checked(shared_->gpu.device->CreateTexture2D(&cropped_desc,nullptr,&cropped),"Create recording region texture");
-            D3D11_BOX box{UINT(x),UINT(y),0,UINT(x+region.width),UINT(y+region.height),1};
-            shared_->gpu.context->CopySubresourceRegion(cropped.Get(),0,0,0,0,owned.Get(),0,&box);owned=std::move(cropped);desc=cropped_desc;
-        }
-        pixels.width = int(desc.Width); pixels.height = int(desc.Height); pixels.stride = pixels.width * 4;
-        pixels.texture = std::shared_ptr<ID3D11Texture2D>(owned.Detach(), [](auto* p) { p->Release(); });
         return true;
     }
     void set_frame_rate(int fps) override {
@@ -330,7 +340,12 @@ public:
         const auto size=item_.Size();return{0,0,size.Width,size.Height};
     }
     RecordingSourceHealth diagnostics() const override {
+        const auto frames=shared_->frames.stats();
         std::lock_guard lock(shared_->mutex);auto result=shared_->diagnostics;
+        result.frames_delivered=frames.delivered;result.overwritten=frames.superseded;
+        result.owned_texture_capacity=frames.capacity;result.owned_textures_allocated=frames.allocated;result.owned_textures_leased=frames.leased;
+        result.owned_textures_peak=frames.peak_leased;result.owned_texture_pressure_drops=frames.pressure_drops;
+        result.copy_p50_ms=frames.copy_p50_ms;result.copy_p95_ms=frames.copy_p95_ms;
         result.adapter=shared_->gpu.diagnostics.adapter;result.adapter_luid=shared_->gpu.diagnostics.adapter_luid;
         result.gpu_device_priority=shared_->gpu.diagnostics.gpu_device_priority;result.gpu_device_priority_applied=shared_->gpu.diagnostics.gpu_device_priority_applied;
         result.display_profile_available=config_.display_profile_available;result.hdr_display=config_.display_hdr;
@@ -341,7 +356,7 @@ public:
             if(!eligible()||!pool_||!item_)return false;
             const auto size=item_.Size();if(size.Width<=0||size.Height<=0)return false;
             pool_.Recreate(direct_device_,config_.capture_hdr?DirectXPixelFormat::R16G16B16A16Float:DirectXPixelFormat::B8G8R8A8UIntNormalized,3,size);
-            std::lock_guard lock(shared_->mutex);shared_->error.clear();shared_->latest.Reset();return true;
+            shared_->frames.reset();return true;
         }catch(...){return false;}
     }
 };
@@ -496,6 +511,171 @@ public:
         }catch(...){return false;}
     }
 };
+}
+
+struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStore::Impl> {
+    Device gpu;
+    const int capacity;
+    const float white;
+    const CaptureRect region;
+    Impl(ID3D11Device* device, int size, float nits, CaptureRect crop) : gpu(device), capacity(size), white(nits), region(crop) {}
+    // Pool and newest slot.
+    mutable std::mutex mutex;
+    std::condition_variable changed;
+    UINT width = 0, height = 0;
+    uint64_t generation = 0;
+    int live = 0, leased = 0, peak = 0; // live: textures of the current size.
+    std::vector<ComPtr<ID3D11Texture2D>> free;
+    uint64_t allocated = 0, delivered = 0, superseded = 0, pressure = 0;
+    std::shared_ptr<ID3D11Texture2D> newest;
+    int64_t stamp = 0;
+    bool closed = false;
+    std::string error;
+    std::deque<double> copy_times;
+    // Delivery-only state, serialized by `delivering`.
+    std::mutex delivering;
+    ComPtr<ID3D11Texture2D> scratch; // Full-size BGRA target for cropped HDR frames.
+    std::map<ID3D11Texture2D*, ComPtr<ID3D11RenderTargetView>> views; // Of pooled textures and the scratch.
+
+    // A texture of the current size, or null at capacity. `mutex` held. The
+    // lease hands the texture back when its last owner releases it.
+    std::shared_ptr<ID3D11Texture2D> lease() {
+        ComPtr<ID3D11Texture2D> texture;
+        if (!free.empty()) { texture = std::move(free.back()); free.pop_back(); }
+        else if (live < capacity) {
+            D3D11_TEXTURE2D_DESC desc{};
+            desc.Width = width; desc.Height = height; desc.MipLevels = 1; desc.ArraySize = 1;
+            desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM; desc.SampleDesc.Count = 1; desc.Usage = D3D11_USAGE_DEFAULT;
+            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            checked(gpu.device->CreateTexture2D(&desc, nullptr, &texture), "Allocate owned recording texture");
+            ++live; ++allocated;
+        } else return {};
+        ++leased; peak = std::max(peak, leased);
+        const std::weak_ptr<Impl> owner = weak_from_this();
+        const auto from = generation;
+        return std::shared_ptr<ID3D11Texture2D>(texture.Detach(), [owner, from](ID3D11Texture2D* returned) {
+            if (const auto impl = owner.lock()) impl->give_back(returned, from); else returned->Release();
+        });
+    }
+    void give_back(ID3D11Texture2D* returned, uint64_t from) {
+        ComPtr<ID3D11Texture2D> texture; texture.Attach(returned);
+        std::lock_guard lock(mutex);
+        --leased;
+        // Textures of an earlier size are discarded.
+        if (from == generation) free.push_back(std::move(texture));
+    }
+    ID3D11RenderTargetView* view(ID3D11Texture2D* texture) {
+        auto& cached = views[texture];
+        if (!cached) checked(gpu.device->CreateRenderTargetView(texture, nullptr, &cached), "Create recording HDR output view");
+        return cached.Get();
+    }
+};
+
+CapturedFrameStore::CapturedFrameStore(ID3D11Device* device, int capacity, float sdr_white_nits, CaptureRect region) {
+    if (!device || capacity < 1 || capacity > 64 || region.width < 0 || region.height < 0 || (region.width > 0) != (region.height > 0))
+        throw std::invalid_argument("Invalid captured frame store");
+    impl_ = std::make_shared<Impl>(device, capacity, sdr_white_nits, region);
+}
+CapturedFrameStore::~CapturedFrameStore() { close(); }
+
+bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp) {
+    auto& s = *impl_;
+    if (!input) throw std::invalid_argument("Missing captured frame");
+    std::lock_guard serial(s.delivering);
+    D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
+    const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if (!hdr && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) throw std::runtime_error("Unsupported capture texture format");
+    const auto crop = s.region.width > 0 ? s.region : CaptureRect{0, 0, int(desc.Width), int(desc.Height)};
+    if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return false;
+    const bool whole = crop.width == int(desc.Width) && crop.height == int(desc.Height);
+    // Released only outside the lock: a lease's return takes it.
+    std::shared_ptr<ID3D11Texture2D> target, stale;
+    {
+        std::lock_guard lock(s.mutex);
+        if (UINT(crop.width) != s.width || UINT(crop.height) != s.height) {
+            s.width = UINT(crop.width); s.height = UINT(crop.height); ++s.generation;
+            s.free.clear(); s.live = 0; stale = std::move(s.newest);
+            s.views.clear();
+        }
+        // An untaken frame is superseded in place: nothing else holds it.
+        if (s.newest) { target = std::move(s.newest); ++s.superseded; }
+        else target = s.lease();
+        if (!target) { ++s.pressure; return false; }
+    }
+    const auto started = std::chrono::steady_clock::now();
+    const D3D11_BOX box{UINT(crop.x), UINT(crop.y), 0, UINT(crop.x + crop.width), UINT(crop.y + crop.height), 1};
+    if (!hdr) s.gpu.copy_into(target.get(), input, whole ? nullptr : &box);
+    else if (whole) s.gpu.tone_map(input, target.get(), s.white, s.view(target.get()));
+    else {
+        D3D11_TEXTURE2D_DESC current{}; if (s.scratch) s.scratch->GetDesc(&current);
+        if (!s.scratch || current.Width != desc.Width || current.Height != desc.Height) {
+            if (s.scratch) s.views.erase(s.scratch.Get());
+            s.scratch.Reset();
+            auto scratch = desc; scratch.Format = DXGI_FORMAT_B8G8R8A8_UNORM; scratch.MipLevels = 1; scratch.ArraySize = 1;
+            scratch.Usage = D3D11_USAGE_DEFAULT; scratch.CPUAccessFlags = 0; scratch.MiscFlags = 0;
+            scratch.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            checked(s.gpu.device->CreateTexture2D(&scratch, nullptr, &s.scratch), "Allocate recording HDR crop texture");
+            std::lock_guard lock(s.mutex); ++s.allocated;
+        }
+        s.gpu.tone_map(input, s.scratch.Get(), s.white, s.view(s.scratch.Get()));
+        s.gpu.copy_into(target.get(), s.scratch.Get(), &box);
+    }
+    const double elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+    std::shared_ptr<ID3D11Texture2D> replaced;
+    {
+        std::lock_guard lock(s.mutex);
+        s.copy_times.push_back(elapsed); if (s.copy_times.size() > 240) s.copy_times.pop_front();
+        replaced = std::move(s.newest);
+        s.newest = std::move(target); s.stamp = timestamp; ++s.delivered;
+    }
+    s.changed.notify_all();
+    return true;
+}
+bool CapturedFrameStore::take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout) {
+    auto& s = *impl_;
+    std::shared_ptr<ID3D11Texture2D> texture;
+    {
+        std::unique_lock lock(s.mutex);
+        s.changed.wait_for(lock, timeout, [&] { return s.newest || s.closed || !s.error.empty(); });
+        if (!s.error.empty()) throw std::runtime_error(s.error);
+        if (!s.newest || s.closed) return false;
+        texture = std::move(s.newest); timestamp = s.stamp;
+    }
+    D3D11_TEXTURE2D_DESC desc{}; texture->GetDesc(&desc);
+    pixels.width = int(desc.Width); pixels.height = int(desc.Height); pixels.stride = pixels.width * 4;
+    pixels.texture = std::move(texture);
+    return true;
+}
+void CapturedFrameStore::fail(const std::string& error) {
+    { std::lock_guard lock(impl_->mutex); impl_->error = error; }
+    impl_->changed.notify_all();
+}
+void CapturedFrameStore::close() {
+    std::shared_ptr<ID3D11Texture2D> dropped;
+    { std::lock_guard lock(impl_->mutex); impl_->closed = true; dropped = std::move(impl_->newest); }
+    impl_->changed.notify_all();
+}
+void CapturedFrameStore::reset() {
+    std::shared_ptr<ID3D11Texture2D> dropped;
+    { std::lock_guard lock(impl_->mutex); impl_->error.clear(); dropped = std::move(impl_->newest); }
+}
+bool CapturedFrameStore::closed() const { std::lock_guard lock(impl_->mutex); return impl_->closed; }
+CapturedFrameStore::Stats CapturedFrameStore::stats() const {
+    const auto& s = *impl_;
+    std::vector<double> times;
+    Stats result;
+    {
+        std::lock_guard lock(s.mutex);
+        result.capacity = s.capacity; result.leased = s.leased; result.peak_leased = s.peak;
+        result.allocated = s.allocated; result.delivered = s.delivered; result.superseded = s.superseded; result.pressure_drops = s.pressure;
+        times.assign(s.copy_times.begin(), s.copy_times.end());
+    }
+    if (!times.empty()) {
+        std::sort(times.begin(), times.end());
+        auto rank = [&](double p) { return times[std::max<size_t>(1, size_t(std::ceil(times.size() * p))) - 1]; };
+        result.copy_p50_ms = rank(.5); result.copy_p95_ms = rank(.95);
+    }
+    return result;
 }
 void capture_copy_texture_pixels(CapturePixels& pixels) {
     if (!pixels.texture || !pixels.bgra.empty()) return;

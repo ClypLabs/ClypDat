@@ -1,5 +1,6 @@
 #include "recording_capture.h"
 #include "readback_stage.h"
+#include "captured_frames.h"
 #include "recording_save.h"
 #include <atomic>
 #include <cstdlib>
@@ -1234,6 +1235,242 @@ void fresh_frame_delivery(){
         if(selected.unique_fps<c.target*.95)throw std::runtime_error("Timestamp selection fresh FPS "+std::to_string(selected.unique_fps)+" at "+std::to_string(c.target));
     }
 }
+// A BGRA (or FP16, every channel `level`) test texture; BGRA pixels hold
+// x in blue, y in green and `value` in red.
+Microsoft::WRL::ComPtr<ID3D11Texture2D> capture_texture(ID3D11Device* device,int width,int height,uint8_t value,bool fp16=false,float level=0){
+    D3D11_TEXTURE2D_DESC desc{};desc.Width=width;desc.Height=height;desc.MipLevels=1;desc.ArraySize=1;desc.SampleDesc.Count=1;
+    desc.Format=fp16?DXGI_FORMAT_R16G16B16A16_FLOAT:DXGI_FORMAT_B8G8R8A8_UNORM;desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET;
+    std::vector<uint16_t> half;std::vector<uint8_t> bgra;D3D11_SUBRESOURCE_DATA data{};
+    if(fp16){half.assign(size_t(width)*height*4,DirectX::PackedVector::XMConvertFloatToHalf(level));
+        for(size_t i=3;i<half.size();i+=4)half[i]=DirectX::PackedVector::XMConvertFloatToHalf(1);data={half.data(),UINT(width*8),0};}
+    else{bgra.resize(size_t(width)*height*4);for(int y=0;y<height;++y)for(int x=0;x<width;++x){auto* p=&bgra[(size_t(y)*width+x)*4];p[0]=uint8_t(x);p[1]=uint8_t(y);p[2]=value;p[3]=255;}
+        data={bgra.data(),UINT(width*4),0};}
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;CHECK(SUCCEEDED(device->CreateTexture2D(&desc,&data,&texture)));return texture;
+}
+std::vector<uint8_t> texture_bytes(const std::shared_ptr<ID3D11Texture2D>& texture){
+    D3D11_TEXTURE2D_DESC desc{};texture->GetDesc(&desc);CapturePixels pixels;pixels.texture=texture;
+    pixels.width=int(desc.Width);pixels.height=int(desc.Height);pixels.stride=pixels.width*4;capture_copy_texture_pixels(pixels);return pixels.bgra;
+}
+ULONG references(IUnknown* object){object->AddRef();return object->Release();}
+// The owned-copy store behind WGC: one reused texture for frames taken at
+// once, held copies never rewritten, untaken frames superseded in place,
+// bounded and counted exhaustion, resize and HDR/SDR handling, region crops,
+// and no reference kept to the capture API's buffer.
+void captured_frame_store(){
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
+    const auto ten=capture_texture(device.Get(),256,144,10),twenty=capture_texture(device.Get(),256,144,20);
+    const auto input_references=references(ten.Get());
+    CapturedFrameStore store(device.Get(),3,80);
+    auto take=[&](CapturedFrameStore& from,int64_t expected){CapturePixels pixels;int64_t stamp=-1;CHECK(from.take(pixels,stamp,0ms)&&stamp==expected);return pixels;};
+    // Frames taken and released at once reuse a single texture: no
+    // allocation after warm-up, and the WGC buffer is never retained.
+    std::set<ID3D11Texture2D*> seen;
+    for(int i=0;i<200;++i){CHECK(store.deliver(ten.Get(),i));seen.insert(take(store,i).texture.get());}
+    auto stats=store.stats();
+    CHECK(seen.size()==1&&stats.allocated==1&&stats.delivered==200&&stats.leased==0&&stats.peak_leased==1&&stats.capacity==3);
+    CHECK(references(ten.Get())==input_references&&stats.copy_p95_ms>=stats.copy_p50_ms);
+    // A held copy is never handed out again or rewritten while referenced.
+    CHECK(store.deliver(ten.Get(),500));auto held=take(store,500);
+    for(int i=0;i<50;++i){CHECK(store.deliver(twenty.Get(),600+i));const auto other=take(store,600+i);CHECK(other.texture.get()!=held.texture.get());}
+    const auto held_bytes=texture_bytes(held.texture);CHECK(held_bytes[2]==10&&held_bytes[(size_t(143)*256+255)*4+2]==10);
+    CHECK(store.stats().allocated==2&&store.stats().leased==1);
+    // An untaken frame is superseded in place, in the same texture.
+    const auto before=store.stats();
+    CHECK(store.deliver(twenty.Get(),700)&&store.deliver(ten.Get(),701));
+    auto latest=take(store,701);CHECK(texture_bytes(latest.texture)[2]==10);
+    CHECK(store.stats().superseded==before.superseded+1&&store.stats().allocated==before.allocated);
+    // Every texture held: the frame is dropped and counted, nothing allocated.
+    CHECK(store.deliver(twenty.Get(),800));auto third=take(store,800);
+    CHECK(store.stats().leased==3&&!store.deliver(ten.Get(),801));
+    CHECK(store.stats().pressure_drops==1&&store.stats().allocated==3&&store.stats().leased==3);
+    third.texture.reset();CHECK(store.deliver(ten.Get(),802)&&take(store,802).texture);
+    // A new size rebuilds the pool; held old-size copies stay intact and are
+    // discarded, not reused, when released.
+    const auto large=capture_texture(device.Get(),320,180,30);
+    CHECK(store.deliver(large.Get(),900));auto resized=take(store,900);CHECK(resized.width==320&&resized.height==180);
+    CHECK(texture_bytes(held.texture)[2]==10);
+    // An extra reference keeps the old address unique; the pool must drop its own.
+    const Microsoft::WRL::ComPtr<ID3D11Texture2D> old_texture(held.texture.get());held=CapturePixels{};latest=CapturePixels{};
+    CHECK(references(old_texture.Get())==1);
+    for(int i=0;i<10;++i){CHECK(store.deliver(large.Get(),910+i));const auto next=take(store,910+i);CHECK(next.texture.get()!=old_texture.Get()&&next.width==320);}
+    CHECK(store.stats().leased==1);resized=CapturePixels{};CHECK(store.stats().leased==0);
+    // FP16 frames are tone-mapped exactly as before, BGRA frames copied, in
+    // the same pooled textures and without retaining either input.
+    const auto hdr=capture_texture(device.Get(),256,144,0,true,.5f);const auto hdr_references=references(hdr.Get());
+    CapturedFrameStore mixed(device.Get(),3,80);
+    const auto expected=texture_bytes(capture_tone_map_texture(hdr.Get(),80));
+    CHECK(mixed.deliver(hdr.Get(),1));CHECK(texture_bytes(take(mixed,1).texture)==expected);
+    CHECK(mixed.deliver(ten.Get(),2));CHECK(texture_bytes(take(mixed,2).texture)[2]==10);
+    for(int i=3;i<20;++i){CHECK(mixed.deliver(i%2?hdr.Get():ten.Get(),i));take(mixed,i);}
+    CHECK(mixed.stats().allocated==1&&references(hdr.Get())==hdr_references);
+    // A capture region is cropped on delivery, SDR and HDR, with the HDR
+    // scratch made once; a region outside the frame drops it.
+    CapturedFrameStore region(device.Get(),3,80,{16,8,128,72});
+    CHECK(region.deliver(ten.Get(),1));const auto crop=take(region,1);CHECK(crop.width==128&&crop.height==72);
+    const auto crop_bytes=texture_bytes(crop.texture);CHECK(crop_bytes[0]==16&&crop_bytes[1]==8&&crop_bytes[2]==10);
+    for(int i=2;i<22;++i){CHECK(region.deliver(hdr.Get(),i));const auto frame=take(region,i);CHECK(frame.width==128);}
+    // The held first crop, one reused pool texture and the HDR scratch.
+    CHECK(region.stats().allocated==3);
+    CHECK(region.deliver(hdr.Get(),30));const auto hdr_crop=texture_bytes(take(region,30).texture);
+    CHECK(hdr_crop.size()==size_t(128)*72*4&&std::equal(hdr_crop.begin(),hdr_crop.begin()+4,expected.begin()));
+    CapturedFrameStore outside(device.Get(),3,80,{200,100,128,72});
+    CHECK(!outside.deliver(ten.Get(),1)&&outside.stats().delivered==0&&outside.stats().allocated==0);
+    // Errors wake take(); reset clears them; close ends it.
+    store.fail("capture failed");bool threw=false;try{CapturePixels pixels;int64_t stamp=0;store.take(pixels,stamp,0ms);}catch(const std::runtime_error&){threw=true;}
+    CHECK(threw);store.reset();{CapturePixels pixels;int64_t stamp=0;CHECK(!store.take(pixels,stamp,0ms));}
+    CHECK(store.deliver(ten.Get(),1000));store.close();{CapturePixels pixels;int64_t stamp=0;CHECK(store.closed()&&!store.take(pixels,stamp,0ms)&&store.stats().leased==0);}
+    bool invalid=false;try{CapturedFrameStore bad(device.Get(),0,80);}catch(const std::invalid_argument&){invalid=true;}CHECK(invalid);
+}
+// WGC-style delivery through the production CapturedFrameStore: a producer
+// thread renders into one of three buffers (like WGC's frame pool) on the
+// schedule and hands it to the store; acquire() takes frames exactly as
+// WgcSource does.
+class PooledWgcSource final:public RecordingFrameSource{
+    Microsoft::WRL::ComPtr<ID3D11Device> device_;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
+    std::vector<Microsoft::WRL::ComPtr<ID3D11Texture2D>> buffers_;std::vector<Microsoft::WRL::ComPtr<ID3D11RenderTargetView>> views_;
+    std::unique_ptr<CapturedFrameStore> store_;std::atomic<bool> stop_{false},started_{false};std::thread producer_;
+public:
+    // The schedule starts at the first acquire(), once the encoder is open.
+    PooledWgcSource(std::vector<Delivery> frames,std::function<int64_t()> clock,int capacity,int width=1280,int height=720){
+        CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context_)));
+        store_=std::make_unique<CapturedFrameStore>(device_.Get(),capacity,80.f);
+        for(int i=0;i<3;++i){buffers_.push_back(capture_texture(device_.Get(),width,height,0));views_.emplace_back();
+            CHECK(SUCCEEDED(device_->CreateRenderTargetView(buffers_.back().Get(),nullptr,&views_.back())));}
+        producer_=std::thread([this,frames=std::move(frames),clock=std::move(clock)]{
+            while(!started_&&!stop_)std::this_thread::sleep_for(1ms);
+            const int64_t base=clock()+50000;
+            HANDLE timer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
+            for(size_t i=0;i<frames.size()&&!stop_;++i){
+                const auto wait=base+frames[i].arrival-clock();
+                if(wait>0){LARGE_INTEGER due{};due.QuadPart=-wait*10;if(timer&&SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE))WaitForSingleObject(timer,INFINITE);}
+                const float shade=float(i%200)/200;const float color[4]{shade,1-shade,.5f,1};
+                context_->ClearRenderTargetView(views_[i%3].Get(),color);
+                store_->deliver(buffers_[i%3].Get(),base+frames[i].stamp);
+            }
+            if(timer)CloseHandle(timer);});
+    }
+    ~PooledWgcSource()override{stop_=true;if(producer_.joinable())producer_.join();}
+    bool acquire(CapturePixels& pixels,std::chrono::milliseconds timeout)override{
+        started_=true;int64_t stamp=0;if(!store_->take(pixels,stamp,timeout))return false;pixels.timestamp_us=stamp;return true;}
+    bool eligible()const override{return true;}
+    const char* name()const override{return "emulated pooled WGC delivery";}
+    ID3D11Device* d3d_device()const override{return device_.Get();}
+    RecordingSourceHealth diagnostics()const override{
+        const auto s=store_->stats();RecordingSourceHealth health;health.frames_delivered=s.delivered;health.overwritten=s.superseded;
+        health.owned_texture_capacity=s.capacity;health.owned_textures_allocated=s.allocated;health.owned_textures_leased=s.leased;
+        health.owned_textures_peak=s.peak_leased;health.owned_texture_pressure_drops=s.pressure_drops;health.copy_p50_ms=s.copy_p50_ms;health.copy_p95_ms=s.copy_p95_ms;
+        return health;}
+};
+struct PooledRun{RecordingCaptureHealth warm,health;};
+// One emulated WGC run through the real capture, pacing and encoding threads
+// (NVENC zero-copy unless `candidates` says otherwise), averaged over the two
+// steady-state health windows after warm-up.
+PooledRun pooled_run(const std::vector<Delivery>& frames,int fps,bool variable,int capacity,RecordingCaptureDependencies dependencies={},double seconds=4){
+    const auto started=std::chrono::steady_clock::now();
+    auto clock=[started]{return int64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-started).count())+10000000;};
+    RecordingCaptureConfig config;config.width=640;config.height=360;config.fps=fps;config.variable_frame_rate=variable;config.monotonic_anchor_us=10000000;
+    dependencies.monotonic_clock=clock;
+    RecordingCaptureCallbacks callbacks;
+    RecordingCapture capture(config,callbacks,std::make_unique<PooledWgcSource>(frames,clock,capacity),std::move(dependencies));capture.start();
+    PooledRun run;double fresh=0,duplicates=0,dropped=0,overwritten=0;int windows=0;
+    for(int second=0;second<int(seconds);++second){std::this_thread::sleep_for(1s);
+        if(second==1)run.warm=capture.health();
+        if(second>=2){const auto h=capture.health();fresh+=h.unique_fps;duplicates+=h.duplicate_fps;dropped+=h.selection_dropped_fps;overwritten+=h.wgc_overwritten_fps;++windows;}}
+    run.health=capture.health();capture.stop();
+    if(!run.health.error.empty())throw std::runtime_error(run.health.error);
+    if(windows){run.health.unique_fps=fresh/windows;run.health.duplicate_fps=duplicates/windows;run.health.selection_dropped_fps=dropped/windows;run.health.wgc_overwritten_fps=overwritten/windows;}
+    return run;
+}
+std::string pooled_state(const RecordingCaptureHealth& h){
+    const auto& s=h.source_details;
+    return "fresh="+std::to_string(h.unique_fps)+" output="+std::to_string(h.output_fps)+" duplicates="+std::to_string(h.duplicate_fps)+
+        " selectionDropped="+std::to_string(h.selection_dropped_fps)+" overwritten="+std::to_string(h.wgc_overwritten_fps)+" sourcePeak="+std::to_string(h.source_queue_peak)+
+        " owned capacity="+std::to_string(s.owned_texture_capacity)+" allocated="+std::to_string(s.owned_textures_allocated)+" peak="+std::to_string(s.owned_textures_peak)+
+        " pressureDrops="+std::to_string(s.owned_texture_pressure_drops)+" "+pressure_state(h);
+}
+// Measures how many owned copies are held at once (large pool, so nothing
+// is refused): steady capture at 60/90/120 FPS, a stuck encoder until it is
+// replaced, and every pool surface pinned by the encoder.
+void measure_source_texture_holders(){
+    struct Case{int target;double refresh,game;};
+    for(const auto& c:{Case{60,144,70},Case{90,240,95},Case{120,240,130},Case{90,240,240}}){
+        const auto run=pooled_run(wgc_schedule(c.game,c.refresh,6,41),c.target,false,32);
+        std::cout<<"holders steady "<<c.target<<"fps@"<<c.refresh<<"Hz game="<<c.game<<": "<<pooled_state(run.health)<<"\n";
+    }
+    {
+        auto probe=std::make_shared<PressureProbe>();probe->stuck=true;
+        RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_nvenc",false,true},{"h264_nvenc",false,true}};
+        dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t candidate){return candidate==0?std::make_unique<VideoEncoder>(value,probe_calls(probe)):std::make_unique<VideoEncoder>(value);};
+        const auto run=pooled_run(wgc_schedule(95,240,7,43),90,false,32,std::move(dependencies),5);
+        std::cout<<"holders stuck encoder 90fps: "<<pooled_state(run.health)<<"\n";
+    }
+    {
+        auto probe=std::make_shared<PressureProbe>();probe->hold=true;
+        RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_nvenc",false,true},{"h264_nvenc",false,true}};
+        // The replacement releases what the probe pinned, as a destroyed encoder would.
+        dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t candidate){
+            if(candidate==0)return std::make_unique<VideoEncoder>(value,probe_calls(probe));probe->release();return std::make_unique<VideoEncoder>(value);};
+        const auto run=pooled_run(wgc_schedule(95,240,7,47),90,false,32,std::move(dependencies),5);
+        std::cout<<"holders pool backpressure 90fps: "<<pooled_state(run.health)<<"\n";
+    }
+}
+// The pooled WGC path through the real pipeline at the production capacity:
+// fresh frames at the target without duplicates or pool drops, source
+// selection still two deep, and no per-frame allocation: a texture is made
+// only when concurrent holders reach a new high, so allocations equal the
+// peak lease count (at most two lazy top-ups after warm-up). A stuck encoder
+// or a blocked writer is absorbed by counted drops, never by growth or a
+// restart.
+void pooled_wgc_capture(){
+    const int capacity=capture_source_texture_capacity(2);
+    auto regressed=[&](const PooledRun& run,int target){const auto& h=run.health;const auto& s=h.source_details;
+        return h.unique_fps<target*.955||h.duplicate_fps>2||h.source_queue_peak>2||s.owned_texture_pressure_drops||s.owned_texture_capacity!=capacity||
+            s.owned_textures_allocated!=uint64_t(s.owned_textures_peak)||s.owned_textures_allocated>run.warm.source_details.owned_textures_allocated+2||
+            s.owned_textures_peak>capacity;};
+    for(const bool variable:{false,true}){
+        const auto run=pooled_run(wgc_schedule(95,240,7,53),90,variable,capacity);
+        std::cout<<"pooled WGC "<<(variable?"VFR":"CFR")<<" 90fps@240Hz game=95: "<<pooled_state(run.health)<<"\n";
+        if(regressed(run,90))throw std::runtime_error("Pooled WGC delivery regressed: "+pooled_state(run.health));
+    }
+    struct Case{int target;double refresh,game;};
+    for(const auto& c:{Case{60,144,70},Case{120,240,130}}){
+        const auto run=pooled_run(wgc_schedule(c.game,c.refresh,7,59),c.target,false,capacity);
+        std::cout<<"pooled WGC CFR "<<c.target<<"fps@"<<c.refresh<<"Hz game="<<c.game<<": "<<pooled_state(run.health)<<"\n";
+        if(regressed(run,c.target))throw std::runtime_error("Pooled WGC delivery regressed at "+std::to_string(c.target)+": "+pooled_state(run.health));
+    }
+    {
+        auto probe=std::make_shared<PressureProbe>();probe->stuck=true;
+        RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_nvenc",false,true},{"h264_nvenc",false,true}};
+        dependencies.open_encoder=[probe](const VideoEncoderConfig& value,size_t candidate){return candidate==0?std::make_unique<VideoEncoder>(value,probe_calls(probe)):std::make_unique<VideoEncoder>(value);};
+        const auto run=pooled_run(wgc_schedule(95,240,7,61),90,false,capacity,std::move(dependencies),5);const auto& h=run.health;
+        std::cout<<"pooled WGC stuck encoder: "<<pooled_state(h)<<"\n";
+        if(h.encoder_stall_recoveries!=1||h.generation!=2||h.restart_required||h.source_details.owned_textures_allocated>uint64_t(capacity))
+            throw std::runtime_error("Pooled WGC stuck encoder: "+pooled_state(h));
+    }
+    // A blocked packet writer backs pacing up with distinct frames until the
+    // pool is exhausted: new WGC frames are dropped and counted, not
+    // allocated, and capture resumes once the writer returns.
+    const auto started=std::chrono::steady_clock::now();
+    auto clock=[started]{return int64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-started).count())+10000000;};
+    RecordingCaptureConfig config;config.width=640;config.height=360;config.fps=90;config.monotonic_anchor_us=10000000;
+    RecordingCaptureDependencies dependencies;dependencies.monotonic_clock=clock;
+    std::mutex mutex;std::condition_variable changed;bool blocked=true,entered=false;uint64_t packets=0;
+    RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){std::unique_lock lock(mutex);++packets;
+        if(packets==20){entered=true;changed.notify_all();changed.wait(lock,[&]{return !blocked;});}};
+    RecordingCapture capture(config,callbacks,std::make_unique<PooledWgcSource>(wgc_schedule(95,240,8,67),clock,capacity),std::move(dependencies));capture.start();
+    {std::unique_lock lock(mutex);CHECK(changed.wait_for(lock,5s,[&]{return entered;}));}
+    if(!wait_health(capture,[](const auto& h){return h.source_details.owned_texture_pressure_drops>=10;},3s))
+        {{std::lock_guard lock(mutex);blocked=false;}changed.notify_all();throw std::runtime_error("No owned-texture pressure: "+pooled_state(capture.health()));}
+    const auto pressured=capture.health();
+    {std::lock_guard lock(mutex);blocked=false;}changed.notify_all();
+    const auto resumed=[&]{std::lock_guard lock(mutex);return packets;}();
+    if(!wait_health(capture,[&](const auto&){std::lock_guard lock(mutex);return packets>=resumed+60;},3s))throw std::runtime_error("Capture did not resume: "+pooled_state(capture.health()));
+    CHECK(capture.stop());const auto health=capture.health();
+    std::cout<<"pooled WGC blocked writer: "<<pooled_state(pressured)<<"\n";
+    if(pressured.restart_required||!health.error.empty()||pressured.source_details.owned_textures_allocated>uint64_t(capacity)||pressured.source_details.owned_textures_peak>capacity)
+        throw std::runtime_error("Owned-texture pressure escalated: "+pooled_state(health));
+}
 void gpu_generation_failover(){
     const auto base=std::filesystem::current_path();const auto root=base/(L"capture-generation-fixture-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));
     CHECK(std::filesystem::create_directory(root));
@@ -1310,11 +1547,81 @@ int readback_bench(const std::string& encoder,int width,int height,int fps){
 #endif
     return 0;
 }
+// Manual benchmark: --wgc-bench <width> <height> <fps> <animate 0|1> [seconds].
+// Real Windows Graphics Capture of the primary monitor through the production
+// encoder candidates. animate=1 shows a 48x48 corner window presenting every
+// vsync so DWM composes at the display rate; animate=0 measures the desktop
+// as it is (idle or throttled).
+class VsyncAnimator {
+    std::atomic<bool> stop_{false};std::thread thread_;
+public:
+    VsyncAnimator(){thread_=std::thread([this]{
+        WNDCLASSW type{};type.lpfnWndProc=DefWindowProcW;type.hInstance=GetModuleHandleW(nullptr);type.lpszClassName=L"ClypDatWgcBenchAnimator";RegisterClassW(&type);
+        HWND window=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,type.lpszClassName,L"",WS_POPUP,0,0,48,48,nullptr,nullptr,type.hInstance,nullptr);
+        if(!window)return;ShowWindow(window,SW_SHOWNOACTIVATE);
+        Microsoft::WRL::ComPtr<ID3D11Device> device;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+        D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context);
+        Microsoft::WRL::ComPtr<IDXGIDevice> dxgi;Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
+        device.As(&dxgi);dxgi->GetAdapter(&adapter);adapter->GetParent(IID_PPV_ARGS(&factory));
+        DXGI_SWAP_CHAIN_DESC1 desc{};desc.Width=48;desc.Height=48;desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;desc.SampleDesc.Count=1;
+        desc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;desc.BufferCount=2;desc.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        Microsoft::WRL::ComPtr<IDXGISwapChain1> swap;factory->CreateSwapChainForHwnd(device.Get(),window,&desc,nullptr,nullptr,&swap);
+        for(int frame=0;!stop_&&swap;++frame){
+            MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> back;swap->GetBuffer(0,IID_PPV_ARGS(&back));Microsoft::WRL::ComPtr<ID3D11RenderTargetView> view;
+            device->CreateRenderTargetView(back.Get(),nullptr,&view);const float shade=frame&1?.12f:.125f;const float color[4]{shade,shade,shade,1};
+            context->ClearRenderTargetView(view.Get(),color);swap->Present(1,0);
+        }
+        swap.Reset();DestroyWindow(window);UnregisterClassW(type.lpszClassName,type.hInstance);});}
+    ~VsyncAnimator(){stop_=true;if(thread_.joinable())thread_.join();}
+};
+int wgc_bench(int width,int height,int fps,bool animate,int seconds){
+    std::unique_ptr<VsyncAnimator> animator;if(animate)animator=std::make_unique<VsyncAnimator>();
+    RecordingCaptureConfig config;config.width=width;config.height=height;config.fps=fps;config.bitrate_mbps=25;
+    std::atomic<uint64_t> packets{0};RecordingCaptureCallbacks callbacks;callbacks.packet=[&](auto,Packet,int64_t,bool){++packets;};
+    RecordingCapture capture(config,callbacks);capture.start();
+    std::this_thread::sleep_for(3s);
+    struct Sample{uint64_t cpu;size_t private_ws;};
+    auto sample=[]{FILETIME created{},exited{},kernel{},user{};GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user);
+        auto ticks=[](FILETIME t){return (uint64_t(t.dwHighDateTime)<<32)|t.dwLowDateTime;};
+        PROCESS_MEMORY_COUNTERS_EX2 memory{};GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory));
+        return Sample{ticks(kernel)+ticks(user),memory.PrivateWorkingSetSize};};
+    const auto warm=capture.health();const auto before=sample();const auto started=std::chrono::steady_clock::now();
+    const auto allocations_before=warm.source_details.owned_textures_allocated;
+    // Rates averaged over one-second health windows.
+    double fresh=0,output=0,delivered=0,callbacks_fps=0,duplicates=0,overwritten=0,selection=0;int windows=0;
+    for(int second=0;second<seconds;++second){std::this_thread::sleep_for(1s);const auto h=capture.health();
+        fresh+=h.unique_fps;output+=h.output_fps;delivered+=h.wgc_delivered_fps;callbacks_fps+=h.wgc_callback_fps;duplicates+=h.duplicate_fps;
+        overwritten+=h.wgc_overwritten_fps;selection+=h.selection_dropped_fps;++windows;}
+    const auto after=sample();const double elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count();
+    const auto h=capture.health();
+    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;Microsoft::WRL::ComPtr<IDXGIAdapter3> adapter3;
+    DXGI_QUERY_VIDEO_MEMORY_INFO local{},shared{};
+    if(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))&&SUCCEEDED(factory->EnumAdapters1(0,&adapter))&&SUCCEEDED(adapter.As(&adapter3))){
+        adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&local);adapter3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,&shared);}
+    CHECK(capture.stop());animator.reset();
+    if(!capture.health().error.empty())throw std::runtime_error("WGC bench: "+capture.health().error);
+    const double mb=1024.0*1024.0;
+    const double allocations=double(h.source_details.owned_textures_allocated-allocations_before)/elapsed;
+    const double copy_p50=h.source_details.copy_p50_ms,copy_p95=h.source_details.copy_p95_ms;
+    std::cout<<std::fixed<<std::setprecision(2)<<"WGC "<<width<<"x"<<height<<"@"<<fps<<(animate?" animated":" idle")<<": source="<<h.source
+        <<" encoder="<<h.encoder<<" ownedAllocations/s="<<allocations<<" copy p50="<<copy_p50<<" p95="<<copy_p95<<"ms"
+        <<" cpu="<<double(after.cpu-before.cpu)/1e7/elapsed*100<<"% privateWS="<<double(after.private_ws)/mb<<"MB dedicated="<<double(local.CurrentUsage)/mb
+        <<"MB shared="<<double(shared.CurrentUsage)/mb<<"MB callbacks="<<callbacks_fps/windows<<" delivered="<<delivered/windows<<" overwritten="<<overwritten/windows
+        <<" fresh="<<fresh/windows<<" output="<<output/windows<<" duplicates="<<duplicates/windows<<" selectionDropped="<<selection/windows
+        <<" completion p50="<<h.completion_p50_ms<<" p95="<<h.completion_p95_ms<<"ms drops="<<(h.backpressure_drops-warm.backpressure_drops)+(h.replaced-warm.replaced)<<"\n";
+    const auto& s=h.source_details;
+    std::cout<<"  owned textures: capacity="<<s.owned_texture_capacity<<" allocated="<<s.owned_textures_allocated<<" leased="<<s.owned_textures_leased
+        <<" peak="<<s.owned_textures_peak<<" pressureDrops="<<(s.owned_texture_pressure_drops-warm.source_details.owned_texture_pressure_drops)<<"\n";
+    return 0;
+}
 int main(int argc,char**argv) {
     try{
     av_log_set_level(AV_LOG_ERROR);
     if(argc>1&&std::string_view(argv[1])=="--4k-gpu"){gpu_4k_to_1440p(90);return 0;}
     if(argc>1&&std::string_view(argv[1])=="--qsv")return qsv_hardware();
+    if(argc>1&&std::string_view(argv[1])=="--wgc-holders"){measure_source_texture_holders();return 0;}
+    if(argc>5&&std::string_view(argv[1])=="--wgc-bench")return wgc_bench(std::atoi(argv[2]),std::atoi(argv[3]),std::atoi(argv[4]),std::atoi(argv[5])!=0,argc>6?std::atoi(argv[6]):8);
     if(argc>5&&std::string_view(argv[1])=="--readback-bench")return readback_bench(argv[2],std::atoi(argv[3]),std::atoi(argv[4]),std::atoi(argv[5]));
     CHECK(capture_queue_capacity(30)==4);CHECK(capture_queue_capacity(120)==15);
     CHECK(capture_final_hold(true,16667,500000)==33334);CHECK(capture_final_hold(false,16667,500000)==16667);
@@ -1334,7 +1641,7 @@ int main(int argc,char**argv) {
     }
     blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();planned_adapter_selection();pool_backpressure();busy_backpressure();stuck_encoder_recovery();stuck_encoder_without_fallback();amf_zero_copy_plan();amf_frame_context_ownership();amf_backpressure();
         qsv_surface_mapping();qsv_derivation();qsv_zero_copy_plan();qsv_backpressure();
-        readback_stage_reuse();readback_pipeline();readback_pressure();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
+        readback_stage_reuse();readback_pipeline();readback_pressure();captured_frame_store();pooled_wgc_capture();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

@@ -259,6 +259,12 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"sdrWhiteNits\":" << h.source_details.sdr_white_nits
         << ",\"sourceCallbacks\":" << h.source_details.callbacks << ",\"sourceDelivered\":" << h.source_details.frames_delivered
         << ",\"sourceOverwritten\":" << h.source_details.overwritten << ",\"sourceResizes\":" << h.source_details.resizes
+        << ",\"sourceOwnedTextureCapacity\":" << h.source_details.owned_texture_capacity
+        << ",\"sourceOwnedTexturesAllocated\":" << h.source_details.owned_textures_allocated
+        << ",\"sourceOwnedTexturesLeased\":" << h.source_details.owned_textures_leased
+        << ",\"sourceOwnedTexturesPeak\":" << h.source_details.owned_textures_peak
+        << ",\"sourceOwnedTexturePressureDrops\":" << h.source_details.owned_texture_pressure_drops
+        << ",\"sourceCopyP50Ms\":" << h.source_details.copy_p50_ms << ",\"sourceCopyP95Ms\":" << h.source_details.copy_p95_ms
         << ",\"sourceCursorCompositionMs\":" << h.source_details.cursor_composition_ms
         << ",\"requestedInterval100ns\":" << h.source_details.requested_interval_100ns
         << ",\"appliedInterval100ns\":" << h.source_details.applied_interval_100ns

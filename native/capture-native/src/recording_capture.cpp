@@ -24,6 +24,17 @@ extern "C" {
 namespace clypdat {
 int capture_queue_capacity(int fps) { return std::clamp((std::clamp(fps, 30, 120) + 7) / 8, 4, 15); }
 int legacy_surface_capacity(int fps) { return std::clamp((fps + 1) / 2, 16, 60) + capture_queue_capacity(fps) + 5; }
+// Owned WGC copies alive at once: the store's newest slot, the source
+// selection window, the frame pacing last selected, one queued and one
+// encoding frame, the detector's readback, and one spare. Measured peaks:
+// 3-4 in steady capture at 60-120 FPS, real WGC and emulated (--wgc-bench,
+// --wgc-holders); 6-7 under heavy game GPU load; 7-9 while a stuck encoder
+// or pinned pool waits out the stall bound. The pool allocates lazily, so
+// this is a ceiling rather than a cost. Longer backlogs, such as a stuck
+// encoder or a blocked writer, drop new frames instead of allocating.
+int capture_source_texture_capacity(int source_queue_depth) {
+    return std::clamp(source_queue_depth, 1, 8) + 6;
+}
 std::vector<RecordingEncoderCandidate> recording_encoder_candidates(bool cpu, bool av1) {
     if (cpu) return {{"libx264"}};
     std::vector<RecordingEncoderCandidate> result;

@@ -30,6 +30,12 @@ struct CapturePixels {
 struct RecordingSourceHealth {
     // overwritten counts delivered frames dropped before acquisition consumed them.
     uint64_t callbacks = 0, frames_delivered = 0, overwritten = 0, resizes = 0;
+    // Owned WGC frame copies from a bounded texture pool (CapturedFrameStore):
+    // capacity, textures created, leased now and at most, frames dropped
+    // because every owned texture was held, and CPU time to issue each copy.
+    int owned_texture_capacity = 0, owned_textures_leased = 0, owned_textures_peak = 0;
+    uint64_t owned_textures_allocated = 0, owned_texture_pressure_drops = 0;
+    double copy_p50_ms = 0, copy_p95_ms = 0;
     int64_t requested_interval_100ns = 0, applied_interval_100ns = 0;
     double display_refresh_hz = 0;
     double cursor_composition_ms = 0;
@@ -204,6 +210,9 @@ std::optional<EncoderPlan> plan_recording_encoder(const RecordingCaptureConfig& 
 
 // Pure policy functions are also used by the recording threads and fixtures.
 int capture_queue_capacity(int fps);
+// Owned WGC frame copies alive at once in steady state, sized from measured
+// holders rather than the pacing queue (see the definition).
+int capture_source_texture_capacity(int source_queue_depth);
 // Continuous backpressure without an accepted frame for this long means the
 // encoder is stuck; it is replaced like a failed encoder.
 inline constexpr int64_t kRecordingEncoderStallUs = 2000000;
