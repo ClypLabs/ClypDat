@@ -1170,10 +1170,13 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                 : hdrProfile.IsHdr ? ReplayHdrCompatibilityStatus.Unavailable : ReplayHdrCompatibilityStatus.SdrDisplay;
             var hdrConversionFailures = 0;
             Vortice.RawRect desktopBounds;
-            // WGC captures the selected window directly, avoiding DXGI desktop
-            // composition cadence. Keep DXGI only as an explicit diagnostic
-            // override while WGC is validated across real games and monitors.
-            var useWgc = Environment.GetEnvironmentVariable("CLYPDAT_FORCE_DXGI") != "1";
+            // WGC works for desktop capture, but some games can present correctly
+            // on screen while their WGC window surface is black. DXGI captures the
+            // composed desktop then crops the foreground game window, so use it for
+            // games by default. Keep WGC available for comparison and recovery.
+            var forceDxgi = Environment.GetEnvironmentVariable("CLYPDAT_FORCE_DXGI") == "1";
+            var forceWgc = Environment.GetEnvironmentVariable("CLYPDAT_FORCE_WGC") == "1";
+            var useWgc = !forceDxgi && (isMonitorMode || forceWgc);
             if (useWgc)
             {
                 try
