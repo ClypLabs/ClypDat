@@ -1176,7 +1176,8 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
             // games by default. Keep WGC available for comparison and recovery.
             var forceDxgi = Environment.GetEnvironmentVariable("CLYPDAT_FORCE_DXGI") == "1";
             var forceWgc = Environment.GetEnvironmentVariable("CLYPDAT_FORCE_WGC") == "1";
-            var useWgc = !forceDxgi && (isMonitorMode || forceWgc);
+            bool ShouldUseWgc() => !forceDxgi && (isMonitorMode || forceWgc);
+            var useWgc = ShouldUseWgc();
             if (useWgc)
             {
                 try
@@ -2244,6 +2245,7 @@ public sealed class NativeReplayBuffer : IReplayBuffer, IReplayCaptureDiagnostic
                     {
                         targetHandle = freshHandle;
                         isMonitorMode = targetHandle == 0;
+                        useWgc = ShouldUseWgc();
                         activeGameFrameSource = null;
 
                         var freshMonitor = ResolveTargetMonitor(targetHandle, config);
