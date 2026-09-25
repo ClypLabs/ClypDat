@@ -15,13 +15,18 @@ public sealed class MediaProbeService
     private readonly string _cacheFolder;
 
     public MediaProbeService()
+        : this(null)
+    {
+    }
+
+    internal MediaProbeService(string? cacheFolder)
     {
         // Named "thumbnails" originally, back when that's all it held - now
         // also holds waveform peaks and probed metadata (duration/tracks/
         // resolution), so "media-cache" is the honest name going forward.
         // Old "thumbnails" folders from prior versions are just left behind;
         // it's disposable cache data, not worth a migration.
-        _cacheFolder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "media-cache");
+        _cacheFolder = cacheFolder ?? Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "media-cache");
         Directory.CreateDirectory(_cacheFolder);
         // Delayed, not fired immediately: this constructor runs during cold
         // boot alongside the library cache load, thumbnail File.Exists
@@ -162,9 +167,9 @@ public sealed class MediaProbeService
             "-of", "default=nw=1:nk=1",
             filePath
         }, cancellationToken).ConfigureAwait(false);
-        if (result.ExitCode == 0 && double.TryParse(result.Output.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0)
+        if (result.ExitCode == 0 && TryParseDuration(result.Output.Trim(), out var duration) && duration > TimeSpan.Zero)
         {
-            return new MediaDurationProbeResult(TimeSpan.FromSeconds(seconds), string.Empty);
+            return new MediaDurationProbeResult(duration, string.Empty);
         }
 
         return new MediaDurationProbeResult(TimeSpan.Zero, string.IsNullOrWhiteSpace(result.Error) ? "ffprobe could not read a duration." : result.Error.Trim());
@@ -252,9 +257,9 @@ public sealed class MediaProbeService
             if (doc.RootElement.TryGetProperty("format", out var format) &&
                 format.TryGetProperty("duration", out var durationJson))
             {
-                if (double.TryParse(durationJson.GetString(), out var seconds))
+                if (TryParseDuration(durationJson.ToString(), out var parsedDuration))
                 {
-                    duration = TimeSpan.FromSeconds(Math.Max(0, seconds));
+                    duration = parsedDuration;
                 }
 
                 steelSeriesAudioTracks = ReadSteelSeriesAudioTracks(format);
@@ -342,7 +347,7 @@ public sealed class MediaProbeService
 
     // 1: frame rates are normalised (see FrameRateNormalizer) rather than stored
     // as the raw avg_frame_rate.
-    private const int ProbeCacheSchemaVersion = 2;
+    private const int ProbeCacheSchemaVersion = 3;
 
     private ProbeCacheEntry? TryReadProbeCache(string filePath, FileInfo info)
     {
@@ -776,7 +781,7 @@ public sealed class MediaProbeService
         var result = await RunProcessAsync("ffmpeg", new[]
         {
             "-y",
-            "-ss", Math.Max(0, atTime.TotalSeconds).ToString("0.###"),
+            "-ss", Math.Max(0, atTime.TotalSeconds).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
             "-i", filePath,
             "-frames:v", "1",
             // Same -2 rounding as EnsureThumbnailAsync - an odd height from
@@ -1423,7 +1428,11 @@ public sealed class MediaProbeService
             var args = new List<string> { "-y", "-v", "error", "-threads", "1" };
             if (startSeconds is not null && lengthSeconds is not null)
             {
-                args.AddRange(new[] { "-ss", startSeconds.Value.ToString("0.###"), "-t", lengthSeconds.Value.ToString("0.###") });
+                args.AddRange(new[]
+                {
+                    "-ss", startSeconds.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+                    "-t", lengthSeconds.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)
+                });
             }
             args.AddRange(new[]
             {
@@ -1540,19 +1549,41 @@ public sealed class MediaProbeService
         return element.TryGetProperty(property, out var value) && value.TryGetInt32(out var number) ? number : 0;
     }
 
-    private static double ParseRate(string value)
+    internal static bool TryParseDuration(string value, out TimeSpan duration)
+    {
+        duration = TimeSpan.Zero;
+        if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds) ||
+            !double.IsFinite(seconds) || seconds < 0 || seconds > TimeSpan.MaxValue.TotalSeconds)
+        {
+            return false;
+        }
+
+        try
+        {
+            duration = TimeSpan.FromSeconds(seconds);
+            return true;
+        }
+        catch (OverflowException)
+        {
+            return false;
+        }
+    }
+
+    internal static double ParseRate(string value)
     {
         if (string.IsNullOrWhiteSpace(value) || value == "0/0") return 0;
         var parts = value.Split('/');
         if (parts.Length == 2 &&
-            double.TryParse(parts[0], out var top) &&
-            double.TryParse(parts[1], out var bottom) &&
-            bottom > 0)
+            double.TryParse(parts[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var top) &&
+            double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var bottom) &&
+            double.IsFinite(top) && double.IsFinite(bottom) && top > 0 && bottom > 0)
         {
-            return top / bottom;
+            var rate = top / bottom;
+            return double.IsFinite(rate) ? rate : 0;
         }
 
-        return double.TryParse(value, out var number) ? number : 0;
+        return double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number) &&
+            double.IsFinite(number) && number > 0 ? number : 0;
     }
 
     private static SteelSeriesAudioTrack[] ReadSteelSeriesAudioTracks(JsonElement format)

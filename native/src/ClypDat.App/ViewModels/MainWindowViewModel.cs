@@ -8775,8 +8775,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             "-progress", "pipe:1",
             "-stats_period", "0.1",
             "-nostats",
-            "-ss", startSeconds.ToString("0.###"),
-            "-t", durationSeconds.ToString("0.###"),
+            "-ss", startSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            "-t", durationSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
             "-i", SelectedVideoPath,
             "-map", "0:v:0?",
             "-map", "0:a?",
@@ -8827,8 +8827,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             "-progress", "pipe:1",
             "-stats_period", "0.1",
             "-nostats",
-            "-ss", startSeconds.ToString("0.###"),
-            "-t", durationSeconds.ToString("0.###"),
+            "-ss", startSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            "-t", durationSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
             "-i", SelectedVideoPath
         };
 
@@ -8901,7 +8901,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 // mono (Settings > Audio > Microphone > Channels), and amix
                 // wants every input on the same layout. Stating it here beats
                 // relying on ffmpeg's automatic conversion to pick one.
-                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent):0.###},aformat=channel_layouts=stereo[{label}];");
+                filter.Append($"[0:{track.StreamIndex}]volume={VolumeMultiplier(track.EffectiveVolumePercent).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)},aformat=channel_layouts=stereo[{label}];");
                 labels.Add($"[{label}]");
             }
 
@@ -8936,7 +8936,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             args.Add("-map");
             args.Add($"0:{audioTracks[0].StreamIndex}?");
-            var audioFilter = $"volume={VolumeMultiplier(audioTracks[0].EffectiveVolumePercent):0.###}";
+            var audioFilter = $"volume={VolumeMultiplier(audioTracks[0].EffectiveVolumePercent).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}";
             if (audioSpeed.Length > 0) audioFilter += $",{audioSpeed}";
             args.Add("-af");
             args.Add(audioFilter);
@@ -8983,8 +8983,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             "-progress", "pipe:1",
             "-stats_period", "0.1",
             "-nostats",
-            "-ss", startSeconds.ToString("0.###"),
-            "-t", durationSeconds.ToString("0.###"),
+            "-ss", startSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            "-t", durationSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
             "-i", SelectedVideoPath
         };
 
