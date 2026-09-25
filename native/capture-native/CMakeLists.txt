@@ -158,6 +158,13 @@ if(CLYPDAT_TEST_GPU)
     add_test(NAME ClypDat.Capture.Native.GpuOverlayPipeline COMMAND ClypDat.Capture.Native.OverlayPipelineTests --gpu)
 endif()
 
+add_executable(ClypDat.Capture.Native.WgcCadenceTests tests/wgc_cadence_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.WgcCadenceTests PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.WgcCadenceTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.WgcCadenceTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.WgcCadence COMMAND ClypDat.Capture.Native.WgcCadenceTests)
+
 add_executable(ClypDat.Capture.Native.VideoHistoryTests tests/video_history_tests.cpp)
 target_link_libraries(ClypDat.Capture.Native.VideoHistoryTests PRIVATE RecorderCore)
 target_compile_definitions(ClypDat.Capture.Native.VideoHistoryTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -194,4 +201,11 @@ add_executable(ClypDat.Capture.Native.ReplaySaveCheck tests/replay_save_check.cp
 target_link_libraries(ClypDat.Capture.Native.ReplaySaveCheck PRIVATE RecorderCore)
 target_compile_definitions(ClypDat.Capture.Native.ReplaySaveCheck PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 set_target_properties(ClypDat.Capture.Native.ReplaySaveCheck PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# Manual: WGC producer cadence on the real primary display.
+add_executable(ClypDat.Capture.Native.WgcCadenceBench tests/wgc_cadence_bench.cpp)
+target_link_libraries(ClypDat.Capture.Native.WgcCadenceBench PRIVATE RecorderCore pdh)
+target_compile_definitions(ClypDat.Capture.Native.WgcCadenceBench PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.WgcCadenceBench PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

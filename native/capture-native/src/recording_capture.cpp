@@ -118,11 +118,20 @@ bool capture_variable_deadline(int64_t now, int64_t interval, int64_t& scheduled
     scheduled += std::max<int64_t>(1, (now - scheduled + 750) / interval) * interval;
     return true;
 }
-int64_t capture_wgc_interval_100ns(int fps, double refresh_hz) {
+// WGC releases frames only on composition ticks, so the interval is a whole
+// number of display ticks: the most that still leaves the producer 1.5x the
+// recording rate. Coarser cadences keep fresh-frame counts but sample a
+// sparser grid, which measurably raises output judder and latency
+// (tests/wgc_cadence_tests.cpp).
+int capture_wgc_update_ticks(int fps, double refresh_hz) {
     const auto target = std::clamp(fps,30,120);
-    if (!std::isfinite(refresh_hz) || refresh_hz<=0) return int64_t(std::llround(10000000.0/target/2));
-    const int periods = std::max(1,int(std::floor(refresh_hz/(target*1.5)+.000001)));
-    return int64_t(std::llround(10000000.0/refresh_hz*(periods-.5)));
+    if (!std::isfinite(refresh_hz) || refresh_hz<=0) return 0;
+    return std::max(1,int(std::floor(refresh_hz/(target*1.5)+.000001)));
+}
+int64_t capture_wgc_interval_100ns(int fps, double refresh_hz) {
+    const int ticks = capture_wgc_update_ticks(fps, refresh_hz);
+    if (!ticks) return int64_t(std::llround(10000000.0/std::clamp(fps,30,120)/2));
+    return int64_t(std::llround(10000000.0/refresh_hz*(ticks-.5)));
 }
 RecordingFramePacer::RecordingFramePacer(int fps,bool variable):fps_(std::clamp(fps,30,120)),variable_(variable){}
 void RecordingFramePacer::set_frame_rate(int fps){fps_=std::clamp(fps,30,120);}
@@ -637,7 +646,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     std::map<int64_t, Frame> retained_surfaces;
     size_t retained_limit = 0; // Frames the active encoder may own at once.
     int64_t pressure_since = 0; // First backpressure drop since the last accepted frame.
-    std::deque<double> submission_times, completion_times, capture_latencies;
+    std::deque<double> submission_times, completion_times, capture_latencies, acquire_latencies, selection_errors, output_judder;
     double readback_ms_sum=0,video_processor_ms_sum=0,software_convert_ms_sum=0,hardware_upload_ms_sum=0,overlay_compose_ms_sum=0;
     uint64_t processing_stage_samples=0;
     int64_t health_window = 0;
@@ -920,9 +929,13 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             // reach processing; foreground can change while AcquireNextFrame waits.
             if (user_paused || !source->eligible()) continue;
             if (!valid_pixels(pixels)) throw std::runtime_error("Capture source returned invalid frame storage");
-            if (!pixels.timestamp_us) pixels.timestamp_us = now();
+            const auto acquired_at = now();
+            const bool stamped = pixels.timestamp_us != 0;
+            if (!stamped) pixels.timestamp_us = acquired_at;
             bool detector_due = false;
-            { std::lock_guard lock(mutex); latest = std::make_shared<CapturePixels>(std::move(pixels));
+            { std::lock_guard lock(mutex);
+              if (stamped) { acquire_latencies.push_back(double(acquired_at - pixels.timestamp_us) / 1000); if (acquire_latencies.size() > 240) acquire_latencies.pop_front(); }
+              latest = std::make_shared<CapturePixels>(std::move(pixels));
               if (detector_wants_frame && latest->timestamp_us >= detector_due_us) { detector_wants_frame = false; detector_frame_ready = detector_due = true; }
               ++sequence; ++status.acquired; status.paused = false;
               if (config.frame_selection != "newest") {
@@ -968,6 +981,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         status.submission_p95_ms = percentile(submission_times,.95); status.completion_p95_ms = percentile(completion_times,.95);
         status.submission_p50_ms = percentile(submission_times,.5); status.completion_p50_ms = percentile(completion_times,.5);
         status.capture_latency_p50_ms = percentile(capture_latencies,.5); status.capture_latency_p95_ms = percentile(capture_latencies,.95);
+        status.acquire_latency_p50_ms = percentile(acquire_latencies,.5); status.acquire_latency_p95_ms = percentile(acquire_latencies,.95);
+        status.selection_error_p50_ms = percentile(selection_errors,.5); status.selection_error_p95_ms = percentile(selection_errors,.95);
+        status.output_judder_p50_ms = percentile(output_judder,.5); status.output_judder_p95_ms = percentile(output_judder,.95);
         status.readback_p50_ms = percentile(readback_times,.5); status.readback_p95_ms = percentile(readback_times,.95);
         status.readback_map_wait_p50_ms = percentile(readback_map_waits,.5); status.readback_map_wait_p95_ms = percentile(readback_map_waits,.95);
         status.overlay.gpu_p50_ms = percentile(overlay_gpu_times,.5); status.overlay.gpu_p95_ms = percentile(overlay_gpu_times,.95);
@@ -1038,6 +1054,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         double constant_deadline=double(scheduled);
         int legacy_catchup_remaining=std::clamp(fps.load()/4,4,60);
         RecordingFramePacer pacer(fps,config.variable_frame_rate);
+        int64_t previous_selected = -1; // Timestamp of the last fresh output frame.
         while (!stopping) {
             const int64_t interval = 1000000 / fps.load();
             const int64_t current = now();
@@ -1089,10 +1106,20 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 }
             }
             if (!held) continue;
-            if (!fresh) ++status.duplicates;
+            if (!fresh) { ++status.duplicates; previous_selected = -1; }
             else {
                 capture_latencies.push_back(double(current - held->timestamp_us) / 1000);
                 if (capture_latencies.size() > 240) capture_latencies.pop_front();
+                // Timing accuracy: distance from the sampled instant, and how far
+                // the source-time step between consecutive fresh outputs is
+                // from one output interval.
+                selection_errors.push_back(double(std::llabs(held->timestamp_us - sample_us)) / 1000);
+                if (selection_errors.size() > 240) selection_errors.pop_front();
+                if (previous_selected >= 0) {
+                    output_judder.push_back(std::abs(double(held->timestamp_us - previous_selected) - 1000000.0 / fps.load()) / 1000);
+                    if (output_judder.size() > 240) output_judder.pop_front();
+                }
+                previous_selected = held->timestamp_us;
             }
             pacer.set_frame_rate(fps);
             const auto pts = origin+pacer.next(elapsed,fresh,intervals); last_pts = pts;

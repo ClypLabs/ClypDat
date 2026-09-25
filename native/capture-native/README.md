@@ -45,6 +45,17 @@ same packets as the original full scan, which the tests run alongside it.
 [--reference]` records the primary monitor through a RecorderSession, saves
 the whole history and checks the clip decodes, seeks and stays in sync.
 
+WGC's MinUpdateInterval is a whole number of display ticks leaving the
+producer 1.5x the active recording rate (`capture_wgc_update_ticks`), reapplied
+whenever the rate or refresh changes. `ClypDat.Capture.Native.WgcCadenceTests`
+models composition ticks, the interval gate and output selection across
+30-120 FPS on 60-360 Hz displays: every coarser cadence keeps fresh-frame counts
+but samples a sparser grid, raising output judder or latency, so the policy
+stays. `--explore` prints the full matrix, and
+`ClypDat.Capture.Native.WgcCadenceBench <fps> <ticks,...> <source fps,...>`
+measures a fixed cadence on the real primary display with a 48x48 presenter
+window.
+
 The [five-round generated media comparison](RECORDING-COMPARISON.md) reports
 CPU time, save time, working set and private bytes for managed and native
 recorders. Local fixture clips and per-run JSON remain under `.local/`.

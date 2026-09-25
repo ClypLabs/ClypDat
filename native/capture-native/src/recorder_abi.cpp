@@ -266,6 +266,9 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"sourceQueueDepth\":" << h.source_queue_depth << ",\"sourceQueuePeak\":" << h.source_queue_peak
         << ",\"sourceQueueCapacity\":" << h.source_queue_capacity
         << ",\"captureLatencyP50Ms\":" << h.capture_latency_p50_ms << ",\"captureLatencyP95Ms\":" << h.capture_latency_p95_ms
+        << ",\"acquireLatencyP50Ms\":" << h.acquire_latency_p50_ms << ",\"acquireLatencyP95Ms\":" << h.acquire_latency_p95_ms
+        << ",\"selectionErrorP50Ms\":" << h.selection_error_p50_ms << ",\"selectionErrorP95Ms\":" << h.selection_error_p95_ms
+        << ",\"outputJudderP50Ms\":" << h.output_judder_p50_ms << ",\"outputJudderP95Ms\":" << h.output_judder_p95_ms
         << ",\"backpressureDrops\":" << h.backpressure_drops << ",\"encoderBusyDrops\":" << h.encoder_busy_drops
         << ",\"retainedPressureDrops\":" << h.retained_pressure_drops << ",\"poolPressureDrops\":" << h.pool_pressure_drops
         << ",\"backpressureDropFps\":" << h.backpressure_drop_fps << ",\"backpressureWaitMaxMs\":" << h.backpressure_wait_max_ms
@@ -292,6 +295,9 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"requestedInterval100ns\":" << h.source_details.requested_interval_100ns
         << ",\"appliedInterval100ns\":" << h.source_details.applied_interval_100ns
         << ",\"updateIntervalAvailable\":" << (h.source_details.update_interval_available ? "true" : "false")
+        << ",\"wgcCadenceMode\":" << quoted(h.source_details.cadence_mode) << ",\"wgcCadenceFps\":" << h.source_details.cadence_fps
+        << ",\"wgcUpdateTicks\":" << h.source_details.update_ticks << ",\"wgcProducerCeilingFps\":" << h.source_details.producer_ceiling_fps
+        << ",\"displayRefreshHz\":" << h.source_details.display_refresh_hz << ",\"wgcCallbackUs\":" << h.source_details.callback_us
         << ",\"closedSessions\":[";
     bool first = true;
     for (const auto& closed : r->session->closed_sessions()) {

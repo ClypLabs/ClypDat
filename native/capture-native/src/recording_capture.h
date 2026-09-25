@@ -39,7 +39,15 @@ struct RecordingSourceHealth {
     double copy_p50_ms = 0, copy_p95_ms = 0;
     int64_t requested_interval_100ns = 0, applied_interval_100ns = 0;
     double display_refresh_hz = 0;
+    // WGC producer cadence: "safe" (capture_wgc_update_ticks), "fixed"
+    // (wgc_update_ticks override) or "unavailable" (no MinUpdateInterval on
+    // this Windows build: WGC delivers every composition). update_ticks is
+    // 0 when the refresh rate is unknown.
+    std::string cadence_mode;
+    int cadence_fps = 0, update_ticks = 0;
+    double producer_ceiling_fps = 0;
     double cursor_composition_ms = 0;
+    uint64_t callback_us = 0; // Time spent in WGC FrameArrived callbacks.
     uint64_t adapter_luid = 0;
     std::wstring adapter;
     bool update_interval_available = false;
@@ -84,6 +92,8 @@ struct RecordingCaptureConfig {
     // "newest" keeps single-slot newest-frame sampling for comparison.
     std::string frame_selection="timestamp";
     int source_queue_depth=2;
+    // Benchmarks: fixes the WGC MinUpdateInterval at this many display ticks.
+    int wgc_update_ticks=0;
     std::wstring target_executable,target_title,target_class;
     float sdr_white_nits = 80;
     int64_t qpc_anchor = 0, qpc_frequency = 0, monotonic_anchor_us = 0;
@@ -110,6 +120,12 @@ struct RecordingCaptureHealth {
     uint64_t selection_dropped = 0;
     int source_queue_depth = 0, source_queue_peak = 0, source_queue_capacity = 0;
     double capture_latency_p50_ms = 0, capture_latency_p95_ms = 0;
+    // Source timestamp to acquisition, before output selection.
+    double acquire_latency_p50_ms = 0, acquire_latency_p95_ms = 0;
+    // Output timing accuracy: selected frame against the sampled instant, and
+    // the source-time step between consecutive fresh outputs against one
+    // output interval (judder).
+    double selection_error_p50_ms = 0, selection_error_p95_ms = 0, output_judder_p50_ms = 0, output_judder_p95_ms = 0;
     std::string frame_selection;
     // Bounded encoder backpressure: ticks dropped after a bounded wait because
     // the encoder was busy, owned its whole in-flight budget, every planned
@@ -251,6 +267,9 @@ inline constexpr int64_t kRecordingEncoderStallUs = 2000000;
 int64_t capture_final_hold(bool variable, int64_t previous_duration, int64_t hold);
 CaptureRect capture_aspect_fit(int source_width, int source_height, int width, int height);
 bool capture_variable_deadline(int64_t now, int64_t interval, int64_t& scheduled);
+// Display ticks between WGC frames for a recording rate (0: refresh unknown),
+// and the MinUpdateInterval that asks for it.
+int capture_wgc_update_ticks(int fps, double refresh_hz);
 int64_t capture_wgc_interval_100ns(int fps, double refresh_hz);
 class RecordingFramePacer {
     int fps_;

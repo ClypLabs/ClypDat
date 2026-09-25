@@ -266,6 +266,10 @@ public:
         pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(direct_device_, format, 3, size);
         auto shared = shared_; auto direct = direct_device_;
         arrived_ = pool_.FrameArrived([shared, direct, format](const Direct3D11CaptureFramePool& pool, auto&&) {
+            const auto entered = std::chrono::steady_clock::now();
+            struct Timed { Shared& shared; std::chrono::steady_clock::time_point entered;
+                ~Timed() { const auto us = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - entered).count());
+                    std::lock_guard lock(shared.mutex); shared.diagnostics.callback_us += us; } } timed{*shared, entered};
             try {
                 {std::lock_guard lock(shared->mutex);++shared->diagnostics.callbacks;}
                 auto frame = pool.TryGetNextFrame();
@@ -328,13 +332,20 @@ public:
         if (!monitor) monitor=MonitorFromPoint(POINT{},MONITOR_DEFAULTTOPRIMARY);
         MONITORINFOEXW info{};info.cbSize=sizeof(info); DEVMODEW mode{};mode.dmSize=sizeof(mode);double refresh=0;
         if(GetMonitorInfoW(monitor,&info)&&EnumDisplaySettingsW(info.szDevice,ENUM_CURRENT_SETTINGS,&mode))refresh=mode.dmDisplayFrequency;
+        // Follows the active rate on every call; fixed only for benchmarks.
+        const bool fixed=config_.wgc_update_ticks>0&&refresh>0;
+        const int ticks=fixed?config_.wgc_update_ticks:capture_wgc_update_ticks(fps,refresh);
+        const auto interval=fixed?int64_t(std::llround(10000000.0/refresh*(ticks-.5))):capture_wgc_interval_100ns(fps,refresh);
+        {std::lock_guard lock(shared_->mutex);auto& d=shared_->diagnostics;d.requested_interval_100ns=interval;d.display_refresh_hz=refresh;
+            d.cadence_fps=fps;d.update_ticks=ticks;d.producer_ceiling_fps=ticks?refresh/ticks:1e7/double(interval);}
         // This interface is optional on older supported Windows builds.
-        const auto interval=capture_wgc_interval_100ns(fps,refresh);
-        {std::lock_guard lock(shared_->mutex);shared_->diagnostics.requested_interval_100ns=interval;shared_->diagnostics.display_refresh_hz=refresh;}
         try { session_.MinUpdateInterval(std::chrono::duration<int64_t, std::ratio<1, 10000000>>(interval));
             const auto applied=session_.MinUpdateInterval().count();
-            std::lock_guard lock(shared_->mutex);shared_->diagnostics.applied_interval_100ns=applied;shared_->diagnostics.update_interval_available=true;
-        } catch (...) {}
+            std::lock_guard lock(shared_->mutex);auto& d=shared_->diagnostics;d.applied_interval_100ns=applied;d.update_interval_available=true;d.cadence_mode=fixed?"fixed":"safe";
+        } catch (...) {
+            std::lock_guard lock(shared_->mutex);auto& d=shared_->diagnostics;d.applied_interval_100ns=0;d.update_interval_available=false;
+            d.cadence_mode="unavailable";d.producer_ceiling_fps=refresh;
+        }
     }
     const char* name() const override { return "Windows Graphics Capture"; }
     ID3D11Device* d3d_device() const override { return shared_->gpu.device.Get(); }
