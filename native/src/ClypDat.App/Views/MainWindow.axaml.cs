@@ -8243,6 +8243,12 @@ public sealed partial class MainWindow : Window
         if (update is null)
         {
             SetAvailableUpdate(null);
+            if (presentation == UpdateCheckPresentation.Dialog && LocalBuildMode.Enabled)
+            {
+                // "Up to date" would be wrong: releases are simply not looked for.
+                await ShowMessageAsync("Updates are off for this build", "This is a locally published development build, so ClypDat does not install releases over it. Publish it again to update it.");
+                return;
+            }
             if (presentation == UpdateCheckPresentation.Dialog)
             {
                 var (whatsNew, fixes) = await AppUpdateService.GetCurrentVersionNotesAsync();

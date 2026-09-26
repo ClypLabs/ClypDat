@@ -55,6 +55,13 @@
     <Version>0.0.0</Version>
   </PropertyGroup>
 
+  <!-- Set by build.ps1 for the builds it publishes into
+       %LOCALAPPDATA%\Programs\ClypDat. Only the define: the version, data root,
+       product and names stay a Stable build's (see LocalBuildMode). -->
+  <PropertyGroup Condition="'$(ClypDatLocalBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);CLYPDAT_LOCAL_BUILD</DefineConstants>
+  </PropertyGroup>
+
   <!-- The preview target is deliberately UI-only. It makes the Avalonia
        shell runnable on macOS while the capture backends remain Windows-only;
        build.ps1 and the normal Windows build do not use this property. -->

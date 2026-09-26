@@ -825,7 +825,9 @@ try {
     New-Item -ItemType Directory -Path $publishStagingDirectory -Force | Out-Null
 
     Write-Host "Publishing to staging directory: $publishStagingDirectory"
-    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -o $publishStagingDirectory /nodeReuse:false
+    # ClypDatLocalBuild: the Stable updater never installs a release over this
+    # build (LocalBuildMode). Version, data root and names are unchanged.
+    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:ClypDatLocalBuild=true -o $publishStagingDirectory /nodeReuse:false
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE."
     }

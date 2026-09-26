@@ -202,14 +202,26 @@ public static class AppUpdateService
         return results;
     }
 
-    public static async Task<AppUpdateInfo?> CheckAsync(CancellationToken cancellationToken = default)
+    public static Task<AppUpdateInfo?> CheckAsync(CancellationToken cancellationToken = default) =>
+        CheckAsync(LocalBuildMode.Enabled, cancellationToken);
+
+    // A locally published build never learns of a Stable release, so nothing -
+    // the startup loader, the badge, the update dialog - can offer or install
+    // one over it (LocalBuildMode).
+    internal static async Task<AppUpdateInfo?> CheckAsync(bool localBuild, CancellationToken cancellationToken)
     {
+        if (localBuild)
+        {
+            LocalBuildMode.LogUpdatesSuppressed();
+            return null;
+        }
+
         using var client = CreateClient();
         var releases = await GetJsonFromAllSourcesAsync(client, LatestReleaseSources, ParseRelease, cancellationToken);
         var candidates = new List<(AppUpdateInfo Info, ReleaseSourceKind Kind)>();
         foreach (var (release, kind) in releases)
         {
-            if (release.Draft || release.Prerelease || !TryParseVersion(release.TagName, out var version) || version <= CurrentVersion)
+            if (!IsNewerStableRelease(release.Draft, release.Prerelease, release.TagName, CurrentVersion, out var version))
             {
                 continue;
             }
@@ -262,6 +274,14 @@ public static class AppUpdateService
         return chosen.Info with { WhatsNew = whatsNew, Fixes = fixes };
     }
 
+    // A published, non-prerelease release whose tag parses to a version above
+    // the running one.
+    internal static bool IsNewerStableRelease(bool draft, bool prerelease, string tagName, Version current, out Version version)
+    {
+        version = new Version(0, 0, 0);
+        return !draft && !prerelease && TryParseVersion(tagName, out version) && version > current;
+    }
+
     // Walks candidates in the order given and returns the first one verify
     // accepts (does not throw for). Cancellation propagates; any other failure
     // is logged and the next candidate is tried. Null when none verify.
@@ -294,8 +314,14 @@ public static class AppUpdateService
         return null;
     }
 
-    public static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
+    public static Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress = null, CancellationToken cancellationToken = default) =>
+        DownloadAndRestartAsync(update, progress, LocalBuildMode.Enabled, cancellationToken);
+
+    internal static async Task DownloadAndRestartAsync(AppUpdateInfo update, IProgress<UpdateDownloadProgress>? progress, bool localBuild, CancellationToken cancellationToken)
     {
+        // The Stable installer would replace this locally published build.
+        // Checked before anything is downloaded or run.
+        if (localBuild) throw new InvalidOperationException(LocalBuildMode.UpdatesSuppressedMessage);
         if (NoticeBoardService.IsBlocked("block-update-version", update.LatestVersion.ToString(3)))
             throw new InvalidOperationException($"Update {update.LatestVersion.ToString(3)} is temporarily blocked by ClypDat policy.");
         // Resolve the digest to enforce BEFORE downloading anything. When a signing key

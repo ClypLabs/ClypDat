@@ -159,6 +159,7 @@ public sealed partial class App : Application
             Dispatcher.UIThread.Post(DevHealthSignal.SignalIfRequested, DispatcherPriority.ApplicationIdle);
             DevUpdateService.StartBackgroundCheck();
         }
+        if (LocalBuildMode.Enabled) LocalBuildMode.LogUpdatesSuppressed();
     }
 
     private static LaunchPresentation ResolveLaunchPresentation(
@@ -214,9 +215,10 @@ public sealed partial class App : Application
                 var essentials = viewModel?.LibraryReadyForRevealTask ?? Task.CompletedTask;
                 // Auto-install is a setting, and a version the user already
                 // told us to ignore is not one to install behind their back.
+                // A locally published build never installs one (LocalBuildMode).
                 bool ShouldInstall(AppUpdateInfo candidate) =>
-                    viewModel?.Settings.InstallUpdatesOnLaunch == true &&
-                    !string.Equals(viewModel.Settings.IgnoredUpdateVersion, candidate.TagName, StringComparison.OrdinalIgnoreCase);
+                    StartupUpdatePolicy.ShouldInstall(LocalBuildMode.Enabled, viewModel?.Settings.InstallUpdatesOnLaunch == true,
+                        viewModel?.Settings.IgnoredUpdateVersion, candidate.TagName);
                 // Handed over rather than dropped: the window's own startup
                 // check would otherwise ask GitHub again seconds later.
                 mainWindow.PendingStartupUpdate = await splash.RunAsync(
