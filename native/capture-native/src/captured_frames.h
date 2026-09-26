@@ -1,4 +1,5 @@
 #pragma once
+#include "output_orientation.h"
 #include "recording_capture.h"
 #include <chrono>
 #include <cstdint>
@@ -51,7 +52,11 @@ public:
     // pooled texture is held (counted as a pressure drop). Keeps no
     // reference to `input`. Crops of a new size rebuild the pool as
     // deliver() does for a new frame size.
-    std::shared_ptr<ID3D11Texture2D> copy(ID3D11Texture2D* input, CaptureRect crop = {});
+    //
+    // `input` in a rotated output's scanout orientation is turned upright:
+    // `crop` is then in the output's desktop orientation (see
+    // output_orientation.h), and so is the copy.
+    std::shared_ptr<ID3D11Texture2D> copy(ID3D11Texture2D* input, CaptureRect crop = {}, OutputRotation rotation = OutputRotation::Identity);
     // Takes the newest frame, waiting up to `timeout`. False when none
     // arrived or the store is closed; throws the error set by fail().
     bool take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout, Timing* timing = nullptr);

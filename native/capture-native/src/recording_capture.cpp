@@ -130,6 +130,11 @@ int64_t capture_qpc_to_us(int64_t qpc, int64_t qpc_anchor, int64_t qpc_frequency
 int64_t capture_qpc_us_to_us(int64_t qpc_us, int64_t qpc_anchor, int64_t qpc_frequency, int64_t monotonic_anchor_us) {
     return monotonic_anchor_us + qpc_us - qpc_anchor / qpc_frequency * 1000000 - qpc_anchor % qpc_frequency * 1000000 / qpc_frequency;
 }
+bool CaptureReopener::attempt(const std::function<void()>& open, std::chrono::steady_clock::time_point now) {
+    try { open(); }
+    catch (...) { ++failures; if (now - since_ > window_) { pending_ = false; throw; } return false; }
+    pending_ = false; ++reopens; return true;
+}
 int capture_wgc_update_ticks(int fps, double refresh_hz) {
     const auto target = std::clamp(fps,30,120);
     if (!std::isfinite(refresh_hz) || refresh_hz<=0) return 0;
@@ -911,8 +916,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             CapturePixels pixels;
             try {
                 if (!source->acquire(pixels, std::chrono::milliseconds(20))) continue;
-            }catch(const std::exception&){
+            }catch(const std::exception& failure){
                 const auto current=now();
+                {std::lock_guard lock(mutex);status.source_recovery_error=failure.what();}
                 // A fresh source recreation gets one recovery opportunity. A
                 // repeated failure inside the original 30s window cannot loop
                 // indefinitely while saves appear healthy.

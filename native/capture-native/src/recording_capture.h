@@ -71,6 +71,9 @@ struct RecordingSourceHealth {
     uint64_t cursor_textures_created = 0, cursor_readback_bytes = 0;
     double cursor_compose_p50_ms = 0, cursor_compose_p95_ms = 0, cursor_lock_wait_p95_ms = 0;
     uint64_t callback_us = 0; // Time spent in WGC FrameArrived callbacks.
+    // Desktop Duplication reopened after losing access (a mode, rotation or
+    // desktop change), and reopen attempts that failed and were retried.
+    uint64_t duplication_reopens = 0, duplication_reopen_failures = 0;
     uint64_t adapter_luid = 0;
     std::wstring adapter;
     bool update_interval_available = false;
@@ -138,6 +141,8 @@ struct RecordingCaptureHealth {
     int output_width=0,output_height=0;
     bool running = false, paused = false, restart_required = false;
     std::string source, encoder, error;
+    // The failure behind the last source recovery or backend switch.
+    std::string source_recovery_error;
     uint64_t duplicates = 0, submitted = 0, source_recoveries = 0;
     uint64_t unique_frames=0;
     // input_fps counts frames the acquisition thread took from the source;
@@ -308,6 +313,24 @@ bool capture_variable_deadline(int64_t now, int64_t interval, int64_t& scheduled
 // Display ticks between WGC frames for a recording rate (0: refresh unknown),
 // and the MinUpdateInterval that asks for it.
 int capture_wgc_update_ticks(int fps, double refresh_hz);
+// Reopens a capture resource that lost access (Desktop Duplication's
+// DXGI_ERROR_ACCESS_LOST on a mode or rotation change): while reopening
+// fails, later attempts retry, and the failure is rethrown only once access
+// has been lost for longer than `window`. A display change is routine, not a
+// source failure for the recorder's recovery budget.
+class CaptureReopener {
+    std::chrono::milliseconds window_;
+    std::chrono::steady_clock::time_point since_{};
+    bool pending_ = false;
+public:
+    explicit CaptureReopener(std::chrono::milliseconds window) : window_(window) {}
+    uint64_t reopens = 0, failures = 0;
+    void lost(std::chrono::steady_clock::time_point at) { if (!pending_) since_ = at; pending_ = true; }
+    bool pending() const { return pending_; }
+    void reset() { pending_ = false; }
+    // Runs `open`; true once it succeeded. Rethrows its failure after the window.
+    bool attempt(const std::function<void()>& open, std::chrono::steady_clock::time_point now);
+};
 int64_t capture_wgc_interval_100ns(int fps, double refresh_hz);
 // The recorder's monotonic timeline in microseconds. A QPC reading maps to
 // monotonic_anchor_us plus its distance from qpc_anchor; a QPC-based time in

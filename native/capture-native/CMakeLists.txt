@@ -24,6 +24,7 @@ add_library(RecorderCore STATIC
     src/encoder_backend.cpp src/encoder_backend.h
     src/readback_stage.cpp src/readback_stage.h
     src/cursor_compositor.cpp src/cursor_compositor.h
+    src/output_orientation.cpp src/output_orientation.h
     src/detector_stage.cpp src/detector_stage.h
     src/overlay_compositor.cpp src/overlay_compositor.h
     src/recording_capture.cpp src/recording_capture.h

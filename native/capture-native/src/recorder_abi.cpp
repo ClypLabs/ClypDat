@@ -201,7 +201,7 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
     std::ostringstream details; details << "{\"source\":" << quoted(h.source) << ",\"encoder\":" << quoted(h.encoder)
         << ",\"fullSessionPath\":" << quoted(utf8(r->session->full_session_path().native()))
         << ",\"fullSessionDurationUs\":" << full.duration_us
-        << ",\"error\":" << quoted(h.error) << ",\"controlError\":" << quoted(error)
+        << ",\"error\":" << quoted(h.error) << ",\"controlError\":" << quoted(error) << ",\"sourceRecoveryError\":" << quoted(h.source_recovery_error)
         << ",\"fullSessionRunning\":" << (full.running ? "true" : "false")
         << ",\"fullSessionFinished\":" << (full.finished ? "true" : "false") << ",\"fullSessionError\":" << quoted(full.error)
         << ",\"inputFps\":" << h.input_fps << ",\"uniqueFps\":" << h.unique_fps << ",\"outputFps\":" << h.output_fps
@@ -290,6 +290,7 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"sdrWhiteNits\":" << h.source_details.sdr_white_nits
         << ",\"sourceCallbacks\":" << h.source_details.callbacks << ",\"sourceDelivered\":" << h.source_details.frames_delivered
         << ",\"sourceOverwritten\":" << h.source_details.overwritten << ",\"sourceResizes\":" << h.source_details.resizes
+        << ",\"sourceDuplicationReopens\":" << h.source_details.duplication_reopens << ",\"sourceDuplicationReopenFailures\":" << h.source_details.duplication_reopen_failures
         << ",\"sourceOwnedTextureCapacity\":" << h.source_details.owned_texture_capacity
         << ",\"sourceOwnedTexturesAllocated\":" << h.source_details.owned_textures_allocated
         << ",\"sourceOwnedTexturesLeased\":" << h.source_details.owned_textures_leased

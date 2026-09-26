@@ -1,6 +1,7 @@
 #include "recording_capture.h"
 #include "captured_frames.h"
 #include "cursor_compositor.h"
+#include "output_orientation.h"
 #include <Windows.h>
 #include <d3d11.h>
 #include <d3d11_4.h>
@@ -34,14 +35,23 @@ using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
 void checked(HRESULT hr, const char* operation) {
     if (FAILED(hr)) throw std::runtime_error(std::string(operation) + " HRESULT=" + std::to_string(uint32_t(hr)));
 }
+// The full-screen triangle and the SDR mapping of scRGB shared by the
+// tone-mapping shaders; the scale for `white` is compiled in.
+std::string tone_map_hlsl(float white) {
+    return "struct V{float4 p:SV_Position;}; V VS(uint id:SV_VertexID){V o;o.p=float4(id==2?3:-1,id==1?3:-1,0,1);return o;}"
+           "Texture2D<float4> Source:register(t0);float Srgb(float v){return v<=0.0031308?v*12.92:1.055*pow(v,1.0/2.4)-0.055;}"
+           "float4 ToneMap(float3 c){float3 rgb=max(c,0)*" + std::to_string(80.f / (white > 0 && white < 10000 ? white : 80.f)) +
+           ";float m=max(rgb.r,max(rgb.g,rgb.b));if(m>1)rgb/=m;return float4(saturate(Srgb(rgb.r)),saturate(Srgb(rgb.g)),saturate(Srgb(rgb.b)),1);}";
+}
 class Device {
 public:
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
     ComPtr<ID3D11Texture2D> staging;
     std::mutex mutex;
-    ComPtr<ID3D11VertexShader> hdr_vertex;
-    ComPtr<ID3D11PixelShader> hdr_pixel;
+    ComPtr<ID3D11VertexShader> hdr_vertex, orient_vertex;
+    ComPtr<ID3D11PixelShader> hdr_pixel, orient_pixel;
+    ComPtr<ID3D11Buffer> orient_constants;
     ComPtr<ID3D11Multithread> multithread;
     RecordingSourceHealth diagnostics;
     explicit Device(ID3D11Device* existing=nullptr,bool debug=false) : device(existing) {
@@ -90,12 +100,7 @@ public:
         struct Enter { ID3D11Multithread* p; explicit Enter(ID3D11Multithread* v) : p(v) { if (p) p->Enter(); } ~Enter() { if (p) p->Leave(); } } device_lock(multithread.Get());
         D3D11_TEXTURE2D_DESC desc{}; output->GetDesc(&desc);
         if (!hdr_vertex) {
-            const std::string shader =
-                "struct V{float4 p:SV_Position;}; V VS(uint id:SV_VertexID){V o;o.p=float4(id==2?3:-1,id==1?3:-1,0,1);return o;}"
-                "Texture2D<float4> Source:register(t0);float Srgb(float v){return v<=0.0031308?v*12.92:1.055*pow(v,1.0/2.4)-0.055;}"
-                "float4 PS(V i):SV_Target{float3 rgb=max(Source.Load(int3(i.p.xy,0)).rgb,0)*" +
-                std::to_string(80.f / (white > 0 && white < 10000 ? white : 80.f)) +
-                ";float m=max(rgb.r,max(rgb.g,rgb.b));if(m>1)rgb/=m;return float4(saturate(Srgb(rgb.r)),saturate(Srgb(rgb.g)),saturate(Srgb(rgb.b)),1);}";
+            const std::string shader = tone_map_hlsl(white) + "float4 PS(V i):SV_Target{return ToneMap(Source.Load(int3(i.p.xy,0)).rgb);}";
             ComPtr<ID3DBlob> vs, ps, error;
             checked(D3DCompile(shader.data(), shader.size(), nullptr, nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vs, &error), "Compile recording HDR vertex shader");
             checked(D3DCompile(shader.data(), shader.size(), nullptr, nullptr, nullptr, "PS", "ps_5_0", 0, 0, &ps, &error), "Compile recording HDR pixel shader");
@@ -114,6 +119,46 @@ public:
         context->PSSetShaderResources(0, 1, &raw_source); context->Draw(3, 0);
         raw_target = nullptr; raw_source = nullptr;
         context->OMSetRenderTargets(1, &raw_target, nullptr); context->PSSetShaderResources(0, 1, &raw_source);
+    }
+    // Draws `crop` of a rotated output's desktop (`desktop` in size) into the
+    // crop-sized BGRA `output`, from `input` in the output's scanout
+    // orientation: each output pixel loads the texel output_orientation.h
+    // maps it to. BGRA texels are copied exactly; FP16 is tone-mapped as
+    // tone_map() does. `view` may be a cached render-target view of `output`.
+    void orient(ID3D11Texture2D* input, ID3D11Texture2D* output, OutputRotation rotation, OutputSize desktop, CaptureRect crop, float white,
+                ID3D11RenderTargetView* view = nullptr) {
+        std::lock_guard lock(mutex);
+        struct Enter { ID3D11Multithread* p; explicit Enter(ID3D11Multithread* v) : p(v) { if (p) p->Enter(); } ~Enter() { if (p) p->Leave(); } } device_lock(multithread.Get());
+        D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
+        if (!orient_pixel) {
+            const std::string shader = tone_map_hlsl(white) +
+                "cbuffer Orientation:register(b0){int4 Crop;int4 Desktop;};"
+                "float4 PS(V i):SV_Target{int2 d=int2(i.p.xy)+Crop.xy;int2 t=d;"
+                "if(Crop.z==1)t=int2(d.y,Desktop.x-1-d.x);else if(Crop.z==2)t=int2(Desktop.x-1-d.x,Desktop.y-1-d.y);else if(Crop.z==3)t=int2(Desktop.y-1-d.y,d.x);"
+                "float4 c=Source.Load(int3(t,0));return Desktop.z?ToneMap(c.rgb):c;}";
+            ComPtr<ID3DBlob> vs, ps, error;
+            checked(D3DCompile(shader.data(), shader.size(), nullptr, nullptr, nullptr, "VS", "vs_5_0", 0, 0, &vs, &error), "Compile recording orientation vertex shader");
+            checked(D3DCompile(shader.data(), shader.size(), nullptr, nullptr, nullptr, "PS", "ps_5_0", 0, 0, &ps, &error), "Compile recording orientation pixel shader");
+            checked(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &orient_vertex), "Create recording orientation vertex shader");
+            checked(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &orient_pixel), "Create recording orientation pixel shader");
+            const D3D11_BUFFER_DESC constants{32, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER, 0, 0, 0};
+            checked(device->CreateBuffer(&constants, nullptr, &orient_constants), "Create recording orientation constants");
+        }
+        const int32_t values[8]{crop.x, crop.y, int32_t(rotation), 0, desktop.width, desktop.height, desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT, 0};
+        context->UpdateSubresource(orient_constants.Get(), 0, nullptr, values, 0, 0);
+        ComPtr<ID3D11ShaderResourceView> source;
+        ComPtr<ID3D11RenderTargetView> created;
+        checked(device->CreateShaderResourceView(input, nullptr, &source), "Create recording orientation input view");
+        if (!view) { checked(device->CreateRenderTargetView(output, nullptr, &created), "Create recording orientation output view"); view = created.Get(); }
+        const D3D11_VIEWPORT viewport{0, 0, float(crop.width), float(crop.height), 0, 1};
+        auto raw_target = view; auto raw_source = source.Get(); auto raw_constants = orient_constants.Get();
+        context->IASetInputLayout(nullptr); context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context->OMSetRenderTargets(1, &raw_target, nullptr); context->OMSetBlendState(nullptr, nullptr, 0xffffffff);
+        context->OMSetDepthStencilState(nullptr, 0); context->RSSetState(nullptr); context->RSSetViewports(1, &viewport);
+        context->VSSetShader(orient_vertex.Get(), nullptr, 0); context->PSSetShader(orient_pixel.Get(), nullptr, 0);
+        context->PSSetShaderResources(0, 1, &raw_source); context->PSSetConstantBuffers(0, 1, &raw_constants); context->Draw(3, 0);
+        raw_target = nullptr; raw_source = nullptr; raw_constants = nullptr;
+        context->OMSetRenderTargets(1, &raw_target, nullptr); context->PSSetShaderResources(0, 1, &raw_source); context->PSSetConstantBuffers(0, 1, &raw_constants);
     }
     bool read(ID3D11Texture2D* texture, CapturePixels& output, CaptureRect crop = {}) {
         std::lock_guard lock(mutex);
@@ -356,8 +401,14 @@ class DxgiSource final : public RecordingFrameSource {
     Device gpu_;
     ComPtr<IDXGIOutputDuplication> duplication_;
     RECT desktop_{};
+    // Frames come in the output's scanout orientation; crops, the cursor
+    // and everything downstream are in desktop orientation.
+    OutputRotation rotation_ = OutputRotation::Identity;
     CaptureRect stable_{}, candidate_{};
     int crop_samples_ = 0;
+    // Access lost to a mode, rotation or desktop change: reopened on later
+    // acquisitions, an error only after 5 s.
+    CaptureReopener reopener_{std::chrono::seconds(5)};
     double cursor_composition_ms_ = 0;
     uint64_t cursor_composition_samples_ = 0;
     // Owned copies come from a bounded pool, as for WGC; the reference path
@@ -415,6 +466,7 @@ public:
                 checked(output5->DuplicateOutput1(gpu_.device.Get(),0,2,formats,&duplication_),"Create HDR desktop duplication");
             }else checked(output1->DuplicateOutput(gpu_.device.Get(), &duplication_), "Create desktop duplication");
             desktop_ = desc.DesktopCoordinates;
+            DXGI_OUTDUPL_DESC duplicated{}; duplication_->GetDesc(&duplicated); rotation_ = output_rotation(int(duplicated.Rotation));
             MONITORINFOEXW monitor{}; monitor.cbSize = sizeof(monitor); DEVMODEW mode{}; mode.dmSize = sizeof(mode);
             if (GetMonitorInfoW(desc.Monitor, &monitor) && EnumDisplaySettingsW(monitor.szDevice, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
                 refresh_period_ = std::chrono::microseconds(1000000 / mode.dmDisplayFrequency);
@@ -422,15 +474,25 @@ public:
         }
         throw std::runtime_error("Capture display unavailable on recording adapter");
     }
+    void lose() { duplication_.Reset(); reopener_.lost(std::chrono::steady_clock::now()); }
     bool eligible() const override { return window_eligible(reinterpret_cast<HWND>(config_.window), false); }
     bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
         if (!eligible()) return false;
+        const auto reopen = [&] {
+            if (reopener_.attempt([this] { open(); }, std::chrono::steady_clock::now())) return true;
+            std::this_thread::sleep_for(std::min(timeout, std::chrono::milliseconds(20))); return false;
+        };
+        if (reopener_.pending() && !reopen()) return false;
         DXGI_OUTDUPL_FRAME_INFO info{}; ComPtr<IDXGIResource> resource;
         const auto result = next_frame(timeout, info, resource);
         if (result == DXGI_ERROR_WAIT_TIMEOUT) return false;
-        if (result == DXGI_ERROR_ACCESS_LOST) { open(); return false; }
+        // Turning a display, AcquireNextFrame was measured failing with
+        // INVALID_CALL rather than ACCESS_LOST: the loss can land on the held
+        // frame's ReleaseFrame instead. Either way the duplication is gone and
+        // is reopened.
+        if (result == DXGI_ERROR_ACCESS_LOST || result == DXGI_ERROR_INVALID_CALL) { lose(); reopen(); return false; }
         checked(result, "Acquire desktop recording frame");
-        struct Release { IDXGIOutputDuplication* p; ~Release() { p->ReleaseFrame(); } } release{duplication_.Get()};
+        struct Release { DxgiSource& s; ~Release() { if (s.duplication_ && s.duplication_->ReleaseFrame() == DXGI_ERROR_ACCESS_LOST) s.lose(); } } release{*this};
         if (!eligible()) return false;
         if(!info.LastPresentTime.QuadPart&&!config_.capture_cursor)return false;
         ++gpu_.diagnostics.frames_delivered;
@@ -453,22 +515,29 @@ public:
         const auto stamp = info.LastPresentTime.QuadPart ? info.LastPresentTime.QuadPart : info.LastMouseUpdateTime.QuadPart;
         pixels.timestamp_us = capture_qpc_to_us(stamp, config_.qpc_anchor, config_.qpc_frequency, config_.monotonic_anchor_us);
         D3D11_TEXTURE2D_DESC desc{}; texture->GetDesc(&desc);
-        if (crop.width <= 0 || crop.height <= 0) crop = {0,0,int(desc.Width),int(desc.Height)};
-        if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return false;
+        // The crop is in desktop orientation; so is the size it must fit.
+        const auto desktop = output_desktop_size({int(desc.Width), int(desc.Height)}, rotation_);
+        if (crop.width <= 0 || crop.height <= 0) crop = {0, 0, desktop.width, desktop.height};
+        if (!output_contains(crop, desktop)) return false;
         if (config_.dxgi_reference_path) {
+            const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
             desc.Width = crop.width; desc.Height = crop.height; desc.Usage = D3D11_USAGE_DEFAULT;
             desc.CPUAccessFlags = 0; desc.MiscFlags = 0; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            if (rotation_ != OutputRotation::Identity) desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
             ComPtr<ID3D11Texture2D> owned;
             checked(gpu_.device->CreateTexture2D(&desc, nullptr, &owned), "Allocate owned desktop frame"); ++reference_textures_;
-            D3D11_BOX box{UINT(crop.x),UINT(crop.y),0,UINT(crop.x+crop.width),UINT(crop.y+crop.height),1};
-            gpu_.context->CopySubresourceRegion(owned.Get(),0,0,0,0,texture.Get(),0,&box);
-            if(desc.Format==DXGI_FORMAT_R16G16B16A16_FLOAT){owned=gpu_.copy(owned.Get(),config_.sdr_white_nits);++reference_textures_;}
+            if (rotation_ != OutputRotation::Identity) gpu_.orient(texture.Get(), owned.Get(), rotation_, desktop, crop, config_.sdr_white_nits);
+            else {
+                D3D11_BOX box{UINT(crop.x),UINT(crop.y),0,UINT(crop.x+crop.width),UINT(crop.y+crop.height),1};
+                gpu_.context->CopySubresourceRegion(owned.Get(),0,0,0,0,texture.Get(),0,&box);
+                if(hdr){owned=gpu_.copy(owned.Get(),config_.sdr_white_nits);++reference_textures_;}
+            }
             pixels.texture = std::shared_ptr<ID3D11Texture2D>(owned.Detach(), [](auto* p){p->Release();});
         } else {
-            // Copied into a pooled texture before ReleaseFrame; with every
-            // pooled texture still held downstream the frame is dropped
-            // and counted rather than allocating another.
-            pixels.texture = frames_.copy(texture.Get(), crop);
+            // Copied (and turned upright) into a pooled texture before
+            // ReleaseFrame; with every pooled texture still held downstream
+            // the frame is dropped and counted rather than allocating another.
+            pixels.texture = frames_.copy(texture.Get(), crop, rotation_);
             if (!pixels.texture) return false;
         }
         pixels.width = crop.width; pixels.height = crop.height; pixels.stride = crop.width * 4;
@@ -489,6 +558,7 @@ public:
     void stop() override { duplication_.Reset(); }
     RecordingSourceHealth diagnostics() const override {
         auto result=gpu_.diagnostics;result.display_profile_available=config_.display_profile_available;
+        result.duplication_reopens = reopener_.reopens; result.duplication_reopen_failures = reopener_.failures;
         result.cursor_composition_ms = cursor_composition_samples_
             ? cursor_composition_ms_ / double(cursor_composition_samples_) : 0;
         const auto frames=frames_.stats();
@@ -502,7 +572,7 @@ public:
             result.cursor_lock_wait_p95_ms=c.lock_wait_p95_ms;}
         result.hdr_display=config_.display_hdr;result.hdr_conversion=config_.capture_hdr;result.sdr_white_nits=config_.sdr_white_nits;return result;
     }
-    bool recover() override { try{open();return true;}catch(...){return false;} }
+    bool recover() override { try{open();reopener_.reset();return true;}catch(...){return false;} }
     CaptureRect content_bounds() const override {
         if(config_.window){RECT rect{};if(GetClientRect(reinterpret_cast<HWND>(config_.window),&rect))return{0,0,rect.right,rect.bottom};}
         if(config_.capture_region.width>0&&config_.capture_region.height>0)return{0,0,config_.capture_region.width,config_.capture_region.height};
@@ -653,6 +723,16 @@ struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStor
             gpu.tone_map(input, scratch.Get(), white, view(scratch.Get()));
             gpu.copy_into(target, scratch.Get(), &box);
         }
+        return record(started);
+    }
+    // Draws `crop` of a rotated output's desktop from scanout-oriented
+    // `input` into `target`. `delivering` held.
+    double fill_rotated(ID3D11Texture2D* target, ID3D11Texture2D* input, OutputRotation rotation, OutputSize desktop, const CaptureRect& crop) {
+        const auto started = std::chrono::steady_clock::now();
+        gpu.orient(input, target, rotation, desktop, crop, white, view(target));
+        return record(started);
+    }
+    double record(std::chrono::steady_clock::time_point started) {
         const double elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
         std::lock_guard lock(mutex);
         copy_times.push_back(elapsed); if (copy_times.size() > 240) copy_times.pop_front();
@@ -697,14 +777,15 @@ bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp, cons
     s.changed.notify_all();
     return true;
 }
-std::shared_ptr<ID3D11Texture2D> CapturedFrameStore::copy(ID3D11Texture2D* input, CaptureRect crop) {
+std::shared_ptr<ID3D11Texture2D> CapturedFrameStore::copy(ID3D11Texture2D* input, CaptureRect crop, OutputRotation rotation) {
     auto& s = *impl_;
     if (!input) throw std::invalid_argument("Missing captured frame");
     std::lock_guard serial(s.delivering);
     D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
     if (desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) throw std::runtime_error("Unsupported capture texture format");
-    if (crop.width <= 0 || crop.height <= 0) crop = {0, 0, int(desc.Width), int(desc.Height)};
-    if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return {};
+    const auto desktop = output_desktop_size({int(desc.Width), int(desc.Height)}, rotation);
+    if (crop.width <= 0 || crop.height <= 0) crop = {0, 0, desktop.width, desktop.height};
+    if (!output_contains(crop, desktop)) return {};
     std::shared_ptr<ID3D11Texture2D> target, stale;
     {
         std::lock_guard lock(s.mutex);
@@ -712,7 +793,8 @@ std::shared_ptr<ID3D11Texture2D> CapturedFrameStore::copy(ID3D11Texture2D* input
         target = s.lease();
         if (!target) { ++s.pressure; return {}; }
     }
-    s.fill(target.get(), input, desc, crop);
+    if (rotation == OutputRotation::Identity) s.fill(target.get(), input, desc, crop);
+    else s.fill_rotated(target.get(), input, rotation, desktop, crop);
     { std::lock_guard lock(s.mutex); ++s.delivered; }
     return target;
 }

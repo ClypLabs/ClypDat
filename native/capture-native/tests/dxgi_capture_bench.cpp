@@ -1,10 +1,14 @@
-// Manual: the Desktop Duplication fallback on the real primary display, the
-// per-frame path (--reference) against the pooled copies and GPU cursor. A
-// 48x48 near-black window in the display's top-left corner presents every
-// refresh so duplication delivers frames; the cursor stays wherever the user
-// left it (draws are reported).
+// Manual: the Desktop Duplication fallback on the real primary display (or
+// --display, e.g. DISPLAY2), the per-frame path (--reference) against the
+// pooled copies and GPU cursor. A 48x48 near-black window in the display's
+// top-left corner presents every refresh so duplication delivers frames; the
+// cursor stays wherever the user left it (draws are reported).
 //
-// dxgi_capture_bench <seconds> <WxH@fps[,...]> <cursor on|off> [--reference]
+// --rotate then turns the display through every orientation while the last
+// mode keeps capturing, measures each, and restores the original mode. The
+// change is dynamic (never written to the registry).
+//
+// dxgi_capture_bench <seconds> <WxH@fps[,...]> <cursor on|off> [--reference] [--display NAME] [--rotate]
 #include "recording_capture.h"
 #include <Windows.h>
 #include <d3d11_4.h>
@@ -106,22 +110,63 @@ std::pair<double, double> video_memory() {
     }
     return {local.CurrentUsage / 1048576.0, shared.CurrentUsage / 1048576.0};
 }
+struct Display { HMONITOR monitor = nullptr; RECT bounds{}; std::wstring name; };
+Display find_display(const std::wstring& name) {
+    // DISPLAY2 or \\.\DISPLAY2; empty for the primary display.
+    Display found; found.name = name.empty() || name.find(L'\\') != std::wstring::npos ? name : L"\\\\.\\" + name;
+    EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR monitor, HDC, LPRECT, LPARAM data) -> BOOL {
+        auto& d = *reinterpret_cast<Display*>(data); MONITORINFOEXW info{}; info.cbSize = sizeof(info);
+        if (GetMonitorInfoW(monitor, &info) && (d.name.empty() ? (info.dwFlags & MONITORINFOF_PRIMARY) != 0 : _wcsicmp(info.szDevice, d.name.c_str()) == 0)) {
+            d.monitor = monitor; d.bounds = info.rcMonitor; d.name = info.szDevice; return FALSE;
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&found));
+    if (!found.monitor) throw std::runtime_error("No such display");
+    return found;
+}
+// Turns a display and puts it back on destruction.
+class Orientation {
+    std::wstring name_; DEVMODEW original_{};
+public:
+    explicit Orientation(std::wstring name) : name_(std::move(name)) {
+        original_.dmSize = sizeof(original_); if (!EnumDisplaySettingsW(name_.c_str(), ENUM_CURRENT_SETTINGS, &original_)) throw std::runtime_error("Read display mode");
+    }
+    ~Orientation() { restore(); }
+    DWORD original() const { return original_.dmDisplayOrientation; }
+    bool set(DWORD orientation) {
+        DEVMODEW mode = original_;
+        if ((orientation & 1) != (original_.dmDisplayOrientation & 1)) std::swap(mode.dmPelsWidth, mode.dmPelsHeight);
+        mode.dmDisplayOrientation = orientation; mode.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT;
+        return ChangeDisplaySettingsExW(name_.c_str(), &mode, nullptr, 0, nullptr) == DISP_CHANGE_SUCCESSFUL;
+    }
+    bool restore() {
+        DEVMODEW current{}; current.dmSize = sizeof(current); EnumDisplaySettingsW(name_.c_str(), ENUM_CURRENT_SETTINGS, &current);
+        if (current.dmDisplayOrientation == original_.dmDisplayOrientation && current.dmPelsWidth == original_.dmPelsWidth && current.dmPelsHeight == original_.dmPelsHeight) return true;
+        auto mode = original_; mode.dmFields = DM_DISPLAYORIENTATION | DM_PELSWIDTH | DM_PELSHEIGHT;
+        if (ChangeDisplaySettingsExW(name_.c_str(), &mode, nullptr, 0, nullptr) == DISP_CHANGE_SUCCESSFUL) return true;
+        return ChangeDisplaySettingsExW(nullptr, nullptr, nullptr, 0, nullptr) == DISP_CHANGE_SUCCESSFUL; // The registry's (unchanged) modes.
+    }
+};
 std::vector<std::string> split(const std::string& text) { std::vector<std::string> parts; std::stringstream stream(text); std::string part; while (std::getline(stream, part, ',')) if (!part.empty()) parts.push_back(part); return parts; }
 }
 
 int main(int argc, char** argv) {
     try {
         av_log_set_level(AV_LOG_ERROR); std::cout << std::unitbuf << std::fixed << std::setprecision(2);
-        if (argc < 4) { std::cerr << "dxgi_capture_bench <seconds> <WxH@fps[,...]> <cursor on|off> [--reference]\n"; return 2; }
-        const int seconds = std::atoi(argv[1]); const bool cursor = std::string(argv[3]) == "on"; bool reference = false;
-        for (int i = 4; i < argc; ++i) if (std::string(argv[i]) == "--reference") reference = true;
+        if (argc < 4) { std::cerr << "dxgi_capture_bench <seconds> <WxH@fps[,...]> <cursor on|off> [--reference] [--display NAME] [--rotate]\n"; return 2; }
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); // Physical pixels, as the recorder sees them.
+        const int seconds = std::atoi(argv[1]); const bool cursor = std::string(argv[3]) == "on"; bool reference = false, rotate = false; std::wstring display_name;
+        for (int i = 4; i < argc; ++i) { const std::string a = argv[i]; if (a == "--reference") reference = true; else if (a == "--rotate") rotate = true;
+            else if (a == "--display" && i + 1 < argc) { const std::string n = argv[++i]; display_name.assign(n.begin(), n.end()); } }
         const double hz = tsc_hz();
-        Presenter presenter({0, 0}); GpuEngines engines;
-        for (const auto& mode : split(argv[2])) {
+        const auto display = find_display(display_name);
+        Presenter presenter({display.bounds.left, display.bounds.top}); GpuEngines engines;
+        const auto modes = split(argv[2]);
+        for (const auto& mode : modes) {
             RecordingCaptureConfig config; int width = 0, height = 0, fps = 0;
             if (sscanf_s(mode.c_str(), "%dx%d@%d", &width, &height, &fps) != 3) throw std::runtime_error("Bad mode " + mode);
             config.width = width; config.height = height; config.fps = fps; config.bitrate_mbps = 25; config.variable_frame_rate = true;
-            config.prefer_dxgi = true; config.capture_cursor = cursor; config.dxgi_reference_path = reference;
+            config.prefer_dxgi = true; config.capture_cursor = cursor; config.dxgi_reference_path = reference; config.monitor = reinterpret_cast<uintptr_t>(display.monitor);
             RecordingCapture capture(config, {}); capture.start();
             std::this_thread::sleep_for(4s);
             const auto before = capture.health(); const auto cycles = thread_cycles(); const auto process = process_ticks(); engines.start();
@@ -136,6 +181,26 @@ int main(int argc, char** argv) {
             const auto h = capture.health(); const auto& s = h.source_details; const auto& b = before.source_details;
             if (!h.error.empty()) throw std::runtime_error("Capture failed: " + h.error);
             if (h.source != "DXGI Desktop Duplication") throw std::runtime_error("Source is " + h.source);
+            if (rotate && &mode == &modes.back()) {
+                // Every orientation in turn and back, capturing throughout.
+                Orientation orientation(display.name); const DWORD start = orientation.original();
+                for (DWORD step = 1; step <= 4; ++step) {
+                    const DWORD target = (start + step) % 4; const auto previous = capture.health();
+                    if (!orientation.set(target)) throw std::runtime_error("Could not turn the display");
+                    std::this_thread::sleep_for(3s); const auto a = capture.health(); std::this_thread::sleep_for(2s); const auto z = capture.health();
+                    if (!z.error.empty()) throw std::runtime_error("Capture failed after turning: " + z.error);
+                    DEVMODEW now{}; now.dmSize = sizeof(now); EnumDisplaySettingsW(display.name.c_str(), ENUM_CURRENT_SETTINGS, &now);
+                    const auto bounds = capture.health().source_details;
+                    std::cout << "  turned to " << target * 90 << " (" << now.dmPelsWidth << "x" << now.dmPelsHeight << "): source=" << z.source << " recoveries=" << z.source_recoveries - previous.source_recoveries
+                              << " reopens=" << z.source_details.duplication_reopens - previous.source_details.duplication_reopens << " reopenFailures="
+                              << z.source_details.duplication_reopen_failures - previous.source_details.duplication_reopen_failures
+                              << (z.source_recovery_error != previous.source_recovery_error ? " recoveryError=\"" + z.source_recovery_error + "\"" : std::string())
+                              << " output=" << z.output_fps << " fresh=" << z.unique_fps << " frames=" << double(z.source_details.frames_delivered - a.source_details.frames_delivered) / 2
+                              << "/s pool " << bounds.owned_textures_allocated << "/" << bounds.owned_texture_capacity << " leased " << bounds.owned_textures_leased << " pressure " << bounds.owned_texture_pressure_drops
+                              << " submit p95=" << z.submission_p95_ms << " completion p95=" << z.completion_p95_ms << "\n";
+                }
+                if (!orientation.restore()) throw std::runtime_error("Could not restore the display orientation");
+            }
             capture.stop();
             auto rate = [&](uint64_t now, uint64_t then) { return double(now - then) / elapsed; };
             std::cout << mode << " cursor=" << (cursor ? "on" : "off") << (reference ? " reference" : " pooled") << (s.hdr_display ? " hdr" : " sdr") << ": frames=" << rate(s.frames_delivered, b.frames_delivered)
