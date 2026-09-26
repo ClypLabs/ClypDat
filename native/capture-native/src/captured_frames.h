@@ -42,6 +42,13 @@ public:
     // outside it, or every pooled texture is held. Keeps no reference to
     // `input`, so the caller may release its buffer on return.
     bool deliver(ID3D11Texture2D* input, int64_t timestamp);
+    // Copies `crop` of `input` (all of it when empty) into a pooled texture
+    // and returns it without publishing (Desktop Duplication hands it
+    // downstream itself). Null when the crop lies outside `input` or every
+    // pooled texture is held (counted as a pressure drop). Keeps no
+    // reference to `input`. Crops of a new size rebuild the pool as
+    // deliver() does for a new frame size.
+    std::shared_ptr<ID3D11Texture2D> copy(ID3D11Texture2D* input, CaptureRect crop = {});
     // Takes the newest frame, waiting up to `timeout`. False when none
     // arrived or the store is closed; throws the error set by fail().
     bool take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout);

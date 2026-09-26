@@ -1,5 +1,6 @@
 #include "recording_capture.h"
 #include "captured_frames.h"
+#include "cursor_compositor.h"
 #include <Windows.h>
 #include <d3d11.h>
 #include <d3d11_4.h>
@@ -178,41 +179,6 @@ DisplayProfile display_profile(HMONITOR monitor){
     }
     return{};
 }
-bool draw_cursor(Device& gpu, ID3D11Texture2D* texture, int width, int height, int origin_x, int origin_y) {
-    CURSORINFO cursor{sizeof(CURSORINFO)};
-    if (!GetCursorInfo(&cursor) || !(cursor.flags & CURSOR_SHOWING)) return false;
-    ICONINFO icon{}; if (!GetIconInfo(cursor.hCursor, &icon)) return false;
-    struct IconCleanup { ICONINFO& i; ~IconCleanup(){ if(i.hbmColor)DeleteObject(i.hbmColor);if(i.hbmMask)DeleteObject(i.hbmMask); } } cleanup{icon};
-    const int x = cursor.ptScreenPos.x - origin_x - int(icon.xHotspot);
-    const int y = cursor.ptScreenPos.y - origin_y - int(icon.yHotspot);
-    BITMAP shape_info{};
-    const auto shape = icon.hbmColor ? icon.hbmColor : icon.hbmMask;
-    if (!shape || GetObjectW(shape, sizeof(shape_info), &shape_info) != sizeof(shape_info)) return false;
-    const int cursor_width = shape_info.bmWidth;
-    const int cursor_height = icon.hbmColor ? shape_info.bmHeight : shape_info.bmHeight / 2;
-    const int left = std::max(0, x), top = std::max(0, y);
-    const int right = std::min(width, x + cursor_width), bottom = std::min(height, y + cursor_height);
-    if (right <= left || bottom <= top) return false;
-    CapturePixels pixels; pixels.width = right - left; pixels.height = bottom - top; pixels.stride = pixels.width * 4;
-    if (!gpu.read(texture, pixels, {left, top, pixels.width, pixels.height})) return false;
-    BITMAPINFO info{}; info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth = pixels.width; info.bmiHeader.biHeight = -pixels.height;
-    info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32; info.bmiHeader.biCompression = BI_RGB;
-    void* data = nullptr; HDC dc = CreateCompatibleDC(nullptr); if (!dc) return false;
-    HBITMAP dib = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &data, nullptr, 0);
-    if (!dib) { DeleteDC(dc); return false; }
-    auto old = SelectObject(dc, dib);
-    for (int row = 0; row < pixels.height; ++row) std::memcpy(static_cast<uint8_t*>(data) + size_t(row) * pixels.width * 4,
-        pixels.bgra.data() + size_t(row) * pixels.stride, size_t(pixels.width) * 4);
-    DrawIconEx(dc, x - left, y - top, cursor.hCursor, cursor_width, cursor_height, 0, nullptr, DI_NORMAL);
-    GdiFlush();
-    for (int row = 0; row < pixels.height; ++row) std::memcpy(pixels.bgra.data() + size_t(row) * pixels.stride,
-        static_cast<uint8_t*>(data) + size_t(row) * pixels.width * 4, size_t(pixels.width) * 4);
-    SelectObject(dc, old); DeleteObject(dib); DeleteDC(dc);
-    gpu.write(texture, pixels, {left, top, pixels.width, pixels.height});
-    return true;
-}
-
 // The monitor-relative capture region WGC frames are cropped to; empty for
 // windows and whole monitors.
 CaptureRect wgc_region(const RecordingCaptureConfig& config) {
@@ -384,8 +350,42 @@ class DxgiSource final : public RecordingFrameSource {
     int crop_samples_ = 0;
     double cursor_composition_ms_ = 0;
     uint64_t cursor_composition_samples_ = 0;
+    // Owned copies come from a bounded pool, as for WGC; the reference path
+    // allocates each one.
+    CapturedFrameStore frames_;
+    std::unique_ptr<CursorCompositor> cursor_;
+    uint64_t reference_textures_ = 0;
+    // Frame polling: AcquireNextFrame is only ever called with a zero timeout.
+    HANDLE timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    std::chrono::steady_clock::time_point last_frame_{};
+    std::chrono::microseconds refresh_period_{4167};
+    // A blocking AcquireNextFrame holds the device's multithread lock while
+    // it waits, stalling the encoder thread for milliseconds per frame.
+    // Poll instead: first just before the next refresh is due, then every
+    // millisecond, and every 2 ms once the display has been quiet for 50 ms.
+    HRESULT next_frame(std::chrono::milliseconds timeout, DXGI_OUTDUPL_FRAME_INFO& info, ComPtr<IDXGIResource>& resource) {
+        if (config_.dxgi_reference_path) return duplication_->AcquireNextFrame(DWORD(timeout.count()), &info, &resource);
+        using namespace std::chrono;
+        const auto deadline = steady_clock::now() + timeout;
+        for (;;) {
+            const auto result = duplication_->AcquireNextFrame(0, &info, &resource);
+            const auto now = steady_clock::now();
+            if (result != DXGI_ERROR_WAIT_TIMEOUT) { if (SUCCEEDED(result)) last_frame_ = now; return result; }
+            if (now >= deadline) return result;
+            auto next = now + (now - last_frame_ > milliseconds(50) ? milliseconds(2) : milliseconds(1));
+            next = std::min(std::max(next, last_frame_ + refresh_period_ * 3 / 4), deadline);
+            const auto wait = duration_cast<microseconds>(next - now).count();
+            LARGE_INTEGER due{}; due.QuadPart = -std::max<int64_t>(wait, 100) * 10;
+            if (timer_ && SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, FALSE)) WaitForSingleObject(timer_, 50);
+            else std::this_thread::sleep_for(microseconds(wait));
+        }
+    }
 public:
-    explicit DxgiSource(const RecordingCaptureConfig& config,ID3D11Device* existing=nullptr) : config_(config),gpu_(existing,config.d3d_debug) { open(); }
+    explicit DxgiSource(const RecordingCaptureConfig& config,ID3D11Device* existing=nullptr) : config_(config),gpu_(existing,config.d3d_debug),
+        frames_(gpu_.device.Get(),capture_source_texture_capacity(config.source_queue_depth),config.sdr_white_nits) {
+        if(config_.capture_cursor)cursor_=std::make_unique<CursorCompositor>(gpu_.device.Get());
+        open();
+    }
     void open() {
         ComPtr<IDXGIDevice> device; checked(gpu_.device.As(&device), "Query duplication device");
         ComPtr<IDXGIAdapter> adapter; checked(device->GetAdapter(&adapter), "Query duplication adapter");
@@ -404,7 +404,11 @@ public:
                 const DXGI_FORMAT formats[]{DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_B8G8R8A8_UNORM};
                 checked(output5->DuplicateOutput1(gpu_.device.Get(),0,2,formats,&duplication_),"Create HDR desktop duplication");
             }else checked(output1->DuplicateOutput(gpu_.device.Get(), &duplication_), "Create desktop duplication");
-            desktop_ = desc.DesktopCoordinates; return;
+            desktop_ = desc.DesktopCoordinates;
+            MONITORINFOEXW monitor{}; monitor.cbSize = sizeof(monitor); DEVMODEW mode{}; mode.dmSize = sizeof(mode);
+            if (GetMonitorInfoW(desc.Monitor, &monitor) && EnumDisplaySettingsW(monitor.szDevice, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1)
+                refresh_period_ = std::chrono::microseconds(1000000 / mode.dmDisplayFrequency);
+            return;
         }
         throw std::runtime_error("Capture display unavailable on recording adapter");
     }
@@ -412,7 +416,7 @@ public:
     bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
         if (!eligible()) return false;
         DXGI_OUTDUPL_FRAME_INFO info{}; ComPtr<IDXGIResource> resource;
-        const auto result = duplication_->AcquireNextFrame(DWORD(timeout.count()), &info, &resource);
+        const auto result = next_frame(timeout, info, resource);
         if (result == DXGI_ERROR_WAIT_TIMEOUT) return false;
         if (result == DXGI_ERROR_ACCESS_LOST) { open(); return false; }
         checked(result, "Acquire desktop recording frame");
@@ -443,19 +447,28 @@ public:
         D3D11_TEXTURE2D_DESC desc{}; texture->GetDesc(&desc);
         if (crop.width <= 0 || crop.height <= 0) crop = {0,0,int(desc.Width),int(desc.Height)};
         if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return false;
-        desc.Width = crop.width; desc.Height = crop.height; desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.CPUAccessFlags = 0; desc.MiscFlags = 0; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-        ComPtr<ID3D11Texture2D> owned;
-        checked(gpu_.device->CreateTexture2D(&desc, nullptr, &owned), "Allocate owned desktop frame");
-        D3D11_BOX box{UINT(crop.x),UINT(crop.y),0,UINT(crop.x+crop.width),UINT(crop.y+crop.height),1};
-        gpu_.context->CopySubresourceRegion(owned.Get(),0,0,0,0,texture.Get(),0,&box);
-        if(desc.Format==DXGI_FORMAT_R16G16B16A16_FLOAT)owned=gpu_.copy(owned.Get(),config_.sdr_white_nits);
+        if (config_.dxgi_reference_path) {
+            desc.Width = crop.width; desc.Height = crop.height; desc.Usage = D3D11_USAGE_DEFAULT;
+            desc.CPUAccessFlags = 0; desc.MiscFlags = 0; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+            ComPtr<ID3D11Texture2D> owned;
+            checked(gpu_.device->CreateTexture2D(&desc, nullptr, &owned), "Allocate owned desktop frame"); ++reference_textures_;
+            D3D11_BOX box{UINT(crop.x),UINT(crop.y),0,UINT(crop.x+crop.width),UINT(crop.y+crop.height),1};
+            gpu_.context->CopySubresourceRegion(owned.Get(),0,0,0,0,texture.Get(),0,&box);
+            if(desc.Format==DXGI_FORMAT_R16G16B16A16_FLOAT){owned=gpu_.copy(owned.Get(),config_.sdr_white_nits);++reference_textures_;}
+            pixels.texture = std::shared_ptr<ID3D11Texture2D>(owned.Detach(), [](auto* p){p->Release();});
+        } else {
+            // Copied into a pooled texture before ReleaseFrame; with every
+            // pooled texture still held downstream the frame is dropped
+            // and counted rather than allocating another.
+            pixels.texture = frames_.copy(texture.Get(), crop);
+            if (!pixels.texture) return false;
+        }
         pixels.width = crop.width; pixels.height = crop.height; pixels.stride = crop.width * 4;
-        pixels.texture = std::shared_ptr<ID3D11Texture2D>(owned.Detach(), [](auto* p){p->Release();});
-        if (config_.capture_cursor) {
+        if (cursor_) {
             const auto cursor_started = std::chrono::steady_clock::now();
-            draw_cursor(gpu_, pixels.texture.get(), pixels.width, pixels.height,
-                desktop_.left + crop.x, desktop_.top + crop.y);
+            const auto state = capture_cursor_state();
+            if (config_.dxgi_reference_path) cursor_->draw_cpu(pixels.texture.get(), pixels.width, pixels.height, desktop_.left + crop.x, desktop_.top + crop.y, state);
+            else cursor_->draw(pixels.texture.get(), pixels.width, pixels.height, desktop_.left + crop.x, desktop_.top + crop.y, state);
             cursor_composition_ms_ += std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - cursor_started).count();
             ++cursor_composition_samples_;
@@ -464,11 +477,21 @@ public:
     }
     const char* name() const override { return "DXGI Desktop Duplication"; }
     ID3D11Device* d3d_device() const override { return gpu_.device.Get(); }
+    ~DxgiSource() override { if (timer_) CloseHandle(timer_); }
     void stop() override { duplication_.Reset(); }
     RecordingSourceHealth diagnostics() const override {
         auto result=gpu_.diagnostics;result.display_profile_available=config_.display_profile_available;
         result.cursor_composition_ms = cursor_composition_samples_
             ? cursor_composition_ms_ / double(cursor_composition_samples_) : 0;
+        const auto frames=frames_.stats();
+        result.owned_texture_capacity=frames.capacity;result.owned_textures_allocated=frames.allocated+reference_textures_;result.owned_textures_leased=frames.leased;
+        result.owned_textures_peak=frames.peak_leased;result.owned_texture_pressure_drops=frames.pressure_drops;
+        result.copy_p50_ms=frames.copy_p50_ms;result.copy_p95_ms=frames.copy_p95_ms;
+        if(cursor_){const auto c=cursor_->stats();
+            result.cursor_gpu_draws=c.gpu_draws;result.cursor_cpu_draws=c.cpu_draws;result.cursor_cpu_fallbacks=c.cpu_fallbacks;
+            result.cursor_shape_changes=c.shape_changes;result.cursor_uploads=c.uploads;result.cursor_textures_created=c.textures_created;
+            result.cursor_readback_bytes=c.readback_bytes;result.cursor_compose_p50_ms=c.compose_p50_ms;result.cursor_compose_p95_ms=c.compose_p95_ms;
+            result.cursor_lock_wait_p95_ms=c.lock_wait_p95_ms;}
         result.hdr_display=config_.display_hdr;result.hdr_conversion=config_.capture_hdr;result.sdr_white_nits=config_.sdr_white_nits;return result;
     }
     bool recover() override { try{open();return true;}catch(...){return false;} }
@@ -517,12 +540,17 @@ public:
     }
     bool switch_backend(bool wgc)override{
         if(!wgc&&!active_->foreground())return false;
+        // A process may duplicate an output only once, so a Desktop
+        // Duplication source is released before its replacement opens, and
+        // reopened if the replacement fails.
+        const bool dxgi_to_dxgi=!wgc&&std::string_view(active_->name())=="DXGI Desktop Duplication";
+        if(dxgi_to_dxgi)active_->stop();
         try{
             auto* device=active_->d3d_device();std::unique_ptr<RecordingFrameSource> replacement;
             if(wgc)replacement=std::make_unique<WgcSource>(config_,device);
             else replacement=std::make_unique<DxgiSource>(config_,device);
             active_->stop();active_=std::move(replacement);return true;
-        }catch(...){return false;}
+        }catch(...){if(dxgi_to_dxgi)active_->recover();return false;}
     }
 };
 }
@@ -583,6 +611,44 @@ struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStor
         if (!cached) checked(gpu.device->CreateRenderTargetView(texture, nullptr, &cached), "Create recording HDR output view");
         return cached.Get();
     }
+    // Resizes the pool for `crop` when needed. `mutex` held; returns the
+    // superseded newest frame, released by the caller outside the lock.
+    std::shared_ptr<ID3D11Texture2D> resize(const CaptureRect& crop) {
+        if (UINT(crop.width) == width && UINT(crop.height) == height) return {};
+        width = UINT(crop.width); height = UINT(crop.height); ++generation;
+        free.clear(); live = 0; views.clear();
+        return std::move(newest);
+    }
+    // Copies, or tone-maps from FP16, `crop` of `input` into `target`.
+    // `delivering` held. Returns the CPU time spent issuing it.
+    double fill(ID3D11Texture2D* target, ID3D11Texture2D* input, const D3D11_TEXTURE2D_DESC& desc, const CaptureRect& crop) {
+        const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+        const bool whole = crop.width == int(desc.Width) && crop.height == int(desc.Height);
+        const auto started = std::chrono::steady_clock::now();
+        const D3D11_BOX box{UINT(crop.x), UINT(crop.y), 0, UINT(crop.x + crop.width), UINT(crop.y + crop.height), 1};
+        if (!hdr) gpu.copy_into(target, input, whole ? nullptr : &box);
+        else if (whole) gpu.tone_map(input, target, white, view(target));
+        else {
+            D3D11_TEXTURE2D_DESC current{}; if (scratch) scratch->GetDesc(&current);
+            if (!scratch || current.Width != desc.Width || current.Height != desc.Height) {
+                if (scratch) views.erase(scratch.Get());
+                scratch.Reset();
+                auto size = desc; size.Format = DXGI_FORMAT_B8G8R8A8_UNORM; size.MipLevels = 1; size.ArraySize = 1;
+                size.Usage = D3D11_USAGE_DEFAULT; size.CPUAccessFlags = 0; size.MiscFlags = 0;
+                size.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+                checked(gpu.device->CreateTexture2D(&size, nullptr, &scratch), "Allocate recording HDR crop texture");
+                std::lock_guard lock(mutex); ++allocated;
+            }
+            // Tone mapping is per pixel, so mapping the whole frame and
+            // copying the crop equals mapping a cropped FP16 copy.
+            gpu.tone_map(input, scratch.Get(), white, view(scratch.Get()));
+            gpu.copy_into(target, scratch.Get(), &box);
+        }
+        const double elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        std::lock_guard lock(mutex);
+        copy_times.push_back(elapsed); if (copy_times.size() > 240) copy_times.pop_front();
+        return elapsed;
+    }
 };
 
 CapturedFrameStore::CapturedFrameStore(ID3D11Device* device, int capacity, float sdr_white_nits, CaptureRect region) {
@@ -601,49 +667,44 @@ bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp) {
     if (!hdr && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) throw std::runtime_error("Unsupported capture texture format");
     const auto crop = s.region.width > 0 ? s.region : CaptureRect{0, 0, int(desc.Width), int(desc.Height)};
     if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return false;
-    const bool whole = crop.width == int(desc.Width) && crop.height == int(desc.Height);
     // Released only outside the lock: a lease's return takes it.
     std::shared_ptr<ID3D11Texture2D> target, stale;
     {
         std::lock_guard lock(s.mutex);
-        if (UINT(crop.width) != s.width || UINT(crop.height) != s.height) {
-            s.width = UINT(crop.width); s.height = UINT(crop.height); ++s.generation;
-            s.free.clear(); s.live = 0; stale = std::move(s.newest);
-            s.views.clear();
-        }
+        stale = s.resize(crop);
         // An untaken frame is superseded in place: nothing else holds it.
         if (s.newest) { target = std::move(s.newest); ++s.superseded; }
         else target = s.lease();
         if (!target) { ++s.pressure; return false; }
     }
-    const auto started = std::chrono::steady_clock::now();
-    const D3D11_BOX box{UINT(crop.x), UINT(crop.y), 0, UINT(crop.x + crop.width), UINT(crop.y + crop.height), 1};
-    if (!hdr) s.gpu.copy_into(target.get(), input, whole ? nullptr : &box);
-    else if (whole) s.gpu.tone_map(input, target.get(), s.white, s.view(target.get()));
-    else {
-        D3D11_TEXTURE2D_DESC current{}; if (s.scratch) s.scratch->GetDesc(&current);
-        if (!s.scratch || current.Width != desc.Width || current.Height != desc.Height) {
-            if (s.scratch) s.views.erase(s.scratch.Get());
-            s.scratch.Reset();
-            auto scratch = desc; scratch.Format = DXGI_FORMAT_B8G8R8A8_UNORM; scratch.MipLevels = 1; scratch.ArraySize = 1;
-            scratch.Usage = D3D11_USAGE_DEFAULT; scratch.CPUAccessFlags = 0; scratch.MiscFlags = 0;
-            scratch.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-            checked(s.gpu.device->CreateTexture2D(&scratch, nullptr, &s.scratch), "Allocate recording HDR crop texture");
-            std::lock_guard lock(s.mutex); ++s.allocated;
-        }
-        s.gpu.tone_map(input, s.scratch.Get(), s.white, s.view(s.scratch.Get()));
-        s.gpu.copy_into(target.get(), s.scratch.Get(), &box);
-    }
-    const double elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+    s.fill(target.get(), input, desc, crop);
     std::shared_ptr<ID3D11Texture2D> replaced;
     {
         std::lock_guard lock(s.mutex);
-        s.copy_times.push_back(elapsed); if (s.copy_times.size() > 240) s.copy_times.pop_front();
         replaced = std::move(s.newest);
         s.newest = std::move(target); s.stamp = timestamp; ++s.delivered;
     }
     s.changed.notify_all();
     return true;
+}
+std::shared_ptr<ID3D11Texture2D> CapturedFrameStore::copy(ID3D11Texture2D* input, CaptureRect crop) {
+    auto& s = *impl_;
+    if (!input) throw std::invalid_argument("Missing captured frame");
+    std::lock_guard serial(s.delivering);
+    D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
+    if (desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) throw std::runtime_error("Unsupported capture texture format");
+    if (crop.width <= 0 || crop.height <= 0) crop = {0, 0, int(desc.Width), int(desc.Height)};
+    if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return {};
+    std::shared_ptr<ID3D11Texture2D> target, stale;
+    {
+        std::lock_guard lock(s.mutex);
+        stale = s.resize(crop);
+        target = s.lease();
+        if (!target) { ++s.pressure; return {}; }
+    }
+    s.fill(target.get(), input, desc, crop);
+    { std::lock_guard lock(s.mutex); ++s.delivered; }
+    return target;
 }
 bool CapturedFrameStore::take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout) {
     auto& s = *impl_;

@@ -23,6 +23,7 @@ add_library(RecorderCore STATIC
     src/video_encoder.cpp src/video_encoder.h
     src/encoder_backend.cpp src/encoder_backend.h
     src/readback_stage.cpp src/readback_stage.h
+    src/cursor_compositor.cpp src/cursor_compositor.h
     src/detector_stage.cpp src/detector_stage.h
     src/overlay_compositor.cpp src/overlay_compositor.h
     src/recording_capture.cpp src/recording_capture.h
@@ -158,6 +159,16 @@ if(CLYPDAT_TEST_GPU)
     add_test(NAME ClypDat.Capture.Native.GpuOverlayPipeline COMMAND ClypDat.Capture.Native.OverlayPipelineTests --gpu)
 endif()
 
+add_executable(ClypDat.Capture.Native.DxgiCaptureTests tests/dxgi_capture_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.DxgiCaptureTests PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.DxgiCaptureTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.DxgiCaptureTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.DxgiCapture COMMAND ClypDat.Capture.Native.DxgiCaptureTests)
+if(CLYPDAT_TEST_GPU)
+    add_test(NAME ClypDat.Capture.Native.GpuDxgiCapture COMMAND ClypDat.Capture.Native.DxgiCaptureTests --gpu)
+endif()
+
 add_executable(ClypDat.Capture.Native.WgcCadenceTests tests/wgc_cadence_tests.cpp)
 target_link_libraries(ClypDat.Capture.Native.WgcCadenceTests PRIVATE RecorderCore)
 target_compile_definitions(ClypDat.Capture.Native.WgcCadenceTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -208,4 +219,11 @@ add_executable(ClypDat.Capture.Native.WgcCadenceBench tests/wgc_cadence_bench.cp
 target_link_libraries(ClypDat.Capture.Native.WgcCadenceBench PRIVATE RecorderCore pdh)
 target_compile_definitions(ClypDat.Capture.Native.WgcCadenceBench PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 set_target_properties(ClypDat.Capture.Native.WgcCadenceBench PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# Manual: Desktop Duplication fallback cost on the real primary display.
+add_executable(ClypDat.Capture.Native.DxgiCaptureBench tests/dxgi_capture_bench.cpp)
+target_link_libraries(ClypDat.Capture.Native.DxgiCaptureBench PRIVATE RecorderCore pdh)
+target_compile_definitions(ClypDat.Capture.Native.DxgiCaptureBench PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.DxgiCaptureBench PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

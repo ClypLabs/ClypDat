@@ -47,6 +47,13 @@ struct RecordingSourceHealth {
     int cadence_fps = 0, update_ticks = 0;
     double producer_ceiling_fps = 0;
     double cursor_composition_ms = 0;
+    // Desktop Duplication cursor: draws composed on the GPU and on the CPU
+    // (fallback shapes, or the reference path), shape changes and uploads,
+    // cursor textures created, bytes read back for CPU draws, compose time
+    // and the wait for the device lock around a GPU draw.
+    uint64_t cursor_gpu_draws = 0, cursor_cpu_draws = 0, cursor_cpu_fallbacks = 0, cursor_shape_changes = 0, cursor_uploads = 0;
+    uint64_t cursor_textures_created = 0, cursor_readback_bytes = 0;
+    double cursor_compose_p50_ms = 0, cursor_compose_p95_ms = 0, cursor_lock_wait_p95_ms = 0;
     uint64_t callback_us = 0; // Time spent in WGC FrameArrived callbacks.
     uint64_t adapter_luid = 0;
     std::wstring adapter;
@@ -94,6 +101,9 @@ struct RecordingCaptureConfig {
     int source_queue_depth=2;
     // Benchmarks: fixes the WGC MinUpdateInterval at this many display ticks.
     int wgc_update_ticks=0;
+    // Benchmarks: the Desktop Duplication path before pooling, a new owned
+    // texture per frame and the CPU cursor.
+    bool dxgi_reference_path=false;
     std::wstring target_executable,target_title,target_class;
     float sdr_white_nits = 80;
     int64_t qpc_anchor = 0, qpc_frequency = 0, monotonic_anchor_us = 0;

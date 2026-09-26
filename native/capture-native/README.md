@@ -38,6 +38,16 @@ hashes detector output for captured game frames so two builds can be compared,
 and `ClypDat.Capture.Native.DetectorBench <seconds> <stage|reference|off|idle>`
 measures detector cost on the pipeline with a generated 4K source.
 
+The Desktop Duplication fallback copies each frame into the same bounded pool
+of owned textures WGC uses (a frame is dropped and counted when every pooled
+texture is still held), polls for frames because a waiting
+`AcquireNextFrame` holds the device lock the encoder needs, and composes the
+cursor on the GPU (`CursorCompositor`) with DrawIconEx's exact arithmetic;
+only cursors it cannot reproduce read their rectangle back to the CPU.
+`ClypDat.Capture.Native.DxgiCaptureTests` compares both cursor paths byte for
+byte, and `ClypDat.Capture.Native.DxgiCaptureBench` measures the fallback
+against its previous per-frame path (`--reference`).
+
 The replay history prunes incrementally from a keyframe index, keeping the
 same packets as the original full scan, which the tests run alongside it.
 `ClypDat.Capture.Native.VideoHistoryTests --bench` compares their cost, and

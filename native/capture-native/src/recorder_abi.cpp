@@ -292,6 +292,12 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"sourceOwnedTexturePressureDrops\":" << h.source_details.owned_texture_pressure_drops
         << ",\"sourceCopyP50Ms\":" << h.source_details.copy_p50_ms << ",\"sourceCopyP95Ms\":" << h.source_details.copy_p95_ms
         << ",\"sourceCursorCompositionMs\":" << h.source_details.cursor_composition_ms
+        << ",\"sourceCursorGpuDraws\":" << h.source_details.cursor_gpu_draws << ",\"sourceCursorCpuDraws\":" << h.source_details.cursor_cpu_draws
+        << ",\"sourceCursorCpuFallbacks\":" << h.source_details.cursor_cpu_fallbacks << ",\"sourceCursorShapeChanges\":" << h.source_details.cursor_shape_changes
+        << ",\"sourceCursorUploads\":" << h.source_details.cursor_uploads << ",\"sourceCursorTexturesCreated\":" << h.source_details.cursor_textures_created
+        << ",\"sourceCursorReadbackBytes\":" << h.source_details.cursor_readback_bytes
+        << ",\"sourceCursorComposeP50Ms\":" << h.source_details.cursor_compose_p50_ms << ",\"sourceCursorComposeP95Ms\":" << h.source_details.cursor_compose_p95_ms
+        << ",\"sourceCursorLockWaitP95Ms\":" << h.source_details.cursor_lock_wait_p95_ms
         << ",\"requestedInterval100ns\":" << h.source_details.requested_interval_100ns
         << ",\"appliedInterval100ns\":" << h.source_details.applied_interval_100ns
         << ",\"updateIntervalAvailable\":" << (h.source_details.update_interval_available ? "true" : "false")
