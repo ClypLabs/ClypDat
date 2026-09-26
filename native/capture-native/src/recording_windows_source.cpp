@@ -482,6 +482,9 @@ public:
             if (reopener_.attempt([this] { open(); }, std::chrono::steady_clock::now())) return true;
             std::this_thread::sleep_for(std::min(timeout, std::chrono::milliseconds(20))); return false;
         };
+        // No duplication (a failed replacement's recover() could not reopen
+        // it): reopened like a lost one.
+        if (!duplication_ && !reopener_.pending()) reopener_.lost(std::chrono::steady_clock::now());
         if (reopener_.pending() && !reopen()) return false;
         DXGI_OUTDUPL_FRAME_INFO info{}; ComPtr<IDXGIResource> resource;
         const auto result = next_frame(timeout, info, resource);
@@ -584,6 +587,7 @@ class AdaptiveSource final:public RecordingFrameSource{
     std::unique_ptr<RecordingFrameSource> active_;
     bool hdr_requested_=false;
     HMONITOR monitored_=nullptr;
+    CaptureReopener reprofile_{std::chrono::seconds(10)};
     HMONITOR current_monitor()const{
         if(config_.window)return MonitorFromWindow(reinterpret_cast<HWND>(config_.window),MONITOR_DEFAULTTONEAREST);
         if(config_.monitor)return reinterpret_cast<HMONITOR>(config_.monitor);
@@ -604,13 +608,26 @@ public:
             const bool wgc=std::string_view(active_->name())=="Windows Graphics Capture";
             auto previous=config_;config_.display_hdr=profile.hdr;config_.capture_hdr=hdr_requested_&&profile.hdr;
             config_.display_profile_available=true;config_.sdr_white_nits=profile.white;
-            if(!switch_backend(wgc)){config_=std::move(previous);throw std::runtime_error("Recording display changed and capture recreation failed; restart worker");}
+            // A display mid mode change (HDR switched on or off) can refuse
+            // a new duplication for a moment. The profile is re-read every
+            // second, so a failed switch is tried again then; only a change
+            // that cannot be followed for 10 s ends capture. An ineligible
+            // Desktop Duplication window waits without a deadline.
+            if(!wgc&&!active_->foreground()){config_=std::move(previous);reprofile_.reset();active_->set_frame_rate(fps);return;}
+            if(!reprofile_.pending())reprofile_.lost(std::chrono::steady_clock::now());
+            bool switched=false;
+            try{
+                switched=reprofile_.attempt([&]{
+                    if(!switch_backend(wgc))throw std::runtime_error("Recording display changed and capture recreation failed; restart worker");
+                },std::chrono::steady_clock::now());
+            }catch(...){config_=std::move(previous);throw;}
+            if(!switched){config_=std::move(previous);active_->set_frame_rate(fps);return;}
             monitored_=monitor;
         }
         active_->set_frame_rate(fps);
     }
     void stop()override{active_->stop();}
-    RecordingSourceHealth diagnostics()const override{return active_->diagnostics();}
+    RecordingSourceHealth diagnostics()const override{auto result=active_->diagnostics();result.profile_switch_failures=reprofile_.failures;return result;}
     CaptureRect content_bounds()const override{return active_->content_bounds();}
     bool recover()override{
         if(active_->recover())return true;

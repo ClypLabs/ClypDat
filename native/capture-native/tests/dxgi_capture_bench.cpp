@@ -8,7 +8,7 @@
 // mode keeps capturing, measures each, and restores the original mode. The
 // change is dynamic (never written to the registry).
 //
-// dxgi_capture_bench <seconds> <WxH@fps[,...]> <cursor on|off> [--reference] [--display NAME] [--rotate]
+// dxgi_capture_bench <seconds> <WxH@fps[,...]> <cursor on|off> [--reference] [--display NAME] [--rotate] [--hdr]
 #include "recording_capture.h"
 #include <Windows.h>
 #include <d3d11_4.h>
@@ -153,10 +153,10 @@ std::vector<std::string> split(const std::string& text) { std::vector<std::strin
 int main(int argc, char** argv) {
     try {
         av_log_set_level(AV_LOG_ERROR); std::cout << std::unitbuf << std::fixed << std::setprecision(2);
-        if (argc < 4) { std::cerr << "dxgi_capture_bench <seconds> <WxH@fps[,...]> <cursor on|off> [--reference] [--display NAME] [--rotate]\n"; return 2; }
+        if (argc < 4) { std::cerr << "dxgi_capture_bench <seconds> <WxH@fps[,...]> <cursor on|off> [--reference] [--display NAME] [--rotate] [--hdr]\n"; return 2; }
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2); // Physical pixels, as the recorder sees them.
-        const int seconds = std::atoi(argv[1]); const bool cursor = std::string(argv[3]) == "on"; bool reference = false, rotate = false; std::wstring display_name;
-        for (int i = 4; i < argc; ++i) { const std::string a = argv[i]; if (a == "--reference") reference = true; else if (a == "--rotate") rotate = true;
+        const int seconds = std::atoi(argv[1]); const bool cursor = std::string(argv[3]) == "on"; bool reference = false, rotate = false, hdr = false; std::wstring display_name;
+        for (int i = 4; i < argc; ++i) { const std::string a = argv[i]; if (a == "--reference") reference = true; else if (a == "--rotate") rotate = true; else if (a == "--hdr") hdr = true;
             else if (a == "--display" && i + 1 < argc) { const std::string n = argv[++i]; display_name.assign(n.begin(), n.end()); } }
         const double hz = tsc_hz();
         const auto display = find_display(display_name);
@@ -166,7 +166,7 @@ int main(int argc, char** argv) {
             RecordingCaptureConfig config; int width = 0, height = 0, fps = 0;
             if (sscanf_s(mode.c_str(), "%dx%d@%d", &width, &height, &fps) != 3) throw std::runtime_error("Bad mode " + mode);
             config.width = width; config.height = height; config.fps = fps; config.bitrate_mbps = 25; config.variable_frame_rate = true;
-            config.prefer_dxgi = true; config.capture_cursor = cursor; config.dxgi_reference_path = reference; config.monitor = reinterpret_cast<uintptr_t>(display.monitor);
+            config.prefer_dxgi = true; config.capture_cursor = cursor; config.dxgi_reference_path = reference; config.capture_hdr = hdr; config.monitor = reinterpret_cast<uintptr_t>(display.monitor);
             RecordingCapture capture(config, {}); capture.start();
             std::this_thread::sleep_for(4s);
             const auto before = capture.health(); const auto cycles = thread_cycles(); const auto process = process_ticks(); engines.start();

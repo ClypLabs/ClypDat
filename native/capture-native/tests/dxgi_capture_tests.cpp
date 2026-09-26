@@ -7,14 +7,18 @@
 #include "cursor_compositor.h"
 #include "recording_capture.h"
 #include <Windows.h>
+#include <DirectXPackedVector.h>
 #include <d3d11_4.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
 #include <algorithm>
 #include <climits>
 #include <functional>
+#include <array>
 #include <cstring>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
@@ -217,6 +221,69 @@ void hdr_matches_per_frame_path(const Device& d) {
         }
     }
     std::cout << "hdr: pooled crop tone-map identical to the per-frame FP16 path at 80/203/480 nits\n";
+}
+
+// The tone map against a CPU reference of its formula (scale by 80/white,
+// compress above 1 keeping the hue, sRGB-encode), at 80/203/480 nits: random
+// scRGB over the FP16 range, and SDR content as DWM composes it (sRGB code
+// to linear, times white/80), which must come back as the code it was. Then
+// a real HDR display's FP16 rows of the hdr_validation pattern (DXGI, SDR
+// white 240 nits) against the pixels GDI drew.
+struct ToneMapError { int max = 0; double mean = 0, differing = 0; };
+ToneMapError tone_map_error(const std::vector<uint8_t>& got, const std::vector<uint8_t>& want) {
+    ToneMapError e; size_t n = 0, off = 0; double sum = 0;
+    for (size_t i = 0; i < got.size(); ++i) { if (i % 4 == 3) continue; const int d = std::abs(int(got[i]) - int(want[i])); e.max = std::max(e.max, d); sum += d; off += d != 0; ++n; }
+    e.mean = sum / double(n); e.differing = 100.0 * double(off) / double(n); return e;
+}
+std::array<uint8_t, 3> tone_map_cpu(const float* rgb, float white) {
+    const float k = std::stof(std::to_string(80.f / (white > 0 && white < 10000 ? white : 80.f))); // The literal compiled into the shader.
+    float c[3]{std::max(rgb[0], 0.f) * k, std::max(rgb[1], 0.f) * k, std::max(rgb[2], 0.f) * k};
+    const float m = std::max({c[0], c[1], c[2]}); if (m > 1) for (auto& v : c) v /= m;
+    std::array<uint8_t, 3> out{};
+    for (int i = 0; i < 3; ++i) { const float s = c[i] <= .0031308f ? c[i] * 12.92f : 1.055f * std::pow(c[i], 1 / 2.4f) - .055f; out[size_t(i)] = uint8_t(std::lround(std::clamp(s, 0.f, 1.f) * 255)); }
+    return out;
+}
+void tone_map_reference(const Device& d) {
+    using namespace DirectX::PackedVector;
+    const int width = 256, height = 64; std::mt19937 random(21);
+    for (const float white : {80.f, 203.f, 480.f}) {
+        // Rows 0-31 random scRGB, rows 32-63 SDR content (every code, grey and each channel alone).
+        std::vector<uint16_t> half(size_t(width) * height * 4); std::vector<uint8_t> cpu(half.size()), sdr(half.size());
+        for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+            const size_t i = (size_t(y) * width + x) * 4; float rgb[3];
+            if (y < 32) for (auto& v : rgb) v = std::uniform_real_distribution<float>(-.2f, 12.5f)(random);
+            else {
+                const int code = x, channel = (y - 32) % 4; const float v = code / 255.f; const float linear = (v <= .04045f ? v / 12.92f : std::pow((v + .055f) / 1.055f, 2.4f)) * white / 80;
+                for (int c = 0; c < 3; ++c) rgb[c] = channel == 3 || channel == c ? linear : 0;
+                sdr[i] = uint8_t(channel == 3 || channel == 2 ? code : 0); sdr[i + 1] = uint8_t(channel == 3 || channel == 1 ? code : 0); sdr[i + 2] = uint8_t(channel == 3 || channel == 0 ? code : 0); sdr[i + 3] = 255;
+            }
+            for (int c = 0; c < 3; ++c) half[i + size_t(c)] = XMConvertFloatToHalf(rgb[c]); half[i + 3] = XMConvertFloatToHalf(1);
+            float stored[3]; for (int c = 0; c < 3; ++c) stored[c] = XMConvertHalfToFloat(half[i + size_t(c)]);
+            const auto mapped = tone_map_cpu(stored, white); cpu[i] = mapped[2]; cpu[i + 1] = mapped[1]; cpu[i + 2] = mapped[0]; cpu[i + 3] = 255;
+        }
+        auto input = texture(d, width, height, DXGI_FORMAT_R16G16B16A16_FLOAT, half.data(), width * 8);
+        CapturedFrameStore store(d.device.Get(), 2, white); const auto gpu = read(store.copy(input.Get()).get());
+        const std::vector<uint8_t> gpu_random(gpu.begin(), gpu.begin() + ptrdiff_t(width) * 32 * 4), cpu_random(cpu.begin(), cpu.begin() + ptrdiff_t(width) * 32 * 4);
+        const std::vector<uint8_t> gpu_sdr(gpu.begin() + ptrdiff_t(width) * 32 * 4, gpu.end()), want_sdr(sdr.begin() + ptrdiff_t(width) * 32 * 4, sdr.end());
+        const auto against_cpu = tone_map_error(gpu, cpu), round_trip = tone_map_error(gpu_sdr, want_sdr);
+        std::cout << "tone map at " << white << " nits: GPU vs CPU reference max " << against_cpu.max << " mean " << against_cpu.mean << " differing " << against_cpu.differing
+                  << "%; SDR codes round trip max " << round_trip.max << " mean " << round_trip.mean << " differing " << round_trip.differing << "%\n";
+        // GPU pow and exp2 differ from the CPU by at most one code on a few channels.
+        CHECK(against_cpu.max <= 1 && against_cpu.differing < 5 && round_trip.max <= 1 && round_trip.differing < 5);
+        (void)gpu_random; (void)cpu_random;
+    }
+    // The real display.
+    std::ifstream file(std::filesystem::path(CLYPDAT_TEST_FIXTURES) / "hdr_display_240nits.bin", std::ios::binary); CHECK(file.good());
+    uint32_t header[4]{}; float white = 0; file.read(reinterpret_cast<char*>(header), sizeof(header)); file.read(reinterpret_cast<char*>(&white), 4);
+    CHECK(header[0] == 0x36315046u && header[1] > 0 && header[2] > 0);
+    const int w = int(header[1]), h = int(header[2]);
+    std::vector<uint16_t> rows(size_t(w) * h * 4); std::vector<uint8_t> drawn(size_t(w) * h * 4);
+    file.read(reinterpret_cast<char*>(rows.data()), std::streamsize(rows.size() * 2)); file.read(reinterpret_cast<char*>(drawn.data()), std::streamsize(drawn.size())); CHECK(file.good());
+    auto input = texture(d, w, h, DXGI_FORMAT_R16G16B16A16_FLOAT, rows.data(), UINT(w) * 8);
+    CapturedFrameStore store(d.device.Get(), 2, white); const auto e = tone_map_error(read(store.copy(input.Get()).get()), drawn);
+    std::cout << "tone map of a real " << white << "-nit HDR display frame (" << w << "x" << h << " pattern rows) against the drawn pixels: max " << e.max << " mean " << e.mean
+              << " differing " << e.differing << "%\n";
+    CHECK(e.max <= 1 && e.differing < 5);
 }
 
 // The orientation contract (output_orientation.h): for every rotation and
@@ -579,6 +646,7 @@ int main(int argc, char** argv) {
         cursor_caching(device);
         pooled_copies(device);
         hdr_matches_per_frame_path(device);
+        tone_map_reference(device);
         orientation_contract();
         rotated_copies(device);
         reopen_policy();

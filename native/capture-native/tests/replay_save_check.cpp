@@ -4,8 +4,9 @@
 // the clip: first packet a keyframe, every frame decodes, a mid-clip seek
 // decodes, and audio and video start and end together.
 //
-// replay_save_check <history seconds> <work directory> <ffmpeg.exe> [--reference]
-// --reference prunes the history with the original full scan.
+// replay_save_check <history seconds> <work directory> <ffmpeg.exe> [--reference] [--hdr]
+// --reference prunes the history with the original full scan; --hdr asks for
+// HDR conversion as the app does (FP16 capture on an HDR display).
 // Build with CLYPDAT_BASELINE for revisions without VideoHistory::stats.
 #include "recorder_session.h"
 #include <Windows.h>
@@ -117,10 +118,11 @@ int main(int argc, char** argv) {
         LARGE_INTEGER counter{}, frequency{}; QueryPerformanceCounter(&counter); QueryPerformanceFrequency(&frequency);
         config.capture.qpc_anchor = counter.QuadPart; config.capture.qpc_frequency = frequency.QuadPart; config.capture.monotonic_anchor_us = monotonic_us();
 #ifndef CLYPDAT_BASELINE
-        config.video_history.reference_pruning = argc > 4 && std::string(argv[4]) == "--reference";
+        for (int i = 4; i < argc; ++i) if (std::string(argv[i]) == "--reference") config.video_history.reference_pruning = true;
 #endif
         config.history_seconds = history; config.work_directory = directory / L"work"; config.ffmpeg = argv[3];
         config.capture_input = false; config.audio_lanes = {{"game", "Game Audio", 2, 1, false}};
+        for (int i = 4; i < argc; ++i) if (std::string(argv[i]) == "--hdr") config.capture.capture_hdr = true;
         RecorderSession recorder(config);
         recorder.start();
         // A continuous 440 Hz tone in 20 ms blocks stamped with capture time.
@@ -161,7 +163,7 @@ int main(int argc, char** argv) {
         stop = true; audio.join(); check(audio_error.empty(), "Audio submission failed: " + audio_error); check(recorder.stop(), "Recorder did not stop");
         const auto clip = inspect(path);
         double sum_output = 0, sum_fresh = 0; for (size_t i = 0; i < output.size(); ++i) { sum_output += output[i]; sum_fresh += fresh[i]; }
-        std::cout << "history=" << history << "s source=" << h.source << " encoder=" << h.encoder << "\n  capture: output=" << sum_output / output.size() << " fresh=" << sum_fresh / fresh.size()
+        std::cout << "history=" << history << "s source=" << h.source << (h.source_details.hdr_conversion ? " (HDR, FP16 tone-mapped)" : "") << " encoder=" << h.encoder << "\n  capture: output=" << sum_output / output.size() << " fresh=" << sum_fresh / fresh.size()
                   << " fps (min output " << *std::min_element(output.begin(), output.end()) << ") drops=" << (h.backpressure_drops + h.replaced - drops_start)
                   << " backpressure=" << h.backpressure_drops << " completion p50=" << completion50 << " p95=" << completion95 << " ms"
                   << "\n  encoding thread with full history: " << encoding_ms << " ms/s (" << encoding_ms / 10 << "% of a core)"

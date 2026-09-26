@@ -74,6 +74,9 @@ struct RecordingSourceHealth {
     // Desktop Duplication reopened after losing access (a mode, rotation or
     // desktop change), and reopen attempts that failed and were retried.
     uint64_t duplication_reopens = 0, duplication_reopen_failures = 0;
+    // Display profile changes (HDR, SDR white level, monitor) whose source
+    // recreation failed and was retried a second later.
+    uint64_t profile_switch_failures = 0;
     uint64_t adapter_luid = 0;
     std::wstring adapter;
     bool update_interval_available = false;

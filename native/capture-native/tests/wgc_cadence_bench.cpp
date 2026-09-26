@@ -4,7 +4,7 @@
 // its WGC MinUpdateInterval fixed at a number of display ticks (0 = the
 // build's policy). One line per target, ticks and source rate.
 //
-// wgc_cadence_bench <target fps> <ticks,...> <source fps,...> [seconds] [--cfr] [--jitter fraction]
+// wgc_cadence_bench <target fps> <ticks,...> <source fps,...> [seconds] [--cfr] [--jitter fraction] [--dwm] [--hdr]
 //   source fps "refresh" presents on every display refresh.
 #include "recording_capture.h"
 #include <Windows.h>
@@ -152,16 +152,16 @@ double tsc_hz() { LARGE_INTEGER f{}, a{}, b{}; QueryPerformanceFrequency(&f); Qu
 int main(int argc, char** argv) {
     try {
         av_log_set_level(AV_LOG_ERROR); std::cout << std::unitbuf << std::fixed << std::setprecision(2);
-        if (argc < 4) { std::cerr << "wgc_cadence_bench <target fps> <ticks,...> <source fps,...> [seconds] [--cfr] [--jitter fraction]\n"; return 2; }
+        if (argc < 4) { std::cerr << "wgc_cadence_bench <target fps> <ticks,...> <source fps,...> [seconds] [--cfr] [--jitter fraction] [--dwm] [--hdr]\n"; return 2; }
         const int target = std::atoi(argv[1]); const int seconds = argc > 4 && argv[4][0] != '-' ? std::atoi(argv[4]) : 12;
-        bool cfr = false, dwm = false; double jitter = 0;
-        for (int i = 4; i < argc; ++i) { const std::string a = argv[i]; if (a == "--cfr") cfr = true; else if (a == "--dwm") dwm = true; else if (a == "--jitter" && i + 1 < argc) jitter = std::atof(argv[++i]); }
+        bool cfr = false, dwm = false, hdr = false; double jitter = 0;
+        for (int i = 4; i < argc; ++i) { const std::string a = argv[i]; if (a == "--cfr") cfr = true; else if (a == "--dwm") dwm = true; else if (a == "--hdr") hdr = true; else if (a == "--jitter" && i + 1 < argc) jitter = std::atof(argv[++i]); }
         const double hz = tsc_hz();
         Presenter presenter; GpuEngines engines;
         for (const auto& ticks_text : split(argv[2])) {
             const int ticks = std::stoi(ticks_text);
             RecordingCaptureConfig config; config.width = 2560; config.height = 1440; config.fps = target; config.bitrate_mbps = 25;
-            config.variable_frame_rate = !cfr; config.wgc_update_ticks = ticks; config.wgc_dwm_timing = dwm;
+            config.variable_frame_rate = !cfr; config.wgc_update_ticks = ticks; config.wgc_dwm_timing = dwm; config.capture_hdr = hdr;
             RecordingCapture capture(config, {}); capture.start();
             for (const auto& source_text : split(argv[3])) {
                 const double rate = source_text == "refresh" ? -1 : std::stod(source_text);

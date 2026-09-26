@@ -162,7 +162,8 @@ endif()
 
 add_executable(ClypDat.Capture.Native.DxgiCaptureTests tests/dxgi_capture_tests.cpp)
 target_link_libraries(ClypDat.Capture.Native.DxgiCaptureTests PRIVATE RecorderCore)
-target_compile_definitions(ClypDat.Capture.Native.DxgiCaptureTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_definitions(ClypDat.Capture.Native.DxgiCaptureTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN
+    CLYPDAT_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 set_target_properties(ClypDat.Capture.Native.DxgiCaptureTests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_test(NAME ClypDat.Capture.Native.DxgiCapture COMMAND ClypDat.Capture.Native.DxgiCaptureTests)
@@ -213,6 +214,13 @@ add_executable(ClypDat.Capture.Native.ReplaySaveCheck tests/replay_save_check.cp
 target_link_libraries(ClypDat.Capture.Native.ReplaySaveCheck PRIVATE RecorderCore)
 target_compile_definitions(ClypDat.Capture.Native.ReplaySaveCheck PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 set_target_properties(ClypDat.Capture.Native.ReplaySaveCheck PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# Manual: HDR capture on a real display (switches HDR and SDR white level, then restores them).
+add_executable(ClypDat.Capture.Native.HdrValidation tests/hdr_validation.cpp)
+target_link_libraries(ClypDat.Capture.Native.HdrValidation PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.HdrValidation PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.HdrValidation PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Manual: WGC producer cadence on the real primary display.
