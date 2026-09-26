@@ -870,6 +870,18 @@ try {
         Write-Host "Removed legacy local build: $legacyInstallDirectory"
     }
 
+    # Windows must not believe ClypDat is installed anywhere but here: the
+    # installer (release updates included) installs wherever InstallDir says,
+    # and the Start menu launches whatever its shortcut names.
+    Import-Module (Join-Path $repoRoot 'eng\LocalInstallRegistration.psm1') -Force
+    $registrationChanges = @(Repair-ClypDatInstallRegistration -InstallDirectory $installDirectory)
+    if ($registrationChanges.Count -eq 0) {
+        Write-Host "Install registration already points at $installDirectory."
+    }
+    foreach ($change in $registrationChanges) {
+        Write-Host "Install registration: $($change.Item): '$($change.Before)' -> '$($change.After)'"
+    }
+
     Write-Host 'Starting updated ClypDat.'
     Start-Process -FilePath $installedExe -ArgumentList '--publish-restart'
 }
