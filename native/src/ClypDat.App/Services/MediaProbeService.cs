@@ -202,12 +202,20 @@ public sealed class MediaProbeService
     // is the cheap, fast part of a full probe: a cache hit is just a JSON
     // read, and even a real ffprobe call is far lighter than image
     // generation - see HydrateLibraryClipsAsync for why that split matters.
-    public async Task<MediaFileInfo> ProbeMetadataAsync(string filePath)
+    public async Task<MediaFileInfo> ProbeMetadataAsync(string filePath) =>
+        (await ProbeMetadataDetailedAsync(filePath).ConfigureAwait(false)).Media;
+
+    // ProbeMetadataAsync, plus why its answer cannot open the clip (Error) and
+    // whether it came from the probe cache. foreground: somebody is waiting on
+    // this one clip, so its ffprobe does not queue behind background ffmpeg
+    // work on ProbeProcessGate. bypassCache: read the file itself even when a
+    // cached answer exists.
+    internal async Task<MediaMetadataProbe> ProbeMetadataDetailedAsync(string filePath, bool foreground = false, bool bypassCache = false)
     {
         await FullSessionRecovery.RecoverAsync(filePath).ConfigureAwait(false);
         RecordingFileOwnership.ThrowIfActive(filePath);
         using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
-        if (processingRead is null) return CreateLibraryStub(filePath);
+        if (processingRead is null) return new MediaMetadataProbe(CreateLibraryStub(filePath), "The Spotify overlay is still being added.", false);
         var info = new FileInfo(filePath);
         var thumbnailPath = GetThumbnailPath(filePath);
         var filmstripPath = GetFilmstripPath(filePath);
@@ -216,10 +224,10 @@ public sealed class MediaProbeService
         // its duration/tracks/resolution can't have changed - skip ffprobe
         // entirely instead of re-reading the whole file's stream info on
         // every single library load (the main cost on a network drive).
-        var cached = TryReadProbeCache(filePath, info);
+        var cached = bypassCache ? null : TryReadProbeCache(filePath, info);
         if (cached is not null)
         {
-            return new MediaFileInfo(
+            return new MediaMetadataProbe(new MediaFileInfo(
                 Path.GetFileNameWithoutExtension(filePath),
                 filePath,
                 info.CreationTimeUtc,
@@ -233,17 +241,18 @@ public sealed class MediaProbeService
                 cached.CaptureBackend,
                 File.Exists(filmstripPath) ? filmstripPath : string.Empty,
                 info.LastWriteTimeUtc,
-                cached.Tracks.Any(track => track.Type == "video"), cached.SpotifyOverlayBurned);
+                cached.Tracks.Any(track => track.Type == "video"), cached.SpotifyOverlayBurned), null, true);
         }
 
+        // -v error, not quiet: a failed probe says why on stderr.
         var result = await RunProcessAsync("ffprobe", new[]
         {
-            "-v", "quiet",
+            "-v", "error",
             "-print_format", "json",
             "-show_format",
             "-show_streams",
             filePath
-        }).ConfigureAwait(false);
+        }, foreground: foreground).ConfigureAwait(false);
 
         TimeSpan duration = TimeSpan.Zero;
         var tracks = new List<MediaTrackInfo>();
@@ -252,77 +261,90 @@ public sealed class MediaProbeService
         var fps = 0d;
         var captureBackend = string.Empty;
         var spotifyOverlayBurned = false;
+        string? error = result.ExitCode != 0
+            ? $"ffprobe exited with code {result.ExitCode}: {FirstLine(result.Error)}"
+            : string.IsNullOrWhiteSpace(result.Output) ? "ffprobe returned nothing." : null;
 
-        if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
+        if (error is null)
         {
-            using var doc = JsonDocument.Parse(result.Output);
-            var steelSeriesAudioTracks = Array.Empty<SteelSeriesAudioTrack>();
-            if (doc.RootElement.TryGetProperty("format", out var format) &&
-                format.TryGetProperty("duration", out var durationJson))
+            try
             {
-                if (double.TryParse(durationJson.GetString(), out var seconds))
+                using var doc = JsonDocument.Parse(result.Output);
+                var steelSeriesAudioTracks = Array.Empty<SteelSeriesAudioTrack>();
+                if (doc.RootElement.TryGetProperty("format", out var format) &&
+                    format.TryGetProperty("duration", out var durationJson))
                 {
-                    duration = TimeSpan.FromSeconds(Math.Max(0, seconds));
+                    if (double.TryParse(durationJson.GetString(), out var seconds))
+                    {
+                        duration = TimeSpan.FromSeconds(Math.Max(0, seconds));
+                    }
+
+                    steelSeriesAudioTracks = ReadSteelSeriesAudioTracks(format);
+                    if (format.TryGetProperty("tags", out var provenanceTags))
+                        spotifyOverlayBurned = provenanceTags.EnumerateObject().Any(tag =>
+                            tag.Name.Equals(SpotifyOverlayBurner.BurnMarker, StringComparison.OrdinalIgnoreCase) && tag.Value.GetString() == "1");
+                    if (format.TryGetProperty("tags", out var formatTags))
+                    {
+                        var comment = GetString(formatTags, "comment");
+                        var prefixes = new[]
+                        {
+                            ClipMetadataTagger.BackendTagKey + "=",
+                            ClipMetadataTagger.LegacyBackendTagKey + "="
+                        };
+                        var prefix = prefixes.FirstOrDefault(candidate => comment.StartsWith(candidate, StringComparison.Ordinal));
+                        if (prefix is not null)
+                        {
+                            captureBackend = comment[prefix.Length..];
+                        }
+                    }
                 }
 
-                steelSeriesAudioTracks = ReadSteelSeriesAudioTracks(format);
-                if (format.TryGetProperty("tags", out var provenanceTags))
-                    spotifyOverlayBurned = provenanceTags.EnumerateObject().Any(tag =>
-                        tag.Name.Equals(SpotifyOverlayBurner.BurnMarker, StringComparison.OrdinalIgnoreCase) && tag.Value.GetString() == "1");
-                if (format.TryGetProperty("tags", out var formatTags))
+                if (doc.RootElement.TryGetProperty("streams", out var streams))
                 {
-                    var comment = GetString(formatTags, "comment");
-                    var prefixes = new[]
+                    var audioIndex = 0;
+                    foreach (var stream in streams.EnumerateArray())
                     {
-                        ClipMetadataTagger.BackendTagKey + "=",
-                        ClipMetadataTagger.LegacyBackendTagKey + "="
-                    };
-                    var prefix = prefixes.FirstOrDefault(candidate => comment.StartsWith(candidate, StringComparison.Ordinal));
-                    if (prefix is not null)
-                    {
-                        captureBackend = comment[prefix.Length..];
+                        var codecType = GetString(stream, "codec_type");
+                        var codecName = GetString(stream, "codec_name");
+                        var index = GetInt(stream, "index");
+                        var audioTrack = codecType == "audio" && audioIndex < steelSeriesAudioTracks.Length
+                            ? steelSeriesAudioTracks[audioIndex]
+                            : null;
+                        var label = audioTrack?.Name ?? BuildTrackLabel(stream, codecType, index);
+                        var volumePercent = audioTrack is null
+                            ? 100
+                            : Math.Clamp(audioTrack.Muted ? 0 : audioTrack.Volume * 100, 0, 150);
+
+                        if (codecType == "video")
+                        {
+                            width = Math.Max(width, GetInt(stream, "width"));
+                            height = Math.Max(height, GetInt(stream, "height"));
+                            // avg_frame_rate is a mean over the whole file, so a few
+                            // dropped frames drag a steady capture below its real
+                            // rate. See FrameRateNormalizer.
+                            fps = Math.Max(fps, FrameRateNormalizer.Normalize(ParseRate(GetString(stream, "avg_frame_rate"))));
+                        }
+
+                        if (codecType is "video" or "audio" or "subtitle")
+                        {
+                            tracks.Add(new MediaTrackInfo(index, codecType, codecName, label, volumePercent));
+                        }
+
+                        if (codecType == "audio")
+                        {
+                            audioIndex++;
+                        }
                     }
                 }
             }
-
-            if (doc.RootElement.TryGetProperty("streams", out var streams))
+            catch (JsonException parseError)
             {
-                var audioIndex = 0;
-                foreach (var stream in streams.EnumerateArray())
-                {
-                    var codecType = GetString(stream, "codec_type");
-                    var codecName = GetString(stream, "codec_name");
-                    var index = GetInt(stream, "index");
-                    var audioTrack = codecType == "audio" && audioIndex < steelSeriesAudioTracks.Length
-                        ? steelSeriesAudioTracks[audioIndex]
-                        : null;
-                    var label = audioTrack?.Name ?? BuildTrackLabel(stream, codecType, index);
-                    var volumePercent = audioTrack is null
-                        ? 100
-                        : Math.Clamp(audioTrack.Muted ? 0 : audioTrack.Volume * 100, 0, 150);
-
-                    if (codecType == "video")
-                    {
-                        width = Math.Max(width, GetInt(stream, "width"));
-                        height = Math.Max(height, GetInt(stream, "height"));
-                        // avg_frame_rate is a mean over the whole file, so a few
-                        // dropped frames drag a steady capture below its real
-                        // rate. See FrameRateNormalizer.
-                        fps = Math.Max(fps, FrameRateNormalizer.Normalize(ParseRate(GetString(stream, "avg_frame_rate"))));
-                    }
-
-                    if (codecType is "video" or "audio" or "subtitle")
-                    {
-                        tracks.Add(new MediaTrackInfo(index, codecType, codecName, label, volumePercent));
-                    }
-
-                    if (codecType == "audio")
-                    {
-                        audioIndex++;
-                    }
-                }
+                error = $"ffprobe output could not be read: {parseError.Message}";
             }
         }
+
+        error ??= duration <= TimeSpan.Zero ? $"ffprobe found no duration. {FirstLine(result.Error)}".Trim()
+            : tracks.Count == 0 ? "ffprobe found no audio or video streams." : null;
 
         var media = new MediaFileInfo(
             Path.GetFileNameWithoutExtension(filePath),
@@ -345,8 +367,11 @@ public sealed class MediaProbeService
             WriteProbeCache(filePath, info, media);
         }
 
-        return media;
+        return new MediaMetadataProbe(media, error, false);
     }
+
+    private static string FirstLine(string text) =>
+        text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? string.Empty;
 
     // 1: frame rates are normalised (see FrameRateNormalizer) rather than stored
     // as the raw avg_frame_rate.
@@ -1626,26 +1651,34 @@ public sealed class MediaProbeService
     // belong behind background hydration on the gate above.
     private static readonly SemaphoreSlim ForegroundWaveformGate = new(1, 1);
 
+    // The same for a clicked card's metadata probe (ClipMetadataHydrator): one
+    // ffprobe the user is waiting on does not queue behind the background work
+    // it is trying to get ahead of.
+    private static readonly SemaphoreSlim ForegroundProbeGate = new(1, 1);
+
     private static async Task<ProcessResult> RunProcessAsync(
         string fileName,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool foreground = false)
     {
-        await ProbeProcessGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = foreground ? ForegroundProbeGate : ProbeProcessGate;
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await RunProcessCoreAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
+            return await RunProcessCoreAsync(fileName, arguments, cancellationToken, foreground).ConfigureAwait(false);
         }
         finally
         {
-            ProbeProcessGate.Release();
+            gate.Release();
         }
     }
 
     private static async Task<ProcessResult> RunProcessCoreAsync(
         string fileName,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool foreground = false)
     {
         var startInfo = new ProcessStartInfo(FfmpegPathResolver.Resolve(fileName))
         {
@@ -1678,7 +1711,8 @@ public sealed class MediaProbeService
             // speed whenever a core is actually free, it only yields under
             // real contention - same approach AudioCapturePipeline already
             // uses for its own background mux/concat processes.
-            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+            // A probe the user is waiting on keeps normal priority.
+            if (!foreground) process.PriorityClass = ProcessPriorityClass.BelowNormal;
         }
         catch
         {
@@ -1793,6 +1827,10 @@ internal sealed record WaveformCacheEntry(
     long SizeBytes,
     long LastWriteTimeUtcTicks,
     Dictionary<int, double[]> Peaks);
+
+// One metadata probe: the media, why it cannot open the clip (null when it
+// can), and whether it was answered from the probe cache.
+internal sealed record MediaMetadataProbe(MediaFileInfo Media, string? Error, bool FromCache);
 
 internal sealed record ProbeCacheEntry(
     TimeSpan Duration,

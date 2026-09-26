@@ -22,6 +22,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     private bool _previewImageDirty = true;
     private int _loadedPreviewWidth;
     private string _busyOverlayText = string.Empty;
+    private ClipMetadataState _metadataState = ClipMetadataState.Stub;
+    private string? _metadataError;
+    private bool _busyOverlayShowsMetadataLoading;
     private CancellationTokenSource? _previewLoadCts;
     private int _previewLoadVersion;
     private long _totalSizeBytes;
@@ -72,11 +75,12 @@ public sealed class ClipCardViewModel : ViewModelBase
     public string Path => Media.Path;
 
     // Set while something is working on this clip and it cannot be watched yet:
-    // a queued/running parameter-set repair, or a full session whose audio is
-    // still being muxed in. The card dims its thumbnail and shows this text over
-    // it - saying so on the tile itself beats a progress bar elsewhere on the
-    // page. Two writers, and finalize wins: a session mid-mux is not enumerable
-    // for repair, so in practice they cannot collide.
+    // a queued/running parameter-set repair, a full session whose audio is
+    // still being muxed in, or a clicked card's metadata probe. The card dims
+    // its thumbnail and shows this text over it - saying so on the tile itself
+    // beats a progress bar elsewhere on the page. Finalize wins over repair: a
+    // session mid-mux is not enumerable for repair, so in practice they cannot
+    // collide; the metadata probe only uses it when nothing else is.
     public string BusyOverlayText
     {
         get => _busyOverlayText;
@@ -101,12 +105,68 @@ public sealed class ClipCardViewModel : ViewModelBase
     public bool IsSpotifyOverlayFailed => SpotifyProcessingPaths.Failed(Path);
     public bool IsOpenable => IsHydrated && !RecordingFileOwnership.IsActive(Path) && !IsSpotifyProcessing;
 
+    // Why the card cannot open, each reason with its own sentence
+    // (ClipOpenMessages) - a missing probe is fixed by probing it, the others
+    // by waiting.
+    public ClipOpenBlocker OpenBlocker =>
+        RecordingFileOwnership.IsActive(Path) ? ClipOpenBlocker.Finalizing
+        : IsSpotifyProcessing ? ClipOpenBlocker.SpotifyProcessing
+        : IsHydrated ? ClipOpenBlocker.None
+        : _metadataState == ClipMetadataState.Failed ? ClipOpenBlocker.MetadataFailed
+        : ClipOpenBlocker.MetadataMissing;
+
+    public ClipMetadataState MetadataState => IsHydrated ? ClipMetadataState.Ready
+        : _metadataState == ClipMetadataState.Ready ? ClipMetadataState.Stub : _metadataState;
+
+    // ffprobe's reason for the last failed probe, for the log; the card itself
+    // only ever says ClipOpenMessages.Failed.
+    internal string? MetadataError => _metadataError;
+
+    internal void SetMetadataState(ClipMetadataState state, string? error = null)
+    {
+        _metadataState = state;
+        _metadataError = state == ClipMetadataState.Failed ? error : null;
+        if (state == ClipMetadataState.Loading)
+        {
+            if (!IsBusyOverlayVisible)
+            {
+                _busyOverlayShowsMetadataLoading = true;
+                BusyOverlayText = ClipOpenMessages.Loading;
+            }
+        }
+        else if (_busyOverlayShowsMetadataLoading)
+        {
+            _busyOverlayShowsMetadataLoading = false;
+            if (BusyOverlayText == ClipOpenMessages.Loading) BusyOverlayText = string.Empty;
+        }
+
+        OnPropertyChanged(nameof(MetadataState));
+        OnPropertyChanged(nameof(OpenBlocker));
+        OnPropertyChanged(nameof(IsOpenable));
+    }
+
+    // A probe's answer: usable media replaces the card's (the path check
+    // guards a rename landing while the probe ran), and the state records
+    // whether the card is ready, unreadable, or still waiting on something.
+    internal void ApplyMetadata(ClipMetadataResult result, bool reloadSidecars)
+    {
+        if (result.Media is { } media && ClipMetadataResult.IsUsable(media) && string.Equals(media.Path, Path, StringComparison.OrdinalIgnoreCase))
+        {
+            UpdateMedia(media, reloadSidecars);
+        }
+
+        SetMetadataState(IsHydrated ? ClipMetadataState.Ready
+            : result.Blocker == ClipOpenBlocker.MetadataFailed ? ClipMetadataState.Failed
+            : ClipMetadataState.Stub, result.Error);
+    }
+
     internal void RefreshSpotifyProcessing()
     {
         OnPropertyChanged(nameof(IsSpotifyProcessing));
         OnPropertyChanged(nameof(SpotifyProcessingText));
         OnPropertyChanged(nameof(IsSpotifyOverlayFailed));
         OnPropertyChanged(nameof(IsOpenable));
+        OnPropertyChanged(nameof(OpenBlocker));
     }
     public DateTimeOffset CreatedAt => IsSteelSeriesImport && _clipInfo?.CapturedAt is { } capturedAt ? capturedAt : Media.CreatedAt;
     public TimeSpan Duration => Media.Duration;
@@ -116,11 +176,9 @@ public sealed class ClipCardViewModel : ViewModelBase
     public long TotalSizeBytes => _totalSizeBytes;
     public DateTime LastWriteTimeUtc => Media.LastWriteTimeUtc;
 
-    // False while HydrateLibraryClipsAsync hasn't reached this card yet (or
-    // its probe genuinely failed) - same stub-detection check OpenClipAsync
-    // already used to decide whether to re-probe on open. Lets the click
-    // handler tell the user to wait instead of opening an editor with no
-    // duration/tracks to work with.
+    // False until this card has been probed - by HydrateLibraryClipsAsync, a
+    // post-save, or a click (ClipOpenFlow) - or when its probe failed
+    // (MetadataState says which). The editor needs the duration and tracks.
     public bool IsHydrated => Duration > TimeSpan.Zero && Media.Tracks.Count > 0;
     private DateTimeOffset CreatedAtLocal => CreatedAt.ToLocalTime();
     public string DateLabel => CreatedAtLocal.ToString("MMM d, yyyy h:mm tt");
@@ -605,6 +663,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(Duration));
         OnPropertyChanged(nameof(IsHydrated));
         OnPropertyChanged(nameof(IsOpenable));
+        OnPropertyChanged(nameof(OpenBlocker));
+        OnPropertyChanged(nameof(MetadataState));
         OnPropertyChanged(nameof(SizeBytes));
         OnPropertyChanged(nameof(TotalSizeBytes));
         OnPropertyChanged(nameof(LastWriteTimeUtc));
