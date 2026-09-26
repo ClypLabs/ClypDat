@@ -429,7 +429,7 @@ public sealed class ClipMetadataHydrationTests
             await SpotifyOverlayBurnerTests.Run("-f", "lavfi", "-i", "color=black:s=160x90:r=30:d=1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
                 "-t", "1", "-c:v", "libx264", "-c:a", "aac", good);
             File.WriteAllBytes(broken, new byte[4096]);
-            var service = new MediaProbeService();
+            var service = new MediaProbeService(Path.Combine(folder, "media-cache")); // Not the real app cache.
             var hydrator = new ClipMetadataHydrator(service.ProbeMetadataDetailedAsync);
 
             var goodCard = Card(good);

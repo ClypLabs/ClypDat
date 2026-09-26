@@ -11,7 +11,7 @@ namespace ClypDat.App.Services;
 // reconciles it after every restore.
 internal sealed class LibraryCacheStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
     private readonly string _databasePath;
 
@@ -184,7 +184,7 @@ internal sealed class LibraryCacheStore
             );
             CREATE INDEX IF NOT EXISTS ix_library_entries_restore
                 ON library_entries (library_root, created_utc_ticks DESC);
-            PRAGMA user_version = 1;
+            PRAGMA user_version = 2;
             """;
         command.ExecuteNonQuery();
     }
