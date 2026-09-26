@@ -123,6 +123,13 @@ bool capture_variable_deadline(int64_t now, int64_t interval, int64_t& scheduled
 // recording rate. Coarser cadences keep fresh-frame counts but sample a
 // sparser grid, which measurably raises output judder and latency
 // (tests/wgc_cadence_tests.cpp).
+int64_t capture_qpc_to_us(int64_t qpc, int64_t qpc_anchor, int64_t qpc_frequency, int64_t monotonic_anchor_us) {
+    const int64_t delta = qpc - qpc_anchor;
+    return monotonic_anchor_us + delta / qpc_frequency * 1000000 + delta % qpc_frequency * 1000000 / qpc_frequency;
+}
+int64_t capture_qpc_us_to_us(int64_t qpc_us, int64_t qpc_anchor, int64_t qpc_frequency, int64_t monotonic_anchor_us) {
+    return monotonic_anchor_us + qpc_us - qpc_anchor / qpc_frequency * 1000000 - qpc_anchor % qpc_frequency * 1000000 / qpc_frequency;
+}
 int capture_wgc_update_ticks(int fps, double refresh_hz) {
     const auto target = std::clamp(fps,30,120);
     if (!std::isfinite(refresh_hz) || refresh_hz<=0) return 0;
@@ -646,7 +653,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     std::map<int64_t, Frame> retained_surfaces;
     size_t retained_limit = 0; // Frames the active encoder may own at once.
     int64_t pressure_since = 0; // First backpressure drop since the last accepted frame.
-    std::deque<double> submission_times, completion_times, capture_latencies, acquire_latencies, selection_errors, output_judder;
+    std::deque<double> submission_times, completion_times, capture_latencies, timestamp_to_acquire, selection_errors, output_judder;
+    std::deque<double> source_leads, callback_takes, callback_copies, handoffs, selection_waits;
+    std::deque<CaptureFrameTimeline> timelines;
     double readback_ms_sum=0,video_processor_ms_sum=0,software_convert_ms_sum=0,hardware_upload_ms_sum=0,overlay_compose_ms_sum=0;
     uint64_t processing_stage_samples=0;
     int64_t health_window = 0;
@@ -697,9 +706,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     int64_t now() const {
         if(dependencies.monotonic_clock)return dependencies.monotonic_clock();
         LARGE_INTEGER ticks{}; QueryPerformanceCounter(&ticks);
-        const int64_t delta = ticks.QuadPart - config.qpc_anchor;
-        return config.monotonic_anchor_us + delta / config.qpc_frequency * 1000000 +
-            delta % config.qpc_frequency * 1000000 / config.qpc_frequency;
+        return capture_qpc_to_us(ticks.QuadPart, config.qpc_anchor, config.qpc_frequency, config.monotonic_anchor_us);
     }
     void fail(const std::string& message) noexcept {
         { std::lock_guard lock(mutex); status.error = message; status.restart_required = true; }
@@ -934,7 +941,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             if (!stamped) pixels.timestamp_us = acquired_at;
             bool detector_due = false;
             { std::lock_guard lock(mutex);
-              if (stamped) { acquire_latencies.push_back(double(acquired_at - pixels.timestamp_us) / 1000); if (acquire_latencies.size() > 240) acquire_latencies.pop_front(); }
+              if (stamped) { timestamp_to_acquire.push_back(double(acquired_at - pixels.timestamp_us) / 1000); if (timestamp_to_acquire.size() > 240) timestamp_to_acquire.pop_front(); }
+              pixels.timing.acquired_us = acquired_at;
               latest = std::make_shared<CapturePixels>(std::move(pixels));
               if (detector_wants_frame && latest->timestamp_us >= detector_due_us) { detector_wants_frame = false; detector_frame_ready = detector_due = true; }
               ++sequence; ++status.acquired; status.paused = false;
@@ -981,7 +989,12 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         status.submission_p95_ms = percentile(submission_times,.95); status.completion_p95_ms = percentile(completion_times,.95);
         status.submission_p50_ms = percentile(submission_times,.5); status.completion_p50_ms = percentile(completion_times,.5);
         status.capture_latency_p50_ms = percentile(capture_latencies,.5); status.capture_latency_p95_ms = percentile(capture_latencies,.95);
-        status.acquire_latency_p50_ms = percentile(acquire_latencies,.5); status.acquire_latency_p95_ms = percentile(acquire_latencies,.95);
+        status.timestamp_to_acquire_p50_ms = percentile(timestamp_to_acquire,.5); status.timestamp_to_acquire_p95_ms = percentile(timestamp_to_acquire,.95);
+        status.source_lead_p50_ms = percentile(source_leads,.5); status.source_lead_p95_ms = percentile(source_leads,.95);
+        status.callback_take_p50_ms = percentile(callback_takes,.5); status.callback_take_p95_ms = percentile(callback_takes,.95);
+        status.callback_copy_p50_ms = percentile(callback_copies,.5); status.callback_copy_p95_ms = percentile(callback_copies,.95);
+        status.handoff_p50_ms = percentile(handoffs,.5); status.handoff_p95_ms = percentile(handoffs,.95);
+        status.selection_wait_p50_ms = percentile(selection_waits,.5); status.selection_wait_p95_ms = percentile(selection_waits,.95);
         status.selection_error_p50_ms = percentile(selection_errors,.5); status.selection_error_p95_ms = percentile(selection_errors,.95);
         status.output_judder_p50_ms = percentile(output_judder,.5); status.output_judder_p95_ms = percentile(output_judder,.95);
         status.readback_p50_ms = percentile(readback_times,.5); status.readback_p95_ms = percentile(readback_times,.95);
@@ -1110,6 +1123,15 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             else {
                 capture_latencies.push_back(double(current - held->timestamp_us) / 1000);
                 if (capture_latencies.size() > 240) capture_latencies.pop_front();
+                // Each delivery stage the source reported, in order.
+                const auto& t = held->timing;
+                auto stage = [](std::deque<double>& values, int64_t from, int64_t to) {
+                    if (!from || !to) return; values.push_back(double(to - from) / 1000); if (values.size() > 240) values.pop_front();
+                };
+                if (t.callback_us) { source_leads.push_back(double(held->timestamp_us - t.callback_us) / 1000); if (source_leads.size() > 240) source_leads.pop_front(); }
+                stage(callback_takes, t.callback_us, t.taken_us); stage(callback_copies, t.taken_us, t.published_us);
+                stage(handoffs, t.published_us, t.acquired_us); stage(selection_waits, t.acquired_us, current);
+                timelines.push_back({held->timestamp_us, t, current}); if (timelines.size() > 64) timelines.pop_front();
                 // Timing accuracy: distance from the sampled instant, and how far
                 // the source-time step between consecutive fresh outputs is
                 // from one output interval.
@@ -1641,6 +1663,9 @@ void RecordingCapture::set_detector_regions(const std::array<CaptureNormalizedRe
     state_->detector_wake.notify_all();
 }
 RecordingCaptureHealth RecordingCapture::health() const { std::lock_guard lock(state_->mutex); return state_->status; }
+std::vector<CaptureFrameTimeline> RecordingCapture::recent_timelines() const {
+    std::lock_guard lock(state_->mutex); return {state_->timelines.begin(), state_->timelines.end()};
+}
 bool RecordingCapture::safe_save_start(int64_t begin,int64_t end,int64_t& result)const{
     std::lock_guard lock(state_->mutex);return state_->recovery.safe_start(begin,end,result);
 }

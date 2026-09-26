@@ -358,6 +358,77 @@ void update_interval_unavailable() {
     std::cout << "  MinUpdateInterval unavailable: every composition delivered, fresh unchanged\n";
 }
 
+
+// QPC readings and QPC-based 100 ns times (WGC SystemRelativeTime) land on
+// the same microsecond timeline, for any QPC frequency and far from the
+// anchor, and the timeline never runs backwards.
+void clock_conversion() {
+    std::mt19937_64 random(42);
+    for (const int64_t frequency : {10000000ll, 3579545ll, 24000000ll, 1000000000ll, 14318180ll}) {
+        const int64_t anchor = int64_t(random() % (int64_t(1) << 50)) + 1;
+        // As recorder_abi sets it: the anchor itself in microseconds.
+        const int64_t monotonic = int64_t(anchor * (1000000.0L / frequency));
+        int64_t previous = INT64_MIN; int64_t worst = 0;
+        std::vector<int64_t> readings;
+        for (int i = 0; i < 20000; ++i) readings.push_back(anchor + int64_t(random() % (int64_t(1) << 44)) - (int64_t(1) << 43));
+        readings.push_back(anchor); readings.push_back(anchor + frequency * 86400 * 365); // A year of uptime past the anchor.
+        std::sort(readings.begin(), readings.end());
+        for (const auto qpc : readings) {
+            const auto from_qpc = capture_qpc_to_us(qpc, anchor, frequency, monotonic);
+            // SystemRelativeTime: QPC converted to 100 ns (floored), then /10.
+            const auto hundred_ns = int64_t((long double)qpc * 10000000 / frequency);
+            const auto from_relative = capture_qpc_us_to_us(hundred_ns / 10, anchor, frequency, monotonic);
+            worst = std::max(worst, std::llabs(from_qpc - from_relative));
+            // Exact against long double arithmetic within a microsecond.
+            const auto exact = int64_t(monotonic + (long double)(qpc - anchor) * 1000000 / frequency);
+            CHECK(std::llabs(from_qpc - exact) <= 1);
+            CHECK(from_qpc >= previous); previous = from_qpc;
+        }
+        CHECK(worst <= 1);
+    }
+    std::cout << "  clock: QPC and SystemRelativeTime agree within 1 us at 5 QPC frequencies, monotonic, a year past the anchor\n";
+}
+// The delivery chain reaches health in the order the stages happen. The
+// source stamps frames 6 ms after their arrival, as WGC does, so the
+// timestamp-to-acquisition figure is negative while every stage is positive.
+class StagedSource final : public RecordingFrameSource {
+    std::function<int64_t()> clock_; std::chrono::steady_clock::time_point next_ = std::chrono::steady_clock::now();
+public:
+    explicit StagedSource(std::function<int64_t()> clock) : clock_(std::move(clock)) {}
+    bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next_) { std::this_thread::sleep_for(std::min(timeout, std::chrono::duration_cast<std::chrono::milliseconds>(next_ - now) + std::chrono::milliseconds(1))); return false; }
+        next_ += std::chrono::microseconds(1000000 / 240);
+        pixels.width = 256; pixels.height = 144; pixels.stride = 256 * 4; pixels.bgra.assign(size_t(256) * 144 * 4, 32);
+        const auto arrival = clock_();
+        pixels.timing.callback_us = arrival - 300; pixels.timing.taken_us = arrival - 260; pixels.timing.published_us = arrival - 140;
+        pixels.timestamp_us = pixels.timing.callback_us + 6000;
+        return true;
+    }
+    bool eligible() const override { return true; }
+    const char* name() const override { return "staged"; }
+};
+void timing_chain() {
+    const auto started = std::chrono::steady_clock::now();
+    const std::function<int64_t()> clock = [started] { return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started).count() + 1000000; };
+    RecordingCaptureConfig config; config.width = 256; config.height = 144; config.fps = 60; config.cpu_encoder = true;
+    RecordingCaptureDependencies dependencies; dependencies.monotonic_clock = clock;
+    RecordingCapture capture(config, {}, std::make_unique<StagedSource>(clock), std::move(dependencies)); capture.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+    const auto h = capture.health(); const auto timelines = capture.recent_timelines();
+    CHECK(capture.stop());
+    CHECK(std::abs(h.source_lead_p50_ms - 6.0) < .01 && std::abs(h.callback_take_p50_ms - .04) < .01 && std::abs(h.callback_copy_p50_ms - .12) < .01);
+    CHECK(h.handoff_p50_ms >= .14 && h.handoff_p50_ms < 5 && h.selection_wait_p50_ms > 0 && h.selection_wait_p95_ms < 40);
+    CHECK(h.timestamp_to_acquire_p50_ms < -5 && h.timestamp_to_acquire_p50_ms > -6.2); // Stamped after arrival.
+    CHECK(timelines.size() == 64);
+    for (const auto& t : timelines) {
+        CHECK(t.timing.callback_us < t.timing.taken_us && t.timing.taken_us < t.timing.published_us && t.timing.published_us <= t.timing.acquired_us && t.timing.acquired_us <= t.selected_us);
+        CHECK(t.timestamp_us - t.timing.callback_us == 6000);
+    }
+    std::cout << "  timing chain: lead " << h.source_lead_p50_ms << " take " << h.callback_take_p50_ms << " copy " << h.callback_copy_p50_ms << " handoff "
+              << h.handoff_p50_ms << " selection wait " << h.selection_wait_p50_ms << " ms; timestamp to acquire " << h.timestamp_to_acquire_p50_ms << " ms\n";
+}
+
 // RecordingCapture hands the source every active-rate change at once.
 class RateSpy final : public RecordingFrameSource {
     std::chrono::steady_clock::time_point next_ = std::chrono::steady_clock::now();
@@ -398,6 +469,8 @@ int main(int argc, char** argv) {
     try {
         av_log_set_level(AV_LOG_ERROR);
         if (argc > 1 && std::string(argv[1]) == "--explore") return explore(argc > 2 ? std::atof(argv[2]) : 180, argc > 3);
+        clock_conversion();
+        timing_chain();
         policy_table();
         safe_policy_quality();
         coarser_cadence_costs_timing();

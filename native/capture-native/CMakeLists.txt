@@ -43,7 +43,7 @@ target_compile_options(RecorderCore PRIVATE /W4 /permissive- /EHsc)
 set_target_properties(RecorderCore PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_link_libraries(RecorderCore PUBLIC
     ffmpeg_avcodec ffmpeg_avformat ffmpeg_avutil ffmpeg_swresample ffmpeg_swscale
-    d3d11 dxgi d3dcompiler runtimeobject windowsapp ole32 avrt user32 gdi32 mmdevapi uuid psapi)
+    d3d11 dxgi d3dcompiler dwmapi runtimeobject windowsapp ole32 avrt user32 gdi32 mmdevapi uuid psapi)
 
 add_library(ClypDat.Capture.Native SHARED
     src/engine.cpp

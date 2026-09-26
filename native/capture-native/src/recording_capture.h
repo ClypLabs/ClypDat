@@ -22,12 +22,28 @@ struct RecordingDetectorSnapshot {
     std::array<RecordingDetectorImage,3> regions;
     RecordingDetectorImage third_mask;
 };
+// A frame's path to the recorder, on the same monotonic microsecond timeline
+// as timestamp_us; 0 where a source has no such stage. WGC fills the
+// callback stages: FrameArrived entry, TryGetNextFrame returned, the pooled
+// copy issued and the frame published. RecordingCapture adds acquisition.
+// dwm_vblank_us and dwm_compose_us are DwmGetCompositionTimingInfo at the
+// callback, recorded only for benchmarks (wgc_dwm_timing).
+struct CaptureFrameTiming {
+    int64_t callback_us = 0, taken_us = 0, published_us = 0, acquired_us = 0;
+    int64_t dwm_vblank_us = 0, dwm_compose_us = 0;
+};
 struct CapturePixels {
     int width = 0, height = 0, stride = 0;
+    // WGC: Direct3D11CaptureFrame.SystemRelativeTime, the QPC time of the
+    // vblank the composed frame is shown at, so it follows the frame's
+    // arrival. DXGI: LastPresentTime (or LastMouseUpdateTime).
     int64_t timestamp_us = 0;
     std::vector<uint8_t> bgra;
     std::shared_ptr<ID3D11Texture2D> texture;
+    CaptureFrameTiming timing;
 };
+// One selected frame's timeline (benchmarks).
+struct CaptureFrameTimeline { int64_t timestamp_us = 0; CaptureFrameTiming timing; int64_t selected_us = 0; };
 struct RecordingSourceHealth {
     // overwritten counts delivered frames dropped before acquisition consumed them.
     uint64_t callbacks = 0, frames_delivered = 0, overwritten = 0, resizes = 0;
@@ -101,6 +117,8 @@ struct RecordingCaptureConfig {
     int source_queue_depth=2;
     // Benchmarks: fixes the WGC MinUpdateInterval at this many display ticks.
     int wgc_update_ticks=0;
+    // Benchmarks: records DWM composition timing at every WGC callback.
+    bool wgc_dwm_timing=false;
     // Benchmarks: the Desktop Duplication path before pooling, a new owned
     // texture per frame and the CPU cursor.
     bool dxgi_reference_path=false;
@@ -129,9 +147,19 @@ struct RecordingCaptureHealth {
     double duplicate_fps = 0, replaced_fps = 0, selection_dropped_fps = 0;
     uint64_t selection_dropped = 0;
     int source_queue_depth = 0, source_queue_peak = 0, source_queue_capacity = 0;
+    // capture_latency: source timestamp to the output tick that selected it.
     double capture_latency_p50_ms = 0, capture_latency_p95_ms = 0;
-    // Source timestamp to acquisition, before output selection.
-    double acquire_latency_p50_ms = 0, acquire_latency_p95_ms = 0;
+    // Acquisition time minus source timestamp. WGC stamps a frame with the
+    // vblank it is displayed at, which follows its arrival, so this is
+    // negative there: it is not a delivery delay.
+    double timestamp_to_acquire_p50_ms = 0, timestamp_to_acquire_p95_ms = 0;
+    // The delivery chain of selected frames: source timestamp minus
+    // FrameArrived entry (WGC: how far ahead of its display the frame
+    // arrives), TryGetNextFrame, the pooled copy, publication to acquisition,
+    // and acquisition to the output tick that selected it.
+    double source_lead_p50_ms = 0, source_lead_p95_ms = 0, callback_take_p50_ms = 0, callback_take_p95_ms = 0;
+    double callback_copy_p50_ms = 0, callback_copy_p95_ms = 0, handoff_p50_ms = 0, handoff_p95_ms = 0;
+    double selection_wait_p50_ms = 0, selection_wait_p95_ms = 0;
     // Output timing accuracy: selected frame against the sampled instant, and
     // the source-time step between consecutive fresh outputs against one
     // output interval (judder).
@@ -281,6 +309,11 @@ bool capture_variable_deadline(int64_t now, int64_t interval, int64_t& scheduled
 // and the MinUpdateInterval that asks for it.
 int capture_wgc_update_ticks(int fps, double refresh_hz);
 int64_t capture_wgc_interval_100ns(int fps, double refresh_hz);
+// The recorder's monotonic timeline in microseconds. A QPC reading maps to
+// monotonic_anchor_us plus its distance from qpc_anchor; a QPC-based time in
+// microseconds (WGC SystemRelativeTime / 10) maps the same way, within 1 us.
+int64_t capture_qpc_to_us(int64_t qpc, int64_t qpc_anchor, int64_t qpc_frequency, int64_t monotonic_anchor_us);
+int64_t capture_qpc_us_to_us(int64_t qpc_us, int64_t qpc_anchor, int64_t qpc_frequency, int64_t monotonic_anchor_us);
 class RecordingFramePacer {
     int fps_;
     bool variable_;
@@ -326,6 +359,8 @@ public:
         int output_width, int output_height);
     void set_detector_regions(const std::array<CaptureNormalizedRect,3>& regions,bool enabled,bool counter_mask);
     RecordingCaptureHealth health() const;
+    // The last 64 selected frames' timelines (benchmarks).
+    std::vector<CaptureFrameTimeline> recent_timelines() const;
     bool safe_save_start(int64_t requested_start,int64_t requested_end,int64_t& safe_start)const;
 private:
     struct State;

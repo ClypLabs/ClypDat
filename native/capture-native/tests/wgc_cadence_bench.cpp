@@ -154,14 +154,14 @@ int main(int argc, char** argv) {
         av_log_set_level(AV_LOG_ERROR); std::cout << std::unitbuf << std::fixed << std::setprecision(2);
         if (argc < 4) { std::cerr << "wgc_cadence_bench <target fps> <ticks,...> <source fps,...> [seconds] [--cfr] [--jitter fraction]\n"; return 2; }
         const int target = std::atoi(argv[1]); const int seconds = argc > 4 && argv[4][0] != '-' ? std::atoi(argv[4]) : 12;
-        bool cfr = false; double jitter = 0;
-        for (int i = 4; i < argc; ++i) { const std::string a = argv[i]; if (a == "--cfr") cfr = true; else if (a == "--jitter" && i + 1 < argc) jitter = std::atof(argv[++i]); }
+        bool cfr = false, dwm = false; double jitter = 0;
+        for (int i = 4; i < argc; ++i) { const std::string a = argv[i]; if (a == "--cfr") cfr = true; else if (a == "--dwm") dwm = true; else if (a == "--jitter" && i + 1 < argc) jitter = std::atof(argv[++i]); }
         const double hz = tsc_hz();
         Presenter presenter; GpuEngines engines;
         for (const auto& ticks_text : split(argv[2])) {
             const int ticks = std::stoi(ticks_text);
             RecordingCaptureConfig config; config.width = 2560; config.height = 1440; config.fps = target; config.bitrate_mbps = 25;
-            config.variable_frame_rate = !cfr; config.wgc_update_ticks = ticks;
+            config.variable_frame_rate = !cfr; config.wgc_update_ticks = ticks; config.wgc_dwm_timing = dwm;
             RecordingCapture capture(config, {}); capture.start();
             for (const auto& source_text : split(argv[3])) {
                 const double rate = source_text == "refresh" ? -1 : std::stod(source_text);
@@ -185,12 +185,30 @@ int main(int argc, char** argv) {
                           << "ms/s driverCpu=" << double(driver_cycles() - driver) / hz * 1000 / elapsed << "ms/s process=" << double(process_ticks() - process) / 1e7 / elapsed * 100 << "% gpu3d=" << three_d << "% gpuCopy=" << copy << "%"
                           << " | output=" << output / seconds << " fresh=" << fresh / seconds << " minFresh=" << min_fresh << " dup=" << duplicates / seconds
                           << " selDrop=" << selection / seconds << " latency p50=" << h.capture_latency_p50_ms << " p95=" << h.capture_latency_p95_ms
-                          << " acquire p50=" << h.acquire_latency_p50_ms << " p95=" << h.acquire_latency_p95_ms
+                          << " timestampToAcquire p50=" << h.timestamp_to_acquire_p50_ms << " p95=" << h.timestamp_to_acquire_p95_ms
                           << " selectionError p50=" << h.selection_error_p50_ms << " p95=" << h.selection_error_p95_ms
                           << " judder p50=" << h.output_judder_p50_ms << " p95=" << h.output_judder_p95_ms
                           << " submit p50=" << h.submission_p50_ms << " p95=" << h.submission_p95_ms << " completion p50=" << h.completion_p50_ms << " p95=" << h.completion_p95_ms
                           << " drops=" << (h.backpressure_drops - before.backpressure_drops) + (h.replaced - before.replaced)
                           << " ownedPressure=" << s.owned_texture_pressure_drops - b.owned_texture_pressure_drops << " overwritten=" << s.overwritten - b.overwritten << "\n";
+                // The delivery chain, and where the timestamp sits against DWM's own timing.
+                std::cout << "  chain: sourceLead p50=" << h.source_lead_p50_ms << " p95=" << h.source_lead_p95_ms << " take p50=" << h.callback_take_p50_ms << " p95=" << h.callback_take_p95_ms
+                          << " copy p50=" << h.callback_copy_p50_ms << " p95=" << h.callback_copy_p95_ms << " handoff p50=" << h.handoff_p50_ms << " p95=" << h.handoff_p95_ms
+                          << " selectionWait p50=" << h.selection_wait_p50_ms << " p95=" << h.selection_wait_p95_ms << " timestamp->selected p50=" << h.capture_latency_p50_ms
+                          << " p95=" << h.capture_latency_p95_ms << " ms";
+                if (dwm) {
+                    const auto timelines = capture.recent_timelines(); const double period = 1e6 / (s.display_refresh_hz > 0 ? s.display_refresh_hz : 240);
+                    int on_compose = 0, on_vblank = 0, samples = 0; double lead_periods = 0;
+                    for (const auto& t : timelines) {
+                        if (!t.timing.dwm_compose_us || !t.timing.callback_us) continue; ++samples;
+                        on_compose += std::llabs(t.timestamp_us - t.timing.dwm_compose_us) <= 1;
+                        const double grid = double(t.timestamp_us - t.timing.dwm_vblank_us) / period; on_vblank += std::abs(grid - std::round(grid)) < .01;
+                        lead_periods += double(t.timestamp_us - t.timing.callback_us) / period;
+                    }
+                    if (samples) std::cout << " | dwm: timestamp==qpcCompose " << on_compose << "/" << samples << ", on vblank grid " << on_vblank << "/" << samples
+                                           << ", arrives " << lead_periods / samples << " refresh periods before its timestamp";
+                }
+                std::cout << "\n";
             }
             capture.stop();
         }

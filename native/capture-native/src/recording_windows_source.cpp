@@ -6,6 +6,7 @@
 #include <d3d11_4.h>
 #include <d3dcompiler.h>
 #include <dxgi1_5.h>
+#include <dwmapi.h>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <winrt/Windows.Foundation.h>
@@ -230,15 +231,19 @@ public:
         if (size.Width <= 0 || size.Height <= 0) throw std::runtime_error("Capture target has no pixels");
         const auto format = config.capture_hdr ? DirectXPixelFormat::R16G16B16A16Float : DirectXPixelFormat::B8G8R8A8UIntNormalized;
         pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(direct_device_, format, 3, size);
-        auto shared = shared_; auto direct = direct_device_;
-        arrived_ = pool_.FrameArrived([shared, direct, format](const Direct3D11CaptureFramePool& pool, auto&&) {
+        auto shared = shared_; auto direct = direct_device_; const bool dwm_timing = config.wgc_dwm_timing;
+        arrived_ = pool_.FrameArrived([shared, direct, format, dwm_timing](const Direct3D11CaptureFramePool& pool, auto&&) {
             const auto entered = std::chrono::steady_clock::now();
+            CapturedFrameStore::Timing timing; LARGE_INTEGER qpc{}; QueryPerformanceCounter(&qpc); timing.callback_qpc = qpc.QuadPart;
+            if (dwm_timing) { DWM_TIMING_INFO dwm{}; dwm.cbSize = sizeof(dwm);
+                if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &dwm))) { timing.dwm_vblank_qpc = int64_t(dwm.qpcVBlank); timing.dwm_compose_qpc = int64_t(dwm.qpcCompose); } }
             struct Timed { Shared& shared; std::chrono::steady_clock::time_point entered;
                 ~Timed() { const auto us = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - entered).count());
                     std::lock_guard lock(shared.mutex); shared.diagnostics.callback_us += us; } } timed{*shared, entered};
             try {
                 {std::lock_guard lock(shared->mutex);++shared->diagnostics.callbacks;}
                 auto frame = pool.TryGetNextFrame();
+                QueryPerformanceCounter(&qpc); timing.taken_qpc = qpc.QuadPart;
                 while (frame) {
                     const auto content = frame.ContentSize();
                     const auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
@@ -254,8 +259,10 @@ public:
                     }
                     // The copy goes to a pooled texture (none free: counted
                     // and dropped), so the WGC buffer is released at once.
+                    // SystemRelativeTime: 100 ns QPC time of the vblank the
+                    // composition is shown at (after this callback runs).
                     const auto timestamp = frame.SystemRelativeTime().count() / 10;
-                    shared->frames.deliver(texture.Get(), timestamp);
+                    shared->frames.deliver(texture.Get(), timestamp, timing);
                     texture.Reset(); frame.Close();
                     frame = pool.TryGetNextFrame();
                 }
@@ -284,11 +291,14 @@ public:
     bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
         // The store already cropped a capture region; the pooled copy returns
         // to the pool when the last CapturePixels owner releases it.
-        int64_t stamp = 0;
-        if (!shared_->frames.take(pixels, stamp, timeout)) return false;
+        int64_t stamp = 0; CapturedFrameStore::Timing timing;
+        if (!shared_->frames.take(pixels, stamp, timeout, &timing)) return false;
         if (!eligible()) { pixels.texture.reset(); return false; }
-        pixels.timestamp_us = config_.monotonic_anchor_us + stamp - config_.qpc_anchor / config_.qpc_frequency * 1000000 -
-            config_.qpc_anchor % config_.qpc_frequency * 1000000 / config_.qpc_frequency;
+        const auto a = config_.qpc_anchor, f = config_.qpc_frequency, m = config_.monotonic_anchor_us;
+        pixels.timestamp_us = capture_qpc_us_to_us(stamp, a, f, m);
+        auto at = [&](int64_t qpc) { return qpc ? capture_qpc_to_us(qpc, a, f, m) : 0; };
+        pixels.timing.callback_us = at(timing.callback_qpc); pixels.timing.taken_us = at(timing.taken_qpc); pixels.timing.published_us = at(timing.published_qpc);
+        pixels.timing.dwm_vblank_us = at(timing.dwm_vblank_qpc); pixels.timing.dwm_compose_us = at(timing.dwm_compose_qpc);
         return true;
     }
     void set_frame_rate(int fps) override {
@@ -441,9 +451,7 @@ public:
         }else if(config_.capture_region.width>0&&config_.capture_region.height>0)crop={config_.capture_region.x-desktop_.left,config_.capture_region.y-desktop_.top,config_.capture_region.width,config_.capture_region.height};
         if (!eligible()) return false;
         const auto stamp = info.LastPresentTime.QuadPart ? info.LastPresentTime.QuadPart : info.LastMouseUpdateTime.QuadPart;
-        const auto delta = stamp - config_.qpc_anchor;
-        pixels.timestamp_us = config_.monotonic_anchor_us + delta / config_.qpc_frequency * 1000000 +
-            delta % config_.qpc_frequency * 1000000 / config_.qpc_frequency;
+        pixels.timestamp_us = capture_qpc_to_us(stamp, config_.qpc_anchor, config_.qpc_frequency, config_.monotonic_anchor_us);
         D3D11_TEXTURE2D_DESC desc{}; texture->GetDesc(&desc);
         if (crop.width <= 0 || crop.height <= 0) crop = {0,0,int(desc.Width),int(desc.Height)};
         if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return false;
@@ -571,6 +579,7 @@ struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStor
     uint64_t allocated = 0, delivered = 0, superseded = 0, pressure = 0;
     std::shared_ptr<ID3D11Texture2D> newest;
     int64_t stamp = 0;
+    CapturedFrameStore::Timing newest_timing;
     bool closed = false;
     std::string error;
     std::deque<double> copy_times;
@@ -658,7 +667,7 @@ CapturedFrameStore::CapturedFrameStore(ID3D11Device* device, int capacity, float
 }
 CapturedFrameStore::~CapturedFrameStore() { close(); }
 
-bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp) {
+bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp, const Timing& timing) {
     auto& s = *impl_;
     if (!input) throw std::invalid_argument("Missing captured frame");
     std::lock_guard serial(s.delivering);
@@ -678,11 +687,12 @@ bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp) {
         if (!target) { ++s.pressure; return false; }
     }
     s.fill(target.get(), input, desc, crop);
+    auto published = timing; LARGE_INTEGER now{}; QueryPerformanceCounter(&now); published.published_qpc = now.QuadPart;
     std::shared_ptr<ID3D11Texture2D> replaced;
     {
         std::lock_guard lock(s.mutex);
         replaced = std::move(s.newest);
-        s.newest = std::move(target); s.stamp = timestamp; ++s.delivered;
+        s.newest = std::move(target); s.stamp = timestamp; s.newest_timing = published; ++s.delivered;
     }
     s.changed.notify_all();
     return true;
@@ -706,7 +716,7 @@ std::shared_ptr<ID3D11Texture2D> CapturedFrameStore::copy(ID3D11Texture2D* input
     { std::lock_guard lock(s.mutex); ++s.delivered; }
     return target;
 }
-bool CapturedFrameStore::take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout) {
+bool CapturedFrameStore::take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout, Timing* timing) {
     auto& s = *impl_;
     std::shared_ptr<ID3D11Texture2D> texture;
     {
@@ -714,7 +724,7 @@ bool CapturedFrameStore::take(CapturePixels& pixels, int64_t& timestamp, std::ch
         s.changed.wait_for(lock, timeout, [&] { return s.newest || s.closed || !s.error.empty(); });
         if (!s.error.empty()) throw std::runtime_error(s.error);
         if (!s.newest || s.closed) return false;
-        texture = std::move(s.newest); timestamp = s.stamp;
+        texture = std::move(s.newest); timestamp = s.stamp; if (timing) *timing = s.newest_timing;
     }
     D3D11_TEXTURE2D_DESC desc{}; texture->GetDesc(&desc);
     pixels.width = int(desc.Width); pixels.height = int(desc.Height); pixels.stride = pixels.width * 4;

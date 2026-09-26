@@ -266,7 +266,12 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"sourceQueueDepth\":" << h.source_queue_depth << ",\"sourceQueuePeak\":" << h.source_queue_peak
         << ",\"sourceQueueCapacity\":" << h.source_queue_capacity
         << ",\"captureLatencyP50Ms\":" << h.capture_latency_p50_ms << ",\"captureLatencyP95Ms\":" << h.capture_latency_p95_ms
-        << ",\"acquireLatencyP50Ms\":" << h.acquire_latency_p50_ms << ",\"acquireLatencyP95Ms\":" << h.acquire_latency_p95_ms
+        << ",\"timestampToAcquireP50Ms\":" << h.timestamp_to_acquire_p50_ms << ",\"timestampToAcquireP95Ms\":" << h.timestamp_to_acquire_p95_ms
+        << ",\"sourceLeadP50Ms\":" << h.source_lead_p50_ms << ",\"sourceLeadP95Ms\":" << h.source_lead_p95_ms
+        << ",\"callbackTakeP50Ms\":" << h.callback_take_p50_ms << ",\"callbackTakeP95Ms\":" << h.callback_take_p95_ms
+        << ",\"callbackCopyP50Ms\":" << h.callback_copy_p50_ms << ",\"callbackCopyP95Ms\":" << h.callback_copy_p95_ms
+        << ",\"handoffP50Ms\":" << h.handoff_p50_ms << ",\"handoffP95Ms\":" << h.handoff_p95_ms
+        << ",\"selectionWaitP50Ms\":" << h.selection_wait_p50_ms << ",\"selectionWaitP95Ms\":" << h.selection_wait_p95_ms
         << ",\"selectionErrorP50Ms\":" << h.selection_error_p50_ms << ",\"selectionErrorP95Ms\":" << h.selection_error_p95_ms
         << ",\"outputJudderP50Ms\":" << h.output_judder_p50_ms << ",\"outputJudderP95Ms\":" << h.output_judder_p95_ms
         << ",\"backpressureDrops\":" << h.backpressure_drops << ",\"encoderBusyDrops\":" << h.encoder_busy_drops

@@ -37,11 +37,14 @@ public:
     CapturedFrameStore(const CapturedFrameStore&) = delete;
     CapturedFrameStore& operator=(const CapturedFrameStore&) = delete;
 
+    // When a frame reached the capture API's callback, in QPC ticks; the
+    // store adds when it was published (copy issued).
+    struct Timing { int64_t callback_qpc = 0, taken_qpc = 0, published_qpc = 0, dwm_vblank_qpc = 0, dwm_compose_qpc = 0; };
     // Copies `input` and publishes it as the newest frame, stamped
     // `timestamp`. Returns false when the frame was dropped: the region lies
     // outside it, or every pooled texture is held. Keeps no reference to
     // `input`, so the caller may release its buffer on return.
-    bool deliver(ID3D11Texture2D* input, int64_t timestamp);
+    bool deliver(ID3D11Texture2D* input, int64_t timestamp, const Timing& timing = {});
     // Copies `crop` of `input` (all of it when empty) into a pooled texture
     // and returns it without publishing (Desktop Duplication hands it
     // downstream itself). Null when the crop lies outside `input` or every
@@ -51,7 +54,7 @@ public:
     std::shared_ptr<ID3D11Texture2D> copy(ID3D11Texture2D* input, CaptureRect crop = {});
     // Takes the newest frame, waiting up to `timeout`. False when none
     // arrived or the store is closed; throws the error set by fail().
-    bool take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout);
+    bool take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout, Timing* timing = nullptr);
     void fail(const std::string& error); // Wakes take() with an error.
     void close();                        // Drops the newest frame; take() returns false.
     void reset();                        // Clears the error and the newest frame.
