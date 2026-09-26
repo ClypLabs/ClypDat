@@ -4693,14 +4693,14 @@ public sealed partial class MainWindow : Window
     private async void ClipContextShare_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
-        if (!ViewModel.PrepareClipForShare(clip)) return;
+        if (!await ViewModel.PrepareClipForShareAsync(clip)) return;
         await ShareCurrentClipAsync();
     }
 
     private async void ClipCardShare_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
-        if (!ViewModel.PrepareClipForShare(clip)) return;
+        if (!await ViewModel.PrepareClipForShareAsync(clip)) return;
         await ShareCurrentClipAsync();
     }
 

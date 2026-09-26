@@ -30,6 +30,12 @@ internal static class SpotifyProcessingPaths
         lock (Sync) return Entries.TryGetValue(Normalize(path), out var entry) && entry.Processing;
     }
 
+    // True inside the writer's own Own(path) scope, where its reads of the clip
+    // (its own library metadata probe) are allowed.
+    public static bool IsOwnedByCaller(string path) =>
+        !string.IsNullOrWhiteSpace(path) && Owner.Value is { Active: true } owner
+        && string.Equals(owner.Path, Normalize(path), StringComparison.OrdinalIgnoreCase);
+
     public static bool Failed(string path)
     {
         lock (Sync) return Entries.TryGetValue(Normalize(path), out var entry) && entry.Failed;

@@ -35,6 +35,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private const int CurrentThumbnailStartFrameVersion = 1;
     private const int CurrentThumbnailCacheCleanupVersion = 1;
     private readonly MediaProbeService _mediaProbe = new();
+    // One probe per clip at a time, shared by clicks, the library sweep, the
+    // folder watcher and post-save processing - see ClipMetadataHydrator.
+    private readonly ClipMetadataHydrator _clipMetadata;
+    private readonly ClipOpenFlow _clipOpenFlow;
     // Shared rather than a second instance: constructing one starts a cache prune.
     internal MediaProbeService MediaProbe => _mediaProbe;
     private readonly LibraryCacheStore _libraryCache = new();
@@ -452,6 +456,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             _libraryRefreshDebounceRetries = 0;
             await RefreshLibraryAsync();
         };
+        _clipMetadata = new ClipMetadataHydrator((path, foreground, bypassCache) => _mediaProbe.ProbeMetadataDetailedAsync(path, foreground, bypassCache));
+        _clipOpenFlow = new ClipOpenFlow(_clipMetadata);
         _clipNotReadyMessageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
         _clipNotReadyMessageTimer.Tick += (_, _) =>
         {
@@ -5697,7 +5703,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 if (existing.SizeBytes == file.Length && existing.LastWriteTimeUtc == file.LastWriteTimeUtc)
                 {
-                    continue; // unchanged - leave the existing card exactly as-is
+                    // Unchanged - leave the card as-is, unless it came back from
+                    // the library cache without metadata (saved while still a
+                    // stub) and the file's own probe cache already has it: a
+                    // JSON read, rather than 0:00 until the sweep - which a
+                    // running game defers - gets to it.
+                    if (!existing.IsHydrated)
+                    {
+                        var cached = _mediaProbe.CreateLibraryStub(file);
+                        if (ClipMetadataResult.IsUsable(cached)) changed.Add((existing, cached));
+                    }
+                    continue;
                 }
                 changed.Add((existing, _mediaProbe.CreateLibraryStub(file)));
             }
@@ -6227,19 +6243,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // audio on open (an already-hydrated older clip has none of this
         // cost - its images are already cached). Images now fill in after,
         // in the background, via HydrateClipImagesAsync.
-        var probedMedia = await _mediaProbe.ProbeMetadataAsync(filePath);
+        var result = await _clipMetadata.EnsureAsync(filePath, foreground: false);
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            clip.UpdateMedia(probedMedia);
+            clip.ApplyMetadata(result, reloadSidecars: true);
+            if (result.Blocker == ClipOpenBlocker.MetadataFailed) AppLog.Info($"Clip metadata unreadable: {filePath}: {result.Error}");
             // Guarded on IsEditorVisible too - AddOrUpdateLibraryClipAsync
             // also runs after the editor closes (to refresh the library
             // card), and SelectedVideoPath still points at that clip then.
             // Without the guard, OpenMedia's unconditional IsEditorVisible =
             // true would pop the editor back open right after the user
             // closed it.
-            if (!SpotifyProcessingPaths.IsProcessing(filePath) && IsEditorVisible && string.Equals(SelectedVideoPath, filePath, StringComparison.OrdinalIgnoreCase))
+            if (result.IsReady && !SpotifyProcessingPaths.IsProcessing(filePath) && IsEditorVisible && string.Equals(SelectedVideoPath, filePath, StringComparison.OrdinalIgnoreCase))
             {
-                OpenMedia(probedMedia, preserveEditorText: true);
+                OpenMedia(result.Media!, preserveEditorText: true);
             }
         });
 
@@ -6360,28 +6377,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     // Returns whether the clip actually opened - OpenClipCardAsync (the click
-    // handler) skips queuing playback when it didn't. A card can be clicked
-    // before HydrateLibraryClipsAsync has reached it (still 0:00, no tracks
-    // probed yet); opening it anyway used to show a half-broken editor that
-    // silently fixed itself once the background probe caught up. Telling the
-    // user to wait instead is clearer than that.
-    public Task<bool> OpenClipAsync(ClipCardViewModel clip)
+    // handler) skips queuing playback when it didn't. A card clicked before
+    // its metadata is in (the library sweep has not reached it, or is
+    // deferred for a running game) is probed on the spot and then opens,
+    // rather than telling the user to try again: see ClipOpenFlow. Opening
+    // with no duration/tracks at all is still never done - that showed a
+    // half-broken editor.
+    public async Task<bool> OpenClipAsync(ClipCardViewModel clip)
     {
-        if (!clip.IsOpenable)
-        {
-            // A full session's video lands in the library before its audio is
-            // muxed in, so "not hydrated" and "still encoding" are different
-            // waits and deserve different sentences.
-            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…"
-                : "Still loading this clip's info - try again in a moment.";
-            _clipNotReadyMessageTimer.Stop();
-            _clipNotReadyMessageTimer.Start();
-            return Task.FromResult(false);
-        }
-
+        var media = await _clipOpenFlow.ResolveAsync(clip, ShowClipNotReady);
+        if (media is null) return false;
+        if (ClipNotReadyMessage == ClipOpenMessages.Loading) ClipNotReadyMessage = string.Empty;
         // See OpenVideoFileAsync - hydration keeps running in the background.
-        OpenMedia(clip.Media);
-        return Task.FromResult(true);
+        OpenMedia(media);
+        return true;
+    }
+
+    private void ShowClipNotReady(string message)
+    {
+        ClipNotReadyMessage = message;
+        _clipNotReadyMessageTimer.Stop();
+        _clipNotReadyMessageTimer.Start();
     }
 
     public bool EnableClipHoverPreview
@@ -6399,21 +6415,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // Share does not need an editor session, but it uses the selected-media
     // metadata for trimming, thumbnail, naming, and encode settings. Prepare
     // that state without making the Library disappear behind the editor.
-    public bool PrepareClipForShare(ClipCardViewModel clip)
+    public async Task<bool> PrepareClipForShareAsync(ClipCardViewModel clip)
     {
-        if (!clip.IsOpenable)
-        {
-            // A full session's video lands in the library before its audio is
-            // muxed in, so "not hydrated" and "still encoding" are different
-            // waits and deserve different sentences.
-            ClipNotReadyMessage = clip.IsSpotifyProcessing ? "Adding Spotify overlay…"
-                : "Still loading this clip's info - try again in a moment.";
-            _clipNotReadyMessageTimer.Stop();
-            _clipNotReadyMessageTimer.Start();
-            return false;
-        }
-
-        OpenMedia(clip.Media, showEditor: false);
+        var media = await _clipOpenFlow.ResolveAsync(clip, ShowClipNotReady);
+        if (media is null) return false;
+        if (ClipNotReadyMessage == ClipOpenMessages.Loading) ClipNotReadyMessage = string.Empty;
+        OpenMedia(media, showEditor: false);
         return true;
     }
 
@@ -7635,6 +7642,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                         SpotifyTrack = first.Track, SpotifyArtist = first.Artist, SpotifyAlbum = first.Album,
                         SpotifyDurationMs = first.DurationMs, SpotifyProgressMs = first.ProgressMs, SpotifyArtPath = first.ArtPath });
                 }
+            }
+            // Only ClypDat closing cancels; an art download timing out is a
+            // failed Spotify step like any other.
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { return SpotifyOverlayOutcome.Cancelled; }
+            catch (Exception error) { AppLog.Error($"Spotify overlay post-save: {clipPath}", error); result = SpotifyOverlayOutcome.Failed; }
+
+            // The card's metadata does not depend on the Spotify work above:
+            // cover art that could not be fetched must not leave the clip
+            // unopenable.
+            try
+            {
                 await AddOrUpdateLibraryClipAsync(clipPath, hydrateImages: false);
                 var card = AllClips.FirstOrDefault(c => string.Equals(c.Path, clipPath, StringComparison.OrdinalIgnoreCase));
                 if (card is not null) await HydrateClipImagesAsync(card, clipPath);
@@ -7663,12 +7681,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 }
             }
             catch (OperationCanceledException) { result = SpotifyOverlayOutcome.Cancelled; }
-            catch (Exception error) { AppLog.Error($"Spotify overlay post-save: {clipPath}", error); result = SpotifyOverlayOutcome.Failed; }
+            catch (Exception error) { AppLog.Error($"Library update after save: {clipPath}", error); result = SpotifyOverlayOutcome.Failed; }
             return result;
         }, _spotifyPostSaveCancellation.Token);
         _ = AddOrUpdateLibraryClipAsync(clipPath, hydrateImages: false, hydrateMetadata: false);
+        // The stub card above always gets its metadata, whatever the post-save
+        // job did: skipped, failed, cancelled, or never ran its body at all (a
+        // duplicate completion, or releasing the readers failed).
+        _ = PostSaveMetadata.EnsureAfterAsync(job,
+            () => _spotifyPostSaveCancellation.IsCancellationRequested || FindLibraryClip(clipPath)?.IsHydrated != false,
+            () => AddOrUpdateLibraryClipAsync(clipPath, hydrateImages: false));
         return job;
     }
+
+    private ClipCardViewModel? FindLibraryClip(string path) =>
+        AllClips.FirstOrDefault(clip => string.Equals(clip.Path, path, StringComparison.OrdinalIgnoreCase));
 
     public bool IsSelectedSpotifyProcessing => SpotifyProcessingPaths.IsProcessing(SelectedVideoPath);
 
@@ -11515,8 +11542,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             await RunHydrationPassAsync(needProbe, "Loading clip info", cancellationToken,
                 async clip =>
                 {
-                    var media = await _mediaProbe.ProbeMetadataAsync(clip.Path);
-                    await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(media, reloadSidecars: false));
+                    // A click or a post-save may have got here first.
+                    if (clip.IsHydrated) return;
+                    var result = await _clipMetadata.EnsureAsync(clip.Path, foreground: false, cancellationToken);
+                    await Dispatcher.UIThread.InvokeAsync(() => clip.ApplyMetadata(result, reloadSidecars: false));
+                    if (result.Blocker == ClipOpenBlocker.MetadataFailed) AppLog.Info($"Clip metadata unreadable: {clip.Path}: {result.Error}");
                 });
 
             // Recomputed rather than reusing the list from above: a clip that
