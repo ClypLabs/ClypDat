@@ -1,5 +1,8 @@
 # Five-round generated recording comparison
 
+Historical: this compared the native recorder against the managed recorder
+during the migration. The managed recorder has since been removed.
+
 Both paths recorded the same generated 128x72 BGRA frames and 44.1 kHz stereo
 tone. Each run saved a three-second CPU libx264 clip. The eight cases cover
 30, 60, 90 and 120 fps in CFR and VFR, with five runs per case per backend.

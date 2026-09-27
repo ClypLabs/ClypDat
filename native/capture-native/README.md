@@ -1,10 +1,19 @@
 # Native recording
 
-The Windows replay and full-session recorder runs in `RecorderCore`. The
-managed adapter owns settings, worker messages and clip publication. It has no
-managed capture or encoding fallback. ABI v3 reports all six required recording
-capabilities; the loader verifies structure sizes and pinned FFmpeg versions
-before opening the engine.
+The Windows replay and full-session recorder runs in `RecorderCore`, inside
+`ClypDat.Capture.Native.dll`, which `ClypDatRecorder.exe` (the capture worker)
+loads. There is no managed capture or encoding path and no backend choice.
+
+- Native: capture, pacing, conversion, encoding, replay history, audio,
+  save/remux, Full Session, burned overlays and detector frame extraction.
+- Managed (`ClypDat.App`): UI and settings, worker IPC (`CaptureWorkerProxy`,
+  `CaptureWorkerHost`), the `NativeRecordingAdapter` over the C ABI in
+  `clypdat_recorder.h`, clip and Full Session publication, the library, and
+  capture health presentation.
+
+The recorder ABI (v3) reports six capabilities; the managed session requires
+all six, and the loader verifies structure sizes and the pinned FFmpeg
+versions before creating a recorder.
 
 Capture uses free-threaded Windows Graphics Capture with a same-device DXGI
 fallback, bounded frame queues, native pacing, aspect-fit, SDR/HDR conversion,
@@ -67,9 +76,12 @@ measures a fixed cadence on the real primary display with a 48x48 presenter
 window.
 
 The [five-round generated media comparison](RECORDING-COMPARISON.md) reports
-CPU time, save time, working set and private bytes for managed and native
-recorders. Local fixture clips and per-run JSON remain under `.local/`.
+CPU time, save time, working set and private bytes for the managed and native
+recorders during the migration; the managed recorder has since been removed.
+Local fixture clips and per-run JSON remain under `.local/`.
 
-Physical screen/window acquisition and real WASAPI device replacement were
-not exercised during this migration. The RTX 4070 Ti NVENC paths used only
-generated textures. AMD and Intel encoder hardware paths remain unverified.
+The native tests use generated textures and never physical screen/window
+acquisition or real WASAPI device replacement; the RTX 4070 Ti NVENC paths are
+also exercised by live replay use. AMF and QSV (zero-copy and readback) are
+implemented and covered by the encoder plan and failover tests, but have not
+been validated on real AMD or Intel hardware.

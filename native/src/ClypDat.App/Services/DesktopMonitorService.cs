@@ -7,8 +7,8 @@ public sealed record DesktopMonitorOption(string DeviceName, string Label, int X
     public static DesktopMonitorOption PrimaryFallback { get; } = new(string.Empty, "Primary display", 0, 0, 1920, 1080, true);
 }
 
-// Win32 device names are stable across app launches and are accepted by both
-// ScreenRecorderLib and DXGI output matching. Avalonia screen IDs are not.
+// Win32 device names are stable across app launches and are what the native
+// recorder matches monitors by. Avalonia screen IDs are not.
 public static class DesktopMonitorService
 {
     private const uint MonitorInfoPrimary = 1;

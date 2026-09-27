@@ -25,13 +25,6 @@ are included in `native/video-output-native` in this repository. See its
 `vendor/vlc/UPSTREAM.md` for provenance and modification details. Distributed
 builds include that notice and the LGPL text under `licenses/`.
 
-## ScreenRecorderLib (MIT)
-
-ClypDat's legacy Windows Capture backend uses `ScreenRecorderLib` by Sverre
-Kristoffer Skodje, licensed under the **MIT License**.
-
-- Project: https://github.com/sskodje/ScreenRecorderLib
-
 ## Avalonia UI (MIT)
 
 ClypDat's user interface is built on the Avalonia UI framework, licensed under
@@ -89,30 +82,23 @@ per-component breakdown for this exact configuration.
   https://www.gnu.org/licenses/gpl-3.0.html and in ClypDat's own `LICENSE`.
 - ClypDat does not modify these binaries.
 
-ClypDat's experimental "ClypDat" capture backend additionally bundles the
-**shared-library** build of the same ffmpeg version (`avcodec-62.dll`,
+ClypDat's native recorder (`ClypDat.Capture.Native.dll`) additionally bundles
+the **shared-library** build of the same ffmpeg version (`avcodec-62.dll`,
 `avformat-62.dll`, `avutil-60.dll`, `swscale-9.dll`, `swresample-6.dll`,
-also from gyan.dev), P/Invoked directly (via `FFmpeg.AutoGen`) instead of
-shelled out to as a separate process. Same GPLv3/libx264 build
+also from gyan.dev) and links it directly instead of running it as a
+separate process. Same GPLv3/libx264 build
 configuration and terms as above; ClypDat is GPLv3-licensed itself (see
 `LICENSE`), so directly linking a GPL component is not a licensing
 conflict.
 
 ## Vortice.Windows (MIT)
 
-The native capture backend's DXGI/Direct3D11 interop (`Vortice.Direct3D11`,
-`Vortice.DXGI`) uses Vortice.Windows, licensed under the **MIT License**.
+ClypDat's Direct3D11/DXGI/DirectComposition interop for its overlay windows,
+editor preview, monitor thumbnails and HDR display checks
+(`Vortice.Direct3D11`, `Vortice.DXGI`, `Vortice.DirectComposition`) uses
+Vortice.Windows, licensed under the **MIT License**.
 
 - Project: https://github.com/amerkoleci/Vortice.Windows
-
-## FFmpeg.AutoGen (MIT)
-
-The native capture backend's direct libavcodec/libavformat P/Invoke
-bindings use FFmpeg.AutoGen, licensed under the **MIT License**. This
-covers only the C# binding code itself; the underlying ffmpeg binaries it
-calls into are covered under "ffmpeg / ffprobe (GPL)" above.
-
-- Project: https://github.com/Ruslan-B/FFmpeg.AutoGen
 
 ---
 

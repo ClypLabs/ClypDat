@@ -55,9 +55,6 @@ public static class FfmpegPathResolver
             return;
         }
 
-        // Managed export features use FFmpeg.AutoGen and need the shared DLL folder.
-        FFmpeg.AutoGen.ffmpeg.RootPath = bundledFolder;
-
         FfmpegPath = ffmpeg;
         FfprobePath = ffprobe;
 
