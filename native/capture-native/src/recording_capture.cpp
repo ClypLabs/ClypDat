@@ -776,7 +776,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             const auto pts=av_rescale_q(packet->pts,generation->time_base,AVRational{1,1000000});
             const bool safe=keyframes.packet(pts,(packet->flags&AV_PKT_FLAG_KEY)!=0);
             { std::lock_guard lock(mutex); status.keyframes=keyframes.health; }
-            if(!safe)throw KeyframeCadenceError();
+            if(!safe) { if(callbacks.keyframe_failure)callbacks.keyframe_failure(); throw KeyframeCadenceError(); }
             const auto mapping = submitted.find(packet->pts);
             if (mapping == submitted.end()) throw std::runtime_error("Encoder output has no source timestamp mapping");
             const auto [acquired, fresh] = mapping->second;

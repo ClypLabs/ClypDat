@@ -234,6 +234,9 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"keyframesEmitted\":" << h.keyframes.emitted << ",\"keyframeRecoveries\":" << h.keyframes.recoveries
         << ",\"keyframeSafe\":" << (h.keyframes.safe?"true":"false")
         << ",\"unsupportedEncoderOptions\":" << quoted(h.unsupported_encoder_options)
+        << ",\"historyRetainedUs\":" << h.history_retained_us << ",\"historyPeakRetainedUs\":" << h.history_peak_retained_us
+        << ",\"historyKeyframeAgeUs\":" << h.history_keyframe_age_us << ",\"historyKeyframes\":" << h.history_keyframes
+        << ",\"historyInvalidations\":" << h.history_invalidations << ",\"historyKeyframeSafe\":" << (h.history_keyframe_safe?"true":"false")
         << ",\"readbackStagingSlots\":" << h.readback_staging_slots << ",\"readbackStagingInUse\":" << h.readback_staging_in_use
         << ",\"readbackStagingPeak\":" << h.readback_staging_peak << ",\"readbackCpuFrames\":" << h.readback_cpu_frames
         << ",\"readbackCpuFramesInUse\":" << h.readback_cpu_frames_in_use << ",\"readbackCpuFramesPeak\":" << h.readback_cpu_frames_peak

@@ -42,19 +42,35 @@ void VideoHistory::append(std::shared_ptr<const CaptureGeneration> generation,Pa
     // Pruned packets are freed after the lock is released.
     std::vector<HistoryPacket> released;
     std::lock_guard lock(mutex_);const auto held=std::chrono::steady_clock::now();
+    ++stats_.appended;
+    // Defense in depth if an upstream watchdog is absent or delayed. Its
+    // maximum budget is two GOPs plus at most one GOP of encoder delay.
+    if(!waiting_for_keyframe_&&pts_us-newest_keyframe_pts_>3*kReplayGopUs) {
+        stats_.pruned+=packets_.size(); released.reserve(packets_.size());
+        for(auto& retained:packets_)released.push_back(std::move(retained));
+        packets_.clear(); keyframes_.clear();
+        front_sequence_=next_sequence_=0; pts_inversions_=0;
+        waiting_for_keyframe_=true; newest_keyframe_pts_=-1; ++stats_.keyframe_invalidations;
+    }
+    if(waiting_for_keyframe_&&!key)return;
+    if(key) { waiting_for_keyframe_=false; newest_keyframe_pts_=pts_us; }
     packets_.push_back(std::move(item));
+    if(key){
+        try{keyframes_.push_back({next_sequence_,pts_us});}catch(...){packets_.pop_back();throw;}
+        if(keyframes_.size()>1&&keyframes_[keyframes_.size()-2].pts_us>pts_us)++pts_inversions_;
+    }
+    ++next_sequence_;
     const auto cutoff=pts_us-retention_us_;
     if(options_.reference_pruning){
         // Keep the preceding GOP. Pruning to an arbitrary packet breaks safe cuts.
         size_t keep=0;for(size_t i=0;i<packets_.size();++i)if((packets_[i].packet->flags&AV_PKT_FLAG_KEY)&&packet_us(packets_[i],packets_[i].packet->pts)<=cutoff)keep=i;
         stats_.examined+=packets_.size();stats_.pruned+=keep;
-        while(keep--)packets_.pop_front();
-    }else{
-        if(key){
-            try{keyframes_.push_back({next_sequence_,pts_us});}catch(...){packets_.pop_back();throw;}
-            if(keyframes_.size()>1&&keyframes_[keyframes_.size()-2].pts_us>pts_us)++pts_inversions_;
+        while(keep--) { released.push_back(std::move(packets_.front())); packets_.pop_front(); ++front_sequence_; }
+        while(!keyframes_.empty()&&keyframes_.front().sequence<front_sequence_) {
+            if(keyframes_.size()>1&&keyframes_[0].pts_us>keyframes_[1].pts_us)--pts_inversions_;
+            keyframes_.pop_front();
         }
-        ++next_sequence_;
+    }else{
         // The newest keyframe at or before the cutoff in append order, as a
         // scan of every packet would choose it.
         size_t chosen=SIZE_MAX;
@@ -65,19 +81,21 @@ void VideoHistory::append(std::shared_ptr<const CaptureGeneration> generation,Pa
             for(size_t i=0;i<keyframes_.size();++i)if(keyframes_[i].pts_us<=cutoff)chosen=i;
         }
         if(chosen!=SIZE_MAX){
-            const auto keep=keyframes_[chosen].sequence;released.reserve(size_t(keep-front_sequence_));
+            const auto keep=keyframes_[chosen].sequence;released.reserve(released.size()+size_t(keep-front_sequence_));
             for(size_t i=0;i<chosen;++i){if(keyframes_[0].pts_us>keyframes_[1].pts_us)--pts_inversions_;keyframes_.pop_front();}
             for(;front_sequence_<keep;++front_sequence_){released.push_back(std::move(packets_.front()));packets_.pop_front();}
             stats_.pruned+=released.size();
         }
         stats_.keyframes_peak=std::max(stats_.keyframes_peak,keyframes_.size());
     }
-    ++stats_.appended;
+    if(!packets_.empty())stats_.peak_retained_us=std::max(stats_.peak_retained_us,pts_us-packet_us(packets_.front(),packets_.front().packet->pts));
     const auto hold=uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-held).count());
     stats_.hold_ns_total+=hold;stats_.hold_ns_max=std::max(stats_.hold_ns_max,hold);hold_ns_[holds_++%hold_ns_.size()]=uint32_t(std::min<uint64_t>(hold,UINT32_MAX));
 }
 VideoSnapshot VideoHistory::snapshot(int64_t start,int64_t end,bool start_at_or_after,bool variable,int fps)const{
-    std::lock_guard lock(mutex_);if(packets_.empty()||end<=start)throw std::runtime_error("No video available for save");
+    std::lock_guard lock(mutex_);
+    if(waiting_for_keyframe_)throw KeyframeCadenceError();
+    if(packets_.empty()||end<=start)throw std::runtime_error("No video available for save");
     auto source=[](const HistoryPacket& packet){return packet.acquired_us?packet.acquired_us:packet_us(packet,packet.packet->pts);};
     size_t last=packets_.size();while(last&&source(packets_[last-1])>=end)--last;
     if(!last)throw std::runtime_error("Requested video window is unavailable");
@@ -89,13 +107,15 @@ VideoSnapshot VideoHistory::snapshot(int64_t start,int64_t end,bool start_at_or_
         if(start_at_or_after){if(at>=start){first=i;break;}}
         else {if(first==last)first=i;if(at<=start)first=i;}
     }
-    if(first==last)throw std::runtime_error("Video has no safe retained keyframe");
+    if(first==last)throw KeyframeCadenceError();
+    if(start-source(packets_[first])>kReplayMaxLeadInUs)throw KeyframeCadenceError();
     VideoSnapshot result;result.packets.assign(packets_.begin()+first,packets_.begin()+last);
     const auto& head=result.packets.front();const auto& tail=result.packets.back();
     const auto first_pts=packet_us(head,head.packet->pts),last_pts=packet_us(tail,tail.packet->pts);
     auto cadence=result.packets.size()>1?last_pts-packet_us(result.packets[result.packets.size()-2],result.packets[result.packets.size()-2].packet->pts):1000000/std::clamp(fps,30,120);
     auto final_hold=capture_final_hold(variable,cadence,end-source(tail));
     result.duration_us=last_pts-first_pts+final_hold;
+    if(result.duration_us>end-start+kReplayMaxLeadInUs)throw KeyframeCadenceError();
     result.start_us=source(head);auto requested_duration=(std::max)(int64_t(1000000),end-result.start_us);
     if(requested_duration-result.duration_us>50000)result.start_us=source(tail)-result.duration_us;
     result.end_us=result.start_us+result.duration_us;
@@ -107,9 +127,30 @@ VideoSnapshot VideoHistory::snapshot(int64_t start,int64_t end,bool start_at_or_
 void VideoHistory::clear(){
     std::deque<HistoryPacket> released;std::lock_guard lock(mutex_);
     released.swap(packets_);keyframes_.clear();front_sequence_=next_sequence_=0;pts_inversions_=0;
+    waiting_for_keyframe_=true;newest_keyframe_pts_=-1;
+}
+void VideoHistory::invalidate_keyframes(){
+    std::deque<HistoryPacket> released;
+    std::lock_guard lock(mutex_);released.swap(packets_);stats_.pruned+=released.size();
+    keyframes_.clear();front_sequence_=next_sequence_=0;pts_inversions_=0;
+    waiting_for_keyframe_=true;newest_keyframe_pts_=-1;++stats_.keyframe_invalidations;
 }
 VideoHistoryStats VideoHistory::stats()const{
     std::lock_guard lock(mutex_);auto result=stats_;result.packets=packets_.size();result.keyframes=keyframes_.size();
+    result.keyframe_safe=!waiting_for_keyframe_&&!packets_.empty();
+    if(!packets_.empty()) {
+        const auto latest=packet_us(packets_.back(),packets_.back().packet->pts);
+        result.retained_us=std::max(int64_t(0),latest-packet_us(packets_.front(),packets_.front().packet->pts));
+        result.newest_keyframe_age_us=std::max(int64_t(0),latest-newest_keyframe_pts_);
+        if(pts_inversions_)result.keyframe_safe=false;
+        else if(!keyframes_.empty()) {
+            const auto requested=latest-retention_us_;
+            auto at=std::upper_bound(keyframes_.begin(),keyframes_.end(),requested,
+                [](int64_t pts,const Keyframe& key){return pts<key.pts_us;});
+            if(at!=keyframes_.begin())--at;
+            result.keyframe_safe=requested-at->pts_us<=kReplayMaxLeadInUs;
+        }
+    }
     const auto count=std::min(holds_,hold_ns_.size());result.recent_hold_ns.reserve(count);
     for(size_t i=holds_-count;i<holds_;++i)result.recent_hold_ns.push_back(hold_ns_[i%hold_ns_.size()]);
     return result;

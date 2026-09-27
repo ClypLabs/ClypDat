@@ -132,6 +132,12 @@ public sealed record ReplayCaptureHealth(
     public long KeyframeRecoveries { get; init; }
     public bool KeyframeSafe { get; init; }
     public string UnsupportedEncoderOptions { get; init; } = string.Empty;
+    public long ReplayHistoryRetainedUs { get; init; }
+    public long ReplayHistoryPeakRetainedUs { get; init; }
+    public long ReplayHistoryKeyframes { get; init; }
+    public long ReplayHistoryKeyframeAgeUs { get; init; }
+    public long ReplayHistoryInvalidations { get; init; }
+    public bool ReplayHistoryKeyframeSafe { get; init; }
     // Frames the capture source handed over per second (WGC or DXGI), before
     // pacing chooses which of them become output frames.
     public double SourceDeliveredFrameRate { get; init; }

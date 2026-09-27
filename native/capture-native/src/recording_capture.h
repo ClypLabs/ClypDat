@@ -172,6 +172,9 @@ struct RecordingCaptureConfig {
 struct RecordingCaptureHealth {
     ReplayKeyframeHealth keyframes;
     std::string unsupported_encoder_options;
+    int64_t history_retained_us=0,history_peak_retained_us=0,history_keyframe_age_us=0;
+    uint64_t history_keyframes=0,history_invalidations=0;
+    bool history_keyframe_safe=false;
     uint64_t acquired = 0, encoded = 0, replaced = 0, generation = 0;
     uint64_t detector_copies = 0;
     int queue_depth = 0, queue_capacity = 0, active_fps = 0;
@@ -272,6 +275,7 @@ struct CaptureGeneration {
     std::string encoder;
 };
 struct RecordingCaptureCallbacks {
+    std::function<void()> keyframe_failure;
     std::function<void(std::shared_ptr<const CaptureGeneration>)> generation;
     std::function<void(std::shared_ptr<const CaptureGeneration>, Packet, int64_t acquired_us, bool fresh)> packet;
     std::function<void(CapturePixels)> detector;

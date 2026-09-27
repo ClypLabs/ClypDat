@@ -57,7 +57,7 @@ Default backend is libx264. The recorder policy and recovery tests run with
 3. Confirm diagnostics report `h264_amf`, the input path, periodic requests and
    emitted keyframes. `keyframeRecoveries` should stay zero. Repeated restart or
    explicit keyframe failure fails acceptance.
-4. Inspect both clips with the validation script supplied with this change. Require
+4. Inspect both clips with `eng/Test-ReplayKeyframes.ps1` (PowerShell 7). Require
    duration at most 121.1 seconds, first packet key, regular key packets throughout,
    valid H.264 IDR payloads, no decode errors, aligned stream starts/durations and
    fast seeking near the end. Listen to all audio tracks at the start and end;
@@ -68,3 +68,13 @@ Default backend is libx264. The recorder policy and recovery tests run with
 
 Do not interpret a successful NVIDIA run as AMD validation. Keep the original
 broken file unchanged; it cannot gain keyframes from an application update.
+
+For a copied script and the installed app's FFmpeg folder:
+
+```powershell
+pwsh -File ./Test-ReplayKeyframes.ps1 -Clip 'C:\Clips\new-amd-clip.mp4' -ReplaySeconds 120 -FfmpegDirectory "$env:LOCALAPPDATA\Programs\ClypDat\ffmpeg"
+```
+
+The script checks packet timestamps, real IDRs, duration and audio stream timing,
+then measures first/near-end decode and decodes every stream with errors fatal.
+It writes no media output. `-SkipDecode` performs only packet/timing validation.

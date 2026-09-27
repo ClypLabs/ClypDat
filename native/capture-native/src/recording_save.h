@@ -32,19 +32,24 @@ struct VideoHistoryOptions {
 struct VideoHistoryStats {
     uint64_t appended = 0, examined = 0, pruned = 0, slow_scans = 0;
     size_t packets = 0, keyframes = 0, keyframes_peak = 0;
+    int64_t retained_us=0, peak_retained_us=0, newest_keyframe_age_us=0;
+    uint64_t keyframe_invalidations=0;
+    bool keyframe_safe=false;
     // Mutex hold per append: total, maximum, and the most recent appends.
     uint64_t hold_ns_total = 0, hold_ns_max = 0;
     std::vector<uint32_t> recent_hold_ns;
 };
 // Keeps the newest keyframe at or before (latest PTS - retention), in append
 // order, and every packet after it, so a save can always start on the GOP
-// preceding its window. With no such keyframe nothing is pruned.
+// preceding its window. Broken cadence invalidates history; inter pictures
+// are discarded until a verified recovery keyframe establishes a new boundary.
 class VideoHistory {
 public:
     explicit VideoHistory(int64_t retention_us, VideoHistoryOptions options = {});
     void append(std::shared_ptr<const CaptureGeneration> generation, Packet packet, int64_t acquired_us=0, bool fresh=true);
     VideoSnapshot snapshot(int64_t start_us,int64_t end_us,bool start_at_or_after=false,bool variable_frame_rate=false,int fps=60) const;
     void clear();
+    void invalidate_keyframes();
     VideoHistoryStats stats() const;
     // Tests: reads the retained packets under the history lock.
     void inspect(const std::function<void(const std::deque<HistoryPacket>&)>& reader) const;
@@ -59,6 +64,8 @@ private:
     // Adjacent keyframes whose PTS goes backwards. While there are none the
     // keyframes at or before any cutoff are a prefix of keyframes_.
     size_t pts_inversions_ = 0;
+    bool waiting_for_keyframe_=true;
+    int64_t newest_keyframe_pts_=-1;
     VideoHistoryStats stats_;
     std::array<uint32_t, 1024> hold_ns_{}; size_t holds_ = 0;
 };

@@ -229,6 +229,9 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             KeyframeGapUs = (long)Number(details, "keyframeGapUs"), KeyframeMaxGapUs = (long)Number(details, "keyframeMaxGapUs"),
             KeyframeWatchdogUs = (long)Number(details, "keyframeWatchdogUs"), KeyframeRecoveries = (long)Number(details, "keyframeRecoveries"),
             KeyframeSafe = Bool(details, "keyframeSafe"), UnsupportedEncoderOptions = Text(details, "unsupportedEncoderOptions"),
+            ReplayHistoryRetainedUs = (long)Number(details, "historyRetainedUs"), ReplayHistoryPeakRetainedUs = (long)Number(details, "historyPeakRetainedUs"),
+            ReplayHistoryKeyframes = (long)Number(details, "historyKeyframes"), ReplayHistoryKeyframeAgeUs = (long)Number(details, "historyKeyframeAgeUs"),
+            ReplayHistoryInvalidations = (long)Number(details, "historyInvalidations"), ReplayHistoryKeyframeSafe = Bool(details, "historyKeyframeSafe"),
             FrameRateMode = configuration.FrameRateMode, EncoderProfile = configuration.EncoderProfile, CapturePaused = native.Paused != 0,
             TotalDroppedFrames = checked((long)native.Replaced + (long)Number(details, "backpressureDrops")), EncodeQueueReplacements = checked((long)native.Replaced),
             SourceDeliveredFrameRate = Number(details, "wgcDeliveredFps"), SaveInProgress = Volatile.Read(ref _saving) != 0,
@@ -305,6 +308,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                 $"lastSkip='{Text(details, "overlayLastSkipReason")}' failure='{Text(details, "overlayFailure")}' lastRenderedUs={Number(details, "overlayLastRenderedUs")} gpu uploads={Number(details, "overlayGpuUploads")} uploadFailures={Number(details, "overlayGpuUploadFailures")} " +
                 $"draw p50={Number(details, "overlayGpuP50Ms"):F3} p95={Number(details, "overlayGpuP95Ms"):F3}ms cpuRoundTrips={Number(details, "overlayCpuRoundTrips")} gpuFailure='{overlayGpuFailure}'.");
             // Its own line: the health line above sits near AppLog's 2000-character cut.
+            AppLog.Debug($"Native replay history: retainedMs={health.ReplayHistoryRetainedUs / 1000:F1} peakMs={health.ReplayHistoryPeakRetainedUs / 1000:F1} keys={health.ReplayHistoryKeyframes} newestKeyAgeMs={health.ReplayHistoryKeyframeAgeUs / 1000:F1} invalidations={health.ReplayHistoryInvalidations} safe={health.ReplayHistoryKeyframeSafe}.");
             AppLog.Debug($"Native keyframes: requested={Number(details, "keyframesRequested")} periodic={Number(details, "periodicKeyframesRequested")} emitted={Number(details, "keyframesEmitted")} lastPtsUs={Number(details, "keyframeLastPtsUs")} gapMs={Number(details, "keyframeGapUs") / 1000:F1} maxGapMs={Number(details, "keyframeMaxGapUs") / 1000:F1} watchdogMs={Number(details, "keyframeWatchdogUs") / 1000:F1} recoveries={Number(details, "keyframeRecoveries")} safe={Bool(details, "keyframeSafe")} unsupportedOptions='{Text(details, "unsupportedEncoderOptions")}'.");
             AppLog.Debug($"Native capture copies: {Number(details, "ownedCopyFps"):F1}/s onSelection={(Bool(details, "copyOnSelection") ? "yes" : "no")} borrowed={Number(details, "borrowedFrames")} peak={Number(details, "borrowedPeak")} discards={Number(details, "borrowDiscards")} pool={Number(details, "wgcPoolBuffers")} copyFailures={Number(details, "materializeFailures")}");
         }

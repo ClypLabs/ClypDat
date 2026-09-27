@@ -120,6 +120,7 @@ RecorderSession::RecorderSession(RecorderSessionConfig config, std::unique_ptr<R
     s->raw_input = std::make_unique<RawInputCapture>(s->input, clock);
     s->camera = std::make_unique<RecordingCamera>(s->overlays, clock);
     RecordingCaptureCallbacks callbacks;
+    callbacks.keyframe_failure=[weak] { if(auto p=weak.lock())p->video.invalidate_keyframes(); };
     callbacks.generation = [weak](std::shared_ptr<const CaptureGeneration> generation) {
         auto p = weak.lock(); if (!p || !p->config.full_session) return;
         std::lock_guard lock(p->mutex);
@@ -257,6 +258,10 @@ void RecorderSession::pause(bool value) { state_->capture->pause(value); }
 void RecorderSession::frame_rate(int value) { state_->capture->request_frame_rate(value); }
 RecordingCaptureHealth RecorderSession::health() const {
     auto result = state_->capture->health();
+    const auto history=state_->video.stats();
+    result.history_retained_us=history.retained_us;result.history_peak_retained_us=history.peak_retained_us;
+    result.history_keyframe_age_us=history.newest_keyframe_age_us;result.history_keyframes=history.keyframes;
+    result.history_invalidations=history.keyframe_invalidations;result.history_keyframe_safe=history.keyframe_safe;
     const auto current = state_->now();
     const auto layers = state_->overlays->frame(current);
     auto& overlay = result.overlay;
