@@ -22,9 +22,11 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private readonly string _revokePath;
     private readonly CancellationTokenSource _lifetime = new();
 
+    private static string DefaultCachePath => Path.Combine(AppDataPaths.Root, "clypdat-account.bin");
+
     public ClypDatAccountActivityService() : this(
         new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(20) },
-        Path.Combine(AppDataPaths.Root, "clypdat-account.bin")) { }
+        DefaultCachePath) { }
 
     internal ClypDatAccountActivityService(HttpClient http, string cachePath)
     {
@@ -111,7 +113,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         // A sign-out that could not reach the site last time gets another go.
         _ = FlushPendingRevokesAsync(_lifetime.Token);
         if (NoticeBoardService.IsBlocked("pause-xbox-activity")) { SetPolicyPaused(true); return false; }
-        _token = LoadToken();
+        _token = LoadToken(_cachePath);
         if (_token is null) return false;
         if (_token.ExpiresAt <= DateTimeOffset.UtcNow)
         {
@@ -762,12 +764,20 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
-    private DesktopToken? LoadToken()
+    /// <summary>
+    /// This PC's saved sign-in, when there is one that has not expired. Read
+    /// from the file rather than a running service, so clip stats can use it
+    /// from whichever process saved the clip. Signing out deletes the file.
+    /// </summary>
+    internal static string? ReadSavedAccessToken(string? cachePath = null) =>
+        LoadToken(cachePath ?? DefaultCachePath) is { } token && token.ExpiresAt > DateTimeOffset.UtcNow ? token.AccessToken : null;
+
+    private static DesktopToken? LoadToken(string path)
     {
         try
         {
-            if (!File.Exists(_cachePath)) return null;
-            var protectedBytes = File.ReadAllBytes(_cachePath);
+            if (!File.Exists(path)) return null;
+            var protectedBytes = File.ReadAllBytes(path);
             var bytes = ProtectedData.Unprotect(protectedBytes, null, DataProtectionScope.CurrentUser);
             return JsonSerializer.Deserialize<DesktopToken>(bytes);
         }
