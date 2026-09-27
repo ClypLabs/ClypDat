@@ -299,6 +299,8 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                 $"keyboard={Bool(details, "overlayKeyboardRequested")}/{Bool(details, "overlayKeyboardReady")} artwork={Number(details, "overlayKeyboardRevision")} frames camera={Number(details, "overlayCameraFrames")} keyboard={Number(details, "overlayKeyboardFrames")} skipped={Number(details, "overlaySkippedFrames")} " +
                 $"lastSkip='{Text(details, "overlayLastSkipReason")}' failure='{Text(details, "overlayFailure")}' lastRenderedUs={Number(details, "overlayLastRenderedUs")} gpu uploads={Number(details, "overlayGpuUploads")} uploadFailures={Number(details, "overlayGpuUploadFailures")} " +
                 $"draw p50={Number(details, "overlayGpuP50Ms"):F3} p95={Number(details, "overlayGpuP95Ms"):F3}ms cpuRoundTrips={Number(details, "overlayCpuRoundTrips")} gpuFailure='{overlayGpuFailure}'.");
+            // Its own line: the health line above sits near AppLog's 2000-character cut.
+            AppLog.Debug($"Native capture copies: {Number(details, "ownedCopyFps"):F1}/s onSelection={(Bool(details, "copyOnSelection") ? "yes" : "no")} borrowed={Number(details, "borrowedFrames")} peak={Number(details, "borrowedPeak")} discards={Number(details, "borrowDiscards")} pool={Number(details, "wgcPoolBuffers")} copyFailures={Number(details, "materializeFailures")}");
         }
         if (health.FullSession.State == FullSessionState.Recording && health.FullSession.OutputPath.Length > 0)
         {

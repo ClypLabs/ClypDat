@@ -64,6 +64,20 @@ same packets as the original full scan, which the tests run alongside it.
 [--reference]` records the primary monitor through a RecorderSession, saves
 the whole history and checks the clip decodes, seeks and stays in sync.
 
+WGC frames stay in the capture API's buffers until they are used: the pacer
+picks from the same timestamps and queue as before, and only the frame it
+picks (or the detector samples) is copied into an owned texture; every other
+frame goes back uncopied. The frame pool grows to the queue depth plus four
+buffers (`capture_wgc_pool_buffers`) so borrowing never makes WGC skip a
+composition. `ClypDat.Capture.Native.WgcCadenceTests` models pool ownership
+across 30-120 FPS on 60-360 Hz displays and checks the selected frames,
+timestamps and tick mapping are identical to copying every arrival; at
+1440p120 on a 240 Hz display in a GPU-bound game this cut owned copies from
+about 200/s to 122/s and returned about 10 fps to the game.
+`CLYPDAT_WGC_COPY=arrival` restores a copy per arrival, and
+`CLYPDAT_CAPTURE_TRACE=<file>` writes every acquisition and output tick for
+replay.
+
 WGC's MinUpdateInterval is a whole number of display ticks leaving the
 producer 1.5x the active recording rate (`capture_wgc_update_ticks`), reapplied
 whenever the rate or refresh changes. `ClypDat.Capture.Native.WgcCadenceTests`

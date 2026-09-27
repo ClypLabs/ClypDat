@@ -247,6 +247,9 @@ class WgcSource final : public RecordingFrameSource {
     };
     RecordingCaptureConfig config_;
     std::shared_ptr<Shared> shared_;
+    // WGC frame-pool buffers: three when every frame is copied in its
+    // callback; more when frames stay borrowed until selection.
+    int buffers_ = 3;
     IDirect3DDevice direct_device_{nullptr};
     GraphicsCaptureItem item_{nullptr};
     Direct3D11CaptureFramePool pool_{nullptr};
@@ -254,7 +257,8 @@ class WgcSource final : public RecordingFrameSource {
     winrt::event_token arrived_{}, closed_{};
 public:
     explicit WgcSource(const RecordingCaptureConfig& config,ID3D11Device* existing=nullptr) : config_(config),
-        shared_(std::make_shared<Shared>(existing, config.d3d_debug, capture_source_texture_capacity(config.source_queue_depth), config.sdr_white_nits, wgc_region(config))) {
+        shared_(std::make_shared<Shared>(existing, config.d3d_debug, capture_source_texture_capacity(config.source_queue_depth), config.sdr_white_nits, wgc_region(config))),
+        buffers_(config.wgc_copy_on_selection ? capture_wgc_pool_buffers(config.source_queue_depth) : 3) {
         // WinRT capture is agile; initialization may already belong to the
         // native worker. RPC_E_CHANGED_MODE is harmless for this API.
         const HRESULT init = RoInitialize(RO_INIT_MULTITHREADED);
@@ -275,9 +279,10 @@ public:
         const auto size = item_.Size();
         if (size.Width <= 0 || size.Height <= 0) throw std::runtime_error("Capture target has no pixels");
         const auto format = config.capture_hdr ? DirectXPixelFormat::R16G16B16A16Float : DirectXPixelFormat::B8G8R8A8UIntNormalized;
-        pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(direct_device_, format, 3, size);
+        pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(direct_device_, format, buffers_, size);
         auto shared = shared_; auto direct = direct_device_; const bool dwm_timing = config.wgc_dwm_timing;
-        arrived_ = pool_.FrameArrived([shared, direct, format, dwm_timing](const Direct3D11CaptureFramePool& pool, auto&&) {
+        const bool borrow = config.wgc_copy_on_selection; const int buffers = buffers_;
+        arrived_ = pool_.FrameArrived([shared, direct, format, dwm_timing, borrow, buffers](const Direct3D11CaptureFramePool& pool, auto&&) {
             const auto entered = std::chrono::steady_clock::now();
             CapturedFrameStore::Timing timing; LARGE_INTEGER qpc{}; QueryPerformanceCounter(&qpc); timing.callback_qpc = qpc.QuadPart;
             if (dwm_timing) { DWM_TIMING_INFO dwm{}; dwm.cbSize = sizeof(dwm);
@@ -298,17 +303,29 @@ public:
                     if (content.Width != int(desc.Width) || content.Height != int(desc.Height)) {
                         {std::lock_guard lock(shared->mutex);++shared->diagnostics.resizes;}
                         frame.Close();
+                        // Frames still borrowed at the old size are copied
+                        // now: they stay selectable, and the new pool never
+                        // shares buffers with them.
+                        if (borrow) shared->frames.materialize_borrowed();
                         if (content.Width > 0 && content.Height > 0)
-                            pool.Recreate(direct, format, 3, content);
+                            pool.Recreate(direct, format, buffers, content);
                         break;
                     }
-                    // The copy goes to a pooled texture (none free: counted
-                    // and dropped), so the WGC buffer is released at once.
                     // SystemRelativeTime: 100 ns QPC time of the vblank the
                     // composition is shown at (after this callback runs).
                     const auto timestamp = frame.SystemRelativeTime().count() / 10;
-                    shared->frames.deliver(texture.Get(), timestamp, timing);
-                    texture.Reset(); frame.Close();
+                    if (borrow) {
+                        // Borrowed until the pacer picks or passes it over;
+                        // only a picked (or detector-sampled) frame is copied.
+                        shared->frames.publish(texture.Get(), [held = frame]() mutable { try { held.Close(); } catch (...) {} }, timestamp, timing);
+                        texture.Reset();
+                    } else {
+                        // The copy goes to a pooled texture (none free:
+                        // counted and dropped), so the WGC buffer is
+                        // released at once.
+                        shared->frames.deliver(texture.Get(), timestamp, timing);
+                        texture.Reset(); frame.Close();
+                    }
                     frame = pool.TryGetNextFrame();
                 }
             } catch (const std::exception& e) {
@@ -325,9 +342,13 @@ public:
     }
     ~WgcSource() override { stop(); }
     void stop() override {
+        // Borrowed buffers go back before the pool closes, and again after
+        // it for a callback that was already running.
         try { if (pool_) pool_.FrameArrived(arrived_); if (item_) item_.Closed(closed_);
+            shared_->frames.discard_borrowed();
             if (session_) session_.Close(); if (pool_) pool_.Close();
             session_=nullptr;pool_=nullptr;item_=nullptr; } catch (...) {}
+        shared_->frames.discard_borrowed();
     }
     bool eligible() const override {
         return !shared_->frames.closed() && window_eligible(reinterpret_cast<HWND>(config_.window), true);
@@ -381,6 +402,8 @@ public:
         result.owned_texture_capacity=frames.capacity;result.owned_textures_allocated=frames.allocated;result.owned_textures_leased=frames.leased;
         result.owned_textures_peak=frames.peak_leased;result.owned_texture_pressure_drops=frames.pressure_drops;
         result.copy_p50_ms=frames.copy_p50_ms;result.copy_p95_ms=frames.copy_p95_ms;
+        result.copy_on_selection=config_.wgc_copy_on_selection;result.owned_copies=frames.copies;result.borrowed_discards=frames.discards;
+        result.borrowed=frames.borrowed;result.borrowed_peak=frames.peak_borrowed;result.wgc_pool_buffers=buffers_;
         result.adapter=shared_->gpu.diagnostics.adapter;result.adapter_luid=shared_->gpu.diagnostics.adapter_luid;
         result.gpu_device_priority=shared_->gpu.diagnostics.gpu_device_priority;result.gpu_device_priority_applied=shared_->gpu.diagnostics.gpu_device_priority_applied;
         result.display_profile_available=config_.display_profile_available;result.hdr_display=config_.display_hdr;
@@ -390,7 +413,8 @@ public:
         try {
             if(!eligible()||!pool_||!item_)return false;
             const auto size=item_.Size();if(size.Width<=0||size.Height<=0)return false;
-            pool_.Recreate(direct_device_,config_.capture_hdr?DirectXPixelFormat::R16G16B16A16Float:DirectXPixelFormat::B8G8R8A8UIntNormalized,3,size);
+            shared_->frames.discard_borrowed();
+            pool_.Recreate(direct_device_,config_.capture_hdr?DirectXPixelFormat::R16G16B16A16Float:DirectXPixelFormat::B8G8R8A8UIntNormalized,buffers_,size);
             shared_->frames.reset();return true;
         }catch(...){return false;}
     }
@@ -665,6 +689,13 @@ struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStor
     std::vector<ComPtr<ID3D11Texture2D>> free;
     uint64_t allocated = 0, delivered = 0, superseded = 0, pressure = 0;
     std::shared_ptr<ID3D11Texture2D> newest;
+    // Copy on selection: the newest borrowed frame, every borrowed frame
+    // still referenced anywhere, and their counters.
+    struct Borrowed;
+    std::shared_ptr<Borrowed> newest_borrowed;
+    std::vector<std::weak_ptr<Borrowed>> outstanding;
+    uint64_t copies = 0, discards = 0;
+    int borrowed = 0, peak_borrowed = 0;
     int64_t stamp = 0;
     CapturedFrameStore::Timing newest_timing;
     bool closed = false;
@@ -715,6 +746,36 @@ struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStor
         free.clear(); live = 0; views.clear();
         return std::move(newest);
     }
+    // The store's crop of a frame described by `desc`; false when the
+    // region lies outside it.
+    bool crop_of(const D3D11_TEXTURE2D_DESC& desc, CaptureRect& crop) const {
+        crop = region.width > 0 ? region : CaptureRect{0, 0, int(desc.Width), int(desc.Height)};
+        return crop.x >= 0 && crop.y >= 0 && int64_t(crop.x) + crop.width <= desc.Width && int64_t(crop.y) + crop.height <= desc.Height;
+    }
+    // A pooled copy of a borrowed buffer, cropped and tone-mapped exactly as
+    // deliver() does; null when every pooled texture is held.
+    std::shared_ptr<ID3D11Texture2D> copy_borrowed(ID3D11Texture2D* input) {
+        std::lock_guard serial(delivering);
+        D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
+        CaptureRect crop; if (!crop_of(desc, crop)) return {};
+        std::shared_ptr<ID3D11Texture2D> target, stale;
+        {
+            std::lock_guard lock(mutex);
+            stale = resize(crop);
+            target = lease();
+            if (!target) { ++pressure; return {}; }
+        }
+        fill(target.get(), input, desc, crop);
+        { std::lock_guard lock(mutex); ++copies; }
+        return target;
+    }
+    void returned(bool copied) { std::lock_guard lock(mutex); --borrowed; if (!copied) ++discards; }
+    std::vector<std::shared_ptr<Borrowed>> referenced() {
+        std::lock_guard lock(mutex);
+        std::vector<std::shared_ptr<Borrowed>> result;
+        for (const auto& weak : outstanding) if (auto frame = weak.lock()) result.push_back(std::move(frame));
+        return result;
+    }
     // Copies, or tone-maps from FP16, `crop` of `input` into `target`.
     // `delivering` held. Returns the CPU time spent issuing it.
     double fill(ID3D11Texture2D* target, ID3D11Texture2D* input, const D3D11_TEXTURE2D_DESC& desc, const CaptureRect& crop) {
@@ -757,6 +818,74 @@ struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStor
     }
 };
 
+// A WGC buffer lent to the recorder. Its only copy is made by the first
+// materialize(); the buffer then goes back at once. Dropped uncopied, it goes
+// back when the last reference does. Store locks are never held while the
+// buffer goes back or this object is destroyed.
+struct CapturedFrameStore::Impl::Borrowed final : CaptureDeferredTexture {
+    std::weak_ptr<Impl> store;
+    ComPtr<ID3D11Texture2D> input;
+    std::function<void()> release;
+    int width = 0, height = 0;
+    std::mutex mutex;
+    std::shared_ptr<ID3D11Texture2D> owned;
+    std::shared_ptr<ID3D11Texture2D> materialize() override {
+        std::function<void()> give_back; std::shared_ptr<ID3D11Texture2D> result;
+        {
+            std::lock_guard lock(mutex);
+            if (owned || !input) return owned;
+            const auto impl = store.lock();
+            if (impl) owned = impl->copy_borrowed(input.Get());
+            result = owned; input.Reset(); give_back = std::move(release);
+            if (impl) impl->returned(bool(owned));
+        }
+        if (give_back) give_back();
+        return result;
+    }
+    void discard() {
+        std::function<void()> give_back;
+        {
+            std::lock_guard lock(mutex);
+            if (!input) return;
+            input.Reset(); give_back = std::move(release);
+            if (const auto impl = store.lock()) impl->returned(false);
+        }
+        if (give_back) give_back();
+    }
+    ~Borrowed() override { discard(); }
+};
+
+bool CapturedFrameStore::publish(ID3D11Texture2D* input, std::function<void()> release, int64_t timestamp, const Timing& timing) {
+    auto& s = *impl_;
+    if (!input) { if (release) release(); throw std::invalid_argument("Missing captured frame"); }
+    D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
+    if (desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) { if (release) release(); throw std::runtime_error("Unsupported capture texture format"); }
+    CaptureRect crop; if (!s.crop_of(desc, crop)) { if (release) release(); return false; }
+    auto frame = std::make_shared<Impl::Borrowed>();
+    frame->store = s.weak_from_this(); frame->input = input; frame->release = std::move(release);
+    frame->width = crop.width; frame->height = crop.height;
+    auto published = timing; LARGE_INTEGER now{}; QueryPerformanceCounter(&now); published.published_qpc = now.QuadPart;
+    std::shared_ptr<Impl::Borrowed> superseded; // Handed back outside the lock.
+    {
+        std::lock_guard lock(s.mutex);
+        ++s.borrowed; s.peak_borrowed = std::max(s.peak_borrowed, s.borrowed);
+        std::erase_if(s.outstanding, [](const auto& weak) { return weak.expired(); });
+        s.outstanding.push_back(frame);
+        if (s.closed) superseded = std::move(frame);
+        else {
+            superseded = std::move(s.newest_borrowed); if (superseded) ++s.superseded;
+            s.newest_borrowed = std::move(frame); s.stamp = timestamp; s.newest_timing = published; ++s.delivered;
+        }
+    }
+    s.changed.notify_all();
+    return true;
+}
+void CapturedFrameStore::materialize_borrowed() { for (const auto& frame : impl_->referenced()) frame->materialize(); }
+void CapturedFrameStore::discard_borrowed() {
+    std::shared_ptr<Impl::Borrowed> newest;
+    { std::lock_guard lock(impl_->mutex); newest = std::move(impl_->newest_borrowed); }
+    for (const auto& frame : impl_->referenced()) frame->discard();
+}
 CapturedFrameStore::CapturedFrameStore(ID3D11Device* device, int capacity, float sdr_white_nits, CaptureRect region) {
     if (!device || capacity < 1 || capacity > 64 || region.width < 0 || region.height < 0 || (region.width > 0) != (region.height > 0))
         throw std::invalid_argument("Invalid captured frame store");
@@ -789,7 +918,7 @@ bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp, cons
     {
         std::lock_guard lock(s.mutex);
         replaced = std::move(s.newest);
-        s.newest = std::move(target); s.stamp = timestamp; s.newest_timing = published; ++s.delivered;
+        s.newest = std::move(target); s.stamp = timestamp; s.newest_timing = published; ++s.delivered; ++s.copies;
     }
     s.changed.notify_all();
     return true;
@@ -812,18 +941,24 @@ std::shared_ptr<ID3D11Texture2D> CapturedFrameStore::copy(ID3D11Texture2D* input
     }
     if (rotation == OutputRotation::Identity) s.fill(target.get(), input, desc, crop);
     else s.fill_rotated(target.get(), input, rotation, desktop, crop);
-    { std::lock_guard lock(s.mutex); ++s.delivered; }
+    { std::lock_guard lock(s.mutex); ++s.delivered; ++s.copies; }
     return target;
 }
 bool CapturedFrameStore::take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout, Timing* timing) {
     auto& s = *impl_;
-    std::shared_ptr<ID3D11Texture2D> texture;
+    std::shared_ptr<ID3D11Texture2D> texture; std::shared_ptr<Impl::Borrowed> borrowed;
     {
         std::unique_lock lock(s.mutex);
-        s.changed.wait_for(lock, timeout, [&] { return s.newest || s.closed || !s.error.empty(); });
+        s.changed.wait_for(lock, timeout, [&] { return s.newest || s.newest_borrowed || s.closed || !s.error.empty(); });
         if (!s.error.empty()) throw std::runtime_error(s.error);
-        if (!s.newest || s.closed) return false;
-        texture = std::move(s.newest); timestamp = s.stamp; if (timing) *timing = s.newest_timing;
+        if ((!s.newest && !s.newest_borrowed) || s.closed) return false;
+        if (s.newest_borrowed) borrowed = std::move(s.newest_borrowed); else texture = std::move(s.newest);
+        timestamp = s.stamp; if (timing) *timing = s.newest_timing;
+    }
+    if (borrowed) {
+        pixels.width = borrowed->width; pixels.height = borrowed->height; pixels.stride = pixels.width * 4;
+        pixels.texture.reset(); pixels.deferred = std::move(borrowed);
+        return true;
     }
     D3D11_TEXTURE2D_DESC desc{}; texture->GetDesc(&desc);
     pixels.width = int(desc.Width); pixels.height = int(desc.Height); pixels.stride = pixels.width * 4;
@@ -835,13 +970,14 @@ void CapturedFrameStore::fail(const std::string& error) {
     impl_->changed.notify_all();
 }
 void CapturedFrameStore::close() {
-    std::shared_ptr<ID3D11Texture2D> dropped;
-    { std::lock_guard lock(impl_->mutex); impl_->closed = true; dropped = std::move(impl_->newest); }
+    std::shared_ptr<ID3D11Texture2D> dropped; std::shared_ptr<Impl::Borrowed> borrowed;
+    { std::lock_guard lock(impl_->mutex); impl_->closed = true; dropped = std::move(impl_->newest); borrowed = std::move(impl_->newest_borrowed); }
     impl_->changed.notify_all();
+    borrowed.reset(); discard_borrowed();
 }
 void CapturedFrameStore::reset() {
-    std::shared_ptr<ID3D11Texture2D> dropped;
-    { std::lock_guard lock(impl_->mutex); impl_->error.clear(); dropped = std::move(impl_->newest); }
+    std::shared_ptr<ID3D11Texture2D> dropped; std::shared_ptr<Impl::Borrowed> borrowed;
+    { std::lock_guard lock(impl_->mutex); impl_->error.clear(); dropped = std::move(impl_->newest); borrowed = std::move(impl_->newest_borrowed); }
 }
 bool CapturedFrameStore::closed() const { std::lock_guard lock(impl_->mutex); return impl_->closed; }
 CapturedFrameStore::Stats CapturedFrameStore::stats() const {
@@ -852,6 +988,7 @@ CapturedFrameStore::Stats CapturedFrameStore::stats() const {
         std::lock_guard lock(s.mutex);
         result.capacity = s.capacity; result.leased = s.leased; result.peak_leased = s.peak;
         result.allocated = s.allocated; result.delivered = s.delivered; result.superseded = s.superseded; result.pressure_drops = s.pressure;
+        result.copies = s.copies; result.discards = s.discards; result.borrowed = s.borrowed; result.peak_borrowed = s.peak_borrowed;
         times.assign(s.copy_times.begin(), s.copy_times.end());
     }
     if (!times.empty()) {
@@ -897,7 +1034,8 @@ bool capture_copy_texture_pixels_nonblocking(CapturePixels& pixels,const std::fu
     }catch(...){context->Unmap(staging.Get(),0);throw;}
     context->Unmap(staging.Get(),0);return true;
 }
-std::unique_ptr<RecordingFrameSource> create_windows_recording_source(const RecordingCaptureConfig& config) {
+std::unique_ptr<RecordingFrameSource> create_windows_recording_source(const RecordingCaptureConfig& requested) {
+    auto config = requested; apply_capture_environment(config);
     auto resolved=config;
     if(!resolved.window&&(!resolved.target_executable.empty()||!resolved.target_title.empty()||!resolved.target_class.empty())){
         struct SearchWindow{RecordingCaptureConfig& config;HWND found=nullptr;}search{resolved};

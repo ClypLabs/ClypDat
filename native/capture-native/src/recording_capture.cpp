@@ -18,7 +18,9 @@ extern "C" {
 #include <cmath>
 #include <cctype>
 #include <condition_variable>
+#include <cstdio>
 #include <deque>
+#include <filesystem>
 #include <mutex>
 #include <map>
 #include <stdexcept>
@@ -37,6 +39,9 @@ int legacy_surface_capacity(int fps) { return std::clamp((fps + 1) / 2, 16, 60) 
 // encoder or a blocked writer, drop new frames instead of allocating.
 int capture_source_texture_capacity(int source_queue_depth) {
     return std::clamp(source_queue_depth, 1, 8) + 6;
+}
+int capture_wgc_pool_buffers(int source_queue_depth) {
+    return std::clamp(source_queue_depth, 1, 8) + 4;
 }
 std::vector<RecordingEncoderCandidate> recording_encoder_candidates(bool cpu, bool av1) {
     if (cpu) return {{"libx264"}};
@@ -165,6 +170,14 @@ std::optional<size_t> capture_select_frame(const std::vector<CaptureFrameStamp>&
     }
     return best;
 }
+std::shared_ptr<CapturePixels> capture_materialize(const std::shared_ptr<CapturePixels>& pixels) {
+    if (!pixels || !pixels->deferred) return pixels;
+    auto texture = pixels->deferred->materialize();
+    if (!texture) return {};
+    auto owned = std::make_shared<CapturePixels>(*pixels);
+    owned->texture = std::move(texture); owned->deferred.reset();
+    return owned;
+}
 void apply_capture_environment(RecordingCaptureConfig& config) {
     auto read = [](const char* name) {
         char* value = nullptr; size_t length = 0;
@@ -179,6 +192,11 @@ void apply_capture_environment(RecordingCaptureConfig& config) {
         if (text.size() == 1 && text[0] >= '1' && text[0] <= '8') target = text[0] - '0';
     };
     depth("CLYPDAT_SOURCE_QUEUE_DEPTH", config.source_queue_depth);
+    const auto copy = read("CLYPDAT_WGC_COPY");
+    if (copy == "selection") config.wgc_copy_on_selection = true;
+    else if (copy == "arrival") config.wgc_copy_on_selection = false;
+    const auto trace = read("CLYPDAT_CAPTURE_TRACE");
+    if (!trace.empty()) config.trace_path = trace;
 }
 void RecordingRecoveryTimeline::observe(bool unhealthy,bool paused,int64_t now){
     if(paused){healthy_windows_=0;return;}
@@ -218,7 +236,7 @@ void check(int result, const char* what) {
 using Candidate=RecordingEncoderCandidate;
 bool valid_pixels(const CapturePixels& p) {
     return p.width > 0 && p.height > 0 && p.width <= 16384 && p.height <= 16384 &&
-        p.stride >= int64_t(p.width) * 4 && (p.texture || uint64_t(p.stride) * p.height <= p.bgra.size());
+        p.stride >= int64_t(p.width) * 4 && (p.texture || p.deferred || uint64_t(p.stride) * p.height <= p.bgra.size());
 }
 bool contains(const CaptureRect& r, int x, int y) {
     return x >= r.x && y >= r.y && int64_t(x) < int64_t(r.x) + r.width && int64_t(y) < int64_t(r.y) + r.height;
@@ -670,7 +688,22 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     uint64_t previous_recoveries=0;
     uint64_t previous_unique=0,previous_source_delivered=0;
     uint64_t previous_duplicates=0,previous_replaced=0,previous_selection_dropped=0,previous_backpressure_drops=0;
-    uint64_t previous_wgc_callbacks=0,previous_wgc_delivered=0,previous_wgc_overwritten=0;
+    uint64_t previous_wgc_callbacks=0,previous_wgc_delivered=0,previous_wgc_overwritten=0,previous_owned_copies=0;
+    // Benchmarks (config.trace_path): every acquisition (A: sequence, source
+    // timestamp, callback, acquired, copied in its callback), output tick at
+    // selection (T: source sequence or 0 for a duplicate, tick time, sample
+    // target, tick, borrowed pick), the pick's copy (M: sequence, tick time,
+    // tick, succeeded) and detector copy (D), written at stop.
+    struct TraceEvent { char kind; uint64_t sequence; int64_t a, b, c; int copied; };
+    std::vector<TraceEvent> trace; uint64_t trace_ticks = 0;
+    void record(TraceEvent event) { if (!config.trace_path.empty() && trace.size() < 8000000) trace.push_back(event); }
+    void write_trace() {
+        if (config.trace_path.empty() || trace.empty()) return;
+        FILE* file = nullptr; if (_wfopen_s(&file, std::filesystem::path(config.trace_path).c_str(), L"w") || !file) return;
+        std::fputs("kind,sequence,a,b,c,copied\n", file);
+        for (const auto& e : trace) std::fprintf(file, "%c,%llu,%lld,%lld,%lld,%d\n", e.kind, (unsigned long long)e.sequence, (long long)e.a, (long long)e.b, (long long)e.c, e.copied);
+        std::fclose(file);
+    }
     int transport_shortfall_windows=0;
     RecordingRecoveryTimeline recovery;
     SwsContext* scaler = nullptr;
@@ -952,6 +985,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
               latest = std::make_shared<CapturePixels>(std::move(pixels));
               if (detector_wants_frame && latest->timestamp_us >= detector_due_us) { detector_wants_frame = false; detector_frame_ready = detector_due = true; }
               ++sequence; ++status.acquired; status.paused = false;
+              record({'A', sequence, latest->timestamp_us, latest->timing.callback_us, acquired_at, latest->deferred ? 0 : 1});
               if (config.frame_selection != "newest") {
                   recent.push_back({latest, sequence});
                   // Overflow drops the oldest; it counts only if never output.
@@ -987,6 +1021,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         status.wgc_callback_fps = rate(status.source_details.callbacks, previous_wgc_callbacks);
         status.wgc_delivered_fps = rate(status.source_details.frames_delivered, previous_wgc_delivered);
         status.wgc_overwritten_fps = rate(status.source_details.overwritten, previous_wgc_overwritten);
+        status.owned_copy_fps = rate(status.source_details.owned_copies, previous_owned_copies);
         auto percentile = [](const std::deque<double>& values,double rank) {
             if (values.empty()) return 0.0;
             std::vector<double> sorted(values.begin(),values.end()); std::sort(sorted.begin(),sorted.end());
@@ -1101,6 +1136,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 constant_deadline=next;
             }
             bool fresh = false;
+            const auto previous_held = held;
             int64_t sample_us = current, elapsed = current - origin;
             if (config.frame_selection == "newest") {
                 fresh = sequence != consumed;
@@ -1123,6 +1159,17 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                     if (config.variable_frame_rate)
                         elapsed = std::clamp(held->timestamp_us, sample_us - delay, current) - origin;
                 }
+            }
+            // Copy on selection: the picked frame is copied only now, with
+            // the lock released so a busy device lock never stalls
+            // acquisition. A refused copy repeats the previous frame.
+            record({'T', fresh ? held_sequence : 0, current, sample_us, int64_t(++trace_ticks), held && held->deferred ? 1 : 0});
+            if (held && held->deferred) {
+                const auto picked = held;
+                lock.unlock(); auto owned = capture_materialize(picked); lock.lock();
+                record({'M', held_sequence, current, 0, int64_t(trace_ticks), owned ? 1 : 0});
+                if (owned) held = std::move(owned);
+                else { held = previous_held; fresh = false; ++status.materialize_failures; }
             }
             if (!held) continue;
             if (!fresh) { ++status.duplicates; previous_selected = -1; }
@@ -1233,6 +1280,15 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 detector_frame_ready = detector_wants_frame = false; continue;
             }
             lock.unlock();
+            if (pixels->deferred) {
+                // Copy on selection: the detector's frame is copied now; a
+                // pick of the same frame reuses this copy.
+                const auto stamp = pixels->timestamp_us;
+                pixels = capture_materialize(pixels);
+                lock.lock(); record({'D', 0, stamp, 0, 0, pixels ? 1 : 0});
+                if (!pixels) { last_detector = stamp; continue; }
+                lock.unlock();
+            }
             if (normalized) { sample_detector(*pixels); resources = true; }
             else { auto owned = *pixels; detector(owned); }
             lock.lock();
@@ -1643,7 +1699,7 @@ bool RecordingCapture::stop(std::chrono::milliseconds timeout) {
     if (!s->changed.wait_for(lock, timeout, [&] { return s->threads == 0; })) {
         s->status.restart_required = true; s->status.error = "Native recording shutdown timed out; restart worker"; return false;
     }
-    s->status.running = false; return true;
+    s->status.running = false; s->write_trace(); s->trace.clear(); return true;
 }
 void RecordingCapture::pause(bool paused) { state_->user_paused = paused; state_->changed.notify_all(); }
 void RecordingCapture::set_save_in_progress(bool saving) { state_->saving=saving; }

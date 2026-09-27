@@ -1322,22 +1322,96 @@ void captured_frame_store(){
     CHECK(store.deliver(ten.Get(),1000));store.close();{CapturePixels pixels;int64_t stamp=0;CHECK(store.closed()&&!store.take(pixels,stamp,0ms)&&store.stats().leased==0);}
     bool invalid=false;try{CapturedFrameStore bad(device.Get(),0,80);}catch(const std::invalid_argument&){invalid=true;}CHECK(invalid);
 }
+// Copy on selection: a published WGC buffer waits, borrowed, and is copied
+// only when something materializes it. It goes back to the capture API
+// exactly once on every path, and a copy is byte-identical to deliver()'s.
+void borrowed_frame_store(){
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
+    const auto ten=capture_texture(device.Get(),256,144,10),twenty=capture_texture(device.Get(),256,144,20);
+    const auto input_references=references(ten.Get());
+    int released=0;auto release=[&released]{return std::function<void()>([&released]{++released;});};
+    CapturedFrameStore store(device.Get(),3,80);
+    auto take=[&](CapturedFrameStore& from,int64_t expected){CapturePixels pixels;int64_t stamp=-1;CHECK(from.take(pixels,stamp,0ms)&&stamp==expected);return std::make_shared<CapturePixels>(std::move(pixels));};
+    // Taken and dropped uncopied: nothing copied or allocated; back once.
+    CHECK(store.publish(ten.Get(),release(),1));
+    {const auto pixels=take(store,1);CHECK(!pixels->texture&&pixels->deferred&&pixels->width==256&&pixels->height==144&&pixels->stride==1024);
+     CHECK(released==0&&store.stats().borrowed==1&&references(ten.Get())>input_references);}
+    CHECK(released==1&&store.stats().borrowed==0&&store.stats().discards==1&&store.stats().copies==0&&store.stats().allocated==0);
+    // Superseded while untaken: back at once, uncopied.
+    CHECK(store.publish(ten.Get(),release(),2)&&store.publish(twenty.Get(),release(),3));CHECK(released==2&&store.stats().superseded==1);
+    // Materialized: one copy, then the buffer goes back; later calls reuse it.
+    auto picked=take(store,3);auto owned=capture_materialize(picked);
+    CHECK(owned&&owned->texture&&!owned->deferred&&owned->timestamp_us==picked->timestamp_us&&released==3&&store.stats().copies==1);
+    CHECK(texture_bytes(owned->texture)[2]==20);
+    const auto again=capture_materialize(picked);CHECK(again->texture.get()==owned->texture.get()&&store.stats().copies==1&&released==3);
+    picked.reset();CHECK(released==3&&store.stats().borrowed==0&&store.stats().leased==1);
+    owned.reset();CHECK(store.stats().leased==1);// `again` still holds it.
+    // materialize_borrowed copies every frame still referenced (before a
+    // resize); discard_borrowed hands the rest back uncopied (before stop).
+    CHECK(store.publish(ten.Get(),release(),4));auto a=take(store,4);CHECK(store.publish(twenty.Get(),release(),5));auto b=take(store,5);
+    store.materialize_borrowed();CHECK(released==5&&store.stats().copies==3);
+    CHECK(texture_bytes(capture_materialize(a)->texture)[2]==10&&texture_bytes(capture_materialize(b)->texture)[2]==20&&store.stats().copies==3);
+    a.reset();b.reset();
+    CHECK(store.publish(ten.Get(),release(),6));auto c=take(store,6);CHECK(store.publish(ten.Get(),release(),7));
+    store.discard_borrowed();CHECK(released==7&&!capture_materialize(c)&&store.stats().copies==3&&store.stats().borrowed==0);
+    c.reset();CHECK(released==7);
+    {CapturePixels none;int64_t stamp=0;CHECK(!store.take(none,stamp,0ms));}// The discarded newest is gone.
+    // Every owned texture held: the copy is refused and counted, and the
+    // buffer still goes back.
+    std::vector<std::shared_ptr<CapturePixels>> holding{again};
+    for(int i=0;i<2;++i){CHECK(store.publish(ten.Get(),release(),10+i));holding.push_back(capture_materialize(take(store,10+i)));CHECK(holding.back());}
+    CHECK(store.stats().leased==3);
+    CHECK(store.publish(twenty.Get(),release(),20));auto refused=take(store,20);
+    CHECK(!capture_materialize(refused)&&store.stats().pressure_drops==1&&released==10&&store.stats().borrowed==0);
+    holding.clear();refused.reset();CHECK(store.stats().leased==1);// `again` still holds its copy.
+    // FP16 is tone-mapped exactly as deliver() does, and regions crop.
+    const auto hdr=capture_texture(device.Get(),256,144,0,true,.5f);
+    const auto expected=texture_bytes(capture_tone_map_texture(hdr.Get(),80));
+    CapturedFrameStore mixed(device.Get(),3,80);
+    CHECK(mixed.publish(hdr.Get(),release(),1));CHECK(texture_bytes(capture_materialize(take(mixed,1))->texture)==expected);
+    CHECK(mixed.deliver(hdr.Get(),2));CHECK(texture_bytes(take(mixed,2)->texture)==expected);
+    CapturedFrameStore region(device.Get(),3,80,{16,8,128,72});
+    CHECK(region.publish(ten.Get(),release(),1));const auto crop=take(region,1);CHECK(crop->width==128&&crop->height==72);
+    const auto crop_bytes=texture_bytes(capture_materialize(crop)->texture);CHECK(crop_bytes.size()==size_t(128)*72*4&&crop_bytes[0]==16&&crop_bytes[1]==8&&crop_bytes[2]==10);
+    CHECK(region.publish(hdr.Get(),release(),2));const auto hdr_crop=texture_bytes(capture_materialize(take(region,2))->texture);
+    CHECK(hdr_crop.size()==size_t(128)*72*4&&std::equal(hdr_crop.begin(),hdr_crop.begin()+4,expected.begin()));
+    const int before_outside=released;CapturedFrameStore outside(device.Get(),3,80,{200,100,128,72});
+    CHECK(!outside.publish(ten.Get(),release(),1)&&released==before_outside+1&&outside.stats().delivered==0);
+    // close(): the newest and every referenced borrowed buffer go back, and
+    // a frame published afterwards goes straight back.
+    CHECK(store.publish(ten.Get(),release(),30));auto d=take(store,30);CHECK(store.publish(ten.Get(),release(),31));
+    const int before_close=released;store.close();
+    CHECK(released==before_close+2&&!capture_materialize(d)&&store.stats().borrowed==0);
+    CHECK(store.publish(ten.Get(),release(),32)&&released==before_close+3);
+    {CapturePixels none;int64_t stamp=0;CHECK(!store.take(none,stamp,0ms));}
+    d.reset();
+    CHECK(references(ten.Get())==input_references);
+}
 // WGC-style delivery through the production CapturedFrameStore: a producer
 // thread renders into one of three buffers (like WGC's frame pool) on the
 // schedule and hands it to the store; acquire() takes frames exactly as
 // WgcSource does.
+// Compositions the emulated WGC pool had to skip because every buffer was
+// still borrowed (copy on selection).
+std::atomic<uint64_t> pooled_starved{0};
 class PooledWgcSource final:public RecordingFrameSource{
     Microsoft::WRL::ComPtr<ID3D11Device> device_;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
     std::vector<Microsoft::WRL::ComPtr<ID3D11Texture2D>> buffers_;std::vector<Microsoft::WRL::ComPtr<ID3D11RenderTargetView>> views_;
     std::unique_ptr<CapturedFrameStore> store_;std::atomic<bool> stop_{false},started_{false};std::thread producer_;
 public:
     // The schedule starts at the first acquire(), once the encoder is open.
-    PooledWgcSource(std::vector<Delivery> frames,std::function<int64_t()> clock,int capacity,int width=1280,int height=720){
+    // pool > 0 lends buffers until selection (copy on selection) from a pool
+    // of that many, skipping a composition when none is free as WGC does;
+    // otherwise three buffers, each copied at once.
+    PooledWgcSource(std::vector<Delivery> frames,std::function<int64_t()> clock,int capacity,int width=1280,int height=720,int pool=0){
         CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context_)));
         store_=std::make_unique<CapturedFrameStore>(device_.Get(),capacity,80.f);
-        for(int i=0;i<3;++i){buffers_.push_back(capture_texture(device_.Get(),width,height,0));views_.emplace_back();
+        const int count=pool>0?pool:3;
+        for(int i=0;i<count;++i){buffers_.push_back(capture_texture(device_.Get(),width,height,0));views_.emplace_back();
             CHECK(SUCCEEDED(device_->CreateRenderTargetView(buffers_.back().Get(),nullptr,&views_.back())));}
-        producer_=std::thread([this,frames=std::move(frames),clock=std::move(clock)]{
+        struct Lent{std::mutex mutex;std::vector<bool> busy;};auto lent=std::make_shared<Lent>();lent->busy.assign(size_t(count),false);
+        producer_=std::thread([this,frames=std::move(frames),clock=std::move(clock),pool,count,lent]{
             while(!started_&&!stop_)std::this_thread::sleep_for(1ms);
             const int64_t base=clock()+50000;
             HANDLE timer=CreateWaitableTimerExW(nullptr,nullptr,CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,TIMER_ALL_ACCESS);
@@ -1345,8 +1419,11 @@ public:
                 const auto wait=base+frames[i].arrival-clock();
                 if(wait>0){LARGE_INTEGER due{};due.QuadPart=-wait*10;if(timer&&SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE))WaitForSingleObject(timer,INFINITE);}
                 const float shade=float(i%200)/200;const float color[4]{shade,1-shade,.5f,1};
-                context_->ClearRenderTargetView(views_[i%3].Get(),color);
-                store_->deliver(buffers_[i%3].Get(),base+frames[i].stamp);
+                if(pool<=0){context_->ClearRenderTargetView(views_[i%3].Get(),color);store_->deliver(buffers_[i%3].Get(),base+frames[i].stamp);continue;}
+                int slot=-1;{std::lock_guard lock(lent->mutex);for(int j=0;j<count;++j){const int at=int((i+size_t(j))%size_t(count));if(!lent->busy[size_t(at)]){slot=at;lent->busy[size_t(at)]=true;break;}}}
+                if(slot<0){++pooled_starved;continue;}
+                context_->ClearRenderTargetView(views_[size_t(slot)].Get(),color);
+                store_->publish(buffers_[size_t(slot)].Get(),[lent,slot]{std::lock_guard lock(lent->mutex);lent->busy[size_t(slot)]=false;},base+frames[i].stamp);
             }
             if(timer)CloseHandle(timer);});
     }
@@ -1360,27 +1437,51 @@ public:
         const auto s=store_->stats();RecordingSourceHealth health;health.frames_delivered=s.delivered;health.overwritten=s.superseded;
         health.owned_texture_capacity=s.capacity;health.owned_textures_allocated=s.allocated;health.owned_textures_leased=s.leased;
         health.owned_textures_peak=s.peak_leased;health.owned_texture_pressure_drops=s.pressure_drops;health.copy_p50_ms=s.copy_p50_ms;health.copy_p95_ms=s.copy_p95_ms;
+        health.owned_copies=s.copies;health.borrowed=s.borrowed;health.borrowed_peak=s.peak_borrowed;health.borrowed_discards=s.discards;
         return health;}
 };
 struct PooledRun{RecordingCaptureHealth warm,health;};
 // One emulated WGC run through the real capture, pacing and encoding threads
 // (NVENC zero-copy unless `candidates` says otherwise), averaged over the two
 // steady-state health windows after warm-up.
-PooledRun pooled_run(const std::vector<Delivery>& frames,int fps,bool variable,int capacity,RecordingCaptureDependencies dependencies={},double seconds=4){
+PooledRun pooled_run(const std::vector<Delivery>& frames,int fps,bool variable,int capacity,RecordingCaptureDependencies dependencies={},double seconds=4,int pool=0){
     const auto started=std::chrono::steady_clock::now();
     auto clock=[started]{return int64_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-started).count())+10000000;};
     RecordingCaptureConfig config;config.width=640;config.height=360;config.fps=fps;config.variable_frame_rate=variable;config.monotonic_anchor_us=10000000;
     dependencies.monotonic_clock=clock;
     RecordingCaptureCallbacks callbacks;
-    RecordingCapture capture(config,callbacks,std::make_unique<PooledWgcSource>(frames,clock,capacity),std::move(dependencies));capture.start();
-    PooledRun run;double fresh=0,duplicates=0,dropped=0,overwritten=0;int windows=0;
+    RecordingCapture capture(config,callbacks,std::make_unique<PooledWgcSource>(frames,clock,capacity,1280,720,pool),std::move(dependencies));capture.start();
+    PooledRun run;double fresh=0,duplicates=0,dropped=0,overwritten=0,copies=0,delivered=0;int windows=0;
     for(int second=0;second<int(seconds);++second){std::this_thread::sleep_for(1s);
         if(second==1)run.warm=capture.health();
-        if(second>=2){const auto h=capture.health();fresh+=h.unique_fps;duplicates+=h.duplicate_fps;dropped+=h.selection_dropped_fps;overwritten+=h.wgc_overwritten_fps;++windows;}}
+        if(second>=2){const auto h=capture.health();fresh+=h.unique_fps;duplicates+=h.duplicate_fps;dropped+=h.selection_dropped_fps;overwritten+=h.wgc_overwritten_fps;
+            copies+=h.owned_copy_fps;delivered+=h.wgc_delivered_fps;++windows;}}
     run.health=capture.health();capture.stop();
     if(!run.health.error.empty())throw std::runtime_error(run.health.error);
-    if(windows){run.health.unique_fps=fresh/windows;run.health.duplicate_fps=duplicates/windows;run.health.selection_dropped_fps=dropped/windows;run.health.wgc_overwritten_fps=overwritten/windows;}
+    if(windows){run.health.unique_fps=fresh/windows;run.health.duplicate_fps=duplicates/windows;run.health.selection_dropped_fps=dropped/windows;run.health.wgc_overwritten_fps=overwritten/windows;
+        run.health.owned_copy_fps=copies/windows;run.health.wgc_delivered_fps=delivered/windows;}
     return run;
+}
+// Copy on selection through the real capture, pacing and encoding threads,
+// against copying every arrival on the same schedule: the same fresh and
+// duplicate rates, no composition the emulated pool had to skip, no refused
+// copy, and owned copies down to the output rate.
+void copy_on_selection_pooled(){
+    struct Case{int target;double refresh,game;};
+    for(const auto& c:{Case{60,144,70},Case{90,240,95},Case{120,240,130},Case{120,240,200},Case{90,240,240},Case{30,240,200}}){
+        const auto frames=wgc_schedule(c.game,c.refresh,7,53);
+        const auto copying=pooled_run(frames,c.target,false,capture_source_texture_capacity(2)).health;
+        pooled_starved=0;
+        const auto borrowing=pooled_run(frames,c.target,false,capture_source_texture_capacity(2),{},4,capture_wgc_pool_buffers(2)).health;
+        std::cout<<"copy on selection "<<c.target<<"fps@"<<c.refresh<<"Hz game="<<c.game<<": delivered "<<copying.wgc_delivered_fps<<" -> "<<borrowing.wgc_delivered_fps
+                 <<" copies/s "<<copying.owned_copy_fps<<" -> "<<borrowing.owned_copy_fps<<" fresh "<<copying.unique_fps<<" -> "<<borrowing.unique_fps
+                 <<" duplicates "<<copying.duplicate_fps<<" -> "<<borrowing.duplicate_fps<<" borrowed peak "<<borrowing.source_details.borrowed_peak<<" skipped "<<pooled_starved.load()<<"\n";
+        CHECK(pooled_starved==0&&borrowing.materialize_failures==0&&borrowing.source_details.owned_texture_pressure_drops==0);
+        CHECK(std::abs(copying.unique_fps-borrowing.unique_fps)<=std::max(1.0,c.target*.02)&&borrowing.duplicate_fps<=copying.duplicate_fps+1);
+        CHECK(std::abs(copying.wgc_delivered_fps-borrowing.wgc_delivered_fps)<=std::max(1.0,copying.wgc_delivered_fps*.02));
+        CHECK(copying.owned_copy_fps>=copying.wgc_delivered_fps*.97&&borrowing.owned_copy_fps<=borrowing.unique_fps*1.03+1);
+        CHECK(borrowing.source_details.borrowed_peak<capture_wgc_pool_buffers(2));
+    }
 }
 std::string pooled_state(const RecordingCaptureHealth& h){
     const auto& s=h.source_details;
@@ -1621,6 +1722,7 @@ int main(int argc,char**argv) {
     if(argc>1&&std::string_view(argv[1])=="--4k-gpu"){gpu_4k_to_1440p(90);return 0;}
     if(argc>1&&std::string_view(argv[1])=="--qsv")return qsv_hardware();
     if(argc>1&&std::string_view(argv[1])=="--wgc-holders"){measure_source_texture_holders();return 0;}
+    if(argc>1&&std::string_view(argv[1])=="--copy-on-selection"){borrowed_frame_store();copy_on_selection_pooled();return 0;}
     if(argc>5&&std::string_view(argv[1])=="--wgc-bench")return wgc_bench(std::atoi(argv[2]),std::atoi(argv[3]),std::atoi(argv[4]),std::atoi(argv[5])!=0,argc>6?std::atoi(argv[6]):8);
     if(argc>5&&std::string_view(argv[1])=="--readback-bench")return readback_bench(argv[2],std::atoi(argv[3]),std::atoi(argv[4]),std::atoi(argv[5]));
     CHECK(capture_queue_capacity(30)==4);CHECK(capture_queue_capacity(120)==15);
@@ -1641,7 +1743,7 @@ int main(int argc,char**argv) {
     }
     blocked_writer();source_eligibility_controls_capture_pause();startup_source_dip_does_not_switch_backend();detector();aspect_fit_processing(false);if(gpu){aspect_fit_processing(true);hdr_shader();gpu_generation_failover();planned_adapter_selection();pool_backpressure();busy_backpressure();stuck_encoder_recovery();stuck_encoder_without_fallback();amf_zero_copy_plan();amf_frame_context_ownership();amf_backpressure();
         qsv_surface_mapping();qsv_derivation();qsv_zero_copy_plan();qsv_backpressure();
-        readback_stage_reuse();readback_pipeline();readback_pressure();captured_frame_store();pooled_wgc_capture();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
+        readback_stage_reuse();readback_pipeline();readback_pressure();captured_frame_store();borrowed_frame_store();pooled_wgc_capture();copy_on_selection_pooled();for(int fps:{60,90,120})gpu_4k_to_1440p(fps);}
     std::cout<<"Native recording generated capture, CFR/VFR pacing, encoding, drain and decode passed\n";
     return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}

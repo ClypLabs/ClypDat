@@ -18,6 +18,7 @@ extern "C" {
 #include <map>
 #include <mutex>
 #include <random>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -37,6 +38,8 @@ struct Source {
     bool refresh_locked = false; // A new frame for every composition (uncapped animation).
     struct Dip { double start, seconds, factor; };
     std::vector<Dip> dips;       // Temporary frame-rate drops.
+    struct Jump { double at, fraction; };
+    std::vector<Jump> phase_jumps; // The present clock jumps by a fraction of an interval.
     double rate_at(double seconds) const {
         for (const auto& dip : dips) if (seconds >= dip.start && seconds < dip.start + dip.seconds) return fps * dip.factor;
         return fps;
@@ -46,10 +49,21 @@ struct Display {
     double refresh = 240;
     double drift_ppm = 37;   // Display clock against the source clock.
     double latch_us = 700;   // A present must land this long before composition.
+    double missed = 0;        // Fraction of compositions DWM skips.
+    double callback_tail = 0; // Fraction of callbacks delayed a further 3-8 ms.
+    struct Stall { double start, seconds; };
+    std::vector<Stall> stalls; // No composition at all (a DWM hitch).
 };
 struct Window { double delivered = 0, fresh = 0, duplicates = 0, selection_dropped = 0, latency_p50 = 0, latency_p95 = 0; };
 struct Result {
     double seconds = 0, delivered = 0, fresh = 0, duplicates = 0, selection_dropped = 0, latency_p50 = 0, latency_p95 = 0, min_fresh_window = 1e9;
+    // Frame ownership: owned GPU copies per second, compositions WGC skipped
+    // because no pool buffer was free, and the most pool buffers out at once
+    // (in flight to the callback plus borrowed by the recorder).
+    double copies = 0; uint64_t starved = 0; int max_held = 0;
+    // The selection itself: each fresh output's source (sequence, timestamp),
+    // and per pacer tick the sequence it output (0 for a duplicate).
+    std::vector<std::pair<uint64_t, int64_t>> selected; std::vector<uint64_t> tick_sources;
     // |selected timestamp - sample target| and |source-time step between
     // consecutive outputs - output interval| (judder), milliseconds.
     double error_p50 = 0, error_p95 = 0, judder_p50 = 0, judder_p95 = 0;
@@ -62,7 +76,11 @@ double percentile(std::vector<double> values, double rank) {
 
 // Runs the pipeline for `seconds`. ticks(window) chooses the WGC gate in
 // whole display ticks (0 = no MinUpdateInterval) and may change the target.
-struct Control { int target; int ticks; double refresh; };
+// pool: WGC frame-pool buffers (0 = unlimited). deferred: frames stay
+// borrowed until the pacer picks them or the detector samples them, and only
+// those are copied; otherwise every arrival is copied and released in its
+// callback.
+struct Control { int target; int ticks; double refresh; int pool = 0; bool deferred = false; };
 Result simulate(const Source& source, Display display, Control control, double seconds, uint32_t seed,
     const std::function<void(int second, const Window&, Control&)>& each_second = {}) {
     std::mt19937_64 random(seed);
@@ -70,7 +88,7 @@ Result simulate(const Source& source, Display display, Control control, double s
     Result result; result.seconds = seconds;
     const double end = seconds * 1e6;
     // Source presents, generated ahead of the display.
-    double present = unit(random) * 1e6 / source.fps; uint64_t presented = 0; int parity = 0;
+    double present = unit(random) * 1e6 / source.fps; uint64_t presented = 0; int parity = 0; size_t jumped = 0;
     std::deque<double> presents;
     auto next_present = [&] {
         const double interval = 1e6 / std::max(1.0, source.rate_at(present / 1e6));
@@ -78,14 +96,18 @@ Result simulate(const Source& source, Display display, Control control, double s
         step += interval * source.periodic_jitter * std::sin(present / 1e6 * 2 * 3.14159265 / 1.7);
         step += interval * source.uneven * ((parity++ & 1) ? 1 : -1);
         present += std::max(100.0, step);
+        while (jumped < source.phase_jumps.size() && present / 1e6 >= source.phase_jumps[jumped].at) present += interval * source.phase_jumps[jumped++].fraction;
         return present;
     };
     // Display composition.
     double tick_period = 1e6 / (display.refresh * (1 + display.drift_ppm * 1e-6)); double tick = unit(random) * tick_period;
     uint64_t shown = 0, delivered_content = 0; double last_delivery = -1e18; uint64_t sequence = 0;
     struct Arrival { double at; CaptureFrameStamp frame; };
-    std::deque<Arrival> arrivals;
+    std::deque<Arrival> arrivals; double last_arrival = 0;
     std::deque<CaptureFrameStamp> recent; uint64_t consumed = 0;
+    // Sequences whose WGC buffer is still out of the pool.
+    std::set<uint64_t> held; uint64_t copies = 0; int64_t last_detector = INT64_MIN / 2;
+    auto release = [&](uint64_t frame, bool copy) { if (held.erase(frame) && copy) ++copies; };
     // CFR pacer: wakes up to 1 ms early like the recorder, late by timer jitter.
     double deadline = 0, pacer = 0;
     // The recorder's timer is set 1 ms before the deadline; wakes land late by timer jitter.
@@ -109,6 +131,9 @@ Result simulate(const Source& source, Display display, Control control, double s
             ++second; window = {}; next_window += 1e6; continue;
         }
         if (now == tick) {
+            bool stalled = display.missed > 0 && unit(random) < display.missed;
+            for (const auto& stall : display.stalls) if (tick / 1e6 >= stall.start && tick / 1e6 < stall.start + stall.seconds) stalled = true;
+            if (stalled) { tick += tick_period; continue; }
             // Content latched for this composition.
             if (source.refresh_locked) { ++presented; ++shown; }
             else {
@@ -118,15 +143,30 @@ Result simulate(const Source& source, Display display, Control control, double s
             }
             const double gate = control.ticks > 0 ? (control.ticks - .5) * 1e6 / display.refresh : 0;
             if (shown > delivered_content && tick - last_delivery >= gate) {
-                delivered_content = shown; last_delivery = tick;
-                arrivals.push_back({tick + 200 + unit(random) * 1300, {++sequence, int64_t(tick)}});
-                ++window.delivered; ++result.delivered;
+                // WGC composes into a free pool buffer or skips the frame.
+                if (control.pool > 0 && int(held.size()) >= control.pool) ++result.starved;
+                else {
+                    delivered_content = shown; last_delivery = tick;
+                    double delay = 200 + unit(random) * 1300;
+                    if (display.callback_tail > 0 && unit(random) < display.callback_tail) delay += 3000 + unit(random) * 5000;
+                    // Callbacks run one at a time, in order.
+                    last_arrival = std::max(last_arrival, tick + delay);
+                    arrivals.push_back({last_arrival, {++sequence, int64_t(tick)}});
+                    held.insert(sequence); result.max_held = std::max(result.max_held, int(held.size()));
+                    ++window.delivered; ++result.delivered;
+                }
             }
             tick += tick_period; continue;
         }
         if (now == arrival_at) {
-            recent.push_back(arrivals.front().frame); arrivals.pop_front();
-            while (recent.size() > 2) { if (recent.front().sequence > consumed) { ++window.selection_dropped; ++result.selection_dropped; } recent.pop_front(); }
+            const auto frame = arrivals.front().frame; recent.push_back(frame); arrivals.pop_front();
+            if (!control.deferred) release(frame.sequence, true);
+            // The detector samples the newest frame every 500 ms of source time.
+            else if (frame.timestamp_us - last_detector >= 500000) { last_detector = frame.timestamp_us; release(frame.sequence, true); }
+            while (recent.size() > 2) {
+                if (recent.front().sequence > consumed) { ++window.selection_dropped; ++result.selection_dropped; }
+                release(recent.front().sequence, false); recent.pop_front();
+            }
             continue;
         }
         // Pacer tick: sample one output interval back.
@@ -135,16 +175,18 @@ Result simulate(const Source& source, Display display, Control control, double s
         deadline += interval * double(intervals);
         const std::vector<CaptureFrameStamp> view(recent.begin(), recent.end());
         if (const auto pick = capture_select_frame(view, consumed, int64_t(now - interval))) {
-            for (size_t i = 0; i < *pick; ++i) if (view[i].sequence > consumed) { ++window.selection_dropped; ++result.selection_dropped; }
+            for (size_t i = 0; i < *pick; ++i) { if (view[i].sequence > consumed) { ++window.selection_dropped; ++result.selection_dropped; } release(view[i].sequence, false); }
+            release(view[*pick].sequence, true);
+            result.selected.push_back({view[*pick].sequence, view[*pick].timestamp_us}); result.tick_sources.push_back(view[*pick].sequence);
             consumed = view[*pick].sequence; recent.erase(recent.begin(), recent.begin() + std::ptrdiff_t(*pick) + 1);
             ++window.fresh; ++result.fresh; latencies.push_back((now - double(view[*pick].timestamp_us)) / 1000); all_latencies.push_back(latencies.back());
             const double selected = double(view[*pick].timestamp_us);
             errors.push_back(std::abs(selected - (now - interval)) / 1000);
             judders.push_back(std::abs((previous_selected < 0 ? interval : selected - previous_selected) - interval) / 1000); previous_selected = selected;
-        } else { ++window.duplicates; ++result.duplicates; previous_selected += interval; }
+        } else { ++window.duplicates; ++result.duplicates; previous_selected += interval; result.tick_sources.push_back(0); }
         pacer = pacer_wake(deadline + interval);
     }
-    result.delivered /= seconds; result.fresh /= seconds; result.duplicates /= seconds; result.selection_dropped /= seconds;
+    result.delivered /= seconds; result.fresh /= seconds; result.duplicates /= seconds; result.selection_dropped /= seconds; result.copies = double(copies) / seconds;
     result.latency_p50 = percentile(all_latencies, .5); result.latency_p95 = percentile(all_latencies, .95);
     result.error_p50 = percentile(errors, .5); result.error_p95 = percentile(errors, .95);
     result.judder_p50 = percentile(judders, .5); result.judder_p95 = percentile(judders, .95);
@@ -359,6 +401,75 @@ void update_interval_unavailable() {
 }
 
 
+// Source and display shapes for the frame-ownership comparison: the target
+// exactly, slightly and well above it, the refresh, irregular presents, dips,
+// phase jumps, late callbacks, missed compositions and composition stalls.
+std::vector<std::pair<std::string, std::pair<Source, Display>>> ownership_cases(int target, double refresh) {
+    std::vector<std::pair<std::string, std::pair<Source, Display>>> list;
+    Display display; display.refresh = refresh;
+    auto add = [&](const std::string& name, Source source, Display shape) {
+        if (!source.refresh_locked && source.fps > refresh * 1.01) return;
+        list.push_back({name, {source, shape}});
+    };
+    for (const double factor : {1.0, 1.1, 1.6, 2.0}) { Source clean; clean.fps = target * factor; add("x" + std::to_string(factor).substr(0, 3), clean, display); }
+    Source slightly; slightly.fps = target * 1.03; slightly.random_jitter = .15; add("target+3%", slightly, display);
+    Source locked; locked.fps = refresh; locked.refresh_locked = true; add("refresh", locked, display);
+    const double busy = std::min(target * 1.34, refresh);
+    Source jitter; jitter.fps = busy; jitter.random_jitter = .25; add("rand", jitter, display);
+    Source uneven; uneven.fps = busy; uneven.uneven = .35; uneven.random_jitter = .05; add("uneven", uneven, display);
+    Source dips; dips.fps = busy; dips.random_jitter = .1; dips.dips = {{10, 3, .6}, {30, 5, .8}, {50, 2, .5}}; add("dips", dips, display);
+    Source jumps; jumps.fps = busy; jumps.random_jitter = .05; jumps.phase_jumps = {{10, .5}, {25, .3}, {40, .7}}; add("phase", jumps, display);
+    Display late = display; late.callback_tail = .02; add("late-callbacks", locked, late);
+    Display missed = display; missed.missed = .01; add("missed-compositions", locked, missed);
+    Display stalls = display; stalls.stalls = {{20, .3}, {45, 1}}; add("stall-recovery", jitter, stalls);
+    return list;
+}
+
+// Copying only the frames the pacer picks (and the detector samples) must
+// not change which frames it picks. The deferred run keeps each WGC frame
+// borrowed until then, so it needs more pool buffers; with capture_wgc_pool_buffers
+// it never makes WGC skip a composition, and it selects exactly the frames,
+// timestamps and tick mapping of copying every arrival.
+struct OwnershipSummary { int cases = 0; double copies_before = 0, copies_after = 0; int max_held = 0; uint64_t starved_at_three = 0; int starved_cases_at_three = 0; };
+OwnershipSummary ownership_matrix(int target, double refresh, int pool, double seconds, bool verbose) {
+    OwnershipSummary summary;
+    const int ticks = capture_wgc_update_ticks(target, refresh);
+    for (const auto& [name, shape] : ownership_cases(target, refresh)) {
+        const auto& [source, display] = shape;
+        const auto label = std::to_string(target) + " fps @ " + std::to_string(int(refresh)) + " Hz " + name;
+        const auto reference = simulate(source, display, {target, ticks, refresh, pool, false}, seconds, 77);
+        const auto deferred = simulate(source, display, {target, ticks, refresh, pool, true}, seconds, 77);
+        if (reference.starved || deferred.starved) throw std::runtime_error(label + ": WGC skipped compositions (" + std::to_string(reference.starved) + " copying, " + std::to_string(deferred.starved) + " deferred)");
+        if (deferred.selected != reference.selected || deferred.tick_sources != reference.tick_sources) {
+            size_t at = 0; while (at < std::min(deferred.tick_sources.size(), reference.tick_sources.size()) && deferred.tick_sources[at] == reference.tick_sources[at]) ++at;
+            throw std::runtime_error(label + ": selection differs from tick " + std::to_string(at));
+        }
+        // Today's pool of three: what borrowing would cost without more buffers.
+        const auto three = simulate(source, display, {target, ticks, refresh, 3, true}, seconds, 77);
+        summary.starved_at_three += three.starved; if (three.starved) ++summary.starved_cases_at_three;
+        ++summary.cases; summary.copies_before += reference.copies; summary.copies_after += deferred.copies;
+        summary.max_held = std::max(summary.max_held, deferred.max_held);
+        if (verbose) std::cout << "    " << std::setw(20) << name << " delivered " << std::setw(6) << reference.delivered << " fresh " << std::setw(6) << reference.fresh
+                               << " copies " << std::setw(6) << reference.copies << " -> " << std::setw(6) << deferred.copies << " held " << reference.max_held << " -> " << deferred.max_held
+                               << " pool-3 skips " << three.starved << "\n";
+    }
+    summary.copies_before /= summary.cases; summary.copies_after /= summary.cases;
+    return summary;
+}
+void copy_on_selection_equivalence(double seconds = 60, bool verbose = false) {
+    std::cout << std::fixed << std::setprecision(1) << "  target  refresh  cases  copies/s before -> after  max held  pool-3 skips (cases)\n";
+    int cases = 0;
+    for (const int target : {30, 60, 90, 120}) for (const double refresh : {60.0, 120.0, 144.0, 165.0, 240.0, 360.0}) {
+        const auto s = ownership_matrix(target, refresh, capture_wgc_pool_buffers(2), seconds, verbose);
+        std::cout << "  " << std::setw(6) << target << std::setw(9) << int(refresh) << std::setw(7) << s.cases << std::setw(12) << s.copies_before << " -> " << std::setw(6) << s.copies_after
+                  << std::setw(10) << s.max_held << std::setw(10) << s.starved_at_three << " (" << s.starved_cases_at_three << ")\n";
+        CHECK(s.max_held < capture_wgc_pool_buffers(2));
+        cases += s.cases;
+    }
+    std::cout << "  copy on selection: identical selection in " << cases << " target/refresh/source cases, no composition skipped\n";
+}
+
+
 // QPC readings and QPC-based 100 ns times (WGC SystemRelativeTime) land on
 // the same microsecond timeline, for any QPC frequency and far from the
 // anchor, and the timeline never runs backwards.
@@ -469,6 +580,7 @@ int main(int argc, char** argv) {
     try {
         av_log_set_level(AV_LOG_ERROR);
         if (argc > 1 && std::string(argv[1]) == "--explore") return explore(argc > 2 ? std::atof(argv[2]) : 180, argc > 3);
+        if (argc > 1 && std::string(argv[1]) == "--ownership") { copy_on_selection_equivalence(argc > 2 ? std::atof(argv[2]) : 60, true); return 0; }
         clock_conversion();
         timing_chain();
         policy_table();
@@ -477,6 +589,7 @@ int main(int argc, char** argv) {
         runtime_rate_changes();
         refresh_changes();
         update_interval_unavailable();
+        copy_on_selection_equivalence();
         capture_follows_active_rate();
         std::cout << "WGC cadence tests passed\n";
         return 0;

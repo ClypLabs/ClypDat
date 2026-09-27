@@ -32,6 +32,16 @@ struct CaptureFrameTiming {
     int64_t callback_us = 0, taken_us = 0, published_us = 0, acquired_us = 0;
     int64_t dwm_vblank_us = 0, dwm_compose_us = 0;
 };
+// A source frame still in the capture API's buffer (WGC copy on
+// selection). materialize() copies it into an owned texture once, hands the
+// buffer back, and returns that same copy on every later call; it returns
+// null when the copy was refused (every owned texture held) or the buffer
+// was already taken back (source stopped or recreated). Dropping the last
+// reference without materializing hands the buffer back uncopied.
+struct CaptureDeferredTexture {
+    virtual ~CaptureDeferredTexture() = default;
+    virtual std::shared_ptr<ID3D11Texture2D> materialize() = 0;
+};
 struct CapturePixels {
     int width = 0, height = 0, stride = 0;
     // WGC: Direct3D11CaptureFrame.SystemRelativeTime, the QPC time of the
@@ -40,8 +50,14 @@ struct CapturePixels {
     int64_t timestamp_us = 0;
     std::vector<uint8_t> bgra;
     std::shared_ptr<ID3D11Texture2D> texture;
+    // Set instead of texture while the frame is borrowed; see
+    // capture_materialize.
+    std::shared_ptr<CaptureDeferredTexture> deferred;
     CaptureFrameTiming timing;
 };
+// `pixels` itself when it owns its pixels, otherwise a copy holding the
+// materialized texture; null when materializing failed.
+std::shared_ptr<CapturePixels> capture_materialize(const std::shared_ptr<CapturePixels>& pixels);
 // One selected frame's timeline (benchmarks).
 struct CaptureFrameTimeline { int64_t timestamp_us = 0; CaptureFrameTiming timing; int64_t selected_us = 0; };
 struct RecordingSourceHealth {
@@ -53,6 +69,11 @@ struct RecordingSourceHealth {
     int owned_texture_capacity = 0, owned_textures_leased = 0, owned_textures_peak = 0;
     uint64_t owned_textures_allocated = 0, owned_texture_pressure_drops = 0;
     double copy_p50_ms = 0, copy_p95_ms = 0;
+    // Copy on selection: owned copies made, WGC buffers borrowed now and at
+    // most, borrowed frames handed back uncopied, and the frame-pool size.
+    bool copy_on_selection = false;
+    uint64_t owned_copies = 0, borrowed_discards = 0;
+    int borrowed = 0, borrowed_peak = 0, wgc_pool_buffers = 0;
     int64_t requested_interval_100ns = 0, applied_interval_100ns = 0;
     double display_refresh_hz = 0;
     // WGC producer cadence: "safe" (capture_wgc_update_ticks), "fixed"
@@ -125,6 +146,16 @@ struct RecordingCaptureConfig {
     int wgc_update_ticks=0;
     // Benchmarks: records DWM composition timing at every WGC callback.
     bool wgc_dwm_timing=false;
+    // WGC frames stay in the capture API's buffers until the pacer picks
+    // one (or the detector samples it), and only those are copied: the same
+    // frames are selected, with roughly 40% fewer copies at 120 FPS on a
+    // 240 Hz display. The frame pool grows to capture_wgc_pool_buffers so
+    // borrowing never makes WGC skip a composition. CLYPDAT_WGC_COPY=arrival
+    // restores a copy per arrival.
+    bool wgc_copy_on_selection=true;
+    // Benchmarks: writes every acquisition and output tick to this CSV at
+    // stop (CLYPDAT_CAPTURE_TRACE).
+    std::string trace_path;
     // Benchmarks: the Desktop Duplication path before pooling, a new owned
     // texture per frame and the CPU cursor.
     bool dxgi_reference_path=false;
@@ -152,6 +183,9 @@ struct RecordingCaptureHealth {
     // the wgc_* rates come from the capture callback itself.
     double input_fps = 0, unique_fps = 0, output_fps = 0;
     double wgc_callback_fps = 0, wgc_delivered_fps = 0, wgc_overwritten_fps = 0;
+    // Owned copies of source frames per second, and picked frames whose
+    // copy failed (output as a duplicate instead).
+    double owned_copy_fps = 0; uint64_t materialize_failures = 0;
     double duplicate_fps = 0, replaced_fps = 0, selection_dropped_fps = 0;
     uint64_t selection_dropped = 0;
     int source_queue_depth = 0, source_queue_peak = 0, source_queue_capacity = 0;
@@ -307,6 +341,10 @@ int capture_queue_capacity(int fps);
 // Owned WGC frame copies alive at once in steady state, sized from measured
 // holders rather than the pacing queue (see the definition).
 int capture_source_texture_capacity(int source_queue_depth);
+// WGC frame-pool buffers when frames stay borrowed until selection: the
+// selection window, the store's newest slot, one in its callback, and free
+// buffers for composition (see the definition).
+int capture_wgc_pool_buffers(int source_queue_depth);
 // Continuous backpressure without an accepted frame for this long means the
 // encoder is stuck; it is replaced like a failed encoder.
 inline constexpr int64_t kRecordingEncoderStallUs = 2000000;

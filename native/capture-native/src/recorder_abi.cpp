@@ -311,6 +311,10 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"wgcCadenceMode\":" << quoted(h.source_details.cadence_mode) << ",\"wgcCadenceFps\":" << h.source_details.cadence_fps
         << ",\"wgcUpdateTicks\":" << h.source_details.update_ticks << ",\"wgcProducerCeilingFps\":" << h.source_details.producer_ceiling_fps
         << ",\"displayRefreshHz\":" << h.source_details.display_refresh_hz << ",\"wgcCallbackUs\":" << h.source_details.callback_us
+        << ",\"copyOnSelection\":" << (h.source_details.copy_on_selection ? "true" : "false") << ",\"ownedCopies\":" << h.source_details.owned_copies
+        << ",\"ownedCopyFps\":" << h.owned_copy_fps << ",\"borrowedFrames\":" << h.source_details.borrowed << ",\"borrowedPeak\":" << h.source_details.borrowed_peak
+        << ",\"borrowDiscards\":" << h.source_details.borrowed_discards << ",\"wgcPoolBuffers\":" << h.source_details.wgc_pool_buffers
+        << ",\"materializeFailures\":" << h.materialize_failures
         << ",\"closedSessions\":[";
     bool first = true;
     for (const auto& closed : r->session->closed_sessions()) {
