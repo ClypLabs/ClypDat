@@ -41,6 +41,16 @@ internal static class GpuScheduling
     // selected capture cadence. REALTIME is safe to try here because the UI is
     // no longer hosted in this process; HIGH and ABOVE_NORMAL remain fallbacks
     // for drivers or policies that refuse it.
+    //
+    // Nothing below REALTIME is a usable default. Measured with hardware GPU
+    // scheduling on (RTX 4070 Ti, GPU-bound Overwatch, 1440p120 recording):
+    // NORMAL, ABOVE_NORMAL and HIGH all behaved the same, with WGC arrivals
+    // falling from ~200/s to ~40/s and only 39 of 120 output frames fresh.
+    // Capture-device thread priority (0, 1 or 7) changed neither result.
+    // REALTIME kept all 120 fresh and cost the game ~16% of its frame rate
+    // (240 -> ~201 fps). That cost is mostly preemption, not work: the
+    // recorder's own 3D-engine use was ~2%, and cutting WGC arrivals from ~200/s
+    // to ~127/s won back ~9 fps.
     private const int SchedulingPriorityClassAboveNormal = 3;
     private const int SchedulingPriorityClassHigh = 4;
     private const int SchedulingPriorityClassRealtime = 5;
