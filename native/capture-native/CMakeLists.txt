@@ -75,6 +75,18 @@ add_custom_command(TARGET ClypDat.Capture.Native POST_BUILD
 enable_testing()
 option(CLYPDAT_TEST_GPU "Run tests requiring a physical D3D11 device" OFF)
 
+add_executable(ClypDat.Capture.Native.KeyframeTests tests/replay_keyframe_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.KeyframeTests PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.KeyframeTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.KeyframeTests PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.KeyframeEncoder COMMAND ClypDat.Capture.Native.KeyframeTests)
+add_test(NAME ClypDat.Capture.Native.KeyframeRecorder COMMAND ClypDat.Capture.Native.KeyframeTests --recorder)
+if(CLYPDAT_TEST_GPU)
+    add_test(NAME ClypDat.Capture.Native.KeyframeNvenc COMMAND ClypDat.Capture.Native.KeyframeTests --backend h264_nvenc --d3d11)
+    add_test(NAME ClypDat.Capture.Native.KeyframeNvencReadback COMMAND ClypDat.Capture.Native.KeyframeTests --backend h264_nvenc)
+    add_test(NAME ClypDat.Capture.Native.KeyframeAv1Nvenc COMMAND ClypDat.Capture.Native.KeyframeTests --backend av1_nvenc --d3d11)
+endif()
+
 # Compile the public ABI as C as well as C++.
 add_library(ClypDat.Capture.Native.CHeader OBJECT tests/c_header.c)
 target_include_directories(ClypDat.Capture.Native.CHeader PRIVATE include)

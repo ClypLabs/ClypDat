@@ -1,5 +1,6 @@
 #pragma once
 #include "video_encoder.h"
+#include "replay_keyframes.h"
 #include "encoder_backend.h"
 #include "recording_overlays.h"
 #include <chrono>
@@ -169,6 +170,8 @@ struct RecordingCaptureConfig {
     bool detector_enabled=false,detector_counter_mask=false;
 };
 struct RecordingCaptureHealth {
+    ReplayKeyframeHealth keyframes;
+    std::string unsupported_encoder_options;
     uint64_t acquired = 0, encoded = 0, replaced = 0, generation = 0;
     uint64_t detector_copies = 0;
     int queue_depth = 0, queue_capacity = 0, active_fps = 0;

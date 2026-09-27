@@ -228,6 +228,12 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"captureAdapterVendor\":" << h.capture_adapter_vendor
         << ",\"submissionP50Ms\":" << h.submission_p50_ms << ",\"completionP50Ms\":" << h.completion_p50_ms
         << ",\"packetPayloadBytes\":" << h.packet_payload_bytes << ",\"packetBufferBytes\":" << h.packet_buffer_bytes
+        << ",\"keyframeLastPtsUs\":" << h.keyframes.last_pts_us << ",\"keyframeGapUs\":" << h.keyframes.gap_us
+        << ",\"keyframeMaxGapUs\":" << h.keyframes.maximum_gap_us << ",\"keyframeWatchdogUs\":" << h.keyframes.watchdog_us
+        << ",\"keyframesRequested\":" << h.keyframes.requested << ",\"periodicKeyframesRequested\":" << h.keyframes.periodic_requested
+        << ",\"keyframesEmitted\":" << h.keyframes.emitted << ",\"keyframeRecoveries\":" << h.keyframes.recoveries
+        << ",\"keyframeSafe\":" << (h.keyframes.safe?"true":"false")
+        << ",\"unsupportedEncoderOptions\":" << quoted(h.unsupported_encoder_options)
         << ",\"readbackStagingSlots\":" << h.readback_staging_slots << ",\"readbackStagingInUse\":" << h.readback_staging_in_use
         << ",\"readbackStagingPeak\":" << h.readback_staging_peak << ",\"readbackCpuFrames\":" << h.readback_cpu_frames
         << ",\"readbackCpuFramesInUse\":" << h.readback_cpu_frames_in_use << ",\"readbackCpuFramesPeak\":" << h.readback_cpu_frames_peak

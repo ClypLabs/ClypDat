@@ -85,6 +85,11 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         const int result = av_opt_set(context.priv_data, key, value.c_str(), 0);
         if (result < 0) unsupported_options_.push_back(std::string(key) + "=" + value + " (" + std::to_string(result) + ")");
     };
+    auto required_idr = [&](const char* key) {
+        // Failing this option changes an explicit I into a non-random-access
+        // picture on some backends. Never silently accept that configuration.
+        checked(av_opt_set(context.priv_data,key,"1",0),"Configure explicit recording IDRs");
+    };
     if (name.ends_with("_nvenc")) {
         option("preset", "p1");
         if (name == "h264_nvenc") option("profile", "high");
@@ -93,21 +98,21 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         option("temporal-aq", "0");
         option("rc-lookahead", "0");
         option("rc", "cbr");
-        option("forced-idr", "1");
+        required_idr("forced-idr");
     } else if (name.ends_with("_amf")) {
         option("usage", "ultralowlatency");
         option("quality", "speed");
         option("rc", name == "av1_amf" ? "hqcbr" : "cbr");
-        option("forced_idr", "1");
+        required_idr("forced_idr");
     } else if (name.ends_with("_qsv")) {
         option("preset", "veryfast");
         option("rc_mode", "cbr");
-        option("forced_idr", "1");
+        required_idr("forced_idr");
         if (config.low_power) option("low_power", "1");
     } else {
         option("preset", "ultrafast");
         option("tune", "zerolatency");
-        option("bitrate", std::to_string(context.bit_rate));
+        required_idr("forced-idr");
     }
     // Surface and delay counts come only from the resource plan.
     for (const auto& [key, value] : config.resource_options) option(key.c_str(), value);

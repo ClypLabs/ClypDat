@@ -638,6 +638,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     std::mutex source_mutex;
     std::condition_variable changed;
     RecordingCaptureHealth status;
+    ReplayKeyframes keyframes;
     std::shared_ptr<CapturePixels> latest;
     uint64_t sequence = 0;
     // Recent acquisitions for timestamp selection, oldest first. Bounded by
@@ -772,6 +773,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     }
     void emit(std::vector<Packet> packets) {
         for (auto& packet : packets) {
+            const auto pts=av_rescale_q(packet->pts,generation->time_base,AVRational{1,1000000});
+            const bool safe=keyframes.packet(pts,(packet->flags&AV_PKT_FLAG_KEY)!=0);
+            { std::lock_guard lock(mutex); status.keyframes=keyframes.health; }
+            if(!safe)throw KeyframeCadenceError();
             const auto mapping = submitted.find(packet->pts);
             if (mapping == submitted.end()) throw std::runtime_error("Encoder output has no source timestamp mapping");
             const auto [acquired, fresh] = mapping->second;
@@ -791,7 +796,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             status.surfaces_in_use = int(submitted.size());
         }
     }
-    void open_encoder(bool recovering) {
+    void open_encoder(bool recovering,bool retry_current=false) {
         const auto old_codec = encoder ? encoder->context().codec_id : AV_CODEC_ID_NONE;
         const bool old_hardware = encoder && active_candidate < encoder_candidates.size() &&
             encoder_candidates[active_candidate].name != "libx264";
@@ -799,7 +804,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         const uint32_t adapter_vendor = dependencies.adapter_vendor ? *dependencies.adapter_vendor : d3d11_adapter_vendor(source->d3d_device());
         const bool overlay_stage = callbacks.compose_nv12 && (!callbacks.overlay_enabled || callbacks.overlay_enabled());
         std::string failures;
-        for (size_t i = recovering ? active_candidate + 1 : 0; i < encoder_candidates.size(); ++i) {
+        for (size_t i = recovering ? active_candidate + (retry_current ? 0 : 1) : 0; i < encoder_candidates.size(); ++i) {
             if (failed_candidates[i]) continue;
             const auto& candidate = encoder_candidates[i];
             const auto codec = candidate.name.starts_with("av1") ? AV_CODEC_ID_AV1 : AV_CODEC_ID_H264;
@@ -830,7 +835,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 } else if (!recovering) { ensure_conversion(capacity); ensure_readback(plan); }
                 auto replacement = dependencies.open_encoder?dependencies.open_encoder(ec,i):std::make_unique<VideoEncoder>(ec);
                 if(!replacement)throw std::runtime_error("Recording encoder factory returned no encoder");
-                if (encoder) { try { emit(encoder->finish()); } catch (...) {} }
+                if (encoder && !retry_current) { try { emit(encoder->finish()); } catch (...) {} }
                 encoder = std::move(replacement); active_candidate = i;
                 // Any unreturned frames belonged to a failed outgoing context.
                 // Destroy that context before dropping their retained surfaces.
@@ -845,9 +850,12 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 // libx264 plans no encoder-owned frames, but the frame being
                 // submitted stays on the ledger until its packet emerges.
                 retained_limit = size_t(plan ? std::max(plan->max_in_flight, 1) : legacy_surface_capacity(config.fps));
+                keyframes.generation(fps,int(retained_limit));
                 // Zero-copy plans keep no CPU staging resources.
                 if (candidate.d3d11 && !recovering) { readback.reset(); readback_staged.clear(); }
                 { std::lock_guard lock(mutex); status.generation = generation->id; status.encoder = candidate.name;
+                  status.keyframes=keyframes.health; status.unsupported_encoder_options.clear();
+                  for(const auto& option:encoder->unsupported_options()) { if(!status.unsupported_encoder_options.empty())status.unsupported_encoder_options+="; "; status.unsupported_encoder_options+=option; }
                   status.hardware_input = candidate.d3d11; status.surface_capacity = candidate.d3d11 ? (gpu ? gpu->capacity() : capacity) : 0;
                   status.hdr = status.source_details.hdr_display;
                   status.capture_adapter_vendor = adapter_vendor; status.encoder_planned = bool(plan);
@@ -1345,6 +1353,15 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     // A failed encoder is replaced by the next compatible candidate; with none
     // left open_encoder throws and the worker restarts.
     void replace_encoder(bool& first) { failed_candidates[active_candidate] = true; open_encoder(true); first = true; }
+    void recover_keyframes(bool& first) {
+        // One reopen per capture session, never an endless loop of the same
+        // broken encoder. Existing worker recovery also has a one-retry breaker.
+        if(keyframes.health.recoveries>=1)throw KeyframeCadenceError();
+        ++keyframes.health.recoveries;
+        { std::lock_guard lock(mutex); status.keyframes=keyframes.health; }
+        try { open_encoder(true,true); first=true; }
+        catch(const std::exception& e) { throw std::runtime_error(std::string(KeyframeCadenceError().what())+"; recovery failed: "+e.what()); }
+    }
     // Drains ready packets for at most one output interval until ready()
     // holds. Never allocates; waited_us reports the time spent.
     template<class Ready> bool relieve(Ready ready, const PressureTimer& timer, int64_t& waited_us, bool& first) {
@@ -1352,6 +1369,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         const int64_t budget = 1000000 / fps.load();
         for (;;) {
             try { emit(encoder->drain_ready()); }
+            catch (const KeyframeCadenceError&) { recover_keyframes(first); waited_us=now()-started; return true; }
             catch (...) { replace_encoder(first); waited_us = now() - started; return true; }
             if (ready()) { waited_us = now() - started; return true; }
             const auto elapsed = now() - started;
@@ -1429,7 +1447,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     // Submits one frame, retrying Busy within one output interval; a frame
     // still refused is dropped as backpressure.
     void submit_frame(Frame frame, const Staged& meta, EncodingState& state, const Tick& tick) {
-        if (state.first) frame->pict_type = AV_PICTURE_TYPE_I;
+        bool request_key=state.first||keyframes.due(meta.pts);
+        // Reused CPU frames must also clear an earlier I-picture request.
+        frame->pict_type=request_key?AV_PICTURE_TYPE_I:AV_PICTURE_TYPE_NONE;
         const bool fresh = meta.source_sequence != state.last_sequence;
         auto track = [&] {
             // Only hardware surfaces are kept alive here. Encoders copy
@@ -1450,20 +1470,28 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             status.surfaces_in_use_peak=std::max(status.surfaces_in_use_peak,int(submitted.size()));
             if(gpu)status.surfaces_allocated=gpu->allocated(); }
         SubmitResult result;
+        auto completed=[&] {
+            if(result.status==SubmitStatus::Accepted)keyframes.accepted(meta.pts,request_key);
+            emit(std::move(result.packets));
+        };
         try {
-            result = encoder->try_submit(*frame); emit(std::move(result.packets));
+            result = encoder->try_submit(*frame); completed();
             // Busy: the encoder refused this frame and holds no reference.
             // Retry within one output interval, then drop the tick.
             const int64_t budget = 1000000 / fps.load();
             while (result.status == SubmitStatus::Busy && now() - submit_started < budget) {
                 state.timer.pause(1000);
-                result = encoder->try_submit(*frame); emit(std::move(result.packets));
+                result = encoder->try_submit(*frame); completed();
             }
+        }
+        catch (const KeyframeCadenceError&) {
+            recover_keyframes(state.first); return;
         }
         catch (...) {
             replace_encoder(state.first); frame->pict_type = AV_PICTURE_TYPE_I;
+            request_key=true;
             track();
-            result = encoder->try_submit(*frame); emit(std::move(result.packets));
+            result = encoder->try_submit(*frame); completed();
         }
         const auto submitted_done = now();
         if (result.status == SubmitStatus::Busy) {
@@ -1681,6 +1709,7 @@ void RecordingCapture::start() {
         s->config.width=width+(width&1);s->config.height=height+(height&1);
     }
     s->fps=s->config.fps;s->user_paused=false;
+    s->keyframes=ReplayKeyframes{};
     std::fill(s->failed_candidates.begin(),s->failed_candidates.end(),false);
     s->open_encoder(false);
     std::lock_guard lock(s->mutex);
@@ -1729,6 +1758,8 @@ std::vector<CaptureFrameTimeline> RecordingCapture::recent_timelines() const {
     std::lock_guard lock(state_->mutex); return {state_->timelines.begin(), state_->timelines.end()};
 }
 bool RecordingCapture::safe_save_start(int64_t begin,int64_t end,int64_t& result)const{
-    std::lock_guard lock(state_->mutex);return state_->recovery.safe_start(begin,end,result);
+    std::lock_guard lock(state_->mutex);
+    if(!state_->status.keyframes.safe)throw KeyframeCadenceError();
+    return state_->recovery.safe_start(begin,end,result);
 }
 }

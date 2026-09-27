@@ -122,6 +122,16 @@ public sealed record ReplayCaptureHealth(
 {
     public FullSessionStatus FullSession { get; init; } = new(FullSessionState.Off);
     public long TotalDroppedFrames { get; init; }
+    public long KeyframesRequested { get; init; }
+    public long PeriodicKeyframesRequested { get; init; }
+    public long KeyframesEmitted { get; init; }
+    public long KeyframeLastPtsUs { get; init; } = -1;
+    public long KeyframeGapUs { get; init; }
+    public long KeyframeMaxGapUs { get; init; }
+    public long KeyframeWatchdogUs { get; init; }
+    public long KeyframeRecoveries { get; init; }
+    public bool KeyframeSafe { get; init; }
+    public string UnsupportedEncoderOptions { get; init; } = string.Empty;
     // Frames the capture source handed over per second (WGC or DXGI), before
     // pacing chooses which of them become output frames.
     public double SourceDeliveredFrameRate { get; init; }
