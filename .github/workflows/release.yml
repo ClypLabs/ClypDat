@@ -3,10 +3,8 @@ run-name: Bump version to ${{ inputs.version || github.ref_name }}
 
 # Triggered by pushing a tag like v0.1.0. Builds the native win-x64 app and
 # packages it four ways: a raw zip, a self-extracting portable exe, an NSIS
-# setup.exe, and a raw MSI - then attaches all four to a GitHub Release for
-# that tag. AppUpdateService.cs (in-app updater) specifically looks for the
-# NSIS asset named ClypDat-Setup.exe, so that name must not change without
-# also updating ExpectedAssetName there.
+# setup.exe, and a raw MSI, named with the release tag. A byte-identical
+# ClypDat-Setup.exe alias preserves existing updater and WinGet clients.
 #
 on:
   push:
@@ -94,6 +92,10 @@ jobs:
         shell: pwsh
         run: .\dotnet.ps1 --info
 
+      - name: Test versioned packaging and signing
+        shell: pwsh
+        run: .\eng\Test-VersionedRelease.ps1
+
       - name: Publish ClypDat.App
         shell: pwsh
         env:
@@ -114,7 +116,9 @@ jobs:
 
       - name: Build zip artifact
         shell: pwsh
-        run: Compress-Archive -Path native\publish\win-x64-folder\* -DestinationPath ClypDat-win-x64.zip
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: Compress-Archive -Path native\publish\win-x64-folder\* -DestinationPath "ClypDat-$env:TAG-win-x64.zip"
 
       - name: Install packaging tools
         shell: pwsh
@@ -142,6 +146,8 @@ jobs:
 
       - name: Build portable exe (7-Zip self-extracting archive)
         shell: pwsh
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           $sevenZip = "C:\Program Files\7-Zip\7z.exe"
           $sfxModule = "C:\Program Files\7-Zip\7z.sfx"
@@ -153,19 +159,22 @@ jobs:
             ';!@InstallEnd@!'
           )
           [System.IO.File]::WriteAllText("sfx-config.txt", ($configLines -join "`r`n"), [System.Text.Encoding]::UTF8)
-          cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z ClypDat-Portable.exe
+          cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z "ClypDat-$env:TAG-Portable.exe"
 
       - name: Build NSIS installer
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DCLYPDAT_VERSION=$env:VERSION" /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder /DCLYPDAT_OUTPUT_FILE=..\ClypDat-Setup.exe installer\ClypDat.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DCLYPDAT_VERSION=$env:VERSION" /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder "/DCLYPDAT_OUTPUT_FILE=..\ClypDat-$env:TAG-Setup.exe" installer\ClypDat.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis.exe failed with exit code $LASTEXITCODE" }
 
       - name: Verify NSIS installer icon
         shell: pwsh
-        run: .\eng\Test-InstallerIcon.ps1 -InstallerPath .\ClypDat-Setup.exe -IconPath .\assets\clypdat-icon.ico
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: .\eng\Test-InstallerIcon.ps1 -InstallerPath ".\ClypDat-$env:TAG-Setup.exe" -IconPath .\assets\clypdat-icon.ico
 
       - name: Locate WiX toolset
         id: wix
@@ -204,6 +213,7 @@ jobs:
         env:
           WIX_BIN: ${{ steps.wix.outputs.bin }}
           VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           $wixBin = $env:WIX_BIN
           $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
@@ -225,20 +235,29 @@ jobs:
             "installer\Product.wixobj", "installer\AppFiles.wixobj",
             # heat.exe authors file KeyPaths without Win64 metadata; suppress
             # the known per-user validation warnings for harvested components.
-            "-out", "ClypDat.msi", "-sice:ICE61", "-sice:ICE38", "-sice:ICE64"
+            "-out", "ClypDat-$env:TAG.msi", "-sice:ICE61", "-sice:ICE38", "-sice:ICE64"
           )
           & "$wixBin\light.exe" @lightArgs
           if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
+
+      - name: Create and verify compatibility alias
+        shell: pwsh
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          Copy-Item -LiteralPath "ClypDat-$env:TAG-Setup.exe" -Destination ClypDat-Setup.exe
+          .\eng\Test-ReleaseAssets.ps1 -Tag $env:TAG -ArtifactDirectory .
 
       - name: Upload release assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-assets
           path: |
-            ClypDat-win-x64.zip
-            ClypDat-Portable.exe
+            ClypDat-${{ steps.version.outputs.tag }}-win-x64.zip
+            ClypDat-${{ steps.version.outputs.tag }}-Portable.exe
+            ClypDat-${{ steps.version.outputs.tag }}-Setup.exe
+            ClypDat-${{ steps.version.outputs.tag }}.msi
             ClypDat-Setup.exe
-            ClypDat.msi
           if-no-files-found: error
           retention-days: 3
           compression-level: 0
@@ -281,7 +300,8 @@ jobs:
           if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { throw "Unexpected tag '$tag' from build job." }
           Set-Location release-assets
           gh release create $tag `
-            ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
+            "ClypDat-$tag-win-x64.zip" "ClypDat-$tag-Portable.exe" "ClypDat-$tag-Setup.exe" "ClypDat-$tag.msi" `
+            "ClypDat-Setup.exe#ClypDat $tag Setup (updater and WinGet compatibility)" `
             --title "ClypDat $tag" `
             --generate-notes `
             --verify-tag `

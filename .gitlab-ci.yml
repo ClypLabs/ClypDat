@@ -17,8 +17,9 @@ build_windows_installer:
   tags:
     - saas-windows-medium-amd64
   script:
-    - '$version = $env:CI_COMMIT_TAG.Substring(1)'
+    - '$tag = $env:CI_COMMIT_TAG; $version = $tag.Substring(1)'
     - .\dotnet.ps1 --info
+    - .\eng\Test-VersionedRelease.ps1
     - |
       $pin = [xml](Get-Content eng\AvaloniaPin.props -Raw)
       $avaloniaCommit = $pin.SelectSingleNode('//ClypDatAvaloniaStableCommit').InnerText
@@ -58,7 +59,7 @@ build_windows_installer:
       if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS was not installed." }
       if (-not (Test-Path "C:\Program Files\7-Zip\7z.exe")) { throw "7-Zip was not installed." }
     - >-
-      Compress-Archive -Path native\publish\win-x64-folder\* -DestinationPath ClypDat-win-x64.zip
+      Compress-Archive -Path native\publish\win-x64-folder\* -DestinationPath "ClypDat-$tag-win-x64.zip"
     - |
       $sevenZip = "C:\Program Files\7-Zip\7z.exe"
       $sfxModule = "C:\Program Files\7-Zip\7z.sfx"
@@ -71,15 +72,15 @@ build_windows_installer:
         ';!@InstallEnd@!'
       )
       [System.IO.File]::WriteAllText("sfx-config.txt", ($configLines -join "`r`n"), [System.Text.Encoding]::UTF8)
-      cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z ClypDat-Portable.exe
+      cmd /c copy /b "$sfxModule" + sfx-config.txt + payload.7z "ClypDat-$tag-Portable.exe"
       if ($LASTEXITCODE -ne 0) { throw "Portable executable creation failed." }
     - >-
       & "C:\Program Files (x86)\NSIS\makensis.exe"
       /DCLYPDAT_VERSION=$version
       /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder
-      /DCLYPDAT_OUTPUT_FILE=..\ClypDat-Setup.exe
+      "/DCLYPDAT_OUTPUT_FILE=..\ClypDat-$tag-Setup.exe"
       installer\ClypDat.nsi
-    - 'if (-not (Test-Path -LiteralPath ClypDat-Setup.exe)) { throw "ClypDat-Setup.exe was not created." }'
+    - Copy-Item -LiteralPath "ClypDat-$tag-Setup.exe" -Destination ClypDat-Setup.exe
     - |
       $found = Get-ChildItem "C:\Program Files (x86)\WiX Toolset*\bin\heat.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
       if (-not $found) {
@@ -92,13 +93,13 @@ build_windows_installer:
       $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
       & "$wixBin\candle.exe" -arch x64 -dClypDatVersion=$version -dClypDatSourceDir=$srcDir -ext WixUtilExtension -ext WixUIExtension installer\Product.wxs installer\AppFiles.wxs -out installer\
       if ($LASTEXITCODE -ne 0) { throw "candle.exe failed with exit code $LASTEXITCODE" }
-      $msiPath = Join-Path $PWD 'ClypDat.msi'
+      $msiPath = Join-Path $PWD "ClypDat-$tag.msi"
       & "$wixBin\light.exe" -ext WixUtilExtension -ext WixUIExtension installer\Product.wixobj installer\AppFiles.wixobj -out $msiPath -sice:ICE61 -sice:ICE38 -sice:ICE64
       if ($LASTEXITCODE -ne 0) { throw "light.exe failed with exit code $LASTEXITCODE" }
       if (-not (Test-Path -LiteralPath $msiPath -PathType Leaf)) { throw "MSI was not created: $msiPath" }
       if ((Get-Item -LiteralPath $msiPath).Length -le 0) { throw "MSI is empty: $msiPath" }
     - |
-      $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi")
+      $assets = @(.\eng\Test-ReleaseAssets.ps1 -Tag $env:CI_COMMIT_TAG -ArtifactDirectory .)
       foreach ($asset in $assets) {
         if (-not (Test-Path -LiteralPath $asset)) { throw "$asset was not created." }
         Get-FileHash -Algorithm SHA256 $asset | Format-List
@@ -106,10 +107,11 @@ build_windows_installer:
   artifacts:
     name: "ClypDat-$CI_COMMIT_TAG"
     paths:
-      - ClypDat-win-x64.zip
-      - ClypDat-Portable.exe
+      - ClypDat-${CI_COMMIT_TAG}-win-x64.zip
+      - ClypDat-${CI_COMMIT_TAG}-Portable.exe
+      - ClypDat-${CI_COMMIT_TAG}-Setup.exe
+      - ClypDat-${CI_COMMIT_TAG}.msi
       - ClypDat-Setup.exe
-      - ClypDat.msi
     expire_in: 1 year
 
 # Manual on purpose. The release manifest is signed offline and this pipeline
@@ -131,7 +133,7 @@ publish_gitlab_release:
     - |
       if ([string]::IsNullOrWhiteSpace($env:RELEASE_DESCRIPTION)) { throw 'Provide reviewed release notes in RELEASE_DESCRIPTION.' }
       $packageBase = "$env:CI_API_V4_URL/projects/$env:CI_PROJECT_ID/packages/generic/clypdat/$env:CI_COMMIT_TAG"
-      $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi")
+      $assets = @(.\eng\Test-ReleaseAssets.ps1 -Tag $env:CI_COMMIT_TAG -ArtifactDirectory .)
       if ([string]::IsNullOrWhiteSpace($env:RELEASE_MANIFEST_B64) -or [string]::IsNullOrWhiteSpace($env:RELEASE_SIGNATURE_B64)) {
         throw 'A signed release manifest and signature are required before publishing, including for legacy clients.'
       }
@@ -155,15 +157,9 @@ publish_gitlab_release:
         if ($LASTEXITCODE -ne 0) { throw "Failed to upload $asset." }
       }
       $releaseUrl = "$env:CI_API_V4_URL/projects/$env:CI_PROJECT_ID/releases"
-      $releaseLinks = @(
-        @{ name = 'ClypDat-win-x64.zip'; url = "$packageBase/ClypDat-win-x64.zip"; direct_asset_path = '/ClypDat-win-x64.zip'; link_type = 'package' },
-        @{ name = 'ClypDat-Portable.exe'; url = "$packageBase/ClypDat-Portable.exe"; direct_asset_path = '/ClypDat-Portable.exe'; link_type = 'package' },
-        @{ name = 'ClypDat-Setup.exe'; url = "$packageBase/ClypDat-Setup.exe"; direct_asset_path = '/ClypDat-Setup.exe'; link_type = 'package' },
-        @{ name = 'ClypDat.msi'; url = "$packageBase/ClypDat.msi"; direct_asset_path = '/ClypDat.msi'; link_type = 'package' }
-      )
-      foreach ($signedAsset in $signedAssets) {
-        $releaseLinks += @{ name = $signedAsset; url = "$packageBase/$signedAsset"; direct_asset_path = "/$signedAsset"; link_type = 'other' }
-      }
+      $releaseLinks = @($assets | ForEach-Object {
+        @{ name = $_; url = "$packageBase/$_"; direct_asset_path = "/$_"; link_type = $(if ($_ -in $signedAssets) { 'other' } else { 'package' }) }
+      })
       $releasePayload = @{
         tag_name = $env:CI_COMMIT_TAG
         name = "ClypDat $env:CI_COMMIT_TAG"

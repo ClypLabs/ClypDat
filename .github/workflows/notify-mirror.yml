@@ -1,0 +1,23 @@
+name: Notify release mirror
+
+on:
+  release:
+    types: [published, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    if: ${{ !github.event.release.draft && !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request mirror sync
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::MIRROR_DISPATCH_TOKEN is unset; scheduled mirror sync will retry."
+            exit 0
+          fi
+          gh api --method POST repos/ClypLabs/webapp/dispatches -f event_type=release-published
