@@ -3,6 +3,7 @@
 #include "recording_process.h"
 #include <Windows.h>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -17,6 +18,39 @@ void require(bool value,const char* message){if(!value)throw std::runtime_error(
 PcmBlock pcm(int64_t start,uint64_t generation,float value,int count=4800){PcmBlock block;block.lane="game";block.source="game:1";block.start_us=start;block.generation=generation;block.sample_rate=48000;block.channels=2;block.samples.assign(size_t(count)*2,value);return block;}
 float sample(const std::filesystem::path& path,int64_t frame){std::ifstream input(path,std::ios::binary);input.seekg(44+frame*8);float result=0;input.read(reinterpret_cast<char*>(&result),4);require(bool(input),"Cannot read rendered PCM");return result;}
 void decode_and_seek(const std::filesystem::path& path,int expected_streams){auto p=path.u8string();std::string utf8(p.begin(),p.end());AVFormatContext* input=nullptr;require(avformat_open_input(&input,utf8.c_str(),nullptr,nullptr)>=0,"Cannot open media");struct Input{AVFormatContext* p;~Input(){avformat_close_input(&p);}} cleanup{input};require(avformat_find_stream_info(input,nullptr)>=0,"Cannot probe media");require(int(input->nb_streams)==expected_streams,"Incorrect saved stream count");int video=av_find_best_stream(input,AVMEDIA_TYPE_VIDEO,-1,-1,nullptr,0);require(video>=0,"Saved video stream missing");const auto* decoder=avcodec_find_decoder(input->streams[video]->codecpar->codec_id);CodecContext context(avcodec_alloc_context3(decoder));require(context&&avcodec_parameters_to_context(context.get(),input->streams[video]->codecpar)>=0&&avcodec_open2(context.get(),decoder,nullptr)>=0,"Cannot open saved decoder");Packet packet(av_packet_alloc());AVFrame* frame=av_frame_alloc();require(frame!=nullptr,"Cannot allocate decode frame");int decoded=0;while(av_read_frame(input,packet.get())>=0){if(packet->stream_index==video){require(avcodec_send_packet(context.get(),packet.get())>=0,"Saved packet rejected by decoder");while(avcodec_receive_frame(context.get(),frame)>=0){++decoded;av_frame_unref(frame);}}av_packet_unref(packet.get());}require(decoded>0,"Saved file produced no decoded video");require(av_seek_frame(input,-1,input->duration/2,AVSEEK_FLAG_BACKWARD)>=0,"Saved file cannot seek");avcodec_flush_buffers(context.get());bool sought=false;while(!sought&&av_read_frame(input,packet.get())>=0){if(packet->stream_index==video&&avcodec_send_packet(context.get(),packet.get())>=0)sought=avcodec_receive_frame(context.get(),frame)>=0;av_packet_unref(packet.get());}av_frame_free(&frame);require(sought,"Saved seek produced no frame");if(expected_streams>1){auto* title=av_dict_get(input->streams[1]->metadata,"title",nullptr,0);auto* handler=av_dict_get(input->streams[1]->metadata,"handler_name",nullptr,0);require((title&&std::string(title->value)=="Game Audio")||(handler&&std::string(handler->value)=="Game Audio"),"Saved named audio lane missing");}}
+std::filesystem::path bundled_ffmpeg(){return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()/L"vendor"/L"ffmpeg"/L"ffmpeg.exe";}
+float decoded_sample(const std::filesystem::path& path,int audio_index){
+    std::atomic_bool cancel=false;
+    auto result=ProcessRunner::run(bundled_ffmpeg(),{L"-v",L"error",L"-nostdin",L"-i",path.wstring(),L"-map",L"0:a:"+std::to_wstring(audio_index),L"-ac",L"2",L"-ar",L"48000",L"-f",L"f32le",L"pipe:1"},cancel);
+    constexpr size_t offset=4800*2*sizeof(float);
+    require(result.output.size()>=offset+sizeof(float),"Decoded audio too short");
+    float value=0;std::memcpy(&value,result.output.data()+offset,sizeof(value));return value;
+}
+void check_replay_audio(const std::filesystem::path& root,const VideoSnapshot& video){
+    AudioHistory audio(root/L"replay-history",3000000);
+    auto submit=[&](const char* lane,int channels,float level){auto block=pcm(video.start_us,1,level,int(video.duration_us*48000/1000000));block.lane=lane;block.source=lane;block.channels=channels;block.samples.assign(size_t(block.samples.size()/2)*channels,level);require(audio.submit(std::move(block)),"Replay audio rejected");};
+    submit("game",2,.1f);submit("discord",2,.2f);submit("mic",1,.3f);
+    auto snapshot=audio.snapshot(video.start_us,video.end_us).get();audio.stop();
+    auto save=[&](const char* id,std::vector<AudioLaneConfig> lanes){
+        std::promise<AudioSnapshot> promise;promise.set_value(snapshot);
+        ReplaySaveRequest request;request.id=id;request.output=root/(std::string(id)+".mp4");request.work_directory=root;request.ffmpeg=bundled_ffmpeg();request.video=video;request.audio=promise.get_future().share();request.lanes=std::move(lanes);
+        SaveCoordinator coordinator;auto result=coordinator.begin(std::move(request)).get();require(result.error.empty(),"Replay save failed");return result.output;
+    };
+    auto mixed=save("mixed-replay",{{"game","Game Audio",2,.5f,false},{"discord","Discord",2,.75f,false},{"mic","Microphone",1,.5f,false}});
+    auto path=mixed.u8string();std::string utf8(path.begin(),path.end());AVFormatContext* input=nullptr;require(avformat_open_input(&input,utf8.c_str(),nullptr,nullptr)>=0,"Cannot open mixed replay");
+    require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==5,"Mixed replay stream count wrong");
+    for(int i=0;i<4;++i){auto* stream=input->streams[i+1];auto* title=av_dict_get(stream->metadata,"title",nullptr,0);auto* handler=av_dict_get(stream->metadata,"handler_name",nullptr,0);const char* expected[]={"All Tracks","Game Audio","Discord","Microphone"};require(stream->codecpar->codec_type==AVMEDIA_TYPE_AUDIO&&((title&&std::string(title->value)==expected[i])||(handler&&std::string(handler->value)==expected[i])),"Mixed replay stream title or order wrong");require(bool(stream->disposition&AV_DISPOSITION_DEFAULT)==(i==0),"Mixed replay default audio disposition wrong");}
+    avformat_close_input(&input);
+    std::atomic_bool cancel=false;auto ffprobe=bundled_ffmpeg();ffprobe.replace_filename(L"ffprobe.exe");
+    auto probe=ProcessRunner::run(ffprobe,{L"-v",L"error",L"-show_entries",L"stream=index,codec_type:stream_tags=title,handler_name:stream_disposition=default",L"-of",L"compact=p=0",mixed.wstring()},cancel);
+    require(probe.output.find("All Tracks")!=std::string::npos&&probe.output.find("Discord")!=std::string::npos,"ffprobe lost replay audio titles");
+    std::cout<<"ffprobe mixed replay:\n"<<probe.output;
+    auto all=decoded_sample(mixed,0),game=decoded_sample(mixed,1),chat=decoded_sample(mixed,2),mic=decoded_sample(mixed,3);
+    require(std::abs(game-.05f)<.02f&&std::abs(chat-.15f)<.02f&&mic>.08f,"Separate replay audio gains or sources wrong");
+    require(std::abs(all-(game+chat+mic))<.025f,"All Tracks does not contain each separate source once");
+    auto single=save("single-replay",{{"game","Game Audio",2,.5f,false}});
+    auto single_path=single.u8string();std::string single_utf8(single_path.begin(),single_path.end());require(avformat_open_input(&input,single_utf8.c_str(),nullptr,nullptr)>=0,"Cannot open single-track replay");require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==2,"Single-track replay gained duplicate mix");avformat_close_input(&input);
+}
 void audio_test(const std::filesystem::path& root){
     AudioSnapshot pinned;
     {
@@ -57,6 +91,7 @@ void video_test(const std::filesystem::path& root){
     std::atomic_bool cancel=false;auto output=root/L"replay.mp4";remux_video(snapshot,output,cancel);
     AVFormatContext* input=nullptr;auto p=output.u8string();std::string path(p.begin(),p.end());require(avformat_open_input(&input,path.c_str(),nullptr,nullptr)>=0,"Saved video cannot open");require(avformat_find_stream_info(input,nullptr)>=0,"Saved video cannot probe");require(input->duration>0&&input->nb_streams==1,"Saved video invalid");avformat_close_input(&input);
     decode_and_seek(output,1);
+    check_replay_audio(root,snapshot);
     FullSessionWriter session({root/L"session.mkv",{{"game","Game Audio",2,1,false}}},generation);
     for(const auto& packet:snapshot.packets){require(session.video(generation,*packet.packet),"Session video rejected");auto block=pcm(packet.packet->pts,packet.packet->pts<700000?1:2,.1f,1470);block.sample_rate=44100;block.channels=1;block.samples.resize(1470);require(session.audio(std::move(block)),"Session PCM rejected");}
     require(session.stop(),"Session did not stop");require(session.status().error.empty(),"Session mux failed");

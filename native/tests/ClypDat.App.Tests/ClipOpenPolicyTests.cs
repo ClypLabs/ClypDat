@@ -33,6 +33,35 @@ public sealed class ClipOpenPolicyTests
         Assert.Equal([1], MainWindowViewModel.PlayableAudioStreamIndexes(tracks, isMedalImport: true));
     }
 
+    [Fact]
+    public void ReplayMixIsExcludedFromEditorAndHoverAudio()
+    {
+        var tracks = new[]
+        {
+            new MediaTrackInfo(0, "video", "h264", "Video"),
+            new MediaTrackInfo(1, "audio", "aac", "All Tracks"),
+            new MediaTrackInfo(2, "audio", "aac", "Game Audio"),
+            new MediaTrackInfo(3, "audio", "aac", "Discord"),
+            new MediaTrackInfo(4, "audio", "aac", "Microphone"),
+        };
+
+        Assert.Equal([2, 3, 4], MainWindowViewModel.PlayableAudioStreamIndexes(tracks, isMedalImport: false));
+    }
+
+    [Fact]
+    public void OnlyFirstNamedMixWithOtherAudioIsExcluded()
+    {
+        var oneStream = new[] { new MediaTrackInfo(1, "audio", "aac", "All Tracks") };
+        var laterMix = new[]
+        {
+            new MediaTrackInfo(1, "audio", "aac", "Game Audio"),
+            new MediaTrackInfo(2, "audio", "aac", "All Tracks"),
+        };
+
+        Assert.Equal([1], MainWindowViewModel.PlayableAudioStreamIndexes(oneStream, isMedalImport: false));
+        Assert.Equal([1, 2], MainWindowViewModel.PlayableAudioStreamIndexes(laterMix, isMedalImport: false));
+    }
+
     [Theory]
     [InlineData(false, false, true, false)]
     [InlineData(false, true, true, true)]

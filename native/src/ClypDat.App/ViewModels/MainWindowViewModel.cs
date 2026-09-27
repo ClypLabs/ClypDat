@@ -9505,8 +9505,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         IsEditorVisible = showEditor;
         if (showEditor) OpenEditorSidebar(EditorSidebarSection.Info);
         StartFilmstripLoad(media);
-        // Checked against the LANES, not against media.Tracks: the Medal
-        // pre-mix skip above means the lane set can be a strict subset of the
+        // Checked against the LANES, not against media.Tracks: the pre-mix
+        // skip above means the lane set can be a strict subset of the
         // audio streams, and a track with no lane has nothing to paint.
         var everyAudioLanePainted = TimelineTracks.Where(track => track.IsAudio).All(track => track.WaveformPeaks.Count > 0);
         // Whatever the lanes are holding now came from this file.
@@ -9517,24 +9517,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         StartWaveformLoad(media, everyAudioLanePainted, carriedPeaksStillValid);
     }
 
-    // Medal usually exports two audio streams: a full pre-mix ("All Audio" -
-    // game+mic+everything combined) first, then a second, narrower one ("All PC
-    // Audio") after it. The pre-mix just duplicates content the other track(s)
-    // already carry, so for a Medal import it's dropped before it's ever added
-    // to TimelineTracks - not shown, not muted, not selectable, just never
-    // exists as far as the editor or playback (which builds its audio list FROM
-    // TimelineTracks, see MainWindow.axaml.cs's StartEditorPlaybackAsync) are
-    // concerned. The Library hover asks the same question to know which audio
-    // to extract ahead of a click, before any lanes exist.
-    //
-    // Only when there IS something else to fall back on, though. A Medal clip
-    // exported with everything mixed down to a single track has that one track
-    // AS its audio, and dropping it left the clip silent with an empty timeline
-    // - the import looked broken rather than mixed.
+    // The first stream of a multi-track Medal import is its pre-mix. New replay
+    // clips identify their pre-mix by title. Timeline lanes, playback, and hover
+    // warmup all use this selection so the pre-mix cannot duplicate sources.
+    // A single audio stream is always playable, even if named "All Tracks".
     internal static IReadOnlyList<int> PlayableAudioStreamIndexes(IEnumerable<MediaTrackInfo> tracks, bool isMedalImport)
     {
-        var audio = tracks.Where(track => track.Type == "audio").Select(track => track.Index).ToArray();
-        return isMedalImport && audio.Length > 1 ? audio[1..] : audio;
+        var audio = tracks.Where(track => track.Type == "audio").ToArray();
+        var skipFirst = audio.Length > 1 && (isMedalImport || string.Equals(audio[0].Label, "All Tracks", StringComparison.Ordinal));
+        return (skipFirst ? audio[1..] : audio).Select(track => track.Index).ToArray();
     }
 
     // The lanes may keep their painted peaks only while they still describe the

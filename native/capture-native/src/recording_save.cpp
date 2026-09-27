@@ -150,7 +150,14 @@ std::shared_future<ReplaySaveResult> SaveCoordinator::begin(ReplaySaveRequest re
             std::vector<std::wstring> args{L"-v",L"error",L"-nostdin",L"-y",L"-i",video.wstring()};
             for(const auto& track:tracks){args.push_back(L"-i");args.push_back(track.second.wstring());}
             args.insert(args.end(),{L"-map",L"0:v:0",L"-c:v",L"copy"});
-            for(size_t i=0;i<tracks.size();++i){auto title=wide(tracks[i].first);args.insert(args.end(),{L"-map",std::to_wstring(i+1)+L":a:0",L"-metadata:s:a:"+std::to_wstring(i),L"title="+title,L"-metadata:s:a:"+std::to_wstring(i),L"handler_name="+title});}
+            if(tracks.size()>1){
+                std::wstring filter;
+                for(size_t i=0;i<tracks.size();++i)filter+=L"["+std::to_wstring(i+1)+L":a:0]aformat=sample_fmts=fltp:channel_layouts=stereo[mix"+std::to_wstring(i)+L"];";
+                for(size_t i=0;i<tracks.size();++i)filter+=L"[mix"+std::to_wstring(i)+L"]";
+                filter+=L"amix=inputs="+std::to_wstring(tracks.size())+L":normalize=0[all_tracks]";
+                args.insert(args.end(),{L"-filter_complex",filter,L"-map",L"[all_tracks]",L"-metadata:s:a:0",L"title=All Tracks",L"-metadata:s:a:0",L"handler_name=All Tracks",L"-disposition:a:0",L"default"});
+            }
+            for(size_t i=0;i<tracks.size();++i){auto title=wide(tracks[i].first);auto index=std::to_wstring(i+(tracks.size()>1?1:0));args.insert(args.end(),{L"-map",std::to_wstring(i+1)+L":a:0",L"-metadata:s:a:"+index,L"title="+title,L"-metadata:s:a:"+index,L"handler_name="+title});if(tracks.size()>1)args.insert(args.end(),{L"-disposition:a:"+index,L"0"});}
             args.insert(args.end(),{L"-c:a",L"aac",L"-b:a",L"192k"});if(request.output.extension()==L".mp4")args.insert(args.end(),{L"-movflags",L"+faststart"});args.push_back(partial.wstring());
             ProcessRunner::run(request.ffmpeg,args,*cancel,std::chrono::minutes(10));
             if(cancel->load())throw std::runtime_error("Replay save cancelled");
