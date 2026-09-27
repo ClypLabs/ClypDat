@@ -2712,6 +2712,36 @@
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="RenderTransform" Value="scale(1.05)" />
   </Style>
+  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider">
+    <Style.Resources>
+      <CornerRadius x:Key="SliderThumbCornerRadius">5</CornerRadius>
+    </Style.Resources>
+  </Style>
+  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider:horizontal /template/ RepeatButton#PART_DecreaseButton">
+    <Setter Property="Margin" Value="0,0,-11,0" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider:horizontal /template/ RepeatButton#PART_IncreaseButton">
+    <Setter Property="Margin" Value="-11,0,0,0" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider /template/ Thumb">
+    <Setter Property="Width" Value="22" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="CornerRadius" Value="5" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Background" Value="{StaticResource Surface_24313C}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Text_C8D6E6}" />
+    <Setter Property="RenderTransform" Value="scale(1)" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider /template/ Thumb:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_334554}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrushHover}" />
+    <Setter Property="RenderTransform" Value="scale(1)" />
+  </Style>
+  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider /template/ Thumb:pressed">
+    <Setter Property="Background" Value="{StaticResource Surface_3E5265}" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
+    <Setter Property="RenderTransform" Value="scale(1)" />
+  </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider">
     <Style.Resources>
       <sys:Double x:Key="SliderTrackThemeHeight">7</sys:Double>

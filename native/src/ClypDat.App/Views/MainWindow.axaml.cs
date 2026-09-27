@@ -251,6 +251,8 @@ public sealed partial class MainWindow : Window
     private DateTime _hoverControlsAnimationStartedUtc;
     private TranslateTransform? _hoverControlsTranslate;
     private ServerPerPixelOverlay? _hoverControlsPerPixelOverlay;
+    private Border? _hoverControlsBackdrop;
+    private bool _hoverControlsVisibleFallback;
     private double _hoverControlsAnimationStartOffset;
     private double _hoverControlsAnimationTargetOffset;
     private double _hoverControlsOffset = HoverControlsSlideDistance;
@@ -9616,6 +9618,21 @@ public sealed partial class MainWindow : Window
     // Only logged on an actual show/hide transition - the poll runs ~8x a
     // second and would otherwise bury the log.
     private string _hoverControlsLastState = string.Empty;
+    private long _hoverAttempt;
+    private DateTime _hoverFailureLastUtc = DateTime.MinValue;
+    private int _hoverFailureRepeats;
+    private string _hoverGeometryLast = string.Empty;
+    private DateTime _hoverGeometryLastUtc = DateTime.MinValue;
+
+    private void LogHoverFailure(string reason)
+    {
+        var now = DateTime.UtcNow;
+        _hoverFailureRepeats++;
+        if (now - _hoverFailureLastUtc < TimeSpan.FromSeconds(5)) return;
+        AppLog.Error($"Editor hover attempt={_hoverAttempt}: {reason}; repeats={_hoverFailureRepeats}; {DescribeNativeWindow(_editorHoverControlsWindow)}");
+        _hoverFailureLastUtc = now;
+        _hoverFailureRepeats = 0;
+    }
 
     private void LogHoverControlsState(string state)
     {
@@ -9649,21 +9666,13 @@ public sealed partial class MainWindow : Window
         // 120ms for as long as the app sat in the tray, and the recovery path
         // - drop the window, build a fresh one - just produced a new window to
         // fail on, so the bar never came back after a restore.
-        if (ViewModel is null || !IsVisible || !ViewModel.IsEditorVisible || ViewModel.IsVideoFullscreen || _playback is null ||
-            ViewModel.IsEditorVideoLoading || IsEditorSurfaceCovered)
+        var blockedReason = HoverBarEligibility.BlockedReason(ViewModel is not null, IsVisible,
+            ViewModel?.IsEditorVisible == true, ViewModel?.IsVideoFullscreen == true,
+            _playback is not null, ViewModel?.IsEditorVideoLoading == true, IsEditorSurfaceCovered);
+        if (blockedReason is not null)
         {
-            if (_editorHoverControlsWindow is { IsVisible: true })
-            {
-                LogHoverControlsState($"hidden (window={IsVisible}, editor={ViewModel?.IsEditorVisible}, fullscreen={ViewModel?.IsVideoFullscreen}, playback={_playback is not null}, covers={_editorSurfaceCovers.Describe()})");
-            }
-            else if (IsEditorSurfaceCovered && IsVisible && ViewModel?.IsEditorVisible == true)
-            {
-                // Logged even though the bar is already down: a cover that
-                // never lifts otherwise leaves no trace at all, which is how
-                // a leaked one hid the bar for a whole session unexplained.
-                // Reasons only, so the ticking age doesn't re-log every poll.
-                LogHoverControlsState($"blocked (covered by {_editorSurfaceCovers.Describe(withAge: false)})");
-            }
+            if (blockedReason == "covered") blockedReason += $" by {_editorSurfaceCovers.Describe(withAge: false)}";
+            LogHoverControlsState($"blocked ({blockedReason})");
             HideEditorHoverControls(immediate: true);
             return;
         }
@@ -9671,6 +9680,7 @@ public sealed partial class MainWindow : Window
         // Mid-resize: stay down until the layout stops moving.
         if (DateTime.UtcNow < _hoverControlsSuppressedUntilUtc)
         {
+            LogHoverControlsState("blocked (resize suppression)");
             HideEditorHoverControls(immediate: true);
             return;
         }
@@ -9697,7 +9707,11 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        if (!GetCursorPos(out var cursor)) return;
+        if (!GetCursorPos(out var cursor))
+        {
+            LogHoverFailure($"GetCursorPos failed: error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}");
+            return;
+        }
 
         // EditorVideoHost, not EditorVideoView: the view carries the zoom
         // ScaleTransform (so its own PointToScreen moves and can extend well
@@ -9737,6 +9751,13 @@ public sealed partial class MainWindow : Window
         if (overVideo || overBar)
         {
             _hoverControlsActiveUntilUtc = DateTime.UtcNow + HoverControlsGrace;
+            if (_editorHoverControlsWindow is not { IsVisible: true } && _hoverControlsLastState != "eligible")
+            {
+                _hoverAttempt++;
+                LogHoverControlsState("eligible");
+                var hit = WindowFromPoint(cursor);
+                AppLog.Debug($"Editor hover attempt={_hoverAttempt}: cursor={cursor.X},{cursor.Y}; video={videoTopLeft.X},{videoTopLeft.Y}-{videoBottomRight.X},{videoBottomRight.Y}; hitChain={DescribeHitAncestry(hit)}; hitRoot={GetAncestor(hit, GaRoot):X}; main={NativeHandleOf(this):X}; overVideo={overVideo}; overBar={overBar}; suppressedUntil={_hoverControlsSuppressedUntilUtc:O}.");
+            }
             ShowEditorHoverControls();
         }
         else if (DateTime.UtcNow >= _hoverControlsActiveUntilUtc)
@@ -9780,6 +9801,8 @@ public sealed partial class MainWindow : Window
         _hoverControlsSlidingOut = false;
 
         var window = EnsureEditorHoverControlsWindow();
+        if (NativeHandleOf(window) != IntPtr.Zero && !MakeWindowNonActivating(window, out var preShowStyleError))
+            LogHoverFailure($"WS_EX_NOACTIVATE missing before Show: error={preShowStyleError}");
         // Every tick, not just on the hidden->shown transition - see
         // RepositionEditorHoverControls, which no-ops unless the video pane
         // has actually moved or resized, so this costs nothing while the bar
@@ -9790,6 +9813,7 @@ public sealed partial class MainWindow : Window
             SetHoverControlsOffset(HoverControlsSlideDistance);
             try
             {
+                AppLog.Debug($"Editor hover attempt={_hoverAttempt}: Show(owner={NativeHandleOf(this):X}, pre={DescribeNativeWindow(window)}).");
                 window.Show(this);
             }
             catch (Exception error)
@@ -9803,7 +9827,7 @@ public sealed partial class MainWindow : Window
                 // Show fail is usually still true a tick later, and retrying
                 // at 8/sec turned one real problem into thousands of log
                 // lines. A second between attempts still recovers promptly.
-                AppLog.Error("Editor hover bar show failed; rebuilding it", error);
+                LogHoverFailure($"Show failed ({error.GetType().Name}: {error.Message}); rebuilding");
                 _editorHoverControlsWindow = null;
                 StopHoverControlsAnimation();
                 try
@@ -9830,12 +9854,23 @@ public sealed partial class MainWindow : Window
             // otherwise see Avalonia's already-correct Position and do
             // nothing), so the bar is guaranteed to be where the video is.
             RepositionEditorHoverControls(window, force: true);
-            // Applied after Show, since there's no hwnd to set styles on
-            // before it - keeps clicking a control from stealing activation
-            // and taking the bar down out from under the click.
-            MakeWindowNonActivating(window);
-            LogHoverControlsState($"sliding in ({DescribeNativeWindow(window)})");
+            if (_hoverControlsPerPixelOverlay is { } mirror && !mirror.TryShowAndRefresh())
+                UseVisibleHoverFallback("mirror show failed");
+            else if (_hoverControlsPerPixelOverlay is { IsReady: true })
+                WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(window);
+            if (!MakeWindowNonActivating(window, out var postShowStyleError))
+                LogHoverFailure($"WS_EX_NOACTIVATE missing after Show: error={postShowStyleError}");
+            LogHoverControlsState($"sliding in (attempt={_hoverAttempt}, {DescribeNativeWindow(window)})");
             Dispatcher.UIThread.Post(() => StartHoverControlsAnimation(0), DispatcherPriority.Loaded);
+            var attempt = _hoverAttempt;
+            var settledTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
+            settledTimer.Tick += (_, _) =>
+            {
+                settledTimer.Stop();
+                if (ReferenceEquals(_editorHoverControlsWindow, window))
+                    AppLog.Debug($"Editor hover attempt={attempt}: settled offset={_hoverControlsOffset:0.##}; mirror={_hoverControlsPerPixelOverlay?.IsReady}; {DescribeNativeWindow(window)}");
+            };
+            settledTimer.Start();
         }
         else
         {
@@ -9846,14 +9881,28 @@ public sealed partial class MainWindow : Window
     // What the OS says about the window, for the log - Avalonia's own
     // IsVisible/Position can't distinguish "shown where we asked" from "shown
     // somewhere else" or "not actually shown at all".
-    private static string DescribeNativeWindow(Window window)
+    private static string DescribeNativeWindow(Window? window)
     {
         var handle = NativeHandleOf(window);
         if (handle == IntPtr.Zero) return "no native handle";
         var visible = IsWindowVisible(handle);
+        var owner = GetWindow(handle, GwOwner);
+        var root = GetAncestor(handle, GaRoot);
+        var previous = GetWindow(handle, GwHwndPrev);
+        var style = GetWindowLongPtr(handle, GwlStyle);
+        var exStyle = GetWindowLongPtr(handle, GwlExStyle);
+        var dpi = GetDpiForWindow(handle);
         return GetWindowRect(handle, out var rect)
-            ? $"native={visible}, rect={rect.Left},{rect.Top}-{rect.Right},{rect.Bottom}"
-            : $"native={visible}, rect=unavailable";
+            ? $"hwnd={handle:X}, owner={owner:X}, root={root:X}, previous={previous:X}, native={visible}, avalonia={window?.IsVisible}, rect={rect.Left},{rect.Top}-{rect.Right},{rect.Bottom}, dpi={dpi}, style={style:X}, ex={exStyle:X}"
+            : $"hwnd={handle:X}, owner={owner:X}, root={root:X}, native={visible}, rect=unavailable, dpi={dpi}, style={style:X}, ex={exStyle:X}";
+    }
+
+    private static string DescribeHitAncestry(IntPtr hit)
+    {
+        var chain = new List<string>();
+        for (var current = hit; current != IntPtr.Zero && chain.Count < 8; current = GetParent(current))
+            chain.Add($"{current:X}");
+        return string.Join(">", chain);
     }
 
     // immediate: true for leaving the editor or entering fullscreen (the bar
@@ -9975,7 +10024,8 @@ public sealed partial class MainWindow : Window
         _hoverControlsOffset = Math.Round(Math.Clamp(offset, 0, HoverControlsSlideDistance) * scaling) / scaling;
         if (_hoverControlsTranslate is null) return;
         _hoverControlsTranslate.Y = _hoverControlsOffset;
-        _hoverControlsPerPixelOverlay?.Refresh();
+        if (_editorHoverControlsWindow?.IsVisible == true && _hoverControlsPerPixelOverlay is { IsReady: true } mirror && !mirror.Refresh())
+            UseVisibleHoverFallback("mirror refresh failed");
     }
 
     // Sizes and places the bar against the video pane as it currently is.
@@ -10005,7 +10055,8 @@ public sealed partial class MainWindow : Window
         // display that put the bar half its own height too low on the very
         // first show, hanging past the bottom of the video pane.
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        var fullHeight = Math.Max(1, (int)Math.Round(barHeight * scaling));
+        var fullHeight = HoverBarGeometry.PixelSize(barHeight, scaling);
+        var fullWidth = HoverBarGeometry.PixelSize(width, scaling);
         var position = new PixelPoint(topLeft.X, bottomOnScreen.Y - fullHeight);
         var handle = NativeHandleOf(bar);
 
@@ -10018,13 +10069,22 @@ public sealed partial class MainWindow : Window
         // rect, or wherever Windows defaulted it on Show). That is the bar
         // reading as shown by every state check and still not being where the
         // user is looking.
-        if (!force && handle != IntPtr.Zero && GetWindowRect(handle, out var nativeRect))
+        if (!force && handle != IntPtr.Zero)
         {
-            if (nativeRect.Left == position.X && nativeRect.Top == position.Y &&
-                Math.Abs(bar.Width - width) < 0.5 && Math.Abs(bar.Height - barHeight) < 0.5)
+            if (GetWindowRect(handle, out var nativeRect))
             {
-                return;
+                if (HoverBarGeometry.MatchesNative(nativeRect.Left, nativeRect.Top, nativeRect.Right, nativeRect.Bottom,
+                    position.X, position.Y, fullWidth, fullHeight))
+                    return;
+                var repair = $"{nativeRect.Left},{nativeRect.Top}-{nativeRect.Right},{nativeRect.Bottom} to {position.X},{position.Y} {fullWidth}x{fullHeight}";
+                if (_hoverGeometryLast != repair || DateTime.UtcNow - _hoverGeometryLastUtc >= TimeSpan.FromSeconds(5))
+                {
+                    AppLog.Debug($"Editor hover attempt={_hoverAttempt}: native geometry repair from {repair}.");
+                    _hoverGeometryLast = repair;
+                    _hoverGeometryLastUtc = DateTime.UtcNow;
+                }
             }
+            else LogHoverFailure($"GetWindowRect failed: error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}");
         }
 
         bar.Width = width;
@@ -10038,8 +10098,10 @@ public sealed partial class MainWindow : Window
         // painting over the bar after a resize or alt-tab reorders things.
         if (handle != IntPtr.Zero)
         {
-            SetWindowPos(handle, HwndTop, position.X, position.Y, 0, 0, SwpNoSize | SwpNoActivate);
-            _hoverControlsPerPixelOverlay?.Refresh();
+            if (!SetWindowPos(handle, HwndTop, position.X, position.Y, fullWidth, fullHeight, SwpNoActivate | SwpNoOwnerZOrder))
+                LogHoverFailure($"SetWindowPos failed: error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}");
+            if (bar.IsVisible && _hoverControlsPerPixelOverlay is { IsReady: true } mirror && !mirror.Refresh())
+                UseVisibleHoverFallback("mirror update failed after reposition");
         }
     }
 
@@ -10271,6 +10333,7 @@ public sealed partial class MainWindow : Window
     private Window EnsureEditorHoverControlsWindow()
     {
         if (_editorHoverControlsWindow is not null) return _editorHoverControlsWindow;
+        _hoverControlsVisibleFallback = false;
 
         var translate = new TranslateTransform { Y = HoverControlsSlideDistance };
         var backdrop = new Border
@@ -10285,6 +10348,7 @@ public sealed partial class MainWindow : Window
             Child = BuildPlaybackBarLayout(),
             RenderTransform = translate,
         };
+        _hoverControlsBackdrop = backdrop;
         _hoverControlsTranslate = translate;
 
         var root = new Border
@@ -10308,14 +10372,12 @@ public sealed partial class MainWindow : Window
         window.Opened += (_, _) =>
         {
             OverlayTransparencyDiagnostics.Log(window, "hover-bar");
-            if (WindowsPlatformProfile.IsServer())
+            if (WindowsPlatformProfile.IsServer() && !_hoverControlsVisibleFallback)
             {
                 _hoverControlsPerPixelOverlay?.Dispose();
                 _hoverControlsPerPixelOverlay = new ServerPerPixelOverlay(window, root);
-                _hoverControlsPerPixelOverlay.ShowAndRefresh();
-                WindowTransparencyFallback.ApplyInputSurfaceIfNeeded(window);
             }
-            else
+            else if (!WindowsPlatformProfile.IsServer())
             {
                 WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background, b => backdrop.Background = b, "hover-bar");
             }
@@ -10325,6 +10387,7 @@ public sealed partial class MainWindow : Window
             _hoverControlsPerPixelOverlay?.Dispose();
             _hoverControlsPerPixelOverlay = null;
             _hoverControlsTranslate = null;
+            _hoverControlsBackdrop = null;
             // A closed Window can never be shown again. Forget it so the next
             // poll builds a fresh one, rather than throwing on Show and
             // backing off first.
@@ -10338,6 +10401,17 @@ public sealed partial class MainWindow : Window
         };
         _editorHoverControlsWindow = window;
         return window;
+    }
+
+    private void UseVisibleHoverFallback(string reason)
+    {
+        if (_editorHoverControlsWindow is not { } window || _hoverControlsBackdrop is not { } backdrop) return;
+        LogHoverFailure(reason);
+        _hoverControlsVisibleFallback = true;
+        _hoverControlsPerPixelOverlay?.Dispose();
+        _hoverControlsPerPixelOverlay = null;
+        WindowTransparencyFallback.ApplyIfNeeded(window, backdrop.Background,
+            brush => backdrop.Background = brush, "hover-bar mirror fallback");
     }
 
     private void EditorVideoView_OnVideoClicked(object? sender, EventArgs e)
@@ -10358,7 +10432,7 @@ public sealed partial class MainWindow : Window
         ViewModel.DeselectCapturedOverlays();
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetCursorPos(out CursorPoint point);
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -10377,7 +10451,7 @@ public sealed partial class MainWindow : Window
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hWnd);
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
 
     // Minimised counts as visible to IsWindowVisible, and a minimised window's
@@ -10386,7 +10460,7 @@ public sealed partial class MainWindow : Window
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -10404,7 +10478,18 @@ public sealed partial class MainWindow : Window
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetParent(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hWnd, uint command);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
+
     private const uint GaRoot = 2;
+    private const uint GwHwndPrev = 3;
+    private const uint GwOwner = 4;
 
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -10416,8 +10501,12 @@ public sealed partial class MainWindow : Window
     private static readonly IntPtr HwndTopmost = new(-1);
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
+    private const uint SwpNoOwnerZOrder = 0x0200;
     private const int GwlExStyle = -20;
+    private const int GwlStyle = -16;
     private const long WsExNoActivate = 0x08000000L;
     private const long WsExTransparent = 0x00000020L;
 
@@ -10458,13 +10547,21 @@ public sealed partial class MainWindow : Window
     // be pressed a second time. WS_EX_NOACTIVATE means clicking never moves
     // activation in the first place; mouse input still routes normally, it
     // just doesn't steal focus.
-    private static void MakeWindowNonActivating(Window window)
+    private static bool MakeWindowNonActivating(Window window, out int error)
     {
+        error = 0;
         var handle = NativeHandleOf(window);
-        if (handle == IntPtr.Zero) return;
+        if (handle == IntPtr.Zero) return false;
         var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
-        if ((exStyle & WsExNoActivate) != 0) return;
+        if ((exStyle & WsExNoActivate) != 0) return true;
         SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExNoActivate));
+        error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+        var updated = (long)GetWindowLongPtr(handle, GwlExStyle);
+        if ((updated & WsExNoActivate) == 0) return false;
+        var positioned = SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0,
+            SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate | SwpNoOwnerZOrder | SwpFrameChanged);
+        if (!positioned) error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+        return positioned;
     }
 
     // WS_EX_TRANSPARENT on top of the above: the clip overlay's window now

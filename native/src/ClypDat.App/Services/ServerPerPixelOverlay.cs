@@ -38,6 +38,7 @@ internal sealed class ServerPerPixelOverlay : IDisposable
     private int _pixelHeight;
     private Vector _positionOffset;
     private bool _disposed;
+    public bool IsReady { get; private set; }
 
     public ServerPerPixelOverlay(Window inputWindow, Control source)
     {
@@ -47,16 +48,25 @@ internal sealed class ServerPerPixelOverlay : IDisposable
 
     public void ShowAndRefresh()
     {
-        if (_disposed || !WindowsPlatformProfile.IsServer()) return;
-        if (!EnsureWindow()) return;
+        if (_disposed || !WindowsPlatformProfile.IsServer() || !EnsureWindow()) return;
         Refresh();
         ShowWindow(_window, SwShowNoActivate);
     }
 
-    public void Refresh()
+    // Hover-bar input may only fade after the companion actually presents.
+    public bool TryShowAndRefresh()
     {
-        if (_disposed || _window == IntPtr.Zero || !_inputWindow.IsVisible) return;
-        if (!GetWindowRect(_inputWindow.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero, out var rect)) return;
+        if (_disposed || !WindowsPlatformProfile.IsServer() || !EnsureWindow()) return false;
+        if (!Refresh()) return false;
+        ShowWindow(_window, SwShowNoActivate);
+        IsReady = IsWindowVisible(_window);
+        return IsReady;
+    }
+
+    public bool Refresh()
+    {
+        if (_disposed || _window == IntPtr.Zero || !_inputWindow.IsVisible) return false;
+        if (!GetWindowRect(_inputWindow.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero, out var rect)) return false;
 
         var width = Math.Max(1, rect.Right - rect.Left);
         var height = Math.Max(1, rect.Bottom - rect.Top);
@@ -86,21 +96,37 @@ internal sealed class ServerPerPixelOverlay : IDisposable
             };
 
             if (!UpdateLayeredWindow(_window, IntPtr.Zero, ref destination, ref size, _memoryDc, ref source, 0, ref blend, UlwAlpha))
+            {
                 AppLog.Error($"Per-pixel hover overlay update failed: error={Marshal.GetLastWin32Error()}.");
+                IsReady = false;
+                return false;
+            }
 
             var inputHandle = _inputWindow.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
             if (inputHandle != IntPtr.Zero)
-                SetWindowPos(_window, inputHandle, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate);
+            {
+                if (!SetWindowPos(_window, inputHandle, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate))
+                {
+                    AppLog.Error($"Per-pixel hover overlay order failed: error={Marshal.GetLastWin32Error()}.");
+                    IsReady = false;
+                    return false;
+                }
+            }
+            IsReady = true;
+            return true;
         }
         catch (Exception error)
         {
             AppLog.Error("Per-pixel hover overlay render failed", error);
+            IsReady = false;
+            return false;
         }
     }
 
     public void Hide()
     {
         if (_window != IntPtr.Zero) ShowWindow(_window, SwHide);
+        IsReady = false;
     }
 
     // Leave source layout intact; move native mirror when an overlay itself
@@ -251,6 +277,9 @@ internal sealed class ServerPerPixelOverlay : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr window, int command);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr window);
 
     [DllImport("user32.dll")]
     private static extern bool DestroyWindow(IntPtr window);

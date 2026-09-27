@@ -2320,7 +2320,7 @@
                             Foreground="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToMuteBrushConverter.Instance}}"
                             Data="{Binding EffectiveMasterVolumePercent, Converter={x:Static opconv:VolumeLevelToIconConverter.Instance}}" />
                 </Border>
-                <Slider Classes="volumeSlider" Minimum="0" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" Width="90" VerticalAlignment="Center"
+                <Slider Classes="volumeSlider fullscreenVolumeSlider" Minimum="0" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" Width="90" VerticalAlignment="Center"
                         Value="{Binding MasterVolumePercent, Mode=TwoWay}"
                         Opacity="{Binding IsMasterMuted, Converter={x:Static opconv:BoolToOpacityConverter.Instance}}" />
                 <TextBlock Text="{Binding MasterVolumePercent, StringFormat={}{0:0}%}"
