@@ -133,9 +133,9 @@ public sealed class PlaybackSession : IDisposable
     private void LogPresentationTimeout(PresentationWaiter.Stage stage, TimeSpan target, long generation, NativeVideoOutput output)
     {
         var native = output.TryReadStatus(out var status)
-            ? $"nativeGeneration={status.Generation}, nativeRevision={status.Revision}, decoded={status.DecodedPicture}, presented={status.PresentedPicture}"
-            : "nativeGeneration=unavailable, nativeRevision=unavailable, decoded=unavailable, presented=unavailable";
-        var line = $"Editor seek presentation {(stage == PresentationWaiter.Stage.AdoptedRetained ? "recovered" : "stall")}: stage={stage}, target={target.TotalSeconds:0.###}s, seekGeneration={generation}, {native}, vlcState={VideoPlayer.State}, vlcTime={VideoPlayer.Time / 1000d:0.###}s.";
+            ? $"nativeGeneration={status.Generation}, nativeRevision={status.Revision}, decoded={status.DecodedPicture}, presented={status.PresentedPicture}, attached={status.Attached}, failed={status.Failed}, failureDetail={(status.Failed != 0 ? status.ErrorMessage : "none")}"
+            : "nativeGeneration=unavailable, nativeRevision=unavailable, decoded=unavailable, presented=unavailable, attached=unavailable, failed=unavailable, failureDetail=unavailable";
+        var line = $"Editor seek presentation {(stage == PresentationWaiter.Stage.AdoptedRetained ? "adoption pending" : "stall")}: stage={stage}, target={target.TotalSeconds:0.###}s, seekGeneration={generation}, {native}, voutCount={VideoPlayer.VoutCount}, vlcState={VideoPlayer.State}, vlcTime={VideoPlayer.Time / 1000d:0.###}s.";
         if (stage == PresentationWaiter.Stage.AdoptedRetained) AppLog.Info(line);
         else AppLog.Error(line);
     }
@@ -1335,6 +1335,19 @@ public sealed class PlaybackSession : IDisposable
     private sealed class PlaybackSeekTransport(PlaybackSession session, long generation, Task? audioSetup = null, bool reusePresentedFrame = false, Func<CancellationToken, Task<bool>>? reveal = null) : IEditorSeekTransport
     {
         private TimeSpan _audioAnchor;
+        public bool NeedsRunningFirstFrame => session.Composition?.HasPresentedPicture != true &&
+            session.VideoPlayer.State is VLCState.NothingSpecial or VLCState.Stopped or VLCState.Opening or VLCState.Buffering;
+        public void StartVideoForLanding()
+        {
+            lock (session._transportLock)
+            {
+                session.ForceVideoSilent();
+                session.Composition?.BindPlayer(session.VideoPlayer);
+                if (session.VideoPlayer.State is VLCState.NothingSpecial or VLCState.Stopped)
+                    session.VideoPlayer.Play();
+                session.VideoPlayer.SetPause(false);
+            }
+        }
         public bool CanReusePresentedFrame(TimeSpan target) => reusePresentedFrame && IsPaused &&
             Math.Abs((Position - target).TotalMilliseconds) <= 150 && session.Composition?.HasPresentedPicture == true;
         // Deliberately far tighter than CanReusePresentedFrame's startup

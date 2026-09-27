@@ -87,6 +87,30 @@ public sealed class PresentationWaiterTests
         Assert.Equal([PresentationWaiter.Stage.AdoptedRetained], stages);
     }
 
+    [Fact]
+    public async Task ParkedPlayerWithoutRetainedPictureStillTimesOut()
+    {
+        var stages = new List<PresentationWaiter.Stage>();
+        var adopts = 0;
+
+        var result = await PresentationWaiter.WaitForSceneAndPresentationAsync(
+            _ => Task.FromResult(true),
+            presented: () => false,
+            current: () => true,
+            CancellationToken.None,
+            stages.Add,
+            TimeSpan.FromMilliseconds(80),
+            new PresentationWaiter.ParkedRecovery(
+                Decoded: () => 0,
+                Stalled: () => true,
+                Adopt: () => { adopts++; return false; },
+                Grace: TimeSpan.FromMilliseconds(20)));
+
+        Assert.False(result);
+        Assert.Equal(1, adopts);
+        Assert.Equal([PresentationWaiter.Stage.NativePresentation], stages);
+    }
+
     [Theory]
     [InlineData(true, true)]
     [InlineData(false, false)]

@@ -137,6 +137,21 @@ public sealed class EditorSeekCoordinatorTests
     }
 
     [Fact]
+    public async Task DirectClickAtNonzeroTrimPresentsBeforeParkingFreshPlayer()
+    {
+        var transport = new RecoveryTransport { NeedsRunningFirstFrame = true, OnlyPresentsWhileRunning = true };
+        var coordinator = new EditorSeekCoordinator(pollInterval: TimeSpan.FromMilliseconds(1));
+
+        var result = await coordinator.StartAsync(transport, TimeSpan.FromMilliseconds(39179), "cold", () => true, CancellationToken.None);
+
+        Assert.Equal(EditorPlaybackStartOutcome.Playing, result.Outcome);
+        Assert.Equal(1, transport.LandingStarts);
+        Assert.True(transport.PausedAtReveal);
+        Assert.Equal(1, transport.Writes);
+        Assert.Equal(1, transport.AudioStarts);
+    }
+
+    [Fact]
     public async Task Startup_AudioMissesBudget_PlaysVideoThenJoinsAudioOnce()
     {
         var preparation = new TaskCompletionSource<AudioPreparationResult>();
@@ -274,6 +289,11 @@ public sealed class EditorSeekCoordinatorTests
         private ulong _picture;
         public List<string> Calls { get; } = [];
         public bool ReusesPresentedFrame { get; init; }
+        public bool NeedsRunningFirstFrame { get; init; }
+        public bool OnlyPresentsWhileRunning { get; init; }
+        public int LandingStarts { get; private set; }
+        public bool PausedAtReveal { get; private set; }
+        public void StartVideoForLanding() { LandingStarts++; IsPaused = false; }
         public bool CanReusePresentedFrame(TimeSpan target) => ReusesPresentedFrame;
         // The player is already parked on the requested frame, so the seek has
         // nothing to write or decode.
@@ -286,8 +306,8 @@ public sealed class EditorSeekCoordinatorTests
         public bool Presented { get; private set; }
         public Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token)
         {
-            Presented = _presents;
-            return Task.FromResult(_presents && current());
+            Presented = _presents && (!OnlyPresentsWhileRunning || !IsPaused);
+            return Task.FromResult(Presented && current());
         }
         public RecoveryTransport(bool videoRolls = true, bool presents = true)
             : this(Task.FromResult(new AudioPreparationResult(1, 0, false)), videoRolls, presents) { }
@@ -312,6 +332,7 @@ public sealed class EditorSeekCoordinatorTests
         {
             Calls.Add("reveal");
             Reveals++;
+            PausedAtReveal = IsPaused;
             return Task.FromResult(RevealResult);
         }
 

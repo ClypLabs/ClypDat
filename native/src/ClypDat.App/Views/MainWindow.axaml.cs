@@ -5294,6 +5294,8 @@ public sealed partial class MainWindow : Window
         public CancellationTokenSource Cancellation { get; } = new();
         public TaskCompletionSource<PlaybackSession> SessionReady { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource VideoLoaded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public EditorHoverWarmupReadiness Readiness { get; } = new();
+        public Task? FramePreparation { get; set; }
         public PlaybackSession? Session { get; set; }
         public bool Claimed { get; set; }
         private int _playerAttached;
@@ -5343,11 +5345,13 @@ public sealed partial class MainWindow : Window
         {
             warmup.SessionReady.TrySetCanceled();
             warmup.VideoLoaded.TrySetCanceled();
+            warmup.Readiness.Complete(false);
         }
         catch (Exception error)
         {
             warmup.SessionReady.TrySetException(error);
             warmup.VideoLoaded.TrySetException(error);
+            warmup.Readiness.Complete(false);
             AppLog.Error($"Editor hover warm-up failed: {Path.GetFileName(warmup.Path)}", error);
         }
         finally
@@ -5359,7 +5363,11 @@ public sealed partial class MainWindow : Window
 
     private void StartWarmEditorOutput(EditorHoverWarmup warmup, PlaybackSession session)
     {
-        if (warmup.Cancellation.IsCancellationRequested || warmup.Claimed || !ReferenceEquals(_editorHoverWarmup, warmup)) return;
+        if (warmup.Cancellation.IsCancellationRequested || warmup.Claimed || !ReferenceEquals(_editorHoverWarmup, warmup))
+        {
+            warmup.Readiness.Complete(false);
+            return;
+        }
 
         // This is the exact native EditorVideoView which will remain attached
         // after the click. LibVLC only promises a stable HWND at play start;
@@ -5380,11 +5388,13 @@ public sealed partial class MainWindow : Window
         };
         async Task PrepareWarmFrameAsync()
         {
+            var succeeded = false;
             try
             {
                 var result = await session.SeekAsync(warmup.Start, cancellationToken: warmup.Cancellation.Token);
                 if (result.Outcome == PlaybackSeekOutcome.Completed && !warmup.Cancellation.IsCancellationRequested)
                 {
+                    succeeded = true;
                     warmup.MarkFirstFrameReady();
                     AppLog.Debug($"Editor hover warm-up frame ready: {Path.GetFileName(warmup.Path)}.");
                     // The pointer has stayed long enough to land a frame, so a
@@ -5398,8 +5408,9 @@ public sealed partial class MainWindow : Window
             }
             catch (OperationCanceledException) { }
             catch (Exception error) { AppLog.Error("Editor warm frame failed", error); }
+            finally { warmup.Readiness.Complete(succeeded); }
         }
-        _ = PrepareWarmFrameAsync();
+        warmup.FramePreparation = PrepareWarmFrameAsync();
         _ = PauseWarmEditorOutputAfterAsync(warmup, session);
     }
 
@@ -5439,6 +5450,7 @@ public sealed partial class MainWindow : Window
     {
         if (warmup is null) return;
         warmup.Cancellation.Cancel();
+        warmup.Readiness.Complete(false);
         if (warmup.Session is not { } session) return;
         if (ReferenceEquals(EditorVideoView.MediaPlayer, session.VideoPlayer))
         {
@@ -9022,7 +9034,18 @@ public sealed partial class MainWindow : Window
                 {
                     var session = await warmup.SessionReady.Task;
                     if (cts.IsCancellationRequested) return;
-                    await StartEditorPlaybackAsync(session, warmup.VideoLoaded.Task, warmup.Codec, cts.Token, openClock, foregroundScope, warmup);
+                    if (await warmup.Readiness.CanAdoptAsync(warmup.VideoLoaded.Task,
+                        () => warmup.PlayerAttached && !warmup.Cancellation.IsCancellationRequested,
+                        () => session.VideoPlayer.VoutCount > 0 && session.Composition?.HasPresentedPicture == true,
+                        cts.Token))
+                    {
+                        await StartEditorPlaybackAsync(session, warmup.VideoLoaded.Task, warmup.Codec, cts.Token, openClock, foregroundScope, warmup);
+                    }
+                    else if (!cts.IsCancellationRequested)
+                    {
+                        AppLog.Info($"Editor hover warm-up had no presented frame; opening cold: {Path.GetFileName(warmup.Path)}.");
+                        openCold = true;
+                    }
                 }
                 catch (OperationCanceledException) when (!cts.IsCancellationRequested)
                 {
@@ -9042,9 +9065,15 @@ public sealed partial class MainWindow : Window
                 }
                 finally
                 {
+                    if (openCold) CancelEditorHoverWarmup(warmup);
                     if (ReferenceEquals(_adoptingEditorHoverWarmup, warmup)) _adoptingEditorHoverWarmup = null;
                 }
-                if (openCold) QueueColdEditorPlayback(cts, openClock);
+                if (openCold)
+                {
+                    await AwaitEditorHoverStopAsync();
+                    if (warmup.FramePreparation is { } framePreparation) await framePreparation;
+                    if (!cts.IsCancellationRequested) QueueColdEditorPlayback(cts, openClock);
+                }
             },
             DispatcherPriority.Default);
     }

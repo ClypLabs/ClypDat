@@ -190,11 +190,28 @@ internal sealed class EditorSeekCoordinator
             token.ThrowIfCancellationRequested();
             if (!current()) return null;
             var clock = Stopwatch.StartNew();
-            transport.PauseVideo();
-            if (!await WaitUntilAsync(() => transport.IsPaused, current, token).ConfigureAwait(false)) continue;
+            // VLC can decode while paused before its first vout display, but
+            // never present that picture. A fresh player must seek while its
+            // clock runs; park it only after the landing frame is on screen.
+            var firstPicture = transport.NeedsRunningFirstFrame;
+            if (firstPicture)
+            {
+                transport.StartVideoForLanding();
+                if (!await WaitUntilAsync(() => transport.VideoState == "Playing", current, token, TimeSpan.FromSeconds(2)).ConfigureAwait(false)) continue;
+            }
+            else
+            {
+                transport.PauseVideo();
+                if (!await WaitUntilAsync(() => transport.IsPaused, current, token).ConfigureAwait(false)) continue;
+            }
             transport.WritePosition(target);
             if (!await transport.PresentAsync(target, current, token).ConfigureAwait(false)) continue;
             if (!current()) return null;
+            if (firstPicture)
+            {
+                transport.PauseVideo();
+                if (!await WaitUntilAsync(() => transport.IsPaused, current, token).ConfigureAwait(false)) continue;
+            }
             transport.LogDebug($"seek={id} video-presented: attempt={attempt}, requested={target.TotalSeconds:0.###}s, presentationMs={clock.ElapsedMilliseconds}.");
             return target;
         }
@@ -206,7 +223,7 @@ internal sealed class EditorSeekCoordinator
 }
 
 internal interface IEditorSeekTransport
-{ bool CanReusePresentedFrame(TimeSpan target); bool IsParkedOnFrame(TimeSpan target); void FreezeOnFrame(TimeSpan target); Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token); bool IsPaused { get; } TimeSpan Position { get; }
+{ bool CanReusePresentedFrame(TimeSpan target); bool IsParkedOnFrame(TimeSpan target); void FreezeOnFrame(TimeSpan target); Task<bool> PresentAsync(TimeSpan target, Func<bool> current, CancellationToken token); bool NeedsRunningFirstFrame { get; } void StartVideoForLanding(); bool IsPaused { get; } TimeSpan Position { get; }
   // Position interpolated between VLC's coarse time updates - what a late
   // audio join anchors to, so it lands where the picture is now.
   TimeSpan LivePosition { get; }
