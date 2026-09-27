@@ -14,8 +14,8 @@ namespace ClypDat.App.Controls;
 /// the two rails back into a single definition that differs only in size.
 ///
 /// The rail is display only. Seeking stays with the hit strip that wraps it
-/// (see FullscreenProgressBar_OnPointerPressed), which is why nothing here is
-/// hit-testable and why the trimmed-away spans are still seekable.
+/// (see FullscreenProgressBar_OnPointerPressed), so the trimmed-away spans
+/// remain seekable. Fullscreen adds a thumb; the hover bar keeps its geometry.
 /// </summary>
 public sealed class SeekRailControl : Control
 {
@@ -41,6 +41,12 @@ public sealed class SeekRailControl : Control
 
     public static readonly StyledProperty<double> RailCornerRadiusProperty =
         AvaloniaProperty.Register<SeekRailControl, double>(nameof(RailCornerRadius));
+
+    public static readonly StyledProperty<double> RailThicknessProperty =
+        AvaloniaProperty.Register<SeekRailControl, double>(nameof(RailThickness));
+
+    public static readonly StyledProperty<double> ThumbDiameterProperty =
+        AvaloniaProperty.Register<SeekRailControl, double>(nameof(ThumbDiameter));
 
     public TimeSpan Duration
     {
@@ -84,6 +90,19 @@ public sealed class SeekRailControl : Control
         set => SetValue(RailCornerRadiusProperty, value);
     }
 
+    // Zero preserves the original full-height, edge-to-edge hover rail.
+    public double RailThickness
+    {
+        get => GetValue(RailThicknessProperty);
+        set => SetValue(RailThicknessProperty, value);
+    }
+
+    public double ThumbDiameter
+    {
+        get => GetValue(ThumbDiameterProperty);
+        set => SetValue(ThumbDiameterProperty, value);
+    }
+
     static SeekRailControl()
     {
         AffectsRender<SeekRailControl>(
@@ -93,7 +112,9 @@ public sealed class SeekRailControl : Control
             TrimEndPercentProperty,
             TrackBrushProperty,
             PlayedBrushProperty,
-            RailCornerRadiusProperty);
+            RailCornerRadiusProperty,
+            RailThicknessProperty,
+            ThumbDiameterProperty);
     }
 
     // The trimmed-away spans are the SAME rail, drawn faint - not the rail
@@ -109,27 +130,40 @@ public sealed class SeekRailControl : Control
     {
         base.Render(context);
 
-        var rect = new Rect(Bounds.Size);
-        if (rect.Width <= 0 || rect.Height <= 0) return;
+        var bounds = new Rect(Bounds.Size);
+        if (bounds.Width <= 0 || bounds.Height <= 0) return;
+
+        var (left, width) = RailBounds(bounds.Width, ThumbDiameter);
+        var height = RailThickness > 0 ? Math.Min(RailThickness, bounds.Height) : bounds.Height;
+        var rect = new Rect(left, (bounds.Height - height) / 2, width, height);
+        if (rect.Width <= 0) return;
 
         var radius = Math.Min(RailCornerRadius, Math.Min(rect.Width, rect.Height) / 2);
         var played = PlayedWidth(rect.Width);
 
-        var start = Math.Clamp(TrimStartPercent, 0, 100) / 100 * rect.Width;
-        var end = Math.Clamp(TrimEndPercent, 0, 100) / 100 * rect.Width;
+        var start = rect.X + Math.Clamp(TrimStartPercent, 0, 100) / 100 * rect.Width;
+        var end = rect.X + Math.Clamp(TrimEndPercent, 0, 100) / 100 * rect.Width;
         if (end < start) (start, end) = (end, start);
 
-        var hasHead = start > 0.5;
-        var hasTail = end < rect.Width - 0.5;
+        var hasHead = start > rect.X + 0.5;
+        var hasTail = end < rect.Right - 0.5;
         if (!hasHead && !hasTail)
         {
             DrawRail(context, rect, radius, played);
-            return;
+        }
+        else
+        {
+            if (hasHead) DrawSpan(context, rect, radius, played, new Rect(rect.X, rect.Y, start - rect.X, rect.Height), CutOpacity);
+            DrawSpan(context, rect, radius, played, new Rect(start, rect.Y, end - start, rect.Height), 1);
+            if (hasTail) DrawSpan(context, rect, radius, played, new Rect(end, rect.Y, rect.Right - end, rect.Height), CutOpacity);
         }
 
-        if (hasHead) DrawSpan(context, rect, radius, played, new Rect(0, 0, start, rect.Height), CutOpacity);
-        DrawSpan(context, rect, radius, played, new Rect(start, 0, end - start, rect.Height), 1);
-        if (hasTail) DrawSpan(context, rect, radius, played, new Rect(end, 0, rect.Width - end, rect.Height), CutOpacity);
+        if (ThumbDiameter > 0)
+        {
+            var center = new Point(rect.X + played, bounds.Height / 2);
+            context.DrawEllipse(Brushes.White, new Pen(PlayedBrush ?? Brushes.White, 2), center,
+                ThumbDiameter / 2 - 1, ThumbDiameter / 2 - 1);
+        }
     }
 
     private void DrawSpan(DrawingContext context, Rect rect, double radius, double played, Rect span, double opacity)
@@ -149,7 +183,7 @@ public sealed class SeekRailControl : Control
     {
         if (TrackBrush is { } track) context.DrawRectangle(track, null, rect, radius, radius);
         if (played <= 0 || PlayedBrush is not { } fill) return;
-        using (context.PushClip(new Rect(0, 0, played, rect.Height)))
+        using (context.PushClip(new Rect(rect.X, rect.Y, played, rect.Height)))
         {
             context.DrawRectangle(fill, null, rect, radius, radius);
         }
@@ -160,5 +194,20 @@ public sealed class SeekRailControl : Control
         var total = Duration.TotalSeconds;
         if (total <= 0) return 0;
         return Math.Clamp(Position.TotalSeconds / total, 0, 1) * width;
+    }
+
+    internal static (double Left, double Width) RailBounds(double width, double thumbDiameter)
+    {
+        var inset = Math.Min(Math.Max(0, thumbDiameter) / 2, Math.Max(0, width) / 2);
+        return (inset, Math.Max(0, width - inset * 2));
+    }
+
+    internal static TimeSpan PositionForPointer(TimeSpan duration, double x, double width, double thumbDiameter)
+    {
+        if (duration <= TimeSpan.Zero) return TimeSpan.Zero;
+        var (left, railWidth) = RailBounds(width, thumbDiameter);
+        if (railWidth <= 0) return TimeSpan.Zero;
+        var fraction = Math.Clamp((x - left) / railWidth, 0, 1);
+        return TimeSpan.FromMilliseconds(duration.TotalMilliseconds * fraction);
     }
 }

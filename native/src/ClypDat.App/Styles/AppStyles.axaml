@@ -343,11 +343,8 @@
   <!--
     Fullscreen playbar seek rail. The Border is the hit target (a press
     anywhere in the 16px band seeks); the rail inside it is hit-test
-    invisible. The rail keeps a constant 8px layout height and is drawn
-    thinner with a ScaleY transform, so growing it on hover animates on the
-    render thread instead of re-running layout on the whole bar every frame -
-    and there is no Height to interpolate from NaN on first apply. Growth on
-    hover is the rail's only affordance: a ProgressBar has no thumb.
+    invisible. The control stays 16px high so its thumb fits. Only the drawn
+    rail thickens on hover; the 16px thumb stays round.
   -->
   <Style Selector="Border.fsSeekStrip">
     <Setter Property="Height" Value="16" />
@@ -355,22 +352,23 @@
     <Setter Property="Cursor" Value="Hand" />
   </Style>
   <Style Selector="Border.fsSeekStrip controls|SeekRailControl.fsSeekRail">
-    <Setter Property="Height" Value="8" />
+    <Setter Property="Height" Value="16" />
     <Setter Property="MinHeight" Value="0" />
     <Setter Property="MinWidth" Value="0" />
     <Setter Property="RailCornerRadius" Value="4" />
+    <Setter Property="RailThickness" Value="4" />
+    <Setter Property="ThumbDiameter" Value="16" />
     <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="TrackBrush" Value="#2EFFFFFF" />
     <Setter Property="IsHitTestVisible" Value="False" />
-    <Setter Property="RenderTransform" Value="scaleY(0.5)" />
     <Setter Property="Transitions">
       <Transitions>
-        <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.12" />
+        <DoubleTransition Property="RailThickness" Duration="0:0:0.12" />
       </Transitions>
     </Setter>
   </Style>
   <Style Selector="Border.fsSeekStrip:pointerover controls|SeekRailControl.fsSeekRail">
-    <Setter Property="RenderTransform" Value="scaleY(1)" />
+    <Setter Property="RailThickness" Value="8" />
   </Style>
   <Style Selector="Button.primaryButton">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
@@ -2676,9 +2674,8 @@
     behind it, and a flat end butted against a round thumb leaves a crescent of
     background at the joint - which is the abrupt cut.
 
-    Each segment is pushed back under the thumb by half its width (8 of the
-    16px thumb, 11 of the 22px one), so the two square ends meet exactly at the
-    thumb's centre, behind it. Track arranges these with Arrange(Rect), which
+    Each segment is pushed back under the 16px thumb by half its width, so the
+    two square ends meet at the thumb's centre, behind it. Track arranges these with Arrange(Rect), which
     applies Margin, so a negative margin genuinely extends the segment past the
     rect it was given. The rail is now one unbroken bar with the thumb sitting
     on top of it, which is what every slider that does this well looks like.
@@ -2711,36 +2708,6 @@
     <Setter Property="Background" Value="{StaticResource Text_EAF0FF}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="RenderTransform" Value="scale(1.05)" />
-  </Style>
-  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider">
-    <Style.Resources>
-      <CornerRadius x:Key="SliderThumbCornerRadius">5</CornerRadius>
-    </Style.Resources>
-  </Style>
-  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider:horizontal /template/ RepeatButton#PART_DecreaseButton">
-    <Setter Property="Margin" Value="0,0,-11,0" />
-  </Style>
-  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider:horizontal /template/ RepeatButton#PART_IncreaseButton">
-    <Setter Property="Margin" Value="-11,0,0,0" />
-  </Style>
-  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider /template/ Thumb">
-    <Setter Property="Width" Value="22" />
-    <Setter Property="Height" Value="24" />
-    <Setter Property="CornerRadius" Value="5" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="Background" Value="{StaticResource Surface_24313C}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Text_C8D6E6}" />
-    <Setter Property="RenderTransform" Value="scale(1)" />
-  </Style>
-  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider /template/ Thumb:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_334554}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrushHover}" />
-    <Setter Property="RenderTransform" Value="scale(1)" />
-  </Style>
-  <Style Selector="Slider.volumeSlider.fullscreenVolumeSlider /template/ Thumb:pressed">
-    <Setter Property="Background" Value="{StaticResource Surface_3E5265}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="RenderTransform" Value="scale(1)" />
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider">
     <Style.Resources>

@@ -5848,8 +5848,8 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _endedAtTrimBoundary = false;
-        var fraction = Math.Clamp(x / Math.Max(1, control.Bounds.Width), 0, 1);
-        ViewModel.CurrentTime = TimeSpan.FromMilliseconds(ViewModel.Duration.TotalMilliseconds * fraction);
+        var thumbDiameter = (control as Border)?.Child is SeekRailControl rail ? rail.ThumbDiameter : 0;
+        ViewModel.CurrentTime = SeekRailControl.PositionForPointer(ViewModel.Duration, x, control.Bounds.Width, thumbDiameter);
         ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
         UpdateTimelineChrome();
         _playback?.SeekPreview(ViewModel.CurrentTime);
