@@ -33,13 +33,10 @@ public const int CurrentSchemaVersion = 14;
             settings.GameAudioExcludedProcesses = AudioProcessIdentity.NormalizeList(settings.GameAudioExcludedProcesses);
         }
 
-        if (settings.SettingsSchemaVersion < 4)
-        {
-            // DXGI is now the only capture path. Keep legacy fields readable,
-            // but never let an old selection revive a retired implementation.
-            settings.ReplayBackend = "Native";
-            foreach (var game in settings.GameCaptureOverrides ?? []) game.CaptureBackend = "Native";
-        }
+        // Schema 4 pinned the retired replay-backend choices (ReplayBackend and
+        // each game's CaptureBackend) to Native. Both settings are gone: the
+        // native recorder is the only backend, and old files' values for them
+        // are simply ignored when read.
 
         if (settings.SettingsSchemaVersion < 5)
         {

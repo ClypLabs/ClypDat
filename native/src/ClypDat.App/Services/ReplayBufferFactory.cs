@@ -28,9 +28,4 @@ public static class ReplayBufferFactory
         return new NativeRecordingAdapter(configProvider);
 #endif
     }
-
-    public static ReplayBackendOption ResolveEffectiveBackend(ReplayBufferConfig config)
-    {
-        return ReplayBackendOption.Native;
-    }
 }

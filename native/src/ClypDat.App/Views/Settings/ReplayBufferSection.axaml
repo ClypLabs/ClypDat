@@ -16,7 +16,7 @@
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="6">
       <TextBlock Classes="settingsSectionTitle" Text="Replay buffer" />
-      <TextBlock Classes="settingsSectionDesc" Text="Control how ClypDat records in the background and which capture backend it uses." />
+      <TextBlock Classes="settingsSectionDesc" Text="Control how ClypDat records in the background." />
     </StackPanel>
 
     <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Save hotkey|Hotkey}">
@@ -240,7 +240,7 @@
             <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
               <StackPanel Classes="settingsRowText">
                 <TextBlock Classes="settingsRowTitle" Text="Full Session recording" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                <TextBlock Classes="settingsRowDesc" Text="Also writes the entire session, video and audio, to ClypDat's VODs folder. ClypDat backend only for now." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Also writes the entire session, video and audio, to ClypDat's VODs folder." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
               </StackPanel>
               <ToggleSwitch Grid.Column="1" IsChecked="{Binding FullSessionRecordingEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
             </Grid>

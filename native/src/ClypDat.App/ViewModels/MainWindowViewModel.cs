@@ -1460,7 +1460,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             ExecutableName = detectionKey,
             DisplayName = detection.DisplayName,
             ProcessName = detection.ExeName,
-            CaptureBackend = "Auto",
             Origin = detection.MatchSource is GameMatchSource.Catalog or GameMatchSource.Steam or GameMatchSource.Epic or GameMatchSource.BattleNet or GameMatchSource.Riot ? "Catalog" : "UserCustom"
         });
         SaveSettings();
@@ -7224,7 +7223,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             ProcessName = exe,
             ExecutablePath = fullPath,
             InstallationId = fullPath is null ? null : key,
-            CaptureBackend = "Auto",
             Origin = "UserCustom"
         });
         NewCustomGameExecutable = string.Empty;
@@ -7295,7 +7293,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (Settings.GameCaptureOverrides.Any(x => string.Equals(x.DisplayName, name, StringComparison.OrdinalIgnoreCase))) name += " " + Guid.NewGuid().ToString("N")[..6];
         }
         var id = "standalone:" + Guid.NewGuid().ToString("N");
-        Settings.GameCaptureOverrides.Add(new GameCaptureOverride { ExecutableName = id, DisplayName = name, ProcessName = Path.GetFileName(path), ExecutablePath = path, InstallationId = id, DetectionReason = reason, CaptureBackend = "Auto", Origin = "Standalone" });
+        Settings.GameCaptureOverrides.Add(new GameCaptureOverride { ExecutableName = id, DisplayName = name, ProcessName = Path.GetFileName(path), ExecutablePath = path, InstallationId = id, DetectionReason = reason, Origin = "Standalone" });
         SaveSettings(); RebuildGameCaptureRows(); GameCatalogChanged?.Invoke(this, EventArgs.Empty);
     }
 

@@ -15,10 +15,11 @@
   </compatibility>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <!-- The native capture backend (DXGI Desktop Duplication) needs the real,
-           unvirtualized monitor resolution - an unaware process gets a scaled-down
-           view of the desktop from Windows (e.g. 2560x1440 instead of 3840x2160 at
-           150% scaling), and DXGI Desktop Duplication inherits that. -->
+      <!-- The native recorder needs the real, unvirtualized monitor resolution
+           and window coordinates - an unaware process gets a scaled-down view of
+           the desktop from Windows (e.g. 2560x1440 instead of 3840x2160 at 150%
+           scaling), which Desktop Duplication crops and window regions inherit.
+           ClypDatRecorder.exe uses this manifest too. -->
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
     </windowsSettings>
   </application>

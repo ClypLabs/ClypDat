@@ -1624,7 +1624,7 @@ int main(int argc,char**argv) {
     if(argc>5&&std::string_view(argv[1])=="--wgc-bench")return wgc_bench(std::atoi(argv[2]),std::atoi(argv[3]),std::atoi(argv[4]),std::atoi(argv[5])!=0,argc>6?std::atoi(argv[6]):8);
     if(argc>5&&std::string_view(argv[1])=="--readback-bench")return readback_bench(argv[2],std::atoi(argv[3]),std::atoi(argv[4]),std::atoi(argv[5]));
     CHECK(capture_queue_capacity(30)==4);CHECK(capture_queue_capacity(120)==15);
-    CHECK(capture_final_hold(true,16667,500000)==33334);CHECK(capture_final_hold(false,16667,500000)==16667);
+    CHECK(capture_final_hold(true,16667,500000)==33334);CHECK(capture_final_hold(true,16667,7400)==7400);CHECK(capture_final_hold(false,16667,500000)==16667);
     auto fit=capture_aspect_fit(1920,1200,1920,1080); CHECK(fit.width==1728&&fit.height==1080&&fit.x==96);
     int64_t deadline=0; CHECK(!capture_variable_deadline(15000,16667,deadline));CHECK(capture_variable_deadline(16000,16667,deadline));CHECK(deadline==16667);
     RecordingFramePacer constant(60,false);CHECK(constant.next(40000,true)==0);CHECK(constant.next(90000,false)==16667);CHECK(constant.next(100000,false)==33333);

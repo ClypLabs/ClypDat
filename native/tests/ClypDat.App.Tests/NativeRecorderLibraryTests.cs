@@ -6,16 +6,6 @@ namespace ClypDat.App.Tests;
 public sealed class NativeRecorderLibraryTests
 {
     [Fact]
-    public void BundledEngineLoadsAndRejectsIncompleteRecordingContract()
-    {
-        var config = new ReplayBufferConfig(60, 1080, 60, 0, 0, 1920, 1080,
-            "", "", [], [], "", [], "Synthetic", "synthetic.exe", "", "");
-        Assert.False(NativeReplayEngine.TryCreate(config, out var engine, out var error));
-        Assert.Null(engine);
-        Assert.Contains("native recorder is incomplete; missing capabilities:", error);
-    }
-
-    [Fact]
     public void MissingBundleReportsAbsoluteComponentPath()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "missing-recorder-" + Guid.NewGuid().ToString("N"));

@@ -264,10 +264,10 @@
     <Copy SourceFiles="@(DetectorHostPublishFiles)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
 
-  <!-- Native replay owns D3D11/FFmpeg state once cut over. Build it through
-       MSVC with its static CRT, then keep DLL beside both developer and
-       published app output. The bridge is presently probe-only, so an absent
-       DLL cannot affect capture startup before the native media path is live. -->
+  <!-- The native recorder (ClypDat.Capture.Native.dll): all capture, encoding,
+       replay history and saving. Built through MSVC with its static CRT and kept
+       beside both developer and published app output, where the capture worker
+       loads it. -->
   <Target Name="BuildNativeCaptureEngine" BeforeTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\..\eng\Build-NativeCapture.ps1&quot; -Configuration $(Configuration)" />
   </Target>

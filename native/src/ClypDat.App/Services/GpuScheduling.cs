@@ -24,8 +24,8 @@ namespace ClypDat.App.Services;
 //     covers EVERY GPU context this process owns. That matters because NVENC's
 //     context is not ours: ffmpeg's h264_nvenc creates its own CUDA/D3D device
 //     internally, so no per-device call we make can reach it. FFmpeg is linked
-//     in-process here (FFmpeg.AutoGen calls avcodec_send_frame directly), so a
-//     process-wide class does reach it. The recorder lives in a dedicated
+//     in-process here (the native recorder calls avcodec_send_frame directly),
+//     so a process-wide class does reach it. The recorder lives in a dedicated
 //     ClypDatRecorder.exe process, so this cannot elevate Avalonia's renderer.
 //
 //   - Per-device GPU thread priority (IDXGIDevice::SetGPUThreadPriority) covers

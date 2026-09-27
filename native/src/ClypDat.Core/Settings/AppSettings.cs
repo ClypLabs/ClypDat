@@ -99,7 +99,6 @@ public sealed class AppSettings
     // back as High because those numbers are exactly High's.
     public bool ReplayQualityCustom { get; set; }
     public ReplayQualitySnapshot? ReplayCustomQuality { get; set; }
-    public string ReplayBackend { get; set; } = "Native";
     public string ExportVideoCodec { get; set; } = "H.264";
     // Was "Ctrl+Shift+F9" before schema 13; AppSettingsMigrations moves untouched installs over.
     public const string DefaultSaveReplayHotkey = "Insert";
@@ -490,10 +489,9 @@ public sealed class GameCaptureOverride
     // subtitle. Rows saved before this field existed have it empty until the
     // game is next detected.
     public string ProcessName { get; set; } = string.Empty;
-    public string CaptureBackend { get; set; } = "Auto";
-    // "Catalog" rows only remember a capture-backend choice for a game found
-    // by the shared catalog or Steam manifest. They must not turn into a
-    // process-only detection rule on later launches.
+    // "Catalog" rows only remember per-game settings for a game found by the
+    // shared catalog or Steam manifest. They must not turn into a process-only
+    // detection rule on later launches.
     public string? Origin { get; set; }
     // Standalone installations use a full path as identity. This lets two
     // PsychEngine.exe copies remain independent games.

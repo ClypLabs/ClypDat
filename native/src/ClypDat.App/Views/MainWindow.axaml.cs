@@ -159,7 +159,6 @@ public sealed partial class MainWindow : Window
     // Burned or editable overlay layers: last sent to the worker, and the
     // mode the running replay session was started with.
     private string? _sentOverlayRecordingMode, _activeOverlayRecordingMode;
-    private ReplayBackendOption _activeReplayBackend = ReplayBackendOption.Auto;
     private readonly HashSet<string> _capturedHotkeyKeys = new(StringComparer.OrdinalIgnoreCase);
     private CustomGameTabViewModel? _hotkeyCaptureCustomGame;
     private bool _hotkeyCaptureFullSession;
@@ -1274,7 +1273,6 @@ public sealed partial class MainWindow : Window
         _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
         AttachEncoderTuning(_replayBuffer);
         _encoderTuning.FrameRateChangeRequested += EncoderTuning_OnFrameRateChangeRequested;
-        _activeReplayBackend = ReplayBufferFactory.ResolveEffectiveBackend(initialConfig);
         ViewModel.RecorderStatus = ReplayIdleStatus;
         UpdateDetectedGame();
     }
@@ -1286,34 +1284,6 @@ public sealed partial class MainWindow : Window
             try { await worker.ShutdownWorkerAsync(); }
             catch (Exception error) { AppLog.Info($"Capture worker shutdown failed: {error.Message}"); }
         }
-    }
-
-    private void EnsureReplayBufferMatchesGame()
-    {
-        if (ViewModel is null || _replayBuffer is null || _replayBuffer.IsRecording) return;
-        var config = ViewModel.CreateReplayConfig();
-        var desired = ReplayBufferFactory.ResolveEffectiveBackend(config);
-        if (desired == _activeReplayBackend) return;
-
-        AppLog.Info($"Replay backend switching: {_activeReplayBackend} -> {desired} for game={config.GameExecutableName}.");
-        _replayBuffer.RecordingStopped -= ReplayBuffer_OnRecordingStopped;
-        if (_replayBuffer is IReplayCaptureDiagnostics oldDiagnostics) oldDiagnostics.HealthChanged -= EncoderTuning_OnHealthChanged;
-        if (_replayBuffer is IReplayCaptureWorkerEvents oldWorkerEvents)
-        {
-            oldWorkerEvents.RecordingStateChanged -= Worker_RecordingStateChanged;
-            oldWorkerEvents.SaveStarted -= Worker_SaveStarted;
-            oldWorkerEvents.SaveCompleted -= Worker_SaveCompleted;
-            oldWorkerEvents.FullSessionRecordingToggled -= Worker_FullSessionRecordingToggled;
-            oldWorkerEvents.AutoClipDetected -= Worker_AutoClipDetected;
-            oldWorkerEvents.AutoClipStatusChanged -= Worker_AutoClipStatusChanged;
-            oldWorkerEvents.FullSessionClosed -= Worker_FullSessionClosed;
-        }
-        _replayBuffer.Dispose();
-        _replayConfigSnapshot = config;
-        _replayBuffer = ReplayBufferFactory.Create(() => _replayConfigSnapshot ?? throw new InvalidOperationException("Replay configuration unavailable."));
-        _replayBuffer.RecordingStopped += ReplayBuffer_OnRecordingStopped;
-        AttachEncoderTuning(_replayBuffer);
-        _activeReplayBackend = desired;
     }
 
     private async void ResetLibraryFolderButton_OnClick(object? sender, RoutedEventArgs e)
@@ -3212,7 +3182,6 @@ public sealed partial class MainWindow : Window
                 ViewModel.RecorderStatus = ReplayIdleStatus;
                 return;
             }
-            EnsureReplayBufferMatchesGame();
             if (_replayBuffer is null) return;
             await EnsureLibraryFolderAsync();
             ApplyCaptureBounds();

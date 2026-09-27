@@ -42,7 +42,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Game Detection"] = new[]
         {
             "Add games", "Add a running game", "browse for an executable", "Game icons", "Refresh game icons",
-            "Excluded games", "Excluded from detection", "capture backend override"
+            "Excluded games", "Excluded from detection"
         },
         ["Import Clips"] = new[]
         {

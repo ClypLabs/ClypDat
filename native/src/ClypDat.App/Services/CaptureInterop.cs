@@ -1,20 +1,19 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using Windows.Foundation.Metadata;
 using Windows.Graphics.Capture;
 using Windows.Graphics.DirectX.Direct3D11;
 
 namespace ClypDat.App.Services;
 
-// Windows.Graphics.Capture has no public "give me an item for this HWND/HMONITOR"
-// constructor - the factory that does this (IGraphicsCaptureItemInterop) is a classic
-// COM interface reachable only via RoGetActivationFactory, not through the normal WinRT
-// projection. This is the standard, well-established pattern for using WGC from a
-// desktop (non-UWP) app.
+// Windows.Graphics.Capture from managed code, for the monitor thumbnails in the
+// capture source picker (MonitorThumbnailService). Recording itself captures in
+// the native recorder.
 //
-// The item factory and DXGI surface bridge are classic COM interfaces, so those
-// calls use direct vtable pointers.  WGC session features themselves use the
-// SDK's WinRT projection (see TrySetMinimumUpdateInterval).
+// WGC has no public "give me an item for this HMONITOR" constructor - the
+// factory that does this (IGraphicsCaptureItemInterop) is a classic COM
+// interface reachable only via RoGetActivationFactory, not through the normal
+// WinRT projection. The item factory and DXGI surface bridge are classic COM
+// interfaces, so those calls use direct vtable pointers.
 [SupportedOSPlatform("windows10.0.17763.0")]
 internal static unsafe class CaptureInterop
 {
@@ -40,26 +39,13 @@ internal static unsafe class CaptureInterop
     [DllImport("d3d11.dll", ExactSpelling = true, PreserveSig = false)]
     private static extern void CreateDirect3D11DeviceFromDXGIDevice(IntPtr dxgiDevice, out IntPtr graphicsDevice);
 
-    public static GraphicsCaptureItem CreateItemForWindow(IntPtr hwnd)
+    public static GraphicsCaptureItem CreateItemForMonitor(IntPtr hmonitor)
     {
         var factory = GetActivationFactoryPointer("Windows.Graphics.Capture.GraphicsCaptureItem", GraphicsCaptureItemInteropIid);
         try
         {
             // IGraphicsCaptureItemInterop vtable: 0=QueryInterface, 1=AddRef, 2=Release,
             // 3=CreateForWindow(HWND, REFIID, void**), 4=CreateForMonitor(HMONITOR, REFIID, void**).
-            return InvokeCreate(factory, slot: 3, hwnd);
-        }
-        finally
-        {
-            Marshal.Release(factory);
-        }
-    }
-
-    public static GraphicsCaptureItem CreateItemForMonitor(IntPtr hmonitor)
-    {
-        var factory = GetActivationFactoryPointer("Windows.Graphics.Capture.GraphicsCaptureItem", GraphicsCaptureItemInteropIid);
-        try
-        {
             return InvokeCreate(factory, slot: 4, hmonitor);
         }
         finally
@@ -112,29 +98,6 @@ internal static unsafe class CaptureInterop
         finally
         {
             Marshal.Release(surfacePointer);
-        }
-    }
-
-    public static WgcMinimumUpdateIntervalResult TrySetMinimumUpdateInterval(GraphicsCaptureSession session, int frameRate, double displayRefreshHz = 0)
-    {
-        var requested = WgcMinimumUpdateIntervalPolicy.FromFrameRate(frameRate, displayRefreshHz);
-        // MinUpdateInterval is projected by the current Windows SDK.  Do not
-        // query the optional IGraphicsCaptureSession5 by hand: that path
-        // requires marshaling a WinRT object through classic COM and fails on
-        // current projections even when WGC itself is healthy.
-        if (!ApiInformation.IsPropertyPresent("Windows.Graphics.Capture.GraphicsCaptureSession", "MinUpdateInterval"))
-            return WgcMinimumUpdateIntervalPolicy.Unsupported(frameRate, displayRefreshHz);
-
-        try
-        {
-            session.MinUpdateInterval = requested;
-            return new WgcMinimumUpdateIntervalResult(true, requested, session.MinUpdateInterval);
-        }
-        catch (Exception error)
-        {
-            // This setting is optional; a rejected interval must never tear
-            // down an otherwise valid game capture session.
-            return new WgcMinimumUpdateIntervalResult(true, requested, null, error.Message);
         }
     }
 
