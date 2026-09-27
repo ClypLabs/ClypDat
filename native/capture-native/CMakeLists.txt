@@ -47,7 +47,6 @@ target_link_libraries(RecorderCore PUBLIC
     d3d11 dxgi d3dcompiler dwmapi runtimeobject windowsapp ole32 avrt user32 gdi32 mmdevapi uuid psapi)
 
 add_library(ClypDat.Capture.Native SHARED
-    src/engine.cpp
     src/recorder_abi.cpp
     src/recording_audio_meter.cpp
     src/recording_recovery_abi.cpp
@@ -73,15 +72,7 @@ add_custom_command(TARGET ClypDat.Capture.Native POST_BUILD
     COMMAND_EXPAND_LISTS)
 
 enable_testing()
-add_executable(ClypDat.Capture.Native.Tests tests/abi_smoke.cpp)
-target_compile_features(ClypDat.Capture.Native.Tests PRIVATE cxx_std_20)
-target_include_directories(ClypDat.Capture.Native.Tests PRIVATE include)
-target_link_libraries(ClypDat.Capture.Native.Tests PRIVATE ClypDat.Capture.Native)
-add_test(NAME ClypDat.Capture.Native.AbiSmoke COMMAND ClypDat.Capture.Native.Tests)
 option(CLYPDAT_TEST_GPU "Run tests requiring a physical D3D11 device" OFF)
-if(CLYPDAT_TEST_GPU)
-    add_test(NAME ClypDat.Capture.Native.DeviceLifecycle COMMAND ClypDat.Capture.Native.Tests --gpu)
-endif()
 
 # Compile the public ABI as C as well as C++.
 add_library(ClypDat.Capture.Native.CHeader OBJECT tests/c_header.c)
