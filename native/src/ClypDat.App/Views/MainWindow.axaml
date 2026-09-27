@@ -42,7 +42,7 @@
     <Border x:Name="FocusSink" Focusable="True" Width="0" Height="0" IsHitTestVisible="False"
             HorizontalAlignment="Left" VerticalAlignment="Top" />
     <Border Grid.Row="0" Background="{StaticResource Surface_171F27}" BorderBrush="{StaticResource Surface_1E2A33}" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
-      <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="12,2,0,0" VerticalAlignment="Stretch">
+      <Grid ColumnDefinitions="Auto,*,Auto,16,Auto" Margin="12,2,0,0" VerticalAlignment="Stretch">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
           <Button Classes="brandButton" Padding="3,5" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
             <!-- 256px source downscaled to the actual 26px on-screen size
@@ -280,7 +280,7 @@
                marks anything unread or a critical notice not yet acknowledged. -->
           <Button Classes="windowChromeButton" Click="NoticeBoardButton_OnClick" ToolTip.Tip="Notice Board"
                   AutomationProperties.Name="Notice Board">
-            <Panel>
+            <Panel Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
               <PathIcon Data="M12,22A2,2 0 0,0 14,20H10A2,2 0 0,0 12,22M18,16V11C18,7.93 16.36,5.36 13.5,4.68V4A1.5,1.5 0 0,0 12,2.5A1.5,1.5 0 0,0 10.5,4V4.68C7.63,5.36 6,7.92 6,11V16L4,18V19H20V18L18,16Z" Width="16" Height="16" />
               <Border Width="7" Height="7" CornerRadius="3.5" Background="{StaticResource Semantic_13C8B5}"
                       HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-2,-3,0"
@@ -289,10 +289,9 @@
           </Button>
         </StackPanel>
 
-        <!-- The active-game chip that used to sit here is gone: the Library
-             heading names the filter now, and the sidebar's All Games button
-             clears it, so the chip was saying the same thing twice. -->
-        <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="16,0,0,0">
+        <Border Grid.Column="3" Width="1" Height="20" Background="{StaticResource Surface_2A3640}"
+                HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" />
+        <StackPanel Grid.Column="4" Orientation="Horizontal">
           <Button Classes="windowChromeButton" Click="MinimizeButton_OnClick">
             <PathIcon Data="M19,13H5V11H19V13Z" Width="14" Height="14" />
           </Button>

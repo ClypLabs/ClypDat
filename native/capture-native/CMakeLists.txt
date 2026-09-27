@@ -30,6 +30,7 @@ add_library(RecorderCore STATIC
     src/recording_capture.cpp src/recording_capture.h
     src/recording_windows_source.cpp
     src/recording_audio.cpp src/recording_audio.h
+    src/recording_audio_timing.cpp src/recording_audio_timing.h
     src/recording_process.cpp src/recording_process.h
     src/recording_save.cpp src/recording_save.h
     src/recorder_session.cpp src/recorder_session.h
@@ -119,6 +120,12 @@ target_link_libraries(ClypDat.Capture.Native.AudioSaveTests PRIVATE RecorderCore
 set_target_properties(ClypDat.Capture.Native.AudioSaveTests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_test(NAME ClypDat.Capture.Native.AudioSave COMMAND ClypDat.Capture.Native.AudioSaveTests)
+
+add_executable(ClypDat.Capture.Native.AudioTimingTests tests/recording_audio_timing_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.AudioTimingTests PRIVATE RecorderCore)
+set_target_properties(ClypDat.Capture.Native.AudioTimingTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.AudioTiming COMMAND ClypDat.Capture.Native.AudioTimingTests)
 
 add_executable(ClypDat.Capture.Native.SessionRecoveryTests tests/recording_session_recovery.cpp)
 target_link_libraries(ClypDat.Capture.Native.SessionRecoveryTests PRIVATE RecorderCore)

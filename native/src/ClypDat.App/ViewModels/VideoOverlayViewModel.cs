@@ -50,7 +50,7 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         : this(settings, save, apply, new CameraPreviewService(), customLayouts, globalSettings) { }
 
     internal VideoOverlayViewModel(VideoOverlaySettings settings, Action save, Action? apply, ICameraPreviewService cameraPreview,
-        List<CustomKeyboardLayout>? customLayouts = null, VideoOverlaySettings? globalSettings = null)
+        List<CustomKeyboardLayout>? customLayouts = null, VideoOverlaySettings? globalSettings = null, bool refreshCameras = true)
     {
         _settings = settings; _save = save; _apply = apply;
         _globalSettings = globalSettings ?? settings;
@@ -64,7 +64,8 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
         // Before RebuildSources: it notifies layout, and layout refreshes slots.
         Slots = new(VideoOverlayLayout.Corners.Select(corner => new VideoOverlaySlotViewModel(this, corner)));
         RebuildSources();
-        _ = RefreshCamerasAsync(); UpdateStatus();
+        if (refreshCameras) _ = RefreshCamerasAsync();
+        UpdateStatus();
     }
 
     public ObservableCollection<CameraOption> Cameras { get; }

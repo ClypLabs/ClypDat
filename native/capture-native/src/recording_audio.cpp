@@ -1,4 +1,5 @@
 #include "recording_audio.h"
+#include "recording_audio_timing.h"
 #include "recording_process.h"
 #include <Windows.h>
 #include <audioclient.h>
@@ -84,7 +85,7 @@ struct AudioHistory::State {
         }
         auto& s = *source;
         require(s.rate == block.sample_rate && s.channels == block.channels, "Audio format changed without a generation change");
-        int64_t target = (block.start_us - s.start_us) * s.rate / 1000000;
+        int64_t target = audio_frames(block.start_us, s.rate) - audio_frames(s.start_us, s.rate);
         uint64_t skip = target < int64_t(s.frames) ? uint64_t(int64_t(s.frames) - target) : 0;
         uint64_t frames = block.samples.size() / s.channels;
         if (skip >= frames) return;
@@ -100,7 +101,7 @@ struct AudioHistory::State {
         const auto cutoff = block.start_us - retention_us;
         for (auto it = sources.begin(); it != sources.end();) {
             auto& old = *it->second;
-            if (it->first != key && old.start_us + int64_t(old.frames) * 1000000 / old.rate < cutoff) it = sources.erase(it); else ++it;
+            if (it->first != key && audio_offset_time(old.start_us, int64_t(old.frames), old.rate) < cutoff) it = sources.erase(it); else ++it;
         }
     }
     AudioSnapshot snapshot(int64_t start, int64_t end) {
@@ -108,11 +109,11 @@ struct AudioHistory::State {
         AudioSnapshot result{start, end, {}};
         for (auto& [key, pointer] : sources) {
             auto& s = *pointer;
-            int64_t first = (std::max)(int64_t(0), (start - s.start_us) * s.rate / 1000000);
-            int64_t last = (std::min)(int64_t(s.frames), (end - s.start_us) * s.rate / 1000000);
+            int64_t first = (std::max)(int64_t(0), audio_frames(start, s.rate) - audio_frames(s.start_us, s.rate));
+            int64_t last = (std::min)(int64_t(s.frames), audio_frames(end, s.rate) - audio_frames(s.start_us, s.rate));
             if (last <= first) continue;
             wav_header(s.stream, s.rate, s.channels, s.frames); s.stream.flush();
-            result.ranges.push_back({s.file,s.lane,s.source,s.generation,uint64_t(first),uint64_t(last-first),s.start_us+first*1000000/s.rate,s.rate,s.channels});
+            result.ranges.push_back({s.file,s.lane,s.source,s.generation,uint64_t(first),uint64_t(last-first),audio_offset_time(s.start_us,first,s.rate),s.rate,s.channels});
         }
         return result;
     }
@@ -170,7 +171,7 @@ std::vector<std::pair<std::string,std::filesystem::path>> render_audio(const Aud
     const std::vector<AudioLaneConfig>& lanes, const std::filesystem::path& directory, const std::atomic_bool& cancel) {
     require(snapshot.end_us > snapshot.start_us, "Invalid audio snapshot window");
     std::filesystem::create_directories(directory);
-    const int64_t total = (snapshot.end_us - snapshot.start_us) * 48000 / 1000000;
+    const int64_t total = audio_frames(snapshot.end_us) - audio_frames(snapshot.start_us);
     std::vector<std::pair<std::string,std::filesystem::path>> result;
     for (size_t lane_index = 0; lane_index < lanes.size(); ++lane_index) {
         const auto& lane = lanes[lane_index]; require(lane.channels == 1 || lane.channels == 2, "Invalid output audio channels");
@@ -191,7 +192,7 @@ std::vector<std::pair<std::string,std::filesystem::path>> render_audio(const Aud
             int code = swr_alloc_set_opts2(&reader->swr,&output_layout,AV_SAMPLE_FMT_FLT,48000,&input_layout,AV_SAMPLE_FMT_FLT,range.sample_rate,0,nullptr);
             av_channel_layout_uninit(&input_layout); av_channel_layout_uninit(&output_layout);
             require(code >= 0 && swr_init(reader->swr) >= 0,"Audio resampler initialization failed");
-            reader->output_start = (range.start_us-snapshot.start_us)*48000/1000000;
+            reader->output_start = audio_frames(range.start_us) - audio_frames(snapshot.start_us);
             readers.push_back(std::move(reader));
         }
         // Stream sources into sparse aligned output; each input chunk is bounded.
@@ -250,6 +251,7 @@ public:
 }
 void WasapiSource::State::run() {
     HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+    std::unique_ptr<RecordingAudioTiming> timing;
     try {
         hr(com,"Initialize audio COM");
         Microsoft::WRL::ComPtr<IAudioClient> client;
@@ -291,6 +293,12 @@ void WasapiSource::State::run() {
         if(format->wFormatTag==WAVE_FORMAT_EXTENSIBLE) floating=reinterpret_cast<WAVEFORMATEXTENSIBLE*>(format)->SubFormat==KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
         require(format->nChannels>0&&format->nChannels<=32,"Unsupported capture channel count");
         require((floating&&format->wBitsPerSample==32)||(!floating&&(format->wBitsPerSample==16||format->wBitsPerSample==24||format->wBitsPerSample==32)),"Unsupported capture sample format");
+        auto deliver=[this](PcmBlock block){
+            float maximum=0;
+            for(float sample:block.samples)maximum=(std::max)(maximum,std::abs(sample));
+            peak=maximum;sink(std::move(block));
+        };
+        if(config.microphone) timing=std::make_unique<RecordingAudioTiming>(deliver);
         hr(client->Start(),"Start audio capture");
         {std::lock_guard lock(mutex);started=true;} ready.notify_all();
         bool stopped=false;
@@ -308,16 +316,16 @@ void WasapiSource::State::run() {
                 block.start_us=config.monotonic_anchor_us+(int64_t(qpc_100ns)-anchor_100ns)/10;
                 if(status&AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR) { LARGE_INTEGER now;QueryPerformanceCounter(&now);block.start_us=config.monotonic_anchor_us+int64_t((long double)(now.QuadPart-config.qpc_anchor)*1000000/config.qpc_frequency)-int64_t(frames)*1000000/block.sample_rate; }
                 block.samples.resize(size_t(frames)*block.channels);
-                float maximum=0;
                 if(!(status&AUDCLNT_BUFFERFLAGS_SILENT)) for(size_t i=0;i<block.samples.size();++i) {
                     float sample=0;
                     if(floating) memcpy(&sample,bytes+i*4,4);
                     else if(format->wBitsPerSample==16){int16_t value;memcpy(&value,bytes+i*2,2);sample=value/32768.f;}
                     else if(format->wBitsPerSample==32){int32_t value;memcpy(&value,bytes+i*4,4);sample=float(value/2147483648.0);}
                     else {const BYTE* p=bytes+i*3;int32_t value=int32_t(uint32_t(p[0])<<8|uint32_t(p[1])<<16|uint32_t(p[2])<<24);sample=float(value/2147483648.0);}
-                    if(!std::isfinite(sample)) sample=0; block.samples[i]=sample;maximum=(std::max)(maximum,std::abs(sample));
+                    if(!std::isfinite(sample)) sample=0; block.samples[i]=sample;
                 }
-                peak=maximum; sink(std::move(block));
+                if(timing) timing->submit(std::move(block),position,!(status&AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR));
+                else deliver(std::move(block));
                 // Release before querying the next packet.
                 release.c->ReleaseBuffer(release.n);release.n=0;
                 hr(capture->GetNextPacketSize(&available),"Query next audio packet");
@@ -325,6 +333,8 @@ void WasapiSource::State::run() {
             if(stopped)break;
         }
     } catch(const std::exception& e) {std::lock_guard lock(mutex);failure=e.what();}
+    try { if(timing)timing->finish(); }
+    catch(const std::exception& e) {std::lock_guard lock(mutex);if(failure.empty())failure=e.what();}
     if(SUCCEEDED(com)) CoUninitialize();
     {std::lock_guard lock(mutex);done=true;started=true;} ready.notify_all();
 }
@@ -382,9 +392,9 @@ class MicrophoneFilter:public std::enable_shared_from_this<MicrophoneFilter>{
     void complete_barriers(){for(auto it=barriers_.begin();it!=barriers_.end();){if(it->first<=completed_frames_){it->second->set_value();it=barriers_.erase(it);}else ++it;}}
     std::wstring filter()const{auto path=model_.wstring();std::wstring escaped;for(auto ch:path){if(ch==L'\\'||ch==L':'||ch==L'\'')escaped.push_back(L'\\');escaped.push_back(ch);}auto result=L"aresample=48000,arnndn=m='"+escaped+L"'";if(threshold_>-100)result+=L",agate=threshold="+std::to_wstring(std::pow(10.0,std::clamp(threshold_,-100.0,-25.0)/20))+L":range=0.06:ratio=2:attack=20:release=250:detection=rms";return result;}
     size_t read(uint8_t* destination,size_t capacity){std::unique_lock lock(mutex_);if(!changed_.wait_for(lock,std::chrono::seconds(2),[&]{return cancel_||closed_||!input_.empty();}))return 0;if(cancel_||input_.empty())return 0;auto pending=input_.front();auto bytes=pending->original.samples.size()*4;auto count=(std::min)(capacity,bytes-pending->bytes_sent);memcpy(destination,reinterpret_cast<uint8_t*>(pending->original.samples.data())+pending->bytes_sent,count);pending->bytes_sent+=count;if(pending->bytes_sent==bytes)input_.pop_front();return count;}
-    void output(const uint8_t* bytes,size_t count){std::lock_guard delivery(delivery_);std::vector<PcmBlock> ready;int64_t completed=0;{std::lock_guard lock(mutex_);remainder_.insert(remainder_.end(),bytes,bytes+count);size_t consumed=0;while(!timeline_.empty()){auto& pending=*timeline_.front();size_t available=(remainder_.size()-consumed)/(size_t(channels_)*4);if(!available)break;size_t frames=(std::min)(available,size_t(pending.output_frames-pending.delivered));PcmBlock block;block.lane=pending.original.lane;block.source=pending.original.source;block.generation=pending.original.generation;block.channels=channels_;block.sample_rate=48000;block.start_us=pending.original.start_us+pending.delivered*1000000/48000;block.samples.resize(frames*channels_);memcpy(block.samples.data(),remainder_.data()+consumed,block.samples.size()*4);consumed+=block.samples.size()*4;pending.delivered+=frames;ready.push_back(std::move(block));if(pending.delivered==pending.output_frames){queued_bytes_-=pending.original.samples.size()*4;completed+=pending.original.samples.size()/pending.original.channels;timeline_.pop_front();}}remainder_.erase(remainder_.begin(),remainder_.begin()+consumed);}for(auto& block:ready)sink_(std::move(block));{std::lock_guard lock(mutex_);completed_frames_+=completed;complete_barriers();}}
+    void output(const uint8_t* bytes,size_t count){std::lock_guard delivery(delivery_);std::vector<PcmBlock> ready;int64_t completed=0;{std::lock_guard lock(mutex_);remainder_.insert(remainder_.end(),bytes,bytes+count);size_t consumed=0;while(!timeline_.empty()){auto& pending=*timeline_.front();size_t available=(remainder_.size()-consumed)/(size_t(channels_)*4);if(!available)break;size_t frames=(std::min)(available,size_t(pending.output_frames-pending.delivered));PcmBlock block;block.lane=pending.original.lane;block.source=pending.original.source;block.generation=pending.original.generation;block.channels=channels_;block.sample_rate=48000;block.start_us=audio_offset_time(pending.original.start_us,pending.delivered);block.samples.resize(frames*channels_);memcpy(block.samples.data(),remainder_.data()+consumed,block.samples.size()*4);consumed+=block.samples.size()*4;pending.delivered+=frames;ready.push_back(std::move(block));if(pending.delivered==pending.output_frames){queued_bytes_-=pending.original.samples.size()*4;completed+=pending.original.samples.size()/pending.original.channels;timeline_.pop_front();}}remainder_.erase(remainder_.begin(),remainder_.begin()+consumed);}for(auto& block:ready)sink_(std::move(block));{std::lock_guard lock(mutex_);completed_frames_+=completed;complete_barriers();}}
     void run(){try{std::vector<std::wstring> args{L"-hide_banner",L"-nostdin",L"-v",L"error",L"-f",L"f32le",L"-ar",std::to_wstring(rate_),L"-ac",std::to_wstring(channels_),L"-i",L"pipe:0",L"-af",filter(),L"-f",L"f32le",L"-ar",L"48000",L"-ac",std::to_wstring(channels_),L"-flush_packets",L"1",L"pipe:1"};ProcessRunner::run(executable_,args,cancel_,std::chrono::milliseconds::zero(),[this](auto bytes,auto count){output(bytes,count);},true,[this](auto bytes,auto count){return read(bytes,count);});}catch(...){}
-        std::lock_guard delivery(delivery_);std::vector<PcmBlock> fallback;{std::lock_guard lock(mutex_);failed_=true;for(auto& pending:timeline_){auto block=std::move(pending->original);size_t skip=size_t(pending->delivered)*block.sample_rate/48000;skip=(std::min)(skip,block.samples.size()/block.channels);block.start_us+=int64_t(skip)*1000000/block.sample_rate;block.samples.erase(block.samples.begin(),block.samples.begin()+skip*block.channels);if(!block.samples.empty())fallback.push_back(std::move(block));}input_.clear();timeline_.clear();queued_bytes_=0;}for(auto& block:fallback)sink_(std::move(block));{std::lock_guard lock(mutex_);completed_frames_=admitted_frames_;complete_barriers();done_=true;}changed_.notify_all();
+        std::lock_guard delivery(delivery_);std::vector<PcmBlock> fallback;{std::lock_guard lock(mutex_);failed_=true;for(auto& pending:timeline_){auto block=std::move(pending->original);size_t skip=size_t(pending->delivered)*block.sample_rate/48000;skip=(std::min)(skip,block.samples.size()/block.channels);block.start_us=audio_offset_time(block.start_us,int64_t(skip),block.sample_rate);block.samples.erase(block.samples.begin(),block.samples.begin()+skip*block.channels);if(!block.samples.empty())fallback.push_back(std::move(block));}input_.clear();timeline_.clear();queued_bytes_=0;}for(auto& block:fallback)sink_(std::move(block));{std::lock_guard lock(mutex_);completed_frames_=admitted_frames_;complete_barriers();done_=true;}changed_.notify_all();
     }
 public:
     MicrophoneFilter(std::filesystem::path executable,std::filesystem::path model,double threshold,WasapiSource::Sink sink):executable_(std::move(executable)),model_(std::move(model)),threshold_(threshold),sink_(std::move(sink)){}
@@ -397,7 +407,7 @@ public:
                 if(!started_){rate_=block.sample_rate;channels_=block.channels;started_=true;try{std::thread([self=shared_from_this()]{self->run();}).detach();}catch(...){started_=false;failed_=true;direct=true;}}
                 if(!direct&&(rate_!=block.sample_rate||channels_!=block.channels||queued_bytes_+block.samples.size()*4>size_t(rate_)*channels_*4*10)){
                     cancel_=true;failed_=true;direct=true;
-                    for(auto& pending:timeline_){auto original=std::move(pending->original);size_t skip=size_t(pending->delivered)*original.sample_rate/48000;skip=(std::min)(skip,original.samples.size()/original.channels);original.start_us+=int64_t(skip)*1000000/original.sample_rate;original.samples.erase(original.samples.begin(),original.samples.begin()+skip*original.channels);if(!original.samples.empty())fallback.push_back(std::move(original));}
+                    for(auto& pending:timeline_){auto original=std::move(pending->original);size_t skip=size_t(pending->delivered)*original.sample_rate/48000;skip=(std::min)(skip,original.samples.size()/original.channels);original.start_us=audio_offset_time(original.start_us,int64_t(skip),original.sample_rate);original.samples.erase(original.samples.begin(),original.samples.begin()+skip*original.channels);if(!original.samples.empty())fallback.push_back(std::move(original));}
                     input_.clear();timeline_.clear();queued_bytes_=0;
                 }
                 if(!direct){auto pending=std::make_shared<Pending>();auto frames=int64_t(block.samples.size()/channels_);pending->output_frames=(admitted_frames_+frames)*48000/rate_-admitted_frames_*48000/rate_;admitted_frames_+=frames;pending->original=std::move(block);queued_bytes_+=pending->original.samples.size()*4;input_.push_back(pending);timeline_.push_back(std::move(pending));}

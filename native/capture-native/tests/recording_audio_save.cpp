@@ -1,4 +1,5 @@
 #include "recording_audio.h"
+#include "recording_audio_timing.h"
 #include "recording_save.h"
 #include "recording_process.h"
 #include <Windows.h>
@@ -51,6 +52,62 @@ void check_replay_audio(const std::filesystem::path& root,const VideoSnapshot& v
     auto single=save("single-replay",{{"game","Game Audio",2,.5f,false}});
     auto single_path=single.u8string();std::string single_utf8(single_path.begin(),single_path.end());require(avformat_open_input(&input,single_utf8.c_str(),nullptr,nullptr)>=0,"Cannot open single-track replay");require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==2,"Single-track replay gained duplicate mix");avformat_close_input(&input);
 }
+void check_timed_microphone_save(const std::filesystem::path& root, const VideoSnapshot& video) {
+    AudioHistory history(root / L"timed-mic-history", 3000000);
+    FullSessionWriter session({root / L"timed-mic-session.mkv", {{"mic", "Microphone", 1, 1, false}}}, video.packets.front().generation);
+    require(session.video(video.packets.front().generation, *video.packets.front().packet), "Timed microphone session rejected first video");
+    RecordingAudioTiming timing([&](PcmBlock block) {
+        require(session.audio(block), "Session rejected timed microphone PCM");
+        require(history.submit(std::move(block)), "History rejected timed microphone PCM");
+    });
+    const auto input_frames = audio_frames(video.end_us - video.start_us, 44100);
+    int64_t position = 0;
+    int index = 0;
+    while (position < input_frames) {
+        const auto count = (std::min)(int64_t(137 + index % 7 * 79), input_frames - position);
+        PcmBlock block;
+        block.lane = block.source = "mic"; block.generation = 1;
+        block.channels = 1; block.sample_rate = 44100;
+        block.start_us = video.start_us + audio_time(position, 44100) + (index == 0 ? 0 : index % 2 ? 1 : -1);
+        for (int64_t i = 0; i < count; ++i)
+            block.samples.push_back(float(.3 * std::sin(2 * 3.141592653589793 * 997 * (position + i) / 44100)));
+        timing.submit(std::move(block), position);
+        position += count; ++index;
+    }
+    timing.finish();
+    for (size_t i = 1; i < video.packets.size(); ++i)
+        require(session.video(video.packets[i].generation, *video.packets[i].packet), "Timed microphone session rejected video");
+    require(session.stop() && session.status().error.empty(), "Timed microphone session failed to finalize");
+    auto snapshot = history.snapshot(video.start_us, video.end_us).get(); history.stop();
+    std::promise<AudioSnapshot> promise; promise.set_value(snapshot);
+    ReplaySaveRequest request;
+    request.id = "timed-mic-replay"; request.output = root / L"timed-mic-replay.mp4";
+    request.work_directory = root; request.ffmpeg = bundled_ffmpeg(); request.video = video;
+    request.audio = promise.get_future().share(); request.lanes = {{"mic", "Microphone", 1, 1, false}};
+    SaveCoordinator coordinator;
+    const auto saved = coordinator.begin(std::move(request)).get();
+    require(saved.error.empty(), "Timed microphone replay failed to save");
+    for (const auto& path : {saved.output, root / L"timed-mic-session.mkv"}) {
+        std::atomic_bool cancel = false;
+        const auto decoded = ProcessRunner::run(bundled_ffmpeg(), {L"-v", L"error", L"-nostdin", L"-i", path.wstring(),
+            L"-map", L"0:a:0", L"-ac", L"1", L"-ar", L"48000", L"-f", L"f32le", L"pipe:1"}, cancel);
+        std::vector<float> samples(decoded.output.size() / sizeof(float));
+        std::memcpy(samples.data(), decoded.output.data(), samples.size() * sizeof(float));
+        require(samples.size() > 9600, "Saved microphone audio too short");
+        double maximum_curvature = 0, energy = 0;
+        for (size_t i = 2401; i + 2400 < samples.size(); ++i) {
+            require(std::isfinite(samples[i]), "Saved microphone has invalid samples");
+            maximum_curvature = (std::max)(maximum_curvature,
+                std::abs(double(samples[i + 1]) - 2 * samples[i] + samples[i - 1]));
+            energy += samples[i] * samples[i];
+        }
+        require(energy / (samples.size() - 4801) > .02, "Saved microphone lost its signal");
+        // The 997 Hz fixture has curvature .0051. Leave room for AAC error,
+        // while rejecting abrupt packet-edge holes in newly saved audio.
+        require(maximum_curvature < .02, "Newly saved microphone audio contains a packet-edge glitch");
+        std::cout << path.filename().string() << " glitch check: " << maximum_curvature << '\n';
+    }
+}
 void audio_test(const std::filesystem::path& root){
     AudioSnapshot pinned;
     {
@@ -92,6 +149,7 @@ void video_test(const std::filesystem::path& root){
     AVFormatContext* input=nullptr;auto p=output.u8string();std::string path(p.begin(),p.end());require(avformat_open_input(&input,path.c_str(),nullptr,nullptr)>=0,"Saved video cannot open");require(avformat_find_stream_info(input,nullptr)>=0,"Saved video cannot probe");require(input->duration>0&&input->nb_streams==1,"Saved video invalid");avformat_close_input(&input);
     decode_and_seek(output,1);
     check_replay_audio(root,snapshot);
+    check_timed_microphone_save(root,snapshot);
     FullSessionWriter session({root/L"session.mkv",{{"game","Game Audio",2,1,false}}},generation);
     for(const auto& packet:snapshot.packets){require(session.video(generation,*packet.packet),"Session video rejected");auto block=pcm(packet.packet->pts,packet.packet->pts<700000?1:2,.1f,1470);block.sample_rate=44100;block.channels=1;block.samples.resize(1470);require(session.audio(std::move(block)),"Session PCM rejected");}
     require(session.stop(),"Session did not stop");require(session.status().error.empty(),"Session mux failed");

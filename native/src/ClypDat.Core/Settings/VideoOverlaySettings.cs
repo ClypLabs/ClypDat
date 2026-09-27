@@ -20,7 +20,7 @@ public sealed class VideoOverlaySettings
     public string RecordingMode { get; set; } = VideoOverlayRecordingMode.EditableLayers;
     public bool IncludeVirtualCameras { get; set; }
     public VideoOverlayCameraSelection? Camera { get; set; }
-    public string KeyboardLayout { get; set; } = "QWERTY Compact";
+    public string KeyboardLayout { get; set; } = "None";
     public VideoOverlayTransform CameraTransform { get; set; } = new(.70, .05, .25);
     public VideoOverlayTransform KeyboardTransform { get; set; } = new(.05, .70, .35);
     // Source placement is separate from its transform.  A source can keep its
