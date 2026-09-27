@@ -28,13 +28,16 @@ public sealed class PresentationWaiterTests
     {
         PresentationWaiter.Stage? timedOut = null;
 
+        // The scene submits at once and the presentation never comes, so the
+        // whole budget runs out in the presentation stage. (A 5ms delay against
+        // a 20ms budget sometimes outlasted it on Windows' 15.6ms timer tick.)
         var result = await PresentationWaiter.WaitForSceneAndPresentationAsync(
-            async token => { await Task.Delay(5, token); return true; },
+            async token => { await Task.Yield(); return true; },
             presented: () => false,
             current: () => true,
             CancellationToken.None,
             stage => timedOut = stage,
-            TimeSpan.FromMilliseconds(20));
+            TimeSpan.FromMilliseconds(200));
 
         Assert.False(result);
         Assert.Equal(PresentationWaiter.Stage.NativePresentation, timedOut);
