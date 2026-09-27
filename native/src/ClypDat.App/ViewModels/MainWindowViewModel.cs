@@ -8715,7 +8715,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             : SelectedMicrophoneDevice?.Name ?? string.Empty;
 
         return new ReplayBufferConfig(
-            SelectedReplayDurationPreset?.Seconds ?? effective.ReplayDurationSeconds,
+            effective.ReplayDurationSeconds,
             effective.ReplayMaxHeight,
             effective.ReplayFrameRate,
             desktopCapture ? desktopMonitor.X : ReplayCaptureX,
