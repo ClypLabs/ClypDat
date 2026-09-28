@@ -97,5 +97,8 @@ Local fixture clips and per-run JSON remain under `.local/`.
 The native tests use generated textures and never physical screen/window
 acquisition or real WASAPI device replacement; the RTX 4070 Ti NVENC paths are
 also exercised by live replay use. AMF and QSV (zero-copy and readback) are
-implemented and covered by the encoder plan and failover tests, but have not
-been validated on real AMD or Intel hardware.
+implemented and covered by the encoder plan and failover tests. Real AMD H.264
+validation passed both focused encoder inputs and full-app D3D11 zero-copy replay;
+see the [AMD validation results](../../docs/replay-keyframe-validation.md) for
+hardware, measurements, and limits. Full-app AMF readback and real Intel hardware
+remain unverified; AV1 AMF initialization is a separate unresolved issue.
