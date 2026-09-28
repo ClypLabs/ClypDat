@@ -1,4 +1,8 @@
 #include "video_encoder.h"
+#include "encoder_backend.h"
+extern "C" {
+#include <libavutil/opt.h>
+}
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -11,6 +15,47 @@ template<class Action> void must_throw(Action action) {
     bool threw = false;
     try { action(); } catch (const std::exception&) { threw = true; }
     CHECK(threw);
+}
+
+// Inspect the production constructor's final options without opening an AMD
+// device. HQCBR plus disabled preanalysis fails AMF AV1 initialization.
+void amf_low_latency_rate_control() {
+    using namespace clypdat;
+    for (const auto codec : { EncoderCodec::H264, EncoderCodec::AV1 })
+    for (const bool zero_copy : { false, true })
+    for (const int fps : { 30, 60, 90, 120 }) {
+        EncoderRequest request;
+        request.codec = codec; request.fps = fps; request.adapter_vendor = kAdapterVendorAmd;
+        const auto plan = encoder_backend(EncoderVendor::Amd).plan(request, zero_copy);
+        VideoEncoderConfig config{ request.width, request.height, fps, request.bitrate_mbps };
+        config.name = plan.codec_name;
+        config.resource_options = plan.options;
+        config.codec_flags = plan.low_delay_flag ? AV_CODEC_FLAG_LOW_DELAY : 0;
+        bool inspected = false;
+        CodecCalls calls;
+        calls.open = [&](AVCodecContext* context, const AVCodec*, AVDictionary**) {
+            auto option = [&](const char* key) {
+                int64_t value = 0;
+                CHECK(av_opt_get_int(context->priv_data, key, 0, &value) == 0);
+                return value;
+            };
+            const auto* rc = av_opt_find(context->priv_data, "rc", nullptr, 0, 0);
+            CHECK(rc);
+            int cbr = 0;
+            CHECK(av_opt_eval_int(context->priv_data, rc, "cbr", &cbr) == 0);
+            if (option("rc") != cbr)
+                std::cerr << config.name << " selected rc=" << option("rc") << "; expected CBR=" << cbr << '\n';
+            CHECK(option("rc") == cbr);
+            CHECK(option("preanalysis") == 0);
+            CHECK(option("bf") == 0 && option("forced_idr") == 1);
+            CHECK(option("async_depth") == plan.encoder_slots);
+            inspected = true;
+            return 0;
+        };
+        VideoEncoder encoder(config, calls);
+        CHECK(inspected && encoder.unsupported_options().empty());
+    }
+    std::cout << "AMF H.264/AV1 low-latency CBR configuration passed (no AMD device opened)\n";
 }
 
 void retries_same_frame(bool flush) {
@@ -143,6 +188,7 @@ void right_sized_packets() {
 
 int main() {
     av_log_set_level(AV_LOG_ERROR);
+    amf_low_latency_rate_control();
     retries_same_frame(false);
     retries_same_frame(true);
     busy_is_not_failure();

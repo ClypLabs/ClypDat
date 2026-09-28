@@ -19,6 +19,7 @@ using Packet = std::unique_ptr<AVPacket, PacketDeleter>;
 struct CodecCalls {
     std::function<int(AVCodecContext*, const AVFrame*)> send = avcodec_send_frame;
     std::function<int(AVCodecContext*, AVPacket*)> receive = avcodec_receive_packet;
+    std::function<int(AVCodecContext*, const AVCodec*, AVDictionary**)> open = avcodec_open2;
 };
 
 struct VideoEncoderConfig {

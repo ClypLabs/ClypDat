@@ -125,7 +125,7 @@ void policy_tests() {
         if(std::string(name).ends_with("_amf")) {
             CHECK(av_opt_set(context->priv_data,"usage","ultralowlatency",0)==0);
             CHECK(av_opt_set(context->priv_data,"quality","speed",0)==0);
-            CHECK(av_opt_set(context->priv_data,"rc",std::string(name).starts_with("av1")?"hqcbr":"cbr",0)==0);
+            CHECK(av_opt_set(context->priv_data,"rc","cbr",0)==0);
         }
     }
 }

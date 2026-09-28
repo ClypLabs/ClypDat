@@ -43,7 +43,7 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
     require_encoder_frames_(config.require_encoder_frames), right_size_packets_(config.right_size_packets) {
     if (!runtime_versions_match()) throw std::runtime_error("Bundled FFmpeg runtime does not match the recording SDK");
     if (config.width <= 0 || config.height <= 0 || (config.width & 1) || (config.height & 1) ||
-        config.fps < 30 || config.fps > 120 || !calls_.send || !calls_.receive)
+        config.fps < 30 || config.fps > 120 || !calls_.send || !calls_.receive || !calls_.open)
         throw std::invalid_argument("Invalid recording encoder configuration");
     const auto& name = config.name;
     if (name != "libx264" && name != "h264_nvenc" && name != "av1_nvenc" &&
@@ -102,7 +102,8 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
     } else if (name.ends_with("_amf")) {
         option("usage", "ultralowlatency");
         option("quality", "speed");
-        option("rc", name == "av1_amf" ? "hqcbr" : "cbr");
+        // AV1 HQCBR requires preanalysis; the low-latency recorder disables it.
+        option("rc", "cbr");
         required_idr("forced_idr");
     } else if (name.ends_with("_qsv")) {
         option("preset", "veryfast");
@@ -116,7 +117,7 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
     }
     // Surface and delay counts come only from the resource plan.
     for (const auto& [key, value] : config.resource_options) option(key.c_str(), value);
-    checked(avcodec_open2(&context, codec, nullptr), "Open recording encoder");
+    checked(calls_.open(&context, codec, nullptr), "Open recording encoder");
 }
 
 int VideoEncoder::receive(std::vector<Packet>& packets) {
