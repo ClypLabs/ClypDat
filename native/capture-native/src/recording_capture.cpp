@@ -1,4 +1,5 @@
 #include "recording_capture.h"
+#include "encoder_input_diagnostics.h"
 #include "readback_stage.h"
 #include "detector_stage.h"
 #include "overlay_compositor.h"
@@ -671,6 +672,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     std::shared_ptr<CaptureGeneration> generation;
     size_t active_candidate = 0;
     std::vector<Candidate> encoder_candidates;
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+    bool diagnostic_encoder_input = false, diagnostic_encoder_input_logged = false;
+#endif
     std::vector<bool> failed_candidates;
     std::map<int64_t, std::pair<int64_t, bool>> submitted;
     std::map<int64_t, int64_t> submitted_at;
@@ -738,6 +742,15 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         if (config.qpc_frequency <= 0) throw std::invalid_argument("Invalid recording clock frequency");
         fps = config.fps; status.active_fps = config.fps; status.queue_capacity = capture_queue_capacity(config.fps);
         encoder_candidates = dependencies.candidates.empty()?recording_encoder_candidates(config.cpu_encoder, config.av1):dependencies.candidates;
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+        if (dependencies.candidates.empty()) {
+            try { diagnostic_encoder_input = detail::select_diagnostic_encoder_input(encoder_candidates, config); }
+            catch (const std::exception& error) {
+                if (callbacks.encoder_input_diagnostic) callbacks.encoder_input_diagnostic(error.what());
+                throw;
+            }
+        }
+#endif
         failed_candidates.resize(encoder_candidates.size());
         detector_stage.reference = dependencies.reference_detector; detector_stage.readback_pending = dependencies.detector_readback_pending;
     }
@@ -802,6 +815,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             encoder_candidates[active_candidate].name != "libx264";
         const bool old_d3d11 = encoder && encoder_candidates[active_candidate].d3d11;
         const uint32_t adapter_vendor = dependencies.adapter_vendor ? *dependencies.adapter_vendor : d3d11_adapter_vendor(source->d3d_device());
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+        if (diagnostic_encoder_input && adapter_vendor != kAdapterVendorAmd)
+            throw std::runtime_error("Diagnostic encoder input amf-system-memory requires an AMD capture adapter");
+#endif
         const bool overlay_stage = callbacks.compose_nv12 && (!callbacks.overlay_enabled || callbacks.overlay_enabled());
         std::string failures;
         for (size_t i = recovering ? active_candidate + (retry_current ? 0 : 1) : 0; i < encoder_candidates.size(); ++i) {
@@ -877,6 +894,16 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                       for (const auto& [key, value] : plan->options) if (key == "delay") status.encoder_delay = std::stoi(value);
                       status.max_in_flight = plan->max_in_flight; status.pool_bytes = plan->pool_bytes;
                   } }
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+                if (diagnostic_encoder_input && !diagnostic_encoder_input_logged) {
+                    if (callbacks.encoder_input_diagnostic) callbacks.encoder_input_diagnostic(
+                        std::string("Diagnostic encoder input selector enabled: requested=amf-system-memory codec=") +
+                        (config.av1 ? "AV1" : "H.264") + " candidate=" + candidate.name +
+                        " encoder=" + encoder->context().codec->name +
+                        " hardwareInput=" + (encoder->context().hw_frames_ctx ? "true" : "false"));
+                    diagnostic_encoder_input_logged = true;
+                }
+#endif
                 if (callbacks.generation) callbacks.generation(generation);
                 return;
             } catch (const std::exception& e) { failed_candidates[i] = true; failures += candidate.name + ": " + e.what() + "\n"; }

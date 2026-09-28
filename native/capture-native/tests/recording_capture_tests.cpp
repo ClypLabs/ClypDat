@@ -1,4 +1,5 @@
 #include "recording_capture.h"
+#include "encoder_input_diagnostics.h"
 #include "readback_stage.h"
 #include "captured_frames.h"
 #include "recording_save.h"
@@ -659,6 +660,127 @@ std::unique_ptr<VideoEncoder> stand_in_encoder(VideoEncoderConfig value,CodecCal
     value.name=hardware?"h264_nvenc":"libx264";value.resource_options.clear();value.codec_flags=0;
     return std::make_unique<VideoEncoder>(value,std::move(calls));
 }
+
+class EncoderInputEnvironment {
+    std::string previous_;
+public:
+    static constexpr const char* key = "CLYPDAT_DIAGNOSTIC_ENCODER_INPUT";
+    EncoderInputEnvironment() {
+        char* value=nullptr;size_t size=0;CHECK(_dupenv_s(&value,&size,key)==0);
+        if(value){previous_=value;std::free(value);}
+    }
+    ~EncoderInputEnvironment(){_putenv_s(key,previous_.c_str());}
+    void set(const char* value){CHECK(_putenv_s(key,value)==0);}
+};
+template<class Action> void encoder_input_error(Action action,const char* expected){
+    try{action();}catch(const std::exception& error){CHECK(std::string(error.what()).find(expected)!=std::string::npos);return;}
+    throw std::runtime_error("Expected encoder input diagnostic error");
+}
+void encoder_input_diagnostics(){
+    EncoderInputEnvironment environment;
+    // Keep the explicit, existing full ordering assertions in both build modes.
+    amf_recording_plans();
+    RecordingCaptureConfig config;config.width=256;config.height=144;
+    const auto same=[](const auto& a,const auto& b){
+        return a.name==b.name&&a.low_power==b.low_power&&a.d3d11==b.d3d11;};
+    for(bool cpu:{false,true})for(bool av1:{false,true}){
+        config.cpu_encoder=cpu;config.av1=av1;environment.set("");
+        const auto baseline=recording_encoder_candidates(cpu,av1);auto selected=baseline;
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+        CHECK(!detail::select_diagnostic_encoder_input(selected,config));
+#endif
+        CHECK(std::equal(selected.begin(),selected.end(),baseline.begin(),baseline.end(),same));
+    }
+    config.cpu_encoder=false;
+    for(bool av1:{false,true}){
+        config.av1=av1;environment.set("amf-system-memory");
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+        auto selected=recording_encoder_candidates(false,av1);
+        CHECK(detail::select_diagnostic_encoder_input(selected,config));
+        CHECK(selected.size()==1&&selected[0].name==(av1?"av1_amf":"h264_amf"));
+        CHECK(!selected[0].d3d11&&!selected[0].low_power);
+        const auto plan=plan_recording_encoder(config,selected[0],kAdapterVendorAmd,false);CHECK(plan);
+        CHECK(plan->input==EncoderInput::SystemFrames&&!plan->zero_copy&&plan->needs_cpu_staging);
+        CHECK(plan->staging_slots>0&&plan->cpu_frames>0&&!plan->frames_from_encoder_ctx);
+        // A real recorder with the generated list tries exactly one encoder;
+        // failure must not reach another input, codec, vendor or software.
+        for(const auto adapter:{kAdapterVendorAmd,kAdapterVendorNvidia,kAdapterVendorIntel,0u}){
+            std::vector<VideoEncoderConfig> opened;
+            RecordingCaptureDependencies dependencies;dependencies.adapter_vendor=adapter;
+            dependencies.open_encoder=[&](const VideoEncoderConfig& value,size_t index)->std::unique_ptr<VideoEncoder>{
+                CHECK(index==0);opened.push_back(value);throw std::runtime_error("selected encoder deliberately failed");};
+            RecordingCapture capture(config,{},std::make_unique<GeneratedSource>(60),dependencies);
+            environment.set("changed-after-construction"); // Read once, not again in start/open.
+            encoder_input_error([&]{capture.start();},adapter==kAdapterVendorAmd?"selected encoder deliberately failed":"requires an AMD capture adapter");
+            CHECK(capture.stop());
+            CHECK(opened.size()==(adapter==kAdapterVendorAmd?1u:0u));
+            if(!opened.empty())CHECK(opened[0].name==selected[0].name&&!opened[0].hardware_frames&&opened[0].resource_options==plan->options);
+            environment.set("amf-system-memory");
+        }
+#endif
+    }
+    // Injected candidates bypass parsing and the AMD guard, even with a typo.
+    environment.set("typo");
+    RecordingCaptureDependencies injected;injected.candidates={{"libx264"}};injected.adapter_vendor=kAdapterVendorNvidia;
+    int opens=0;
+    injected.open_encoder=[&](const VideoEncoderConfig& value,size_t index)->std::unique_ptr<VideoEncoder>{
+        CHECK(index==0&&value.name=="libx264");++opens;throw std::runtime_error("injected candidate preserved");};
+    RecordingCapture injected_capture(config,{},std::make_unique<GeneratedSource>(60),injected);
+    encoder_input_error([&]{injected_capture.start();},"injected candidate preserved");CHECK(opens==1);CHECK(injected_capture.stop());
+
+    for(const char* value:{"amf-system-memory","typo"}){
+        environment.set(value);config.cpu_encoder=true;
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+        std::vector<std::string> messages;RecordingCaptureCallbacks callbacks;
+        callbacks.encoder_input_diagnostic=[&](const auto& message){messages.push_back(message);};
+        encoder_input_error([&]{RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60));},
+            std::string(value)=="typo"?"unsupported CLYPDAT_DIAGNOSTIC_ENCODER_INPUT":"cannot use CPU encoder mode");
+        CHECK(messages.size()==1&&messages[0].starts_with("Diagnostic encoder input configuration:"));
+#else
+        // No injected candidates: the actual production constructor ignores
+        // both the supported value and invalid values in an ordinary build.
+        RecordingCapture capture(config,{},std::make_unique<GeneratedSource>(60));capture.start();
+        CHECK(capture.health().encoder=="libx264");CHECK(capture.stop());
+#endif
+    }
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+    std::cout<<"Encoder input diagnostics ON: ordering, exact codec selection, fail-closed errors, AMD guard, read-once and injected-candidate bypass passed\n";
+#else
+    std::cout<<"Encoder input diagnostics OFF: production ordering and environment inertness passed\n";
+#endif
+}
+
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+void diagnostic_readback_pipeline(){
+    EncoderInputEnvironment environment;
+    for(bool av1:{false,true})for(int fps:{30,60,90,120}){
+        environment.set("amf-system-memory");
+        RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=fps;config.av1=av1;
+        const RecordingEncoderCandidate candidate{av1?"av1_amf":"h264_amf",false,false};
+        const auto plan=plan_recording_encoder(config,candidate,kAdapterVendorAmd,false);CHECK(plan);
+        RecordingCaptureDependencies dependencies;dependencies.adapter_vendor=kAdapterVendorAmd;
+        int opens=0;std::vector<std::string> messages;
+        dependencies.open_encoder=[&](const VideoEncoderConfig& value,size_t index){
+            CHECK(index==0&&value.name==candidate.name&&!value.hardware_frames);
+            CHECK(value.resource_options==plan->options);++opens;
+            return stand_in_encoder(value); // libx264 only; no local AMF hardware claim.
+        };
+        RecordingCaptureCallbacks callbacks;callbacks.encoder_input_diagnostic=[&](const auto& message){messages.push_back(message);};
+        RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(fps,true),dependencies);
+        environment.set("changed-after-construction");capture.start();
+        CHECK(wait_health(capture,[](const auto& h){return h.encoded>=12;},3s));CHECK(capture.stop());
+        const auto h=capture.health();CHECK(h.error.empty()&&opens==1);
+        CHECK(h.encoder==candidate.name&&!h.hardware_input&&h.zero_copy_status=="not-used");
+        CHECK(h.processing_path=="d3d11-video-processor-readback"&&h.gpu_conversion_fallbacks==0);
+        CHECK(h.readback_staging_slots==plan->staging_slots&&h.readback_cpu_frames==plan->cpu_frames);
+        CHECK(h.readback_staging_peak>0&&h.readback_staging_peak<=plan->staging_slots);
+        CHECK(h.readback_cpu_frames_peak>0&&h.readback_cpu_frames_peak<=plan->cpu_frames);
+        CHECK(messages.size()==1&&messages[0].find("candidate="+candidate.name)!=std::string::npos);
+        CHECK(messages[0].find("encoder=libx264 hardwareInput=false")!=std::string::npos);
+    }
+    std::cout<<"Diagnostic AMF readback plans: actual GPU conversion/staged readback passed, both codecs at 30/60/90/120; software encoder stand-in only\n";
+}
+#endif
 struct AmfRun{RecordingCaptureHealth health;std::vector<size_t> attempted;std::vector<VideoEncoderConfig> opened;};
 AmfRun amf_run(std::optional<uint32_t> adapter){
     RecordingCaptureConfig config;config.width=256;config.height=144;config.fps=60;
@@ -1719,6 +1841,10 @@ int wgc_bench(int width,int height,int fps,bool animate,int seconds){
 int main(int argc,char**argv) {
     try{
     av_log_set_level(AV_LOG_ERROR);
+    if(argc>1&&std::string_view(argv[1])=="--encoder-input"){encoder_input_diagnostics();return 0;}
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+    if(argc>1&&std::string_view(argv[1])=="--diagnostic-readback"){diagnostic_readback_pipeline();return 0;}
+#endif
     if(argc>1&&std::string_view(argv[1])=="--4k-gpu"){gpu_4k_to_1440p(90);return 0;}
     if(argc>1&&std::string_view(argv[1])=="--qsv")return qsv_hardware();
     if(argc>1&&std::string_view(argv[1])=="--wgc-holders"){measure_source_texture_holders();return 0;}

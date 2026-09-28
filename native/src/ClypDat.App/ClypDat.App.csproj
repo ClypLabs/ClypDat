@@ -264,7 +264,11 @@
        beside both developer and published app output, where the capture worker
        loads it. -->
   <Target Name="BuildNativeCaptureEngine" BeforeTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
-    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\..\eng\Build-NativeCapture.ps1&quot; -Configuration $(Configuration)" />
+    <PropertyGroup>
+      <_EncoderInputDiagnosticsSwitch />
+      <_EncoderInputDiagnosticsSwitch Condition="'$(ClypDatEncoderInputDiagnostics)' == 'true'">-EnableEncoderInputDiagnostics</_EncoderInputDiagnosticsSwitch>
+    </PropertyGroup>
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\..\eng\Build-NativeCapture.ps1&quot; -Configuration $(Configuration) $(_EncoderInputDiagnosticsSwitch)" />
   </Target>
 
   <Target Name="BuildEditorVideoOutput" BeforeTargets="PrepareForBuild" Condition="'$(ClypDatUiPreview)' != 'true'">

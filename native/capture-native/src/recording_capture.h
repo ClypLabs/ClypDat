@@ -293,6 +293,10 @@ struct RecordingCaptureCallbacks {
     // capture falls back to compose_nv12.
     std::function<OverlayFrame(int64_t pts)> overlay_frame;
     std::function<void(int64_t pts, const OverlayFrame& layers, OverlayCompositionResult drawn)> overlay_composed;
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+    // Private native log sink; never crosses the recorder ABI.
+    std::function<void(const std::string&)> encoder_input_diagnostic;
+#endif
 };
 // Native construction seams only. The DLL never accepts these overrides.
 struct RecordingEncoderCandidate { std::string name; bool low_power=false,d3d11=false; };

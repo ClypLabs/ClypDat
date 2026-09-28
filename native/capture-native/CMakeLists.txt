@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(ClypDatCaptureNative LANGUAGES C CXX)
+option(CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS "Enable private encoder input selection for hardware validation" OFF)
 
 if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "ClypDat recording requires MSVC x64")
@@ -27,7 +28,7 @@ add_library(RecorderCore STATIC
     src/output_orientation.cpp src/output_orientation.h
     src/detector_stage.cpp src/detector_stage.h
     src/overlay_compositor.cpp src/overlay_compositor.h
-    src/recording_capture.cpp src/recording_capture.h
+    src/recording_capture.cpp src/recording_capture.h src/encoder_input_diagnostics.h
     src/recording_windows_source.cpp
     src/recording_audio.cpp src/recording_audio.h
     src/recording_audio_timing.cpp src/recording_audio_timing.h
@@ -41,6 +42,9 @@ add_library(RecorderCore STATIC
 target_compile_features(RecorderCore PUBLIC cxx_std_20)
 target_include_directories(RecorderCore PUBLIC src)
 target_compile_definitions(RecorderCore PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+if(CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS)
+    target_compile_definitions(RecorderCore PUBLIC CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS=1)
+endif()
 target_compile_options(RecorderCore PRIVATE /W4 /permissive- /EHsc)
 set_target_properties(RecorderCore PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_link_libraries(RecorderCore PUBLIC
@@ -130,6 +134,10 @@ target_compile_definitions(ClypDat.Capture.Native.CaptureTests PRIVATE NOMINMAX 
 set_target_properties(ClypDat.Capture.Native.CaptureTests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_test(NAME ClypDat.Capture.Native.CapturePipeline COMMAND ClypDat.Capture.Native.CaptureTests)
+add_test(NAME ClypDat.Capture.Native.EncoderInputDiagnostics COMMAND ClypDat.Capture.Native.CaptureTests --encoder-input)
+if(CLYPDAT_TEST_GPU AND CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS)
+    add_test(NAME ClypDat.Capture.Native.DiagnosticReadback COMMAND ClypDat.Capture.Native.CaptureTests --diagnostic-readback)
+endif()
 
 add_executable(ClypDat.Capture.Native.AudioSaveTests tests/recording_audio_save.cpp)
 target_link_libraries(ClypDat.Capture.Native.AudioSaveTests PRIVATE RecorderCore)

@@ -2,7 +2,8 @@
 param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Release',
     [switch]$Test,
-    [switch]$TestGpu
+    [switch]$TestGpu,
+    [switch]$EnableEncoderInputDiagnostics
 )
 $ErrorActionPreference = 'Stop'
 $source = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../native/capture-native'))
@@ -20,7 +21,8 @@ if (-not (Test-Path -LiteralPath $cmake)) { throw 'Install CMake or set CLYPDAT_
 $major = ([version]$installation.installationVersion).Major
 $generator = switch ($major) { 17 { 'Visual Studio 17 2022' }; 18 { 'Visual Studio 18 2026' }; default { throw "Unsupported Visual Studio version: $major" } }
 $sdk = & (Join-Path $PSScriptRoot 'Prepare-CaptureFfmpegSdk.ps1') -MsvcBin $msvcBin -BuildDirectory $build
-& $cmake -S $source -B $build -G $generator -A x64 "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)" "-DCLYPDAT_FFMPEG_SDK=$sdk" "-DCLYPDAT_TEST_GPU=$($TestGpu.IsPresent.ToString().ToUpperInvariant())"
+$encoderInputDiagnostics = if ($EnableEncoderInputDiagnostics) { 'ON' } else { 'OFF' }
+& $cmake -S $source -B $build -G $generator -A x64 "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)" "-DCLYPDAT_FFMPEG_SDK=$sdk" "-DCLYPDAT_TEST_GPU=$($TestGpu.IsPresent.ToString().ToUpperInvariant())" "-DCLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS=$encoderInputDiagnostics"
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)." }
 & $cmake --build $build --config $Configuration
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)." }

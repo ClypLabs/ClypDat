@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <stdexcept>
 #include <condition_variable>
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+#include <fstream>
+#endif
 
 namespace clypdat {
 struct RecorderSession::State {
@@ -194,6 +197,16 @@ RecorderSession::RecorderSession(RecorderSessionConfig config, std::unique_ptr<R
             { std::lock_guard lock(p->mutex); writer = p->session; }
             if (writer) writer->audio(std::move(block));
         });
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+    // The GUI worker has no stderr pipe. Keep the one-shot native diagnostic
+    // beside its existing audio/save work files, without adding an IPC field.
+    callbacks.encoder_input_diagnostic = [path = s->config.work_directory / L"encoder-input-diagnostics.log"](const std::string& message) {
+        std::ofstream log(path, std::ios::app);
+        log << message << '\n';
+        log.flush();
+        if (!log) throw std::runtime_error("Cannot write native encoder input diagnostic log");
+    };
+#endif
     s->capture = std::make_unique<RecordingCapture>(s->config.capture, std::move(callbacks), std::move(source));
 }
 RecorderSession::~RecorderSession() { stop(); }
