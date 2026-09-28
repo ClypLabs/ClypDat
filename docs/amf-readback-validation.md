@@ -1,12 +1,162 @@
 # AMF system-memory application validation
 
-This candidate tests the existing GPU conversion and staged-readback pipeline.
-It does not indicate that AMD readback has failed. The previous application
-validation was blocked because the working D3D11 encoder candidate opened first.
+AV1 and H.264 AMF system-memory input passed real application validation on
+2026-09-28 with candidate `b5d936ab` on branch `cpp-rewrite`. The optional AMD
+readback validation task can close for the tested hardware/driver combination.
+The validation procedure remains below for future hardware runs.
+
+## Real hardware results
+
+| GPU | Driver | Windows | HAGS | Candidate |
+|---|---|---|---|---|
+| AMD Radeon RX 9070 XT | 32.0.31019.2002 | Windows Server 2025 Datacenter, 26100.32860 | Enabled | `b5d936ab` (`1.6.0+b5d936ab`) |
+
+Evidence: report `cc550b7a-a434-47da-84c9-0351ab3bf62d`, titled
+`Full-app AMF readback validation | b5d936ab | RX 9070 XT`, downloaded as
+`clypdat-diagnostics-cc550b7a-a434-47da-84c9-0351ab3bf62d.zip`.
+All 148 entries in `archive-manifest.json` matched their sizes and SHA-256 hashes
+during this review. The AMD package verification separately records 962 candidate
+payload files checked without mismatches.
+
+Sources reviewed include `final-report.md`, `validation-method.md`,
+`evidence/{environment,candidate-build,package-verification,acceptance}.json`,
+both codecs' selector and worker logs, capture/keyframe/history CSVs,
+before/after-save health, save results, and `media/` probe, decoded-frame,
+keyframe, decode, seek and audio results. Restoration and final-state evidence
+record restored normal settings/startup registration, an unchanged installed
+executable, stopped candidate processes, and no selector environment variable.
+The ZIP contains verification outputs, not replay media; decode and seek results
+are recorded AMD runs. This review independently recalculated cadence, packet/
+frame counts and timestamp ordering from those outputs, without rerunning media.
+
+### Application path
+
+| Codec | Encoder | hardwareInput | Processing path | Result |
+|---|---|---|---|---|
+| AV1 | `av1_amf` | `false` | `d3d11-video-processor-readback` | PASS |
+| H.264 | `h264_amf` | `false` | `d3d11-video-processor-readback` | PASS |
+
+Both sessions exercised WGC D3D11 capture, GPU conversion, staged D3D11 readback,
+reusable system-memory frames, AMD AMF, replay history and replay save in the
+real application. Selector logs explicitly confirm `hardwareInput=false`;
+capture samples report `zeroCopy=not-used`, nonzero GPU video-processor/readback
+timings and bounded staging/CPU pools. `EncoderInputPath=Software` describes
+frame storage; the encoders remained hardware AMF. No synthetic encoder harness
+was used. After gameplay, a temporary controller disconnected the candidate UI
+and used existing IPC to save from the same running worker. The UI hotkey
+handler was outside this validation's scope.
+
+### Live health
+
+FPS below is configured FPS followed by median fresh/output FPS. Key counts
+are the before-save snapshots; capture continued during saving.
+
+| Codec | FPS: configured; fresh/output | Requested/emitted keys | Max gap | Watchdog recoveries | Encoder recoveries | Pressure drops |
+|---|---|---|---|---|---|---|
+| AV1 | 120; 120.0/120.0 | 194/194 | 1.000 s | 0 | 0 | 0 |
+| H.264 | 120; 119.85/119.9 | 64/64 | 1.000 s | 0 | 0 | 0 |
+
+Observed capture spans, including startup and save completion, were 202.529 s
+for AV1 and 66.027 s for H.264. After-save key counts reached 203/203 and 67/67.
+Both before/after-save states were Healthy. History peaks were 120.991667 s
+and 30.991667 s, within the requested window plus one GOP, with no history
+invalidations. Output-frame drops and encoder backpressure drops stayed zero.
+
+AV1 briefly reached 98.0 fresh FPS. That sample still output 120.0 FPS with CFR
+duplicates filling missing fresh-source slots; the separate minimum output
+sample was 118.9 FPS. No output-frame drop, readback pressure drop or recovery
+accompanied the dip. H.264's minimum fresh/output samples were 92.9/119.3 FPS
+(also separate samples). These are observed transients, not readback failures.
+
+### Replay result
+
+| Codec | Requested | Actual | Probe codec | FPS | Keyframes | Full decode |
+|---|---|---|---|---|---|---|
+| AV1 | 120 s | 120.716666 s | `av1` | 120 | 121 | PASS; 14,486 frames |
+| H.264 | 30 s | 30.775001 s | `h264` | 120 | 31 | PASS; 3,693 frames |
+
+Both saved files are 1880x1080. Packet and decoded-frame counts match; first
+packets and decoded frames are key. Keyframe gap min/median/max is
+1.000/1.000/1.000 s for each codec. Video/audio packet PTS and DTS, and decoded
+video-frame timestamps, strictly increase. Full video decodes used
+`-v error -xerror -err_detect explode`, exited zero and produced empty error logs.
+All three seeks per codec passed: midpoint, ten seconds before the end and five
+seconds before the end. Timings include process startup and one second of
+decode: AV1 1.707-2.011 s; H.264 0.609-0.627 s using the corrected diagnostic
+time base described below.
+
+Each replay contains four independently decoded AAC tracks: All Tracks, Game
+Audio, Discord and Microphone. All start at video time zero. End deltas versus
+video are -0.666 ms for AV1 and -0.001 ms for H.264. These objective checks passed;
+subjective listening, visible lip-sync and activity on every source were not
+verified.
+
+### Readback
+
+p95 columns show median / maximum of reported gameplay rolling-window p95
+samples in milliseconds, not percentiles recomputed over every frame.
+
+| Codec | Staging slots/peak | CPU frames/peak | p95 ms | Map p95 ms | Stalls | Pressure drops | GPU fallbacks |
+|---|---|---|---|---|---|---|---|
+| AV1 | 2/2 | 2/1 | 0.42/0.59 | 0.03/0.04 | 1, startup only | 0 | 0 |
+| H.264 | 2/2 | 2/1 | 0.50/0.61 | 0.03/0.05 | 1, startup only | 0 | 0 |
+
+Each stall counter incremented once before gameplay and remained at one.
+Neither run shows sustained readback stalls, CPU-frame exhaustion, growing
+frame pools, pressure drops or GPU conversion fallbacks. Watchdog and encoder
+recoveries stayed zero. The bounded startup events do not indicate sustained
+readback instability.
+
+### Diagnostic caveats
+
+The first AV1 save attempt failed because the temporary controller serialized
+`RequestedUtc` as Windows PowerShell's `/Date(...)/`, which the worker rejected.
+After the disconnected UI/controller failed to reconnect, the existing ten-second
+idle timeout ended that attempt. Only the temporary controller changed, to
+`DateTime.UtcNow.ToString("o")`. The entire AV1 run was repeated from the official
+launcher and passed. No production code changed; this was neither an AMF failure
+nor a watchdog/encoder recovery. The failed attempt remains separately archived
+under `evidence/av1-attempt1-helper-error/`.
+
+The initial H.264 midpoint seek logged duplicate-DTS warnings from FFmpeg's
+diagnostic null-output muxer, whose output time base was 1/120. The original
+`media/summary.json` therefore retains `automated_pass=false`. Source PTS, DTS
+and decoded-frame timestamps strictly increase, and full source decode passed.
+Repeating all three seeks with `-fps_mode passthrough -enc_time_base demux`
+produced zero exits and empty error logs, recorded in `seek-timebase-check.json`
+and accepted by `evidence/acceptance.json`. This diagnostic timestamp-rescaling
+artifact is not evidence of corrupt replay timestamps and indicates no recorder
+timestamp change. A verbose metadata trace also contains
+`UDTA parsing failed retrying raw`; track identification and all decodes passed.
+
+### Scope and production decision
+
+The full-app staged-readback path is hardware-validated on **RX 9070 XT + driver
+32.0.31019.2002**, on the Windows build above. This does not establish identical
+behavior on every AMD architecture, AMD driver version or Windows build.
+
+| Codec | D3D11 zero-copy | System-memory/readback |
+|---|---|---|
+| AV1 AMF | Validated previously on `2df9aeab` | Validated on `b5d936ab` |
+| H.264 AMF | Validated previously on `37acd112` | Validated on `b5d936ab` |
+
+AV1 zero-copy and CBR initialization fix `2df9aeab` are supported by earlier
+report `5134d57e-930d-4ee4-a7cb-f4f55a5c3b49` (reviewed final report, health and
+media summary). H.264 zero-copy evidence is recorded in
+[Replay keyframe validation](replay-keyframe-validation.md). The final readback
+package completes the remaining input-path coverage. Periodic replay keyframes
+and bounded history/save behavior are validated. **No further production recorder
+code change is indicated by AMD testing.**
+
+Keep the system-memory candidate and existing candidate order. D3D11 zero-copy
+remains the preferred normal AMD path. The `b5d936ab` selector remains default
+OFF, compiled out normally, and validation/test infrastructure only. Successful
+hardware validation does not justify enabling it in normal production builds.
 
 ## Build gate
 
-Ordinary builds compile the selector out. `Build-NativeCapture.ps1` explicitly
+Ordinary builds compile the selector out and ignore
+`CLYPDAT_DIAGNOSTIC_ENCODER_INPUT`. `Build-NativeCapture.ps1` explicitly
 configures `CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS=OFF` unless called with
 `-EnableEncoderInputDiagnostics`, including after an earlier diagnostic build.
 Application publishing forwards that switch only when MSBuild property
