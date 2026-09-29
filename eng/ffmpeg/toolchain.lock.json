@@ -51,6 +51,26 @@
       "name": "python.exe",
       "path": "sys.executable (Python 3.13)",
       "sha256": "85b71d8c6ec1905935f74be0c9869aae198d00e98f39df699ec66f9c5a84cecd"
+    },
+    {
+      "name": "c1.dll",
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\c1.dll",
+      "sha256": "869b66c385a087df9fc60eea91ab6fa5fcb651a58e2a10b71da5d7e80eb6e0d0"
+    },
+    {
+      "name": "c1xx.dll",
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\c1xx.dll",
+      "sha256": "c4549b88f0b12571a0931d5a6c0a9bb0def061feae0e5532300091e1e47f0cdd"
+    },
+    {
+      "name": "c2.dll",
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\c2.dll",
+      "sha256": "ff18524161e4447d2cdb6d4cdad3c44cf6449f8456086e465247e18e3ad141c4"
+    },
+    {
+      "name": "clang-cl.exe",
+      "path": "D:/ClypDatFfmpeg812/tools/llvm/bin/clang-cl.exe",
+      "sha256": "986af49c2d1eefeac324f724ff54597753d1053927fa5d58a37a457f578e1cf8"
     }
   ]
 }

@@ -42,7 +42,7 @@ def verify_toolchain():
         if ENV.get(key.upper())!=lock[key]:raise RuntimeError('Toolchain version mismatch: '+key)
     for item in lock['files']:
         name=item['name']
-        path=sys.executable if name=='python.exe' else item['path'] if name in ('git.exe','bash.exe','7z.exe') else shutil.which(name,path=ENV['PATH'])
+        path=sys.executable if name=='python.exe' else item['path'] if name in ('git.exe','bash.exe','7z.exe','clang-cl.exe','c1.dll','c1xx.dll','c2.dll') else shutil.which(name,path=ENV['PATH'])
         with open(path,'rb') as f:actual=hashlib.file_digest(f,'sha256').hexdigest()
         if actual!=item['sha256']:raise RuntimeError('Toolchain checksum mismatch: '+name)
 
@@ -68,6 +68,17 @@ def cmake_dep(name,sub='',flags=()):
     build=ROOT/'build'/('aom-nasm216' if name=='aom' else name)
     cmake=CMAKE
     generator=['-G','Visual Studio 18 2026','-A','x64']
+    if name=='aom':
+        # MSVC 19.51 generates two parse_decode_block variants from identical
+        # input. Keep the workaround scoped to AOM; retain MSVC CRT/link tools.
+        clang=(ROOT/'tools/llvm/bin/clang-cl.exe').as_posix()
+        generator=['-G','Ninja','-DCMAKE_BUILD_TYPE=Release',
+            '-DCMAKE_C_COMPILER='+clang,'-DCMAKE_CXX_COMPILER='+clang,
+            '-DCMAKE_AR='+pathlib.Path(shutil.which('lib.exe',path=ENV['PATH'])).as_posix(),
+            '-DCMAKE_LINKER='+pathlib.Path(shutil.which('link.exe',path=ENV['PATH'])).as_posix(),
+            '-DCMAKE_C_FLAGS=/Brepro','-DCMAKE_CXX_FLAGS=/Brepro',
+            '-DCMAKE_STATIC_LINKER_FLAGS=/Brepro',
+            '-DCMAKE_ASM_NASM_FLAGS=--reproducible']
     run(name+'-configure',[cmake,'-S',src,'-B',build,*generator,
         '-DCMAKE_POLICY_VERSION_MINIMUM=3.5',f'-DCMAKE_INSTALL_PREFIX={PREFIX.as_posix()}',
         '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL','-DCMAKE_ASM_NASM_COMPILER=D:/ClypDatFfmpeg812/tools/nasm-2.16.03/nasm.exe',*flags])
@@ -113,7 +124,7 @@ def x265_multilib(install=True):
         shutil.copy2(combined,PREFIX/'lib/x265-static.lib')
 
 def deps():
-    cmake_dep('onevpl',flags=['-DBUILD_SHARED_LIBS=ON','-DBUILD_EXPERIMENTAL=ON','-DBUILD_EXAMPLES=OFF','-DBUILD_TESTS=OFF','-DINSTALL_EXAMPLES=OFF'])
+    cmake_dep('onevpl',flags=['-DCMAKE_SHARED_LINKER_FLAGS=/Brepro','-DBUILD_SHARED_LIBS=ON','-DBUILD_EXPERIMENTAL=ON','-DBUILD_EXAMPLES=OFF','-DBUILD_TESTS=OFF','-DINSTALL_EXAMPLES=OFF'])
     # zlib's legacy #ifdef treats FFmpeg's HAVE_UNISTD_H=0 as true.
     # MSVC has no unistd.h; fix only the dependency's header template.
     template=source('zlib')/'zconf.h.cmakein'
@@ -155,7 +166,7 @@ def ffmpeg():
         '--enable-libx264','--enable-libx265','--enable-libaom','--enable-libdav1d','--enable-zlib','--enable-schannel',
         '--extra-cflags=-MD -ID:/ClypDatFfmpeg812/deps/include -DONEVPL_EXPERIMENTAL=1',
         '--extra-cxxflags=-MD -DONEVPL_EXPERIMENTAL=1',
-        '--extra-ldflags=-LIBPATH:D:/ClypDatFfmpeg812/deps/lib','--pkg-config=pkgconf']
+        '--extra-ldflags=-LIBPATH:D:/ClypDatFfmpeg812/deps/lib -Brepro','--pkg-config=pkgconf']
     import shlex
     script='export PKG_CONFIG_PATH=/d/ClypDatFfmpeg812/deps/lib/pkgconfig\n'
     if '--resume' not in sys.argv:

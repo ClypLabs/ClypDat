@@ -24,7 +24,12 @@ def acquire(root,item):
         with urllib.request.urlopen(item['url'],timeout=180) as response,open(dest,'wb') as output:shutil.copyfileobj(response,output)
     if sha(dest)!=item['sha256']:raise RuntimeError('Source checksum mismatch: '+item['name'])
     print('VERIFIED',item['name'],flush=True)
-    if item.get('git'):return
+    if item.get('git') or item['name']=='llvm-license':return
+    if item['name']=='llvm-aom':
+        # Extract compiler/resource headers only; never execute the installer.
+        subprocess.run(['C:/Program Files/7-Zip/7z.exe','x','-y',str(dest),
+            '-o'+str(root/'tools/llvm'),'bin/clang-cl.exe','lib/clang/22/include/*'],check=True,stdout=subprocess.DEVNULL)
+        return
     if item['name'] in ('make','pkgconf'):
         data=subprocess.check_output(['C:/Program Files/7-Zip/7z.exe','x','-so',str(dest)])
         with tarfile.open(fileobj=io.BytesIO(data)) as archive:archive.extractall(root/'tools',filter='data')

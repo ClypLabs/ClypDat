@@ -113,5 +113,21 @@
     "url": "https://files.pythonhosted.org/packages/9c/07/b48592d325cb86682829f05216e4efb2dc881762b8f1bafb48b57442307a/meson-1.9.1-py3-none-any.whl",
     "file": "meson-1.9.1-py3-none-any.whl",
     "sha256": "f824ab770c041a202f532f69e114c971918ed2daff7ea56583d80642564598d0"
+  },
+  {
+    "name": "llvm-aom",
+    "version": "22.1.8",
+    "revision": "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
+    "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-win64.exe",
+    "file": "LLVM-22.1.8-win64.exe",
+    "sha256": "16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c"
+  },
+  {
+    "name": "llvm-license",
+    "version": "22.1.8",
+    "revision": "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
+    "url": "https://raw.githubusercontent.com/llvm/llvm-project/ca7933e47d3a3451d81e72ac174dcb5aa28b59d1/llvm/LICENSE.TXT",
+    "file": "LLVM-LICENSE.TXT",
+    "sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
   }
 ]

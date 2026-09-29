@@ -7,7 +7,7 @@ This recipe builds a separate candidate. It does not call `Prepare-CaptureFfmpeg
 - FFmpeg n8.1.2 source commit: `38b88335f99e76ed89ff3c93f877fdefce736c13`. Upstream annotated tag object: `1c2c67c0b9f7f66ab32c19dcf7f227bcd290aa4c`.
 - oneVPL headers and dispatcher: 2.16.0, commit `778a66d6c6537f08eabb91955dbbf1bce3812894`.
 - oneVPL configuration: `BUILD_SHARED_LIBS=ON`, `BUILD_EXPERIMENTAL=ON`. FFmpeg receives `ONEVPL_EXPERIMENTAL=1` globally. Both avutil and avcodec link the **same absolute import library** `deps/lib/vpl.lib`, whose target is `libvpl.dll`. No static dispatcher archive is produced or linked.
-- Required external codecs: x264 pinned snapshot, x265 4.1 tag (8/10/12-bit multilib), libaom 3.13.1. Static codec libraries, all using MSVC `/MD`.
+- Required external codecs: x264 pinned snapshot, x265 4.1 tag (8/10/12-bit multilib), libaom 3.13.1. Static codec libraries using the Microsoft `/MD` runtime. AOM alone uses pinned clang-cl 22.1.8; FFmpeg and other C/C++ dependencies retain MSVC.
 - Default AV1 decoding: dav1d 1.5.4, commit `54706fc6bc0cdecab7e9593974a4039cc038fca7`, built with pinned Meson 1.9.1 and `b_vscrt=md`. This preserves the baseline's automatically selected AV1 decoder; libaom also remains available for CPU AV1 export.
 - GPU headers: nv-codec-headers n13.0.19.0 and AMF v1.4.36. GPU driver runtimes are not bundled.
 - `patches/amf-display-c-compat.patch` makes the AMF 1.4.36 display-capture declaration valid in C as well as C++. It preserves the AMF version and ABI; no encoder logic changes. The original tag object is `86b1b09ca5c0572ab710ee7b6b174f8c7aa00119`, resolving to commit `16f7d73e0b45c473e903e46981ed0b91efc4c091`.
@@ -20,16 +20,16 @@ The x265 4.1 source archive contains stale version metadata (`4.0+1-6318f22`). I
 
 ## Build prerequisites
 
-The recorded machine uses Windows 11 x64, Visual Studio Community 2026 18.9.1 at `C:/Program Files/Microsoft Visual Studio/18/Community`, MSVC tools directory 14.51.36231 with compiler 19.51.36256.0, Windows SDK 10.0.26100.0, VS CMake 4.3.1-msvc1 and bundled Ninja. Install matching released toolchain components before reproducing; the script does not install them. `toolchain.lock.json` records compiler/linker/resource compiler, CMake, Ninja, Git, Bash, 7-Zip and Python SHA-256 values. Build startup checks these hashes and selected MSVC/SDK versions; drift fails closed. Python may live at a different path if its executable hash matches.
+The recorded machine uses Windows 11 x64, Visual Studio Community 2026 18.9.1 at `C:/Program Files/Microsoft Visual Studio/18/Community`, MSVC tools directory 14.51.36231 with compiler 19.51.36256.0, Windows SDK 10.0.26100.0, VS CMake 4.3.1-msvc1 and bundled Ninja. Install matching released toolchain components before reproducing; the script does not install them. `toolchain.lock.json` records compiler frontends/backend, the AOM-only clang-cl compiler, linker/resource compiler, CMake, Ninja, Git, Bash, 7-Zip and Python SHA-256 values. Build startup checks these hashes and selected MSVC/SDK versions; drift fails closed. Python may live at a different path if its executable hash matches.
 
-Other prerequisites: Git for Windows 2.55.0.windows.3 at `C:/Program Files/Git`, Python 3.13, 7-Zip at `C:/Program Files/7-Zip/7z.exe`, and a D: drive. CMake 3.31.8 (x265 only), NASM 2.16.03, GNU Make 4.4.1-3 and pkgconf 3.0.7-1 are acquired from locked archives into staging. The older CMake is needed for upstream x265's OLD policy settings; no CMake source patch is used.
+Other prerequisites: Git for Windows 2.55.0.windows.3 at `C:/Program Files/Git`, Python 3.13, 7-Zip at `C:/Program Files/7-Zip/7z.exe`, and a D: drive. LLVM 22.1.8 (AOM compiler only), CMake 3.31.8 (x265 only), NASM 2.16.03, GNU Make 4.4.1-3 and pkgconf 3.0.7-1 are acquired from locked archives into staging. The LLVM installer is hash-checked and extracted with 7-Zip, never executed. Only clang-cl and its resource headers are extracted; no global installation or LLVM runtime DLL is added. The older CMake is needed for upstream x265's OLD policy settings; no CMake source patch is used.
 
 ## Fresh reproduction
 
 From the directory containing this recipe:
 
 ```powershell
-python bootstrap.py 'D:/ClypDat-builds/ffmpeg-8.1.2-shared-r1'
+python bootstrap.py 'D:/ClypDat-builds/ffmpeg-8.1.2-shared-r2'
 ```
 
 The target must not exist. The fixed build junction `D:/ClypDatFfmpeg812` must also be free. The bootstrap downloads and verifies every locked source/tool archive, extracts into the target, creates that junction, builds dependencies and FFmpeg, installs only into `candidate/`, assembles notices and runtime files, and creates binary/source ZIPs with manifests. Download hash mismatches fail closed.
@@ -64,10 +64,17 @@ python package.py
 - `candidate/include`, `candidate/lib`: matching public development headers and import libraries. Shared-only pkg-config metadata uses a relocatable prefix; build-machine static dependency paths are removed.
 - `candidate/licenses`, `candidate/BUILD.md`, source/configuration locks and dependency patches: redistribution material.
 - `candidate/SHA256SUMS`, `candidate/manifest.json`: final file hashes.
-- `clypdat-ffmpeg-8.1.2-win64-shared-r1.zip` and matching `.sha256`.
-- `clypdat-ffmpeg-8.1.2-win64-shared-r1-sources.zip` and matching `.sha256`: corresponding sources and recipe. Publish beside the binaries if released.
+- `clypdat-ffmpeg-8.1.2-win64-shared-r2.zip` and matching `.sha256`.
+- `clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip` and matching `.sha256`: corresponding sources and recipe. Publish beside the binaries if released.
 
-This is a pinned, repeatable source-build procedure. Byte-identical compiler output across fresh builds is a separate claim: MSVC PE/archive timestamps and toolchain details can change output hashes. The binary package hash identifies the exact tested artifact and must be updated only after validating a rebuilt artifact. ZIP entry ordering/timestamps are normalized; that alone does not prove bit-for-bit compiler reproducibility.
+Revision r2 addresses two independently reproduced defects in r1:
+
+- MSVC 19.51.36256 produces two `parse_decode_block` instruction sequences from identical preprocessed AOM input, command, environment and output path. A fixed-command serial trial produced 28/2 variants in 30 compilations. `/Brepro` and `/experimental:deterministic` still produced both variants. The difference exists in `decodeframe.obj` before archive/link time; no `/GL`, LTCG or PGO is involved. Identical preprocessing and reproduction without parallelism exclude a generated-header/build-order race. A reduced standalone translation unit retains both original function hashes. The internal optimizer defect is not known.
+- Default MSVC linking writes wall-clock COFF/debug timestamps. Controlled repeated links of identical input become identical with `/Brepro`. FFmpeg and oneVPL shared linking use that option. AOM's clang-cl compiler and MSVC librarian use `/Brepro`; NASM uses `--reproducible` through `CMAKE_ASM_NASM_FLAGS`. Experiments verified that these eliminate actual object/archive metadata differences. No binary bytes are rewritten after compilation/linking.
+
+AOM retains `/O2`, `/Ob2`, `/MD`, assembly and the same codec features. Its compiler workaround is deliberately limited to this dependency. LLVM's immutable release archive, compiler executable and license are pinned in the locks. No alternate linker, compiler runtime or system installation is introduced.
+
+Acceptance requires two entirely new build roots, independently verified downloads/toolchains and no reused compiled dependencies. Compare every candidate file, `manifest.json`, `SHA256SUMS`, binary ZIP and source ZIP by SHA-256. ZIP ordering and timestamps are fixed. Leave build A untouched, remove only its fixed-path junction, then bootstrap build B. A successful single build is not proof of reproducibility. Any different payload or ZIP hash blocks acceptance; hardware/software smoke and CPU AV1 performance comparison remain separate gates. Never substitute old validated binaries to make hashes match.
 
 ## Acceptance and integration boundary
 

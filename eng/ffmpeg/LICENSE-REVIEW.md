@@ -25,3 +25,11 @@ The existing RNNoise model is neither changed nor added by this dependency build
 The AMF download also contains unrelated prebuilt FFmpeg 7 libraries. They are excluded from runtime and corresponding-source deliverables. Only used AMF headers, the C compatibility patch and AMD notice are included. The full upstream archive is acquisition evidence, not part of the proposed release.
 
 For release, publish the exact corresponding source bundle beside the binary package; keep these build instructions and license notices available. A local validated candidate is not itself a publication. [FFmpeg licensing](https://ffmpeg.org/legal.html), [oneVPL license](https://github.com/intel/libvpl/blob/v2.16.0/LICENSE), [libaom license](https://aomedia.googlesource.com/aom/+/refs/tags/v3.13.1/LICENSE).
+
+## AOM-only compiler in revision r2
+
+LLVM clang-cl 22.1.8, commit `ca7933e47d3a3451d81e72ac174dcb5aa28b59d1`, is a build tool only. Its official Windows archive and exact compiler executable are hash-pinned. The installer is extracted, not executed. AOM still links against the Microsoft release CRT; no LLVM DLL or compiler binary is included in the runtime/source package.
+
+LLVM uses Apache-2.0 WITH LLVM-exception. The compilation exception covers portions embedded in object code as a result of compilation; this introduces no new copyleft mode into the GPLv3-or-later FFmpeg package. Preserve the pinned complete LLVM license in `licenses/LLVM-LICENSE.TXT` and the corresponding-source downloads. Build instructions/locks identify the immutable tool download and source commit. [LLVM license at the pinned commit](https://github.com/llvm/llvm-project/blob/ca7933e47d3a3451d81e72ac174dcb5aa28b59d1/llvm/LICENSE.TXT), [LLVM licensing policy](https://llvm.org/docs/DeveloperPolicy.html#license).
+
+The large compiler installer is not bundled with application or corresponding-source ZIPs. It remains an independently downloadable, hash-verified build prerequisite, like the existing Microsoft compiler. Matching FFmpeg and codec sources, patches, recipe and notices remain included. Production dependency/source-release integration is outside this candidate recipe change.

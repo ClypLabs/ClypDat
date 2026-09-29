@@ -54,6 +54,7 @@ def runtime():
 
 def licenses():
     dst=P/'licenses';dst.mkdir(exist_ok=True)
+    shutil.copy2(R/'downloads/LLVM-LICENSE.TXT',dst/'LLVM-LICENSE.TXT')
     for name in ('ffmpeg','onevpl','x264','x265','aom','dav1d','zlib','amf','nv-codec-headers'):
         base=source(name)
         (dst/name).mkdir(exist_ok=True)
@@ -78,9 +79,9 @@ def write_manifest():
     (P/'SHA256SUMS').write_text(''.join(f"{x['sha256']}  {x['path']}\n" for x in data))
 
 def archive():
-    name='clypdat-ffmpeg-8.1.2-win64-shared-r1'
+    name='clypdat-ffmpeg-8.1.2-win64-shared-r2'
     for suffix,files in [('',[(p,name+'/'+p.relative_to(P).as_posix()) for p in P.rglob('*') if p.is_file()]),
-                         ('-sources',[(R/'downloads'/x['file'],'downloads/'+x['file']) for x in json.loads((R/'sources.lock.json').read_text()) if x['name'] not in ('make','pkgconf','cmake-compat','nasm-compat','nasm','meson','amf')])]:
+                         ('-sources',[(R/'downloads'/x['file'],'downloads/'+x['file']) for x in json.loads((R/'sources.lock.json').read_text()) if x['name'] not in ('make','pkgconf','cmake-compat','nasm-compat','nasm','meson','amf','llvm-aom')])]:
         if suffix:
             # AMF's complete upstream archive contains unrelated FFmpeg 7 DLLs.
             # Ship only the exact headers used here, plus the root AMD notice.
