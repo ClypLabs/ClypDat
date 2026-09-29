@@ -38,7 +38,10 @@ void video_round_trip(int fps, const std::string& name = "libx264", bool gpu = f
     const int height = gpu ? 144 : 48;
     if (gpu) {
         AVBufferRef* created = nullptr;
-        CHECK(av_hwdevice_ctx_create(&created, AV_HWDEVICE_TYPE_D3D11VA, nullptr, nullptr, 0) == 0);
+        AVDictionary* options=nullptr;
+        av_dict_set(&options,"vendor_id","0x10de",0);
+        const int result=av_hwdevice_ctx_create(&created, AV_HWDEVICE_TYPE_D3D11VA, nullptr, options, 0);
+        av_dict_free(&options);CHECK(result == 0);
         device.reset(created);
         frames.reset(av_hwframe_ctx_alloc(device.get()));
         CHECK(frames);

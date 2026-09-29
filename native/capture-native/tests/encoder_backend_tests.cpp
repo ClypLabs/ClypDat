@@ -240,13 +240,13 @@ void qsv_depth() {
         const auto p = plan(EncoderVendor::Intel, on(EncoderVendor::Intel, request(s.width, s.height, s.fps)));
         CHECK(p.codec_name == "h264_qsv" && p.input == EncoderInput::QsvFrames && p.frames_from_encoder_ctx && p.fixed_pool);
         CHECK(option(p, "async_depth") == std::to_string(expected[i][0]) && option(p, "look_ahead").empty());
-        CHECK(p.max_in_flight == expected[i][0] && p.output_delay_frames == expected[i][0]);
+        CHECK(p.max_in_flight == expected[i][0] + 1 && p.output_delay_frames == expected[i][0] + 1);
         CHECK(p.stages.encoder_input_surfaces == expected[i][0] + 1 && p.pool_capacity == expected[i][1]);
         CHECK(p.right_size_packets && p.surface_alignment == 16);
         CHECK(p.pool_bytes == uint64_t(p.pool_capacity) * frame_bytes(EncoderPixelFormat::NV12, s.width, s.height, 16));
     }
     const auto l = plan(EncoderVendor::Intel, on(EncoderVendor::Intel, request(2560, 1440, 90, 1, 10)));
-    CHECK(l.max_in_flight == 17 && l.output_delay_frames == 17 && l.stages.encoder_input_surfaces == 18 && l.pool_capacity == 20);
+    CHECK(l.max_in_flight == 18 && l.output_delay_frames == 18 && l.stages.encoder_input_surfaces == 18 && l.pool_capacity == 20);
     CHECK(option(l, "look_ahead") == "1" && option(l, "look_ahead_depth") == "10");
     auto av1 = on(EncoderVendor::Intel, request(2560, 1440, 90, 0, 10)); av1.codec = EncoderCodec::AV1;
     for (const bool zero_copy : { true, false }) {
@@ -272,7 +272,7 @@ void qsv_depth() {
     CHECK(plan(EncoderVendor::Intel, suggested).pool_capacity == 9);
     suggested.suggested_input_surfaces = 12;
     const auto grown = plan(EncoderVendor::Intel, suggested);
-    CHECK(grown.stages.encoder_input_surfaces == 12 && grown.pool_capacity == 14 && grown.max_in_flight == 6);
+    CHECK(grown.stages.encoder_input_surfaces == 12 && grown.pool_capacity == 14 && grown.max_in_flight == 7);
     CHECK(option(grown, "async_depth") == "6" && grown.pool_bytes == 14ull * 2560 * 1440 * 3 / 2);
     CHECK(plan(EncoderVendor::Intel, suggested, false).pool_capacity == 2); // Readback pools hold no encoder input.
     suggested.suggested_input_surfaces = 62;

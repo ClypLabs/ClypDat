@@ -1,3 +1,4 @@
+#include "gpu_test_device.h"
 #include "recording_capture.h"
 #include "encoder_input_diagnostics.h"
 #include "readback_stage.h"
@@ -39,7 +40,7 @@ class GeneratedSource final : public RecordingFrameSource {
 public:
     explicit GeneratedSource(int fps,bool gpu=false,int width=256,int height=144,IDXGIAdapter* adapter=nullptr) : fps_(fps) {
         if(gpu){width_=width;height_=height;
-            CHECK(SUCCEEDED(D3D11CreateDevice(adapter,adapter?D3D_DRIVER_TYPE_UNKNOWN:D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context_)));
+            CHECK(SUCCEEDED(create_test_d3d11_device(adapter,adapter?D3D_DRIVER_TYPE_UNKNOWN:D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context_)));
             Microsoft::WRL::ComPtr<ID3D11Multithread> protection;CHECK(SUCCEEDED(context_.As(&protection)));protection->SetMultithreadProtected(TRUE);
             std::vector<uint8_t> initial(size_t(width_)*height_*4,96);
             for(size_t i=3;i<initial.size();i+=4)initial[i]=255;
@@ -312,7 +313,7 @@ class PatternSource final:public RecordingFrameSource{
     int width_,height_;bool delivered_=false;Microsoft::WRL::ComPtr<ID3D11Device> device_;
 public:
     PatternSource(int width,int height,bool gpu):width_(width),height_(height){
-        if(gpu){Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context)));
+        if(gpu){Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;CHECK(SUCCEEDED(create_test_d3d11_device(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context)));
             Microsoft::WRL::ComPtr<ID3D11Multithread> protection;CHECK(SUCCEEDED(context.As(&protection)));protection->SetMultithreadProtected(TRUE);}
     }
     bool acquire(CapturePixels& pixels,std::chrono::milliseconds wait)override{
@@ -348,7 +349,7 @@ void aspect_fit_processing(bool gpu){
     }
 }
 void hdr_shader(){
-    Microsoft::WRL::ComPtr<ID3D11Device> device;CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
+    Microsoft::WRL::ComPtr<ID3D11Device> device;CHECK(SUCCEEDED(create_test_d3d11_device(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
     for(int width:{4,6})for(bool changed:{false,true}){
         std::vector<uint16_t> data(size_t(width)*4*4);
         for(int y=0;y<4;++y)for(int x=0;x<width;++x){float r=0,g=0,b=0;
@@ -481,7 +482,7 @@ void qsv_recording_plans(){
         const auto p=plan_recording_encoder(config,zero_copy,kAdapterVendorIntel,false);CHECK(p);
         CHECK(p->vendor==EncoderVendor::Intel&&p->codec_name=="h264_qsv"&&p->input==EncoderInput::QsvFrames);
         CHECK(p->zero_copy&&p->zero_copy_status==ZeroCopyStatus::Confirmed&&p->frames_from_encoder_ctx&&p->right_size_packets&&!p->needs_cpu_staging);
-        CHECK(p->encoder_slots==depth&&p->max_in_flight==depth&&p->output_delay_frames==depth&&p->pool_capacity==pool&&!p->low_delay_flag);
+        CHECK(p->encoder_slots==depth&&p->max_in_flight==depth+1&&p->output_delay_frames==depth+1&&p->pool_capacity==pool&&!p->low_delay_flag);
         CHECK(p->stages.encoder_input_surfaces==depth+1&&p->pool_bytes==uint64_t(pool)*2560*1440*3/2);
         CHECK((p->options==std::vector<std::pair<std::string,std::string>>{{"async_depth",std::to_string(depth)}}));
         check_encoder_plan(*p);
@@ -497,7 +498,7 @@ void qsv_recording_plans(){
         bool skipped=false;try{plan_recording_encoder(config,zero_copy,foreign,false);}catch(const EncoderPlanInfeasible&){skipped=true;}CHECK(skipped);}
     const auto copy=plan_recording_encoder(config,readback,kAdapterVendorNvidia,false);CHECK(copy);
     CHECK(!copy->zero_copy&&copy->zero_copy_status==ZeroCopyStatus::NotUsed&&copy->needs_cpu_staging&&!copy->frames_from_encoder_ctx);
-    CHECK(copy->input==EncoderInput::SystemFrames&&copy->pool_capacity==2&&copy->max_in_flight==6&&copy->right_size_packets);
+    CHECK(copy->input==EncoderInput::SystemFrames&&copy->pool_capacity==2&&copy->max_in_flight==7&&copy->right_size_packets);
     CHECK((copy->options==std::vector<std::pair<std::string,std::string>>{{"async_depth","6"}}));
     // Unknown adapter: probe allowed, never confirmed by being unknown.
     const auto unknown=plan_recording_encoder(config,zero_copy,0,false);CHECK(unknown);
@@ -825,7 +826,7 @@ void amf_zero_copy_plan(){
 // A frame from any other frames context is rejected before FFmpeg sees it,
 // instead of reaching amfenc's av_assert0. The check is opt-in.
 void amf_frame_context_ownership(){
-    AVBufferRef* raw=nullptr;CHECK(av_hwdevice_ctx_create(&raw,AV_HWDEVICE_TYPE_D3D11VA,nullptr,nullptr,0)>=0);
+    AVBufferRef* raw=nullptr;CHECK(create_test_ffmpeg_d3d11(&raw)>=0);
     struct Unref{AVBufferRef* p;~Unref(){av_buffer_unref(&p);}} device{raw};
     auto frames=[&]{AVBufferRef* ref=av_hwframe_ctx_alloc(device.p);CHECK(ref);auto* ctx=reinterpret_cast<AVHWFramesContext*>(ref->data);
         ctx->format=AV_PIX_FMT_D3D11;ctx->sw_format=AV_PIX_FMT_NV12;ctx->width=256;ctx->height=144;
@@ -877,7 +878,7 @@ void amf_backpressure(){
 }
 uint32_t test_adapter_vendor(){
     Microsoft::WRL::ComPtr<ID3D11Device> device;
-    CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
+    CHECK(SUCCEEDED(create_test_d3d11_device(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
     return d3d11_adapter_vendor(device.Get());
 }
 struct BufferRef{AVBufferRef* p=nullptr;~BufferRef(){av_buffer_unref(&p);}};
@@ -912,7 +913,7 @@ bool exact_size(const AVPacket& packet){return packet.buf&&packet.buf->size==siz
 // undersized and out-of-range surfaces are refused. NVIDIA refuses NV12
 // render-target arrays, so slice indices come from a decoder array.
 void qsv_surface_mapping(){
-    BufferRef device;CHECK(av_hwdevice_ctx_create(&device.p,AV_HWDEVICE_TYPE_D3D11VA,nullptr,nullptr,0)>=0);
+    BufferRef device;CHECK(create_test_ffmpeg_d3d11(&device.p)>=0);
     auto frames=[&](int pool,UINT bind){AVBufferRef* ref=av_hwframe_ctx_alloc(device.p);CHECK(ref);auto* ctx=reinterpret_cast<AVHWFramesContext*>(ref->data);
         ctx->format=AV_PIX_FMT_D3D11;ctx->sw_format=AV_PIX_FMT_NV12;ctx->width=256;ctx->height=144;ctx->initial_pool_size=pool;
         static_cast<AVD3D11VAFramesContext*>(ctx->hwctx)->BindFlags=bind;CHECK(av_hwframe_ctx_init(ref)>=0);return ref;};
@@ -979,7 +980,7 @@ bool derived_qsv_frames(ID3D11Device* d3d){
 }
 void qsv_derivation(){
     Microsoft::WRL::ComPtr<ID3D11Device> device;
-    CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
+    CHECK(SUCCEEDED(create_test_d3d11_device(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
     CHECK(derived_qsv_frames(device.Get())==(d3d11_adapter_vendor(device.Get())==kAdapterVendorIntel));
 }
 struct QsvRun{RecordingCaptureHealth health;std::vector<size_t> attempted;std::vector<VideoEncoderConfig> opened;uint64_t packets=0,oversized=0;};
@@ -1005,8 +1006,8 @@ void qsv_zero_copy_plan(){
     CHECK((opened.resource_options==std::vector<std::pair<std::string,std::string>>{{"async_depth","4"}}));
     const auto& h=confirmed.health;
     CHECK(h.encoder_planned&&h.encoder_vendor=="intel"&&h.zero_copy_status=="confirmed"&&h.hardware_input&&h.processing_path=="d3d11-video-processor-qsv");
-    CHECK(h.encoder_slots==4&&h.max_in_flight==4&&h.output_delay_frames==4&&h.surface_capacity==7&&h.pool_capacity==7);
-    CHECK(h.surfaces_allocated<=7&&h.surfaces_in_use_peak<=4&&h.gpu_conversion_fallbacks==0);
+    CHECK(h.encoder_slots==4&&h.max_in_flight==5&&h.output_delay_frames==5&&h.surface_capacity==7&&h.pool_capacity==7);
+    CHECK(h.surfaces_allocated<=7&&h.surfaces_in_use_peak<=5&&h.gpu_conversion_fallbacks==0);
     CHECK(h.readback_staging_slots==0&&h.readback_cpu_frames==0&&h.frame_allocations==0);
     // Only exact-size packets reach history: payload plus FFmpeg's padding.
     CHECK(confirmed.oversized==0&&h.packet_buffer_bytes==h.packet_payload_bytes+h.encoded*AV_INPUT_BUFFER_PADDING_SIZE);
@@ -1020,7 +1021,7 @@ void qsv_zero_copy_plan(){
     CHECK(readback.name=="h264_qsv"&&!readback.hardware_frames&&!readback.require_encoder_frames&&readback.right_size_packets);
     CHECK((readback.resource_options==std::vector<std::pair<std::string,std::string>>{{"async_depth","4"}}));
     CHECK(!foreign.health.hardware_input&&foreign.health.zero_copy_status=="not-used"&&foreign.health.pool_capacity==2&&foreign.health.surface_capacity==0);
-    CHECK(foreign.health.processing_path=="d3d11-video-processor-readback"&&foreign.health.max_in_flight==4&&foreign.oversized==0);
+    CHECK(foreign.health.processing_path=="d3d11-video-processor-readback"&&foreign.health.max_in_flight==5&&foreign.oversized==0);
     CHECK(foreign.health.readback_staging_slots==2&&foreign.health.readback_cpu_frames==2&&foreign.health.frame_allocations==4);
     // The real derivation on a non-Intel capture device fails during
     // initialisation, before any encoder opens, and readback QSV follows,
@@ -1032,7 +1033,7 @@ void qsv_zero_copy_plan(){
     }
 }
 // Bounded backpressure uses the QSV plan's budgets: pool 7 and in-flight cap
-// 4 at 60 fps, then stuck-encoder replacement by the next QSV zero-copy candidate.
+// 5 at 60 fps, then stuck-encoder replacement by the next QSV zero-copy candidate.
 void qsv_backpressure(){
     {
         auto probe=std::make_shared<PressureProbe>();probe->hold=true;
@@ -1061,7 +1062,7 @@ void qsv_backpressure(){
     RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true),std::move(dependencies));capture.start();
     CHECK(wait_health(capture,[](const auto& h){return h.retained_pressure_drops>=5;},3s));
     const auto pressured=capture.health();
-    if(pressured.restart_required||pressured.submitted!=4||pressured.max_in_flight!=4)throw std::runtime_error("QSV retained pressure: "+pressure_state(pressured));
+    if(pressured.restart_required||pressured.submitted!=5||pressured.max_in_flight!=5)throw std::runtime_error("QSV retained pressure: "+pressure_state(pressured));
     if(!wait_health(capture,[&](const auto&){return second.load()>=30;},6s))throw std::runtime_error("Stuck QSV encoder not replaced: "+pressure_state(capture.health()));
     CHECK(capture.stop());const auto health=capture.health();
     if(!health.error.empty()||health.encoder_stall_recoveries!=1||health.generation!=2||health.encoder_vendor!="intel"||
@@ -1081,7 +1082,7 @@ size_t decode_all(const CaptureGeneration& generation,const std::vector<Packet>&
 // frames and two staging textures. A held CPU frame is never overwritten, and
 // a full stage refuses rather than grows.
 void readback_stage_reuse(){
-    BufferRef device;CHECK(av_hwdevice_ctx_create(&device.p,AV_HWDEVICE_TYPE_D3D11VA,nullptr,nullptr,0)>=0);
+    BufferRef device;CHECK(create_test_ffmpeg_d3d11(&device.p)>=0);
     auto* d3d=static_cast<AVD3D11VADeviceContext*>(reinterpret_cast<AVHWDeviceContext*>(device.p->data)->hwctx)->device;
     for(const auto format:{AV_PIX_FMT_NV12,AV_PIX_FMT_P010}){
         const bool deep=format==AV_PIX_FMT_P010;
@@ -1383,7 +1384,7 @@ ULONG references(IUnknown* object){object->AddRef();return object->Release();}
 // and no reference kept to the capture API's buffer.
 void captured_frame_store(){
     Microsoft::WRL::ComPtr<ID3D11Device> device;
-    CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
+    CHECK(SUCCEEDED(create_test_d3d11_device(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
     const auto ten=capture_texture(device.Get(),256,144,10),twenty=capture_texture(device.Get(),256,144,20);
     const auto input_references=references(ten.Get());
     CapturedFrameStore store(device.Get(),3,80);
@@ -1452,7 +1453,7 @@ void captured_frame_store(){
 // exactly once on every path, and a copy is byte-identical to deliver()'s.
 void borrowed_frame_store(){
     Microsoft::WRL::ComPtr<ID3D11Device> device;
-    CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
+    CHECK(SUCCEEDED(create_test_d3d11_device(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,nullptr)));
     const auto ten=capture_texture(device.Get(),256,144,10),twenty=capture_texture(device.Get(),256,144,20);
     const auto input_references=references(ten.Get());
     int released=0;auto release=[&released]{return std::function<void()>([&released]{++released;});};
@@ -1530,7 +1531,7 @@ public:
     // of that many, skipping a composition when none is free as WGC does;
     // otherwise three buffers, each copied at once.
     PooledWgcSource(std::vector<Delivery> frames,std::function<int64_t()> clock,int capacity,int width=1280,int height=720,int pool=0){
-        CHECK(SUCCEEDED(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context_)));
+        CHECK(SUCCEEDED(create_test_d3d11_device(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,nullptr,&context_)));
         store_=std::make_unique<CapturedFrameStore>(device_.Get(),capacity,80.f);
         const int count=pool>0?pool:3;
         for(int i=0;i<count;++i){buffers_.push_back(capture_texture(device_.Get(),width,height,0));views_.emplace_back();
@@ -1786,7 +1787,7 @@ public:
         HWND window=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,type.lpszClassName,L"",WS_POPUP,0,0,48,48,nullptr,nullptr,type.hInstance,nullptr);
         if(!window)return;ShowWindow(window,SW_SHOWNOACTIVATE);
         Microsoft::WRL::ComPtr<ID3D11Device> device;Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
-        D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context);
+        create_test_d3d11_device(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context);
         Microsoft::WRL::ComPtr<IDXGIDevice> dxgi;Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;Microsoft::WRL::ComPtr<IDXGIFactory2> factory;
         device.As(&dxgi);dxgi->GetAdapter(&adapter);adapter->GetParent(IID_PPV_ARGS(&factory));
         DXGI_SWAP_CHAIN_DESC1 desc{};desc.Width=48;desc.Height=48;desc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;desc.SampleDesc.Count=1;
@@ -1841,9 +1842,45 @@ int wgc_bench(int width,int height,int fps,bool animate,int seconds){
         <<" peak="<<s.owned_textures_peak<<" pressureDrops="<<(s.owned_texture_pressure_drops-warm.source_details.owned_texture_pressure_drops)<<"\n";
     return 0;
 }
+// Models QSV's one-input startup delay plus async FIFO, including its 90 kHz
+// timestamp round trip. Real hardware is exercised separately by --qsv.
+void qsv_submission_ledger() {
+    for (const int fps : {30,60,90,120}) {
+        RecordingCaptureConfig config; config.width=128;config.height=72;config.fps=fps;
+        RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_qsv",true,false}};
+        const int depth=plan_recording_encoder(config,dependencies.candidates.front(),0,false)->encoder_slots;
+        dependencies.open_encoder=[depth](const VideoEncoderConfig& value,size_t) {
+            struct Pending { int64_t pts; bool key; };
+            auto pending=std::make_shared<std::deque<Pending>>();
+            auto flushing=std::make_shared<bool>(false);
+            CodecCalls calls;calls.open=[](AVCodecContext*,const AVCodec*,AVDictionary**){return 0;};
+            calls.send=[pending,flushing](AVCodecContext*,const AVFrame* frame){
+                if(frame)pending->push_back({frame->pts,frame->pict_type==AV_PICTURE_TYPE_I});else *flushing=true;
+                return 0;
+            };
+            calls.receive=[pending,flushing,depth](AVCodecContext*,AVPacket* packet){
+                if(pending->empty())return *flushing?AVERROR_EOF:AVERROR(EAGAIN);
+                if(!*flushing&&pending->size()<=size_t(depth))return AVERROR(EAGAIN);
+                const auto item=pending->front();pending->pop_front();
+                CHECK(av_new_packet(packet,1)==0);
+                packet->pts=packet->dts=av_rescale_q(av_rescale_q(item.pts,AVRational{1,1000000},AVRational{1,90000}),AVRational{1,90000},AVRational{1,1000000});
+                packet->flags=item.key?AV_PKT_FLAG_KEY:0;return 0;
+            };
+            return std::make_unique<VideoEncoder>(value,calls);
+        };
+        std::atomic<int> packets=0;RecordingCaptureCallbacks callbacks;
+        callbacks.packet=[&](auto,Packet,int64_t,bool){++packets;};
+        RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(fps),std::move(dependencies));
+        capture.start();CHECK(wait_health(capture,[&](const auto&){return packets>=30;},3s));
+        CHECK(capture.stop());const auto h=capture.health();
+        CHECK(h.error.empty()&&h.max_in_flight==depth+1&&h.surfaces_in_use_peak<=depth+1);
+        CHECK(h.retained_pressure_drops==0&&h.encoder_stall_recoveries==0);
+    }
+}
 int main(int argc,char**argv) {
     try{
     av_log_set_level(AV_LOG_ERROR);
+    if(argc>1&&std::string_view(argv[1])=="--qsv-ledger"){qsv_submission_ledger();return 0;}
     if(argc>1&&std::string_view(argv[1])=="--encoder-input"){encoder_input_diagnostics();return 0;}
 #ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
     if(argc>1&&std::string_view(argv[1])=="--diagnostic-readback"){diagnostic_readback_pipeline();return 0;}
@@ -1863,7 +1900,7 @@ int main(int argc,char**argv) {
     RecordingRecoveryTimeline recovery;recovery.observe(true,false,4000000);int64_t safe=0;CHECK(!recovery.safe_start(0,60000000,safe));
     recovery.observe(false,false,11000000);CHECK(!recovery.safe_start(0,60000000,safe));recovery.observe(false,false,12000000);CHECK(recovery.safe_start(0,60000000,safe));CHECK(safe==12000000);
     CHECK(!capture_transport_shortfall(true,true,90,54));
-    recording_encoder_plans();amf_recording_plans();qsv_recording_plans();
+    recording_encoder_plans();amf_recording_plans();qsv_recording_plans();qsv_submission_ledger();
     frame_selection_policy();fresh_frame_delivery();
     const bool gpu=argc>1&&std::string_view(argv[1])=="--gpu";
     for(int fps:{30,60,90,120})for(bool variable:{false,true}){

@@ -145,8 +145,9 @@ public:
     }
 };
 
-// FFmpeg qsvenc.c: packets are withheld until async_depth tasks are queued and
-// inputs stay locked until their task completes. Input must be AV_PIX_FMT_QSV
+// FFmpeg 8.1.2 qsvenc.c drains at async_depth queued tasks. Real H.264 QSV
+// needs one startup input before those tasks, so admission must allow N+1.
+// Inputs stay locked until their task completes. Input must be AV_PIX_FMT_QSV
 // frames; each packet buffer is BufferSizeInKB sized and never shrunk.
 class QsvBackend final : public EncoderBackend {
 public:
@@ -167,8 +168,8 @@ public:
         plan.min_encoder_slots = 1;
         plan.encoder_slots = depth;
         plan.max_encoder_slots = std::numeric_limits<int>::max();
-        plan.max_in_flight = depth + b + l;
-        plan.output_delay_frames = depth + b + l;
+        plan.max_in_flight = depth + b + l + 1;
+        plan.output_delay_frames = plan.max_in_flight;
         plan.frames_from_encoder_ctx = zero_copy;
         plan.fixed_pool = true;
         plan.options = {{"async_depth", text(depth)}};
@@ -178,7 +179,10 @@ public:
         }
         // Locked inputs plus one surface for MFX NumFrameSuggested headroom,
         // or the driver's own suggestion when it is known and larger.
-        finish(plan, request, policy, std::max(plan.max_in_flight + policy.qsv_suggested_slack, request.suggested_input_surfaces), depth);
+        // The existing suggested-surface slack already covers the pump input;
+        // do not add it twice or grow every default QSV pool.
+        finish(plan, request, policy, std::max({plan.max_in_flight,
+            depth + b + l + policy.qsv_suggested_slack, request.suggested_input_surfaces}), depth);
         return plan;
     }
 };

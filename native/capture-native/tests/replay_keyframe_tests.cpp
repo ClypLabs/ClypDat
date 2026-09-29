@@ -135,7 +135,10 @@ void encoder_check(const std::string& backend,bool gpu,bool explicit_requests,in
     constexpr int width=320,height=192;
     if(gpu) {
         AVBufferRef* d=nullptr;
-        CHECK(av_hwdevice_ctx_create(&d,AV_HWDEVICE_TYPE_D3D11VA,nullptr,nullptr,0)==0); device.reset(d);
+        AVDictionary* options=nullptr;
+        if(backend.ends_with("_nvenc"))av_dict_set(&options,"vendor_id","0x10de",0);
+        const int result=av_hwdevice_ctx_create(&d,AV_HWDEVICE_TYPE_D3D11VA,nullptr,options,0);
+        av_dict_free(&options);CHECK(result==0);device.reset(d);
         frames.reset(av_hwframe_ctx_alloc(device.get())); CHECK(frames);
         auto* pool=reinterpret_cast<AVHWFramesContext*>(frames->data);
         pool->format=AV_PIX_FMT_D3D11; pool->sw_format=AV_PIX_FMT_NV12;

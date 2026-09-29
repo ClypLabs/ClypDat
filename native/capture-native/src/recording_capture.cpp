@@ -678,7 +678,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     std::map<int64_t, std::pair<int64_t, bool>> submitted;
     std::map<int64_t, int64_t> submitted_at;
     std::map<int64_t, Frame> retained_surfaces;
-    size_t retained_limit = 0; // Frames the active encoder may own at once.
+    // Bounds pending output mappings, including empty CPU entries. Hardware
+    // entries additionally keep their pool surface alive until completion.
+    size_t retained_limit = 0;
     int64_t pressure_since = 0; // First backpressure drop since the last accepted frame.
     std::deque<double> submission_times, completion_times, capture_latencies, timestamp_to_acquire, selection_errors, output_judder;
     std::deque<double> source_leads, callback_takes, callback_copies, handoffs, selection_waits;
@@ -785,12 +787,31 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     }
     void emit(std::vector<Packet> packets) {
         for (auto& packet : packets) {
+            auto mapping = submitted.find(packet->pts);
+            if (mapping == submitted.end() && encoder_candidates[active_candidate].name == "h264_qsv") {
+                // QSV converts input PTS through its 90 kHz clock. Match that
+                // exact round trip, not an arbitrary nearest timestamp. The
+                // pending ledger remains bounded by the backend admission cap.
+                const auto round_trip = [&](int64_t value) {
+                    return av_rescale_q(av_rescale_q(value,generation->time_base,AVRational{1,90000}),
+                        AVRational{1,90000},generation->time_base);
+                };
+                auto next = submitted.lower_bound(packet->pts);
+                if (next != submitted.end() && round_trip(next->first) == packet->pts) mapping = next;
+                else if (next != submitted.begin()) {
+                    --next;
+                    if (round_trip(next->first) == packet->pts) mapping = next;
+                }
+                if (mapping != submitted.end()) {
+                    if (packet->dts != AV_NOPTS_VALUE) packet->dts += mapping->first - packet->pts;
+                    packet->pts = mapping->first;
+                }
+            }
+            if (mapping == submitted.end()) throw std::runtime_error("Encoder output has no source timestamp mapping");
             const auto pts=av_rescale_q(packet->pts,generation->time_base,AVRational{1,1000000});
             const bool safe=keyframes.packet(pts,(packet->flags&AV_PKT_FLAG_KEY)!=0);
             { std::lock_guard lock(mutex); status.keyframes=keyframes.health; }
             if(!safe) { if(callbacks.keyframe_failure)callbacks.keyframe_failure(); throw KeyframeCadenceError(); }
-            const auto mapping = submitted.find(packet->pts);
-            if (mapping == submitted.end()) throw std::runtime_error("Encoder output has no source timestamp mapping");
             const auto [acquired, fresh] = mapping->second;
             const auto completed_at = now();
             const auto issued = submitted_at.find(packet->pts);

@@ -1,3 +1,4 @@
+#include "gpu_test_device.h"
 // Burned overlays through the real capture pipeline: GPU composition on
 // zero-copy encoders compared pixel by pixel with the CPU reference, the CPU
 // paths, lifecycle (recovery, pool pressure, resize, pause, generation and
@@ -81,7 +82,7 @@ public:
     PatternSource(int width, int height, int fps, bool gpu) : width_(width), height_(height), fps_(fps), gpu_(gpu) {
         if (gpu) {
             ComPtr<ID3D11DeviceContext> context;
-            CHECK(SUCCEEDED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+            CHECK(SUCCEEDED(create_test_d3d11_device(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
                 D3D11_SDK_VERSION, &device_, nullptr, &context)));
             ComPtr<ID3D11Multithread> protection; CHECK(SUCCEEDED(context.As(&protection))); protection->SetMultithreadProtected(TRUE);
         }
