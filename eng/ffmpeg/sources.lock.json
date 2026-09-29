@@ -1,0 +1,117 @@
+[
+  {
+    "name": "ffmpeg",
+    "version": "8.1.2",
+    "revision": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+    "url": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/38b88335f99e76ed89ff3c93f877fdefce736c13",
+    "file": "ffmpeg.tar.gz",
+    "sha256": "2ae7e42343cfffb811d15cfe98b6d005f082595fcdf034d30a4ff90cfed9f9c6"
+  },
+  {
+    "name": "onevpl",
+    "version": "2.16.0",
+    "revision": "778a66d6c6537f08eabb91955dbbf1bce3812894",
+    "url": "https://codeload.github.com/intel/libvpl/zip/778a66d6c6537f08eabb91955dbbf1bce3812894",
+    "file": "onevpl.zip",
+    "sha256": "49746537f282a2087c7647fded7b692cdbb7f67a4731e8f3d6690c7257d7fb61"
+  },
+  {
+    "name": "nv-codec-headers",
+    "version": "13.0.19.0",
+    "revision": "n13.0.19.0",
+    "url": "https://codeload.github.com/FFmpeg/nv-codec-headers/tar.gz/refs/tags/n13.0.19.0",
+    "file": "nv-codec-headers.tar.gz",
+    "sha256": "86d15d1a7c0ac73a0eafdfc57bebfeba7da8264595bf531cf4d8db1c22940116"
+  },
+  {
+    "name": "amf",
+    "version": "1.4.36",
+    "revision": "16f7d73e0b45c473e903e46981ed0b91efc4c091",
+    "url": "https://codeload.github.com/GPUOpen-LibrariesAndSDKs/AMF/tar.gz/86b1b09ca5c0572ab710ee7b6b174f8c7aa00119",
+    "file": "amf.tar.gz",
+    "sha256": "cdd7e9d24118f93fff6dccb273c1d20977d747f7f3e46c662042eedcc8fec36b",
+    "tagObject": "86b1b09ca5c0572ab710ee7b6b174f8c7aa00119"
+  },
+  {
+    "name": "x264",
+    "version": "stable snapshot",
+    "revision": "0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee",
+    "url": "https://code.videolan.org/videolan/x264/-/archive/0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee/x264-0480cb05fa188d37ae87e8f4fd8f1aea3711f7ee.tar.gz",
+    "file": "x264.tar.gz",
+    "sha256": "d0967a1348c85dfde363bb52610403be898171493100561efa0dd05d5fd1ae50"
+  },
+  {
+    "name": "x265",
+    "version": "4.1",
+    "revision": "1d117bed4747758b51bd2c124d738527e30392cb",
+    "url": "https://bitbucket.org/multicoreware/x265_git/get/f21b135c3414ade4e22305d008bf07d23d0595fb.tar.gz",
+    "file": "x265.tar.gz",
+    "sha256": "7d23cdcdbd510728202c0dfbf7c51eda26a395de2096c504c2b10d6035711102",
+    "tagObject": "f21b135c3414ade4e22305d008bf07d23d0595fb"
+  },
+  {
+    "name": "aom",
+    "version": "3.13.1",
+    "revision": "d772e334cc724105040382a977ebb10dfd393293",
+    "git": "https://aomedia.googlesource.com/aom",
+    "url": "git-archive",
+    "file": "aom.tar.gz",
+    "sha256": "e0a42c539bab29593647e8900a1d138a2a7b05cf924c6af0bb41ec29aa4feeae"
+  },
+  {
+    "name": "zlib",
+    "version": "1.3.1",
+    "revision": "v1.3.1",
+    "url": "https://zlib.net/fossils/zlib-1.3.1.tar.gz",
+    "file": "zlib.tar.gz",
+    "sha256": "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23"
+  },
+  {
+    "name": "make",
+    "version": "4.4.1",
+    "revision": "4.4.1-3",
+    "url": "https://repo.msys2.org/msys/x86_64/make-4.4.1-3-x86_64.pkg.tar.zst",
+    "file": "make.pkg.tar.zst",
+    "sha256": "af0bdba17f06fe037f0194069adaa31a8fe45f1a11381501896aea1fae37bd5d"
+  },
+  {
+    "name": "pkgconf",
+    "version": "3.0.7",
+    "revision": "3.0.7-1",
+    "url": "https://repo.msys2.org/msys/x86_64/pkgconf-3.0.7-1-x86_64.pkg.tar.zst",
+    "file": "pkgconf.pkg.tar.zst",
+    "sha256": "5e051b9623f7e539515f8c42430bf4bd1e377a459e810faea4358f48c3115199"
+  },
+  {
+    "name": "cmake-compat",
+    "version": "3.31.8",
+    "revision": "v3.31.8",
+    "url": "https://github.com/Kitware/CMake/releases/download/v3.31.8/cmake-3.31.8-windows-x86_64.zip",
+    "file": "cmake-3.31.8-windows-x86_64.zip",
+    "sha256": "81aa9964dbabd71fe02e7ec50472fd3ad56138c49944515ece9001efbff8d719"
+  },
+  {
+    "name": "nasm-compat",
+    "version": "2.16.03",
+    "revision": "2.16.03",
+    "url": "https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip",
+    "file": "nasm-2.16.03-win64.zip",
+    "sha256": "3ee4782247bcb874378d02f7eab4e294a84d3d15f3f6ee2de2f47a46aa7226e6"
+  },
+  {
+    "name": "dav1d",
+    "version": "1.5.4",
+    "revision": "54706fc6bc0cdecab7e9593974a4039cc038fca7",
+    "url": "https://code.videolan.org/videolan/dav1d/-/archive/54706fc6bc0cdecab7e9593974a4039cc038fca7/dav1d-54706fc6bc0cdecab7e9593974a4039cc038fca7.tar.gz",
+    "file": "dav1d.tar.gz",
+    "sha256": "9edb11a2108b375cc58370354e705feebc93430bb780130363815c1e1ac0c250"
+  },
+  {
+    "name": "meson",
+    "version": "1.9.1",
+    "revision": "1.9.1",
+    "url": "https://files.pythonhosted.org/packages/9c/07/b48592d325cb86682829f05216e4efb2dc881762b8f1bafb48b57442307a/meson-1.9.1-py3-none-any.whl",
+    "file": "meson-1.9.1-py3-none-any.whl",
+    "sha256": "f824ab770c041a202f532f69e114c971918ed2daff7ea56583d80642564598d0"
+  }
+]

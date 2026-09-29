@@ -1,0 +1,16 @@
+--- a/amf/public/include/components/DisplayCapture.h
++++ b/amf/public/include/components/DisplayCapture.h
+@@ -40,11 +40,15 @@
+ 
+ #include "Component.h"
+ 
++#ifdef __cplusplus
+ extern "C"
+ {
+     // To create capture component with Desktop Duplication API use this function
+     AMF_RESULT AMF_CDECL_CALL AMFCreateComponentDisplayCapture(amf::AMFContext* pContext, void* reserved, amf::AMFComponent** ppComponent);
+ }
++#else
++AMF_RESULT AMF_CDECL_CALL AMFCreateComponentDisplayCapture(AMFContext* pContext, void* reserved, AMFComponent** ppComponent);
++#endif
+ 

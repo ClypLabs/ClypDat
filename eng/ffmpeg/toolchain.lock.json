@@ -1,0 +1,56 @@
+{
+  "VCToolsVersion": "14.51.36231",
+  "WindowsSDKVersion": "10.0.26100.0\\",
+  "files": [
+    {
+      "name": "cl.exe",
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\cl.exe",
+      "sha256": "e6d57100c82ae0310c18b16abfe52bc0df8fbb272ca6c5fb287d485807cfce91"
+    },
+    {
+      "name": "link.exe",
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\link.exe",
+      "sha256": "3ef8fcf80d409fab22ddd89ee19249f31a26ad9914d3e3e48573c30998fa24de"
+    },
+    {
+      "name": "lib.exe",
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\lib.exe",
+      "sha256": "c3a50e04fdf91886f63946b99c11aed024596789e13003c30b80e30b92d9f24e"
+    },
+    {
+      "name": "rc.exe",
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe",
+      "sha256": "65db0d7b4f10ba0f55973fd9356543a556da9ec1c777a0c05f05a0329c8a100a"
+    },
+    {
+      "name": "cmake.exe",
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe",
+      "sha256": "87fafbe6507d4b23c38ccaf72a1859219d070acb57ef0160332df10945d2dfac"
+    },
+    {
+      "name": "ninja.exe",
+      "path": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja\\ninja.exe",
+      "sha256": "9546466f0feca6d62d7d4ea9b7fbc381f8e302cb7f02f4ce327a39d8577bb293"
+    },
+    {
+      "name": "git.exe",
+      "path": "C:\\Program Files\\Git\\cmd\\git.exe",
+      "sha256": "7b7971dd13f0c3a284e538601f2f9770b3a87dfaccb5fb52d68141c67ed22364"
+    },
+    {
+      "name": "bash.exe",
+      "path": "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+      "sha256": "acf4ecb52e601f7b4a37db51b07650b5d0315eafd010590e98079fa026da4b7b"
+    },
+    {
+      "name": "7z.exe",
+      "path": "C:\\Program Files\\7-Zip\\7z.exe",
+      "sha256": "83967f1b02b43c4efeda302795722c809e0e81b8307de73558d10484d5676a7d"
+    },
+    {
+      "name": "python.exe",
+      "path": "sys.executable (Python 3.13)",
+      "sha256": "85b71d8c6ec1905935f74be0c9869aae198d00e98f39df699ec66f9c5a84cecd"
+    }
+  ]
+}

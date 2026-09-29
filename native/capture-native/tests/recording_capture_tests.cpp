@@ -658,12 +658,25 @@ void stuck_encoder_without_fallback(){
     capture.stop();
 }
 
-// AMF and QSV cannot open on this NVIDIA machine. An NVENC (or libx264)
-// context stands in for the encoder while RecordingCapture runs the real AMF
+// Plan-only tests use an NVENC (or libx264) context as the encoder stand-in
+// while RecordingCapture runs the real AMF
 // or QSV plan: options, flags, frame-context ownership, pool and in-flight
 // limits, packet right-sizing and backpressure.
 std::unique_ptr<VideoEncoder> stand_in_encoder(VideoEncoderConfig value,CodecCalls calls={}){
     const bool hardware=value.hardware_frames!=nullptr;
+    if(value.name=="h264_qsv"&&!hardware){
+        // The QSV readback ledger matches its 90 kHz clock, even when a
+        // software encoder supplies the test's packets.
+        calls.receive=[receive=calls.receive](AVCodecContext* context,AVPacket* packet){
+            const int result=receive(context,packet);
+            if(result>=0){
+                const auto round_trip=[&](int64_t value){return value==AV_NOPTS_VALUE?value:
+                    av_rescale_q(av_rescale_q(value,context->time_base,AVRational{1,90000}),AVRational{1,90000},context->time_base);};
+                packet->pts=round_trip(packet->pts);packet->dts=round_trip(packet->dts);
+            }
+            return result;
+        };
+    }
     value.name=hardware?"h264_nvenc":"libx264";value.resource_options.clear();value.codec_flags=0;
     return std::make_unique<VideoEncoder>(value,std::move(calls));
 }
