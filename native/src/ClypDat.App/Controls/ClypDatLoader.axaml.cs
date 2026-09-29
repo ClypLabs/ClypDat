@@ -54,19 +54,24 @@ public sealed partial class ClypDatLoader : UserControl
         if (_animationsStarted || !_isAttached || Bounds.Width <= 0 || Bounds.Height <= 0)
             return;
 
-        _animationsStarted = true;
-        StartRotation(Ring, TimeSpan.FromSeconds(1.6), 0, TwoPi);
-        StartRotation(MarkOuter, TimeSpan.FromSeconds(6), 0, TwoPi);
-        StartRotation(MarkInner, TimeSpan.FromSeconds(4.5), TwoPi, 0);
-        StartGlow();
-    }
-
-    private void StartGlow()
-    {
-        var visual = ElementComposition.GetElementVisual(Glow);
-        if (visual is null)
+        // A reused loader retains its bounds, but Avalonia attaches the parent
+        // before its descendants. Do not mark startup complete while their
+        // compositor visuals are still missing; LayoutUpdated will retry.
+        if (ElementComposition.GetElementVisual(Ring) is not { } ring ||
+            ElementComposition.GetElementVisual(MarkOuter) is not { } outer ||
+            ElementComposition.GetElementVisual(MarkInner) is not { } inner ||
+            ElementComposition.GetElementVisual(Glow) is not { } glow)
             return;
 
+        StartRotation(Ring, ring, TimeSpan.FromSeconds(1.6), 0, TwoPi);
+        StartRotation(MarkOuter, outer, TimeSpan.FromSeconds(6), 0, TwoPi);
+        StartRotation(MarkInner, inner, TimeSpan.FromSeconds(4.5), TwoPi, 0);
+        StartGlow(glow);
+        _animationsStarted = true;
+    }
+
+    private void StartGlow(CompositionVisual visual)
+    {
         visual.CenterPoint = CentreOf(Glow);
         visual.Opacity = 0.18f;
         visual.Scale = new Vector3D(0.8, 0.8, 1);
@@ -90,12 +95,8 @@ public sealed partial class ClypDatLoader : UserControl
         visual.StartAnimation(scale.Target, scale);
     }
 
-    private static void StartRotation(Control control, TimeSpan duration, float from, float to)
+    private static void StartRotation(Control control, CompositionVisual visual, TimeSpan duration, float from, float to)
     {
-        var visual = ElementComposition.GetElementVisual(control);
-        if (visual is null)
-            return;
-
         visual.CenterPoint = CentreOf(control);
         visual.RotationAngle = from;
 
