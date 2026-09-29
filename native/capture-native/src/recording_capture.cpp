@@ -1,4 +1,5 @@
 #include "recording_capture.h"
+#include "qsv_timestamps.h"
 #include "encoder_input_diagnostics.h"
 #include "readback_stage.h"
 #include "detector_stage.h"
@@ -788,7 +789,9 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     void emit(std::vector<Packet> packets) {
         for (auto& packet : packets) {
             auto mapping = submitted.find(packet->pts);
-            if (mapping == submitted.end() && encoder_candidates[active_candidate].name == "h264_qsv") {
+            if (encoder_candidates[active_candidate].name == "h264_qsv" && !encoder_candidates[active_candidate].d3d11) {
+                mapping = detail::reconcile_qsv_readback_timestamp(submitted, *packet, generation->time_base);
+            } else if (mapping == submitted.end() && encoder_candidates[active_candidate].name == "h264_qsv") {
                 // QSV converts input PTS through its 90 kHz clock. Match that
                 // exact round trip, not an arbitrary nearest timestamp. The
                 // pending ledger remains bounded by the backend admission cap.
@@ -836,7 +839,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         const bool old_d3d11 = encoder && encoder_candidates[active_candidate].d3d11;
         const uint32_t adapter_vendor = dependencies.adapter_vendor ? *dependencies.adapter_vendor : d3d11_adapter_vendor(source->d3d_device());
 #ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
-        if (diagnostic_encoder_input && adapter_vendor != kAdapterVendorAmd)
+        if (diagnostic_encoder_input && encoder_candidates.front().name.ends_with("_amf") && adapter_vendor != kAdapterVendorAmd)
             throw std::runtime_error("Diagnostic encoder input amf-system-memory requires an AMD capture adapter");
 #endif
         const bool overlay_stage = callbacks.compose_nv12 && (!callbacks.overlay_enabled || callbacks.overlay_enabled());
@@ -863,6 +866,12 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                     ec.require_encoder_frames = plan->frames_from_encoder_ctx;
                     ec.right_size_packets = plan->right_size_packets;
                 }
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+                // Pin both QSV modes explicitly; false normally leaves FFmpeg's
+                // default alone. Diagnostic selection must never mean automatic.
+                if (diagnostic_encoder_input && candidate.name == "h264_qsv")
+                    ec.resource_options.emplace_back("low_power", candidate.low_power ? "1" : "0");
+#endif
                 if (candidate.d3d11) {
                     // A recovering encoder may still own surfaces of the current pool.
                     if (gpu && !recovering && (gpu->capacity() != capacity || gpu->qsv() != qsv_frames)) gpu.reset();
@@ -917,10 +926,16 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
 #ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
                 if (diagnostic_encoder_input && !diagnostic_encoder_input_logged) {
                     if (callbacks.encoder_input_diagnostic) callbacks.encoder_input_diagnostic(
-                        std::string("Diagnostic encoder input selector enabled: requested=amf-system-memory codec=") +
+                        std::string("Diagnostic encoder input selector enabled: requested=") +
+                        (candidate.name == "h264_qsv" ? "qsv-system-memory" : "amf-system-memory") + " codec=" +
                         (config.av1 ? "AV1" : "H.264") + " candidate=" + candidate.name +
                         " encoder=" + encoder->context().codec->name +
-                        " hardwareInput=" + (encoder->context().hw_frames_ctx ? "true" : "false"));
+                        " hardwareInput=" + (encoder->context().hw_frames_ctx ? "true" : "false") +
+                        " low_power=" + (candidate.low_power ? "1" : "0") +
+                        " captureAdapterVendor=" + std::to_string(adapter_vendor) +
+                        " processingPath=" + status.processing_path +
+                        " stagingSlots=" + std::to_string(status.readback_staging_slots) +
+                        " cpuFrames=" + std::to_string(status.readback_cpu_frames));
                     diagnostic_encoder_input_logged = true;
                 }
 #endif

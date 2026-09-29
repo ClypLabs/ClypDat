@@ -1,5 +1,6 @@
 #include "gpu_test_device.h"
 #include "recording_capture.h"
+#include "qsv_timestamps.h"
 #include "encoder_input_diagnostics.h"
 #include "readback_stage.h"
 #include "captured_frames.h"
@@ -669,14 +670,15 @@ std::unique_ptr<VideoEncoder> stand_in_encoder(VideoEncoderConfig value,CodecCal
 
 class EncoderInputEnvironment {
     std::string previous_;
+    const char* key_;
 public:
     static constexpr const char* key = "CLYPDAT_DIAGNOSTIC_ENCODER_INPUT";
-    EncoderInputEnvironment() {
-        char* value=nullptr;size_t size=0;CHECK(_dupenv_s(&value,&size,key)==0);
+    explicit EncoderInputEnvironment(const char* name=key) : key_(name) {
+        char* value=nullptr;size_t size=0;CHECK(_dupenv_s(&value,&size,key_)==0);
         if(value){previous_=value;std::free(value);}
     }
-    ~EncoderInputEnvironment(){_putenv_s(key,previous_.c_str());}
-    void set(const char* value){CHECK(_putenv_s(key,value)==0);}
+    ~EncoderInputEnvironment(){_putenv_s(key_,previous_.c_str());}
+    void set(const char* value){CHECK(_putenv_s(key_,value)==0);}
 };
 template<class Action> void encoder_input_error(Action action,const char* expected){
     try{action();}catch(const std::exception& error){CHECK(std::string(error.what()).find(expected)!=std::string::npos);return;}
@@ -684,6 +686,7 @@ template<class Action> void encoder_input_error(Action action,const char* expect
 }
 void encoder_input_diagnostics(){
     EncoderInputEnvironment environment;
+    EncoderInputEnvironment power("CLYPDAT_DIAGNOSTIC_QSV_LOW_POWER");
     // Keep the explicit, existing full ordering assertions in both build modes.
     amf_recording_plans();
     RecordingCaptureConfig config;config.width=256;config.height=144;
@@ -725,6 +728,38 @@ void encoder_input_diagnostics(){
         }
 #endif
     }
+#ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
+    config.av1=false;
+    for(bool low_power:{false,true})for(const auto adapter:{kAdapterVendorAmd,kAdapterVendorNvidia,kAdapterVendorIntel,0u}){
+        environment.set("qsv-system-memory");power.set(low_power?"1":"0");
+        auto selected=recording_encoder_candidates(false,false);
+        CHECK(detail::select_diagnostic_encoder_input(selected,config));
+        CHECK(selected.size()==1&&selected[0].name=="h264_qsv"&&!selected[0].d3d11&&selected[0].low_power==low_power);
+        const auto plan=plan_recording_encoder(config,selected[0],adapter,false);CHECK(plan);
+        CHECK(plan->input==EncoderInput::SystemFrames&&!plan->zero_copy&&plan->needs_cpu_staging);
+        std::vector<VideoEncoderConfig> opened;
+        RecordingCaptureDependencies dependencies;dependencies.adapter_vendor=adapter;
+        dependencies.open_encoder=[&](const VideoEncoderConfig& value,size_t index)->std::unique_ptr<VideoEncoder>{
+            CHECK(index==0);opened.push_back(value);throw std::runtime_error("selected QSV encoder deliberately failed");};
+        RecordingCapture capture(config,{},std::make_unique<GeneratedSource>(60),dependencies);
+        environment.set("changed-after-construction");power.set("changed-after-construction");
+        encoder_input_error([&]{capture.start();},"selected QSV encoder deliberately failed");CHECK(capture.stop());
+        CHECK(opened.size()==1&&opened[0].name=="h264_qsv"&&!opened[0].hardware_frames&&opened[0].low_power==low_power);
+        auto options=plan->options;options.emplace_back("low_power",low_power?"1":"0");
+        CHECK(opened[0].resource_options==options);
+    }
+    environment.set("qsv-system-memory");
+    for(const char* value:{"","auto","2","-1"}){
+        power.set(value);
+        encoder_input_error([&]{RecordingCapture capture(config,{},std::make_unique<GeneratedSource>(60));},
+            "requires CLYPDAT_DIAGNOSTIC_QSV_LOW_POWER=0 or 1");
+    }
+    power.set("1");config.av1=true;
+    encoder_input_error([&]{RecordingCapture capture(config,{},std::make_unique<GeneratedSource>(60));},"requires H.264");
+    config.av1=false;
+    std::vector<RecordingEncoderCandidate> missing={{"h264_qsv",true,true},{"libx264"}};
+    encoder_input_error([&]{detail::select_diagnostic_encoder_input(missing,config);},"candidate unavailable");
+#endif
     // Injected candidates bypass parsing and the AMD guard, even with a typo.
     environment.set("typo");
     RecordingCaptureDependencies injected;injected.candidates={{"libx264"}};injected.adapter_vendor=kAdapterVendorNvidia;
@@ -734,7 +769,8 @@ void encoder_input_diagnostics(){
     RecordingCapture injected_capture(config,{},std::make_unique<GeneratedSource>(60),injected);
     encoder_input_error([&]{injected_capture.start();},"injected candidate preserved");CHECK(opens==1);CHECK(injected_capture.stop());
 
-    for(const char* value:{"amf-system-memory","typo"}){
+    power.set("invalid-and-ignored-without-the-gate");
+    for(const char* value:{"amf-system-memory","qsv-system-memory","typo"}){
         environment.set(value);config.cpu_encoder=true;
 #ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
         std::vector<std::string> messages;RecordingCaptureCallbacks callbacks;
@@ -750,7 +786,7 @@ void encoder_input_diagnostics(){
 #endif
     }
 #ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS
-    std::cout<<"Encoder input diagnostics ON: ordering, exact codec selection, fail-closed errors, AMD guard, read-once and injected-candidate bypass passed\n";
+    std::cout<<"Encoder input diagnostics ON: ordering, exact AMF/QSV selection, explicit QSV low-power modes, fail-closed errors, AMD guard, cross-adapter QSV, read-once and injected-candidate bypass passed\n";
 #else
     std::cout<<"Encoder input diagnostics OFF: production ordering and environment inertness passed\n";
 #endif
@@ -1845,6 +1881,29 @@ int wgc_bench(int width,int height,int fps,bool animate,int seconds){
 // Models QSV's one-input startup delay plus async FIFO, including its 90 kHz
 // timestamp round trip. Real hardware is exercised separately by --qsv.
 void qsv_submission_ledger() {
+    // Captured from real WGC/VFR: adjacent microsecond inputs collapse onto
+    // one 90 kHz timestamp. The old nearest/exact lookup reversed these.
+    for(const auto inputs : {std::vector<int64_t>{5008814664,5008814665},
+            std::vector<int64_t>{5024765576,5024765577},
+            std::vector<int64_t>{5008814664,5008814665,5008814667}}) {
+        std::map<int64_t,int> pending;
+        for(size_t i=0;i<inputs.size();++i)pending.emplace(inputs[i],int(i));
+        const auto returned=av_rescale_q(av_rescale_q(inputs[0],AVRational{1,1000000},AVRational{1,90000}),AVRational{1,90000},AVRational{1,1000000});
+        for(size_t i=0;i<inputs.size();++i){
+            AVPacket packet{};packet.pts=packet.dts=returned;
+            const auto mapping=detail::reconcile_qsv_readback_timestamp(pending,packet,{1,1000000});
+            CHECK(mapping!=pending.end()&&mapping->first==inputs[i]&&mapping->second==int(i));
+            CHECK(packet.pts==inputs[i]&&packet.dts==inputs[i]);pending.erase(mapping);
+        }
+        CHECK(pending.empty());
+    }
+    // Unmatched output must fail closed; missing DTS stays missing.
+    std::map<int64_t,int> pending{{174823,1}};AVPacket packet{};packet.pts=333333;packet.dts=AV_NOPTS_VALUE;
+    CHECK(detail::reconcile_qsv_readback_timestamp(pending,packet,{1,1000000})==pending.end());
+    CHECK(packet.pts==333333&&packet.dts==AV_NOPTS_VALUE&&pending.size()==1);
+    packet.pts=174822;
+    CHECK(detail::reconcile_qsv_readback_timestamp(pending,packet,{1,1000000})==pending.begin());
+    CHECK(packet.pts==174823&&packet.dts==AV_NOPTS_VALUE);
     for (const int fps : {30,60,90,120}) {
         RecordingCaptureConfig config; config.width=128;config.height=72;config.fps=fps;
         RecordingCaptureDependencies dependencies;dependencies.candidates={{"h264_qsv",true,false}};
