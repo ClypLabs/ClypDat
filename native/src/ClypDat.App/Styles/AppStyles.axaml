@@ -1696,6 +1696,13 @@
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
     <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
+  <Style Selector="ComboBox.recordingCodecPicker ComboBoxItem" x:DataType="vm:ReplayVideoCodecOption">
+    <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+  </Style>
+  <Style Selector="ComboBox.recordingCodecPicker ComboBoxItem:disabled">
+    <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
+    <Setter Property="Opacity" Value="0.5" />
+  </Style>
   <Style Selector="ListBox.pillGroup">
     <Setter Property="Theme" Value="{StaticResource SlidingSelectionListBox}" />
     <Setter Property="Background" Value="Transparent" />

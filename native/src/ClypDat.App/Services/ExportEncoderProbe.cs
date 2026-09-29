@@ -75,12 +75,12 @@ public static class ExportEncoderProbe
         {
             if (CanEncode($"av1_{family}"))
             {
-                AppLog.Info($"Replay: using {family} hardware AV1 encoder when Auto is selected.");
+                AppLog.Info($"Export: using {family} hardware AV1 encoder.");
                 return family;
             }
         }
 
-        AppLog.Info("Replay: no hardware AV1 encoder available; Auto will use H.264.");
+        AppLog.Info("Export: no hardware AV1 encoder available.");
         return null;
     }
 
@@ -124,8 +124,9 @@ public static class ExportEncoderProbe
             // Draining both pipes matters even though the output is discarded: a
             // process that fills a redirected pipe blocks forever instead of
             // exiting, which would hang the probe rather than fail it.
-            process.StandardOutput.ReadToEnd();
-            process.StandardError.ReadToEnd();
+            // Async reads also let WaitForExit enforce its timeout on a stall.
+            var output = process.StandardOutput.ReadToEndAsync();
+            var errorOutput = process.StandardError.ReadToEndAsync();
 
             if (!process.WaitForExit(15000))
             {
@@ -133,7 +134,7 @@ public static class ExportEncoderProbe
                 return false;
             }
 
-            return process.ExitCode == 0;
+            return Task.WhenAll(output, errorOutput).Wait(1000) && process.ExitCode == 0;
         }
         catch (Exception error)
         {

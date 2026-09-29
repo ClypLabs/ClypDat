@@ -15,11 +15,13 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     private readonly Action _save;
     private readonly Action<CustomGameSettingChange>? _settingChanged;
     private readonly string? _executablePath;
+    private readonly Func<bool>? _isAv1Available;
+    private bool _av1ProbeCompleted;
     private bool _isSelected;
     private bool _qualityWarningAcknowledged;
 
     public CustomGameTabViewModel(string detectionKey, CustomGameProfile profile, AppSettings settings, Action save,
-        Action<CustomGameSettingChange>? settingChanged = null, string? executablePath = null)
+        Action<CustomGameSettingChange>? settingChanged = null, string? executablePath = null, Func<bool>? isAv1Available = null)
     {
         DetectionKey = detectionKey;
         Profile = profile;
@@ -27,6 +29,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         _save = save;
         _settingChanged = settingChanged;
         _executablePath = executablePath;
+        _isAv1Available = isAv1Available;
         Icon = GamePortraitService.TryLoadStandaloneIcon(_executablePath) ?? GameIconService.TryLoad(profile.DisplayName);
         // Nothing about the portrait touches the UI thread. This constructor
         // runs once per tab while the settings page is being built, and a
@@ -207,13 +210,44 @@ public sealed class CustomGameTabViewModel : ViewModelBase
     public string ReplayVideoCodec
     {
         get => Profile.ReplayVideoCodec;
-        set => Set(v => Profile.ReplayVideoCodec = v, Profile.ReplayVideoCodec, value);
+        set
+        {
+            if (string.Equals(value, "AV1", StringComparison.OrdinalIgnoreCase) &&
+                (IsReplayEncoderCpu || _isAv1Available?.Invoke() != true))
+            {
+                OnPropertyChanged();
+                return;
+            }
+            Set(v => Profile.ReplayVideoCodec = v, Profile.ReplayVideoCodec, value);
+        }
     }
 
     public string ReplayEncoderMode
     {
         get => Profile.ReplayEncoderMode;
-        set => Set(v => Profile.ReplayEncoderMode = v, Profile.ReplayEncoderMode, value);
+        set
+        {
+            if (string.Equals(Profile.ReplayEncoderMode, value, StringComparison.OrdinalIgnoreCase)) return;
+            Profile.ReplayEncoderMode = value;
+            if (IsReplayEncoderCpu) Profile.ReplayVideoCodec = "H.264";
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsReplayEncoderCpu));
+            OnPropertyChanged(nameof(ReplayVideoCodec));
+            _save();
+            _settingChanged?.Invoke(CustomGameSettingChange.Quality);
+        }
+    }
+
+    public bool IsReplayEncoderCpu => string.Equals(Profile.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase);
+
+    internal void RefreshReplayCodecAvailability(bool probeCompleted)
+    {
+        _av1ProbeCompleted = probeCompleted;
+        if ((IsReplayEncoderCpu || (probeCompleted && _isAv1Available?.Invoke() != true)) &&
+            string.Equals(Profile.ReplayVideoCodec, "AV1", StringComparison.OrdinalIgnoreCase))
+            ReplayVideoCodec = "H.264";
+        OnPropertyChanged(nameof(ReplayVideoCodec));
+        OnPropertyChanged(nameof(IsReplayEncoderCpu));
     }
 
     // Combo-bound, so int rather than the double a Slider would need. The
@@ -517,6 +551,7 @@ public sealed class CustomGameTabViewModel : ViewModelBase
 
     private void RaiseAllValues()
     {
+        RefreshReplayCodecAvailability(_av1ProbeCompleted);
         OnPropertyChanged(nameof(IsManualCapture));
         OnPropertyChanged(nameof(IsFullSessionCapture));
         OnPropertyChanged(nameof(IsRecordingOff));

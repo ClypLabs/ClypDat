@@ -159,7 +159,7 @@
                   </StackPanel>
                   <StackPanel Spacing="5">
                     <TextBlock Classes="settingsFieldLabel" Text="Codec" />
-                    <ComboBox Classes="settingsInput" Width="170" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
+                    <ComboBox Classes="settingsInput recordingCodecPicker" Width="170" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
                       <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                     </ComboBox>
                   </StackPanel>

@@ -251,15 +251,18 @@
                 <StackPanel Classes="settingsRowText">
                   <TextBlock Classes="settingsRowTitle" Text="Encoder" />
                   <TextBlock Classes="settingsRowDesc" Text="Codec, encoder and frame timing for this game only." />
+                  <TextBlock Classes="settingsRowDescSm" IsVisible="{Binding !IsReplayEncoderCpu}"
+                             Text="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayAv1AvailabilityStatus}" />
+                  <TextBlock Classes="settingsRowDescSm" IsVisible="{Binding IsReplayEncoderCpu}" Text="CPU mode uses software H.264." />
                 </StackPanel>
                 <WrapPanel HorizontalAlignment="Left" ItemSpacing="12" LineSpacing="10">
                   <StackPanel Spacing="5">
                     <TextBlock Classes="settingsFieldLabel" Text="Codec" />
-                    <ComboBox Classes="settingsInput" Width="170"
+                    <ComboBox Classes="settingsInput recordingCodecPicker" Width="170"
                               ItemsSource="{Binding $parent[UserControl].((vm:MainWindowViewModel)DataContext).ReplayVideoCodecs}"
                               DisplayMemberBinding="{Binding Label}"
                               SelectedValueBinding="{Binding Value}"
-                              SelectedValue="{Binding ReplayVideoCodec}" />
+                              SelectedValue="{Binding ReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}" />
                   </StackPanel>
                   <StackPanel Spacing="5">
                     <TextBlock Classes="settingsFieldLabel" Text="Video encoder" />

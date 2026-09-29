@@ -184,6 +184,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _selectedVideoName = "No video selected";
     private string _selectedVideoPath = string.Empty;
     private string _selectedVideoCodec = string.Empty;
+    private bool _replayAv1ProbeCompleted;
+    private string? _replayAv1Family;
     private string _selectedThumbnailPath = string.Empty;
     private Avalonia.Media.Imaging.Bitmap? _selectedThumbnail;
     private bool _isEditorVideoLoading;
@@ -322,7 +324,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         ReplayVideoCodecs = new ObservableCollection<ReplayVideoCodecOption>
         {
             new("H.264", "H.264", "Widest playback compatibility. Default codec."),
-            new("AV1", "AV1", "Uses hardware AV1 when available, then falls back to H.264.")
+            new("AV1", "AV1", "Requires a supported hardware AV1 encoder.", isEnabled: false)
         };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
@@ -405,8 +407,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedReplayCaptureSource = string.Equals(Settings.ReplayCaptureSource, "Desktop", StringComparison.OrdinalIgnoreCase)
             ? "Desktop Capture"
             : "Game Capture";
-        _ = Task.Run(() => ExportEncoderProbe.Av1Family).ContinueWith(_ =>
-            Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(ReplayVideoCodecStatus))),
+        _ = Task.Run(() => ExportEncoderProbe.Av1Family).ContinueWith(result =>
+            Dispatcher.UIThread.Post(() => ApplyReplayAv1ProbeResult(result.IsCompletedSuccessfully ? result.Result : null)),
             TaskScheduler.Default);
         _ = Task.Run(() => ExportEncoderProbe.Family).ContinueWith(_ =>
             Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(CpuEncoderHardwareWarningVisible))),
@@ -838,7 +840,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public sealed record ReplayFrameTimingOption(string Label, string Value, string Description);
     public ObservableCollection<ReplayFrameTimingOption> ReplayFrameTimingModes { get; }
     public ObservableCollection<string> ReplayBitrateOptions { get; }
-    public sealed record ReplayVideoCodecOption(string Label, string Value, string Description);
     public ObservableCollection<ReplayVideoCodecOption> ReplayVideoCodecs { get; }
     public ObservableCollection<string> ReplayCaptureSources { get; }
     public ObservableCollection<DesktopMonitorOption> DesktopMonitors { get; }
@@ -2166,11 +2167,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                     OnPropertyChanged(nameof(SelectedReplayBitrateOption));
                 }
                 OnPropertyChanged(nameof(SelectedReplayVideoCodec));
-                OnPropertyChanged(nameof(ReplayVideoCodecStatus));
             }
 
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsReplayEncoderCpu));
+            OnPropertyChanged(nameof(ReplayVideoCodecStatus));
             OnPropertyChanged(nameof(CpuEncoderHardwareWarningVisible));
             NotifyReplayBitrateRecommendation();
             SaveSettings();
@@ -2275,7 +2276,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (value is null || string.Equals(Settings.ReplayVideoCodec, value.Value, StringComparison.OrdinalIgnoreCase)) return;
-            if (IsReplayEncoderCpu && string.Equals(value.Value, "AV1", StringComparison.OrdinalIgnoreCase)) return;
+            if (!value.IsEnabled || (string.Equals(value.Value, "AV1", StringComparison.OrdinalIgnoreCase) &&
+                                    (IsReplayEncoderCpu || !IsReplayAv1Available)))
+            {
+                OnPropertyChanged();
+                return;
+            }
             var followsRecommendation = _replayBitrateFollowsRecommendation;
             Settings.ReplayVideoCodec = value.Value;
             if (followsRecommendation)
@@ -2345,19 +2351,50 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return false;
     }
 
+    public bool IsReplayAv1Available => _replayAv1ProbeCompleted && _replayAv1Family is "nvenc" or "amf";
+
+    public string ReplayAv1AvailabilityStatus => !_replayAv1ProbeCompleted
+        ? "Checking hardware AV1 support…"
+        : IsReplayAv1Available
+            ? "Hardware AV1 available."
+            : "AV1 recording unavailable on this system. Use H.264.";
+
+    internal void ApplyReplayAv1ProbeResult(string? family)
+    {
+        _replayAv1Family = family;
+        _replayAv1ProbeCompleted = true;
+        ReplayVideoCodecs.First(codec => codec.Value == "AV1").IsEnabled = IsReplayAv1Available;
+        if ((!IsReplayAv1Available || IsReplayEncoderCpu) && string.Equals(Settings.ReplayVideoCodec, "AV1", StringComparison.OrdinalIgnoreCase))
+            SelectedReplayVideoCodec = ReplayVideoCodecs.First(codec => codec.Value == "H.264");
+
+        var profilesChanged = false;
+        foreach (var profile in Settings.CustomGameSettings.Values)
+        {
+            if ((!IsReplayAv1Available || string.Equals(profile.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase)) &&
+                string.Equals(profile.ReplayVideoCodec, "AV1", StringComparison.OrdinalIgnoreCase))
+            {
+                profile.ReplayVideoCodec = "H.264";
+                profilesChanged = true;
+            }
+        }
+        foreach (var tab in CustomGameTabs) tab.RefreshReplayCodecAvailability(_replayAv1ProbeCompleted);
+        if (profilesChanged) SaveSettings();
+        OnPropertyChanged(nameof(IsReplayAv1Available));
+        OnPropertyChanged(nameof(ReplayAv1AvailabilityStatus));
+        OnPropertyChanged(nameof(ReplayVideoCodecStatus));
+    }
+
     public string ReplayVideoCodecStatus
     {
         get
         {
             if (IsReplayEncoderCpu)
                 return "CPU mode uses software H.264.";
+            if (!IsReplayAv1Available) return ReplayAv1AvailabilityStatus;
             if (string.Equals(Settings.ReplayVideoCodec, "H.264", StringComparison.OrdinalIgnoreCase))
                 return "H.264 selected. Hardware encoder chosen automatically.";
 
-            if (!ExportEncoderProbe.Av1ProbeCompleted) return "Checking hardware AV1 support…";
-            return ExportEncoderProbe.Av1Family is null
-                ? "Hardware AV1 unavailable. H.264 fallback will be used."
-                : "Hardware AV1 selected. H.264 fallback remains available.";
+            return "Hardware AV1 selected. H.264 fallback remains available.";
         }
     }
 
@@ -8378,7 +8415,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 string.Equals(game.ExecutableName, entry.Key, StringComparison.OrdinalIgnoreCase));
             var executablePath = installation is null ? null : StandaloneGameIdentity.ExecutablePath(installation);
             var tab = new CustomGameTabViewModel(entry.Key, entry.Value, Settings, SaveSettings,
-                change => NotifyCustomGameSettingChanged(entry.Key, change), executablePath);
+                change => NotifyCustomGameSettingChanged(entry.Key, change), executablePath, () => IsReplayAv1Available);
+            tab.RefreshReplayCodecAvailability(_replayAv1ProbeCompleted);
             tab.SyncAudioProcesses(ActiveAudioProcesses);
             CustomGameTabs.Add(tab);
         }
