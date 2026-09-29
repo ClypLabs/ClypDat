@@ -151,8 +151,9 @@ public:
 class QsvBackend final : public EncoderBackend {
 public:
     EncoderVendor vendor() const override { return EncoderVendor::Intel; }
-    std::string codec_name(EncoderCodec codec) const override { return codec == EncoderCodec::AV1 ? "av1_qsv" : "h264_qsv"; }
-    EncoderCodec effective_codec(const EncoderRequest& request) const override { return request.codec; }
+    // AV1 QSV remains unsupported until it can be validated on Intel hardware.
+    std::string codec_name(EncoderCodec) const override { return "h264_qsv"; }
+    EncoderCodec effective_codec(const EncoderRequest&) const override { return EncoderCodec::H264; }
     bool supports_zero_copy_input() const override { return true; }
     AdapterMatch zero_copy_adapter(const EncoderRequest& request) const override { return adapter_match(request.adapter_vendor, vendor()); }
     EncoderPlan plan(const EncoderRequest& request, bool zero_copy, const EncoderPolicy& policy) const override {
@@ -172,8 +173,7 @@ public:
         plan.fixed_pool = true;
         plan.options = {{"async_depth", text(depth)}};
         if (l) {
-            plan.options.push_back(request.codec == EncoderCodec::AV1 ? std::pair<std::string, std::string>{"extbrc", "1"} :
-                std::pair<std::string, std::string>{"look_ahead", "1"});
+            plan.options.push_back({"look_ahead", "1"});
             plan.options.push_back({"look_ahead_depth", text(l)});
         }
         // Locked inputs plus one surface for MFX NumFrameSuggested headroom,

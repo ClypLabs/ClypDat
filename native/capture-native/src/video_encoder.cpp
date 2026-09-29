@@ -47,7 +47,7 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         throw std::invalid_argument("Invalid recording encoder configuration");
     const auto& name = config.name;
     if (name != "libx264" && name != "h264_nvenc" && name != "av1_nvenc" &&
-        name != "h264_amf" && name != "av1_amf" && name != "h264_qsv" && name != "av1_qsv")
+        name != "h264_amf" && name != "av1_amf" && name != "h264_qsv")
         throw std::invalid_argument("Unsupported recording encoder");
     const auto* codec = avcodec_find_encoder_by_name(name.c_str());
     if (!codec) throw std::runtime_error("Recording encoder unavailable: " + name);

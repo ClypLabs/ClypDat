@@ -465,7 +465,7 @@ void amf_recording_plans(){
     CHECK((names(recording_encoder_candidates(false,false))==std::vector<std::string>{"h264_nvenc+d3d11","h264_nvenc","h264_amf+d3d11","h264_amf",
         "h264_qsv+d3d11+lp","h264_qsv+d3d11","h264_qsv+lp","h264_qsv","libx264"}));
     CHECK((names(recording_encoder_candidates(false,true))==std::vector<std::string>{"av1_nvenc+d3d11","h264_nvenc+d3d11","av1_nvenc","h264_nvenc",
-        "av1_amf+d3d11","av1_amf","av1_qsv+d3d11+lp","av1_qsv+d3d11","av1_qsv+lp","av1_qsv",
+        "av1_amf+d3d11","av1_amf",
         "h264_amf+d3d11","h264_amf","h264_qsv+d3d11+lp","h264_qsv+d3d11","h264_qsv+lp","h264_qsv","libx264"}));
     CHECK((names(recording_encoder_candidates(true,false))==std::vector<std::string>{"libx264"}));
 }
@@ -502,9 +502,14 @@ void qsv_recording_plans(){
     // Unknown adapter: probe allowed, never confirmed by being unknown.
     const auto unknown=plan_recording_encoder(config,zero_copy,0,false);CHECK(unknown);
     CHECK(unknown->zero_copy_status==ZeroCopyStatus::Unverified&&!unknown->confirmed()&&unknown->pool_capacity==9);
-    const auto av1=plan_recording_encoder(config,{"av1_qsv",true,true},kAdapterVendorIntel,false);
-    CHECK(av1&&av1->codec_name=="av1_qsv"&&av1->requested_codec==EncoderCodec::AV1&&av1->effective_codec==EncoderCodec::AV1);
-    CHECK(av1->input==EncoderInput::QsvFrames&&av1->pool_capacity==9&&av1->right_size_packets);
+    config.av1=true;
+    for(const bool hardware:{true,false})for(const bool low_power:{true,false}){
+        bool skipped=false;
+        try{plan_recording_encoder(config,{"av1_qsv",low_power,hardware},kAdapterVendorIntel,false);}
+        catch(const EncoderPlanInfeasible&){skipped=true;}CHECK(skipped);
+        const auto fallback=plan_recording_encoder(config,{"h264_qsv",low_power,hardware},kAdapterVendorIntel,false);
+        CHECK(fallback&&fallback->codec_name=="h264_qsv"&&fallback->effective_codec==EncoderCodec::H264);
+    }
     // NVENC and AMF resource values are unchanged.
     const auto nvenc=plan_recording_encoder(config,{"h264_nvenc",false,true},kAdapterVendorNvidia,false);
     CHECK(nvenc->encoder_slots==8&&nvenc->max_in_flight==7&&nvenc->pool_capacity==9&&!nvenc->right_size_packets);
@@ -936,11 +941,9 @@ void qsv_surface_mapping(){
     bool rejected=false;try{capture_surface_target(software);}catch(const std::invalid_argument&){rejected=true;}CHECK(rejected);
     for(auto* frame:held)av_frame_free(&frame);
     // qsvenc takes only QSV frames: D3D11 frames are refused before FFmpeg opens it.
-    for(const auto name:{"h264_qsv","av1_qsv"}){
-        VideoEncoderConfig config;config.width=256;config.height=144;config.fps=60;config.bitrate_mbps=5;config.name=name;config.hardware_frames=singles.p;
-        bool wrong=false;try{VideoEncoder encoder(config);}catch(const std::invalid_argument& error){wrong=std::string(error.what()).find("QSV")!=std::string::npos;}
-        CHECK(wrong);
-    }
+    VideoEncoderConfig config;config.width=256;config.height=144;config.fps=60;config.bitrate_mbps=5;config.name="h264_qsv";config.hardware_frames=singles.p;
+    bool wrong=false;try{VideoEncoder encoder(config);}catch(const std::invalid_argument& error){wrong=std::string(error.what()).find("QSV")!=std::string::npos;}
+    CHECK(wrong);
 }
 // The real derivation from a recording D3D11VA device. Without an Intel QSV
 // runtime behind the device's adapter it fails cleanly; on Intel it yields
@@ -948,7 +951,7 @@ void qsv_surface_mapping(){
 // on the capture device itself. Returns whether derivation succeeded.
 bool derived_qsv_frames(ID3D11Device* d3d){
     CHECK(av_hwdevice_find_type_by_name("qsv")==AV_HWDEVICE_TYPE_QSV);
-    CHECK(avcodec_find_encoder_by_name("h264_qsv")&&avcodec_find_encoder_by_name("av1_qsv"));
+    CHECK(avcodec_find_encoder_by_name("h264_qsv"));
     BufferRef device{av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_D3D11VA)};CHECK(device.p);
     auto* hw=static_cast<AVD3D11VADeviceContext*>(reinterpret_cast<AVHWDeviceContext*>(device.p->data)->hwctx);hw->device=d3d;d3d->AddRef();
     CHECK(av_hwdevice_ctx_init(device.p)>=0);
@@ -1210,7 +1213,7 @@ void readback_pressure(){
     CHECK(capture.stop());const auto health=capture.health();
     if(!health.error.empty()||health.encoder_stall_recoveries||health.generation!=1||health.frame_allocations!=4)throw std::runtime_error("Readback pressure recovery: "+pressure_state(health));
 }
-// Intel hardware only, run by hand with --qsv: real QSV zero-copy and
+// Intel hardware only, run by hand with --qsv: real H.264 QSV zero-copy and
 // readback encodes on every Intel adapter. Other machines report a skip.
 int qsv_hardware(){
     Microsoft::WRL::ComPtr<IDXGIFactory1> factory;CHECK(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))));
@@ -1224,15 +1227,15 @@ int qsv_hardware(){
     for(const auto& adapter:adapters){
         DXGI_ADAPTER_DESC1 desc{};adapter->GetDesc1(&desc);std::wcout<<L"Intel adapter: "<<desc.Description<<L"\n";
         {GeneratedSource probe(60,true,1920,1080,adapter.Get());CHECK(derived_qsv_frames(probe.d3d_device()));}
-        for(const bool av1:{false,true})for(const bool zero_copy:{true,false}){
-            const std::string name=av1?"av1_qsv":"h264_qsv",label=name+(zero_copy?" zero-copy":" readback");
+        for(const bool zero_copy:{true,false}){
+            const std::string name="h264_qsv",label=name+(zero_copy?" zero-copy":" readback");
             RecordingCaptureConfig config;config.width=1920;config.height=1080;config.fps=60;config.bitrate_mbps=25;
             RecordingCaptureDependencies dependencies;dependencies.candidates={{name,true,zero_copy},{name,false,zero_copy}};
             std::mutex mutex;std::vector<Packet> packets;std::shared_ptr<const CaptureGeneration> generation;uint64_t oversized=0;
             RecordingCaptureCallbacks callbacks;callbacks.generation=[&](auto value){std::lock_guard lock(mutex);generation=value;};
             callbacks.packet=[&](auto,Packet packet,int64_t,bool){std::lock_guard lock(mutex);if(!exact_size(*packet))++oversized;packets.push_back(std::move(packet));};
             RecordingCapture capture(config,callbacks,std::make_unique<GeneratedSource>(60,true,1920,1080,adapter.Get()),std::move(dependencies));
-            try{capture.start();}catch(const std::exception& error){if(!av1)throw;std::cout<<label<<" unavailable: "<<error.what()<<"\n";continue;}
+            capture.start();
             std::this_thread::sleep_for(3s);CHECK(capture.stop());const auto h=capture.health();
             if(!h.error.empty())throw std::runtime_error(label+": "+h.error);
             CHECK(h.encoder_vendor=="intel"&&h.hardware_input==zero_copy&&h.zero_copy_status==(zero_copy?"confirmed":"not-used"));

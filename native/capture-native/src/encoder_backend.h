@@ -39,7 +39,7 @@ public:
 struct EncoderRequest {
     EncoderCodec codec = EncoderCodec::H264;
     EncoderPixelFormat pixel_format = EncoderPixelFormat::NV12;
-    bool allow_codec_fallback = true; // Today AV1 may fall back to H.264 libx264.
+    bool allow_codec_fallback = true; // AV1 may fall back to H.264 QSV or libx264.
     int width = 1920, height = 1080, fps = 60, bitrate_mbps = 20;
     int b_frames = 0, lookahead = 0;
     uint32_t adapter_vendor = 0; // DXGI VendorId of the capture device; 0 when unknown.

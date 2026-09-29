@@ -54,11 +54,10 @@ std::vector<RecordingEncoderCandidate> recording_encoder_candidates(bool cpu, bo
     result.push_back({"h264_nvenc"});
     // AMF and QSV zero-copy are planned only on their own vendor's capture
     // adapter; elsewhere the plan is infeasible and the readback form follows.
-    // QSV tries low-power (VDEnc) before the full encoder in both forms.
+    // QSV is H.264-only until AV1 has real Intel hardware validation.
+    // It tries low-power (VDEnc) before the full encoder in both forms.
     if (av1) {
         result.push_back({"av1_amf", false, true}); result.push_back({"av1_amf"});
-        result.push_back({"av1_qsv", true, true}); result.push_back({"av1_qsv", false, true});
-        result.push_back({"av1_qsv", true}); result.push_back({"av1_qsv"});
     }
     result.push_back({"h264_amf", false, true}); result.push_back({"h264_amf"});
     result.push_back({"h264_qsv", true, true}); result.push_back({"h264_qsv", false, true});

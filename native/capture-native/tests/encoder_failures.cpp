@@ -58,6 +58,27 @@ void amf_low_latency_rate_control() {
     std::cout << "AMF H.264/AV1 low-latency CBR configuration passed (no AMD device opened)\n";
 }
 
+void qsv_h264_only() {
+    using namespace clypdat;
+    for (const bool low_power : { false, true }) {
+        VideoEncoderConfig config{ 64, 48, 60, 5 };
+        config.name = "av1_qsv"; config.low_power = low_power;
+        bool opened = false, rejected = false;
+        CodecCalls calls;
+        calls.open = [&](AVCodecContext* context, const AVCodec*, AVDictionary**) {
+            CHECK(context->codec_id == AV_CODEC_ID_H264);
+            opened = true;
+            return 0;
+        };
+        try { VideoEncoder encoder(config, calls); }
+        catch (const std::invalid_argument& error) { rejected = std::string(error.what()) == "Unsupported recording encoder"; }
+        CHECK(rejected && !opened);
+        config.name = "h264_qsv";
+        VideoEncoder encoder(config, calls);
+        CHECK(opened);
+    }
+}
+
 void retries_same_frame(bool flush) {
     AVFrame frame{};
     frame.width = 64;
@@ -189,6 +210,7 @@ void right_sized_packets() {
 int main() {
     av_log_set_level(AV_LOG_ERROR);
     amf_low_latency_rate_control();
+    qsv_h264_only();
     retries_same_frame(false);
     retries_same_frame(true);
     busy_is_not_failure();

@@ -118,7 +118,7 @@ void policy_tests() {
     CHECK(ignored.packet(3100000,true)); CHECK(ignored.health.safe);
     // Verify option names against the shipped runtime without pretending that
     // AVOption acceptance proves a driver honored SetProperty/SubmitInput.
-    for(const auto* name:{"h264_amf","av1_amf","h264_qsv","av1_qsv"}) {
+    for(const auto* name:{"h264_amf","av1_amf","h264_qsv"}) {
         const auto* codec=avcodec_find_encoder_by_name(name); CHECK(codec);
         CodecContext context(avcodec_alloc_context3(codec)); CHECK(context);
         CHECK(av_opt_set(context->priv_data,"forced_idr","1",0)==0);

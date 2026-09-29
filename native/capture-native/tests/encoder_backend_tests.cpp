@@ -74,8 +74,7 @@ void surface_bytes() {
     const auto p = plan(EncoderVendor::Nvidia, ten);
     CHECK(p.pixel_format == F::P010 && p.pool_capacity == 9 && p.pool_bytes == 9ull * 11059200);
     auto qsv = on(EncoderVendor::Intel, request(1920, 1080, 60)); qsv.codec = EncoderCodec::AV1; qsv.pixel_format = F::P010;
-    const auto q = plan(EncoderVendor::Intel, qsv);
-    CHECK(q.pool_bytes == uint64_t(q.pool_capacity) * 6266880);
+    infeasible([&] { plan(EncoderVendor::Intel, qsv); });
     // P010 is not planned for H.264 or software until capabilities are probed.
     auto h264 = on(EncoderVendor::Nvidia, request(1920, 1080, 60)); h264.pixel_format = F::P010;
     infeasible([&] { plan(EncoderVendor::Nvidia, h264); });
@@ -250,8 +249,15 @@ void qsv_depth() {
     CHECK(l.max_in_flight == 17 && l.output_delay_frames == 17 && l.stages.encoder_input_surfaces == 18 && l.pool_capacity == 20);
     CHECK(option(l, "look_ahead") == "1" && option(l, "look_ahead_depth") == "10");
     auto av1 = on(EncoderVendor::Intel, request(2560, 1440, 90, 0, 10)); av1.codec = EncoderCodec::AV1;
-    const auto a = plan(EncoderVendor::Intel, av1);
-    CHECK(a.codec_name == "av1_qsv" && option(a, "extbrc") == "1" && option(a, "look_ahead").empty());
+    for (const bool zero_copy : { true, false }) {
+        av1.allow_codec_fallback = true;
+        const auto a = plan(EncoderVendor::Intel, av1, zero_copy);
+        CHECK(a.codec_name == "h264_qsv" && a.codec_fallback());
+        CHECK(a.requested_codec == EncoderCodec::AV1 && a.effective_codec == EncoderCodec::H264);
+        CHECK(option(a, "look_ahead") == "1" && option(a, "extbrc").empty());
+        av1.allow_codec_fallback = false;
+        infeasible([&] { plan(EncoderVendor::Intel, av1, zero_copy); });
+    }
     EncoderPolicy deeper; deeper.qsv_max_depth = 10;
     CHECK(option(plan(EncoderVendor::Intel, on(EncoderVendor::Intel, request(2560, 1440, 120)), true, deeper), "async_depth") == "8");
     const auto readback = plan(EncoderVendor::Intel, request(1920, 1080, 60), false);
@@ -300,7 +306,8 @@ void codec_fallback() {
     CHECK(p.codec_name == "libx264");
     av1.allow_codec_fallback = false;
     infeasible([&] { plan(EncoderVendor::Software, av1, false); });
-    for (const auto vendor : hardware) {
+    infeasible([&] { plan(EncoderVendor::Intel, on(EncoderVendor::Intel, av1)); });
+    for (const auto vendor : {EncoderVendor::Nvidia, EncoderVendor::Amd}) {
         const auto h = plan(vendor, on(vendor, av1));
         CHECK(h.requested_codec == EncoderCodec::AV1 && h.effective_codec == EncoderCodec::AV1 && !h.codec_fallback());
     }
@@ -390,7 +397,8 @@ void executable_plan_invariants() {
         CHECK(p.pool_capacity >= encoder_pool_requirement(st, p.ffmpeg_hold));
         CHECK(p.pool_capacity <= p.max_distinct_textures && p.max_distinct_textures <= kD3D11TextureArrayLimit);
         CHECK(p.min_encoder_slots <= p.encoder_slots && p.encoder_slots <= p.max_encoder_slots);
-        CHECK(p.requested_codec == codec && (p.effective_codec == codec || vendor == EncoderVendor::Software));
+        CHECK(p.requested_codec == codec && (p.effective_codec == codec || vendor == EncoderVendor::Intel || vendor == EncoderVendor::Software));
+        if (vendor == EncoderVendor::Intel) CHECK(p.effective_codec == EncoderCodec::H264 && p.codec_name == "h264_qsv");
         if (p.zero_copy) {
             CHECK(vendor != EncoderVendor::Software);
             CHECK(p.input == (vendor == EncoderVendor::Intel ? EncoderInput::QsvFrames : EncoderInput::D3D11Frames));

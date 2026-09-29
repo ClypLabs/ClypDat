@@ -4,6 +4,14 @@ The Windows replay and full-session recorder runs in `RecorderCore`, inside
 `ClypDat.Capture.Native.dll`, which `ClypDatRecorder.exe` (the capture worker)
 loads. There is no managed capture or encoding path and no backend choice.
 
+Intel QSV recording supports H.264 only. AV1 QSV is disabled until hardware
+that supports AV1 encoding is available for validation. NVIDIA NVENC and AMD AMF
+retain H.264 and AV1 support. An AV1 preference can use the existing H.264
+fallback candidates, including `h264_qsv`; the selected encoder and saved codec
+report H.264. QSV retains both zero-copy and staged-readback inputs, with
+low-power candidates tried before the full encoder. Real Intel hardware
+acceptance is still pending; passing local plan tests does not establish it.
+
 - Native: capture, pacing, conversion, encoding, replay history, audio,
   save/remux, Full Session, burned overlays and detector frame extraction.
 - Managed (`ClypDat.App`): UI and settings, worker IPC (`CaptureWorkerProxy`,
@@ -96,9 +104,12 @@ Local fixture clips and per-run JSON remain under `.local/`.
 
 The native tests use generated textures and never physical screen/window
 acquisition or real WASAPI device replacement; the RTX 4070 Ti NVENC paths are
-also exercised by live replay use. AMF and QSV (zero-copy and readback) are
+also exercised by live replay use. AMF and H.264 QSV (zero-copy and readback) are
 implemented and covered by the encoder plan and failover tests. Real AMD H.264
-validation passed both focused encoder inputs and full-app D3D11 zero-copy replay;
-see the [AMD validation results](../../docs/replay-keyframe-validation.md) for
-hardware, measurements, and limits. Full-app AMF readback and real Intel hardware
-remain unverified; AV1 AMF initialization is a separate unresolved issue.
+and AV1 validation passed D3D11 zero-copy and full-app staged readback; see
+[AMD readback validation](../../docs/amf-readback-validation.md) and
+[replay keyframe validation](../../docs/replay-keyframe-validation.md) for
+hardware, measurements, and limits. Real Intel H.264 hardware acceptance remains
+pending. Run `ClypDat.Capture.Native.CaptureTests --qsv` on an Intel adapter for
+the generated zero-copy/readback checks, followed by real application capture,
+replay save, keyframe, decode, seek and audio validation.
