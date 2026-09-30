@@ -218,8 +218,6 @@ internal static class H264HardwareDecodeProbe
         return hex.Contains("000001", StringComparison.Ordinal);
     }
 
-    internal static bool ContainsIdrPayload(ReadOnlySpan<byte> bytes) => ContainsIdrPayload(bytes, H264PacketFormat.Auto);
-
     internal static bool ContainsIdrPayload(ReadOnlySpan<byte> bytes, H264PacketFormat format)
     {
         if (format is H264PacketFormat.Auto or H264PacketFormat.AnnexB && ContainsAnnexBIdr(bytes)) return true;

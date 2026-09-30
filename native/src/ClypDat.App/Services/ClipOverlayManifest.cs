@@ -164,13 +164,6 @@ public sealed record ClipOverlayManifest(
 /// manifests have no states and retain their static layers.</summary>
 public sealed record ClipOverlayState(double StartSeconds, ClipOverlayLayer? Camera, ClipOverlayLayer? Peripherals);
 
-internal static class ClipOverlayStateResolver
-{
-    public static ClipOverlayState Resolve(ClipOverlayManifest manifest, double seconds) =>
-        manifest.States?.Where(state => state.StartSeconds <= seconds).OrderBy(state => state.StartSeconds).LastOrDefault()
-        ?? new ClipOverlayState(0, manifest.Camera, manifest.Peripherals);
-}
-
 public sealed record ClipOverlayLayer(
     string Source,
     bool Available,

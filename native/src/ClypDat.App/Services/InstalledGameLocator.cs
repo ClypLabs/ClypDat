@@ -20,8 +20,6 @@ public static class InstalledGameLocator
     // cheap but pointless to repeat, and installs rarely appear mid-session.
     public static IReadOnlyDictionary<string, string> Index => _index ??= BuildIndex(CancellationToken.None);
 
-    public static string? FindExecutable(string displayName) => FindExecutable(displayName, CancellationToken.None);
-
     internal static string? FindExecutable(string displayName, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(displayName)) return null;

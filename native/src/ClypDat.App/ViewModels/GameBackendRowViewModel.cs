@@ -1,5 +1,4 @@
 using Avalonia;
-using ClypDat.App.Services;
 
 namespace ClypDat.App.ViewModels;
 

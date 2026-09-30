@@ -73,12 +73,4 @@ public static class AudioProcessIdentity
         value = default;
         return false;
     }
-
-    public static IEnumerable<string> OrderForRecording(IEnumerable<string> names)
-    {
-        return names
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(name => IsSocial(name) ? 0 : 1)
-            .ThenBy(name => name, StringComparer.OrdinalIgnoreCase);
-    }
 }

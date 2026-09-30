@@ -36,7 +36,6 @@ public static class VideoOverlayRecordingMode
 
     public static string Normalize(string? value) => string.Equals(value, BurnIntoVideo, StringComparison.OrdinalIgnoreCase)
         ? BurnIntoVideo : EditableLayers;
-    public static bool IsBurned(string? value) => Normalize(value) == BurnIntoVideo;
 }
 
 public sealed record VideoOverlayCameraSelection(string DeviceMoniker, string FriendlyName);

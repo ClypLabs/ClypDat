@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -249,7 +248,6 @@ internal sealed class SpotifyNowPlayingService : IDisposable
     public string? AccountName => _accountName;
     /// <summary>The Spotify app on this PC has a media session.</summary>
     public bool IsLocalAvailable => _local.Current is not null;
-    public bool IsSigningIn => _signInCts is not null;
 
     private bool Blocked => _policyPaused || NoticeBoardService.IsBlocked("pause-spotify");
 

@@ -114,8 +114,6 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
 
     public TimeSpan TotalTime => TimeSpan.FromSeconds(_totalFrames / (double)SampleRate);
 
-    public bool AtEnd => Volatile.Read(ref _positionFrames) >= _totalFrames;
-
     public TimeSpan CurrentTime
     {
         get => TimeSpan.FromSeconds(Volatile.Read(ref _positionFrames) / (double)SampleRate);

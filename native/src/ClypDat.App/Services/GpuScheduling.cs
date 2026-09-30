@@ -55,12 +55,6 @@ internal static class GpuScheduling
     private const int SchedulingPriorityClassHigh = 4;
     private const int SchedulingPriorityClassRealtime = 5;
 
-    // DXGI clamps to [-7, 7] and returns E_INVALIDARG outside it. 7 is what a
-    // capture app wants: the work is small, bounded, and latency-critical
-    // relative to the game's, so it should cut ahead rather than queue.
-    private const int MaxGpuThreadPriority = 7;
-    internal const int CaptureDevicePriority = 1;
-
     // The clip overlay is the other side of the same argument, in the UI
     // process. Its GPU work is one small upload per notification and then
     // nothing, but it is the most latency-visible thing the app draws: a badge
@@ -86,10 +80,6 @@ internal static class GpuScheduling
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int GetGpuThreadPriorityDelegate(nint self, out int priority);
 
-    // Only the capture worker calls this. The UI process stays NORMAL.
-    internal static bool IsProcessPriorityElevationEnabled(string? value)
-        => ResolveProcessPriority(value) is not null;
-
     internal static string? ResolveProcessPriority(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         null or "" or "realtime" => "REALTIME",
@@ -99,17 +89,8 @@ internal static class GpuScheduling
         _ => "HIGH"
     };
 
-    internal static int ResolveDevicePriority(string? value) => ResolveDevicePriority(value, CaptureDevicePriority);
-
     internal static int ResolveDevicePriority(string? value, int fallback) =>
         int.TryParse(value, out var parsed) && parsed is >= -7 and <= 7 ? parsed : fallback;
-
-    // Kept for existing callers/tests that were named before the two knobs
-    // were separated.
-    internal static bool IsPriorityElevationEnabled(string? value) => IsProcessPriorityElevationEnabled(value);
-
-    private static bool IsProcessPriorityElevationEnabled()
-        => IsProcessPriorityElevationEnabled(Environment.GetEnvironmentVariable("CLYPDAT_GPU_PROCESS_PRIORITY"));
 
     public static void TryRaiseProcessGpuPriority()
     {
@@ -193,19 +174,6 @@ internal static class GpuScheduling
         5 => "REALTIME",
         _ => $"UNKNOWN({value})"
     };
-
-    // Same raw-vtable approach as TryMarkDeviceMultithreadProtected in
-    // native capture interop, and for the same reason: this call has to reach
-    // IDXGIDevice on whatever COM pointer the device exposes, without
-    // depending on a Vortice wrapper existing or keeping its name across
-    // package versions.
-    //
-    // IDXGIDevice vtable, after IUnknown (QueryInterface/AddRef/Release = 0-2)
-    // and IDXGIObject (SetPrivateData/SetPrivateDataInterface/GetPrivateData/
-    // GetParent = 3-6): GetAdapter=7, CreateSurface=8, QueryResourceResidency=9,
-    // SetGPUThreadPriority=10, GetGPUThreadPriority=11.
-    public static int? TryRaiseDeviceGpuPriority(nint devicePointer, string role)
-        => TryRaiseDeviceGpuPriority(devicePointer, role, "Native capture", CaptureDevicePriority, "CLYPDAT_GPU_DEVICE_PRIORITY");
 
     public static int? TryRaiseDeviceGpuPriority(nint devicePointer, string role, string subsystem, int fallback, string environmentVariable)
     {

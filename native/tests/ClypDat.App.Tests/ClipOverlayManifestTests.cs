@@ -107,17 +107,4 @@ public sealed class ClipOverlayManifestTests
         Assert.False(loaded.Camera!.SynchronizationApproximate);
         Assert.Equal(36.84, loaded.Camera.Assets![0].StartSeconds, 3);
     }
-
-    [Fact]
-    public void StateResolver_UsesLatestRecordedAppearanceAndStaticLegacyFallback()
-    {
-        var camera = new ClipOverlayLayer("Facecam", true, InitialTransform: new(.7, .05, .25));
-        var moved = camera with { InitialTransform = new(.1, .2, .3) };
-        var manifest = new ClipOverlayManifest(ClipOverlayManifest.CurrentVersion, camera, States: [
-            new ClipOverlayState(0, camera, null), new ClipOverlayState(2, moved, null)]);
-
-        Assert.Equal(camera.InitialTransform, ClipOverlayStateResolver.Resolve(manifest, 1).Camera!.InitialTransform);
-        Assert.Equal(moved.InitialTransform, ClipOverlayStateResolver.Resolve(manifest, 2).Camera!.InitialTransform);
-        Assert.Equal(camera, ClipOverlayStateResolver.Resolve(new ClipOverlayManifest(6, camera), 99).Camera);
-    }
 }

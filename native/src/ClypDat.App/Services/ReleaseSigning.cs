@@ -133,25 +133,6 @@ public static class ReleaseSigning
         }
         throw new CryptographicException($"{subject} signature did not verify against any of the {trustedKeys.Count} pinned key(s).");
     }
-
-    /// <summary>
-    /// Returns the signed SHA-256 for an asset, or null when the manifest does not cover
-    /// it. Callers treat null as "refuse the update" rather than falling back.
-    /// </summary>
-    public static string? FindAssetSha256(ReleaseManifest manifest, string assetName)
-    {
-        foreach (var asset in manifest.Assets)
-        {
-            if (string.Equals(asset.Name, assetName, StringComparison.OrdinalIgnoreCase))
-            {
-                var hex = asset.Sha256?.Trim().ToLowerInvariant();
-                if (string.IsNullOrEmpty(hex) || hex.Length != 64 || !hex.All(Uri.IsHexDigit)) return null;
-                return hex;
-            }
-        }
-
-        return null;
-    }
 }
 
 /// <summary>A release-signing public key trusted by this build.</summary>

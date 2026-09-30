@@ -3,7 +3,6 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Avalonia;
-using Avalonia.Platform;
 using ClypDat.App.Controls;
 using ClypDat.App.ViewModels;
 
@@ -35,7 +34,6 @@ internal sealed class ClipHoverPreviewController : IDisposable
     // upload time without being resolvable on a library card.
     internal const int MaximumPreviewWidth = 640;
     private const int MinimumPreviewWidth = 160;
-    private const int MinimumPreviewHeight = 90;
     internal static readonly TimeSpan HoverDelay = TimeSpan.Zero;
     internal static readonly TimeSpan WarmExitGrace = TimeSpan.FromMilliseconds(150);
 

@@ -251,9 +251,6 @@ internal static class AppThemeService
     public static IReadOnlyList<ThemeOption> LightOptions { get; } =
         LightPresetOrder.Select(Option).ToArray();
 
-    public static bool IsLight(string preset) =>
-        Transforms.TryGetValue(Normalize(preset), out var transform) && transform.IsLight;
-
     public static string Normalize(string? preset)
     {
         if (string.Equals(preset, "Violet", StringComparison.OrdinalIgnoreCase)) return "Berry";

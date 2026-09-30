@@ -26,9 +26,6 @@ public enum EditorSidebarSection
     Export
 }
 
-
-internal readonly record struct LibraryStartupDateMarker(string Text, int FirstVisibleIndex, int Count);
-
 public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private readonly SteamGameLibrary _steamGames = SteamGameLibrary.Shared;
@@ -79,20 +76,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer _clipNotReadyMessageTimer;
     private readonly DispatcherTimer _libraryCacheWriteTimer;
     private readonly DispatcherTimer _relativeDateRefreshTimer;
-    private CancellationTokenSource? _cachedLibraryRestoreCts;
     private readonly TaskCompletionSource _libraryReadyForReveal = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private bool _isRestoringCachedLibrary;
     private bool _isInitialLibraryLoadComplete;
-    private IReadOnlyList<CachedClipState> _startupLibraryStates = Array.Empty<CachedClipState>();
-    private IReadOnlyList<LibraryStartupDateMarker> _startupLibraryDateMarkers = Array.Empty<LibraryStartupDateMarker>();
-    private int _startupLibraryIndexVersion;
-    private int _startupVisibleClipCount;
-    private int _loadedVisibleLibraryTileCount;
-    private int _loadedStartupClipCount;
-    private double _startupCardChromeHeight = 112;
-    private double _startupCardSurfaceTopInset = 20;
-    private double _startupCardSurfaceChromeHeight = 86;
-    private double _libraryReservedContentHeight;
     private bool _libraryCacheDirty;
     private (long Total, long Free) _driveStats;
     // See WasRecentlySelfAdded - suppresses the redundant full-library
@@ -352,8 +337,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             new("Custom", ClipFileNaming.CustomScheme)
         };
         _selectedClipOverlayPosition = ClipOverlayPositions.FirstOrDefault(position => string.Equals(position, Settings.ClipOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Top Right";
-        _selectedSpotifyOverlayPosition = ClipOverlayPositions.FirstOrDefault(position =>
-            string.Equals(position, Settings.SpotifyOverlayPosition, StringComparison.OrdinalIgnoreCase)) ?? "Bottom Left";
         _selectedClipOverlayVolume = ClipOverlayVolumes.FirstOrDefault(volume => string.Equals(volume, Settings.ClipOverlayVolume, StringComparison.OrdinalIgnoreCase)) ?? "High";
         _selectedClipFileNameScheme = ClipFileNameSchemes.FirstOrDefault(item => string.Equals(item.Value, Settings.ClipFileNameScheme, StringComparison.OrdinalIgnoreCase))?.Value ?? ClipFileNaming.StandardScheme;
         _customClipFileNameTemplate = Settings.CustomClipFileNameTemplate;
@@ -509,7 +492,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // One picker per colour, each writing straight into the theme it is editing.
     public ThemeColorPickerViewModel BasePicker { get; }
     public ThemeColorPickerViewModel AccentPicker { get; }
-
 
     // A custom theme carries its own accent, and AppThemeService.Apply ignores
     // the Windows accent entirely while one is selected. The toggle is inert in
@@ -673,7 +655,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = ThemeEditorBaseColor, AccentColor = ThemeEditorAccentColor });
     }
 
-
     /// <summary>
     /// The font box applies while the user types, but only once what they have
     /// typed names a font that exists.
@@ -739,28 +720,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     internal LibraryGridProjectionResult LibraryProjection { get; private set; } =
         new([], [], 0, new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase), []);
-    public bool IsRestoringLibraryCache => _isRestoringCachedLibrary;
-    public bool ShowLibraryLoadingTiles => !IsInitialLibraryLoadComplete || IsRestoringLibraryCache;
-    public int LibraryLoadingTileCount => HasStartupLibraryIndex ? _startupVisibleClipCount : 12;
-    // Real cards stay transparent until first measured layout pass. Keep
-    // overlay covering every slot until reveal.
-    public int LoadedVisibleLibraryTileCount => IsInitialLibraryLoadComplete
-        ? _loadedVisibleLibraryTileCount
-        : 0;
+    public bool ShowLibraryLoadingTiles => !IsInitialLibraryLoadComplete;
+    public int LibraryLoadingTileCount => 12;
+    public int LoadedVisibleLibraryTileCount => 0;
     public double LibraryLoadingRowPitch => StartupLibraryRowPitch;
-    public double LibraryLoadingTileTopInset => _startupCardSurfaceTopInset;
-    public double LibraryLoadingTileHeight => Math.Max(1, CardImageHeight + _startupCardSurfaceChromeHeight);
-    public double LibraryReservedContentHeight
-    {
-        get => IsGameFilterActive || IsClipTypeFilterActive || !string.IsNullOrWhiteSpace(_librarySearchText)
-            ? 0
-            : _libraryReservedContentHeight;
-        private set => SetProperty(ref _libraryReservedContentHeight, value);
-    }
-    internal bool HasStartupLibraryIndex => _startupLibraryStates.Count > 0;
-    internal int StartupLibraryIndexVersion => _startupLibraryIndexVersion;
-    internal IReadOnlyList<LibraryStartupDateMarker> StartupLibraryDateMarkers => _startupLibraryDateMarkers;
-    internal double StartupLibraryRowPitch => Math.Max(1, CardImageHeight + _startupCardChromeHeight);
+    public double LibraryLoadingTileTopInset => 20;
+    public double LibraryLoadingTileHeight => Math.Max(1, CardImageHeight + 86);
+    internal double StartupLibraryRowPitch => Math.Max(1, CardImageHeight + 112);
     public bool IsInitialLibraryLoadComplete
     {
         get => _isInitialLibraryLoadComplete;
@@ -768,7 +734,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _isInitialLibraryLoadComplete, value)) return;
             OnPropertyChanged(nameof(LibraryCardGridOpacity));
-            OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
             OnPropertyChanged(nameof(LibraryTitle));
             OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
         }
@@ -894,12 +859,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get
         {
-            if (IsRestoringLibraryCache && _startupLibraryStates.Count > 0 && _startupLibraryStates.Count > _loadedStartupClipCount)
-            {
-                var total = _startupLibraryStates.Count;
-                var remaining = Math.Max(0, total - _loadedStartupClipCount);
-                return $"Clips ({total:N0}) ({remaining:N0} left to load)";
-            }
             if (!IsInitialLibraryLoadComplete) return "Loading library";
             var parts = new List<string>();
             if (_activeGameFilters.Count > 0) parts.Add(string.Join(", ", _activeGameFilters.OrderBy(name => name, StringComparer.OrdinalIgnoreCase)));
@@ -2751,26 +2710,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private string _cs2GsiStatusText = string.Empty;
-
-    public string Cs2GsiStatusText
-    {
-        get => _cs2GsiStatusText;
-        set => SetProperty(ref _cs2GsiStatusText, value);
-    }
-
-    public bool Cs2AutoClipEnabled
-    {
-        get => Settings.Cs2AutoClip.Enabled;
-        set
-        {
-            if (Settings.Cs2AutoClip.Enabled == value) return;
-            Settings.Cs2AutoClip.Enabled = value;
-            OnPropertyChanged();
-            SaveSettings();
-        }
-    }
-
     public bool AutoClippingEnabled
     {
         get => Settings.AutoClipping.Enabled && !AutoClippingPolicyBlocked;
@@ -2878,129 +2817,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 if (!game.Events.ContainsKey(item.Id)) game.Events[item.Id] = item.DefaultEnabled;
             }
-        }
-    }
-
-    // Three-state: true only when all five are on, false only when none are,
-    // null (indeterminate - rendered as a filled box with a dash) for any
-    // partial mix. IsHitTestVisible="False" in the XAML means this is purely
-    // a reflected/decorative summary of the five sub-checkboxes below, not
-    // itself directly clickable - the setter exists for completeness but
-    // isn't reachable from the UI today.
-    public bool? Cs2AllKills
-    {
-        get
-        {
-            var kills = Settings.Cs2AutoClip;
-            var selectedCount = new[] { kills.Kill, kills.TwoKill, kills.ThreeKill, kills.FourKill, kills.Ace }.Count(selected => selected);
-            if (selectedCount == 0) return false;
-            if (selectedCount == 5) return true;
-            return null;
-        }
-        set
-        {
-            var apply = value == true;
-            Settings.Cs2AutoClip.Kill = apply;
-            Settings.Cs2AutoClip.TwoKill = apply;
-            Settings.Cs2AutoClip.ThreeKill = apply;
-            Settings.Cs2AutoClip.FourKill = apply;
-            Settings.Cs2AutoClip.Ace = apply;
-            OnPropertyChanged();
-            OnPropertyChanged(nameof(Cs2Kill));
-            OnPropertyChanged(nameof(Cs2TwoKill));
-            OnPropertyChanged(nameof(Cs2ThreeKill));
-            OnPropertyChanged(nameof(Cs2FourKill));
-            OnPropertyChanged(nameof(Cs2Ace));
-            OnPropertyChanged(nameof(Cs2AllKillsChecked));
-            OnPropertyChanged(nameof(Cs2AllKillsIndeterminate));
-            OnPropertyChanged(nameof(Cs2EventsSummary));
-            SaveSettings();
-        }
-    }
-
-    // Fluent's own indeterminate CheckBox glyph renders as a filled square,
-    // not a dash - hand-drawn in XAML instead (checkmark/dash/empty-outline
-    // Border+Path elements toggled by these) for a look that's actually a
-    // dash, not dependent on the theme's own glyph choice.
-    public bool Cs2AllKillsChecked => Cs2AllKills == true;
-    public bool Cs2AllKillsIndeterminate => Cs2AllKills is null;
-
-    public bool Cs2Kill
-    {
-        get => Settings.Cs2AutoClip.Kill;
-        set { Settings.Cs2AutoClip.Kill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
-    }
-
-    public bool Cs2TwoKill
-    {
-        get => Settings.Cs2AutoClip.TwoKill;
-        set { Settings.Cs2AutoClip.TwoKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
-    }
-
-    public bool Cs2ThreeKill
-    {
-        get => Settings.Cs2AutoClip.ThreeKill;
-        set { Settings.Cs2AutoClip.ThreeKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
-    }
-
-    public bool Cs2FourKill
-    {
-        get => Settings.Cs2AutoClip.FourKill;
-        set { Settings.Cs2AutoClip.FourKill = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
-    }
-
-    public bool Cs2Ace
-    {
-        get => Settings.Cs2AutoClip.Ace;
-        set { Settings.Cs2AutoClip.Ace = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2AllKills)); OnPropertyChanged(nameof(Cs2AllKillsChecked)); OnPropertyChanged(nameof(Cs2AllKillsIndeterminate)); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
-    }
-
-    public bool Cs2Headshot
-    {
-        get => Settings.Cs2AutoClip.Headshot;
-        set { Settings.Cs2AutoClip.Headshot = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
-    }
-
-    public bool Cs2Death
-    {
-        get => Settings.Cs2AutoClip.Death;
-        set { Settings.Cs2AutoClip.Death = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
-    }
-
-    public bool Cs2Assist
-    {
-        get => Settings.Cs2AutoClip.Assist;
-        set { Settings.Cs2AutoClip.Assist = value; OnPropertyChanged(); OnPropertyChanged(nameof(Cs2EventsSummary)); SaveSettings(); }
-    }
-
-    private bool _cs2CardExpanded;
-
-    public bool Cs2CardExpanded
-    {
-        get => _cs2CardExpanded;
-        set => SetProperty(ref _cs2CardExpanded, value);
-    }
-
-    private bool _cs2AllKillsExpanded;
-
-    public bool Cs2AllKillsExpanded
-    {
-        get => _cs2AllKillsExpanded;
-        set => SetProperty(ref _cs2AllKillsExpanded, value);
-    }
-
-    public string Cs2EventsSummary
-    {
-        get
-        {
-            var clip = Settings.Cs2AutoClip;
-            var selected = new[] { clip.Kill, clip.TwoKill, clip.ThreeKill, clip.FourKill, clip.Ace, clip.Headshot, clip.Death, clip.Assist }.Count(value => value);
-            return selected switch
-            {
-                0 => "No events selected",
-                8 => "All events selected",
-                _ => $"{selected} of 8 events selected"
-            };
         }
     }
 
@@ -3996,13 +3812,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsMicrophoneVolumeDefault =>
         Math.Abs(MicrophoneVolumePercent - AudioTrackProcessViewModel.DefaultVolumePercent) < 0.5;
 
-    // Mono/Stereo for the microphone track. Almost every headset and desk mic
-    // is a single capsule that Windows presents through a stereo mix format,
-    // so recording it as stereo just doubles the data - or, on drivers that
-    // only fill the left channel, puts the whole track in one ear. Stereo is
-    // here for the microphones that genuinely have two capsules.
-    public IReadOnlyList<string> MicrophoneChannelModes { get; } = new[] { "Mono", "Stereo" };
-
     public string MicrophoneChannelMode
     {
         get => Settings.MicrophoneChannelMode;
@@ -4716,12 +4525,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return spec.Timeline is null && spec.LegacyCard is null ? null : spec;
     }
 
-    public async Task<SpotifyOverlayAnimation?> PrepareSpotifyAnimationAsync(CancellationToken token)
-    {
-        var spec = CaptureSpotifyRenderSpec();
-        return spec is null ? null : await SpotifyOverlayAnimation.PrepareAsync(spec, token);
-    }
-
     /// <summary>What the captured overlays would burn as, or null when neither
     /// is showing. Reads the corrected manifest, never the sidecar directly.</summary>
     internal ClipOverlayBurnSpec? CaptureOverlayBurnSpec()
@@ -5174,10 +4977,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // before this deliberately bounded observable commit.
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                _restoredClipPaths.Clear();
+                var restoredClipPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var clip in models)
                 {
-                    if (!_restoredClipPaths.Add(clip.Path)) continue;
+                    if (!restoredClipPaths.Add(clip.Path)) continue;
                     AttachClip(clip);
                     AllClips.Add(clip);
                 }
@@ -5263,85 +5066,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task RestoreRemainingCachedClipsAsync(IReadOnlyList<CachedClipState> states, string root, CancellationToken cancellationToken)
-    {
-        const int batchSize = 8;
-        var cardArrivalDelay = TimeSpan.FromMilliseconds(32);
-        try
-        {
-            for (var offset = 0; offset < states.Count; offset += batchSize)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var rows = states.Skip(offset).Take(batchSize).ToArray();
-                var batch = await Task.Run(() => NormalizeCachedStates(rows), cancellationToken);
-
-                // An ItemsControl with a WrapPanel creates every card's visual
-                // tree, including cards outside the viewport. Adding a whole
-                // batch in one dispatcher turn starves native window moves and
-                // resizes. Drip cards in at roughly one per frame instead.
-                foreach (var state in batch)
-                {
-                    // Per card, not per batch. Realizing a card's visual tree is UI-thread
-                    // work, and a clip opened mid-restore is waiting on that same thread -
-                    // parking per batch would still let eight of these through first.
-                    await EditorForegroundWork.ParkWhileActiveAsync(cancellationToken);
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
-                        AddCachedClip(state);
-                    }, DispatcherPriority.Background);
-                    await Task.Delay(cardArrivalDelay, cancellationToken);
-                }
-
-                // These three are each O(every clip) and also run on the UI thread.
-                await EditorForegroundWork.ParkWhileActiveAsync(cancellationToken);
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
-                    ApplyGameFilters();
-                    ApplyClipTypeFilters();
-                    ApplySearchFilter();
-                }, DispatcherPriority.Background);
-            }
-
-            if (!cancellationToken.IsCancellationRequested && string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
-            {
-                NotifyLibraryChrome();
-                AppLog.Info($"Library cache: restore complete, {AllClips.Count} cards available before disk reconciliation.");
-                await RefreshLibraryAsync();
-                await PersistLibraryCacheSnapshotAsync();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Another library root superseded this cached snapshot.
-        }
-        finally
-        {
-            if (_cachedLibraryRestoreCts?.Token == cancellationToken)
-            {
-                _cachedLibraryRestoreCts.Dispose();
-                _cachedLibraryRestoreCts = null;
-                _isRestoringCachedLibrary = false;
-                _startupLibraryStates = Array.Empty<CachedClipState>();
-                _startupLibraryDateMarkers = Array.Empty<LibraryStartupDateMarker>();
-                _startupVisibleClipCount = 0;
-                _loadedVisibleLibraryTileCount = 0;
-                _loadedStartupClipCount = 0;
-                _startupLibraryIndexVersion++;
-                OnPropertyChanged(nameof(StartupLibraryIndexVersion));
-                OnPropertyChanged(nameof(LibraryLoadingTileCount));
-                OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
-                OnPropertyChanged(nameof(ShowLibraryLoadingTiles));
-                LibraryReservedContentHeight = 0;
-                _restoredClipPaths.Clear();
-                OnPropertyChanged(nameof(IsRestoringLibraryCache));
-                OnPropertyChanged(nameof(LibraryTitle));
-                RecomputeGameFilterBadges();
-            }
-        }
-    }
-
     // The disk-touching half of a cached-row restore, hoisted out so it can run
     // off the dispatcher (see its callers). Nothing here reads view-model state.
     private static CachedClipState[] NormalizeCachedStates(IReadOnlyList<CachedClipState> states)
@@ -5366,142 +5090,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return normalized;
     }
 
-    // Takes an already-normalized row (NormalizeCachedStates) - this half only
-    // builds the card and must stay cheap: it runs on the dispatcher, once per
-    // clip, for the whole cached library.
-    private void AddCachedClip(CachedClipState state)
-    {
-        // Set lookup, not a scan of AllClips per row - that made restoring a
-        // cached library quadratic in its own size, all of it on the UI thread,
-        // which is precisely the case (a big library, cold) this path exists
-        // to make fast.
-        if (!_restoredClipPaths.Add(state.Media.Path)) return;
-        var clip = new ClipCardViewModel(state, Settings.LibraryFolder);
-        AttachClip(clip);
-        AllClips.Add(clip);
-        // Cached cards intentionally arrive one at a time to keep first paint
-        // smooth. Keep the rail's usage figure and quota ring in step with the
-        // cards instead of leaving them stale until the restore finishes.
-        OnPropertyChanged(nameof(LibrarySizeDisplay));
-        NotifyStorageChrome();
-        if (_isRestoringCachedLibrary)
-        {
-            _loadedStartupClipCount++;
-            OnPropertyChanged(nameof(LibraryTitle));
-        }
-        if (clip.IsVisibleInLibrary)
-        {
-            _loadedVisibleLibraryTileCount++;
-            OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
-        }
-    }
-
-    // Called once MainWindow has measured a hidden real card. The reservation
-    // uses real card chrome, so it remains correct across display scaling and
-    // avoids a scrollbar thumb that shrinks as cached cards trickle in.
-    internal void CompleteInitialLibraryLayout(double measuredRowPitch, double surfaceTopInset, double surfaceHeight)
-    {
-        if (IsInitialLibraryLoadComplete || !HasStartupLibraryIndex) return;
-        if (double.IsFinite(measuredRowPitch) && measuredRowPitch > CardImageHeight)
-        {
-            _startupCardChromeHeight = measuredRowPitch - CardImageHeight;
-            OnPropertyChanged(nameof(LibraryLoadingRowPitch));
-        }
-        if (double.IsFinite(surfaceTopInset) && surfaceTopInset >= 0
-            && double.IsFinite(surfaceHeight) && surfaceHeight > CardImageHeight)
-        {
-            _startupCardSurfaceTopInset = surfaceTopInset;
-            _startupCardSurfaceChromeHeight = surfaceHeight - CardImageHeight;
-            OnPropertyChanged(nameof(LibraryLoadingTileTopInset));
-            OnPropertyChanged(nameof(LibraryLoadingTileHeight));
-        }
-
-        UpdateReservedLibraryExtent();
-        IsInitialLibraryLoadComplete = true;
-    }
-
-    private void RefreshStartupLibraryIndex()
-    {
-        if (!HasStartupLibraryIndex) return;
-
-        var visible = _startupLibraryStates.Where(IsStartupStateVisible).ToArray();
-        var countsByDate = visible
-            .GroupBy(state => state.Media.CreatedAt.ToLocalTime().Date)
-            .ToDictionary(group => group.Key, group => group.Count());
-        var seenDates = new HashSet<DateTime>();
-        var markers = new List<LibraryStartupDateMarker>();
-        for (var index = 0; index < visible.Length; index++)
-        {
-            var state = visible[index];
-            var localDate = state.Media.CreatedAt.ToLocalTime();
-            if (!seenDates.Add(localDate.Date)) continue;
-            var format = localDate.Year == DateTime.Now.Year ? "MMM d" : "MMM d, yyyy";
-            markers.Add(new LibraryStartupDateMarker(
-                localDate.ToString(format).ToUpperInvariant(),
-                index,
-                countsByDate[localDate.Date]));
-        }
-
-        UpdateLoadedVisibleLibraryTileCount();
-        if (_startupVisibleClipCount == visible.Length && _startupLibraryDateMarkers.SequenceEqual(markers)) return;
-        _startupVisibleClipCount = visible.Length;
-        _startupLibraryDateMarkers = markers;
-        _startupLibraryIndexVersion++;
-        OnPropertyChanged(nameof(StartupLibraryIndexVersion));
-        OnPropertyChanged(nameof(LibraryLoadingTileCount));
-        UpdateReservedLibraryExtent();
-    }
-
-    private void UpdateLoadedVisibleLibraryTileCount()
-    {
-        var count = AllClips.Count(clip => clip.IsVisibleInLibrary);
-        if (_loadedVisibleLibraryTileCount == count) return;
-        _loadedVisibleLibraryTileCount = count;
-        OnPropertyChanged(nameof(LoadedVisibleLibraryTileCount));
-    }
-
-    private void UpdateReservedLibraryExtent()
-    {
-        if (!HasStartupLibraryIndex || !IsInitialLibraryLoadComplete && AllClips.Count == 0) return;
-        var rows = (int)Math.Ceiling(_startupVisibleClipCount / (double)Math.Max(1, CardColumns));
-        LibraryReservedContentHeight = rows * StartupLibraryRowPitch;
-    }
-
-    private bool IsStartupStateVisible(CachedClipState state)
-    {
-        var game = CachedStateGameFilterKey(state);
-        if (_activeGameFilters.Count > 0 && !_activeGameFilters.Contains(game)) return false;
-        if (_activeClipTypeFilters.Count > 0 && !MatchesCachedClipTypeFilter(state)) return false;
-
-        var query = _librarySearchText.Trim();
-        return query.Length == 0 ||
-            state.Media.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-            game.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-            (state.ClipInfo?.FileTitle?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false) ||
-            (state.ClipInfo?.CustomTitle?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false);
-    }
-
     private static string CachedStateGameFilterKey(CachedClipState state) =>
         GameFilterResolver.Resolve(state.ClipInfo, state.Media.Name);
-
-    private bool MatchesCachedClipTypeFilter(CachedClipState state)
-    {
-        var isMedalImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey);
-        var isSteelSeriesImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.SteelSeriesImportKey);
-        var isAutoClip = !string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType);
-        if ((isMedalImport || isSteelSeriesImport) && _activeClipTypeFilters.Contains(ClipTypeImported)) return true;
-        if (isAutoClip && _activeClipTypeFilters.Contains(ClipTypeAutoClip)) return true;
-        if (isMedalImport || isSteelSeriesImport || isAutoClip) return false;
-        if (IsCachedStateVod(state)) return _activeClipTypeFilters.Contains(ClipTypeVod);
-        return _activeClipTypeFilters.Contains(ClipTypeManual);
-    }
-
-    // Paths already in AllClips during a cached restore pass. Live only for the
-    // duration of that pass (cleared at both ends); the watcher's own insert
-    // path feeds it too so a clip that lands mid-restore isn't then added a
-    // second time from the snapshot. RefreshLibraryAsync reconciles everything
-    // against the real folder afterwards regardless.
-    private readonly HashSet<string> _restoredClipPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private void AttachClip(ClipCardViewModel clip) => clip.PersistentStateChanged += Clip_OnPersistentStateChanged;
 
@@ -5525,7 +5115,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void MarkLibraryCacheDirty()
     {
-        if (_isRestoringCachedLibrary || string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return;
+        if (string.IsNullOrWhiteSpace(Settings.LibraryFolder)) return;
         _libraryCacheDirty = true;
         if (!_libraryCacheWriteTimer.IsEnabled) _libraryCacheWriteTimer.Start();
     }
@@ -5552,7 +5142,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public Task LoadLibraryFolderAsync(string folderPath)
     {
-        _cachedLibraryRestoreCts?.Cancel();
         _libraryCacheWriteTimer.Stop();
         _libraryCacheDirty = false;
         Settings.LibraryFolder = folderPath;
@@ -6187,60 +5776,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return inferredGame && title.Contains("MedalTV", StringComparison.OrdinalIgnoreCase) ? game : title;
     }
 
-    // One-time reorganization for clips saved before per-game subfolders
-    // existed: only files sitting directly in the library root (Medal imports
-    // and Full Sessions already live in their own subfolders and are left
-    // alone). Reuses ClipCardViewModel's own game-name resolution (auto-clip
-    // sidecar's GameDisplayName, or the filename-parsed name otherwise) so the
-    // destination folder always matches what the game filter dropdown groups
-    // by. Sidecars (edit state, clip info, paused ranges) move along with the
-    // video; a name collision at the destination just leaves that one file
-    // where it was instead of overwriting anything.
-    private void MigrateFlatClipsIntoGameFolders()
-    {
-        var libraryFolder = Settings.LibraryFolder;
-        if (string.IsNullOrWhiteSpace(libraryFolder) || !Directory.Exists(libraryFolder)) return;
-
-        string[] topLevelVideos;
-        try
-        {
-            topLevelVideos = Directory.EnumerateFiles(libraryFolder, "*.*", SearchOption.TopDirectoryOnly)
-                .Where(MediaProbeService.IsVideoFile)
-                .ToArray();
-        }
-        catch (Exception error)
-        {
-            AppLog.Error("Clip game-folder migration: failed listing library folder.", error);
-            return;
-        }
-
-        var moved = 0;
-        foreach (var videoPath in topLevelVideos)
-        {
-            try
-            {
-                var card = new ClipCardViewModel(_mediaProbe.CreateLibraryStub(videoPath), Settings.LibraryFolder);
-                var gameFolderName = ClipFileNaming.BuildBaseName(card.GameFilterKey);
-                if (string.IsNullOrWhiteSpace(gameFolderName)) continue;
-
-                var destinationDir = Path.Combine(libraryFolder, gameFolderName);
-                var destinationPath = Path.Combine(destinationDir, Path.GetFileName(videoPath));
-                if (File.Exists(destinationPath)) continue;
-
-                Directory.CreateDirectory(destinationDir);
-                File.Move(videoPath, destinationPath);
-                MoveClipSidecars(videoPath, destinationPath);
-                moved++;
-            }
-            catch (Exception error)
-            {
-                AppLog.Error($"Clip game-folder migration: failed moving {videoPath}", error);
-            }
-        }
-
-        if (moved > 0) AppLog.Info($"Clip game-folder migration: moved {moved} clip(s) into per-game folders.");
-    }
-
     private void MoveClipSidecars(string oldVideoPath, string newVideoPath)
     {
         LibraryLayout.MoveSidecars(Settings.LibraryFolder, oldVideoPath, newVideoPath);
@@ -6258,8 +5793,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var insertIndex = FindSortedClipIndex(AllClips, clip);
         AttachClip(clip);
         AllClips.Insert(insertIndex, clip);
-        // No-op outside a cached restore - see _restoredClipPaths.
-        _restoredClipPaths.Add(clip.Path);
         MarkLibraryCacheDirty();
     }
 
@@ -6433,9 +5966,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         try { _gameIconSweepCts?.Cancel(); } catch (ObjectDisposedException) { }
         _gameIconSweepCts?.Dispose();
         _gameIconSweepCts = null;
-        _cachedLibraryRestoreCts?.Cancel();
-        _cachedLibraryRestoreCts?.Dispose();
-        _cachedLibraryRestoreCts = null;
         CancelLibraryHydration();
         _backgroundFilmstripCts?.Cancel();
         _backgroundFilmstripCts?.Dispose();
@@ -6454,18 +5984,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         _libraryWatcher?.Dispose();
         _libraryWatcher = null;
-    }
-
-    public Task OpenVideoFileAsync(string filePath)
-    {
-        if (SpotifyProcessingPaths.IsProcessing(filePath)) return Task.CompletedTask;
-        // Library hydration deliberately keeps running in the background here
-        // - opening a clip shouldn't stop the rest of the library from
-        // filling in behind it. Only closing ClypDat (Dispose) should stop it.
-        var media = _mediaProbe.CreateLibraryStub(filePath);
-        OpenMedia(media);
-        _ = HydrateSelectedMediaAsync(filePath);
-        return Task.CompletedTask;
     }
 
     // Returns whether the clip actually opened - OpenClipCardAsync (the click
@@ -6554,7 +6072,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (columnsChanged) RebuildLibraryProjection();
         OnPropertyChanged(nameof(LibraryLoadingRowPitch));
         OnPropertyChanged(nameof(LibraryLoadingTileHeight));
-        if (HasStartupLibraryIndex) UpdateReservedLibraryExtent();
         // Thumbnails decode to whatever the cards are now, not to the source's
         // full 960px - see ClipCardViewModel.SetPreviewDecodeWidth.
         ClipCardViewModel.SetPreviewDecodeWidth(layout.Width, _cardRenderScaling);
@@ -7419,7 +6936,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         AddIgnoredGameExecutable(row.ExecutableName);
     }
 
-
     // ---- Custom Game Settings -------------------------------------------
     // Per-game overrides of the recording settings. The tab strip is the added
     // games; the panel below it belongs to whichever tab is selected.
@@ -7492,21 +7008,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (Settings.SpotifyOverlayDynamicBackground == value) return;
             Settings.SpotifyOverlayDynamicBackground = value;
-            SaveSettings();
-            OnPropertyChanged();
-            RaiseSpotifyOverlayPreviewChanged();
-        }
-    }
-
-    private string _selectedSpotifyOverlayPosition = string.Empty;
-    public string SelectedSpotifyOverlayPosition
-    {
-        get => _selectedSpotifyOverlayPosition;
-        set
-        {
-            if (string.IsNullOrWhiteSpace(value) || value == _selectedSpotifyOverlayPosition) return;
-            _selectedSpotifyOverlayPosition = value;
-            Settings.SpotifyOverlayPosition = value;
             SaveSettings();
             OnPropertyChanged();
             RaiseSpotifyOverlayPreviewChanged();
@@ -7949,21 +7450,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return XboxActivityForDesktop && !string.IsNullOrWhiteSpace(EffectiveXboxSnapshot.CurrentTitle)
             ? EffectiveXboxSnapshot.CurrentTitle!
             : fallback;
-    }
-    public async Task LinkXboxAsync()
-    {
-        if (await _xboxActivity.ConnectAsync().ConfigureAwait(false))
-        {
-            Settings.XboxActivityEnabled = true;
-            SaveSettings();
-            OnPropertyChanged(nameof(XboxActivityForDesktop));
-            UpdateDiscordPresence();
-        }
-    }
-    public void UnlinkXbox()
-    {
-        _xboxActivity.Disconnect();
-        _clypDatAccount.Disconnect();
     }
 
     public async Task LinkClypDatAccountAsync()
@@ -8421,8 +7907,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             ApplyDiscordSettings();
         }
     }
-
-
 
     /// <summary>
     /// False when the game in the foreground has its Recording Mode set to
@@ -9437,8 +8921,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (SpotifyProcessingPaths.IsProcessing(media.Path)) return;
         ResetVideoZoom();
         // Answered BEFORE SelectedVideoPath is overwritten one line down.
-        // HydrateSelectedMediaAsync, HydrateOpenClipAsync and
-        // AddOrUpdateLibraryClipAsync all re-enter here for the clip that is
+        // AddOrUpdateLibraryClipAsync re-enters here for the clip that is
         // ALREADY open, and rebuilding the lanes below throws away peaks that
         // are already painted - so a waveform that had finished drawing visibly
         // blanked and refilled for no reason the user could see.
@@ -9463,7 +8946,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Nothing else ever clears this flag, so the two calls that DON'T lead
         // to one were each raising a placeholder with no way back down:
         // PrepareClipForShare (showEditor: false) left it set for the rest of
-        // the session, and the re-open from HydrateSelectedMediaAsync
+        // the session, and the re-open after library metadata hydration
         // (preserveEditorText: true) dropped it back over video that was
         // already playing.
         if (showEditor && !preserveEditorText) IsEditorVideoLoading = true;
@@ -9750,10 +9233,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryPossibleClipsDisplay));
         NotifyStorageChrome();
         NotifySelectionChrome();
-        // Cached library data already supplied exact game counts before cards
-        // began arriving. Rebuilding this for each trickled-in card would
-        // replace that complete sidebar with a partial one until restore ends.
-        if (!_isRestoringCachedLibrary) RecomputeGameFilterBadges();
+        RecomputeGameFilterBadges();
         UpdateFirstOfDateFlags();
         RebuildLibraryProjection();
     }
@@ -10667,7 +10147,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (gameKey is not null) _activeGameFilters.Add(gameKey);
         foreach (var option in GameFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, gameKey, StringComparison.OrdinalIgnoreCase));
         ApplyGameFilters();
-        OnPropertyChanged(nameof(LibraryReservedContentHeight));
 
         // Not combined: only one filter is ever active, game or clip-type -
         // this must clear the other side whether gameKey is a real game
@@ -10696,7 +10175,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (key is not null) _activeClipTypeFilters.Add(key);
         foreach (var option in ClipTypeFilterOptions) option.SetCheckedSilently(string.Equals(option.Key, key, StringComparison.OrdinalIgnoreCase));
         ApplyClipTypeFilters();
-        OnPropertyChanged(nameof(LibraryReservedContentHeight));
 
         // Same reasoning as SelectGameSection's own clear-the-other-side
         // block - "All Clips" (key null) must clear an active game filter
@@ -10736,7 +10214,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RestoreAllLibraryFilterMatches();
         UpdateFirstOfDateFlags();
         UpdateDaySelectionStates();
-        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         // The grid renders LibraryRows, NOT the per-clip match flags -
         // LibraryGridProjection.Build is what reads IsVisibleInLibrary, and
         // nothing re-runs it on its own. ApplyGameFilters, ApplyClipTypeFilters
@@ -10749,7 +10226,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsClipTypeFilterActive));
         OnPropertyChanged(nameof(IsAllClipsActive));
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
-        OnPropertyChanged(nameof(LibraryReservedContentHeight));
         OnPropertyChanged(nameof(LibraryTitle));
         var visible = AllClips.Count(clip => clip.IsVisibleInLibrary);
         AppLog.Info($"Library filters reset complete: {visible}/{AllClips.Count} clips visible.");
@@ -10817,9 +10293,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         UpdateFirstOfDateFlags();
         UpdateDaySelectionStates();
-        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
-        OnPropertyChanged(nameof(LibraryReservedContentHeight));
         RebuildLibraryProjection();
     }
 
@@ -10830,9 +10304,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
         }
         UpdateFirstOfDateFlags();
-        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
-        OnPropertyChanged(nameof(LibraryReservedContentHeight));
         RebuildLibraryProjection();
     }
 
@@ -10909,8 +10381,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (!SetProperty(ref _librarySearchText, value)) return;
             ApplySearchFilter();
-            OnPropertyChanged(nameof(LibraryReservedContentHeight));
-            if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
             OnPropertyChanged(nameof(LibraryTitle));
             OnPropertyChanged(nameof(IsAllClipsActive));
         }
@@ -10924,7 +10394,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             clip.IsMatchedBySearch = query.Length == 0 || MatchesSearch(clip, query);
         }
         UpdateFirstOfDateFlags();
-        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
         OnPropertyChanged(nameof(IsLibraryHeaderSelected));
         RebuildLibraryProjection();
     }
@@ -11510,50 +10979,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         catch
         {
             // Missing waveforms should not block editing.
-        }
-    }
-
-    private async Task HydrateOpenClipAsync(ClipCardViewModel clip)
-    {
-        try
-        {
-            var media = await _mediaProbe.ProbeAsync(clip.Path);
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                clip.UpdateMedia(media);
-                // Guarded on IsEditorVisible too - AddOrUpdateLibraryClipAsync also
-                // calls this after the editor closes (to refresh the library card),
-                // and SelectedVideoPath still points at that clip at that point.
-                // Without the guard, OpenMedia's unconditional IsEditorVisible = true
-                // would pop the editor back open right after the user closed it.
-                if (IsEditorVisible && string.Equals(SelectedVideoPath, clip.Path, StringComparison.OrdinalIgnoreCase))
-                {
-                    OpenMedia(media, preserveEditorText: true);
-                }
-            });
-        }
-        catch
-        {
-            // Card stubs are enough to keep editor responsive when probe fails.
-        }
-    }
-
-    private async Task HydrateSelectedMediaAsync(string filePath)
-    {
-        try
-        {
-            var media = await _mediaProbe.ProbeAsync(filePath);
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                if (string.Equals(SelectedVideoPath, filePath, StringComparison.OrdinalIgnoreCase))
-                {
-                    OpenMedia(media, preserveEditorText: true);
-                }
-            });
-        }
-        catch
-        {
-            // File can still play even when metadata/thumbnail generation fails.
         }
     }
 

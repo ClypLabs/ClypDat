@@ -9,7 +9,6 @@ public sealed class TrackLaneViewModel : ViewModelBase
 {
     public const double StandardAudioLaneHeight = 66;
     public const double CompactAudioLaneHeight = 48;
-    public const double CompactAudioLaneHeightReduction = StandardAudioLaneHeight - CompactAudioLaneHeight;
 
     private double _volumePercent = 100;
     private double _volumeBadgeX = 46;
@@ -104,7 +103,6 @@ public sealed class TrackLaneViewModel : ViewModelBase
     public int LabelRowSpan => IsVideo || IsOverlay ? 2 : 1;
     public string VolumeLabel => $"{VolumePercent:0}%";
     public Thickness VolumeBadgeMargin => new(VolumeBadgeX, -8, 0, 0);
-    public string HeaderClass => IsAudio ? "audioHeader" : "videoHeader";
 
     public bool IsLastAudioTrack
     {

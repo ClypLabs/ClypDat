@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using ClypDat.Capture.Abstractions;
 using Microsoft.Win32.SafeHandles;
@@ -111,7 +110,7 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
         public readonly OverlayCall Overlay = Export<OverlayCall>("overlay");
         public readonly ArtworkCall Artwork = Export<ArtworkCall>("artwork");
         public readonly KeysCall Keys = Export<KeysCall>("keys");
-        public readonly FrameCall Detector = Export<FrameCall>("detector_copy"), Camera = Export<FrameCall>("camera_copy");
+        public readonly FrameCall Camera = Export<FrameCall>("camera_copy");
         public readonly RegionsCall Regions = Export<RegionsCall>("detector_regions");
         public readonly DetectorSetCall DetectorSet = Export<DetectorSetCall>("detector_set");
         public readonly DetectorReadCall DetectorRead = Export<DetectorReadCall>("detector_read");
@@ -271,14 +270,6 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
     {
         fixed (Rectangle* r = regions, m = masks) Check(Api.Value.Regions(handle, r, (uint)regions.Length, m, (uint)masks.Length, (uint)width, (uint)height), "update native detector regions");
         GC.KeepAlive(this);
-    }
-    internal (Frame Value, byte[] Pixels)? DetectorFrame()
-    {
-        var value = new Frame { Header = Version<Frame>() }; var result = Api.Value.Detector(handle, &value);
-        if (result == -5) { GC.KeepAlive(this); return null; }
-        if (result != -6) Check(result, "read native detector frame"); var bytes = Buffer(value.Pixels.Required);
-        fixed (byte* data = bytes) { value.Pixels.Data = data; value.Pixels.Capacity = (uint)bytes.Length; Check(Api.Value.Detector(handle, &value), "copy native detector frame"); }
-        GC.KeepAlive(this); return (value, bytes);
     }
     internal void ConfigureDetector(DetectorRegionSet? regions)
     {

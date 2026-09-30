@@ -27,7 +27,3 @@ internal sealed class CameraPreviewFrame : IDisposable
 }
 
 internal sealed record CameraPreviewFailure(int Session, string Message);
-internal sealed record CameraPreviewMode(int Width, int Height, double FramesPerSecond, string Format, bool IsCompressed)
-{
-    public override string ToString() => $"{Width}x{Height} {Format} {FramesPerSecond:0.###} FPS";
-}

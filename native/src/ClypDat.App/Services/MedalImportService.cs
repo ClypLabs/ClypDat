@@ -304,11 +304,6 @@ public static class MedalImportService
         return Regex.Replace(compactName, @"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ").Trim();
     }
 
-    internal static bool TryParseRawFilenameTimestamp(string fileNameWithoutExtension, out DateTime localTimestamp)
-    {
-        return TryResolveGameFromFileName(fileNameWithoutExtension, out _, out localTimestamp);
-    }
-
     // Only safe to swap in the plain game-folder name when the filename's
     // middle segment IS just the game's own name with the spaces/punctuation
     // stripped (Medal's default, uninformative export name). If it's anything

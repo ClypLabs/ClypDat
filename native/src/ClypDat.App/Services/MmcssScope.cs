@@ -43,8 +43,6 @@ internal readonly struct MmcssScope : IDisposable
     // on this hardware.
     public static MmcssScope Capture(string context) => Register("Capture", context);
 
-    public static MmcssScope ProAudio(string context) => Register("Pro Audio", context);
-
     private static MmcssScope Register(string taskName, string context)
     {
         try

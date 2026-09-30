@@ -75,18 +75,3 @@ public sealed class SpotifyOverlayAnimation : IDisposable
         finally { if (renderer is not null) await Dispatcher.UIThread.InvokeAsync(renderer.Dispose); }
     }
 }
-
-internal sealed class SpotifyAnimationCache(SpotifyRenderSpec? spec) : IDisposable
-{
-    private readonly Dictionary<(int, int), SpotifyOverlayAnimation> _animations = new();
-    public SpotifyRenderSpec? Spec { get; } = spec;
-    public async Task<SpotifyOverlayAnimation?> GetAsync(int width, int height, CancellationToken token)
-    {
-        if (Spec is null) return null;
-        if (_animations.TryGetValue((width, height), out var animation)) return animation;
-        animation = await SpotifyOverlayAnimation.PrepareAsync(Spec with { Width = width, Height = height }, token);
-        _animations.Add((width, height), animation);
-        return animation;
-    }
-    public void Dispose() { foreach (var animation in _animations.Values) animation.Dispose(); }
-}

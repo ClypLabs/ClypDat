@@ -39,26 +39,6 @@ internal static class CustomGameSettingsResolver
     public const string FullSessionMode = "FullSession";
     public const string OffMode = "Off";
 
-    public static string GroupDisplayName(string group) => group switch
-    {
-        RecordingModeGroup => "Recording Mode",
-        QualityGroup => "Recording Quality",
-        ReplayGroup => "Replay Length",
-        AudioGroup => "Audio",
-        OverlaysGroup => "Video Overlays",
-        _ => group
-    };
-
-    public static string GroupDescription(string group) => group switch
-    {
-        RecordingModeGroup => "Whether this game records by hotkey, records whole sessions, or is not recorded.",
-        QualityGroup => "Codec, encoder, bitrate, frame rate and resolution cap for this game.",
-        ReplayGroup => "How much of this game the replay buffer keeps.",
-        AudioGroup => "Game and microphone levels, and microphone noise suppression.",
-        OverlaysGroup => "Camera, keyboard layout and overlay placement for this game.",
-        _ => string.Empty
-    };
-
     /// <summary>
     /// The profile that applies to a detection key, or null when the game has
     /// none. Callers should treat null as "use the global settings".

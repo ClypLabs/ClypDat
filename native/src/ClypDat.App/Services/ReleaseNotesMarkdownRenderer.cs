@@ -23,13 +23,6 @@ internal static class ReleaseNotesMarkdownRenderer
 
     private static readonly IBrush LinkBrush = Brush.Parse("#71D7FF");
 
-    internal static TextBlock CreateTextBlock(string markdown)
-    {
-        var textBlock = new TextBlock();
-        Apply(textBlock, markdown);
-        return textBlock;
-    }
-
     // allowLink narrows which links become clickable (the Notice Board passes its
     // host allow-list); anything it rejects renders as plain text.
     internal static void Apply(TextBlock textBlock, string? markdown, Func<Uri, bool>? allowLink = null)

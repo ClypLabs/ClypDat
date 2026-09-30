@@ -41,44 +41,6 @@ public static class TimedEffectPainter
     public static Color ParseColour(string? value, Color fallback) => Color.TryParse(value, out var colour) ? colour : fallback;
 
     /// <summary>
-    /// How far to shrink a buffer before blurring it with sigma
-    /// <paramref name="sigmaPixels"/>: the blur then runs at about three pixels of
-    /// sigma, where a gaussian drawn back up at display size is indistinguishable
-    /// from one computed at full size, on a buffer k² times smaller.
-    /// </summary>
-    public static int WorkingFactor(double sigmaPixels) => Math.Max(1, (int)Math.Floor(sigmaPixels / 3));
-
-    /// <summary>Averages each k×k block into one pixel. Partial blocks at the
-    /// right and bottom average whatever pixels they have.</summary>
-    public static (byte[] Pixels, int Width, int Height) Downsample(byte[] bgra, int width, int height, int factor)
-    {
-        if (factor <= 1) return (bgra, width, height);
-        var w = (width + factor - 1) / factor;
-        var h = (height + factor - 1) / factor;
-        var result = new byte[w * h * 4];
-        for (var y = 0; y < h; y++)
-        {
-            var y0 = y * factor;
-            var y1 = Math.Min(height, y0 + factor);
-            for (var x = 0; x < w; x++)
-            {
-                var x0 = x * factor;
-                var x1 = Math.Min(width, x0 + factor);
-                int b = 0, g = 0, r = 0, a = 0;
-                for (var sy = y0; sy < y1; sy++)
-                {
-                    var i = (sy * width + x0) * 4;
-                    for (var sx = x0; sx < x1; sx++, i += 4) { b += bgra[i]; g += bgra[i + 1]; r += bgra[i + 2]; a += bgra[i + 3]; }
-                }
-                var count = (y1 - y0) * (x1 - x0);
-                var o = (y * w + x) * 4;
-                result[o] = (byte)(b / count); result[o + 1] = (byte)(g / count); result[o + 2] = (byte)(r / count); result[o + 3] = (byte)(a / count);
-            }
-        }
-        return (result, w, h);
-    }
-
-    /// <summary>
     /// Gaussian blur of a whole BGRA buffer, in place, as three box passes.
     /// Edges clamp; callers pass a buffer already padded with the picture
     /// around the region, so the clamp only ever touches pixels that get cut off.

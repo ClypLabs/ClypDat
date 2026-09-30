@@ -4,7 +4,6 @@ namespace ClypDat.App.Services;
 
 internal sealed class EditorSeekCoordinator
 {
-    internal static readonly TimeSpan PositionTolerance = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan AudioReadyBudget = TimeSpan.FromMilliseconds(75);
     private readonly TimeSpan _pollInterval;
     private readonly TimeSpan _attemptTimeout;

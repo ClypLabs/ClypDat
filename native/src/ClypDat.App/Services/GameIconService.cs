@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
@@ -311,29 +310,6 @@ public static class GameIconService
         }
 
         return await ResolveSteamAppIconAsync(client, displayName, cancellationToken);
-    }
-
-    // Discord Rich Presence accepts HTTPS image URLs. Reuse the same curated
-    // and Steam-resolution path as the Library, but do not touch its bitmap
-    // cache because Discord fetches the image itself.
-    public static async Task<string?> ResolveExternalIconUrlAsync(string displayName, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(displayName)) return null;
-
-        try
-        {
-            var url = await ResolveIconUrlAsync(Http, displayName, cancellationToken).ConfigureAwait(false);
-            return !string.IsNullOrWhiteSpace(url) && IsAllowedIconUrl(url) ? url : null;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception error)
-        {
-            AppLog.Error($"Discord game-art lookup failed for '{displayName}' (non-fatal)", error);
-            return null;
-        }
     }
 
     // Steam's own app icon - the same square artwork Steam puts on a desktop

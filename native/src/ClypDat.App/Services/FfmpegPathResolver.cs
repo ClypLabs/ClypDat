@@ -88,9 +88,6 @@ public static class FfmpegPathResolver
     /// <summary>Builds a ProcessStartInfo for the bundled ffmpeg, pinned to an absolute path and a fixed working directory.</summary>
     public static ProcessStartInfo Ffmpeg() => Create(FfmpegPath, "ffmpeg");
 
-    /// <summary>Builds a ProcessStartInfo for the bundled ffprobe, pinned to an absolute path and a fixed working directory.</summary>
-    public static ProcessStartInfo Ffprobe() => Create(FfprobePath, "ffprobe");
-
     private static ProcessStartInfo Create(string exePath, string name)
     {
         if (exePath.Length == 0)

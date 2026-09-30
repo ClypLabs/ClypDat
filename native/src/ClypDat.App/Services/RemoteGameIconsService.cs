@@ -1,4 +1,3 @@
-using System.Net.Http;
 using System.Text.Json;
 
 namespace ClypDat.App.Services;

@@ -37,18 +37,15 @@ public enum TemplateScoring
 /// frequencies from both sides drops those same false matches to 0.116 while
 /// real banners stay at 0.305 and above, and every one of 15 hand-labelled
 /// banner frames then picks its own template. Detail is what a small capture
-/// loses first, so the margin narrows going DOWN but not up - see
-/// <c>IsSupportedDetectorResolution</c> in NativeReplayBuffer for the floor and
-/// the per-resolution minimum size policy.
+/// loses first, so the margin narrows going DOWN but not up. The native detector
+/// configuration sets the minimum supported capture and region sizes.
 ///
 /// Note the order in <see cref="Score"/>: resample first, filter second. The
 /// blur radius is in template pixels, so filtering before the resample would
 /// give the cutoff a different meaning on every capture size.
 ///
-/// <see cref="FixedRegionTemplateMatcher"/> does the same maths against image
-/// files on disk; this one works on the in-memory crops the detector pipeline
-/// actually carries, and rescales so a template captured at 1080p still matches
-/// a 1440p capture.
+/// Works on the in-memory crops the detector pipeline carries, and rescales so
+/// a template captured at 1080p still matches a 1440p capture.
 /// </summary>
 public sealed class GrayTemplateMatcher
 {

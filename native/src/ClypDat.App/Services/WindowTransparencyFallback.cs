@@ -1,4 +1,3 @@
-using System;
 using System.Runtime.CompilerServices;
 using Avalonia.Controls;
 using Avalonia.Media;

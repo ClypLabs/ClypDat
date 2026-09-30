@@ -1,6 +1,5 @@
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace ClypDat.App.Services;
 
@@ -218,9 +217,6 @@ internal static class NoticeBoardRules
             .Where(notice => notice.IsCritical ? !acknowledged.Contains(notice.Id) : !seen.Contains(notice.Id))
             .ToList();
     }
-
-    public static bool HasUnread(IReadOnlyList<Notice> applicable, IEnumerable<string> seenIds, IEnumerable<string> acknowledgedIds) =>
-        ToShow(applicable, seenIds, acknowledgedIds).Count > 0;
 
     /// <summary>Info and critical notices interrupt a session once; features wait until launch.</summary>
     public static IReadOnlyList<Notice> ToShowDuringSession(IReadOnlyList<Notice> applicable,

@@ -4,7 +4,6 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Media.Fonts;
-using Avalonia.Platform;
 using Avalonia.Threading;
 using System.Diagnostics;
 using ClypDat.App.Services;

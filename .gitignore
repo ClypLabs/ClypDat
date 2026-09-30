@@ -11,9 +11,6 @@ native/capture-native/build/
 *.user
 *.suo
 native/vendor/*
-!native/vendor/obs-runtime/
-!native/vendor/obs-runtime/bin/
-!native/vendor/obs-runtime/bin/**
 !native/vendor/ffmpeg/
 
 # Build output

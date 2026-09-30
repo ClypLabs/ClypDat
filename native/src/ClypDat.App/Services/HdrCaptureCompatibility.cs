@@ -1,58 +1,11 @@
-using ClypDat.Capture.Abstractions;
 using System.Runtime.InteropServices;
-using Vortice.Direct3D11;
-using Vortice.DXGI;
 
 namespace ClypDat.App.Services;
 
-// DisplayConfig is the live source for HDR state and SDR white level: DXGI
-// caches output descriptions per factory, so Output6's colour space stays at
-// whatever it was when capture started. Keep this small and independent from
-// capture so a display move/HDR toggle can be sampled with the recorder's
-// existing one-second target check.
+// Reads live DisplayConfig support for the HDR settings label. The native
+// recorder owns capture colour conversion and its display profile.
 internal static class HdrCaptureCompatibility
 {
-    private static nint _lastFallbackMonitor;
-    private static string? _lastLoggedState;
-    internal readonly record struct DisplayProfile(bool IsHdr, float SdrWhiteLevelNits, float PeakLuminanceNits)
-    {
-        public static DisplayProfile Unknown => new(false, 80, 1000);
-    }
-
-    public static DisplayProfile GetDisplayProfile(ID3D11Device device, nint monitor)
-    {
-        var colourAvailable = TryGetDisplayConfigColour(monitor, out var detectedWhite, out var hdrEnabled, out _);
-        var white = colourAvailable ? detectedWhite : 80f;
-        if (colourAvailable)
-        {
-            var state = $"{monitor}|{hdrEnabled}|{white:0}";
-            if (Interlocked.Exchange(ref _lastLoggedState, state) != state)
-                AppLog.Info($"Native capture: Windows HDR {(hdrEnabled ? "on" : "off")} (monitor 0x{monitor:x}), SDR white {white:0} nits.");
-        }
-        else if (Interlocked.Exchange(ref _lastFallbackMonitor, monitor) != monitor)
-            AppLog.Info("Native capture: DisplayConfig HDR state unavailable; using DXGI colour space and assuming 80-nit SDR white.");
-        try
-        {
-            using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
-            using var adapter = dxgiDevice.GetParent<IDXGIAdapter>();
-            for (uint index = 0; ; index++)
-            {
-                var result = adapter.EnumOutputs(index, out var output);
-                if (result.Failure) break;
-                using (output)
-                {
-                    if (output.Description.Monitor != monitor) continue;
-                    using var output6 = output.QueryInterface<IDXGIOutput6>();
-                    var description = output6.Description1;
-                    var peak = description.MaxLuminance <= 0 ? 1000f : description.MaxLuminance;
-                    if (description.MaxLuminance <= 0) AppLog.Info("Native capture: HDR peak luminance unavailable; assuming 1000 nits.");
-                    return new DisplayProfile(colourAvailable ? hdrEnabled : IsHdrColorSpace(description.ColorSpace), white, peak);
-                }
-            }
-        }
-        catch { }
-        return colourAvailable ? new DisplayProfile(hdrEnabled, white, 1000) : DisplayProfile.Unknown;
-    }
 
     // DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO bits: 0x1 supported, 0x2 enabled,
     // 0x4 wideColorEnforced (SDR Auto Color Management, not HDR).
@@ -147,23 +100,5 @@ internal static class HdrCaptureCompatibility
     [StructLayout(LayoutKind.Sequential)] internal struct DisplayConfigSdrWhiteLevel { public DisplayConfigDeviceInfoHeader Header; public uint SdrWhiteLevel; }
     [StructLayout(LayoutKind.Sequential)] internal struct DisplayConfigAdvancedColorInfo { public DisplayConfigDeviceInfoHeader Header; public uint Value, ColorEncoding, BitsPerColorChannel; }
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] private struct MonitorInfoEx { public uint Size; public Vortice.RawRect Monitor, Work; public uint Flags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName; }
-
-    public static ReplayHdrCompatibilityStatus Detect(ID3D11Device device, nint monitor)
-    {
-        var profile = GetDisplayProfile(device, monitor);
-        return profile.IsHdr ? ReplayHdrCompatibilityStatus.PreparingConversion : ReplayHdrCompatibilityStatus.SdrDisplay;
-    }
-
-    // Windows desktop HDR commonly exposes linear scRGB (G10) rather than
-    // PQ/HDR10. Both carry HDR headroom and require SDR conversion before the
-    // existing BT.709 encoder path.
-    internal static bool IsHdrColorSpace(ColorSpaceType colorSpace) => (int)colorSpace switch
-    {
-        1 => true, // RGB_FULL_G10_NONE_P709 (scRGB)
-        12 or 13 or 14 or 16 => true, // ST.2084/PQ
-        18 or 19 => true, // HLG
-        25 => true, // RGB_FULL_G10_NONE_P2020
-        _ => false
-    };
 
 }

@@ -4,7 +4,6 @@ using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Rendering.Composition;
 using Avalonia.Rendering.Composition.Animations;
-using Avalonia.VisualTree;
 using System.Numerics;
 
 namespace ClypDat.App.Controls;

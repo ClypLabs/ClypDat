@@ -510,7 +510,6 @@ public sealed partial class MainWindow : Window
                     {
                         StartLibraryReturnTiming("Settings");
                     }
-                    if (e.PropertyName == nameof(MainWindowViewModel.StartupLibraryIndexVersion)) QueueDateScrubberRebuild();
                     if (e.PropertyName == nameof(MainWindowViewModel.LibraryProjection))
                     {
                         UpdateRealizedLibraryClips();
@@ -1289,15 +1288,6 @@ public sealed partial class MainWindow : Window
             try { await worker.ShutdownWorkerAsync(); }
             catch (Exception error) { AppLog.Info($"Capture worker shutdown failed: {error.Message}"); }
         }
-    }
-
-    private async void ResetLibraryFolderButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        var path = DefaultLibraryFolder();
-        Directory.CreateDirectory(path);
-        LibraryLayout.EnsureRoots(path);
-        await ViewModel.LoadLibraryFolderAsync(path);
     }
 
     // Shared by the sidebar's "All Games"/per-game buttons - the "All"
@@ -2199,9 +2189,6 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    private void LibraryCardPanel_OnMetricsChanged(object? sender, LibraryCardLayout layout) =>
-        ViewModel?.UpdateCardLayout(layout);
-
     private void QueueLibraryLayoutUpdate()
     {
         if (_libraryLayoutUpdateQueued) return;
@@ -2555,23 +2542,8 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
 
-        // Called only by relevant container/layout events. Both halves are
-        // one-shot, so later calls bail before walking realized visuals.
+        // Called only by relevant container/layout events. Reveal is one-shot.
         if (ViewModel.IsInitialLibraryLoadComplete && ViewModel.IsLibraryFirstViewportRendered) return;
-
-        var container = LibraryItemsControl.GetRealizedContainers()?
-            .FirstOrDefault(control => control.DataContext is ClipCardViewModel or LibraryGridRow && control.Bounds.Height > 0);
-        if (container is not null)
-        {
-            var cardSurface = container.GetVisualDescendants()
-                .OfType<Border>()
-                .FirstOrDefault(border => border.Name == "LibraryClipCardSurface" && border.Bounds.Height > 0);
-            var surfaceTop = cardSurface?.TranslatePoint(default, container)?.Y ?? 0;
-            if (!ViewModel.IsInitialLibraryLoadComplete && ViewModel.HasStartupLibraryIndex)
-            {
-                ViewModel.CompleteInitialLibraryLayout(container.Bounds.Height, surfaceTop, cardSurface?.Bounds.Height ?? 0);
-            }
-        }
 
         // Container bookkeeping can precede measured bounds by one dispatcher
         // turn. Layout completion must not become a splash timeout.
@@ -3828,17 +3800,6 @@ public sealed partial class MainWindow : Window
         if (bytes >= 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.##} MB";
         if (bytes >= 1024) return $"{bytes / 1024.0:0.##} KB";
         return $"{bytes} B";
-    }
-
-    private static string FormatTimeAgo(DateTimeOffset createdAt)
-    {
-        var elapsed = DateTimeOffset.UtcNow - createdAt.ToUniversalTime();
-        if (elapsed < TimeSpan.FromSeconds(60)) return "A FEW SECONDS AGO";
-        if (elapsed < TimeSpan.FromMinutes(2)) return "A MINUTE AGO";
-        if (elapsed < TimeSpan.FromHours(1)) return $"{(int)elapsed.TotalMinutes} MINUTES AGO";
-        if (elapsed < TimeSpan.FromHours(2)) return "AN HOUR AGO";
-        if (elapsed < TimeSpan.FromDays(1)) return $"{(int)elapsed.TotalHours} HOURS AGO";
-        return $"{(int)elapsed.TotalDays} DAYS AGO";
     }
 
     private Border BuildNewClipCard(NewClipEntryViewModel entry, double previewHeight)
@@ -5948,7 +5909,6 @@ public sealed partial class MainWindow : Window
         await ViewModel.RefreshOpenProcessesAsync();
     }
 
-
     internal void ClearSettingsSearchButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not null) ViewModel.SettingsSearchText = string.Empty;
@@ -6037,16 +5997,6 @@ public sealed partial class MainWindow : Window
             AppLog.Error("Capture diagnostic bundle export failed", error);
             await ShowMessageAsync("Export Bundle failed", "ClypDat could not create the diagnostic bundle. Please try again after recording resumes.");
         }
-    }
-
-    private void ToggleCs2CardButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is not null) ViewModel.Cs2CardExpanded = !ViewModel.Cs2CardExpanded;
-    }
-
-    private void ToggleCs2AllKillsButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is not null) ViewModel.Cs2AllKillsExpanded = !ViewModel.Cs2AllKillsExpanded;
     }
 
     internal async void ScanMedalButton_OnClick(object? sender, RoutedEventArgs e)
@@ -6724,7 +6674,6 @@ public sealed partial class MainWindow : Window
     {
         ViewModel?.ToggleMicTest();
     }
-
 
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
@@ -8313,14 +8262,6 @@ public sealed partial class MainWindow : Window
         await ShowUpdateDialogAsync(CreateUpdateDialog(_availableUpdate));
     }
 
-    private void AddExcludedProcessOnboardingButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        if (this.FindControl<TextBox>("OnboardingExcludedProcessTextBox") is not { } textBox) return;
-        ViewModel.AddExcludedProcess(textBox.Text ?? string.Empty);
-        textBox.Text = string.Empty;
-    }
-
     /// <summary>
     /// What the splash's own check found, handed over so the first startup check
     /// does not repeat it. Consumed once.
@@ -8963,7 +8904,6 @@ public sealed partial class MainWindow : Window
             });
         }
 
-
         var hero = new StackPanel
         {
             Margin = new Avalonia.Thickness(22, 20, 22, 16),
@@ -9442,7 +9382,6 @@ public sealed partial class MainWindow : Window
                 ViewModel.SetDuration(playback.Duration);
             }
             UpdateTimelineChrome();
-
 
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -10694,12 +10633,6 @@ public sealed partial class MainWindow : Window
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
 
-    // Minimised counts as visible to IsWindowVisible, and a minimised window's
-    // rect is parked off every monitor - so anything picking a monitor from a
-    // window rect has to ask this too. See ScreenForOverlay.
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool IsIconic(IntPtr hWnd);
-
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
@@ -10750,33 +10683,6 @@ public sealed partial class MainWindow : Window
     private const long WsExNoActivate = 0x08000000L;
     private const long WsExTransparent = 0x00000020L;
 
-    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
-
-    private const uint WdaNone = 0x00000000;
-    // Excluded from capture entirely - the window still renders on the physical
-    // display, it just isn't composited into anything that asks DWM for the
-    // screen. Deliberately NOT the older WDA_MONITOR (0x01), which goes back to
-    // Windows 7 but paints the window as a black rectangle in captures instead
-    // of omitting it: a black box in the middle of a clip is worse than the
-    // overlay simply being there.
-    private const uint WdaExcludeFromCapture = 0x00000011;
-
-    // Same call KeePassXC uses to keep its window out of screenshots. Requires
-    // Windows 10 2004 (build 19041) - SupportedOSPlatformVersion here is 17763,
-    // so on anything older this fails and the overlay captures as it always
-    // did. Applied on every show rather than once at construction: the setting
-    // is live, and the flag has to be cleared again when it's turned off.
-    private static void ApplyCaptureExclusion(Window? window, bool exclude)
-    {
-        var handle = NativeHandleOf(window);
-        if (handle == IntPtr.Zero) return;
-        if (!SetWindowDisplayAffinity(handle, exclude ? WdaExcludeFromCapture : WdaNone) && exclude)
-        {
-            AppLog.Debug($"Overlay capture exclusion unavailable (needs Windows 10 build 19041): error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}.");
-        }
-    }
-
     private static IntPtr NativeHandleOf(Window? window) =>
         window?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
 
@@ -10803,23 +10709,6 @@ public sealed partial class MainWindow : Window
         if (!positioned) error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
         return positioned;
     }
-
-    // WS_EX_TRANSPARENT on top of the above: the clip overlay's window now
-    // stretches from the badge out to the screen edge to give the slide a
-    // runway, and most of that strip is empty and fully transparent. Without
-    // this it would still hit-test, so for the couple of seconds the overlay is
-    // up, clicks landing in that empty strip would hit nothing instead of
-    // reaching the window underneath. Purely decorative window, no input to
-    // lose by making the whole thing click-through.
-    private static void MakeWindowClickThrough(Window window)
-    {
-        var handle = NativeHandleOf(window);
-        if (handle == IntPtr.Zero) return;
-        var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
-        if ((exStyle & WsExTransparent) != 0) return;
-        SetWindowLongPtr(handle, GwlExStyle, (IntPtr)(exStyle | WsExTransparent));
-    }
-
 
     // When the UI started believing in playback that LibVLC has not delivered.
     private long _playbackMismatchSince;
@@ -11206,32 +11095,7 @@ public sealed partial class MainWindow : Window
 
     private readonly record struct TimelineGesture(TimelineDragMode Mode, bool WasPlaying, long Generation);
 
-    private static async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments)
-    {
-        var startInfo = new ProcessStartInfo(FfmpegPathResolver.Resolve(fileName))
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
-        };
-
-        foreach (var argument in arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(startInfo);
-        if (process is null) return new ProcessResult(-1, string.Empty, "Failed to start process.");
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-        return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
-    }
-
-    // Same as RunProcessAsync, but built for ffmpeg specifically - reads stdout
-    // line by line instead of buffering it all, watching for the "-progress
+    // Reads ffmpeg stdout line by line, watching for the "-progress
     // pipe:1" key=value lines BuildExportArguments already asks ffmpeg to emit
     // (one "out_time_us=<microseconds>" per encoded chunk) to report real
     // percentage progress back to the caller instead of an indefinite spinner.

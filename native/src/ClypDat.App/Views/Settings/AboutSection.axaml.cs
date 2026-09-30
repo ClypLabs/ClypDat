@@ -1,11 +1,9 @@
-using System.Net.Http;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
-using Avalonia.VisualTree;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
 

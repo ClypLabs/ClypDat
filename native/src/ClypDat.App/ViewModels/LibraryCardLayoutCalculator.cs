@@ -6,8 +6,6 @@ internal static class LibraryCardLayoutCalculator
 {
     internal const double CardLeftInset = 4;
     internal const double CardRightInset = 20;
-    internal const double CardTopInset = 2;
-    internal const double CardBottomInset = 4;
     internal const double HorizontalMargin = CardLeftInset + CardRightInset;
     private const double MinimumContentWidth = 320;
     private const double MinimumCardWidth = 220;

@@ -155,39 +155,6 @@ public sealed class DetectorHostTests
     }
 
     [Fact]
-    public void PackArchiveRejectsTraversal()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "clypdat-pack-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            var archivePath = Path.Combine(root, "pack.zip");
-            using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
-            using (var writer = new StreamWriter(archive.CreateEntry("../escape.json").Open())) writer.Write("{}");
-            var file = new AutoClipPackFile("../escape.json", 2, Convert.ToHexString(SHA256.HashData("{}"u8.ToArray())).ToLowerInvariant());
-            Assert.Throws<InvalidDataException>(() => AutoClipPackStore.VerifyAndExtractArchive(archivePath, Path.Combine(root, "stage"), [file]));
-            Assert.False(File.Exists(Path.Combine(root, "escape.json")));
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    [Fact]
-    public void PackArchiveRejectsWrongFileHash()
-    {
-        var root = Path.Combine(Path.GetTempPath(), "clypdat-pack-test-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            var archivePath = Path.Combine(root, "pack.zip");
-            using (var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
-            using (var writer = new StreamWriter(archive.CreateEntry("graph.json").Open())) writer.Write("{}");
-            var file = new AutoClipPackFile("graph.json", 2, new string('0', 64));
-            Assert.Throws<InvalidDataException>(() => AutoClipPackStore.VerifyAndExtractArchive(archivePath, Path.Combine(root, "stage"), [file]));
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    [Fact]
     public void DetachedSignatureRejectsUnauthenticatedPackManifest()
     {
         var signature = Encoding.UTF8.GetBytes(Convert.ToBase64String(new byte[384]));

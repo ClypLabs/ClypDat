@@ -107,21 +107,6 @@ public static class StorageJanitor
         }
     }
 
-    internal static int DeleteFilesOlderThan(string root, DateTime cutoffUtc)
-    {
-        var removed = 0;
-        if (!Directory.Exists(root)) return removed;
-        foreach (var file in EnumerateContainedFiles(root))
-        {
-            var info = new FileInfo(file);
-            if (info.LastWriteTimeUtc >= cutoffUtc) continue;
-            File.Delete(file);
-            removed++;
-        }
-
-        return removed;
-    }
-
     // Enumerates files under root WITHOUT following directory junctions or symlinks.
     //
     // The default EnumerationOptions skips only Hidden|System, and a junction created

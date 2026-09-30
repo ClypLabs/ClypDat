@@ -336,7 +336,6 @@ public sealed class ClipCardViewModel : ViewModelBase
         : Stretch.UniformToFill;
 
     public string DurationLabel => ClipDurationFormatter.Format(TrimmedDuration);
-    public string GameLabel => "VIDEO";
     public string CaptureBackendLabel => IsMedalImport
         ? "Imported from Medal"
         : IsSteelSeriesImport
@@ -389,7 +388,6 @@ public sealed class ClipCardViewModel : ViewModelBase
             var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedByGameFilter, value)) return;
             if (wasVisible == IsVisibleInLibrary) return;
-            Interlocked.Increment(ref _libraryVisibilityVersion);
             OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
@@ -408,7 +406,6 @@ public sealed class ClipCardViewModel : ViewModelBase
             var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedByClipTypeFilter, value)) return;
             if (wasVisible == IsVisibleInLibrary) return;
-            Interlocked.Increment(ref _libraryVisibilityVersion);
             OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
@@ -425,7 +422,6 @@ public sealed class ClipCardViewModel : ViewModelBase
             var wasVisible = IsVisibleInLibrary;
             if (!SetProperty(ref _isMatchedBySearch, value)) return;
             if (wasVisible == IsVisibleInLibrary) return;
-            Interlocked.Increment(ref _libraryVisibilityVersion);
             OnPropertyChanged(nameof(IsVisibleInLibrary));
         }
     }
@@ -434,14 +430,6 @@ public sealed class ClipCardViewModel : ViewModelBase
     // clip-type filter, and search box all have to match (AND across
     // groups; each checklist group's own set membership is an OR).
     public bool IsVisibleInLibrary => IsMatchedByGameFilter && IsMatchedByClipTypeFilter && IsMatchedBySearch;
-
-    // Bumped by the three setters above whenever any card's
-    // IsVisibleInLibrary actually flips. Callers that would otherwise count
-    // visible cards on every layout pass (the date scrubber's signature) can
-    // memoize against this instead of walking the whole library per frame.
-    internal static int LibraryVisibilityVersion => Volatile.Read(ref _libraryVisibilityVersion);
-
-    private static int _libraryVisibilityVersion;
 
     public string PreviewImagePath
     {

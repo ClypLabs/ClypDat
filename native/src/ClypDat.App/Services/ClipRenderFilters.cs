@@ -216,13 +216,6 @@ public static class ClipRenderFilters
     public static double AdjustDuration(double seconds, double speed) =>
         Math.Max(0.1, seconds / NormalizeSpeed(speed));
 
-    /// <summary>
-    /// LibVLC's crop geometry string ("WxH+X+Y"), used for the editor's live
-    /// preview. Empty string clears the crop - libvlc treats null as "unchanged".
-    /// </summary>
-    public static string ToVlcCropGeometry(CropRect? crop) =>
-        crop is { } rect ? $"{rect.Width}x{rect.Height}+{rect.X}+{rect.Y}" : string.Empty;
-
     private static int EvenDown(int value) => value - (value % 2);
 
     private static string Format(double value) => value.ToString("0.####", CultureInfo.InvariantCulture);

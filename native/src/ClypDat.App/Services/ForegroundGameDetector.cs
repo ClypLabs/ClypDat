@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -147,8 +146,6 @@ public sealed class ForegroundGameDetector
         !string.IsNullOrWhiteSpace(left.DetectionKey) && !string.IsNullOrWhiteSpace(right.DetectionKey)
             ? string.Equals(left.DetectionKey, right.DetectionKey, StringComparison.OrdinalIgnoreCase)
             : string.Equals(left.ExeName, right.ExeName, StringComparison.OrdinalIgnoreCase);
-
-    public string DetectDisplayName() => Detect().DisplayName;
 
     public IReadOnlyList<GameDetection> DetectAllRunningGames() => ScanWindows()
         .GroupBy(game => string.IsNullOrWhiteSpace(game.DetectionKey) ? game.ExeName : game.DetectionKey, StringComparer.OrdinalIgnoreCase)

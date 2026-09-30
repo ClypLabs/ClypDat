@@ -105,7 +105,6 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             ? token.AccessToken
             : throw new InvalidOperationException("Link your ClypDat account before sending diagnostics.");
     }
-    public bool IsConnecting => _connectCts is not null;
     public event EventHandler<XboxActivitySnapshot>? Changed;
 
     public async Task<bool> TryRestoreAsync(CancellationToken cancellationToken = default)

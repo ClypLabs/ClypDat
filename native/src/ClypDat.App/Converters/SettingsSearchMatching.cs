@@ -1,5 +1,3 @@
-using System.Linq;
-
 namespace ClypDat.App.Converters;
 
 // Shared "relative" matching for the Settings search: every word of the query

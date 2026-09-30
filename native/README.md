@@ -2,7 +2,7 @@
 
 This is the Avalonia/.NET desktop application for ClypDat.
 
-The Electron app remains in the repository. The native application separates platform capture from its UI:
+The application separates platform capture from its UI:
 
 - `ClypDat.App`: Avalonia desktop UI.
 - `ClypDat.Core`: shared settings, clip-library, and metadata logic.

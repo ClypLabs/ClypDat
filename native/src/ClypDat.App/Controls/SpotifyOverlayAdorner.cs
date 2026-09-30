@@ -38,9 +38,6 @@ internal sealed class SpotifyOverlayAdorner : Control
         }
     }
 
-    public SpotifyOverlayDragMode HitTest(Point point)
-        => TryHitTest(point, out var mode) ? mode : SpotifyOverlayDragMode.Move;
-
     /// <summary>Finds a card gesture target without treating empty canvas as a move.</summary>
     public bool TryHitTest(Point point, out SpotifyOverlayDragMode mode)
         => TryHitTest(point, includeHandles: true, out mode);

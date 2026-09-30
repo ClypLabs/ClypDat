@@ -40,26 +40,6 @@ public static class AudioProcessCatalog
         return ids.ToArray();
     }
 
-    public static IReadOnlyList<string> GetActiveAudioProcessNames()
-    {
-        if (!OperatingSystem.IsWindows()) return Array.Empty<string>();
-        using var enumerator = new MMDeviceEnumerator();
-        return ResolveActiveAudioProcessIds(enumerator)
-            .Select(processId =>
-            {
-                try
-                {
-                    using var process = Process.GetProcessById(processId);
-                    return process.ProcessName;
-                }
-                catch { return string.Empty; }
-            })
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
-            .ToArray();
-    }
-
     public static IReadOnlyList<ActiveAudioProcess> GetActiveAudioProcesses()
     {
         if (!OperatingSystem.IsWindows()) return Array.Empty<ActiveAudioProcess>();

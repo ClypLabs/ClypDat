@@ -145,7 +145,6 @@ public partial class ShareDialog : Window
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out Win32Rect rect);
 
-
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool GetCursorPos(out Win32Point point);
 
@@ -253,17 +252,6 @@ public partial class ShareDialog : Window
     private void ShareDialog_OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Escape) Close();
-    }
-
-    // Unlike NewClipsOverlay_OnPointerPressed (which lives INSIDE MainWindow,
-    // so BeginMoveDrag there deliberately keeps the real app window draggable
-    // through its scrim), ShareDialog is its own separate top-level Window -
-    // calling BeginMoveDrag here would drag the popup itself off of its
-    // owner instead. Presses on the card are consumed by its own controls
-    // before they bubble here, so this only ever sees clicks on the
-    // surrounding scrim, which should just do nothing.
-    private void Scrim_OnPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
     }
 
     // The pill only exists while there is a trim to send, so a clip nobody

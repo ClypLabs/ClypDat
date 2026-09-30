@@ -35,8 +35,6 @@ public sealed class TimedEffectLayer : Control, ICustomHitTest
 
     private TimeSpan _position;
 
-    public bool IsGestureActive => _gesture is not null;
-
     /// <summary>Updates selection geometry at the editor clock position.</summary>
     public void Update(MainWindowViewModel model) => Update(model, model.CurrentTime);
 

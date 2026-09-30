@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Globalization;
 
 namespace ClypDat.App.Services;
 
@@ -92,18 +91,6 @@ internal sealed class CameraPreviewService : ICameraPreviewService
             }
             cancellation.Dispose();
         }
-    }
-    // Settings tooling contract; production commands execute in RecorderCore.
-    internal static IReadOnlyList<string> BuildArguments(string deviceMoniker, CameraPreviewMode? mode)
-    {
-        var arguments = new List<string> { "-hide_banner", "-f", "dshow" };
-        if (mode is not null)
-        {
-            arguments.AddRange(["-video_size", $"{mode.Width}x{mode.Height}", "-framerate", mode.FramesPerSecond.ToString("0.###", CultureInfo.InvariantCulture)]);
-            arguments.Add(mode.IsCompressed ? "-vcodec" : "-pixel_format"); arguments.Add(mode.Format);
-        }
-        arguments.AddRange(["-i", $"video={deviceMoniker}", "-an", "-vf", "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2", "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"]);
-        return arguments;
     }
     public void Stop()
     {

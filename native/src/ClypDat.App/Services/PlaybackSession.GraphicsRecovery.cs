@@ -9,7 +9,6 @@ public sealed partial class PlaybackSession
 {
     private readonly List<string> _videoOptions = [];
     private volatile bool _graphicsRecoveryActive, _graphicsRestartRequired;
-    internal bool GraphicsRestartRequired => _graphicsRestartRequired;
     private void AddVideoOption(string option) { _videoOptions.Add(option); _videoMedia!.AddOption(option); }
     internal void BeginGraphicsRecovery(TimeSpan position)
     {

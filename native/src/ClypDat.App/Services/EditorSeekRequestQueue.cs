@@ -138,9 +138,6 @@ internal sealed class EditorSeekRequestQueue
     internal static TimeSpan Normalize(TimeSpan target) =>
         TimeSpan.FromMilliseconds(Math.Max(0, (long)target.TotalMilliseconds));
 
-    internal static bool ShouldResume(bool previousPlaying, bool seekSucceeded) =>
-        previousPlaying && seekSucceeded;
-
     internal sealed class PreviewTransportLease : IDisposable
     {
         private EditorSeekRequestQueue? _owner;

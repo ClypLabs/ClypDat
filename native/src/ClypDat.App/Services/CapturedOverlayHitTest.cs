@@ -13,9 +13,6 @@ internal static class CapturedOverlayHitTest
     /// <summary>Same reach as <c>SpotifyOverlayAdorner.HandleSize + 4</c>.</summary>
     public const double HandleReach = 14;
 
-    public static bool TryHit(Rect bounds, Point point, out VideoOverlayManipulationMode mode)
-        => TryHit(bounds, point, includeHandles: true, out mode);
-
     public static bool TryHit(Rect bounds, Point point, bool includeHandles, out VideoOverlayManipulationMode mode)
     {
         mode = VideoOverlayManipulationMode.Move;

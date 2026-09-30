@@ -1,6 +1,5 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
 using Avalonia.Media.Imaging;
 using ClypDat.Core.Settings;
 
@@ -37,5 +36,4 @@ public sealed class OverlaySceneControl : Canvas
         SetLeft(_keyboard, bounds.X); SetTop(_keyboard, bounds.Y); _keyboard.Width = bounds.Width; _keyboard.Height = bounds.Height;
     }
     public void ClearPeripherals() => _keyboard.IsVisible = false;
-    public void BeginPointerGesture(PointerPressedEventArgs args) => args.Pointer.Capture(this);
 }

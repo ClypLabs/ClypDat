@@ -42,8 +42,4 @@ internal static class MonotonicClock
     }
     [DllImport("ntdll.dll")]
     private static extern int NtQuerySystemInformation(int informationClass, IntPtr buffer, int length, out int returnedLength);
-
-    // How far the system clock has stepped away from this timeline since
-    // process start. ~0 normally; jumps when NTP/manual adjustments happen.
-    public static TimeSpan SystemClockOffset => DateTime.UtcNow - UtcNow;
 }

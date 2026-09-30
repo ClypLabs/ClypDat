@@ -104,7 +104,6 @@ public sealed partial class PlaybackSession : IDisposable
     // declined every preview scene mid-drag, leaving its barrier unpresentable.
     internal Func<TimeSpan, Func<bool>, CancellationToken, Task<bool>>? PublishSceneAsync { get; set; }
     internal Func<CancellationToken, Task>? NextRenderAsync { get; set; }
-    internal bool PreviewWorkerRunning { get { lock (_previewLock) return _previewWorker is not null; } }
 
     private async Task<bool> PresentSeekAsync(TimeSpan target, long generation, Func<bool> current, CancellationToken token)
     {
@@ -937,21 +936,6 @@ public sealed partial class PlaybackSession : IDisposable
         }
     }
 
-    public void EnsurePlayingIfNeeded(bool shouldPlay)
-    {
-        if (_graphicsRecoveryActive || _graphicsRestartRequired) { _shouldPlay = shouldPlay; return; }
-        if (!shouldPlay) return;
-        _shouldPlay = true;
-        ForceVideoSilent();
-        lock (_transportLock)
-        {
-            if (!VideoPlayer.IsPlaying) { Composition?.BindPlayer(VideoPlayer); VideoPlayer.Play(); }
-            VideoPlayer.SetPause(false);
-            if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing) StartAudioAt(Position, Interlocked.Read(ref _seekVersion));
-            ResumeOverlayClock(Position);
-        }
-    }
-
     // Global output level (fullscreen playbar slider) - distinct from
     // SetTrackVolume, which mixes individual tracks against each other.
     public void SetMasterVolume(double percent)
@@ -1177,45 +1161,6 @@ public sealed partial class PlaybackSession : IDisposable
         lock (_transportLock)
         {
             if (VideoPlayer.IsPlaying) VideoPlayer.SetPause(true);
-        }
-    }
-
-    public void SyncAudioStreams()
-    {
-        if (_graphicsRecoveryActive || _graphicsRestartRequired) return;
-        if (_isSeeking || !_shouldPlay || _audioOutput is null || !VideoPlayer.IsPlaying) return;
-        lock (_transportLock)
-        {
-            if (_audioOutput is not null && _audioOutput.PlaybackState != PlaybackState.Playing)
-            {
-                StartAudioAt(Position, Interlocked.Read(ref _seekVersion));
-            }
-        }
-    }
-
-    public void SyncAndPlayMixedAudio()
-    {
-        lock (_transportLock)
-        {
-            if (_audioOutput is null) return;
-            var position = Position;
-            SeekAudio(position);
-            // VideoPlayer.IsPlaying used to gate this too, but LibVLC's Play()/seek
-            // is asynchronous - PlayFrom already issued Play() moments earlier, but
-            // IsPlaying can still read false here if this runs before that state
-            // transition lands, which permanently skipped starting the audio output
-            // while video went on to play fine. _shouldPlay already is the source of
-            // truth for play/pause intent (set by Play()/Pause()), so trust that
-            // instead of re-checking a state that hasn't caught up yet.
-            var willPlay = _shouldPlay;
-            if (willPlay)
-            {
-                StartAudioAt(position, Interlocked.Read(ref _seekVersion));
-            }
-
-            var readerState = string.Join(",", _audioSources.Select(pair =>
-                $"{pair.Key}:cur={pair.Value.Reader.CurrentTime.TotalSeconds:0.###}s/total={pair.Value.Reader.TotalTime.TotalSeconds:0.###}s"));
-            AppLog.Debug($"Editor audio sync: position={position.TotalSeconds:0.###}s, shouldPlay={_shouldPlay}, videoPlaying={VideoPlayer.IsPlaying}, willPlay={willPlay}, outputState={_audioOutput.PlaybackState}, readers=[{readerState}].");
         }
     }
 

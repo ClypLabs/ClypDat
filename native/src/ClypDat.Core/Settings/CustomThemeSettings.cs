@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace ClypDat.Core.Settings;
 
@@ -65,21 +64,4 @@ public static class CustomThemeLibrary
     public static string Export(CustomThemeSettings theme) => JsonSerializer.Serialize(
         new ThemeFile(ThemeFileSchemaVersion, theme.Name, theme.BaseColor, theme.AccentColor),
         new JsonSerializerOptions { WriteIndented = true });
-
-    public static bool TryImport(string json, IEnumerable<CustomThemeSettings> existing,
-        out CustomThemeSettings? theme, out string? error)
-    {
-        theme = null;
-        try
-        {
-            var file = JsonSerializer.Deserialize<ThemeFile>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            if (file is null || file.SchemaVersion != ThemeFileSchemaVersion) { error = "Unsupported theme schema."; return false; }
-            if (!TryNormalizeName(file.Name, existing, null, out var name, out error) && error != "Theme name already exists.") return false;
-            if (!IsColor(file.BaseColor) || !IsColor(file.AccentColor)) { error = "Theme colours must use #RRGGBB."; return false; }
-            theme = new CustomThemeSettings { Name = UniqueName(name, existing), BaseColor = file.BaseColor.ToUpperInvariant(), AccentColor = file.AccentColor.ToUpperInvariant() };
-            error = null;
-            return true;
-        }
-        catch (JsonException) { error = "Theme file is not valid JSON."; return false; }
-    }
 }

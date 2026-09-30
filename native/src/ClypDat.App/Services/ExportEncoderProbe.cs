@@ -34,7 +34,6 @@ public static class ExportEncoderProbe
     /// </summary>
     public static string? Av1Family => UiPreviewMode.Enabled ? null : _av1Probe.Value;
     public static bool HardwareProbeCompleted => UiPreviewMode.Enabled || _probe.IsValueCreated;
-    public static bool Av1ProbeCompleted => UiPreviewMode.Enabled || _av1Probe.IsValueCreated;
 
     // Same order capture uses, so a machine that somehow has two usable encoders
     // gets the same answer from both halves of the app.

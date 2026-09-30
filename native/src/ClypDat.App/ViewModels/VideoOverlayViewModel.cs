@@ -389,12 +389,6 @@ public sealed class VideoOverlayViewModel : ViewModelBase, IDisposable
             Cameras.Add(new CameraOption($"{selected.FriendlyName} (unavailable)", selected.DeviceMoniker));
         RebuildSources(); UpdateStatus(); NotifyLayout();
     }
-    public void SelectSourceAt(string corner)
-    {
-        var source = SourceAt(corner);
-        if (source?.Kind == OverlaySourceKind.Camera) SelectLayer("Camera");
-        else if (source?.Kind == OverlaySourceKind.Keyboard) SelectLayer("Keyboard");
-    }
     internal OverlaySourceOption? SourceAt(string corner)
     {
         if (_settings.CameraAnchor == corner && HasCamera)

@@ -5,7 +5,6 @@ using ClypDat.App.Services;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia;
-using Avalonia.Media;
 using ClypDat.App.ViewModels;
 using ClypDat.Core.Settings;
 

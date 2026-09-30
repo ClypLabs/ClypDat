@@ -183,24 +183,6 @@ public sealed class MediaProbeService
         return new MediaDurationProbeResult(TimeSpan.Zero, string.IsNullOrWhiteSpace(result.Error) ? "ffprobe could not read a duration." : result.Error.Trim());
     }
 
-    // Full probe: metadata (from cache if possible) AND generates the
-    // thumbnail/filmstrip if either is missing. Used where a single specific
-    // clip's complete info is needed right away (opening a clip, adding one
-    // new clip to the library) - for hydrating the WHOLE library, see
-    // ProbeMetadataAsync/EnsureThumbnailAsync/EnsureFilmstripAsync instead,
-    // called as three separate passes (MainWindowViewModel.
-    // HydrateLibraryClipsAsync) so a single clip's full pipeline can't block
-    // every other clip behind it in the list from getting at least its basic
-    // info quickly.
-    public async Task<MediaFileInfo> ProbeAsync(string filePath)
-    {
-        var media = await ProbeMetadataAsync(filePath).ConfigureAwait(false);
-        if (!media.HasVideo) return media;
-        var thumbnailPath = await EnsureThumbnailAsync(filePath, media.Duration).ConfigureAwait(false);
-        var filmstripPath = await EnsureFilmstripAsync(filePath, media.Duration).ConfigureAwait(false);
-        return media with { ThumbnailPath = thumbnailPath, FilmstripPath = filmstripPath };
-    }
-
     // Metadata only (duration/tracks/resolution/etc) - no ffmpeg thumbnail/
     // filmstrip generation, just whichever of those already happen to exist
     // in cache (a cheap File.Exists check, same as CreateLibraryStub). This
