@@ -100,6 +100,8 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             }
             catch
             {
+                try { var failed = session.ReadHealth(); PublishHealth(configuration, failed.Value, failed.Details); }
+                catch (Exception error) { AppLog.Info($"Native startup failure health unavailable: {error.Message}"); }
                 lock (_gate) { if (ReferenceEquals(_session, session)) { _session = null; _recording = false; } }
                 try { await Task.Run(session.Stop, CancellationToken.None).ConfigureAwait(false); }
                 catch (Exception error) { AppLog.Error("Native recording startup cleanup requires a worker restart.", error); }
@@ -223,6 +225,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             Number(details, "inputFps"), Number(details, "uniqueFps"), Number(details, "outputFps"),
             (long)Number(details, "duplicates"), checked((long)native.Replaced), (int)native.QueueDepth, Text(details, "encoder"), Text(details, "adapter"), error, DateTime.UtcNow)
         {
+            GraphicsFailure = NativeRecorderSession.ReadGraphicsFailure(details),
             NativeEngineVersion = 3, EncodeQueueCapacity = (int)native.QueueCapacity, ConfiguredFrameRate = configuration.FrameRate,
             KeyframesRequested = (long)Number(details, "keyframesRequested"), PeriodicKeyframesRequested = (long)Number(details, "periodicKeyframesRequested"),
             KeyframesEmitted = (long)Number(details, "keyframesEmitted"), KeyframeLastPtsUs = (long)Number(details, "keyframeLastPtsUs"),
@@ -385,7 +388,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             }
         }
     }
-    private static string FullSessionPath(ReplayBufferConfig configuration)
+    internal static string FullSessionPath(ReplayBufferConfig configuration)
     {
         if (!configuration.FullSessionRecordingEnabled || string.IsNullOrWhiteSpace(configuration.FullSessionRecordingFolder)) return "";
         Directory.CreateDirectory(configuration.FullSessionRecordingFolder);

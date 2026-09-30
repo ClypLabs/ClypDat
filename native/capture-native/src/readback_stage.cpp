@@ -1,4 +1,5 @@
 #include "readback_stage.h"
+#include "../../common/graphics_device_failure.h"
 #include <Windows.h>
 #include <d3d11_4.h>
 #include <wrl/client.h>
@@ -25,10 +26,6 @@ DXGI_FORMAT dxgi_format(AVPixelFormat format) {
 }
 double elapsed_ms(std::chrono::steady_clock::time_point started) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
-}
-std::string hresult(const char* what, HRESULT value) {
-    char code[16]{}; std::snprintf(code, sizeof(code), "0x%08X", unsigned(value));
-    return std::string(what) + " (hr=" + code + ")";
 }
 }
 
@@ -81,7 +78,7 @@ ReadbackStage::ReadbackStage(ID3D11Device* device, int width, int height, AVPixe
         desc.Usage = D3D11_USAGE_STAGING; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         Impl::Slot slot;
         const auto created = device->CreateTexture2D(&desc, nullptr, &slot.texture);
-        if (FAILED(created)) throw std::runtime_error(hresult("Create recording readback staging texture", created));
+        check_graphics(created, "Create recording readback staging texture");
         slot.properties.reset(av_frame_alloc()); if (!slot.properties) throw std::bad_alloc();
         s.slots.push_back(std::move(slot)); ++s.allocations;
     }
@@ -162,7 +159,7 @@ ReadbackResult ReadbackStage::read() {
         s.pause(200);
     }
     result.map_wait_ms = elapsed_ms(started);
-    if (FAILED(hr)) throw std::runtime_error(hresult("Map recording readback staging texture", hr));
+    check_graphics(hr, "Map recording readback staging texture");
     const auto copy_started = std::chrono::steady_clock::now();
     uint8_t* planes[4]{}; int pitches[4]{};
     for (auto& pitch : pitches) pitch = int(mapped.RowPitch);

@@ -117,6 +117,7 @@ public:
     virtual void set_frame_rate(int) {}
     virtual const char* name() const = 0;
     virtual ID3D11Device* d3d_device() const { return nullptr; }
+    virtual int32_t device_removed_reason() const;
     virtual void stop() {}
     virtual RecordingSourceHealth diagnostics() const { return {}; }
     virtual bool recover() { return false; }
@@ -181,6 +182,8 @@ struct RecordingCaptureHealth {
     int output_width=0,output_height=0;
     bool running = false, paused = false, restart_required = false;
     std::string source, encoder, error;
+    uint32_t failure_kind = 0; // 1 device loss, 2 graphics operation
+    int32_t failure_hresult = 0, device_removed_reason = 0;
     // The failure behind the last source recovery or backend switch.
     std::string source_recovery_error;
     uint64_t duplicates = 0, submitted = 0, source_recoveries = 0;
@@ -311,6 +314,8 @@ struct RecordingCaptureDependencies {
     // Reports the GPU overlay compositor unavailable, as a driver without
     // BGRA video-processor support would.
     bool disable_gpu_overlays = false;
+    // Generated tests inject at production boundaries, without resetting a driver.
+    std::function<void(const char*)> graphics_boundary;
     // Runs the detector's full-frame path instead of DetectorStage's region
     // readback (benchmarks and tests).
     bool reference_detector = false;

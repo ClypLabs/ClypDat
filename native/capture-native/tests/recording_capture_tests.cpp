@@ -5,6 +5,7 @@
 #include "readback_stage.h"
 #include "captured_frames.h"
 #include "recording_save.h"
+#include "../../common/graphics_device_failure.h"
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -1949,9 +1950,65 @@ void qsv_submission_ledger() {
         CHECK(h.retained_pressure_drops==0&&h.encoder_stall_recoveries==0);
     }
 }
+struct GraphicsLossProbe {
+    std::atomic<int32_t> removed = S_OK;
+    std::atomic<bool> silent = false;
+    std::atomic<int> recoveries = 0, switches = 0;
+};
+class GraphicsLossSource final : public RecordingFrameSource {
+    GeneratedSource source_{60};
+    std::shared_ptr<GraphicsLossProbe> probe_;
+public:
+    explicit GraphicsLossSource(std::shared_ptr<GraphicsLossProbe> probe) : probe_(std::move(probe)) { }
+    bool acquire(CapturePixels& pixels, std::chrono::milliseconds timeout) override {
+        if (probe_->silent) { std::this_thread::sleep_for(timeout); return false; }
+        return source_.acquire(pixels, timeout);
+    }
+    bool eligible() const override { return true; }
+    const char* name() const override { return "Generated GPU loss fixture"; }
+    int32_t device_removed_reason() const override { return probe_->removed; }
+    bool recover() override { ++probe_->recoveries; return true; }
+    bool switch_backend(bool) override { ++probe_->switches; return true; }
+    RecordingSourceHealth diagnostics() const override { RecordingSourceHealth h; h.adapter = L"Injected adapter"; h.adapter_luid = 1234; return h; }
+};
+void graphics_loss_boundaries() {
+    for (const std::string boundary : {"capture", "conversion", "encoding", "silent"}) {
+        RecordingCaptureConfig config; config.width=128; config.height=72; config.fps=60; config.cpu_encoder=true;
+        auto probe = std::make_shared<GraphicsLossProbe>();
+        std::atomic<int> packets = 0;
+        RecordingCaptureCallbacks callbacks; callbacks.packet = [&](auto, Packet, int64_t, bool) { ++packets; };
+        RecordingCaptureDependencies dependencies;
+        dependencies.graphics_boundary = [&](const char* stage) {
+            if (packets >= 3 && boundary == stage) throw GraphicsError(DXGI_ERROR_DEVICE_REMOVED, "Injected boundary GPU loss");
+        };
+        RecordingCapture capture(config, callbacks, std::make_unique<GraphicsLossSource>(probe), std::move(dependencies));
+        capture.start();
+        if (boundary == "silent") {
+            CHECK(wait_health(capture, [&](const auto&) { return packets >= 3; }, 2s));
+            probe->silent = true; probe->removed = DXGI_ERROR_DEVICE_RESET;
+        }
+        CHECK(wait_health(capture, [](const auto& h) { return h.restart_required; }, 2s));
+        const auto h = capture.health();
+        CHECK(h.failure_kind == 1);
+        CHECK(h.failure_hresult == (boundary == "silent" ? DXGI_ERROR_DEVICE_RESET : DXGI_ERROR_DEVICE_REMOVED));
+        CHECK(h.device_removed_reason == probe->removed);
+        CHECK(h.source_details.adapter_luid == 1234 && h.source_details.adapter == L"Injected adapter");
+        CHECK(probe->recoveries == 0 && probe->switches == 0);
+        CHECK(capture.stop());
+        bool refused = false; try { capture.start(); } catch (...) { refused = true; } CHECK(refused);
+        auto fresh = std::make_shared<GraphicsLossProbe>();
+        RecordingCapture replacement(config, callbacks, std::make_unique<GraphicsLossSource>(fresh));
+        const auto previous = packets.load(); replacement.start();
+        CHECK(wait_health(replacement, [&](const auto&) { return packets >= previous + 3; }, 2s));
+        CHECK(replacement.health().failure_kind == 0 && replacement.health().generation == 1);
+        CHECK(replacement.stop());
+    }
+    std::cout << "GPU loss at capture, conversion, encoding and silent acquisition; fresh session recovery passed\n";
+}
 int main(int argc,char**argv) {
     try{
     av_log_set_level(AV_LOG_ERROR);
+    if(argc>1&&std::string_view(argv[1])=="--graphics-loss"){graphics_loss_boundaries();return 0;}
     if(argc>1&&std::string_view(argv[1])=="--qsv-ledger"){qsv_submission_ledger();return 0;}
     if(argc>1&&std::string_view(argv[1])=="--encoder-input"){encoder_input_diagnostics();return 0;}
 #ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS

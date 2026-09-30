@@ -134,6 +134,7 @@ target_compile_definitions(ClypDat.Capture.Native.CaptureTests PRIVATE NOMINMAX 
 set_target_properties(ClypDat.Capture.Native.CaptureTests PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_test(NAME ClypDat.Capture.Native.CapturePipeline COMMAND ClypDat.Capture.Native.CaptureTests)
+add_test(NAME ClypDat.Capture.Native.GraphicsLoss COMMAND ClypDat.Capture.Native.CaptureTests --graphics-loss)
 add_test(NAME ClypDat.Capture.Native.EncoderInputDiagnostics COMMAND ClypDat.Capture.Native.CaptureTests --encoder-input)
 if(CLYPDAT_TEST_GPU AND CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS)
     add_test(NAME ClypDat.Capture.Native.DiagnosticReadback COMMAND ClypDat.Capture.Native.CaptureTests --diagnostic-readback)

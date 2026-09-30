@@ -24,6 +24,7 @@
 #include <vector>
 #include <mutex>
 #include <stdexcept>
+#include "../../common/graphics_device_failure.h"
 #include <thread>
 
 namespace clypdat {
@@ -33,7 +34,7 @@ using namespace winrt::Windows::Graphics::Capture;
 using namespace winrt::Windows::Graphics::DirectX;
 using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
 void checked(HRESULT hr, const char* operation) {
-    if (FAILED(hr)) throw std::runtime_error(std::string(operation) + " HRESULT=" + std::to_string(uint32_t(hr)));
+    check_graphics(hr, operation);
 }
 // The full-screen triangle and the SDR mapping of scRGB shared by the
 // tone-mapping shaders; the scale for `white` is compiled in.
@@ -332,8 +333,10 @@ public:
                     }
                     frame = pool.TryGetNextFrame();
                 }
+            } catch (const winrt::hresult_error& e) {
+                shared->frames.fail("Windows Graphics Capture frame callback failed", std::make_exception_ptr(GraphicsError(e.code(), "Windows Graphics Capture frame callback")));
             } catch (const std::exception& e) {
-                shared->frames.fail(e.what());
+                shared->frames.fail(e.what(), std::current_exception());
             } catch (...) {
                 shared->frames.fail("Windows Graphics Capture frame callback failed");
             }
@@ -414,6 +417,7 @@ public:
         result.hdr_conversion=config_.capture_hdr;result.sdr_white_nits=config_.sdr_white_nits;return result;
     }
     bool recover() override {
+        if (FAILED(device_removed_reason())) return false;
         try {
             if(!eligible()||!pool_||!item_)return false;
             const auto size=item_.Size();if(size.Width<=0||size.Height<=0)return false;
@@ -603,7 +607,7 @@ public:
             result.cursor_lock_wait_p95_ms=c.lock_wait_p95_ms;}
         result.hdr_display=config_.display_hdr;result.hdr_conversion=config_.capture_hdr;result.sdr_white_nits=config_.sdr_white_nits;return result;
     }
-    bool recover() override { try{open();reopener_.reset();return true;}catch(...){return false;} }
+    bool recover() override { if (FAILED(device_removed_reason())) return false; try{open();reopener_.reset();return true;}catch(...){return false;} }
     CaptureRect content_bounds() const override {
         if(config_.window){RECT rect{};if(GetClientRect(reinterpret_cast<HWND>(config_.window),&rect))return{0,0,rect.right,rect.bottom};}
         if(config_.capture_region.width>0&&config_.capture_region.height>0)return{0,0,config_.capture_region.width,config_.capture_region.height};
@@ -704,6 +708,7 @@ struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStor
     CapturedFrameStore::Timing newest_timing;
     bool closed = false;
     std::string error;
+    std::exception_ptr error_cause;
     std::deque<double> copy_times;
     // Delivery-only state, serialized by `delivering`.
     std::mutex delivering;
@@ -954,6 +959,7 @@ bool CapturedFrameStore::take(CapturePixels& pixels, int64_t& timestamp, std::ch
     {
         std::unique_lock lock(s.mutex);
         s.changed.wait_for(lock, timeout, [&] { return s.newest || s.newest_borrowed || s.closed || !s.error.empty(); });
+        if (s.error_cause) std::rethrow_exception(s.error_cause);
         if (!s.error.empty()) throw std::runtime_error(s.error);
         if ((!s.newest && !s.newest_borrowed) || s.closed) return false;
         if (s.newest_borrowed) borrowed = std::move(s.newest_borrowed); else texture = std::move(s.newest);
@@ -969,8 +975,8 @@ bool CapturedFrameStore::take(CapturePixels& pixels, int64_t& timestamp, std::ch
     pixels.texture = std::move(texture);
     return true;
 }
-void CapturedFrameStore::fail(const std::string& error) {
-    { std::lock_guard lock(impl_->mutex); impl_->error = error; }
+void CapturedFrameStore::fail(const std::string& error, std::exception_ptr cause) {
+    { std::lock_guard lock(impl_->mutex); if (impl_->error.empty()) { impl_->error = error; impl_->error_cause = cause; } }
     impl_->changed.notify_all();
 }
 void CapturedFrameStore::close() {
@@ -981,7 +987,7 @@ void CapturedFrameStore::close() {
 }
 void CapturedFrameStore::reset() {
     std::shared_ptr<ID3D11Texture2D> dropped; std::shared_ptr<Impl::Borrowed> borrowed;
-    { std::lock_guard lock(impl_->mutex); impl_->error.clear(); dropped = std::move(impl_->newest); borrowed = std::move(impl_->newest_borrowed); }
+    { std::lock_guard lock(impl_->mutex); impl_->error.clear(); impl_->error_cause = {}; dropped = std::move(impl_->newest); borrowed = std::move(impl_->newest_borrowed); }
 }
 bool CapturedFrameStore::closed() const { std::lock_guard lock(impl_->mutex); return impl_->closed; }
 CapturedFrameStore::Stats CapturedFrameStore::stats() const {
@@ -1080,11 +1086,18 @@ std::unique_ptr<RecordingFrameSource> create_windows_recording_source(const Reco
     const auto profile=display_profile(target_monitor);resolved.display_hdr=profile.hdr;resolved.display_profile_available=profile.available;
     resolved.capture_hdr=resolved.capture_hdr&&profile.hdr;resolved.sdr_white_nits=profile.white;
     std::unique_ptr<RecordingFrameSource> source;
-    if (resolved.prefer_dxgi) {
-        try { source=std::make_unique<DxgiSource>(resolved); } catch (...) { require_window_available(resolved.window); source=std::make_unique<WgcSource>(resolved); }
-    }else{
-        try { source=std::make_unique<WgcSource>(resolved); } catch (...) { require_window_available(resolved.window); source=std::make_unique<DxgiSource>(resolved); }
+    auto open = [&](bool dxgi) -> std::unique_ptr<RecordingFrameSource> {
+        try {
+            if (dxgi) return std::make_unique<DxgiSource>(resolved);
+            return std::make_unique<WgcSource>(resolved);
+        } catch (const winrt::hresult_error& error) { throw GraphicsError(error.code(), "Create Windows recording source"); }
+    };
+    try { source = open(resolved.prefer_dxgi); }
+    catch (const GraphicsError& error) {
+        if (is_device_loss(error.result)) throw;
+        require_window_available(resolved.window); source = open(!resolved.prefer_dxgi);
     }
+    catch (...) { require_window_available(resolved.window); source = open(!resolved.prefer_dxgi); }
     require_window_available(resolved.window);
     return std::make_unique<AdaptiveSource>(resolved,std::move(source),config.capture_hdr);
 }

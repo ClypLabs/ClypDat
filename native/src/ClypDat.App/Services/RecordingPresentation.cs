@@ -8,6 +8,8 @@ internal sealed record RecordingPresentation(string Label, string Detail, string
     {
         if (stopping || health.State == ReplayCaptureState.Stopping || health.FullSession.State == FullSessionState.Stopping) return new("Stopping", "Finishing queued recording data.");
         if (!enabled) return new("Off", "Recording is off.");
+        if (health.State == ReplayCaptureState.Recovering && health.GraphicsFailure?.Kind == GraphicsFailureKind.DeviceLost)
+            return new("Waiting for graphics device", "Recording resumes automatically. Replay buffer resets after graphics recovery.");
         if (health.State == ReplayCaptureState.Recovering || health.PipelineRecoveryAction != ReplayPipelineRecoveryAction.None) return new("Recovering", "Reconnecting to the capture worker.");
         // Still armed: capture resumes by itself, so this is never "Off".
         if (recording && suspended) return new("Replay On — Suspended", "Display unavailable. Capture resumes automatically when it returns.", "#8A8F98");
@@ -17,8 +19,9 @@ internal sealed record RecordingPresentation(string Label, string Detail, string
             return new("Starting", "Starting recording.");
         if (health.State == ReplayCaptureState.Failed) return new("Waiting", health.LastFailure);
         var label = health.FullSession.State == FullSessionState.Recording ? "Full Session Recording" : "Recording";
+        var reset = health.ReplayBufferReset ? " Replay buffer reset after graphics recovery." : "";
         // Pausing video does not end the recording session; keep its red pulse.
-        if (health.CapturePaused) return new(label, "Video capture paused. Audio continues.", "#F04452", true);
-        return new(label, health.FullSession.State == FullSessionState.Failed ? $"Full Session failed: {health.FullSession.Failure} Replay recording continues." : label, "#F04452", true);
+        if (health.CapturePaused) return new(label, "Video capture paused. Audio continues." + reset, "#F04452", true);
+        return new(label, (health.FullSession.State == FullSessionState.Failed ? $"Full Session failed: {health.FullSession.Failure} Replay recording continues." : label) + reset, "#F04452", true);
     }
 }

@@ -14,6 +14,7 @@ int cdvo_compose(void *renderer, ID3D11RenderTargetView *output,
                  const D3D11_VIEWPORT *viewport, int redraw);
 void cdvo_presented(void *renderer);
 void cdvo_fail(void *renderer, const char *message);
+void cdvo_fail_hresult(void *renderer, const char *message, int32_t result);
 int cdvo_needs_redraw(void *renderer);
 int cdvo_has_retained_picture(void *renderer);
 #ifdef __cplusplus

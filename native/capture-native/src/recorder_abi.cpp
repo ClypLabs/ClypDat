@@ -110,7 +110,7 @@ int32_t CD_CALL cd_recorder_get_contract(cd_session_contract* contract) try {
         sizeof(cd_session_save_request), sizeof(cd_session_save_status), sizeof(cd_session_health),
         sizeof(cd_overlay_update), sizeof(cd_artwork_update), sizeof(cd_event_poll),
         CD_CAP_CAPTURE | CD_CAP_REPLAY_SAVE | CD_CAP_AUDIO | CD_CAP_FULL_SESSION |
-            CD_CAP_OVERLAYS | CD_CAP_ASYNC_CONTROL};
+            CD_CAP_OVERLAYS | CD_CAP_ASYNC_CONTROL | CD_CAP_GPU_FAILURE};
     return CD_OK;
 } catch (...) { return CD_E_UNSUPPORTED_ABI; }
 int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder** recorder) try {
@@ -202,6 +202,7 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"fullSessionPath\":" << quoted(utf8(r->session->full_session_path().native()))
         << ",\"fullSessionDurationUs\":" << full.duration_us
         << ",\"error\":" << quoted(h.error) << ",\"controlError\":" << quoted(error) << ",\"sourceRecoveryError\":" << quoted(h.source_recovery_error)
+        << ",\"failureKind\":" << h.failure_kind << ",\"failureHresult\":" << h.failure_hresult << ",\"deviceRemovedReason\":" << h.device_removed_reason
         << ",\"fullSessionRunning\":" << (full.running ? "true" : "false")
         << ",\"fullSessionFinished\":" << (full.finished ? "true" : "false") << ",\"fullSessionError\":" << quoted(full.error)
         << ",\"inputFps\":" << h.input_fps << ",\"uniqueFps\":" << h.unique_fps << ",\"outputFps\":" << h.output_fps

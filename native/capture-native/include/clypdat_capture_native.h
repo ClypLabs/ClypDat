@@ -50,6 +50,7 @@ enum cd_capability {
     CD_CAP_FULL_SESSION = 8,
     CD_CAP_OVERLAYS = 16,
     CD_CAP_ASYNC_CONTROL = 32,
+    CD_CAP_GPU_FAILURE = 64,
 };
 
 #pragma pack(push, 8)

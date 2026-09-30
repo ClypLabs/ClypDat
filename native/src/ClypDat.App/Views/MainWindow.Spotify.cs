@@ -64,10 +64,11 @@ public sealed partial class MainWindow
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.0 / 60) };
         timer.Tick += (_, _) => UpdateSpotifyPreview();
         Opened += (_, _) => timer.Start();
-        Closed += (_, _) => { timer.Stop(); EndSpotifyGesture(); _timedEffectLayer?.Dispose(); _spotifyPerPixel?.Dispose(); _spotifyWindow?.Close(); _spotifyPreview?.Dispose(); _capturedPlayback?.Dispose(); };
+        Closed += (_, _) => { CancelEditorGraphicsRecovery(); timer.Stop(); EndSpotifyGesture(); _timedEffectLayer?.Dispose(); _spotifyPerPixel?.Dispose(); _spotifyWindow?.Close(); _spotifyPreview?.Dispose(); _capturedPlayback?.Dispose(); };
     }
     private void UpdateSpotifyPreview()
     {
+        CheckEditorGraphicsRecoveryNavigation();
         var model = ViewModel;
         if (model is null || _playback is null)
         { HideSpotifyPreview(); HideCapturedOverlayPreview(); return; }
@@ -277,6 +278,10 @@ public sealed partial class MainWindow
         catch (Exception error)
         {
             if (session.Composition != output) return false;
+            if (_editorGraphicsRecovery is { IsCompleted: false }) { _editorGraphicsAttemptFailed = true; return false; }
+            if (error is GraphicsDeviceUnavailableException || output.TryReadStatus(out var status) && status.FailureKind == (uint)ClypDat.Capture.Abstractions.GraphicsFailureKind.DeviceLost) {
+                BeginEditorGraphicsRecovery(session, model, time); return false;
+            }
             session.Pause();
             model.IsPlaying = false;
             if (_compositionErrorOutput == output) return false;

@@ -43,6 +43,9 @@ public enum ReplayStorageState
     Inaccessible
 }
 
+[Flags]
+public enum ReplayStoragePressureCause { None = 0, Capacity = 1, WriteLatency = 2, Inaccessible = 4 }
+
 public sealed record ReplayStorageHealth(
     ReplayStorageState State,
     long FreeBytes,
@@ -52,6 +55,9 @@ public sealed record ReplayStorageHealth(
     string Reason,
     DateTime UpdatedUtc)
 {
+    public ReplayStoragePressureCause Cause { get; init; }
+    public string Location { get; init; } = string.Empty;
+    public double LastSaveDurationMs { get; init; }
     public static ReplayStorageHealth Unknown => new(ReplayStorageState.Healthy, -1, 0, 0, string.Empty, string.Empty, DateTime.UtcNow);
 }
 
@@ -62,6 +68,10 @@ public enum ReplayDegradeReason
     CaptureStall,
     CaptureTransport
 }
+
+public enum GraphicsFailureKind { None, DeviceLost, Operation, TeardownTimeout }
+public sealed record GraphicsFailure(GraphicsFailureKind Kind, int HResult, int DeviceRemovedReason,
+    string AdapterDescription = "", string AdapterLuid = "");
 
 // The first failing boundary in the recorder.  Keep this separate from the
 // compatibility degrade reason: a slow source must never make the encoder
@@ -120,6 +130,8 @@ public sealed record ReplayCaptureHealth(
     string LastFailure,
     DateTime UpdatedUtc)
 {
+    public GraphicsFailure? GraphicsFailure { get; init; }
+    public bool ReplayBufferReset { get; init; }
     public FullSessionStatus FullSession { get; init; } = new(FullSessionState.Off);
     public long TotalDroppedFrames { get; init; }
     public long KeyframesRequested { get; init; }

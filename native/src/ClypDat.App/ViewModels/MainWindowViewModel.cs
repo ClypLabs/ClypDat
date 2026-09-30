@@ -4351,6 +4351,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEditorVideoAreaVisible));
         }
     }
+    private string _editorGraphicsRecoveryStatus = string.Empty;
+    public string EditorGraphicsRecoveryStatus
+    {
+        get => _editorGraphicsRecoveryStatus;
+        set { if (SetProperty(ref _editorGraphicsRecoveryStatus, value)) OnPropertyChanged(nameof(IsEditorGraphicsRecovering)); }
+    }
+    public bool IsEditorGraphicsRecovering => _editorGraphicsRecoveryStatus.Length > 0;
 
     public string SelectedMetadata
     {

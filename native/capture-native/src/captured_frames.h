@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <exception>
 #include <memory>
 #include <string>
 struct ID3D11Device;
@@ -81,7 +82,7 @@ public:
     // Takes the newest frame, waiting up to `timeout`. False when none
     // arrived or the store is closed; throws the error set by fail().
     bool take(CapturePixels& pixels, int64_t& timestamp, std::chrono::milliseconds timeout, Timing* timing = nullptr);
-    void fail(const std::string& error); // Wakes take() with an error.
+    void fail(const std::string& error, std::exception_ptr cause = {}); // Wakes take() with the original error.
     void close();                        // Drops the newest frame and every borrowed buffer; take() returns false.
     void reset();                        // Clears the error and the newest frame.
     bool closed() const;

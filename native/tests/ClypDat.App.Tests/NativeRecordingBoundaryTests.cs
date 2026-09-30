@@ -41,9 +41,9 @@ public sealed class NativeRecordingBoundaryTests
     public void EveryIncompleteCapabilityMaskIsRejected()
     {
         Assert.Throws<NotSupportedException>(() => NativeRecorderSession.RequireCapabilities(0));
-        foreach (var flag in new ulong[] { 1, 2, 4, 8, 16, 32 })
-            Assert.Throws<NotSupportedException>(() => NativeRecorderSession.RequireCapabilities(63 & ~flag));
-        NativeRecorderSession.RequireCapabilities(63);
+        foreach (var flag in new ulong[] { 1, 2, 4, 8, 16, 32, 64 })
+            Assert.Throws<NotSupportedException>(() => NativeRecorderSession.RequireCapabilities(127 & ~flag));
+        NativeRecorderSession.RequireCapabilities(127);
     }
     [Fact]
     public void IndependentPreviewHandleDoesNotOpenADeviceUntilStarted()

@@ -287,9 +287,13 @@ int main() {
                 status.presented_picture == frames &&
                 status.width == width && status.height == height,
             "status frame identity and original dimensions");
-    cdvo_fail(renderer, "Injected device failure");
+    cdvo_fail_hresult(renderer, "Injected device failure", DXGI_ERROR_DEVICE_REMOVED);
+    cdvo_fail(renderer, "Generic preparation error must not replace device loss");
     require(cdvo_query(token, &status) != 0 && status.failed,
             "device failure handshake");
+    require(status.failure_kind == 1 && status.failure_hresult == DXGI_ERROR_DEVICE_REMOVED &&
+                status.device_removed_reason == S_OK && status.adapter[0] != 0,
+            "typed device loss retains original HRESULT and adapter");
     require(cdvo_begin_picture(renderer, width, height, 10000000) == nullptr,
             "failed device cannot accept pictures");
     cdvo_release(token);

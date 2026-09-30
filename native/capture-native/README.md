@@ -113,3 +113,37 @@ hardware, measurements, and limits. Real Intel H.264 hardware acceptance remains
 pending. Run `ClypDat.Capture.Native.CaptureTests --qsv` on an Intel adapter for
 the generated zero-copy/readback checks, followed by real application capture,
 replay save, keyframe, decode, seek and audio validation.
+
+## Graphics recovery and storage admission
+
+Device loss retains its original HRESULT, device removal reason, adapter name
+and LUID in native health JSON. Capture, conversion and encoding stop using
+that device. The UI stays armed, says “Waiting for graphics device”, and retries
+with a fresh worker immediately, then after 1, 2, 4, 8 and 10 seconds; subsequent
+delays remain 10 seconds. GPU outages do not consume the ordinary crash budget.
+Control and health requests have a five-second limit and startup has a
+45-second limit. Replacement waits for confirmed exit of the preceding worker.
+
+Accepted replay saves may finish from pinned history for up to 30 seconds
+before replacement. Each unresolved save receives one interruption result and
+is never retried against replacement history. Completed files remain. A fresh
+replay buffer and a new, unique Full Session file replace the lost recording;
+the current target, audio routing, pause state, hotkeys and overlays are restored.
+
+Save admission checks the requested destination, native working storage under
+the app data root, and system temporary storage. Its estimate uses the requested
+clip window and bitrate, a 3x allowance, and a 2 GiB reserve. Inactive Full
+Session destinations and obsolete configured roots cannot block a replay save.
+Total save duration is telemetry; it is not a disk write latency sample.
+Capacity and write latency causes have independent recovery state and retain
+their explanations throughout cooldown.
+
+`ClypDat.Capture.Native.CaptureTests --graphics-loss` injects loss at capture,
+conversion, encoding and a silent frame source, then verifies fresh sessions.
+The managed storage/recovery tests also cover five-minute simulated outages,
+wire request timeouts, restored configuration and save interruption. These use
+generated media and do not restart a physical graphics driver. Final acceptance
+requires a user-controlled graphics outage with replay and Full Session armed:
+check automatic resumption, unique Full Session output, buffer-reset wording,
+completed/interrupted save results, cancellation when recording is switched off,
+and a second outage in the same app session.

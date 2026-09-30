@@ -58,3 +58,28 @@ additional lost frames were zero percentage points. This is a short regression
 check, not a sustained frame-pacing or thermal benchmark. Interactive DPI,
 fullscreen and zoom transitions, physical device removal, HDR footage and
 end-to-end audible playback still require dedicated acceptance runs.
+
+## Device loss
+
+Output ABI 2 adds typed graphics failure, original HRESULT, removal reason,
+adapter name and LUID. Both normal presentation and paused redraw preserve the
+failure; a later generic preparation error cannot replace device loss. The
+render thread polls removal while paused. UI status queries copy diagnostics
+without accessing the D3D device. Render-fence waits are limited to five seconds.
+
+The editor keeps its edit model and audio readers during recovery, rebuilds the
+video output, restores artwork and the current blur/text scene, then waits for
+that scene to be presented before revealing video. Playhead, speed, volumes and
+play/pause intent survive; edits made while waiting apply to the replacement.
+Closing the editor or selecting another clip cancels recovery. A native teardown
+that cannot finish within five seconds retains its resources and asks for an
+application restart while preserving edits.
+
+The compositor test injects device loss without a driver reset, checks that the
+typed cause survives later errors, rejects old output and exercises replacement
+contexts. `validate.ps1` covers generated CFR/VFR clips, paused edits, seek
+boundaries, software decode and file release. For user-controlled driver-loss
+acceptance, open an edited clip with blur, text, camera, keyboard and Spotify
+layers; test playing and paused recovery, changes to speed/volume while waiting,
+clip changes and editor close during retry, and a repeated outage. The complete
+scene must appear before playback resumes, with audio aligned to the playhead.

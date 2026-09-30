@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using LibVLCSharp.Shared;
+using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
 
@@ -11,13 +12,14 @@ namespace ClypDat.App.Services;
 /// so VLC and the bridge share its registry even while players are being replaced.</summary>
 internal sealed unsafe class NativeVideoOutput : IDisposable
 {
-    internal const uint Abi = 1;
+    internal const uint Abi = 2;
     private const string CoreSha256 = "D3475B834DD3EB77910F37F71B0341D358BCBDDA5B9F04CC4A3A8E2BE1BC8E35";
     private static readonly Lazy<nint> Module = new(LoadModule);
     private readonly object _gate = new();
     private ulong _token;
     private ulong _generation = 1, _revision;
     private bool _seeking;
+    private readonly Dictionary<ulong, (byte[] Pixels, uint Width, uint Height)> _artwork = [];
     private readonly Stopwatch _opened = Stopwatch.StartNew();
     private bool _wasAttached;
 
@@ -45,6 +47,11 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
         public ulong Generation, Revision, DecodedPicture, PresentedPicture, Redraws;
         public uint Width, Height, Attached, Failed;
         public fixed byte Error[256];
+        public uint FailureKind;
+        public int FailureHresult, DeviceRemovedReason;
+        public ulong AdapterLuid;
+        public fixed byte Adapter[128];
+        public GraphicsFailure GraphicsFailure { get { fixed (byte* p = Adapter) return new((GraphicsFailureKind)FailureKind, FailureHresult, DeviceRemovedReason, Marshal.PtrToStringUTF8((nint)p) ?? "", AdapterLuid.ToString()); } }
         public string ErrorMessage { get { fixed (byte* p = Error) return Marshal.PtrToStringUTF8((nint)p) ?? "Video composition failed."; } }
     }
     private static nint Export(string name) => NativeLibrary.GetExport(Module.Value, name);
@@ -112,8 +119,24 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
             bitmap.CopyPixels(new PixelRect(0, 0, width, height), (nint)p, pixels.Length, width * 4);
             if (bitmap.Format == Avalonia.Platform.PixelFormat.Rgba8888)
                 for (var i = 0; i < pixels.Length; i += 4) (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
-            lock (_gate) if (_token != 0 && Upload(_token, _generation, id, (uint)width, (uint)height, (uint)(width * 4), p) == 0)
-                throw new InvalidOperationException("Could not upload editor artwork to the GPU compositor.");
+            lock (_gate) {
+                if (_token != 0 && Upload(_token, _generation, id, (uint)width, (uint)height, (uint)(width * 4), p) == 0)
+                    throw new InvalidOperationException("Could not upload editor artwork to the GPU compositor.");
+                _artwork[id] = (pixels, (uint)width, (uint)height);
+            }
+        }
+    }
+    internal void CopyArtworkFrom(NativeVideoOutput previous)
+    {
+        KeyValuePair<ulong, (byte[] Pixels, uint Width, uint Height)>[] retained;
+        lock (previous._gate) retained = previous._artwork.ToArray();
+        lock (_gate) foreach (var entry in retained) {
+            var pixels = entry.Value;
+            fixed (byte* p = pixels.Pixels) {
+                if (Upload(_token, _generation, entry.Key, pixels.Width, pixels.Height, pixels.Width * 4, p) == 0)
+                    throw new InvalidOperationException("Could not restore editor artwork.");
+            }
+            _artwork[entry.Key] = pixels;
         }
     }
     internal void Submit(Blur[] blurs, Artwork[] artwork, TimeSpan position, double rate, long? anchorMicroseconds = null)
@@ -138,6 +161,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
                     Artworks = a
                 };
                 if (SubmitState(_token, &state) == 0) throw new InvalidOperationException("The GPU compositor rejected an editor update.");
+                if (!_seeking) foreach (var obsolete in _artwork.Keys.Where(id => !artwork.Any(item => item.Id == id)).ToArray()) _artwork.Remove(obsolete);
             }
         }
     }
@@ -148,7 +172,10 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
             var status = new Status { Size = (uint)sizeof(Status), Version = Abi };
             if (_token == 0 || Query(_token, &status) == 0) throw new InvalidOperationException("The editor GPU compositor is unavailable.");
             _wasAttached |= status.Attached != 0;
-            if (status.Failed != 0) throw new InvalidOperationException(status.ErrorMessage);
+            if (status.Failed != 0) {
+                if (status.FailureKind == (uint)GraphicsFailureKind.DeviceLost) throw new GraphicsDeviceUnavailableException(status.ErrorMessage, status.GraphicsFailure);
+                throw new InvalidOperationException(status.ErrorMessage);
+            }
             if (!_wasAttached && _opened.Elapsed > TimeSpan.FromSeconds(10)) throw new InvalidOperationException("The editor GPU compositor did not initialize. Reopen the clip; reinstall ClypDat if this persists.");
             return status;
         }

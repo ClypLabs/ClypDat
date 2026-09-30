@@ -1,5 +1,6 @@
 #include "recording_capture.h"
 #include "qsv_timestamps.h"
+#include "../../common/graphics_device_failure.h"
 #include "encoder_input_diagnostics.h"
 #include "readback_stage.h"
 #include "detector_stage.h"
@@ -29,6 +30,7 @@ extern "C" {
 #include <thread>
 
 namespace clypdat {
+int32_t RecordingFrameSource::device_removed_reason() const { auto* device = d3d_device(); return device ? device->GetDeviceRemovedReason() : S_OK; }
 int capture_queue_capacity(int fps) { return std::clamp((std::clamp(fps, 30, 120) + 7) / 8, 4, 15); }
 int legacy_surface_capacity(int fps) { return std::clamp((fps + 1) / 2, 16, 60) + capture_queue_capacity(fps) + 5; }
 // Owned WGC copies alive at once: the store's newest slot, the source
@@ -252,9 +254,7 @@ struct ReadbackExhausted : std::runtime_error { using std::runtime_error::runtim
 using Buffer = std::unique_ptr<AVBufferRef, BufferDeleter>;
 using Microsoft::WRL::ComPtr;
 void check_hr(HRESULT value, const char* text) {
-    if (SUCCEEDED(value)) return;
-    char code[16]{}; std::snprintf(code, sizeof(code), "0x%08X", unsigned(value));
-    throw std::runtime_error(std::string(text) + " (hr=" + code + ")");
+    check_graphics(value, text);
 }
 // GPU time between begin() and end(), from timestamp queries read a few
 // frames later without flushing, so the CPU never waits on them. A result
@@ -404,7 +404,10 @@ public:
             try { made->timer = std::make_unique<GpuTimer>(device_.Get(), immediate_.Get()); } catch (const std::exception&) {}
             overlays_ = std::move(made);
             return true;
-        } catch (const std::exception& error) { overlay_failure_ = error.what(); return false; }
+        } catch (const std::exception& error) {
+            if (const auto* graphics = dynamic_cast<const GraphicsError*>(&error); graphics && is_device_loss(graphics->result)) throw;
+            check_hr(device_->GetDeviceRemovedReason(), "GPU overlay device removed"); overlay_failure_ = error.what(); return false;
+        }
     }
     GpuProcessor(ID3D11Device* input, int width, int height, int fps, int capacity, bool qsv = false,
         const std::function<AVBufferRef*(AVBufferRef*, int, int)>& qsv_frames = {}) :
@@ -456,7 +459,7 @@ public:
     Frame convert(const CapturePixels& pixels, int64_t pts, const OverlayFrame* layers = nullptr, OverlayCompositionResult* drawn = nullptr) {
         if (!pixels.texture) throw std::runtime_error("Recording frame has no GPU texture");
         struct Lock { ID3D11Multithread* p; Lock(ID3D11Multithread* v):p(v){if(p)p->Enter();} ~Lock(){if(p)p->Leave();} } lock(multithread_.Get());
-        auto hr = [](HRESULT value, const char* text) { if (FAILED(value)) { char code[16]{};std::snprintf(code,sizeof(code),"0x%08X",unsigned(value));throw std::runtime_error(std::string(text)+" (hr="+code+")"); } };
+        auto hr = [](HRESULT value, const char* text) { check_graphics(value, text); };
         if (!processor_ || pixels.width != source_width_ || pixels.height != source_height_) {
             enumerator_.Reset(); processor_.Reset();
             D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc{}; desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
@@ -502,6 +505,8 @@ public:
                 return frame;
             } catch (const std::exception& error) {
                 // Straight to the plain conversion below; later frames take
+                if (const auto* graphics = dynamic_cast<const GraphicsError*>(&error); graphics && is_device_loss(graphics->result)) throw;
+                check_hr(device_->GetDeviceRemovedReason(), "GPU overlay device removed");
                 // the CPU composition fallback.
                 overlay_failure_ = std::string("GPU overlay composition failed: ") + error.what();
                 overlays_.reset();
@@ -660,6 +665,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
     int64_t last_pts = -1, last_detector = INT64_MIN / 2;
     std::unique_ptr<VideoEncoder> encoder;
     std::unique_ptr<GpuProcessor> gpu;
+    ComPtr<ID3D11Device> monitored_device;
     // Readback candidates only; zero-copy candidates never create one.
     std::unique_ptr<ReadbackStage> readback;
     // Frames staged for readback, oldest first, matching readback->pending().
@@ -762,10 +768,32 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         LARGE_INTEGER ticks{}; QueryPerformanceCounter(&ticks);
         return capture_qpc_to_us(ticks.QuadPart, config.qpc_anchor, config.qpc_frequency, config.monotonic_anchor_us);
     }
-    void fail(const std::string& message) noexcept {
-        { std::lock_guard lock(mutex); status.error = message; status.restart_required = true; }
+    void fail(const std::string& message, HRESULT original = S_OK) noexcept {
+        HRESULT removed = S_OK;
+        try {
+            if (source) removed = source->device_removed_reason();
+            ComPtr<ID3D11Device> device; { std::lock_guard lock(mutex); device = monitored_device; }
+            if (SUCCEEDED(removed) && device) removed = device->GetDeviceRemovedReason();
+        } catch (...) { }
+        { std::lock_guard lock(mutex);
+          if (status.error.empty() || (status.failure_kind != 1 && (is_device_loss(original) || FAILED(removed)))) {
+              status.error = message;
+              status.failure_kind = is_device_loss(original) || FAILED(removed) ? 1 : FAILED(original) ? 2 : 0;
+              status.failure_hresult = original; status.device_removed_reason = removed;
+          }
+          status.restart_required = true; }
         stopping = true; changed.notify_all(); wake_detector();
         try { if (callbacks.failure) callbacks.failure(message); } catch (...) {}
+    }
+    void check_device() {
+        const auto reason = source ? source->device_removed_reason() : S_OK;
+        if (FAILED(reason)) throw GraphicsError(reason, "Recording graphics device removed");
+        ComPtr<ID3D11Device> device; { std::lock_guard lock(mutex); device = monitored_device; }
+        if (device) check_graphics(device->GetDeviceRemovedReason(), "Recording processing device removed");
+    }
+    void check_device_failure(const std::exception& error) {
+        if (const auto* graphics = dynamic_cast<const GraphicsError*>(&error); graphics && is_device_loss(graphics->result)) throw *graphics;
+        check_device();
     }
     // Taking the mutex orders this after a detection thread that has checked
     // its wait condition but not yet slept, so the notification is not lost.
@@ -778,6 +806,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 {
                 CaptureThreadScheduling scheduling(action!=&State::detection);
                 try { (self.get()->*action)(); }
+                catch (const GraphicsError& e) { self->fail(e.what(), e.result); }
                 catch (const std::exception& e) { self->fail(e.what()); }
                 catch (...) { self->fail("Unhandled native recording failure"); }
                 }
@@ -941,7 +970,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
 #endif
                 if (callbacks.generation) callbacks.generation(generation);
                 return;
-            } catch (const std::exception& e) { failed_candidates[i] = true; failures += candidate.name + ": " + e.what() + "\n"; }
+            } catch (const GraphicsError& e) {
+                if (is_device_loss(e.result)) throw;
+                check_device(); failed_candidates[i] = true; failures += candidate.name + ": " + e.what() + "\n";
+            } catch (const std::exception& e) { check_device(); failed_candidates[i] = true; failures += candidate.name + ": " + e.what() + "\n"; }
         }
         throw std::runtime_error("No compatible recording encoder available: " + failures);
     }
@@ -952,7 +984,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         if (!device || (gpu && !gpu->qsv() && gpu->capacity() == capacity)) return;
         gpu.reset();
         try { gpu = std::make_unique<GpuProcessor>(device, config.width, config.height, fps, capacity); gpu_initialization_error.clear(); }
-        catch (const std::exception& error) { gpu_initialization_error = error.what(); std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
+        catch (const GraphicsError& error) { if (is_device_loss(error.result)) throw; check_device(); gpu_initialization_error = error.what(); std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
+        catch (const std::exception& error) { check_device(); gpu_initialization_error = error.what(); std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
         catch (...) { gpu_initialization_error = "Unknown GPU processor initialization error"; std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = gpu_initialization_error; }
     }
     // The readback pipeline sized by the plan: staging textures only when the
@@ -970,6 +1003,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         try { readback = std::make_unique<ReadbackStage>(device, config.width, config.height, AV_PIX_FMT_NV12, staging, frames); }
         catch (const std::exception& error) {
             // Without staging textures, GPU frames are read back synchronously
+            check_device_failure(error);
             // into the same reusable CPU frames.
             readback = std::make_unique<ReadbackStage>(nullptr, config.width, config.height, AV_PIX_FMT_NV12, 0, frames);
             std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks; status.gpu_conversion_fallback_error = error.what();
@@ -1005,6 +1039,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         int64_t last_recovery = 0;
         bool backend_fallback_attempted = false;
         while (!stopping) {
+            check_device();
             const int requested = fps;
             if (applied_fps != requested || now()-refresh_checked>=1000000) {
                 source->set_frame_rate(requested); applied_fps = requested; refresh_checked=now();
@@ -1018,8 +1053,10 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             }
             CapturePixels pixels;
             try {
+                if (dependencies.graphics_boundary) dependencies.graphics_boundary("capture");
                 if (!source->acquire(pixels, std::chrono::milliseconds(20))) continue;
             }catch(const std::exception& failure){
+                check_device_failure(failure);
                 const auto current=now();
                 {std::lock_guard lock(mutex);status.source_recovery_error=failure.what();}
                 // A fresh source recreation gets one recovery opportunity. A
@@ -1422,7 +1459,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         ++keyframes.health.recoveries;
         { std::lock_guard lock(mutex); status.keyframes=keyframes.health; }
         try { open_encoder(true,true); first=true; }
-        catch(const std::exception& e) { throw std::runtime_error(std::string(KeyframeCadenceError().what())+"; recovery failed: "+e.what()); }
+        catch(const std::exception& e) { check_device_failure(e); throw std::runtime_error(std::string(KeyframeCadenceError().what())+"; recovery failed: "+e.what()); }
     }
     // Drains ready packets for at most one output interval until ready()
     // holds. Never allocates; waited_us reports the time spent.
@@ -1432,7 +1469,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         for (;;) {
             try { emit(encoder->drain_ready()); }
             catch (const KeyframeCadenceError&) { recover_keyframes(first); waited_us=now()-started; return true; }
-            catch (...) { replace_encoder(first); waited_us = now() - started; return true; }
+            catch (const std::exception& error) { check_device_failure(error); replace_encoder(first); waited_us = now() - started; return true; }
             if (ready()) { waited_us = now() - started; return true; }
             const auto elapsed = now() - started;
             if (elapsed >= budget) { waited_us = elapsed; return false; }
@@ -1537,6 +1574,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             emit(std::move(result.packets));
         };
         try {
+            check_device();
+            if (dependencies.graphics_boundary) dependencies.graphics_boundary("encoding");
             result = encoder->try_submit(*frame); completed();
             // Busy: the encoder refused this frame and holds no reference.
             // Retry within one output interval, then drop the tick.
@@ -1549,7 +1588,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
         catch (const KeyframeCadenceError&) {
             recover_keyframes(state.first); return;
         }
-        catch (...) {
+        catch (const std::exception& error) {
+            check_device_failure(error);
             replace_encoder(state.first); frame->pict_type = AV_PICTURE_TYPE_I;
             request_key=true;
             track();
@@ -1638,6 +1678,8 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
             // including the fallback upload and the overlay upload; readback
             // CPU frame exhaustion as ReadbackExhausted.
             auto produce = [&]() -> Frame {
+                check_device();
+                if (dependencies.graphics_boundary) dependencies.graphics_boundary("conversion");
                 Frame frame;
                 const bool zero_copy = encoder_candidates[active_candidate].d3d11;
                 const bool overlays = overlay_active();
@@ -1676,6 +1718,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                     } catch (const ReadbackExhausted&) {
                         throw;
                     } catch (const std::exception& error) {
+                        check_device_failure(error);
                         { std::lock_guard lock(mutex); ++status.gpu_conversion_fallbacks;status.gpu_conversion_fallback_error=error.what(); }
                         const auto readback_started=std::chrono::steady_clock::now();capture_copy_texture_pixels(*pixels);tick.readback_ms+=since_ms(readback_started);
                         const auto convert_started=std::chrono::steady_clock::now();frame=convert(*pixels,work.pts);tick.software_convert_ms=since_ms(convert_started);
@@ -1759,10 +1802,12 @@ RecordingCapture::RecordingCapture(RecordingCaptureConfig c, RecordingCaptureCal
 RecordingCapture::~RecordingCapture() { if (state_) stop(); }
 void RecordingCapture::start() {
     auto s = state_;
+    try {
     { std::lock_guard lock(s->mutex);
       if(s->status.restart_required)throw std::logic_error("Recording capture requires worker restart");
       if (s->status.running || s->threads) throw std::logic_error("Recording capture already running"); }
     if (!s->injected_source) { s->source = create_windows_recording_source(s->config); s->gpu.reset(); }
+    { std::lock_guard lock(s->mutex); s->status.source_details = s->source->diagnostics(); s->status.source = s->source->name(); s->monitored_device = s->source->d3d_device(); }
     if(s->config.max_height>0){
         const auto bounds=s->source->content_bounds();
         if(bounds.width<=0||bounds.height<=0)throw std::runtime_error("Recording source has no initial canvas dimensions");
@@ -1783,6 +1828,8 @@ void RecordingCapture::start() {
     try { s->launch(&State::acquisition, L"ClypDat capture acquisition"); s->launch(&State::pacing, L"ClypDat capture pacing");
           s->launch(&State::encoding, L"ClypDat capture encoding"); s->launch(&State::detection, L"ClypDat capture detection"); }
     catch (...) { s->stopping = true; s->pacing_finished = true; s->changed.notify_all(); s->detector_wake.notify_all(); throw; }
+    } catch (const GraphicsError& error) { s->fail(error.what(), error.result); throw; }
+    catch (const std::exception& error) { s->fail(error.what()); throw; }
 }
 bool RecordingCapture::stop(std::chrono::milliseconds timeout) {
     auto s = state_; s->stopping = true; s->changed.notify_all(); s->wake_detector();

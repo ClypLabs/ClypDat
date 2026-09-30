@@ -1,4 +1,5 @@
 #include "overlay_compositor.h"
+#include "../../common/graphics_device_failure.h"
 #include <Windows.h>
 #include <d3d11_4.h>
 #include <d3dcompiler.h>
@@ -11,9 +12,7 @@ namespace clypdat {
 namespace {
 using Microsoft::WRL::ComPtr;
 void checked(HRESULT result, const char* what) {
-    if (SUCCEEDED(result)) return;
-    char code[16]{}; std::snprintf(code, sizeof(code), "0x%08X", unsigned(result));
-    throw std::runtime_error(std::string(what) + " (hr=" + code + ")");
+    check_graphics(result, what);
 }
 // A full-screen triangle drawn through a viewport set to the layer's
 // placement covers exactly its pixels. Each pixel loads the texel the CPU

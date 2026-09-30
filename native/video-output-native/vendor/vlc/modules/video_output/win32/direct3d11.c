@@ -1012,7 +1012,7 @@ static void Manage(vout_display_t *vd)
             DXGI_PRESENT_PARAMETERS parameters = {0};
             HRESULT hr = IDXGISwapChain1_Present1(sys->dxgiswapChain, 0, 0, &parameters);
             if (SUCCEEDED(hr)) cdvo_presented(sys->compositor);
-            else cdvo_fail(sys->compositor, "Paused redraw failed. Reopen the clip.");
+            else cdvo_fail_hresult(sys->compositor, "Paused redraw failed.", hr);
         }
         d3d11_device_unlock(&sys->d3d_dev);
     }
@@ -1365,7 +1365,11 @@ static void Prepare(vout_display_t *vd, picture_t *picture, subpicture_t *subpic
         ID3D11Fence_SetEventOnCompletion(sys->d3dRenderFence, sys->renderFence, sys->renderFinished);
         ID3D11DeviceContext4_Signal(sys->d3dcontext4, sys->d3dRenderFence, sys->renderFence);
 
-        WaitForSingleObject(sys->renderFinished, INFINITE);
+        const DWORD fence_wait = WaitForSingleObject(sys->renderFinished, 5000);
+        if (fence_wait != WAIT_OBJECT_0) {
+            cdvo_fail_hresult(sys->compositor, "Video render fence timed out.", HRESULT_FROM_WIN32(fence_wait == WAIT_TIMEOUT ? ERROR_TIMEOUT : GetLastError()));
+            sys->prepared = false;
+        }
         if (sys->log_level >= 4)
             msg_Dbg(vd, "waited %" PRId64 " ms for the render fence",
                     (mdate() - render_start) * 1000 / CLOCK_FREQ);
@@ -1398,7 +1402,7 @@ static void Display(vout_display_t *vd, picture_t *picture, subpicture_t *subpic
             sys->last_picture_key = sys->picture_key;
             sys->last_picture_date = sys->picture_date;
         }
-        else cdvo_fail(sys->compositor, "Video presentation failed. Reopen the clip or update the graphics driver.");
+        else cdvo_fail_hresult(sys->compositor, "Video presentation failed.", hr);
     }
     sys->prepared = false;
     if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET)

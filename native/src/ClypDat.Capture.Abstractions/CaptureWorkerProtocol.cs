@@ -21,7 +21,8 @@ public static class CaptureWorkerProtocol
     // start intent without claiming that recording is active. A worker left over from an
     // older install fails the version check in CaptureWorkerPipe.ReadAsync, which
     // the proxy's read loop already routes into recovery.
-    public const int Version = 12;
+    // 13 requires typed GPU failures and bounded worker replacement.
+    public const int Version = 13;
     public const string PipePrefix = "ClypDat-CaptureWorker-";
     public const string MutexPrefix = "ClypDat-CaptureWorker-Mutex-";
 
@@ -54,8 +55,8 @@ public sealed record CaptureWorkerAck(bool Accepted, string Error = "");
 // Suspended: capture is requested but held stopped while the display or
 // session is unavailable. The worker restarts it by itself when they return;
 // the replay stays armed meanwhile.
-public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "", FullSessionStatus? FullSession = null, bool Suspended = false);
-public sealed record CaptureWorkerHandshake(int Version, string ClientId);
+public sealed record CaptureWorkerStartAck(bool Accepted, bool Recording, string Error = "", FullSessionStatus? FullSession = null, bool Suspended = false, ReplayCaptureHealth? FailureHealth = null);
+public sealed record CaptureWorkerHandshake(int Version, string ClientId, int ProcessId = 0);
 public sealed record CaptureWorkerAttachResponse(
     bool Recording,
     string ConfigIdentity,

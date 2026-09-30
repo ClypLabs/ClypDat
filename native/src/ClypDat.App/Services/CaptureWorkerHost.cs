@@ -169,14 +169,14 @@ internal static class CaptureWorkerHost
             switch (message.Type)
             {
                 case "handshake":
-                    await ReplyAsync(client, message, new CaptureWorkerHandshake(CaptureWorkerProtocol.Version, "capture-worker"), cancellationToken);
+                    await ReplyAsync(client, message, new CaptureWorkerHandshake(CaptureWorkerProtocol.Version, "capture-worker", Environment.ProcessId), cancellationToken);
                     break;
                 case "attach":
                     await AttachAsync(client, message, cancellationToken);
                     break;
                 case "start":
-                    var started = await RequestCaptureAsync(Lifecycle, () => _buffer?.IsRecording == true, () => GetHealth().FullSession, cancellationToken);
-                    await ReplyAsync(client, message, started, cancellationToken);
+                    Lifecycle.Request(true);
+                    _ = Task.Run(() => ReplyStartAsync(client, message, cancellationToken));
                     break;
                 case "stop":
                     Lifecycle.Request(false);
@@ -222,8 +222,7 @@ internal static class CaptureWorkerHost
                     break;
                 case "save":
                     var request = message.Payload.Deserialize<CaptureWorkerSaveRequest>(JsonOptions) ?? throw new InvalidDataException("Invalid save request.");
-                    var result = await SaveAsync(request, cancellationToken);
-                    await ReplyAsync(client, message, result, cancellationToken);
+                    _ = Task.Run(() => ReplySaveAsync(client, message, request, cancellationToken));
                     break;
                 case "ack-save":
                     var acknowledgedId = message.Payload.TryGetProperty("saveId", out var saveIdElement) && saveIdElement.TryGetGuid(out var parsedId)
@@ -303,12 +302,7 @@ internal static class CaptureWorkerHost
                 if (_buffer?.IsRecording == true) Lifecycle.Request(true);
 
                 ApplyWorkerPriority();
-                Storage.Start(new[]
-                {
-                    (config.LibraryFolder, "library"),
-                    (Path.GetTempPath(), "system-temp"),
-                    (config.FullSessionRecordingFolder, "full-session")
-                });
+                UpdateStoragePaths(config);
                 SetHotkey(config.SaveReplayHotkey);
                 SetFullSessionHotkey(config.FullSessionHotkey);
                 var response = new CaptureWorkerAttachResponse(
@@ -322,6 +316,32 @@ internal static class CaptureWorkerHost
             finally { SaveGate.Release(); }
         }
         finally { CaptureLifecycleGate.Release(); }
+    }
+
+    internal static string WorkingStoragePath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "native-replay-buffer");
+    private static void UpdateStoragePaths(ReplayBufferConfig config)
+    {
+        var paths = new List<(string Path, string Role)> { (config.LibraryFolder, "library"), (WorkingStoragePath, "working storage"), (Path.GetTempPath(), "system-temp") };
+        if (config.FullSessionRecordingEnabled) paths.Add((config.FullSessionRecordingFolder, "full-session"));
+        Storage.Start(paths);
+    }
+
+    private static async Task ReplyStartAsync(Stream client, CaptureWorkerEnvelope message, CancellationToken token)
+    {
+        try
+        {
+            CaptureWorkerStartAck ack;
+            try { ack = await RequestCaptureAsync(Lifecycle, () => _buffer?.IsRecording == true, () => GetHealth().FullSession, token, requestCapture: false); }
+            catch (Exception error) { ack = new(false, false, error.Message, FailureHealth: GetHealth()); }
+            await ReplyAsync(client, message, ack, token);
+        }
+        catch (Exception error) { CaptureWorkerLog.Info($"Capture start reply failed: {error.Message}"); }
+    }
+
+    private static async Task ReplySaveAsync(Stream client, CaptureWorkerEnvelope message, CaptureWorkerSaveRequest request, CancellationToken token)
+    {
+        try { await ReplyAsync(client, message, await SaveAsync(request, token), token); }
+        catch (Exception error) { CaptureWorkerLog.Info($"Capture save reply failed: {error.Message}"); }
     }
 
     private static async Task EnsureBufferAsync()
@@ -338,9 +358,9 @@ internal static class CaptureWorkerHost
     // suspended, reported as such, until the availability monitor's wake
     // reconciles and starts it once; nothing here retries.
     internal static async Task<CaptureWorkerStartAck> RequestCaptureAsync(CaptureLifecycleCoordinator lifecycle,
-        Func<bool> recording, Func<FullSessionStatus?> fullSession, CancellationToken cancellationToken)
+        Func<bool> recording, Func<FullSessionStatus?> fullSession, CancellationToken cancellationToken, bool requestCapture = true)
     {
-        lifecycle.Request(true);
+        if (requestCapture) lifecycle.Request(true);
         await lifecycle.ReconcileAsync(cancellationToken).ConfigureAwait(false);
         return new CaptureWorkerStartAck(true, recording(), FullSession: fullSession(), Suspended: lifecycle.Suspended);
     }
@@ -509,7 +529,8 @@ internal static class CaptureWorkerHost
         try
         {
             await EnsureBufferAsync();
-            if (!Storage.CanSave(_config?.BitrateMbps ?? 15, TimeSpan.FromSeconds(_config?.DurationSeconds ?? 60), out var storageReason))
+            var duration = request.ClipWindow is { } window ? window.EndUtc - window.StartUtc : TimeSpan.FromSeconds(_config?.DurationSeconds ?? 60);
+            if (!Storage.CanSave(new[] { request.OutputFolder, WorkingStoragePath, Path.GetTempPath() }, _config?.BitrateMbps ?? 15, duration, out var storageReason))
             {
                 var unavailable = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, storageReason, saveId, requestedUtc);
                 await SendEventAsync("save-failed", unavailable);
@@ -519,7 +540,7 @@ internal static class CaptureWorkerHost
             var gameDisplayName = string.IsNullOrWhiteSpace(request.GameDisplayNameOverride) ? _config?.GameDisplayName : request.GameDisplayNameOverride;
             var path = await _buffer!.SaveReplayAsync(request.OutputFolder, cancellationToken, request.TitleOverride, request.ClipWindow, gameDisplayName, saveId);
             stopwatch.Stop();
-            Storage.RecordWrite(path, stopwatch.Elapsed);
+            Storage.RecordSaveDuration(stopwatch.Elapsed);
             if (_config is not null)
             {
                 // No Spotify track here on purpose: this runs in the capture
@@ -593,6 +614,7 @@ internal static class CaptureWorkerHost
             var enabled = !_config.FullSessionRecordingEnabled;
             await _buffer.StopAsync(CancellationToken.None).ConfigureAwait(false);
             _config = _config with { FullSessionRecordingEnabled = enabled };
+            UpdateStoragePaths(_config);
 
             CaptureWorkerLog.Info($"Full session recording toggled {(enabled ? "on" : "off")} by hotkey.");
             await SendEventAsync("full-session-toggled", new { enabled }).ConfigureAwait(false);

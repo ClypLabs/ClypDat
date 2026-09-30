@@ -11,6 +11,7 @@ namespace ClypDat.App.Services;
 internal sealed class EditorCompositionScene
 {
     private NativeVideoOutput? _output;
+    private string? _clipPath;
     private ulong _nextId = 4;
     private long _cameraRevision = -1, _spotifyRevision = -1;
     private string? _keyboardKey;
@@ -26,9 +27,12 @@ internal sealed class EditorCompositionScene
     {
         if (_output != output)
         {
+            var sameClip = string.Equals(_clipPath, model.SelectedVideoPath, StringComparison.OrdinalIgnoreCase);
+            if (sameClip && _output is not null) output.CopyArtworkFrom(_output);
             _output = output;
+            _clipPath = model.SelectedVideoPath;
             _texts.Clear(); _cameraRevision = _spotifyRevision = -1; _keyboardKey = null;
-            _cameraBounds = _keyboardBounds = _spotifyBounds = null;
+            if (!sameClip) _cameraBounds = _keyboardBounds = _spotifyBounds = null;
         }
         var sourceWidth = model.SelectedSourceWidth; var sourceHeight = model.SelectedSourceHeight;
         if (sourceWidth <= 0 || sourceHeight <= 0) return;

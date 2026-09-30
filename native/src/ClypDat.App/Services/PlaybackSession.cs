@@ -29,7 +29,7 @@ public enum PlaybackRateChangeOutcome
     Rejected
 }
 
-public sealed class PlaybackSession : IDisposable
+public sealed partial class PlaybackSession : IDisposable
 {
     private readonly LibVLC _libVlc;
     private readonly Dictionary<int, AudioTrackSource> _audioSources = new();
@@ -197,13 +197,14 @@ public sealed class PlaybackSession : IDisposable
     {
         get
         {
+            if (_graphicsRecoveryActive || _graphicsRestartRequired) return _lastRequestedPosition;
             var time = VideoPlayer.Time;
             return time > 0
                 ? TimeSpan.FromMilliseconds(time)
                 : _lastRequestedPosition;
         }
     }
-    public bool IsPlaying => VideoPlayer.IsPlaying;
+    public bool IsPlaying => !_graphicsRecoveryActive && !_graphicsRestartRequired && VideoPlayer.IsPlaying;
     public double PlaybackRate => _playbackRate;
     internal double EffectiveOverlayRate => _overlayClock.EffectiveRate;
     internal bool TryGetOverlayPosition(out TimeSpan position) => _overlayClock.TryGetOverlayPosition(out position);
@@ -351,6 +352,7 @@ public sealed class PlaybackSession : IDisposable
     internal Task LoadVideoAsync(string path, string videoCodec, bool replayArmed = false, CancellationToken cancellationToken = default) => Task.Run(async () =>
     {
         using var load = await _loadGate.EnterAsync(cancellationToken).ConfigureAwait(false);
+        if (_graphicsRestartRequired) throw new EditorGraphicsRestartRequiredException();
         using var processingRead = SpotifyProcessingPaths.TryRead(path);
         if (processingRead is null) throw new OperationCanceledException("Adding Spotify overlay�");
         cancellationToken.ThrowIfCancellationRequested();
@@ -372,12 +374,13 @@ public sealed class PlaybackSession : IDisposable
         _lastRequestedPosition = TimeSpan.Zero;
         ResetOverlayClock(TimeSpan.Zero);
         LoadedPath = path;
+        _videoOptions.Clear();
         _videoMedia = new Media(_libVlc, new Uri(path));
         Composition = new NativeVideoOutput();
         Composition.BindPlayer(VideoPlayer);
-        _videoMedia.AddOption(Composition.MediaOption);
-        _videoMedia.AddOption(":vout=clypdat_d3d11,none");
-        _videoMedia.AddOption(":no-audio");
+        AddVideoOption(Composition.MediaOption);
+        AddVideoOption(":vout=clypdat_d3d11,none");
+        AddVideoOption(":no-audio");
         if (IsH264(videoCodec))
         {
             var hardwareDecodeQualified = H264HardwareDecodeProbe.TryGetCachedResult(path, out var safeForHardwareDecode);
@@ -385,24 +388,24 @@ public sealed class PlaybackSession : IDisposable
             // random-access packets are genuine IDRs. A cache miss must retain
             // the software fallback rather than block this click on a full
             // packet scan; qualification runs after editor foreground work.
-            _videoMedia.AddOption(safeForHardwareDecode ? ":avcodec-hw=any" : ":avcodec-hw=none");
-            _videoMedia.AddOption(":avcodec-skiploopfilter=0");
-            _videoMedia.AddOption(":avcodec-skip-frame=0");
-            _videoMedia.AddOption(":avcodec-skip-idct=0");
+            AddVideoOption(safeForHardwareDecode ? ":avcodec-hw=any" : ":avcodec-hw=none");
+            AddVideoOption(":avcodec-skiploopfilter=0");
+            AddVideoOption(":avcodec-skip-frame=0");
+            AddVideoOption(":avcodec-skip-idct=0");
             AppLog.Info($"Editor H.264 decode: {(safeForHardwareDecode ? "hardware" : "software")} (IDR qualification={(hardwareDecodeQualified ? "cached" : "deferred")}).");
         }
         else
         {
             // AV1/HEVC use negotiated hardware decode when available, with
             // LibVLC software fallback when no compatible hardware path exists.
-            _videoMedia.AddOption(":avcodec-hw=any");
+            AddVideoOption(":avcodec-hw=any");
         }
         // Bounded rather than libvlc's "0" (every core) - see
         // ResolveDecodeThreads. Still generous enough that a short 1080p clip
         // decodes comfortably ahead of playback; just not at the price of
         // starving the capture pipeline of the machine it is recording with.
         var decodeThreads = ResolveDecodeThreads(replayArmed);
-        _videoMedia.AddOption($":avcodec-threads={decodeThreads}");
+        AddVideoOption($":avcodec-threads={decodeThreads}");
         // LibVLC already streams windowed around the playhead (it never reads
         // the whole file), but its default read-ahead cache is sized for
         // local disks - on a network drive (UNC path or mapped SMB share) the
@@ -414,7 +417,7 @@ public sealed class PlaybackSession : IDisposable
         // network shares need a much larger buffer to absorb their latency.
         var isNetwork = IsNetworkPath(path);
         var fileCachingMilliseconds = isNetwork ? 5000 : LocalFileCachingMilliseconds;
-        _videoMedia.AddOption($":file-caching={fileCachingMilliseconds}");
+        AddVideoOption($":file-caching={fileCachingMilliseconds}");
         cancellationToken.ThrowIfCancellationRequested();
         VideoPlayer.Media = _videoMedia;
         VideoPlayer.Mute = true;
@@ -639,6 +642,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void PlayFrom(TimeSpan time)
     {
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) { _lastRequestedPosition = time; _shouldPlay = true; return; }
         // A timeline seek can still be waiting for LibVLC to settle when the
         // user presses Play. Its old completion must not pause/stop the newer
         // transport state after PlayFrom has already started it.
@@ -689,6 +693,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void Pause()
     {
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) { _shouldPlay = false; return; }
         Interlocked.Increment(ref _playVersion);
         _shouldPlay = false;
         ResetSlowRateMonitor();
@@ -713,6 +718,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void Stop()
     {
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) { _shouldPlay = false; return; }
         try
         {
             Interlocked.Increment(ref _playVersion);
@@ -775,6 +781,7 @@ public sealed class PlaybackSession : IDisposable
     // presentation; later pointer targets replace only the pending request.
     public void SeekPreview(TimeSpan time)
     {
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) { _lastRequestedPosition = EditorSeekRequestQueue.Normalize(time); return; }
         if (_disposed || !_previewRequests.TryQueuePreview(time)) return;
         Interlocked.Increment(ref _seekVersion);
         _lastRequestedPosition = EditorSeekRequestQueue.Normalize(time);
@@ -845,6 +852,7 @@ public sealed class PlaybackSession : IDisposable
 
     public Task<PlaybackSeekResult> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
     {
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) { _lastRequestedPosition = time; _shouldPlay = resumePlayback; return Task.FromResult(PlaybackSeekResult.Completed(false)); }
         lock (_seekTaskLock)
         {
             if (_disposed) return Task.FromCanceled<PlaybackSeekResult>(_disposeCts.Token);
@@ -931,6 +939,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void EnsurePlayingIfNeeded(bool shouldPlay)
     {
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) { _shouldPlay = shouldPlay; return; }
         if (!shouldPlay) return;
         _shouldPlay = true;
         ForceVideoSilent();
@@ -981,6 +990,10 @@ public sealed class PlaybackSession : IDisposable
         var normalized = ClipRenderFilters.NormalizeSpeed(rate);
         var previous = _playbackRate;
         if (Math.Abs(previous - normalized) < 0.0001) return PlaybackRateChangeOutcome.Unchanged;
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) {
+            _playbackRate = normalized; _rateStage?.SetRate(normalized);
+            _overlayClock.SetRate(_overlayClockGeneration, normalized); return PlaybackRateChangeOutcome.Applied;
+        }
         int result;
         try
         {
@@ -1150,6 +1163,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void EnsurePausedIfNeeded()
     {
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) return;
         // Mirrors the _shouldPlay-vs-VideoPlayer.IsPlaying race already fixed in
         // SyncAndPlayMixedAudio: a seek issued while paused/ended has to force
         // VideoPlayer.Play() first (LibVLC ignores seeks on a stopped/ended
@@ -1168,6 +1182,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void SyncAudioStreams()
     {
+        if (_graphicsRecoveryActive || _graphicsRestartRequired) return;
         if (_isSeeking || !_shouldPlay || _audioOutput is null || !VideoPlayer.IsPlaying) return;
         lock (_transportLock)
         {
@@ -1206,6 +1221,7 @@ public sealed class PlaybackSession : IDisposable
 
     public void Dispose()
     {
+        if (_graphicsRestartRequired || _graphicsRecoveryActive) { _disposed = true; _disposeCts.Cancel(); AppLog.Info("Retaining editor native resources until application restart."); return; }
         if (_disposed) return;
         _disposed = true;
         if (_overlayClockHandler is not null) VideoPlayer.TimeChanged -= _overlayClockHandler;

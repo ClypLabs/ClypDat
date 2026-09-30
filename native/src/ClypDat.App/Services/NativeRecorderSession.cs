@@ -143,9 +143,9 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
     }
     internal static void RequireCapabilities(ulong capabilities)
     {
-        const ulong required = 1 | 2 | 4 | 8 | 16 | 32;
+        const ulong required = 1 | 2 | 4 | 8 | 16 | 32 | 64;
         if ((capabilities & required) != required)
-            throw new NotSupportedException("Native recorder is incomplete: capture, audio, saves, full sessions, overlays, and asynchronous control are required. Install a complete ClypDat recorder build.");
+            throw new NotSupportedException("Native recorder is incomplete: capture, audio, saves, full sessions, overlays, asynchronous control, and GPU failure reporting are required. Install a complete ClypDat recorder build.");
     }
     internal static NativeRecorderSession Create(ReplayBufferConfig settings, string workDirectory, string fullSessionPath)
     {
@@ -334,14 +334,25 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
     {
         if (result == 0) return;
         string? reason = null;
+        GraphicsFailure? failure = null;
         try
         {
             var details = ReadHealth().Details;
             if (details.TryGetProperty("controlError", out var error)) reason = error.GetString();
+            failure = ReadGraphicsFailure(details);
         }
         catch { }
         GC.KeepAlive(this);
-        throw new InvalidOperationException(string.IsNullOrWhiteSpace(reason) ? $"Could not {action} (native status {result})." : $"Could not {action}: {reason}");
+        var message = string.IsNullOrWhiteSpace(reason) ? $"Could not {action} (native status {result})." : $"Could not {action}: {reason}";
+        if (failure?.Kind == GraphicsFailureKind.DeviceLost) throw new GraphicsDeviceUnavailableException(message, failure);
+        throw new InvalidOperationException(message);
+    }
+    internal static GraphicsFailure? ReadGraphicsFailure(JsonElement details)
+    {
+        if (!details.TryGetProperty("failureKind", out var kind) || !kind.TryGetInt32(out var code) || code == 0) return null;
+        int Number(string key) => details.TryGetProperty(key, out var value) && value.TryGetInt32(out var number) ? number : 0;
+        string Text(string key) => details.TryGetProperty(key, out var value) ? value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.GetRawText() : "";
+        return new((GraphicsFailureKind)code, Number("failureHresult"), Number("deviceRemovedReason"), Text("adapter"), Text("adapterLuid"));
     }
     protected override bool ReleaseHandle()
     {

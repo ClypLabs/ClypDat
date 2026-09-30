@@ -3,7 +3,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define CDVO_ABI 1u
+#define CDVO_ABI 2u
 #define CDVO_API __declspec(dllexport)
 typedef struct cdvo_rect {
   float x, y, width, height;
@@ -35,6 +35,10 @@ typedef struct cdvo_status {
   uint64_t generation, revision, decoded_picture, presented_picture, redraws;
   uint32_t width, height, attached, failed;
   char error[256];
+  uint32_t failure_kind; /* 1 device loss, 2 graphics operation, 3 teardown timeout */
+  int32_t failure_hresult, device_removed_reason;
+  uint64_t adapter_luid;
+  char adapter[128];
 } cdvo_status;
 CDVO_API uint64_t cdvo_create(uint32_t abi);
 CDVO_API int cdvo_bind_player(uint64_t token, void *player);

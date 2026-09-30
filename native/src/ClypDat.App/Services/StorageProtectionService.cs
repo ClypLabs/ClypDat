@@ -10,6 +10,8 @@ public sealed class StoragePressurePolicy
     private readonly Queue<(DateTime At, double Ms)> _writes = new();
     private ReplayStorageHealth _health;
     private DateTime? _healthySince;
+    private ReplayStorageState _capacityState, _latencyState;
+    private string _latencyReason = string.Empty;
 
     public StoragePressurePolicy(string volumeRole = "unknown")
     {
@@ -26,32 +28,34 @@ public sealed class StoragePressurePolicy
         var latencyWarning = _writes.Count(item => item.Ms >= 100) >= 3;
         var freeCritical = freeBytes >= 0 && freeBytes < 2L * 1024 * 1024 * 1024;
         var freeWarning = freeBytes >= 0 && freeBytes < 10L * 1024 * 1024 * 1024;
-        var pressure = freeCritical || latencyCritical ? ReplayStorageState.Critical
-            : freeWarning || latencyWarning ? ReplayStorageState.Warning
-            : ReplayStorageState.Healthy;
-
-        if (_health.State == ReplayStorageState.Critical && pressure == ReplayStorageState.Healthy && freeBytes < 3L * 1024 * 1024 * 1024)
-            pressure = ReplayStorageState.Critical;
-        if (_health.State == ReplayStorageState.Warning && pressure == ReplayStorageState.Healthy && freeBytes < 12L * 1024 * 1024 * 1024)
-            pressure = ReplayStorageState.Warning;
-
-        if (pressure == ReplayStorageState.Healthy && _health.Reason.Contains("write", StringComparison.OrdinalIgnoreCase))
+        _capacityState = freeCritical || (_capacityState == ReplayStorageState.Critical && freeBytes < 3L * 1024 * 1024 * 1024)
+            ? ReplayStorageState.Critical
+            : freeWarning || (_capacityState != ReplayStorageState.Healthy && freeBytes < 12L * 1024 * 1024 * 1024)
+                ? ReplayStorageState.Warning : ReplayStorageState.Healthy;
+        var latency = latencyCritical ? ReplayStorageState.Critical : latencyWarning ? ReplayStorageState.Warning : ReplayStorageState.Healthy;
+        if (latency == ReplayStorageState.Healthy && _latencyState != ReplayStorageState.Healthy)
         {
             _healthySince ??= nowUtc;
-            if (_health.State is ReplayStorageState.Warning or ReplayStorageState.Critical
-                && nowUtc - _healthySince.Value < TimeSpan.FromSeconds(30))
-                pressure = _health.State;
+            if (nowUtc - _healthySince.Value >= TimeSpan.FromSeconds(30))
+            { _latencyState = ReplayStorageState.Healthy; _latencyReason = string.Empty; }
         }
-        else _healthySince = null;
-
-        var reason = freeCritical ? "Free space below 2 GB"
-            : freeWarning ? "Free space below 10 GB"
-            : latencyCritical ? "Two writes exceeded 500 ms in 10 seconds"
-            : latencyWarning ? "Three writes exceeded 100 ms in 10 seconds"
-            : string.Empty;
+        else if (latency != ReplayStorageState.Healthy)
+        {
+            _healthySince = null;
+            _latencyState = latency;
+            _latencyReason = latencyCritical ? "Two writes exceeded 500 ms in 10 seconds" : "Three writes exceeded 100 ms in 10 seconds";
+        }
+        var pressure = (ReplayStorageState)Math.Max((int)_capacityState, (int)_latencyState);
+        var capacityReason = _capacityState == ReplayStorageState.Critical ? "Free space below 3 GB recovery reserve"
+            : _capacityState == ReplayStorageState.Warning ? "Free space below 12 GB recovery reserve" : string.Empty;
+        var reason = string.Join("; ", new[] { capacityReason, _latencyReason }.Where(value => value.Length > 0));
         _health = new ReplayStorageHealth(pressure, freeBytes,
             _writes.Count == 0 ? 0 : _writes.Average(item => item.Ms),
-            _writes.Count == 0 ? 0 : _writes.Max(item => item.Ms), _volumeRole, reason, nowUtc);
+            _writes.Count == 0 ? 0 : _writes.Max(item => item.Ms), _volumeRole, reason, nowUtc)
+        {
+            Cause = (_capacityState == ReplayStorageState.Healthy ? ReplayStoragePressureCause.None : ReplayStoragePressureCause.Capacity)
+                | (_latencyState == ReplayStorageState.Healthy ? ReplayStoragePressureCause.None : ReplayStoragePressureCause.WriteLatency)
+        };
         return _health;
     }
 
@@ -73,6 +77,14 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
     private readonly Dictionary<string, (string Role, StoragePressurePolicy Policy)> _volumes = new(StringComparer.OrdinalIgnoreCase);
     private Timer? _timer;
     private ReplayStorageHealth _health = ReplayStorageHealth.Unknown;
+    private readonly Func<string, long> _freeSpace;
+    private readonly Action<string> _checkDestination;
+    private double _lastSaveDurationMs;
+
+    public StorageProtectionService() : this(GetAvailableFreeBytes, CheckDestination) { }
+    internal StorageProtectionService(Func<string, long> freeSpace, Action<string> checkDestination)
+    { _freeSpace = freeSpace; _checkDestination = checkDestination; }
+    internal IReadOnlyList<string> MonitoredRoots { get { lock (_sync) return _volumes.Keys.ToArray(); } }
 
     public ReplayStorageHealth Health { get { lock (_sync) return _health; } }
     public ReplayStorageHealth StorageHealth => Health;
@@ -83,6 +95,8 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
     {
         lock (_sync)
         {
+            var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var roles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (path, role) in paths)
             {
                 if (string.IsNullOrWhiteSpace(path)) continue;
@@ -90,13 +104,21 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
                 {
                     var root = Path.GetPathRoot(Path.GetFullPath(path));
                     if (string.IsNullOrWhiteSpace(root)) continue;
+                    active.Add(root);
+                    roles[root] = roles.TryGetValue(root, out var previous) ? previous + ", " + role : role;
                     if (!_volumes.ContainsKey(root)) _volumes[root] = (role, new StoragePressurePolicy(role));
                 }
                 catch { }
             }
+            foreach (var obsolete in _volumes.Keys.Where(root => !active.Contains(root)).ToArray()) _volumes.Remove(obsolete);
+            foreach (var (root, role) in roles) _volumes[root] = (role, _volumes[root].Policy);
+            _health = ReplayStorageHealth.Unknown;
             _timer ??= new Timer(_ => Sample(), null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
         }
     }
+
+    public void RecordSaveDuration(TimeSpan elapsed)
+    { lock (_sync) _lastSaveDurationMs = Math.Max(0, elapsed.TotalMilliseconds); }
 
     public void RecordWrite(string path, TimeSpan elapsed)
     {
@@ -119,33 +141,37 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
     }
 
     public bool CanSave(int bitrateMbps, TimeSpan duration, out string reason)
+        => CanSave(MonitoredRoots, bitrateMbps, duration, out reason);
+
+    public bool CanSave(IEnumerable<string> paths, int bitrateMbps, TimeSpan duration, out string reason)
     {
         var estimate = EstimateSave(bitrateMbps, duration);
-        string[] roots;
-        lock (_sync)
-        {
-            if (SavesBlocked)
-            {
-                reason = $"Storage pressure: {Health.VolumeRole}; {Health.Reason}";
-                return false;
-            }
-            roots = _volumes.Keys.ToArray();
-        }
         // Queried outside the lock: a network share can take seconds to answer.
-        foreach (var root in roots)
+        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
             {
-                var free = GetAvailableFreeBytes(root);
+                _checkDestination(path);
+                var free = _freeSpace(path);
                 if (free < estimate.RequiredFreeBytes)
                 {
-                    reason = $"Save needs {estimate.RequiredFreeBytes} bytes free; {root} has {free}.";
+                    reason = $"Save needs {estimate.RequiredFreeBytes} bytes free; {path} has {free} bytes available.";
                     return false;
                 }
+                lock (_sync)
+                {
+                    var root = Path.GetPathRoot(Path.GetFullPath(path));
+                    if (root is not null && _volumes.TryGetValue(root, out var volume))
+                    {
+                        var health = volume.Policy.ObserveFreeSpace(free, DateTime.UtcNow);
+                        if (health.State == ReplayStorageState.Critical && health.Cause.HasFlag(ReplayStoragePressureCause.WriteLatency))
+                        { reason = $"Storage pressure at {path}: {health.Reason}"; return false; }
+                    }
+                }
             }
-            catch
+            catch (Exception error)
             {
-                reason = $"Storage volume {root} is inaccessible.";
+                reason = $"Storage location {path} is inaccessible: {error.Message}";
                 return false;
             }
         }
@@ -167,7 +193,7 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
             var free = new Dictionary<string, long?>(StringComparer.OrdinalIgnoreCase);
             foreach (var root in roots)
             {
-                try { free[root] = GetAvailableFreeBytes(root); }
+                try { free[root] = _freeSpace(root); }
                 catch { free[root] = null; }
             }
 
@@ -176,12 +202,15 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
             {
                 foreach (var (root, volume) in _volumes)
                 {
-                    if (free.TryGetValue(root, out var bytes) && bytes is { } available)
-                        samples.Add(volume.Policy.ObserveFreeSpace(available, DateTime.UtcNow));
+                    if (!free.TryGetValue(root, out var bytes)) continue; // Config changed while an old share was answering.
+                    if (bytes is { } available)
+                        samples.Add(volume.Policy.ObserveFreeSpace(available, DateTime.UtcNow) with { Location = root, VolumeRole = volume.Role });
                     else
-                        samples.Add(new ReplayStorageHealth(ReplayStorageState.Inaccessible, -1, 0, 0, volume.Role, "Volume inaccessible", DateTime.UtcNow));
+                        samples.Add(new ReplayStorageHealth(ReplayStorageState.Inaccessible, -1, 0, 0, volume.Role, $"Volume {root} inaccessible", DateTime.UtcNow)
+                        { Cause = ReplayStoragePressureCause.Inaccessible, Location = root });
                 }
-                _health = samples.OrderByDescending(item => item.State).ThenBy(item => item.FreeBytes).FirstOrDefault() ?? ReplayStorageHealth.Unknown;
+                _health = (samples.OrderByDescending(item => item.State).ThenBy(item => item.FreeBytes).FirstOrDefault() ?? ReplayStorageHealth.Unknown)
+                    with { LastSaveDurationMs = _lastSaveDurationMs };
             }
             HealthChanged?.Invoke(this, Health);
         }
@@ -197,7 +226,7 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
     // directory, and reports the space available to this user (quotas included).
     internal static long GetAvailableFreeBytes(string root)
     {
-        if (OperatingSystem.IsWindows() && IsUncRoot(root))
+        if (OperatingSystem.IsWindows())
         {
             var directory = root.EndsWith('\\') ? root : root + "\\";
             if (!GetDiskFreeSpaceEx(directory, out var available, out _, out _))
@@ -205,6 +234,13 @@ public sealed class StorageProtectionService : IDisposable, IStoragePressureObse
             return available > long.MaxValue ? long.MaxValue : (long)available;
         }
         return new DriveInfo(root).AvailableFreeSpace;
+    }
+
+    private static void CheckDestination(string path)
+    {
+        Directory.CreateDirectory(path);
+        using var probe = new FileStream(Path.Combine(path, ".clypdat-storage-" + Guid.NewGuid().ToString("N")),
+            FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose);
     }
 
     internal static bool IsUncRoot(string root) =>

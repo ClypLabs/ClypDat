@@ -1398,6 +1398,10 @@
                       <Border x:Name="EditorLoadingSpinnerHost"
                               HorizontalAlignment="Center"
                               VerticalAlignment="Center" />
+                      <TextBlock Text="{Binding EditorGraphicsRecoveryStatus}"
+                                 IsVisible="{Binding IsEditorGraphicsRecovering}"
+                                 Foreground="White" TextWrapping="Wrap" TextAlignment="Center"
+                                 HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="24" />
                       <StackPanel x:Name="EditorLoadErrorPanel"
                                   IsVisible="False"
                                   MaxWidth="420"

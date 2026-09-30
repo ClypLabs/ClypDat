@@ -1,4 +1,5 @@
 #include "compositor.h"
+#include "../../common/graphics_device_failure.h"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -13,8 +14,7 @@
 using Microsoft::WRL::ComPtr;
 namespace {
 void check(HRESULT hr) {
-  if (FAILED(hr))
-    throw std::runtime_error("D3D11 compositor operation failed");
+  clypdat::check_graphics(hr, "D3D11 compositor operation failed");
 }
 struct Image {
   uint32_t width, height;
@@ -260,9 +260,15 @@ struct Restore {
     i->PSSetSamplers(0, 1, &s);
   }
 };
-void fail(const std::shared_ptr<Context> &c, const char *message) {
+void fail(const std::shared_ptr<Context> &c, const char *message, HRESULT original = S_OK, ID3D11Device* device = nullptr) {
+  const HRESULT removed = device ? device->GetDeviceRemovedReason() : S_OK;
+  const bool lost = clypdat::is_device_loss(original) || FAILED(removed);
   std::lock_guard lock(c->mutex);
+  if (c->status.failed && (!lost || c->status.failure_kind == 1)) return;
   c->status.failed = 1;
+  c->status.failure_kind = lost ? 1 : FAILED(original) ? 2 : 0;
+  c->status.failure_hresult = original;
+  c->status.device_removed_reason = removed;
   strncpy_s(c->status.error, message, _TRUNCATE);
 }
 // Promotes the retained picture into the seek barrier's generation, but only
@@ -435,12 +441,19 @@ void *cdvo_attach(uint64_t token, ID3D11Device *device,
     std::lock_guard lock(c->mutex);
     if (c->closed || c->status.attached)
       return nullptr;
+    ComPtr<IDXGIDevice> dxgi; ComPtr<IDXGIAdapter> adapter; DXGI_ADAPTER_DESC description{};
+    if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgi))) && SUCCEEDED(dxgi->GetAdapter(&adapter)) && SUCCEEDED(adapter->GetDesc(&description))) {
+      c->status.adapter_luid = uint64_t(uint32_t(description.AdapterLuid.LowPart)) | (uint64_t(uint32_t(description.AdapterLuid.HighPart)) << 32);
+      WideCharToMultiByte(CP_UTF8, 0, description.Description, -1, c->status.adapter, sizeof(c->status.adapter), nullptr, nullptr);
+    }
     auto r = new Renderer(c, device, immediate);
     c->status.attached = 1;
     return r;
+  } catch (const clypdat::GraphicsError& error) {
+    fail(c, "GPU compositor initialization failed", error.result, device); return nullptr;
   } catch (...) {
     fail(c, "GPU compositor initialization failed. Update the graphics driver, "
-            "then reopen the clip.");
+            "then reopen the clip.", S_OK, device);
     return nullptr;
   }
 }
@@ -455,8 +468,10 @@ void cdvo_detach(void *renderer) {
   delete r;
 }
 void cdvo_fail(void *renderer, const char *message) {
-  if (renderer)
-    fail(static_cast<Renderer *>(renderer)->context, message);
+  cdvo_fail_hresult(renderer, message, S_OK);
+}
+void cdvo_fail_hresult(void *renderer, const char *message, int32_t result) {
+  if (renderer) { auto* r = static_cast<Renderer *>(renderer); fail(r->context, message, result, r->device.Get()); }
 }
 ID3D11RenderTargetView *cdvo_begin_picture(void *renderer, uint32_t width,
                                            uint32_t height, int64_t date) {
@@ -477,9 +492,11 @@ ID3D11RenderTargetView *cdvo_begin_picture(void *renderer, uint32_t width,
     r.context->status.width = width;
     r.context->status.height = height;
     return r.pending.rtv.Get();
+  } catch (const clypdat::GraphicsError& error) {
+    fail(r.context, "Source texture allocation failed", error.result, r.device.Get()); return nullptr;
   } catch (...) {
     fail(r.context,
-         "Source texture allocation failed. Pause and reopen the clip.");
+         "Source texture allocation failed. Pause and reopen the clip.", S_OK, r.device.Get());
     return nullptr;
   }
 }
@@ -495,6 +512,10 @@ int cdvo_needs_redraw(void *renderer) {
   if (!renderer)
     return 0;
   auto &r = *static_cast<Renderer *>(renderer);
+  // VLC's device remains owned by its render thread, including while paused.
+  // UI status queries copy diagnostics and never touch a live D3D interface.
+  const auto removed = r.device->GetDeviceRemovedReason();
+  if (FAILED(removed)) { fail(r.context, "Waiting for graphics device", removed, r.device.Get()); return 0; }
   std::lock_guard lock(r.context->mutex);
   adopt_carry(r);
   const auto generation = r.context->state.clock.generation;
@@ -622,9 +643,11 @@ int cdvo_compose(void *renderer, ID3D11RenderTargetView *output,
     }
     check(r.device->GetDeviceRemovedReason());
     return 1;
+  } catch (const clypdat::GraphicsError& error) {
+    fail(r.context, "GPU composition failed", error.result, r.device.Get()); return 0;
   } catch (...) {
     fail(r.context, "GPU composition failed. Playback paused; reopen the clip "
-                    "or update the graphics driver.");
+                    "or update the graphics driver.", S_OK, r.device.Get());
     return 0;
   }
 }
