@@ -88,6 +88,7 @@ struct AudioGraphConfig {
     std::vector<AudioApplicationConfig> applications;
     float game_gain=1,microphone_gain=1;
     bool microphone_stereo=false,noise_suppression=false;
+    bool system_audio=false;
     double gate_threshold_db=-100;
 };
 std::vector<AudioLaneConfig> recording_audio_lanes(const AudioGraphConfig& config);

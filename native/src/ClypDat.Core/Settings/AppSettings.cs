@@ -144,6 +144,8 @@ public sealed class AppSettings
     // own clip track; the value is its capture gain in percent (0–150).
     public Dictionary<string, int> AdditionalAudioProcesses { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public int GameAudioVolumePercent { get; set; } = 100;
+    public bool SystemAudioEnabled { get; set; }
+    public int SystemAudioVolumePercent { get; set; } = 100;
     public int MicrophoneVolumePercent { get; set; } = 100;
     // "Mono" or "Stereo". Windows hands a mono microphone back through a
     // stereo mix format, so capturing it as-is produced a two-channel track

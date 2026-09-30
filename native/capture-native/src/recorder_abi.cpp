@@ -162,6 +162,7 @@ int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder*
     for (uint32_t i = 0; i < config->application_count; ++i)
         audio.applications.push_back({copy(config->applications[i].name), std::clamp(config->applications[i].gain_percent, 0, 150) / 100.f});
     audio.game_gain = std::clamp(config->game_gain_percent, 0, 150) / 100.f;
+    audio.system_audio = (config->flags & CD_SESSION_SYSTEM_AUDIO) != 0;
     audio.microphone_gain = std::clamp(config->microphone_gain_percent, 0, 150) / 100.f;
     audio.microphone_stereo = copy(config->microphone_channel_mode) == L"Stereo";
     audio.noise_suppression = (config->flags & CD_SESSION_NOISE_SUPPRESSION) != 0;

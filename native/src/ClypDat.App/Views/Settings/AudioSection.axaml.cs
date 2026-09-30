@@ -38,6 +38,12 @@ public sealed partial class AudioSection : UserControl
     private void ResetGameAudioVolumeButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.ResetGameAudioVolumeButton_OnClick(sender, e);
 
+    private void ResetSystemAudioVolumeButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.SystemAudioVolumePercent = AudioTrackProcessViewModel.DefaultVolumePercent;
+    }
+
     private void ResetMicrophoneVolumeButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.ResetMicrophoneVolumeButton_OnClick(sender, e);
 

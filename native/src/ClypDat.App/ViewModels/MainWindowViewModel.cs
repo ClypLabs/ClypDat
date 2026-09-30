@@ -3927,6 +3927,36 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SaveSettings();
     }
 
+    public bool SystemAudioEnabled
+    {
+        get => Settings.SystemAudioEnabled;
+        set
+        {
+            if (Settings.SystemAudioEnabled == value) return;
+            Settings.SystemAudioEnabled = value;
+            OnPropertyChanged();
+            UpdateReplayQualityRestartRequired();
+            SaveSettings();
+        }
+    }
+
+    public double SystemAudioVolumePercent
+    {
+        get => Settings.SystemAudioVolumePercent;
+        set
+        {
+            var volume = (int)Math.Round(Math.Clamp(value, 0, 150));
+            if (Settings.SystemAudioVolumePercent == volume) return;
+            Settings.SystemAudioVolumePercent = volume;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsSystemAudioVolumeDefault));
+            SaveSettings();
+        }
+    }
+
+    public bool IsSystemAudioVolumeDefault =>
+        Math.Abs(SystemAudioVolumePercent - AudioTrackProcessViewModel.DefaultVolumePercent) < 0.5;
+
     public double GameAudioVolumePercent
     {
         get => Settings.GameAudioVolumePercent;
@@ -8804,7 +8834,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             MicrophoneNoiseSuppressionEnabled: effective.MicrophoneNoiseSuppressionEnabled,
             MicrophoneNoiseGateThresholdDb: effective.MicrophoneNoiseGateThresholdDb,
             AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled,
-            ReplayHdrCompatibilityEnabled: Settings.ReplayHdrCompatibilityEnabled);
+            ReplayHdrCompatibilityEnabled: Settings.ReplayHdrCompatibilityEnabled,
+            SystemAudioEnabled: Settings.SystemAudioEnabled,
+            SystemAudioVolumePercent: Settings.SystemAudioVolumePercent);
     }
 
     public void SetDuration(TimeSpan duration)

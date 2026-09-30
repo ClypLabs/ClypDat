@@ -373,8 +373,10 @@ std::wstring endpoint_id(IMMDeviceEnumerator* enumerator,bool microphone,const s
 }
 bool social(const std::wstring& name){static const std::set<std::wstring> names{L"discord",L"guilded",L"teamspeak",L"mumble",L"skype",L"teams",L"zoom",L"slack",L"signal",L"telegram",L"whatsapp"};return names.contains(normalize_process(name));}
 std::vector<AudioLaneConfig> graph_lanes(const AudioGraphConfig& config){
-    std::vector<AudioLaneConfig> result{{"game","Game Audio",2,config.game_gain,false}};
-    auto apps=config.applications;std::sort(apps.begin(),apps.end(),[](const auto& a,const auto& b){if(social(a.process_name)!=social(b.process_name))return social(a.process_name);return normalize_process(a.process_name)<normalize_process(b.process_name);});
+    std::vector<AudioLaneConfig> result{config.system_audio
+        ? AudioLaneConfig{"system","All System Audio",2,config.game_gain,false}
+        : AudioLaneConfig{"game","Game Audio",2,config.game_gain,false}};
+    auto apps=config.system_audio?std::vector<AudioApplicationConfig>{}:config.applications;std::sort(apps.begin(),apps.end(),[](const auto& a,const auto& b){if(social(a.process_name)!=social(b.process_name))return social(a.process_name);return normalize_process(a.process_name)<normalize_process(b.process_name);});
     std::set<std::string> added;
     auto add=[&](const AudioApplicationConfig& app){auto key=narrow(normalize_process(app.process_name));if(key.empty()||!added.insert(key).second)return;result.push_back({key,narrow(process_title(app.process_name)),2,std::clamp(app.gain,0.f,1.5f),key=="spotify"});};
     for(const auto& app:apps)if(social(app.process_name))add(app);
@@ -442,13 +444,21 @@ struct AudioGraph::State:public std::enable_shared_from_this<AudioGraph::State> 
         auto signature=std::to_wstring(settings.noise_suppression)+L":"+std::to_wstring(settings.gate_threshold_db)+L":"+settings.rnnoise_model.wstring();
         bool changed_filter=signature!=filter_signature;filter_signature=std::move(signature);
         Microsoft::WRL::ComPtr<IMMDeviceEnumerator> enumerator;hr(CoCreateInstance(__uuidof(MMDeviceEnumerator),nullptr,CLSCTX_ALL,IID_PPV_ARGS(&enumerator)),"Enumerate audio routes");
-        ProcessTable table(enumerator.Get());std::map<std::string,WasapiConfig> wanted;
+        std::map<std::string,WasapiConfig> wanted;
         auto source=[&](std::string key,std::string lane,uint32_t pid,bool mic,std::wstring device){WasapiConfig c;c.lane=std::move(lane);c.source=key;c.process_id=pid;c.microphone=mic;c.device_id=std::move(device);c.qpc_anchor=settings.qpc_anchor;c.qpc_frequency=settings.qpc_frequency;c.monotonic_anchor_us=settings.monotonic_anchor_us;wanted.emplace(std::move(key),std::move(c));};
-        bool routed=!settings.applications.empty()||!settings.excluded_processes.empty();std::set<uint32_t> excluded{GetCurrentProcessId()};
-        for(const auto& name:settings.excluded_processes){auto ids=table.names[normalize_process(name)];excluded.insert(ids.begin(),ids.end());}
-        for(const auto& app:settings.applications){auto ids=table.names[normalize_process(app.process_name)];excluded.insert(ids.begin(),ids.end());auto pid=table.app_root(app.process_name);if(pid){auto lane=narrow(normalize_process(app.process_name));source("app:"+lane,lane,pid,false,{});}}
-        if(routed){std::set<uint32_t> allowed;for(auto pid:table.active)if(!excluded.contains(pid)&&!table.ancestor(pid,excluded))allowed.insert(pid);for(auto it=allowed.begin();it!=allowed.end();){bool overlaps=false;for(auto excluded_pid:excluded)if(table.ancestor(excluded_pid,{*it})){overlaps=true;break;}if(overlaps){it=allowed.erase(it);std::lock_guard lock(mutex);failure="Audio process tree contains an excluded application; that route is unavailable";}else ++it;}auto game=table.names[normalize_process(settings.game_executable)];std::set<uint32_t> matched;std::set_intersection(allowed.begin(),allowed.end(),game.begin(),game.end(),std::inserter(matched,matched.end()));if(!matched.empty())allowed=std::move(matched);for(auto pid:table.roots(std::move(allowed)))source("game:"+std::to_string(pid),"game",pid,false,{});}
-        else source("game:default","game",0,false,endpoint_id(enumerator.Get(),false,settings.output_device_id));
+        if(settings.system_audio){
+            // Process loopback spans all playback endpoints. Exclude this
+            // recorder's own tree so capture cannot feed back into itself.
+            source("system:all","system",GetCurrentProcessId(),false,{});
+            wanted.at("system:all").exclude_process_tree=true;
+        }else{
+            ProcessTable table(enumerator.Get());
+            bool routed=!settings.applications.empty()||!settings.excluded_processes.empty();std::set<uint32_t> excluded{GetCurrentProcessId()};
+            for(const auto& name:settings.excluded_processes){auto ids=table.names[normalize_process(name)];excluded.insert(ids.begin(),ids.end());}
+            for(const auto& app:settings.applications){auto ids=table.names[normalize_process(app.process_name)];excluded.insert(ids.begin(),ids.end());auto pid=table.app_root(app.process_name);if(pid){auto lane=narrow(normalize_process(app.process_name));source("app:"+lane,lane,pid,false,{});}}
+            if(routed){std::set<uint32_t> allowed;for(auto pid:table.active)if(!excluded.contains(pid)&&!table.ancestor(pid,excluded))allowed.insert(pid);for(auto it=allowed.begin();it!=allowed.end();){bool overlaps=false;for(auto excluded_pid:excluded)if(table.ancestor(excluded_pid,{*it})){overlaps=true;break;}if(overlaps){it=allowed.erase(it);std::lock_guard lock(mutex);failure="Audio process tree contains an excluded application; that route is unavailable";}else ++it;}auto game=table.names[normalize_process(settings.game_executable)];std::set<uint32_t> matched;std::set_intersection(allowed.begin(),allowed.end(),game.begin(),game.end(),std::inserter(matched,matched.end()));if(!matched.empty())allowed=std::move(matched);for(auto pid:table.roots(std::move(allowed)))source("game:"+std::to_string(pid),"game",pid,false,{});}
+            else source("game:default","game",0,false,endpoint_id(enumerator.Get(),false,settings.output_device_id));
+        }
         for(const auto& selected:settings.microphone_device_ids){auto lane="mic:"+narrow(selected);try{source(lane,lane,0,true,endpoint_id(enumerator.Get(),true,selected));}catch(const std::exception& e){std::lock_guard lock(mutex);failure=e.what();}}
         for(auto it=routes.begin();it!=routes.end();){auto desired=wanted.find(it->first);auto& old=it->second;if(desired==wanted.end()||desired->second.process_id!=old.config.process_id||desired->second.device_id!=old.config.device_id||!old.capture->error().empty()||(old.config.microphone&&changed_filter)){old.capture->stop();if(old.capture->error().find("worker restart required")!=std::string::npos){std::lock_guard lock(mutex);failure=old.capture->error();}if(old.filter&&!old.filter->stop()){std::lock_guard lock(mutex);failure="Microphone filter shutdown timed out; worker restart required";}it=routes.erase(it);}else ++it;}
         for(auto& [key,c]:wanted){if(routes.contains(key))continue;c.generation=++generation;try{auto history_owner=history;auto live_sink=live;WasapiSource::Sink sink=[history_owner,live_sink](PcmBlock block){if(live_sink)live_sink(block);history_owner->submit(std::move(block));};std::shared_ptr<MicrophoneFilter> filter;if(c.microphone&&settings.noise_suppression&&!settings.rnnoise_model.empty()&&std::filesystem::exists(settings.rnnoise_model)){filter=std::make_shared<MicrophoneFilter>(settings.ffmpeg,settings.rnnoise_model,settings.gate_threshold_db,sink);sink=[filter](PcmBlock block){filter->submit(std::move(block));};{std::lock_guard lock(mutex);filters.push_back(filter);}}auto capture=std::make_unique<WasapiSource>(c,std::move(sink));routes.emplace(key,Route{c,std::move(capture),std::move(filter)});}catch(const std::exception& e){std::lock_guard lock(mutex);failure=e.what();}}

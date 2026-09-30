@@ -163,10 +163,12 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
             Header = Version<Configuration>(), QpcAnchor = MonotonicClock.QpcAnchor, QpcFrequency = Stopwatch.Frequency,
             UtcAnchorTicks = MonotonicClock.UtcAnchor.Ticks, BootId = Guid.Parse(MonotonicClock.BootId), Window = unchecked((ulong)s.GameWindowHandle),
             DurationSeconds = s.DurationSeconds, MaxHeight = s.MaxHeight, FrameRate = s.FrameRate, CaptureX = s.CaptureX, CaptureY = s.CaptureY,
-            CaptureWidth = s.CaptureWidth, CaptureHeight = s.CaptureHeight, BitrateMbps = s.BitrateMbps, GameGainPercent = s.GameAudioVolumePercent,
+            CaptureWidth = s.CaptureWidth, CaptureHeight = s.CaptureHeight, BitrateMbps = s.BitrateMbps,
+            GameGainPercent = s.SystemAudioEnabled ? s.SystemAudioVolumePercent : s.GameAudioVolumePercent,
             MicrophoneGainPercent = s.MicrophoneVolumePercent, FullSessionQuotaGb = s.FullSessionQuotaGb,
             Flags = (s.CaptureCursor ? 1u : 0) | (s.FullSessionRecordingEnabled ? 2u : 0) | (s.FullSessionBackgroundFinalize ? 4u : 0) |
-                (s.MicrophoneNoiseSuppressionEnabled ? 8u : 0) | (s.AdaptiveFrameRateProtectionEnabled ? 16u : 0) | (s.ReplayHdrCompatibilityEnabled ? 32u : 0),
+                (s.MicrophoneNoiseSuppressionEnabled ? 8u : 0) | (s.AdaptiveFrameRateProtectionEnabled ? 16u : 0) | (s.ReplayHdrCompatibilityEnabled ? 32u : 0) |
+                (s.SystemAudioEnabled ? 64u : 0),
             MicrophoneGateDb = s.MicrophoneNoiseGateThresholdDb, ChatDeviceName = memory.Text(s.ChatAudioDeviceName), ChatDeviceId = memory.Text(s.ChatAudioDeviceId),
             MicrophoneDeviceName = memory.Text(s.MicrophoneDeviceName), ChatProcesses = memory.Texts(s.ChatAudioProcessNames),
             MicrophoneDevices = memory.Texts(s.MicrophoneDeviceIds), ExcludedProcesses = memory.Texts(s.GameAudioExcludedProcesses),

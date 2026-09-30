@@ -30,7 +30,7 @@ float decoded_sample(const std::filesystem::path& path,int audio_index){
 void check_replay_audio(const std::filesystem::path& root,const VideoSnapshot& video){
     AudioHistory audio(root/L"replay-history",3000000);
     auto submit=[&](const char* lane,int channels,float level){auto block=pcm(video.start_us,1,level,int(video.duration_us*48000/1000000));block.lane=lane;block.source=lane;block.channels=channels;block.samples.assign(size_t(block.samples.size()/2)*channels,level);require(audio.submit(std::move(block)),"Replay audio rejected");};
-    submit("game",2,.1f);submit("discord",2,.2f);submit("mic",1,.3f);
+    submit("game",2,.1f);submit("discord",2,.2f);submit("mic",1,.3f);submit("system",2,.4f);submit("mic:default",1,.3f);
     auto snapshot=audio.snapshot(video.start_us,video.end_us).get();audio.stop();
     auto save=[&](const char* id,std::vector<AudioLaneConfig> lanes){
         std::promise<AudioSnapshot> promise;promise.set_value(snapshot);
@@ -51,6 +51,20 @@ void check_replay_audio(const std::filesystem::path& root,const VideoSnapshot& v
     require(std::abs(all-(game+chat+mic))<.025f,"All Tracks does not contain each separate source once");
     auto single=save("single-replay",{{"game","Game Audio",2,.5f,false}});
     auto single_path=single.u8string();std::string single_utf8(single_path.begin(),single_path.end());require(avformat_open_input(&input,single_utf8.c_str(),nullptr,nullptr)>=0,"Cannot open single-track replay");require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==2,"Single-track replay gained duplicate mix");avformat_close_input(&input);
+    AudioGraphConfig system_config;system_config.system_audio=true;system_config.game_gain=.5f;
+    system_config.applications={{L"Discord",1}};system_config.microphone_device_ids={L"default"};
+    // The snapshot also contains the old game/app routes. Saving system mode
+    // must select only system playback and the separate microphone.
+    auto system=save("system-replay",recording_audio_lanes(system_config));
+    auto system_path=system.u8string();std::string system_utf8(system_path.begin(),system_path.end());
+    require(avformat_open_input(&input,system_utf8.c_str(),nullptr,nullptr)>=0,"Cannot open system-audio replay");
+    require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==4,"System-audio replay retained game or app tracks");
+    auto* system_title=av_dict_get(input->streams[2]->metadata,"handler_name",nullptr,0);
+    require(system_title&&std::string(system_title->value)=="All System Audio","System-audio track label lost");
+    avformat_close_input(&input);
+    auto system_mix=decoded_sample(system,0),playback=decoded_sample(system,1),system_mic=decoded_sample(system,2);
+    require(std::abs(playback-.2f)<.02f&&system_mic>.15f,"System-audio capture gain or microphone source wrong");
+    require(std::abs(system_mix-(playback+system_mic))<.025f,"System-audio replay mixed duplicate game or app sources");
 }
 void check_timed_microphone_save(const std::filesystem::path& root, const VideoSnapshot& video) {
     AudioHistory history(root / L"timed-mic-history", 3000000);
@@ -159,6 +173,22 @@ void video_test(const std::filesystem::path& root){
 }
 void process_test(){wchar_t executable[32768]{};require(GetModuleFileNameW(nullptr,executable,DWORD(std::size(executable)))>0,"Cannot resolve test executable");std::atomic_bool cancel=false;bool failed=false;try{ProcessRunner::run(executable,{L"--fail-child"},cancel);}catch(...){failed=true;}require(failed,"Child process failure was ignored");auto result=ProcessRunner::run(executable,{L"--fail-child"},cancel,std::chrono::seconds(5),{},false);require(result.exit_code==7&&result.error.find("injected")!=std::string::npos,"Child stderr/exit code not retained");std::jthread canceller([&]{std::this_thread::sleep_for(std::chrono::milliseconds(100));cancel=true;});auto start=std::chrono::steady_clock::now();bool cancelled=false;try{ProcessRunner::run(executable,{L"--wait-child"},cancel);}catch(...){cancelled=true;}require(cancelled&&std::chrono::steady_clock::now()-start<std::chrono::seconds(5),"Child cancellation did not terminate promptly");}
 void timeline_test(){auto generation=std::make_shared<CaptureGeneration>();generation->id=9;generation->codec={avcodec_parameters_alloc(),CaptureCodecParametersDeleter{}};require(bool(generation->codec),"Cannot allocate timeline codec");VideoHistory history(10000000);for(int i=0;i<10;++i){Packet packet(av_packet_alloc());packet->pts=packet->dts=i*100000;packet->flags=i%3==0?AV_PKT_FLAG_KEY:0;history.append(generation,std::move(packet),1000000+i*200000,false);}auto normal=history.snapshot(1250000,2900000);auto safe=history.snapshot(1250000,2900000,true);require(normal.overlay_mappings.front().source_start_us==1000000,"Normal save lost preceding source keyframe");require(safe.overlay_mappings.front().source_start_us==1600000,"Recovery save included unsafe preceding GOP");require(normal.mappings.front().source_start_us!=normal.overlay_mappings.front().source_start_us,"Audio shortfall correction moved overlay mapping");require(normal.frozen,"All-duplicate video not marked frozen");bool rejected=false;try{history.snapshot(2850000,2900000,true);}catch(...){rejected=true;}require(rejected,"Recovery save without safe keyframe accepted");}
-void lane_test(){AudioGraphConfig config;config.applications={{L"Spotify.exe",1},{L"Guilded",1},{L"Discord.exe",1},{L"zebra.exe",.5f}};config.microphone_device_ids={L"default",L"second"};auto lanes=recording_audio_lanes(config);require(lanes.size()==7,"Logical audio lane count changed");require(lanes[0].title=="Game Audio"&&lanes[1].title=="Discord"&&lanes[2].title=="Guilded"&&lanes[3].title=="Microphone 1"&&lanes[4].title=="Microphone 2"&&lanes[5].title=="Spotify"&&lanes[6].title=="zebra","Audio ordering or display names changed");require(lanes[5].omit_if_silent&&lanes[6].gain==.5f,"Audio lane policy changed");}
+void lane_test(){
+    AudioGraphConfig config;
+    config.applications={{L"Spotify.exe",1},{L"Guilded",1},{L"Discord.exe",1},{L"zebra.exe",.5f}};
+    config.microphone_device_ids={L"default",L"second"};
+    auto lanes=recording_audio_lanes(config);
+    require(lanes.size()==7,"Logical audio lane count changed");
+    require(lanes[0].title=="Game Audio"&&lanes[1].title=="Discord"&&lanes[2].title=="Guilded"&&lanes[3].title=="Microphone 1"&&lanes[4].title=="Microphone 2"&&lanes[5].title=="Spotify"&&lanes[6].title=="zebra","Audio ordering or display names changed");
+    require(lanes[5].omit_if_silent&&lanes[6].gain==.5f,"Audio lane policy changed");
+    config.system_audio=true;config.game_gain=.75f;
+    auto system=recording_audio_lanes(config);
+    require(system.size()==3&&system[0].key=="system"&&system[0].title=="All System Audio"&&system[0].gain==.75f,"System audio did not replace game and application lanes");
+    require(system[1].title=="Microphone 1"&&system[2].title=="Microphone 2","System audio lost separate microphones");
+    config.system_audio=false;
+    require(recording_audio_lanes(config).size()==7,"System audio toggle lost saved application selections");
+    config.system_audio=true;config.microphone_device_ids.clear();
+    require(recording_audio_lanes(config).size()==1,"System audio without microphones created extra tracks");
+}
 }
 int main(int argc,char** argv){if(argc>1&&std::string(argv[1])=="--fail-child"){std::cerr<<"injected child failure\n";return 7;}if(argc>1&&std::string(argv[1])=="--wait-child"){Sleep(60000);return 0;}auto root=std::filesystem::current_path()/(L"audio-save-fixture-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64()));bool owned=false;try{owned=std::filesystem::create_directory(root);require(owned,"Fixture directory already exists");audio_test(root);video_test(root);process_test();timeline_test();lane_test();require(ProcessRunner::quote(L"a b\\")==L"\"a b\\\\\"","Process quoting corrupts trailing slash");std::filesystem::remove_all(root);std::cout<<"Native audio/history/save/session tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';std::error_code ignored;if(owned)std::filesystem::remove_all(root,ignored);return 1;}}

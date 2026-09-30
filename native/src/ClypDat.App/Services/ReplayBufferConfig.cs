@@ -50,5 +50,7 @@ public sealed record ReplayBufferConfig(
     bool AdaptiveFrameRateProtectionEnabled = false,
     string FullSessionHotkey = "F8",
     string FullSessionContainer = "MKV",
-    bool ReplayHdrCompatibilityEnabled = true);
+    bool ReplayHdrCompatibilityEnabled = true,
+    bool SystemAudioEnabled = false,
+    int SystemAudioVolumePercent = 100);
 

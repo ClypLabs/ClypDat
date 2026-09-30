@@ -16,10 +16,10 @@
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="6">
       <TextBlock Classes="settingsSectionTitle" Text="Recording audio" />
-      <TextBlock Classes="settingsSectionDesc" Text="Choose the Windows mixer apps to capture. Every enabled app is saved as its own editable track." />
+      <TextBlock Classes="settingsSectionDesc" Text="Capture all system audio together, or choose individual Windows mixer apps for separate editable tracks." />
     </StackPanel>
 
-    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks}">
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks|All System Audio}">
       <TextBlock Classes="settingsGroupLabel" Text="AUDIO TRACKS" />
       <Border Classes="settingsGroupCard">
         <StackPanel>
@@ -27,23 +27,37 @@
             <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
               <StackPanel Classes="settingsRowText">
                 <TextBlock Classes="settingsRowTitle" Text="Audio tracks" />
-                <TextBlock Classes="settingsRowDesc" Text="Each row below is saved as its own editable track. Apps playing in the Windows Volume Mixer appear under App tracks." />
+                <TextBlock Classes="settingsRowDesc" Text="All System Audio replaces Game Audio and app tracks when enabled. Microphones remain separate tracks. Turn it off to restore your app selections." />
               </StackPanel>
               <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" VerticalAlignment="Center" />
             </Grid>
           </Border>
           <Border Classes="settingsRowDivider" />
 
-          <!-- Two lists, because the top two rows behave differently from the
-               rest: they are always captured and cannot be switched off, so
-               mixing them in made their permanently disabled toggles read as
-               broken controls. -->
+          <!-- System audio switches playback routing; microphones remain
+               dedicated tracks in either mode. -->
           <Border Classes="settingsRow static">
             <StackPanel Spacing="8">
               <TextBlock Classes="settingsPickerLabel" Text="DEDICATED TRACKS" />
                   <Border Classes="audioProcessList">
                     <StackPanel Spacing="0">
-                      <Border Classes="audioProcessRow enabledRow">
+                      <Border Classes="audioProcessRow" Classes.enabledRow="{Binding SystemAudioEnabled}">
+                        <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
+                          <Border Classes="audioRowRail" IsVisible="{Binding SystemAudioEnabled}" />
+                          <ToggleSwitch Grid.Column="1" IsChecked="{Binding SystemAudioEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                          <Border Grid.Column="2" Classes="audioIconTile">
+                            <PathIcon Data="M4,3H20V15H4V3M6,5V13H18V5H6M11,17H13V19H17V21H7V19H11V17Z" Width="17" Height="17" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          </Border>
+                          <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
+                            <TextBlock Classes="audioTrackName" Text="All System Audio" />
+                            <TextBlock Classes="settingsRowDescSm" Text="All playback in one track" />
+                          </StackPanel>
+                          <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" IsEnabled="{Binding SystemAudioEnabled}" Foreground="{Binding SystemAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding SystemAudioVolumePercent}" />
+                          <TextBlock Grid.Column="5" Classes="audioPercent" IsEnabled="{Binding SystemAudioEnabled}" Text="{Binding SystemAudioVolumePercent, StringFormat={}{0:0}%}" />
+                          <Button Grid.Column="6" Classes="volumeReset" Click="ResetSystemAudioVolumeButton_OnClick" IsVisible="{Binding !IsSystemAudioVolumeDefault}" IsEnabled="{Binding SystemAudioEnabled}"><PathIcon Data="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z" /></Button>
+                        </Grid>
+                      </Border>
+                      <Border Classes="audioProcessRow enabledRow" IsVisible="{Binding !SystemAudioEnabled}">
                         <Grid ColumnDefinitions="3,44,34,*,320,52,26" ColumnSpacing="12" MinHeight="46">
                           <Border Classes="audioRowRail" />
                           <PathIcon Grid.Column="1" Classes="audioRowLock" Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z" />
@@ -80,7 +94,7 @@
             </StackPanel>
           </Border>
 
-          <Border Classes="settingsRow static" Padding="20,0,20,18">
+          <Border Classes="settingsRow static" Padding="20,0,20,18" IsVisible="{Binding !SystemAudioEnabled}">
             <StackPanel Spacing="8">
               <TextBlock Classes="settingsPickerLabel" Text="APP TRACKS" />
                   <Border Classes="audioProcessList">

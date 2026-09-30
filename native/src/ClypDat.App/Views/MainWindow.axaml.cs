@@ -3099,6 +3099,7 @@ public sealed partial class MainWindow : Window
         !active.ChatAudioProcessNames.SequenceEqual(desired.ChatAudioProcessNames, StringComparer.OrdinalIgnoreCase) ||
         !active.GameAudioExcludedProcesses.SequenceEqual(desired.GameAudioExcludedProcesses, StringComparer.OrdinalIgnoreCase) ||
         active.GameAudioVolumePercent != desired.GameAudioVolumePercent || active.MicrophoneVolumePercent != desired.MicrophoneVolumePercent ||
+        active.SystemAudioEnabled != desired.SystemAudioEnabled || active.SystemAudioVolumePercent != desired.SystemAudioVolumePercent ||
         active.MicrophoneNoiseSuppressionEnabled != desired.MicrophoneNoiseSuppressionEnabled || active.MicrophoneNoiseGateThresholdDb != desired.MicrophoneNoiseGateThresholdDb ||
         !AudioProcessesEqual(active.AdditionalAudioProcesses, desired.AdditionalAudioProcesses);
 

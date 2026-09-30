@@ -31,7 +31,8 @@ typedef struct cd_session_config {
 } cd_session_config;
 enum cd_session_flags {
     CD_SESSION_CURSOR = 1, CD_SESSION_FULL = 2, CD_SESSION_BACKGROUND_FINALIZE = 4,
-    CD_SESSION_NOISE_SUPPRESSION = 8, CD_SESSION_ADAPTIVE_FPS = 16, CD_SESSION_HDR = 32
+    CD_SESSION_NOISE_SUPPRESSION = 8, CD_SESSION_ADAPTIVE_FPS = 16, CD_SESSION_HDR = 32,
+    CD_SESSION_SYSTEM_AUDIO = 64
 };
 typedef struct cd_session_contract {
     cd_struct_header header;

@@ -130,6 +130,7 @@ public static class AppSettingsStore
         settings.ChatAudioProcessNames ??= new List<string>();
         settings.AdditionalAudioProcesses ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         settings.GameAudioVolumePercent = Math.Clamp(settings.GameAudioVolumePercent, 0, 150);
+        settings.SystemAudioVolumePercent = Math.Clamp(settings.SystemAudioVolumePercent, 0, 150);
         settings.MicrophoneVolumePercent = Math.Clamp(settings.MicrophoneVolumePercent, 0, 150);
         settings.MicrophoneChannelMode = string.Equals(settings.MicrophoneChannelMode, "Stereo", StringComparison.OrdinalIgnoreCase)
             ? "Stereo"
