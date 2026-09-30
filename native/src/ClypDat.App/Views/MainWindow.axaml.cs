@@ -3557,7 +3557,7 @@ public sealed partial class MainWindow : Window
             (_, 1) => $"{clipCount} clips and VOD saved",
             _ => $"{clipCount} clips and {vodCount} VODs saved"
         };
-        var summarySubtitle = $"{FormatFileSize(entries.Sum(entry => entry.Clip.TotalSizeBytes))} • Ready in your library";
+        var summarySubtitle = FormatFileSize(entries.Sum(entry => entry.Clip.TotalSizeBytes));
 
         // Both presentations render the same NewClipsPanel; everything below
         // targets whichever one this show is using. EnsureEditorNewClipsDialog
@@ -3791,8 +3791,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || _currentNewClipsEntries.Count == 0) return;
         var selected = ChosenNewClips();
-        var summary = selected.Length == 1 ? selected[0].Clip.Name : $"{selected.Length} clips";
-        if (!await ConfirmDeleteAsync(summary)) return;
+        if (!await ConfirmDeleteAsync(selected.Select(entry => entry.Clip).ToArray())) return;
 
         foreach (var entry in selected)
         {
@@ -3874,71 +3873,72 @@ public sealed partial class MainWindow : Window
             if (args.PropertyName == nameof(ClipCardViewModel.PreviewImageStretch)) thumbnail.Stretch = entry.Clip.PreviewImageStretch;
         };
 
-        // Bottom-right and small, where a video's length is conventionally
-        // read, leaving the top-left corner to the selection badge alone. The
-        // 8px inset also keeps it clear of the 4px hover progress bar.
+        // Everything drawn over the thumbnail is the library tile's own
+        // (MainWindow.axaml's clip card), value for value: the duration pill,
+        // the checkbox, the tint and the pick-order number. These are the same
+        // clips the user is about to see in the library behind the popup, so
+        // how one is read and how one is selected should not change between
+        // the two.
         var duration = new Border
         {
-            Background = AppThemeService.Brush("Surface_CC0E151C", "#CC0E151C"),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(7, 3),
-            Margin = new Thickness(8),
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            IsHitTestVisible = false,
+            Background = AppThemeService.Brush("Surface_1A2530", "#1A2530"),
+            CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(10, 6),
+            VerticalAlignment = VerticalAlignment.Top,
             Child = new TextBlock
             {
                 Text = entry.Clip.DurationLabel,
                 Foreground = AppThemeService.Brush("Text_D8E2EE", "#D8E2EE"),
-                FontSize = 12,
-                FontWeight = Avalonia.Media.FontWeight.SemiBold
+                FontSize = 14,
+                FontWeight = Avalonia.Media.FontWeight.Bold,
+                VerticalAlignment = VerticalAlignment.Center
             }
         };
 
-        // One badge does what a checkbox, a tint over the whole thumbnail and a
-        // 48px number in the middle of it used to do between them: hollow while
-        // the tile is merely hovered, filled with the pick order once ticked.
-        // With most of a session selected, the old trio buried every thumbnail.
-        // Its colours are fixed rather than themed because it sits on footage,
-        // not on a surface the theme controls.
-        var badgeIdle = Brush.Parse("#73000000");
-        var badgeLabel = new TextBlock
+        var check = new CheckBox
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            IsChecked = entry.IsSelected,
+            IsVisible = entry.IsCheckVisible
+        };
+        check.Click += (_, _) => entry.IsSelected = check.IsChecked == true;
+        // Clicking the card body opens the clip (below), so the checkbox has to
+        // stop its own click reaching that handler - otherwise ticking a box
+        // would also fling the user into the editor.
+        check.PointerPressed += (_, args) => args.Handled = true;
+
+        // The checkbox only exists while hovered or ticked and can be taller
+        // than the pill; the pill is anchored to this grid's top edge so that
+        // coming and going never moves it.
+        var pictureChrome = new Grid
+        {
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(12),
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
+            Children = { check, duration }
+        };
+        Grid.SetColumn(duration, 2);
+
+        var selectionOverlay = new Border
+        {
+            Background = AppThemeService.Brush("Surface_661A2040", "#661A2040"),
+            IsHitTestVisible = false
+        };
+        var selectionOrder = new TextBlock
         {
             Foreground = Brushes.White,
-            FontSize = 12,
+            FontSize = 48,
             FontWeight = Avalonia.Media.FontWeight.Bold,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        var badge = new Border
-        {
-            Width = 24,
-            Height = 24,
-            CornerRadius = new CornerRadius(12),
-            BorderBrush = Brush.Parse("#F2FFFFFF"),
-            BorderThickness = new Thickness(1.5),
+            Opacity = 0.9,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Child = badgeLabel
-        };
-        // The circle is 24px; the target around it is 40, so a near miss ticks
-        // the clip instead of falling through to the tile and opening it.
-        var badgeTarget = new Border
-        {
-            Width = 40,
-            Height = 40,
-            Background = Brushes.Transparent,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Top,
-            Child = badge
-        };
-        // Clicking the tile body opens the clip (below), so the badge has to
-        // stop its own press reaching that handler - otherwise ticking a clip
-        // would also fling the user into the editor.
-        badgeTarget.PointerPressed += (_, args) =>
-        {
-            args.Handled = true;
-            if (args.GetCurrentPoint(badgeTarget).Properties.IsLeftButtonPressed) entry.IsSelected = !entry.IsSelected;
+            IsHitTestVisible = false,
+            Effect = new DropShadowEffect
+            {
+                Color = Colors.Black,
+                BlurRadius = 10,
+                Opacity = 0.6
+            }
         };
 
         // The card's edge in every state: a hairline at rest, the two-pixel
@@ -3957,7 +3957,7 @@ public sealed partial class MainWindow : Window
         {
             Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
             Height = previewHeight,
-            Children = { thumbnail, preview, duration, badgeTarget }
+            Children = { thumbnail, preview, selectionOverlay, selectionOrder, pictureChrome }
         };
 
         var metaBrush = AppThemeService.Brush("Text_8C98A7", "#8C98A7");
@@ -4032,9 +4032,11 @@ public sealed partial class MainWindow : Window
 
         void SyncCardState()
         {
-            badgeTarget.IsVisible = entry.IsCheckVisible;
-            badge.Background = entry.IsSelected ? AppThemeService.Brush("AccentBrush", "#5864E8") : badgeIdle;
-            badgeLabel.Text = entry.HasSelectionOrder ? entry.SelectionOrder.ToString() : string.Empty;
+            check.IsChecked = entry.IsSelected;
+            check.IsVisible = entry.IsCheckVisible;
+            selectionOverlay.IsVisible = entry.IsSelected;
+            selectionOrder.Text = entry.SelectionOrder.ToString();
+            selectionOrder.IsVisible = entry.HasSelectionOrder;
             // Hover is a neutral ring and selection the accent one, so a card
             // under the pointer never reads as already ticked.
             var emphasised = entry.IsSelected || entry.IsHovered;
@@ -5248,7 +5250,7 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
 
-        var confirmed = await ConfirmDeleteAsync(clip.Name);
+        var confirmed = await ConfirmDeleteAsync(new[] { clip });
         if (!confirmed) return;
 
         try
@@ -5524,7 +5526,11 @@ public sealed partial class MainWindow : Window
     private async void DeleteSelectedButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is null || !ViewModel.HasSelection) return;
-        var confirmed = await ConfirmDeleteAsync(ViewModel.SelectionSummary);
+        // The same filter DeleteSelectedAsync applies, so the dialog counts what
+        // will actually go rather than everything that happens to be ticked.
+        var selected = ViewModel.AllClips.Where(clip => clip.IsSelected && !clip.IsSpotifyProcessing).ToArray();
+        if (selected.Length == 0) return;
+        var confirmed = await ConfirmDeleteAsync(selected);
         if (!confirmed) return;
 
         try
@@ -7292,7 +7298,7 @@ public sealed partial class MainWindow : Window
         if (clip is null) return;
 
         PauseEditorPlayback();
-        var confirmed = await ConfirmDeleteAsync(clip.Name);
+        var confirmed = await ConfirmDeleteAsync(new[] { clip });
         if (!confirmed) return;
 
         try
@@ -7854,11 +7860,141 @@ public sealed partial class MainWindow : Window
         return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
-    private async Task<bool> ConfirmDeleteAsync(string summary)
+    // Takes the clips themselves rather than a caller-written summary string,
+    // so every delete in the app asks the same question the same way and the
+    // count in the title, in the body and on the button cannot disagree.
+    private async Task<bool> ConfirmDeleteAsync(IReadOnlyList<ClipCardViewModel> clips)
     {
-        var dialog = CreateDialog("Delete clips?", $"{summary}\n\nThis permanently deletes the file(s).", true);
-        var result = await ShowModalDialogAsync<bool>(dialog);
-        return result;
+        var vods = clips.Count(clip => clip.IsVod);
+        var noun = vods == 0 ? "clip" : vods == clips.Count ? "VOD" : "item";
+        var what = clips.Count == 1 ? noun : $"{clips.Count} {noun}s";
+        var dialog = CreateDialog($"Delete {what}?", string.Empty, true, $"Delete {what}", content: BuildDeleteSummary(clips));
+        return await ShowModalDialogAsync<bool>(dialog);
+    }
+
+    // The three things a delete confirm owes the user, and nothing else: which
+    // clips (their thumbnails - the names are mostly the same "Clip from
+    // <date>"), how much disk comes back, and that there is no getting them
+    // back. It used to be a bare "3 clips" over a line about "file(s)".
+    private static Control BuildDeleteSummary(IReadOnlyList<ClipCardViewModel> clips)
+    {
+        static Border Thumbnail(ClipCardViewModel? clip, double width, string? overflow = null)
+        {
+            var content = new Panel();
+            if (clip?.PreviewImage is { } image)
+            {
+                content.Children.Add(new Image { Source = image, Stretch = clip.PreviewImageStretch });
+            }
+            if (overflow is not null)
+            {
+                content.Children.Add(new TextBlock
+                {
+                    Text = overflow,
+                    Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+                    FontSize = 13,
+                    FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+            }
+            return new Border
+            {
+                Width = width,
+                Height = Math.Round(width * 9d / 16d),
+                CornerRadius = new CornerRadius(6),
+                ClipToBounds = true,
+                Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
+                Child = content
+            };
+        }
+
+        var size = FormatFileSize(clips.Sum(clip => clip.TotalSizeBytes));
+        Control summary;
+        if (clips.Count == 1)
+        {
+            var clip = clips[0];
+            var facts = new[] { clip.TileTopLabel, clip.DurationLabel, size }.Where(fact => !string.IsNullOrWhiteSpace(fact));
+            var text = new StackPanel
+            {
+                Spacing = 3,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = clip.TileMainLabel,
+                        Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+                        FontSize = 14,
+                        FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                        TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
+                    },
+                    new TextBlock
+                    {
+                        Text = string.Join(" • ", facts),
+                        Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
+                        FontSize = 12,
+                        TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
+                    }
+                }
+            };
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), ColumnSpacing = 14 };
+            // A thumbnail that has not been decoded is left out rather than
+            // asked for: the library owns which previews are in memory.
+            if (clip.PreviewImage is not null) row.Children.Add(Thumbnail(clip, 112));
+            Grid.SetColumn(text, 1);
+            row.Children.Add(text);
+            summary = row;
+        }
+        else
+        {
+            // Four fit the card. Past that - or when some were never decoded
+            // because they are scrolled out of the library - the last tile
+            // counts the rest instead.
+            var decoded = clips.Where(clip => clip.PreviewImage is not null).ToList();
+            var shown = decoded.Take(decoded.Count == clips.Count && clips.Count <= 4 ? 4 : 3).ToList();
+            var strip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            foreach (var clip in shown) strip.Children.Add(Thumbnail(clip, 76));
+            if (shown.Count > 0 && shown.Count < clips.Count) strip.Children.Add(Thumbnail(null, 76, $"+{clips.Count - shown.Count}"));
+
+            var stack = new StackPanel { Spacing = 12 };
+            if (strip.Children.Count > 0) stack.Children.Add(strip);
+            stack.Children.Add(new TextBlock
+            {
+                Text = $"Frees {size}",
+                Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
+                FontSize = 14,
+                FontWeight = Avalonia.Media.FontWeight.SemiBold
+            });
+            summary = stack;
+        }
+
+        return new StackPanel
+        {
+            Spacing = 14,
+            Children =
+            {
+                new Border
+                {
+                    Background = AppThemeService.Brush("Surface_0C1319", "#0C1319"),
+                    BorderBrush = AppThemeService.Brush("Surface_232F3A", "#232F3A"),
+                    BorderThickness = new Avalonia.Thickness(1),
+                    CornerRadius = new CornerRadius(10),
+                    Padding = new Avalonia.Thickness(14),
+                    Child = summary
+                },
+                // File.Delete, not the shell: nothing goes to the Recycle Bin,
+                // which is the one thing here a user could reasonably assume
+                // otherwise.
+                new TextBlock
+                {
+                    Text = "Deleted from disk, not moved to the Recycle Bin. This can't be undone.",
+                    Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+                    FontSize = 13,
+                    LineHeight = 19,
+                    TextWrapping = Avalonia.Media.TextWrapping.Wrap
+                }
+            }
+        };
     }
 
     private async Task ShowMessageAsync(string title, string message)
@@ -11364,14 +11500,19 @@ public sealed partial class MainWindow : Window
 
         buttons.Children.Add(ok);
 
-        body.Children.Add(new TextBlock
+        // A dialog whose content says everything (the delete confirm) passes no
+        // message; an empty TextBlock would still claim a row and its spacing.
+        if (!string.IsNullOrEmpty(message))
         {
-            Text = message,
-            Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
-            FontSize = 13,
-            LineHeight = 19,
-            TextWrapping = Avalonia.Media.TextWrapping.Wrap
-        });
+            body.Children.Add(new TextBlock
+            {
+                Text = message,
+                Foreground = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6"),
+                FontSize = 13,
+                LineHeight = 19,
+                TextWrapping = Avalonia.Media.TextWrapping.Wrap
+            });
+        }
         if (content is not null) body.Children.Add(content);
         body.Children.Add(buttons);
 
