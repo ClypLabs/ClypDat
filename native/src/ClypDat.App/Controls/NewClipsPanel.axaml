@@ -44,11 +44,19 @@
             <TextBlock x:Name="SubtitleText" Foreground="{StaticResource Text_8C98A7}" FontSize="12"
                        TextTrimming="CharacterEllipsis" />
           </StackPanel>
-          <Button x:Name="CloseButton" Grid.Column="1" Classes="dialogClose" FontSize="13"
-                  Width="32" Height="32" Padding="0" CornerRadius="8" VerticalAlignment="Top"
+          <!-- A drawn cross, not the "✕" character: that glyph comes from
+               whichever fallback font the machine picks, so its weight and its
+               vertical centre changed with it and sat visibly off-centre inside
+               the hover tile. Two round-capped strokes on a 10px box are
+               centred by construction, and take the button's Foreground so the
+               hover colour still applies. -->
+          <Button x:Name="CloseButton" Grid.Column="1" Classes="dialogClose"
+                  Width="32" Height="32" Padding="0" CornerRadius="16" VerticalAlignment="Top"
                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                   Click="CloseButton_OnClick">
-            <TextBlock Text="✕" />
+            <Path Data="M0,0 L10,10 M10,0 L0,10" Width="10" Height="10" Stretch="None"
+                  Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5"
+                  StrokeLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Button>
         </Grid>
       </Border>
