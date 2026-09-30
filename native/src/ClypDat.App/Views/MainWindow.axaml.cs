@@ -3585,15 +3585,12 @@ public sealed partial class MainWindow : Window
 
         var single = entries.Count == 1;
         const int cardSpacing = 16;
-        // Rows sit further apart than columns: each tile carries two lines of
-        // text under its thumbnail, and at the column gap that text crowded the
-        // thumbnail of the row below it.
-        const int rowSpacing = 20;
         // The same 24px gutter NewClipsPanel gives its title and buttons, so the
-        // thumbnails share their left and right edges.
+        // cards share their left and right edges. The top inset clears the
+        // separator under the header.
         const int gutter = 24;
         var cardsPanel = panel.Cards;
-        cardsPanel.Margin = new Thickness(gutter, 4, gutter, 0);
+        cardsPanel.Margin = new Thickness(gutter, 20, gutter, 0);
         var columns = single ? 1 : Math.Min(NewClipsCardLayoutPolicy.CardsPerRow, entries.Count);
         var maximumDialogWidth = Math.Max(320d, Bounds.Width - 32);
         var availableCardWidth = (maximumDialogWidth - cardsPanel.Margin.Left - cardsPanel.Margin.Right - (columns - 1) * cardSpacing) / columns;
@@ -3619,7 +3616,7 @@ public sealed partial class MainWindow : Window
             {
                 var card = BuildNewClipCard(entries[entryIndex++], cardWidth * 9d / 16d);
                 card.Width = cardWidth;
-                card.Margin = new Thickness(0, 0, cardIndex == rowLength - 1 ? 0 : cardSpacing, rowSpacing);
+                card.Margin = new Thickness(0, 0, cardIndex == rowLength - 1 ? 0 : cardSpacing, cardSpacing);
                 row.Children.Add(card);
             }
             cardsPanel.Children.Add(row);
@@ -3944,27 +3941,23 @@ public sealed partial class MainWindow : Window
             if (args.GetCurrentPoint(badgeTarget).Properties.IsLeftButtonPressed) entry.IsSelected = !entry.IsSelected;
         };
 
-        // Drawn inside the rounded clip so it follows the thumbnail's corners.
-        // Progress is added after it, so the bar's ends reach the edge instead
-        // of sitting inset beneath the ring's two-pixel stroke.
+        // The card's edge in every state: a hairline at rest, the two-pixel
+        // ring on hover or selection. It is an overlay rather than the card's
+        // own BorderThickness so that thickening it never moves the thumbnail
+        // or the text by a pixel.
         var outline = new Border
         {
-            CornerRadius = new CornerRadius(10),
-            BorderThickness = new Thickness(2),
+            CornerRadius = new CornerRadius(12),
             IsHitTestVisible = false
         };
+        var restOutlineBrush = AppThemeService.Brush("Surface_2C3B48", "#2C3B48");
         var hoverOutlineBrush = Brush.Parse("#66FFFFFF");
 
-        var picture = new Border
+        var picture = new Panel
         {
             Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
-            CornerRadius = new CornerRadius(10),
-            ClipToBounds = true,
             Height = previewHeight,
-            Child = new Panel
-            {
-                Children = { thumbnail, preview, outline, duration, badgeTarget, progress }
-            }
+            Children = { thumbnail, preview, duration, badgeTarget }
         };
 
         var metaBrush = AppThemeService.Brush("Text_8C98A7", "#8C98A7");
@@ -3994,13 +3987,11 @@ public sealed partial class MainWindow : Window
             Children = { age, game }
         };
 
-        // Title first, then one quiet line for game and age. No panel behind
-        // the text: the tile is its thumbnail, and a filled card under every
-        // one of them was a second box inside the popup's own.
+        // Title first, then one quiet line for game and age.
         var info = new StackPanel
         {
             Spacing = 3,
-            Margin = new Thickness(2, 10, 2, 0),
+            Margin = new Thickness(14, 11, 14, 13),
             Children =
             {
                 new TextBlock
@@ -4015,12 +4006,28 @@ public sealed partial class MainWindow : Window
             }
         };
 
-        // Transparent rather than null, so the gaps around the text are still
-        // part of the tile's hit area.
+        // Progress goes in after the outline, so the bar's ends reach the card's
+        // edge instead of sitting inset beneath the ring's two-pixel stroke.
+        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto") };
+        Grid.SetRow(picture, 0);
+        Grid.SetRow(info, 1);
+        Grid.SetRowSpan(outline, 2);
+        Grid.SetRow(progress, 0);
+        layout.Children.Add(picture);
+        layout.Children.Add(info);
+        layout.Children.Add(outline);
+        layout.Children.Add(progress);
+
+        // A quiet card: one step above the popup's surface with a hairline
+        // edge, no shadow. Thumbnails floating straight on the popup left it
+        // looking empty, and the earlier, much lighter fill with a drop shadow
+        // turned every clip into a slab competing with its own thumbnail.
         var card = new Border
         {
-            Background = Brushes.Transparent,
-            Child = new StackPanel { Children = { picture, info } }
+            Background = AppThemeService.Brush("Surface_1A2530", "#1A2530"),
+            CornerRadius = new CornerRadius(12),
+            ClipToBounds = true,
+            Child = layout
         };
 
         void SyncCardState()
@@ -4028,12 +4035,13 @@ public sealed partial class MainWindow : Window
             badgeTarget.IsVisible = entry.IsCheckVisible;
             badge.Background = entry.IsSelected ? AppThemeService.Brush("AccentBrush", "#5864E8") : badgeIdle;
             badgeLabel.Text = entry.HasSelectionOrder ? entry.SelectionOrder.ToString() : string.Empty;
-            // Hover is a neutral ring and selection the accent one, so a tile
+            // Hover is a neutral ring and selection the accent one, so a card
             // under the pointer never reads as already ticked.
-            outline.IsVisible = entry.IsSelected || entry.IsHovered;
+            var emphasised = entry.IsSelected || entry.IsHovered;
+            outline.BorderThickness = new Thickness(emphasised ? 2 : 1);
             outline.BorderBrush = entry.IsSelected
                 ? AppThemeService.Brush("AccentBrush", "#5864E8")
-                : hoverOutlineBrush;
+                : entry.IsHovered ? hoverOutlineBrush : restOutlineBrush;
         }
 
         entry.PropertyChanged += (_, _) => SyncCardState();
