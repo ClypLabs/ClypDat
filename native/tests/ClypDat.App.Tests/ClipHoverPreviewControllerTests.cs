@@ -4,10 +4,11 @@ using ClypDat.App.Controls;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace ClypDat.App.Tests;
 
-public sealed class ClipHoverPreviewControllerTests
+public sealed class ClipHoverPreviewControllerTests(ITestOutputHelper output)
 {
     [Theory]
     [InlineData(1.0, 320, 180)]
@@ -83,12 +84,24 @@ public sealed class ClipHoverPreviewControllerTests
 
         var zeroProgressBeforeRestart = presenter.ZeroProgressCount;
         var firstFrameBeforeRestart = presenter.FirstFrames.Single();
+        var positionBeforeRestart = presenter.Progress;
         controller.Request(fixture.Clip, true, presenter, fixture.Size);
-        await WaitUntilAsync(() => presenter.ZeroProgressCount > zeroProgressBeforeRestart && presenter.FirstFrames.Count == 2);
+        await WaitUntilAsync(() => presenter.ZeroProgressCount > zeroProgressBeforeRestart && presenter.FirstFrames.Count == 2 && presenter.FirstProgress.Count == 2);
 
         Assert.Equal([true, false, true], presenter.Attachments.Take(3));
         Assert.True(presenter.FramesPresentedWhileDetached > 0);
-        Assert.Equal(firstFrameBeforeRestart, presenter.FirstFrames[1]);
+        // The latest-frame mailbox can skip frames before its first consumer
+        // runs. Two sessions need not first present the same decoded frame.
+        // Verify fresh-stream pixels at each reported position, and a rewind,
+        // while retaining the stage-before-attach checks above.
+        var reference = await fixture.DecodeFramePrefixesAsync();
+        var frameCount = (int)Math.Ceiling(fixture.Clip.HoverPreviewRange.Duration.TotalSeconds * ClipHoverPreviewController.MaximumFramesPerSecond);
+        var indices = presenter.FirstProgress.Select(progress => (int)Math.Round(progress * frameCount) - 1).ToArray();
+        output.WriteLine($"First displayed frame indices: initial={indices[0]}, restart={indices[1]}.");
+        Assert.All(indices, index => Assert.InRange(index, 0, reference.Count - 1));
+        Assert.Equal(reference[indices[0]], firstFrameBeforeRestart);
+        Assert.Equal(reference[indices[1]], presenter.FirstFrames[1]);
+        Assert.True(presenter.FirstProgress[1] < positionBeforeRestart, "Warm reentry must rewind the decoder.");
         Assert.Equal(0, presenter.ReleaseCount);
 
         controller.PointerLeft(fixture.Clip);
@@ -157,6 +170,8 @@ public sealed class ClipHoverPreviewControllerTests
         private int _framesInSession;
         private int _framesPresentedWhileDetached;
         private readonly List<byte[]> _firstFrames = [];
+        private readonly List<double> _firstProgress = [];
+        private double _progress;
 
         public PreviewPresentationPath Path => PreviewPresentationPath.Software;
         public int FrameCount => Volatile.Read(ref _frames);
@@ -165,6 +180,9 @@ public sealed class ClipHoverPreviewControllerTests
         public int FramesPresentedWhileDetached => Volatile.Read(ref _framesPresentedWhileDetached);
         public IReadOnlyList<bool> Attachments { get { lock (_gate) return _attachments.ToArray(); } }
         public IReadOnlyList<byte[]> FirstFrames { get { lock (_gate) return _firstFrames.Select(frame => frame.ToArray()).ToArray(); } }
+
+        public IReadOnlyList<double> FirstProgress { get { lock (_gate) return _firstProgress.ToArray(); } }
+        public double Progress { get { lock (_gate) return _progress; } }
 
         public ValueTask ActivateSessionAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
         public ValueTask SetAttachedAsync(bool attached)
@@ -178,11 +196,13 @@ public sealed class ClipHoverPreviewControllerTests
         }
         public ValueTask SetProgressAsync(double progress)
         {
-            if (progress == 0)
+            lock (_gate)
             {
-                lock (_gate) _framesInSession = 0;
-                Interlocked.Increment(ref _zeroProgress);
+                _progress = progress;
+                if (progress == 0) _framesInSession = 0;
+                else if (_firstProgress.Count < _firstFrames.Count) _firstProgress.Add(progress);
             }
+            if (progress == 0) Interlocked.Increment(ref _zeroProgress);
             return ValueTask.CompletedTask;
         }
         public ValueTask ReleaseResourcesAsync()
@@ -241,6 +261,29 @@ public sealed class ClipHoverPreviewControllerTests
             await process.WaitForExitAsync();
             Assert.Equal(0, process.ExitCode);
             return new PreviewFixture(path, CreateClip(path, "hover"));
+        }
+
+        public async Task<IReadOnlyList<byte[]>> DecodeFramePrefixesAsync()
+        {
+            var info = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
+            {
+                UseShellExecute = false, CreateNoWindow = true,
+                RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            foreach (var argument in ClipHoverPreviewController.BuildDecoderArguments(
+                Path, Clip.HoverPreviewRange, ClipHoverPreviewController.MaximumFramesPerSecond, Size))
+                info.ArgumentList.Add(argument);
+            using var process = Process.Start(info)!;
+            var errors = process.StandardError.ReadToEndAsync();
+            using var decoded = new MemoryStream();
+            await process.StandardOutput.BaseStream.CopyToAsync(decoded);
+            await process.WaitForExitAsync();
+            Assert.True(process.ExitCode == 0, await errors);
+            var bytes = decoded.ToArray();
+            var frameBytes = Size.Width * Size.Height * 4;
+            Assert.Equal(0, bytes.Length % frameBytes);
+            return Enumerable.Range(0, bytes.Length / frameBytes)
+                .Select(index => bytes.AsSpan(index * frameBytes, 32).ToArray()).ToArray();
         }
 
         public ClipCardViewModel CreateClip(string name) => CreateClip(Path, name);

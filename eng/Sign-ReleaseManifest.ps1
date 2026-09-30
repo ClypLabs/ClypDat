@@ -35,9 +35,9 @@ if (-not (Test-Path -LiteralPath $PrivateKeyPath -PathType Leaf)) { throw "Priva
 if (-not (Test-Path -LiteralPath $ArtifactDirectory -PathType Container)) { throw "Artifact directory not found: $ArtifactDirectory" }
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = $ArtifactDirectory }
 
-# ClypDat-Setup.exe is what the in-app updater downloads, so it must be covered.
-# The others are listed when present so a manual download can be checked too.
-$assetNames = @('ClypDat-Setup.exe', 'ClypDat-Portable.exe', 'ClypDat-win-x64.zip', 'ClypDat.msi', 'clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip')
+# Validate all four tag-derived artifacts and the byte-identical updater alias,
+# plus the matching FFmpeg corresponding-source bundle.
+$assetNames = @(& (Join-Path $PSScriptRoot 'Test-ReleaseAssets.ps1') -Tag $Tag -ArtifactDirectory $ArtifactDirectory)
 
 $assets = @()
 foreach ($name in $assetNames) {

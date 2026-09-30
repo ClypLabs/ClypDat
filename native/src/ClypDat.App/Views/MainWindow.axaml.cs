@@ -1,4 +1,4 @@
-using Avalonia.Animation;
+﻿using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data;
@@ -2972,7 +2972,7 @@ public sealed partial class MainWindow : Window
         ViewModel is { Settings.ReplayBufferEnabled: true, IsRecordingEnabledForActiveGame: true }
         && (ViewModel.IsDesktopCapture || detection.IsDetected);
 
-    private static string ReplayTargetIdentity(ReplayBufferConfig config) => string.Join('|',
+    internal static string ReplayTargetIdentity(ReplayBufferConfig config) => string.Join('|',
         config.CaptureSource,
         config.CaptureMonitorDeviceName,
         config.GameExecutableName,
@@ -4618,7 +4618,15 @@ public sealed partial class MainWindow : Window
     // Try again - never a spinner that runs forever, never a silent dead end.
     private void ShowEditorLoadError(string message, string? detail = null)
     {
-        if (ViewModel is null) return;
+        if (ViewModel is null || _editorLoadError is not null) return;
+        // Failure settles this open. Keep its poster, but cancel all work that
+        // could later reveal it or replace the original error.
+        _playbackStartCts?.Cancel();
+        if (_playback is { } failedPlayback)
+        {
+            failedPlayback.Pause();
+            QueueEditorBackgroundStop(failedPlayback);
+        }
         AppLog.Info($"Editor open failed on screen: path={ViewModel.SelectedVideoPath}, message={message}, detail={detail ?? "none"}");
         ViewModel.IsPlaying = false;
         ViewModel.IsEditorVideoLoading = true;
@@ -4656,7 +4664,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            await Task.Delay(EditorOpenStallTimeout, cancellationToken);
+            await Task.Delay(RemainingEditorOpenTime(openClock), cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -4666,7 +4674,10 @@ public sealed partial class MainWindow : Window
         if (cancellationToken.IsCancellationRequested || !ReferenceEquals(ViewModel, model) || !model.IsEditorVideoLoading ||
             _editorLoadError is not null || !string.Equals(model.SelectedVideoPath, path, StringComparison.OrdinalIgnoreCase)) return;
         AppLog.Error($"Editor open stalled: path={path}, clickMs={openClock.ElapsedMilliseconds}, playback={_playback is not null}, composition={(_playback?.Composition is { } output ? DescribeCompositionStatus(output) : "none")}.");
-        ShowEditorLoadError("This clip is taking too long to load.");
+        ShowEditorLoadError(PlaybackSession.IsNetworkPath(path)
+            ? "This network clip took too long to load."
+            : "This clip is taking too long to load.",
+            PlaybackSession.IsNetworkPath(path) ? "Check the network drive connection, then try again." : null);
     }
 
     private async void ClipContextExport_OnClick(object? sender, RoutedEventArgs e)
@@ -5300,6 +5311,9 @@ public sealed partial class MainWindow : Window
         public bool Claimed { get; set; }
         private int _playerAttached;
         private int _firstFrameReady;
+        private int _failed;
+        public bool Failed => Volatile.Read(ref _failed) != 0;
+        public void MarkFailed() => Volatile.Write(ref _failed, 1);
 
         public bool PlayerAttached => Volatile.Read(ref _playerAttached) != 0;
         public bool FirstFrameReady => Volatile.Read(ref _firstFrameReady) != 0;
@@ -5349,6 +5363,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception error)
         {
+            warmup.MarkFailed();
             warmup.SessionReady.TrySetException(error);
             warmup.VideoLoaded.TrySetException(error);
             warmup.Readiness.Complete(false);
@@ -5392,6 +5407,7 @@ public sealed partial class MainWindow : Window
             try
             {
                 var result = await session.SeekAsync(warmup.Start, cancellationToken: warmup.Cancellation.Token);
+                if (result.Outcome == PlaybackSeekOutcome.Failed) warmup.MarkFailed();
                 if (result.Outcome == PlaybackSeekOutcome.Completed && !warmup.Cancellation.IsCancellationRequested)
                 {
                     succeeded = true;
@@ -5407,7 +5423,7 @@ public sealed partial class MainWindow : Window
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception error) { AppLog.Error("Editor warm frame failed", error); }
+            catch (Exception error) { warmup.MarkFailed(); AppLog.Error("Editor warm frame failed", error); }
             finally { warmup.Readiness.Complete(succeeded); }
         }
         warmup.FramePreparation = PrepareWarmFrameAsync();
@@ -5421,7 +5437,11 @@ public sealed partial class MainWindow : Window
             await Task.Delay(EditorHoverWarmupMaximumDecode, warmup.Cancellation.Token).ConfigureAwait(false);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (!warmup.Cancellation.IsCancellationRequested && !warmup.Claimed && ReferenceEquals(_editorHoverWarmup, warmup)) session.Pause();
+                if (!warmup.Cancellation.IsCancellationRequested && !warmup.Claimed && ReferenceEquals(_editorHoverWarmup, warmup))
+                {
+                    if (!warmup.FirstFrameReady) warmup.MarkFailed();
+                    session.Pause();
+                }
             });
         }
         catch (OperationCanceledException)
@@ -9032,9 +9052,9 @@ public sealed partial class MainWindow : Window
                 var openCold = false;
                 try
                 {
-                    var session = await warmup.SessionReady.Task;
+                    var session = await warmup.SessionReady.Task.WaitAsync(cts.Token);
                     if (cts.IsCancellationRequested) return;
-                    if (await warmup.Readiness.CanAdoptAsync(warmup.VideoLoaded.Task,
+                    if (!warmup.Failed && await warmup.Readiness.CanAdoptAsync(warmup.VideoLoaded.Task,
                         () => warmup.PlayerAttached && !warmup.Cancellation.IsCancellationRequested,
                         () => session.VideoPlayer.VoutCount > 0 && session.Composition?.HasPresentedPicture == true,
                         cts.Token))
@@ -9078,6 +9098,12 @@ public sealed partial class MainWindow : Window
             DispatcherPriority.Default);
     }
 
+    private static TimeSpan RemainingEditorOpenTime(System.Diagnostics.Stopwatch clock)
+    {
+        var remaining = EditorOpenStallTimeout - clock.Elapsed;
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+    }
+
     private async Task StartEditorPlaybackAsync(
         PlaybackSession playback,
         Task videoLoad,
@@ -9098,11 +9124,20 @@ public sealed partial class MainWindow : Window
             .Select(track => new AudioPreviewTrack(track.StreamIndex, track.EffectiveVolumePercent))
             .ToArray();
 
+        using var observation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var observationToken = observation.Token;
         try
         {
-            await videoLoad;
+            await videoLoad.WaitAsync(cancellationToken);
             AppLog.Debug($"Editor open trace: video load done at {openClock.ElapsedMilliseconds}ms.");
             if (cancellationToken.IsCancellationRequested || !ReferenceEquals(ViewModel, openingViewModel) || !string.Equals(ViewModel.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase)) return;
+            if (hoverWarmup?.Failed == true && _playbackStartCts is { } retry && retry.Token == cancellationToken)
+            {
+                CancelEditorHoverWarmup(hoverWarmup);
+                _adoptingEditorHoverWarmup = null;
+                QueueColdEditorPlayback(retry, openClock);
+                return;
+            }
             playback.SetMasterVolume(openingVolume);
             _playback = playback;
             var openingComposition = playback.Composition;
@@ -9141,6 +9176,8 @@ public sealed partial class MainWindow : Window
                 if (!videoReady.TrySetResult()) return;
                 AppLog.Debug($"Editor {source} ready at {openClock.ElapsedMilliseconds}ms.");
             }
+            var firstPictureBudget = playback.IsNetworkSource ? RemainingEditorOpenTime(openClock)
+                : TimeSpan.FromSeconds(Math.Min(5, RemainingEditorOpenTime(openClock).TotalSeconds));
             var cropMaskReapplied = 0;
             void OnVout(object? _, MediaPlayerVoutEventArgs args)
             {
@@ -9162,8 +9199,8 @@ public sealed partial class MainWindow : Window
                 {
                     if (await PresentationWaiter.WaitAsync(
                         () => openingComposition?.HasPresentedPicture == true,
-                        () => ReferenceEquals(playback.Composition, openingComposition), cancellationToken,
-                        TimeSpan.FromSeconds(5)))
+                        () => ReferenceEquals(playback.Composition, openingComposition), observationToken,
+                        firstPictureBudget))
                     {
                         AppLog.Debug($"Editor first presentation: prepareMs={firstFrameClock.ElapsedMilliseconds}, clickMs={openClock.ElapsedMilliseconds}.");
                         ConfirmVideoReady("native presentation");
@@ -9173,7 +9210,7 @@ public sealed partial class MainWindow : Window
                 finally { playback.VideoPlayer.Vout -= OnVout; }
             }
             _ = ObserveFirstPresentationAsync();
-            _ = RevealEditorVideoIfStalledAsync(videoReady.Task, playback, openingComposition, openingViewModel, openingPath, cancellationToken);
+            _ = RevealEditorVideoIfStalledAsync(videoReady.Task, playback, openingComposition, openingViewModel, openingPath, observationToken, firstPictureBudget);
 
             // A claimed hover player already rendered a frame through this
             // exact HWND, then paused. Reveal it immediately; PlayFrom below
@@ -9204,7 +9241,8 @@ public sealed partial class MainWindow : Window
                 AppLog.Debug($"Editor layout/timeline ready: clickMs={openClock.ElapsedMilliseconds}.");
             });
             var startup = await playback.StartCoordinatedAsync(startPosition, cancellationToken, audioSetup, resumeWarmFrame,
-                token => RevealOpeningVideoAsync(playback, openingComposition, openingViewModel, openingPath, openClock, cancellationToken, token));
+                token => RevealOpeningVideoAsync(playback, openingComposition, openingViewModel, openingPath, openClock, cancellationToken, token),
+                RemainingEditorOpenTime(openClock));
             AppLog.Debug($"Editor synchronized audio/video ready: clickMs={openClock.ElapsedMilliseconds}, outcome={startup.Outcome}.");
             // A newer open owns the poster from here.
             if (!IsCurrentEditorOpen(playback, openingComposition, openingViewModel, openingPath, cancellationToken)) return;
@@ -9217,7 +9255,19 @@ public sealed partial class MainWindow : Window
                     else ShowEditorLoadError("Playback was interrupted before this clip loaded.");
                     return;
                 case EditorPlaybackStartOutcome.Failed:
-                    ShowEditorLoadError("This clip couldn't be played.");
+                    if (hoverWarmup is not null && _playbackStartCts is { } startupRetry && startupRetry.Token == cancellationToken &&
+                        RemainingEditorOpenTime(openClock) > TimeSpan.Zero)
+                    {
+                        AppLog.Info($"Editor hover adoption failed ({startup.Failure}); reloading once: {Path.GetFileName(openingPath)}.");
+                        CancelEditorHoverWarmup(hoverWarmup);
+                        _adoptingEditorHoverWarmup = null;
+                        QueueColdEditorPlayback(startupRetry, openClock);
+                        return;
+                    }
+                    var networkTimeout = playback.IsNetworkSource && startup.Failure is
+                        EditorPlaybackStartFailure.DeadlineExceeded or EditorPlaybackStartFailure.PauseTimeout;
+                    ShowEditorLoadError(networkTimeout ? "This network clip took too long to load." : "This clip couldn't be played.",
+                        networkTimeout ? "Check the network drive connection, then try again." : "Try again. If the clip still won't open, send a diagnostics report.");
                     return;
                 case EditorPlaybackStartOutcome.RevealedPaused:
                     // On screen, but the video never started moving: leave it
@@ -9277,9 +9327,20 @@ public sealed partial class MainWindow : Window
             AppLog.Error("Editor playback failed", error);
             // Asked before the stop, which cancels this open's own token.
             var stillCurrent = IsCurrentEditorOpenPath(openingViewModel, openingPath, cancellationToken);
-            StopEditorPlayback();
-            if (stillCurrent) ShowEditorLoadError("This clip couldn't be played.", error.Message);
+            if (stillCurrent && hoverWarmup is not null && _playbackStartCts is { } recovery &&
+                recovery.Token == cancellationToken && RemainingEditorOpenTime(openClock) > TimeSpan.Zero)
+            {
+                CancelEditorHoverWarmup(hoverWarmup);
+                _adoptingEditorHoverWarmup = null;
+                QueueColdEditorPlayback(recovery, openClock);
+            }
+            else if (stillCurrent)
+            {
+                StopEditorPlayback();
+                ShowEditorLoadError("This clip couldn't be played.", error.Message);
+            }
         }
+        finally { observation.Cancel(); }
     }
 
     private bool IsCurrentEditorOpenPath(MainWindowViewModel openingViewModel, string openingPath, CancellationToken cancellationToken) =>
@@ -9329,11 +9390,11 @@ public sealed partial class MainWindow : Window
 
     private async Task RevealEditorVideoIfStalledAsync(Task videoReady, PlaybackSession playback,
         NativeVideoOutput? composition, MainWindowViewModel openingViewModel, string openingPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, TimeSpan firstPictureBudget)
     {
         try
         {
-            await videoReady.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+            await videoReady.WaitAsync(firstPictureBudget, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -9346,14 +9407,15 @@ public sealed partial class MainWindow : Window
                 if (cancellationToken.IsCancellationRequested || !ReferenceEquals(_playback, playback) ||
                     !ReferenceEquals(playback.Composition, composition) || !ReferenceEquals(ViewModel, openingViewModel) ||
                     !string.Equals(ViewModel?.SelectedVideoPath, openingPath, StringComparison.OrdinalIgnoreCase) ||
-                    !openingViewModel.IsEditorVideoLoading) return;
+                    !openingViewModel.IsEditorVideoLoading || _editorLoadError is not null) return;
                 // Presented after all: the start sequence owns the reveal.
                 if (composition?.HasPresentedPicture == true) return;
                 playback.Pause();
                 openingViewModel.IsPlaying = false;
                 var status = composition is null ? "none" : DescribeCompositionStatus(composition);
                 AppLog.Error($"Editor compositor did not present first picture: path={openingPath}, loading={openingViewModel.IsEditorVideoLoading}, {status}.");
-                ShowEditorLoadError("This clip's first frame didn't render.", "If it keeps happening, send the editor log from this attempt.");
+                ShowEditorLoadError(playback.IsNetworkSource ? "This network clip took too long to load." : "This clip's first frame didn't render.",
+                    playback.IsNetworkSource ? "Check the network drive connection, then try again." : "If it keeps happening, send the editor log from this attempt.");
             });
         }
     }
