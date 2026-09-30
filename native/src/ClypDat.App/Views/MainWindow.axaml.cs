@@ -3584,9 +3584,16 @@ public sealed partial class MainWindow : Window
         }
 
         var single = entries.Count == 1;
-        const int cardSpacing = 14;
+        const int cardSpacing = 16;
+        // Rows sit further apart than columns: each tile carries two lines of
+        // text under its thumbnail, and at the column gap that text crowded the
+        // thumbnail of the row below it.
+        const int rowSpacing = 20;
+        // The same 24px gutter NewClipsPanel gives its title and buttons, so the
+        // thumbnails share their left and right edges.
+        const int gutter = 24;
         var cardsPanel = panel.Cards;
-        cardsPanel.Margin = single ? new Thickness(28, 20, 28, 8) : new Thickness(8, 20, 8, 8);
+        cardsPanel.Margin = new Thickness(gutter, 4, gutter, 0);
         var columns = single ? 1 : Math.Min(NewClipsCardLayoutPolicy.CardsPerRow, entries.Count);
         var maximumDialogWidth = Math.Max(320d, Bounds.Width - 32);
         var availableCardWidth = (maximumDialogWidth - cardsPanel.Margin.Left - cardsPanel.Margin.Right - (columns - 1) * cardSpacing) / columns;
@@ -3612,7 +3619,7 @@ public sealed partial class MainWindow : Window
             {
                 var card = BuildNewClipCard(entries[entryIndex++], cardWidth * 9d / 16d);
                 card.Width = cardWidth;
-                card.Margin = new Thickness(0, 0, cardIndex == rowLength - 1 ? 0 : cardSpacing, cardSpacing);
+                card.Margin = new Thickness(0, 0, cardIndex == rowLength - 1 ? 0 : cardSpacing, rowSpacing);
                 row.Children.Add(card);
             }
             cardsPanel.Children.Add(row);
@@ -3870,163 +3877,163 @@ public sealed partial class MainWindow : Window
             if (args.PropertyName == nameof(ClipCardViewModel.PreviewImageStretch)) thumbnail.Stretch = entry.Clip.PreviewImageStretch;
         };
 
+        // Bottom-right and small, where a video's length is conventionally
+        // read, leaving the top-left corner to the selection badge alone. The
+        // 8px inset also keeps it clear of the 4px hover progress bar.
         var duration = new Border
         {
-            Background = AppThemeService.Brush("Surface_1A2530", "#1A2530"),
-            CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(10, 6),
-            VerticalAlignment = VerticalAlignment.Top,
+            Background = AppThemeService.Brush("Surface_CC0E151C", "#CC0E151C"),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(7, 3),
+            Margin = new Thickness(8),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            IsHitTestVisible = false,
             Child = new TextBlock
             {
                 Text = entry.Clip.DurationLabel,
                 Foreground = AppThemeService.Brush("Text_D8E2EE", "#D8E2EE"),
-                FontSize = 13,
-                FontWeight = Avalonia.Media.FontWeight.Bold
+                FontSize = 12,
+                FontWeight = Avalonia.Media.FontWeight.SemiBold
             }
         };
 
-        var check = new CheckBox
-        {
-            VerticalAlignment = VerticalAlignment.Top,
-            IsChecked = entry.IsSelected,
-            IsVisible = entry.IsCheckVisible
-        };
-        check.Click += (_, _) => entry.IsSelected = check.IsChecked == true;
-        // Clicking the card body opens the clip (below), so the checkbox has to
-        // stop its own click reaching that handler - otherwise ticking a box
-        // would also fling the user into the editor.
-        check.PointerPressed += (_, args) => args.Handled = true;
-
-        var pictureChrome = new Grid
-        {
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(12),
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"),
-            Children = { check, duration }
-        };
-        Grid.SetColumn(duration, 2);
-
-        var picture = new Panel
-        {
-            Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
-            Height = previewHeight,
-            Children = { thumbnail, preview }
-        };
-        var selectionOverlay = new Border
-        {
-            Background = AppThemeService.Brush("Surface_661A2040", "#661A2040"),
-            IsHitTestVisible = false
-        };
-        picture.Children.Add(selectionOverlay);
-        var selectionOrder = new TextBlock
+        // One badge does what a checkbox, a tint over the whole thumbnail and a
+        // 48px number in the middle of it used to do between them: hollow while
+        // the tile is merely hovered, filled with the pick order once ticked.
+        // With most of a session selected, the old trio buried every thumbnail.
+        // Its colours are fixed rather than themed because it sits on footage,
+        // not on a surface the theme controls.
+        var badgeIdle = Brush.Parse("#73000000");
+        var badgeLabel = new TextBlock
         {
             Foreground = Brushes.White,
-            FontSize = 48,
+            FontSize = 12,
             FontWeight = Avalonia.Media.FontWeight.Bold,
-            Opacity = 0.9,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var badge = new Border
+        {
+            Width = 24,
+            Height = 24,
+            CornerRadius = new CornerRadius(12),
+            BorderBrush = Brush.Parse("#F2FFFFFF"),
+            BorderThickness = new Thickness(1.5),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            IsHitTestVisible = false,
-            Effect = new DropShadowEffect
-            {
-                Color = Colors.Black,
-                BlurRadius = 10,
-                Opacity = 0.6
-            }
+            Child = badgeLabel
         };
-        picture.Children.Add(selectionOrder);
-        picture.Children.Add(pictureChrome);
-
-        var timeRow = new StackPanel
+        // The circle is 24px; the target around it is 40, so a near miss ticks
+        // the clip instead of falling through to the tile and opening it.
+        var badgeTarget = new Border
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            Children =
+            Width = 40,
+            Height = 40,
+            Background = Brushes.Transparent,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = badge
+        };
+        // Clicking the tile body opens the clip (below), so the badge has to
+        // stop its own press reaching that handler - otherwise ticking a clip
+        // would also fling the user into the editor.
+        badgeTarget.PointerPressed += (_, args) =>
+        {
+            args.Handled = true;
+            if (args.GetCurrentPoint(badgeTarget).Properties.IsLeftButtonPressed) entry.IsSelected = !entry.IsSelected;
+        };
+
+        // Drawn inside the rounded clip so it follows the thumbnail's corners.
+        // Progress is added after it, so the bar's ends reach the edge instead
+        // of sitting inset beneath the ring's two-pixel stroke.
+        var outline = new Border
+        {
+            CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(2),
+            IsHitTestVisible = false
+        };
+        var hoverOutlineBrush = Brush.Parse("#66FFFFFF");
+
+        var picture = new Border
+        {
+            Background = AppThemeService.Brush("Surface_16202A", "#16202A"),
+            CornerRadius = new CornerRadius(10),
+            ClipToBounds = true,
+            Height = previewHeight,
+            Child = new Panel
             {
-                new PathIcon
-                {
-                    Data = Geometry.Parse("M12,20c-4.41,0-8-3.59-8-8s3.59-8,8-8s8,3.59,8,8S16.41,20,12,20z M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M12.5,7H11v6l5.25,3.15l0.75-1.23l-4.5-2.67V7z"),
-                    Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
-                    Width = 12,
-                    Height = 12
-                },
-                new TextBlock
-                {
-                    Text = entry.Clip.RelativeDateLabel,
-                    Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
-                    FontSize = 12,
-                    FontWeight = Avalonia.Media.FontWeight.SemiBold
-                }
+                Children = { thumbnail, preview, outline, duration, badgeTarget, progress }
             }
         };
 
+        var metaBrush = AppThemeService.Brush("Text_8C98A7", "#8C98A7");
+        var game = new TextBlock
+        {
+            Text = entry.Clip.TileTopLabel,
+            Foreground = metaBrush,
+            FontSize = 12,
+            TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis,
+            IsVisible = !string.IsNullOrWhiteSpace(entry.Clip.TileTopLabel)
+        };
+        var age = new TextBlock
+        {
+            Text = game.IsVisible ? $"• {entry.Clip.RelativeDateLabel}" : entry.Clip.RelativeDateLabel,
+            Foreground = metaBrush,
+            FontSize = 12,
+            Margin = new Thickness(game.IsVisible ? 6 : 0, 0, 0, 0)
+        };
+        // Age is docked first so it is measured first: a long game name is what
+        // gives way and trims, and "2 hours ago" is never the part cut off.
+        // Left-aligned, the panel is only as wide as the two need, so the age
+        // follows the name instead of being flung to the tile's right edge.
+        DockPanel.SetDock(age, Dock.Right);
+        var meta = new DockPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Children = { age, game }
+        };
+
+        // Title first, then one quiet line for game and age. No panel behind
+        // the text: the tile is its thumbnail, and a filled card under every
+        // one of them was a second box inside the popup's own.
         var info = new StackPanel
         {
-            Spacing = 6,
-            Margin = new Thickness(16, 13),
+            Spacing = 3,
+            Margin = new Thickness(2, 10, 2, 0),
             Children =
             {
-                new TextBlock
-                {
-                    Text = entry.Clip.TileTopLabel,
-                    Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"),
-                    FontSize = 12,
-                    FontWeight = Avalonia.Media.FontWeight.Bold,
-                    TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
-                },
                 new TextBlock
                 {
                     Text = entry.Clip.TileMainLabel,
                     Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"),
-                    FontSize = 15,
-                    FontWeight = Avalonia.Media.FontWeight.Bold,
+                    FontSize = 14,
+                    FontWeight = Avalonia.Media.FontWeight.SemiBold,
                     TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis
                 },
-                timeRow
+                meta
             }
         };
 
-        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto") };
-        var hoverOutline = new Border
-        {
-            CornerRadius = new CornerRadius(12),
-            BorderThickness = new Thickness(2),
-            IsHitTestVisible = false,
-            ZIndex = 10
-        };
-        Grid.SetRow(picture, 0);
-        Grid.SetRow(info, 1);
-        Grid.SetRow(progress, 0);
-        Grid.SetRowSpan(hoverOutline, 2);
-        layout.Children.Add(picture);
-        layout.Children.Add(info);
-        layout.Children.Add(hoverOutline);
-        layout.Children.Add(progress);
-
+        // Transparent rather than null, so the gaps around the text are still
+        // part of the tile's hit area.
         var card = new Border
         {
-            Background = AppThemeService.Brush("Surface_24303A", "#24303A"),
-            CornerRadius = new CornerRadius(12),
-            BoxShadow = Avalonia.Media.BoxShadows.Parse("0 6 18 -6 #66000000"),
-            Child = new Border
-            {
-                CornerRadius = new CornerRadius(12),
-                ClipToBounds = true,
-                Child = layout
-            }
+            Background = Brushes.Transparent,
+            Child = new StackPanel { Children = { picture, info } }
         };
 
         void SyncCardState()
         {
-            check.IsChecked = entry.IsSelected;
-            check.IsVisible = entry.IsCheckVisible;
-            selectionOverlay.IsVisible = entry.IsSelected;
-            selectionOrder.Text = entry.SelectionOrder.ToString();
-            selectionOrder.IsVisible = entry.HasSelectionOrder;
-            hoverOutline.IsVisible = entry.IsSelected || entry.IsHovered;
-            hoverOutline.BorderBrush = entry.IsSelected
+            badgeTarget.IsVisible = entry.IsCheckVisible;
+            badge.Background = entry.IsSelected ? AppThemeService.Brush("AccentBrush", "#5864E8") : badgeIdle;
+            badgeLabel.Text = entry.HasSelectionOrder ? entry.SelectionOrder.ToString() : string.Empty;
+            // Hover is a neutral ring and selection the accent one, so a tile
+            // under the pointer never reads as already ticked.
+            outline.IsVisible = entry.IsSelected || entry.IsHovered;
+            outline.BorderBrush = entry.IsSelected
                 ? AppThemeService.Brush("AccentBrush", "#5864E8")
-                : AppThemeService.Brush("AccentBrushHover", "#6D77F0");
+                : hoverOutlineBrush;
         }
 
         entry.PropertyChanged += (_, _) => SyncCardState();
