@@ -310,7 +310,7 @@ jobs:
           Set-Location release-assets
           gh release create $tag `
             "ClypDat-$tag-win-x64.zip" "ClypDat-$tag-Portable.exe" "ClypDat-$tag-Setup.exe" "ClypDat-$tag.msi" `
-            "ClypDat-Setup.exe#ClypDat $tag Setup (updater and WinGet compatibility)" `
+            "ClypDat-Setup.exe#ClypDat Windows Updater" `
             clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip `
             --title "ClypDat $tag" `
             --generate-notes `
