@@ -374,7 +374,7 @@ std::wstring endpoint_id(IMMDeviceEnumerator* enumerator,bool microphone,const s
 bool social(const std::wstring& name){static const std::set<std::wstring> names{L"discord",L"guilded",L"teamspeak",L"mumble",L"skype",L"teams",L"zoom",L"slack",L"signal",L"telegram",L"whatsapp"};return names.contains(normalize_process(name));}
 std::vector<AudioLaneConfig> graph_lanes(const AudioGraphConfig& config){
     std::vector<AudioLaneConfig> result{config.system_audio
-        ? AudioLaneConfig{"system","All System Audio",2,config.game_gain,false}
+        ? AudioLaneConfig{"system","Full System Audio",2,config.game_gain,false}
         : AudioLaneConfig{"game","Game Audio",2,config.game_gain,false}};
     auto apps=config.system_audio?std::vector<AudioApplicationConfig>{}:config.applications;std::sort(apps.begin(),apps.end(),[](const auto& a,const auto& b){if(social(a.process_name)!=social(b.process_name))return social(a.process_name);return normalize_process(a.process_name)<normalize_process(b.process_name);});
     std::set<std::string> added;

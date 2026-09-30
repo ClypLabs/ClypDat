@@ -441,6 +441,8 @@ public sealed partial class MainWindow : Window
                 ViewModel.RecordingSettingsSaved += ApplySavedRecordingSettings;
                 ViewModel.PropertyChanged += (_, e) =>
                 {
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsOnboardingVisible) && ViewModel.IsOnboardingVisible)
+                        Dispatcher.UIThread.Post(() => this.FindControl<Button>("OnboardingNextButton")?.Focus());
                     if (e.PropertyName == nameof(MainWindowViewModel.ActiveGameDetection)) _ = UpdateVideoOverlaySettingsAsync();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVideoLoading)) RestartEditorLoadingIndicator();
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsHelpVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
@@ -603,6 +605,7 @@ public sealed partial class MainWindow : Window
                 return;
             }
             if (IsQuitting) return;
+            if (ViewModel?.IsOnboardingVisible == true) return;
             // Hiding to tray keeps the app (and replay buffer) running,
             // but PlaybackSession itself - LibVLC's video output and the
             // NAudio WasapiOut mixer - has nothing to do with the window
@@ -6739,6 +6742,12 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (ViewModel?.IsOnboardingVisible == true)
+        {
+            if (e.Key == Key.Escape) e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape && ViewModel is not null && !IsTypingInTextInput(e.Source))
         {
             if (ViewModel.IsVideoFullscreen)
@@ -8113,6 +8122,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is not null && !ViewModel.Settings.HasSeenOnboarding)
         {
             ViewModel.StartOnboarding();
+            await ViewModel.OnboardingCompletion;
         }
 
         if (StartupPlaybackWarning is { } playbackWarning)
@@ -8292,11 +8302,6 @@ public sealed partial class MainWindow : Window
         ViewModel?.OnboardingNext();
     }
 
-    private void OnboardingSkipButton_OnClick(object? sender, RoutedEventArgs e)
-    {
-        ViewModel?.FinishOnboarding();
-    }
-
     private async void AvailableUpdateButton_OnClick(object? sender, RoutedEventArgs e)
     {
         if (_availableUpdate is null || _updateDialogOpen) return;
@@ -8306,14 +8311,6 @@ public sealed partial class MainWindow : Window
             return;
         }
         await ShowUpdateDialogAsync(CreateUpdateDialog(_availableUpdate));
-    }
-
-    private void OnboardingOverlay_OnPointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (!e.GetCurrentPoint(OnboardingOverlay).Properties.IsLeftButtonPressed) return;
-        if (!ReferenceEquals(e.Source, OnboardingOverlay)) return;
-        if (ViewModel?.IsFirstRunOnboarding == true) return;
-        ViewModel?.FinishOnboarding();
     }
 
     private void AddExcludedProcessOnboardingButton_OnClick(object? sender, RoutedEventArgs e)

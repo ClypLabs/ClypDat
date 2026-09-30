@@ -19,7 +19,7 @@
       <TextBlock Classes="settingsSectionDesc" Text="Capture all system audio together, or choose individual Windows mixer apps for separate editable tracks." />
     </StackPanel>
 
-    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks|All System Audio}">
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording Audio|Audio Tracks|Full System Audio|All System Audio}">
       <TextBlock Classes="settingsGroupLabel" Text="AUDIO TRACKS" />
       <Border Classes="settingsGroupCard">
         <StackPanel>
@@ -27,7 +27,7 @@
             <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
               <StackPanel Classes="settingsRowText">
                 <TextBlock Classes="settingsRowTitle" Text="Audio tracks" />
-                <TextBlock Classes="settingsRowDesc" Text="All System Audio replaces Game Audio and app tracks when enabled. Microphones remain separate tracks. Turn it off to restore your app selections." />
+                <TextBlock Classes="settingsRowDesc" Text="Full System Audio replaces Game Audio and app tracks when enabled. Microphones remain separate tracks. Turn it off to restore your app selections." />
               </StackPanel>
               <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" VerticalAlignment="Center" />
             </Grid>
@@ -49,7 +49,7 @@
                             <PathIcon Data="M4,3H20V15H4V3M6,5V13H18V5H6M11,17H13V19H17V21H7V19H11V17Z" Width="17" Height="17" Foreground="{StaticResource LinkBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                           </Border>
                           <StackPanel Grid.Column="3" Spacing="1" VerticalAlignment="Center">
-                            <TextBlock Classes="audioTrackName" Text="All System Audio" />
+                            <TextBlock Classes="audioTrackName" Text="Full System Audio" />
                             <TextBlock Classes="settingsRowDescSm" Text="All playback in one track" />
                           </StackPanel>
                           <Slider Grid.Column="4" Classes="volumeSlider appVolumeSlider" Minimum="0" Maximum="150" SmallChange="1" LargeChange="5" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" IsEnabled="{Binding SystemAudioEnabled}" Foreground="{Binding SystemAudioVolumePercent, Converter={x:Static opconv:AudioVolumeBrushConverter.Instance}}" Value="{Binding SystemAudioVolumePercent}" />

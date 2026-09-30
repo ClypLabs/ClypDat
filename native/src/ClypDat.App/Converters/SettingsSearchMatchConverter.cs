@@ -75,7 +75,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Auto-Clip"] = new[] { "Auto Capture", "Auto Capture Events", "Competitive", "Deathmatch Clipping", "Deathmatch" }.Concat(AutoClipGameNames).ToArray(),
         ["Audio"] = new[]
         {
-            "Audio sources", "Audio tracks", "All System Audio", "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics",
+            "Audio sources", "Audio tracks", "Full System Audio", "All System Audio", "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics",
             "Channels", "Mono", "Stereo"
         },
         ["Game Audio Exclusions"] = new[] { "Excluded apps", "Excluded", "exclusions" },

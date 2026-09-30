@@ -1,4 +1,4 @@
-﻿<Window xmlns="https://github.com/avaloniaui"
+<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vlc="using:LibVLCSharp.Avalonia"
         xmlns:vm="using:ClypDat.App.ViewModels"
@@ -2006,25 +2006,36 @@
          #F5141D24). Written the wrong way round this parsed as alpha 00 with AA
          landing in the BLUE channel, i.e. fully transparent, so the scrim behind
          this dialog was never actually drawn. -->
-    <Border x:Name="OnboardingOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}" PointerPressed="OnboardingOverlay_OnPointerPressed">
-      <!-- Four settings pages fit in 500 DIPs: 52 header, fixed footer, body
+    <Border x:Name="OnboardingOverlay" Grid.RowSpan="2" Background="#AA000000" IsVisible="{Binding IsOnboardingVisible}">
+      <!-- Each settings page fits in 500 DIPs: 52 header, fixed footer, body
            padding, and 12 DIP clearance below Capture's wrapped replay pills.
            Keeping this fixed prevents navigation from jumping as pages change. -->
-      <Border x:Name="OnboardingDialog" Width="640" Height="500" CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <Border x:Name="OnboardingDialog" Width="640" Height="500" CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True" HorizontalAlignment="Center" VerticalAlignment="Center" KeyboardNavigation.TabNavigation="Cycle">
         <Grid RowDefinitions="Auto,*,Auto" Margin="1">
           <Border Grid.Row="0" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0">
             <Grid ColumnDefinitions="Auto,*,Auto" Height="52">
               <StackPanel Orientation="Horizontal" Spacing="8" Margin="14,0,0,0" VerticalAlignment="Center">
                 <Image Source="{DynamicResource AppLogoSmall}" Width="16" Height="16" />
-                <StackPanel Spacing="1"><TextBlock Text="Welcome to ClypDat" Foreground="{StaticResource Text_EDF4FB}" FontSize="14" FontWeight="Bold" /><TextBlock Text="Quick setup — you can change everything later" Foreground="{StaticResource Surface_718396}" FontSize="10.5" /></StackPanel>
+                <StackPanel Spacing="1"><TextBlock Text="Welcome to ClypDat" Foreground="{StaticResource Text_EDF4FB}" FontSize="14" FontWeight="Bold" /><TextBlock Text="Complete setup to get started. Change settings anytime." Foreground="{StaticResource Surface_718396}" FontSize="10.5" /></StackPanel>
               </StackPanel>
-              <Button Grid.Column="2" Classes="dialogClose" FontSize="22" Width="48" Height="50" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="OnboardingSkipButton_OnClick"><TextBlock Text="×" Margin="0,-4,0,0" HorizontalAlignment="Center" /></Button>
             </Grid>
           </Border>
           <Grid x:Name="OnboardingBody" Grid.Row="1" Margin="24,22,24,12">
             <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Capture}">
               <TextBlock Text="Capture in seconds" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Choose where clips save, your save hotkey, and replay length." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
               <Border x:Name="OnboardingCaptureCard" Classes="onboardingSettingCard" Padding="14"><StackPanel Spacing="9"><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="Library folder" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><TextBlock Text="{Binding LibraryFolderDisplay}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextTrimming="CharacterEllipsis" /></StackPanel><Button Classes="onboardingAction" Grid.Column="1" Content="Change folder" Click="FolderButton_OnClick" /></Grid><Grid ColumnDefinitions="*,Auto"><TextBlock Text="Save hotkey" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" VerticalAlignment="Center" /><Button Classes="onboardingAction" Grid.Column="1" Content="{Binding HotkeyDisplay}" Click="HotkeyCaptureButton_OnClick" /></Grid><StackPanel Spacing="3"><TextBlock Text="Replay length" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" /><ListBox x:Name="OnboardingReplayDurationPills" Classes="pillGroup onboardingPills" ItemsSource="{Binding ReplayDurationPresets}" SelectedItem="{Binding SelectedReplayDurationPreset}"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ListBox.ItemTemplate></ListBox></StackPanel></StackPanel></Border>
+            </StackPanel>
+            <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=CaptureMode}">
+              <TextBlock Text="Choose what to capture" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
+              <TextBlock Text="Select a capture mode before continuing." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              <Border x:Name="OnboardingCaptureModeCard" Classes="onboardingSettingCard" Padding="14">
+                <StackPanel Spacing="12">
+                  <ListBox x:Name="OnboardingCaptureModes" Classes="pillGroup onboardingPills" ItemsSource="{Binding OnboardingCaptureModes}" SelectedItem="{Binding SelectedOnboardingCaptureMode}" />
+                  <TextBlock Text="Game: record the detected game window." Foreground="{StaticResource Text_B8C7D8}" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Text="Desktop: record your display, including other apps." Foreground="{StaticResource Text_B8C7D8}" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Text="Game (automatic): record your desktop, switch to a detected game, then return to desktop when it closes." Foreground="{StaticResource Text_B8C7D8}" FontSize="12" TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
             </StackPanel>
             <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Quality}">
               <TextBlock Text="Choose recording quality" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Balanced is strong default. Higher quality uses more GPU and disk." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
@@ -2057,15 +2068,22 @@
               </Border>
             </StackPanel>
             <StackPanel Spacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Audio}">
-              <TextBlock Text="Audio" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Choose the microphone your clips record from." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              <TextBlock Text="Audio" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" /><TextBlock Text="Choose your playback track and the microphone your clips record from." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
               <Border x:Name="OnboardingAudioCard" Classes="onboardingSettingCard" Padding="14">
                 <StackPanel Spacing="10">
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="Full System Audio" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" />
+                      <TextBlock Text="Record all playback together. Replaces Game Audio and app tracks." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" MaxWidth="430" HorizontalAlignment="Left" />
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding SystemAudioEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" VerticalAlignment="Center" />
+                  </Grid>
                   <StackPanel Spacing="3">
                     <TextBlock Text="Microphone" Foreground="{StaticResource Text_B8C7D8}" FontWeight="Bold" />
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" />
                   </StackPanel>
                   <Border Background="{StaticResource Semantic_102723}" BorderBrush="{StaticResource Semantic_285A50}" BorderThickness="1" CornerRadius="9" Padding="12">
-                    <TextBlock Text="Your microphone and game audio always record as separate tracks, so either one can be muted or remixed after the fact." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="Microphones stay separate from playback, so you can mute or remix them in the editor." Foreground="{StaticResource Semantic_A1CDBE}" FontSize="11" TextWrapping="Wrap" />
                   </Border>
                 </StackPanel>
               </Border>
@@ -2089,7 +2107,10 @@
             <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Tracks}">
               <TextBlock Text="Audio tracks" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
               <TextBlock Grid.Row="1" Text="Switch on any app you want saved as its own track, so it can be muted or remixed while you edit." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-              <Border Grid.Row="2" x:Name="OnboardingTracksCard" Classes="onboardingSettingCard" Padding="14" VerticalAlignment="Stretch">
+              <Border Grid.Row="2" Classes="onboardingSettingCard" Padding="14" VerticalAlignment="Top" IsVisible="{Binding SystemAudioEnabled}">
+                <TextBlock Text="Full System Audio is enabled. All apps share one playback track; microphones stay separate. Turn it off on the Audio step to choose individual app tracks." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              </Border>
+              <Border Grid.Row="2" x:Name="OnboardingTracksCard" Classes="onboardingSettingCard" Padding="14" VerticalAlignment="Stretch" IsVisible="{Binding !SystemAudioEnabled}">
                 <Grid RowDefinitions="Auto,*,Auto" RowSpacing="8">
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="Game audio and your microphone are always their own tracks." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" VerticalAlignment="Center" />
@@ -2130,7 +2151,10 @@
             <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12" IsVisible="{Binding OnboardingStep, Converter={x:Static conv:ObjectConverters.Equal}, ConverterParameter=Exclusions}">
               <TextBlock Text="Keep apps out of game audio" Foreground="{StaticResource Text_EDF4FB}" FontWeight="Bold" FontSize="18" />
               <TextBlock Grid.Row="1" Text="Excluded apps are removed from the Game Audio track, so a Discord call or your music never ends up welded into the game." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
-              <Border Grid.Row="2" x:Name="OnboardingExclusionsCard" Classes="onboardingSettingCard" Padding="14" VerticalAlignment="Stretch">
+              <Border Grid.Row="2" Classes="onboardingSettingCard" Padding="14" VerticalAlignment="Top" IsVisible="{Binding SystemAudioEnabled}">
+                <TextBlock Text="Full System Audio includes every app's playback. Game Audio exclusions apply when Full System Audio is off. Your saved exclusions will be restored when you turn it off." Foreground="{StaticResource Text_B9C6D4}" FontSize="13" TextWrapping="Wrap" />
+              </Border>
+              <Border Grid.Row="2" x:Name="OnboardingExclusionsCard" Classes="onboardingSettingCard" Padding="14" VerticalAlignment="Stretch" IsVisible="{Binding !SystemAudioEnabled}">
                 <Grid RowDefinitions="Auto,*,Auto" RowSpacing="8">
                   <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                     <ComboBox Classes="settingsInput" ItemsSource="{Binding OpenProcesses}" SelectedItem="{Binding SelectedProcessExclusion}" HorizontalAlignment="Stretch" />
@@ -2161,7 +2185,7 @@
               <Border x:Name="OnboardingStartupCard" Classes="onboardingSettingCard" Padding="14"><StackPanel Spacing="12"><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="Launch ClypDat on Windows boot" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="Keep replay ready after sign-in." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding LaunchOnWindowsStartup}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid><Grid ColumnDefinitions="*,Auto"><StackPanel Spacing="2"><TextBlock Text="Start minimized to tray" Foreground="{StaticResource Text_D2DEEC}" FontWeight="Bold" /><TextBlock Text="Keep ClypDat out of way while it records." Foreground="{StaticResource Text_6B7C8C}" FontSize="11" /></StackPanel><ToggleSwitch Grid.Column="1" IsChecked="{Binding StartMinimizedToTray}" OnContent="{x:Null}" OffContent="{x:Null}" /></Grid></StackPanel></Border>
             </StackPanel>
           </Grid>
-          <StackPanel x:Name="OnboardingFooter" Grid.Row="2" Margin="24,0,24,20" Spacing="14"><StackPanel Orientation="Horizontal" Spacing="10"><TextBlock Text="{Binding OnboardingProgressLabel}" Foreground="{StaticResource Text_A9C9E5}" FontSize="11" FontWeight="Bold" /><StackPanel Orientation="Horizontal" Spacing="6"><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Quality}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Audio}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Tracks}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Exclusions}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Startup}" /></StackPanel></StackPanel><Grid ColumnDefinitions="Auto,*,Auto"><Button Classes="onboardingAction" Content="Skip setup" Width="116" Click="OnboardingSkipButton_OnClick" /><StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10"><Button Classes="onboardingAction" Content="Back" Width="96" IsEnabled="{Binding OnboardingBackEnabled}" Click="OnboardingBackButton_OnClick" /><Button Content="{Binding OnboardingNextLabel}" Width="96" Classes="primaryButton onboardingAction" Click="OnboardingNextButton_OnClick" /></StackPanel></Grid></StackPanel>
+          <StackPanel x:Name="OnboardingFooter" Grid.Row="2" Margin="24,0,24,20" Spacing="14"><StackPanel Orientation="Horizontal" Spacing="10"><TextBlock Text="{Binding OnboardingProgressLabel}" Foreground="{StaticResource Text_A9C9E5}" FontSize="11" FontWeight="Bold" /><StackPanel Orientation="Horizontal" Spacing="6"><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Capture}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=CaptureMode}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Quality}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Audio}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Tracks}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Exclusions}" /><Border Width="8" Height="8" CornerRadius="4" Background="{Binding OnboardingStep, Converter={x:Static opconv:OnboardingDotBrushConverter.Instance}, ConverterParameter=Startup}" /></StackPanel></StackPanel><Grid ColumnDefinitions="Auto,*,Auto"><StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10"><Button Classes="onboardingAction" Content="Back" Width="96" IsEnabled="{Binding OnboardingBackEnabled}" Click="OnboardingBackButton_OnClick" /><Button x:Name="OnboardingNextButton" Content="{Binding OnboardingNextLabel}" Width="96" Classes="primaryButton onboardingAction" IsEnabled="{Binding OnboardingCanContinue}" Click="OnboardingNextButton_OnClick" /></StackPanel></Grid></StackPanel>
         </Grid>
       </Border>
     </Border>

@@ -60,7 +60,7 @@ void check_replay_audio(const std::filesystem::path& root,const VideoSnapshot& v
     require(avformat_open_input(&input,system_utf8.c_str(),nullptr,nullptr)>=0,"Cannot open system-audio replay");
     require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==4,"System-audio replay retained game or app tracks");
     auto* system_title=av_dict_get(input->streams[2]->metadata,"handler_name",nullptr,0);
-    require(system_title&&std::string(system_title->value)=="All System Audio","System-audio track label lost");
+    require(system_title&&std::string(system_title->value)=="Full System Audio","System-audio track label lost");
     avformat_close_input(&input);
     auto system_mix=decoded_sample(system,0),playback=decoded_sample(system,1),system_mic=decoded_sample(system,2);
     require(std::abs(playback-.2f)<.02f&&system_mic>.15f,"System-audio capture gain or microphone source wrong");
@@ -183,7 +183,7 @@ void lane_test(){
     require(lanes[5].omit_if_silent&&lanes[6].gain==.5f,"Audio lane policy changed");
     config.system_audio=true;config.game_gain=.75f;
     auto system=recording_audio_lanes(config);
-    require(system.size()==3&&system[0].key=="system"&&system[0].title=="All System Audio"&&system[0].gain==.75f,"System audio did not replace game and application lanes");
+    require(system.size()==3&&system[0].key=="system"&&system[0].title=="Full System Audio"&&system[0].gain==.75f,"System audio did not replace game and application lanes");
     require(system[1].title=="Microphone 1"&&system[2].title=="Microphone 2","System audio lost separate microphones");
     config.system_audio=false;
     require(recording_audio_lanes(config).size()==7,"System audio toggle lost saved application selections");

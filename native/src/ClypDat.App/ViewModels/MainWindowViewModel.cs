@@ -238,6 +238,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private LibraryCardLayout? _pendingLibraryLayout;
     private bool _isOnboardingVisible;
     private string _onboardingStep = "Replay Buffer";
+    private string? _selectedOnboardingCaptureMode;
+    private TaskCompletionSource? _onboardingCompletion;
 
     public MainWindowViewModel()
     {
@@ -7022,6 +7024,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string[] OnboardingStepOrder =
     {
         "Capture",
+        "CaptureMode",
         "Quality",
         "Audio",
         "Tracks",
@@ -7032,7 +7035,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsOnboardingVisible
     {
         get => _isOnboardingVisible;
-        set => SetProperty(ref _isOnboardingVisible, value);
+        private set => SetProperty(ref _isOnboardingVisible, value);
     }
 
     public bool IsFirstRunOnboarding
@@ -7044,13 +7047,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string OnboardingStep
     {
         get => _onboardingStep;
-        set
+        private set
         {
             if (!SetProperty(ref _onboardingStep, value)) return;
             OnPropertyChanged(nameof(OnboardingStepNumber));
             OnPropertyChanged(nameof(OnboardingProgressLabel));
             OnPropertyChanged(nameof(OnboardingBackEnabled));
             OnPropertyChanged(nameof(OnboardingNextLabel));
+            OnPropertyChanged(nameof(OnboardingCanContinue));
         }
     }
 
@@ -7059,36 +7063,51 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string OnboardingProgressLabel => $"Step {OnboardingStepNumber} of {OnboardingStepCount}";
     public bool OnboardingBackEnabled => OnboardingStepNumber > 1;
     public string OnboardingNextLabel => OnboardingStepNumber == OnboardingStepCount ? "Finish" : "Next";
+    public bool OnboardingCanContinue => OnboardingStep != "CaptureMode" || SelectedOnboardingCaptureMode is not null;
+    public Task OnboardingCompletion => _onboardingCompletion?.Task ?? Task.CompletedTask;
+
+    private static readonly string[] OnboardingCaptureModeOptions = ["Game", "Desktop", "Game (automatic)"];
+    public IReadOnlyList<string> OnboardingCaptureModes => OnboardingCaptureModeOptions;
+
+    public string? SelectedOnboardingCaptureMode
+    {
+        get => _selectedOnboardingCaptureMode;
+        set
+        {
+            if (value is null || !OnboardingCaptureModeOptions.Contains(value) ||
+                !SetProperty(ref _selectedOnboardingCaptureMode, value)) return;
+            ReplayAutoSwitchToGameCapture = value == "Game (automatic)";
+            SelectedReplayCaptureSource = value == "Game" ? "Game Capture" : "Desktop Capture";
+            OnPropertyChanged(nameof(OnboardingCanContinue));
+        }
+    }
 
     public void StartOnboarding()
     {
+        if (IsOnboardingVisible) return;
         IsFirstRunOnboarding = !Settings.HasSeenOnboarding;
+        _onboardingCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _selectedOnboardingCaptureMode = null;
+        OnPropertyChanged(nameof(SelectedOnboardingCaptureMode));
         OnboardingStep = OnboardingStepOrder[0];
         IsOnboardingVisible = true;
-        // Recorded the moment the walkthrough is SHOWN, not when it's
-        // finished. HasSeenOnboarding is false only while no settings file
-        // exists, but any save before the user finishes - changing a setting,
-        // picking a folder, or just closing the window, which saves bounds -
-        // writes that false to disk and makes it stick. Anyone who closed the
-        // app without completing the walkthrough then got it again on every
-        // single launch, forever. It can still be replayed deliberately from
-        // Settings > About > Show Walkthrough.
-        if (!Settings.HasSeenOnboarding)
-        {
-            Settings.HasSeenOnboarding = true;
-            SaveSettings();
-        }
+        // An interrupted first run must return here on the next launch.
+        // Only Finish on the last step records completion.
+        SaveSettings();
     }
 
     public void OnboardingBack()
     {
+        if (!IsOnboardingVisible) return;
         var i = Array.IndexOf(OnboardingStepOrder, OnboardingStep);
         if (i > 0) OnboardingStep = OnboardingStepOrder[i - 1];
     }
 
     public void OnboardingNext()
     {
+        if (!IsOnboardingVisible || !OnboardingCanContinue) return;
         var i = Array.IndexOf(OnboardingStepOrder, OnboardingStep);
+        if (i < 0) return;
         if (i == OnboardingStepOrder.Length - 1)
         {
             FinishOnboarding();
@@ -7098,11 +7117,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnboardingStep = OnboardingStepOrder[i + 1];
     }
 
-    public void FinishOnboarding()
+    private void FinishOnboarding()
     {
-        IsOnboardingVisible = false;
+        if (!IsOnboardingVisible || OnboardingStepNumber != OnboardingStepCount || !OnboardingCanContinue) return;
         Settings.HasSeenOnboarding = true;
         SaveSettings();
+        IsOnboardingVisible = false;
+        IsFirstRunOnboarding = false;
+        _onboardingCompletion?.TrySetResult();
     }
 
     // returnToEditor: put back whatever Settings was opened over, which is right

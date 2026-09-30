@@ -45,6 +45,7 @@ public sealed class SystemAudioSettingsTests
             Assert.Equal(initial.AdditionalAudioProcesses, vm.CreateReplayConfig().AdditionalAudioProcesses);
             Assert.Equal(80, settings.GameAudioVolumePercent);
             Assert.True(SettingsSearchMatchConverter.MatchesSection("All System Audio", "Audio"));
+            Assert.True(SettingsSearchMatchConverter.MatchesSection("Full System Audio", "Audio"));
         }
         finally
         {
