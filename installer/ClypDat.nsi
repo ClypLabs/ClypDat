@@ -9,6 +9,10 @@
 !ifndef CLYPDAT_VERSION
   !define CLYPDAT_VERSION "0.0.0"
 !endif
+; Prerelease display versions need a separate numeric Windows file version.
+!ifndef CLYPDAT_PRODUCT_VERSION
+  !define CLYPDAT_PRODUCT_VERSION "${CLYPDAT_VERSION}"
+!endif
 !ifndef CLYPDAT_SOURCE_DIR
   !define CLYPDAT_SOURCE_DIR "..\native\publish\win-x64-folder"
 !endif
@@ -92,7 +96,7 @@ machineUninstallerMissing:
   Abort
 FunctionEnd
 
-VIProductVersion "${CLYPDAT_VERSION}.0"
+VIProductVersion "${CLYPDAT_PRODUCT_VERSION}.0"
 VIAddVersionKey "ProductName" "ClypDat"
 VIAddVersionKey "CompanyName" "ClypLabs"
 VIAddVersionKey "FileVersion" "${CLYPDAT_VERSION}"

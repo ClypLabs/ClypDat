@@ -89,6 +89,9 @@ jobs:
           if ($tag.Contains("`n") -or $tag.Contains("`r")) { throw "Tag contains a line break." }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
+          # MSI ProductVersion and NSIS VS_FIXEDFILEINFO accept only numeric
+          # fields; preserve the full prerelease version for the app/display.
+          "installer_version=$($version.Split('-')[0])" >> $env:GITHUB_OUTPUT
 
       - name: Bootstrap repo-local .NET SDK
         shell: pwsh
@@ -163,8 +166,9 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          INSTALLER_VERSION: ${{ steps.version.outputs.installer_version }}
         run: |
-          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DCLYPDAT_VERSION=$env:VERSION" /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder /DCLYPDAT_OUTPUT_FILE=..\ClypDat-Setup.exe installer\ClypDat.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" "/DCLYPDAT_VERSION=$env:VERSION" "/DCLYPDAT_PRODUCT_VERSION=$env:INSTALLER_VERSION" /DCLYPDAT_SOURCE_DIR=..\native\publish\win-x64-folder /DCLYPDAT_OUTPUT_FILE=..\ClypDat-Setup.exe installer\ClypDat.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis.exe failed with exit code $LASTEXITCODE" }
 
       - name: Verify NSIS installer icon
@@ -207,7 +211,7 @@ jobs:
         shell: pwsh
         env:
           WIX_BIN: ${{ steps.wix.outputs.bin }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.version.outputs.installer_version }}
         run: |
           $wixBin = $env:WIX_BIN
           $srcDir = (Resolve-Path native\publish\win-x64-folder).Path
