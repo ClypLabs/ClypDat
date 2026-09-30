@@ -20,6 +20,15 @@ foreach(component avcodec avformat avutil swresample swscale)
         INTERFACE_INCLUDE_DIRECTORIES "${ffmpeg_include}")
 endforeach()
 
+# Tests run beside the native binaries, outside the managed publish folder.
+# The shared FFmpeg package also needs its dispatcher and bundled C++ runtime;
+# TARGET_RUNTIME_DLLS only lists the five explicitly imported FFmpeg libraries.
+file(GLOB ffmpeg_runtime CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../vendor/ffmpeg/*.dll")
+add_custom_target(ClypDat.Capture.Native.FfmpegRuntime ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ffmpeg_runtime} "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+    COMMAND_EXPAND_LISTS)
+
 add_library(RecorderCore STATIC
     src/video_encoder.cpp src/video_encoder.h
     src/encoder_backend.cpp src/encoder_backend.h
@@ -39,6 +48,7 @@ add_library(RecorderCore STATIC
     src/recording_overlays.cpp src/recording_overlays.h
     src/recording_overlays_input.cpp
     src/recording_overlays_camera.cpp)
+add_dependencies(RecorderCore ClypDat.Capture.Native.FfmpegRuntime)
 target_compile_features(RecorderCore PUBLIC cxx_std_20)
 target_include_directories(RecorderCore PUBLIC src)
 target_compile_definitions(RecorderCore PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

@@ -27,6 +27,6 @@ if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)." }
 & $cmake --build $build --config $Configuration
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)." }
 if ($Test -or $TestGpu) {
-    & (Join-Path (Split-Path $cmake -Parent) 'ctest.exe') --test-dir $build -C $Configuration --output-on-failure --no-tests=error
+    & (Join-Path (Split-Path $cmake -Parent) 'ctest.exe') --test-dir $build -C $Configuration --output-on-failure --no-tests=error --timeout 600
     if ($LASTEXITCODE -ne 0) { throw "Native tests failed ($LASTEXITCODE)." }
 }
