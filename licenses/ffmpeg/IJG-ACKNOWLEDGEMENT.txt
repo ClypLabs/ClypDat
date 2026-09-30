@@ -1,0 +1,3 @@
+This software is based in part on the work of the Independent JPEG Group.
+FFmpeg jfdctfst.c, jfdctint_template.c and jrevdct.c are included unmodified.
+Their original notices are retained in the corresponding source archive.

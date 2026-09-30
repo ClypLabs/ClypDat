@@ -1,0 +1,5 @@
+Microsoft Visual C++ release runtime, x64, from VC/Redist/MSVC/14.51.36231.
+Copyright Microsoft Corporation. Distributed unmodified under Microsoft Visual Studio redistributable terms.
+https://learn.microsoft.com/en-us/visualstudio/releases/2026/redistribution
+https://visualstudio.microsoft.com/license-terms/
+These files are not relicensed under the GPL. See microsoft-runtime.json for exact provenance and hashes.

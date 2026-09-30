@@ -47,49 +47,17 @@ Release-note formatting uses Markdig by Alexandre Mutel, licensed under the
 - Project: https://github.com/xoofx/markdig
 - The BSD-2-Clause text is included in `licenses/Markdig-BSD-2-Clause.txt`.
 
-## ffmpeg / ffprobe (GPL)
+## FFmpeg 8.1.2 shared build (GPL-3.0-or-later)
 
-ClypDat bundles `ffmpeg.exe` and `ffprobe.exe` (the gyan.dev "essentials"
-Windows build, version **8.1.2**) so muxing, probing, and thumbnail/
-waveform generation work without a separate ffmpeg install. This build is
-compiled with `--enable-gpl`, **`--enable-version3`**, and `--enable-libx264`,
-so the distributed binaries are licensed under the **GPL version 3 or later**
-rather than GPLv2 - `--enable-version3` opts in components whose terms are
-GPLv3-or-later, which upgrades the licence of the combined work. ClypDat is
-itself GPLv3 (see `LICENSE`), so this is not a licensing conflict, but the
-governing version stated here has to be right.
+ClypDat distributes one coherent FFmpeg 8.1.2 shared package for the native recorder and bundled `ffmpeg.exe` / `ffprobe.exe`. Its FFmpeg source commit is `38b88335f99e76ed89ff3c93f877fdefce736c13`. The build recipe, locked dependencies and reproducibility instructions are in `eng/ffmpeg/`. The FFmpeg DLLs, command-line tools, matching SDK headers/import libraries and oneVPL dispatcher originate from the same accepted package.
 
-The exact build shipped in this repository, for CVE tracking and provenance:
-
-| File | SHA-256 |
-| --- | --- |
-| `ffmpeg.exe` | `1326dde4c84ff1f96fe6b8916c5bed29e163e9b5dccf995f6f3db069d143ec5e` |
-| `ffprobe.exe` | `b49ccc7c6547b141ad5a2f6ec69cc04323d7133d7704d70b331b904c63eecb07` |
-
-Reported version string: `ffmpeg version 8.1.2-essentials_build-www.gyan.dev`.
-
-ffmpeg is a combination of many components under a
-mix of GPLv2, GPLv2-or-later, and GPLv3-or-later terms depending on build
-configuration; see https://ffmpeg.org/legal.html for the authoritative
-per-component breakdown for this exact configuration.
-
-- Project: https://ffmpeg.org and https://github.com/FFmpeg/FFmpeg
-- Build source: https://www.gyan.dev/ffmpeg/builds (see that page's "Git
-  Windows builds" section for the exact commit each release is built from)
-- The governing licence for these binaries is GPLv3-or-later (see
-  `--enable-version3` above). The GPLv2 text below is retained for the
-  components that remain under GPLv2; the full GPLv3 text is at
-  https://www.gnu.org/licenses/gpl-3.0.html and in ClypDat's own `LICENSE`.
-- ClypDat does not modify these binaries.
-
-ClypDat's native recorder (`ClypDat.Capture.Native.dll`) additionally bundles
-the **shared-library** build of the same ffmpeg version (`avcodec-62.dll`,
-`avformat-62.dll`, `avutil-60.dll`, `swscale-9.dll`, `swresample-6.dll`,
-also from gyan.dev) and links it directly instead of running it as a
-separate process. Same GPLv3/libx264 build
-configuration and terms as above; ClypDat is GPLv3-licensed itself (see
-`LICENSE`), so directly linking a GPL component is not a licensing
-conflict.
+- Binary package SHA-256: `c3fa9bf41f61658c046c286b7f020d0997b891c49a50a1eaba2c4dc6ec3f951f` (`clypdat-ffmpeg-8.1.2-win64-shared-r2.zip`).
+- Matching source package SHA-256: `2a41968c8e47a6e0b3b067c40bd43209af4539a89db712fae631a0d032943532` (`clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip`). The source ZIP is included in the repository under `eng/ffmpeg/artifacts/` and published alongside each release's installers.
+- The runtime's individual file hashes and sizes are in `native/vendor/ffmpeg/runtime-manifest.json`. Build and publish verification reject missing, changed or extra runtime files.
+- The build enables `--enable-gpl --enable-version3` and has no `--enable-nonfree`; the combined FFmpeg binaries are **GPL-3.0-or-later**, matching ClypDat's GPLv3 distribution. FFmpeg's original license texts and notices ship in `licenses/ffmpeg/`.
+- oneVPL **2.16.0** uses one imported `libvpl.dll` with consistent experimental ABI settings. Its MIT notice is `licenses/ffmpeg/onevpl/LICENSE`.
+- x264, x265, libaom, dav1d, zlib, AMD AMF and NVIDIA codec header notices, the LLVM compiler notice, IJG acknowledgement and Microsoft runtime provenance are in `licenses/ffmpeg/`. See `eng/ffmpeg/LICENSE-REVIEW.md` for the exact enabled libraries and obligations. LLVM clang-cl is a pinned build tool for libaom only; no LLVM runtime library is bundled.
+- The complete GPLv3 text is in ClypDat's `LICENSE`. Original FFmpeg/codec sources and patches, the pinned build recipe and matching license material are in the source ZIP. See https://ffmpeg.org/legal.html for upstream component licensing.
 
 ## Vortice.Windows (MIT)
 

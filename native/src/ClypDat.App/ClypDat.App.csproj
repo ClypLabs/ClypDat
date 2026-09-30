@@ -190,13 +190,18 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <Target Name="VerifyFfmpegVendor" BeforeTargets="CopyFfmpegToPublish;CopyFfmpegToOutput">
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\..\eng\Verify-CaptureFfmpegRuntime.ps1&quot; -VerifyPackage" />
+  </Target>
   <Target Name="CopyFfmpegToPublish" AfterTargets="Publish" Condition="Exists('..\..\vendor\ffmpeg')">
+    <RemoveDir Directories="$(PublishDir)ffmpeg" />
     <ItemGroup>
       <FfmpegFiles Include="..\..\vendor\ffmpeg\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(FfmpegFiles)"
           DestinationFiles="@(FfmpegFiles->'$(PublishDir)ffmpeg\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\..\eng\Verify-CaptureFfmpegRuntime.ps1&quot; -RuntimeDirectory &quot;$(PublishDir)ffmpeg&quot;" />
   </Target>
 
   <!-- Same copy, but for a plain `dotnet build` run. Without it a dev build
@@ -204,12 +209,14 @@
        and FfmpegPathResolver finds no ffmpeg.exe or ffprobe.exe for export,
        probing, thumbnails and waveforms. -->
   <Target Name="CopyFfmpegToOutput" AfterTargets="Build" Condition="Exists('..\..\vendor\ffmpeg')">
+    <RemoveDir Directories="$(OutDir)ffmpeg" />
     <ItemGroup>
       <FfmpegOutputFiles Include="..\..\vendor\ffmpeg\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(FfmpegOutputFiles)"
           DestinationFiles="@(FfmpegOutputFiles->'$(OutDir)ffmpeg\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+    <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\..\eng\Verify-CaptureFfmpegRuntime.ps1&quot; -RuntimeDirectory &quot;$(OutDir)ffmpeg&quot;" />
   </Target>
 
   <!-- A distinct apphost gives Task Manager a truthful process name and file

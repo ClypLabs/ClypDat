@@ -104,7 +104,11 @@ jobs:
 
       - name: Verify self-contained publish
         shell: pwsh
-        run: .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
+        run: |
+          .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
+          .\eng\Verify-CaptureFfmpegRuntime.ps1 -RuntimeDirectory native\publish\win-x64-folder\ffmpeg -VerifyPackage
+          $source = 'eng\ffmpeg\artifacts\clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip'
+          Copy-Item -LiteralPath $source -Destination .
 
       - name: Trim non-Windows runtime assets
         shell: pwsh
@@ -239,6 +243,7 @@ jobs:
             ClypDat-Portable.exe
             ClypDat-Setup.exe
             ClypDat.msi
+            clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip
           if-no-files-found: error
           retention-days: 3
           compression-level: 0
@@ -281,7 +286,7 @@ jobs:
           if ($tag -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$') { throw "Unexpected tag '$tag' from build job." }
           Set-Location release-assets
           gh release create $tag `
-            ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi `
+            ClypDat-win-x64.zip ClypDat-Portable.exe ClypDat-Setup.exe ClypDat.msi clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip `
             --title "ClypDat $tag" `
             --generate-notes `
             --verify-tag `

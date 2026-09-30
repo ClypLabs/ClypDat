@@ -6,53 +6,68 @@ param(
 
 $ErrorActionPreference = 'Stop'
 function Get-Sha256([string]$Path) {
-    # MSBuild invokes Windows PowerShell; its module search path can inherit
-    # PowerShell 7 modules where Get-FileHash cannot autoload.
     $stream = [IO.File]::OpenRead($Path)
     $algorithm = [Security.Cryptography.SHA256]::Create()
     try { return [BitConverter]::ToString($algorithm.ComputeHash($stream)).Replace('-', '').ToLowerInvariant() }
     finally { $algorithm.Dispose(); $stream.Dispose() }
 }
-$archiveName = 'ffmpeg-8.1.2-full_build-shared.7z'
-# Publisher: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-full_build-shared.7z.sha256
-$archiveHash = 'cba748035c21ce1431d0823c7a3a711f38616f89f87a265dceddf9b7f6749d2d'
+
+$vendor = Join-Path $PSScriptRoot '../native/vendor/ffmpeg'
+& (Join-Path $PSScriptRoot 'Verify-CaptureFfmpegRuntime.ps1') -RuntimeDirectory $vendor -VerifyPackage | Out-Host
+$manifest = Get-Content -LiteralPath (Join-Path $vendor 'runtime-manifest.json') -Raw | ConvertFrom-Json
+$archive = Join-Path $PSScriptRoot "ffmpeg/artifacts/$($manifest.package)"
 $sdk = Join-Path $BuildDirectory 'sdk'
-$archive = Join-Path $sdk $archiveName
-$extracted = Join-Path $sdk 'extracted'
-$package = Join-Path $extracted 'ffmpeg-8.1.2-full_build-shared'
-$runtime = Join-Path $PSScriptRoot '../native/vendor/ffmpeg'
-$libraries = @('avcodec-62', 'avformat-62', 'avutil-60', 'swresample-6', 'swscale-9')
-New-Item -ItemType Directory -Force $sdk | Out-Null
-if (-not (Test-Path -LiteralPath $archive)) {
-    Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/packages/$archiveName" -OutFile $archive -UseBasicParsing
-}
-if ((Get-Sha256 $archive) -ne $archiveHash) {
-    throw "FFmpeg SDK checksum mismatch: $archive. Remove the archive and retry."
-}
-$sevenZip = (Get-Command 7z -ErrorAction SilentlyContinue).Source
-if (-not $sevenZip) { $sevenZip = Join-Path $env:ProgramFiles '7-Zip/7z.exe' }
-if (-not (Test-Path -LiteralPath $sevenZip)) { throw '7-Zip is required to extract the pinned FFmpeg SDK.' }
-# Always re-extract verified headers and reference DLLs; an edited cached header
-# must not silently change the ABI used to build the recorder.
-& $sevenZip x $archive "-o$extracted" '-y' '*/include/*' '*/bin/*.dll' | Out-Host
-if ($LASTEXITCODE -ne 0) { throw 'FFmpeg SDK extraction failed.' }
-$importDirectory = Join-Path $sdk 'lib'
-New-Item -ItemType Directory -Force $importDirectory | Out-Null
-foreach ($library in $libraries) {
-    $dll = Join-Path $runtime "$library.dll"
-    if ((Get-Sha256 $dll) -ne (Get-Sha256 (Join-Path $package "bin/$library.dll"))) {
-        throw "Bundled $library.dll does not match the pinned FFmpeg 8.1.2 SDK."
+$buildRoot = [IO.Path]::GetFullPath($BuildDirectory).TrimEnd('\')
+$sdkRoot = [IO.Path]::GetFullPath($sdk)
+if (-not $sdkRoot.Equals((Join-Path $buildRoot 'sdk'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected FFmpeg SDK directory.' }
+$sdk = $sdkRoot
+New-Item -ItemType Directory -Path $sdk -Force | Out-Null
+if (((Get-Item -LiteralPath $sdkRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'FFmpeg SDK staging must not be a junction.' }
+foreach ($directory in @('include','lib','extracted')) {
+    $target = Join-Path $sdkRoot $directory
+    if (-not ([IO.Path]::GetFullPath($target)).StartsWith($sdkRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'FFmpeg SDK cleanup escaped staging.' }
+    if (Test-Path -LiteralPath $target) {
+        if (((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'FFmpeg SDK cleanup target must not be a junction.' }
+        Remove-Item -LiteralPath $target -Recurse -Force
     }
-    $exports = & (Join-Path $MsvcBin 'dumpbin.exe') /nologo /exports $dll
-    if ($LASTEXITCODE -ne 0) { throw "Could not inspect exports of $dll." }
-    $names = @($exports | ForEach-Object {
-        if ($_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+([A-Za-z_][A-Za-z_0-9]*)\s*$') { $Matches[1] }
-    })
-    if ($names.Count -eq 0) { throw "No exports found in $dll." }
-    $definition = Join-Path $importDirectory "$library.def"
-    @("LIBRARY $library.dll", 'EXPORTS') + $names | Set-Content -LiteralPath $definition -Encoding Ascii
-    $name = $library -replace '-\d+$', ''
-    & (Join-Path $MsvcBin 'lib.exe') /nologo /machine:x64 "/def:$definition" "/out:$(Join-Path $importDirectory "$name.lib")" | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw "Could not generate MSVC import library for $library." }
 }
+
+# The package SHA authenticates its own manifest and every header/import library.
+# Re-extract on each configure so an edited SDK cache never changes the ABI.
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [IO.Compression.ZipFile]::OpenRead($archive)
+try {
+    $prefix = [IO.Path]::GetFileNameWithoutExtension($manifest.package) + '/'
+    $manifestEntry = $zip.GetEntry($prefix + 'manifest.json')
+    if ($null -eq $manifestEntry) { throw 'Accepted FFmpeg package has no manifest.' }
+    $reader = [IO.StreamReader]::new($manifestEntry.Open())
+    try { $payload = $reader.ReadToEnd() | ConvertFrom-Json }
+    finally { $reader.Dispose() }
+    $sdkFiles = @($payload | Where-Object { $_.path -like 'include/*' -or $_.path -like 'lib/*' })
+    if (-not ($sdkFiles.path -contains 'include/libavcodec/avcodec.h')) { throw 'Accepted FFmpeg SDK has no avcodec headers.' }
+    foreach ($library in 'avcodec','avformat','avutil','swresample','swscale') {
+        if (-not ($sdkFiles.path -contains "lib/$library.lib")) { throw "Accepted FFmpeg SDK is missing $library.lib." }
+    }
+    foreach ($item in $sdkFiles) {
+        $entry = $zip.GetEntry($prefix + $item.path)
+        if ($null -eq $entry -or $entry.Length -ne [long]$item.bytes) { throw "FFmpeg SDK entry missing or wrong size: $($item.path)" }
+        $relative = [string]$item.path
+        if ($relative.Contains('..') -or $relative.StartsWith('/') -or $relative.Contains('\')) { throw 'Unsafe FFmpeg SDK entry path.' }
+        $target = Join-Path $sdk ($relative -replace '/', [IO.Path]::DirectorySeparatorChar)
+        New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
+        $inputStream = $entry.Open()
+        $outputStream = [IO.File]::Create($target)
+        try { $inputStream.CopyTo($outputStream) }
+        finally { $outputStream.Dispose(); $inputStream.Dispose() }
+        if ((Get-Sha256 $target) -cne $item.sha256) { throw "FFmpeg SDK payload hash mismatch: $relative" }
+    }
+    foreach ($directory in @('include','lib')) {
+        $expectedNames = @($sdkFiles | Where-Object { $_.path -like "$directory/*" } | ForEach-Object { $_.path.Substring($directory.Length + 1).Replace('/', '\') })
+        $actualNames = @(Get-ChildItem -LiteralPath (Join-Path $sdk $directory) -File -Recurse | ForEach-Object { $_.FullName.Substring((Join-Path $sdk $directory).Length + 1) })
+        $unexpected = @($actualNames | Where-Object { $_ -notin $expectedNames })
+        if ($unexpected.Count -ne 0) { throw "Unverified file remains in FFmpeg SDK ${directory}: $($unexpected[0])" }
+    }
+}
+finally { $zip.Dispose() }
 Write-Output $sdk

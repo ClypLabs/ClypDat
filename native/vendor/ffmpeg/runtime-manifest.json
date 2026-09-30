@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "package": "clypdat-ffmpeg-8.1.2-win64-shared-r2.zip",
+  "packageSha256": "c3fa9bf41f61658c046c286b7f020d0997b891c49a50a1eaba2c4dc6ec3f951f",
+  "sourcePackage": "clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip",
+  "sourceSha256": "2a41968c8e47a6e0b3b067c40bd43209af4539a89db712fae631a0d032943532",
+  "ffmpegCommit": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+  "runtime": [
+    {
+      "file": "avcodec-62.dll",
+      "sha256": "f6cae653f4c965e77653f1dd19ae76c2480a71319b45b7e953f77fc252be0e6c",
+      "bytes": 43278848
+    },
+    {
+      "file": "avdevice-62.dll",
+      "sha256": "49c59793101fffa916c5fbcf0d153aeeb5bb06996395501e64ca7207aac03f4a",
+      "bytes": 74752
+    },
+    {
+      "file": "avfilter-11.dll",
+      "sha256": "33828096a9bdbb839b612489a239d6c51e0a1a434601587c5ab0a6ae5607f4bb",
+      "bytes": 4197376
+    },
+    {
+      "file": "avformat-62.dll",
+      "sha256": "cfc04782d93d44078c5e1b0526ba698eeca21a5fae85376eefe4026c42da0609",
+      "bytes": 2569728
+    },
+    {
+      "file": "avutil-60.dll",
+      "sha256": "bc2242f258b2fcc9b2e2d43c74ac9c3b5b79e71aa21d93c403cd5cde9d267b8f",
+      "bytes": 914432
+    },
+    {
+      "file": "ffmpeg.exe",
+      "sha256": "2dca7ad1cf106a35172c14f65d35582322a5c562a9b836ec82cda542459aa0c1",
+      "bytes": 397312
+    },
+    {
+      "file": "ffprobe.exe",
+      "sha256": "12d084de7e1e197a26fcfd51baf66a93737d6ecae1e37b143316a61553bd8327",
+      "bytes": 164864
+    },
+    {
+      "file": "libvpl.dll",
+      "sha256": "c09827d07bb721bce704c4d76725ef8bfc63dc4db50cfa28fba134a847eca7c6",
+      "bytes": 311808
+    },
+    {
+      "file": "MSVCP140.dll",
+      "sha256": "7c26614e1d733892c2deac7e245ce115504b1d80592dd0a01b08e3e5a55f89ca",
+      "bytes": 643512
+    },
+    {
+      "file": "swresample-6.dll",
+      "sha256": "a98d83cba60817f524e46b9ca1c47a7cc714836fb294486bd57d141fdc63ccdd",
+      "bytes": 128000
+    },
+    {
+      "file": "swscale-9.dll",
+      "sha256": "062a6348a205af5d39bd6d1677b9fcbed67da8085397dce86e0e37c329b261d0",
+      "bytes": 1006592
+    },
+    {
+      "file": "VCRUNTIME140.dll",
+      "sha256": "d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7",
+      "bytes": 178616
+    },
+    {
+      "file": "VCRUNTIME140_1.dll",
+      "sha256": "a7146c08f89fe5b04541ab507cdb59ff7b44534d4ba3c668a426c6450a03434e",
+      "bytes": 50112
+    }
+  ]
+}

@@ -45,6 +45,8 @@ build_windows_installer:
       -c Release -r win-x64 --self-contained true -p:Platform=x64
       -p:Version=$version -o native\publish\win-x64-folder --nologo
     - .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
+    - .\eng\Verify-CaptureFfmpegRuntime.ps1 -RuntimeDirectory native\publish\win-x64-folder\ffmpeg -VerifyPackage
+    - Copy-Item -LiteralPath eng\ffmpeg\artifacts\clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip -Destination .
     - |
       foreach ($tool in @(
         @{ Name = 'nsis'; Version = '3.12.0' },
@@ -98,7 +100,7 @@ build_windows_installer:
       if (-not (Test-Path -LiteralPath $msiPath -PathType Leaf)) { throw "MSI was not created: $msiPath" }
       if ((Get-Item -LiteralPath $msiPath).Length -le 0) { throw "MSI is empty: $msiPath" }
     - |
-      $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi")
+      $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi", "clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip")
       foreach ($asset in $assets) {
         if (-not (Test-Path -LiteralPath $asset)) { throw "$asset was not created." }
         Get-FileHash -Algorithm SHA256 $asset | Format-List
@@ -110,6 +112,7 @@ build_windows_installer:
       - ClypDat-Portable.exe
       - ClypDat-Setup.exe
       - ClypDat.msi
+      - clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip
     expire_in: 1 year
 
 # Manual on purpose. The release manifest is signed offline and this pipeline
@@ -131,7 +134,7 @@ publish_gitlab_release:
     - |
       if ([string]::IsNullOrWhiteSpace($env:RELEASE_DESCRIPTION)) { throw 'Provide reviewed release notes in RELEASE_DESCRIPTION.' }
       $packageBase = "$env:CI_API_V4_URL/projects/$env:CI_PROJECT_ID/packages/generic/clypdat/$env:CI_COMMIT_TAG"
-      $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi")
+      $assets = @("ClypDat-win-x64.zip", "ClypDat-Portable.exe", "ClypDat-Setup.exe", "ClypDat.msi", "clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip")
       if ([string]::IsNullOrWhiteSpace($env:RELEASE_MANIFEST_B64) -or [string]::IsNullOrWhiteSpace($env:RELEASE_SIGNATURE_B64)) {
         throw 'A signed release manifest and signature are required before publishing, including for legacy clients.'
       }
@@ -159,7 +162,8 @@ publish_gitlab_release:
         @{ name = 'ClypDat-win-x64.zip'; url = "$packageBase/ClypDat-win-x64.zip"; direct_asset_path = '/ClypDat-win-x64.zip'; link_type = 'package' },
         @{ name = 'ClypDat-Portable.exe'; url = "$packageBase/ClypDat-Portable.exe"; direct_asset_path = '/ClypDat-Portable.exe'; link_type = 'package' },
         @{ name = 'ClypDat-Setup.exe'; url = "$packageBase/ClypDat-Setup.exe"; direct_asset_path = '/ClypDat-Setup.exe'; link_type = 'package' },
-        @{ name = 'ClypDat.msi'; url = "$packageBase/ClypDat.msi"; direct_asset_path = '/ClypDat.msi'; link_type = 'package' }
+        @{ name = 'ClypDat.msi'; url = "$packageBase/ClypDat.msi"; direct_asset_path = '/ClypDat.msi'; link_type = 'package' },
+        @{ name = 'clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip'; url = "$packageBase/clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip"; direct_asset_path = '/clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip'; link_type = 'other' }
       )
       foreach ($signedAsset in $signedAssets) {
         $releaseLinks += @{ name = $signedAsset; url = "$packageBase/$signedAsset"; direct_asset_path = "/$signedAsset"; link_type = 'other' }

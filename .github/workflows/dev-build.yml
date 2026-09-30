@@ -192,6 +192,8 @@ jobs:
           & "C:\Program Files (x86)\NSIS\makensis.exe" /DCLYPDAT_VERSION=0.0.0 /DCLYPDAT_BUILD_ID=$buildId /DCLYPDAT_SOURCE_DIR=$installerSource /DCLYPDAT_OUTPUT_FILE=$pwd\dev-setup\ClypDat-Dev-Setup.exe installer\ClypDat.Dev.nsi
           if ($LASTEXITCODE -ne 0) { throw "makensis.exe failed with exit code $LASTEXITCODE" }
           .\eng\Test-InstallerIcon.ps1 -InstallerPath .\dev-setup\ClypDat-Dev-Setup.exe -IconPath .\assets\clypdat-icon.ico
+          .\eng\Verify-CaptureFfmpegRuntime.ps1 -VerifyPackage
+          Copy-Item -LiteralPath .\eng\ffmpeg\artifacts\clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip -Destination .\dev-setup\
 
       - name: Upload Dev archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -206,7 +208,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dev-installer
-          path: dev-setup/ClypDat-Dev-Setup.exe
+          path: |
+            dev-setup/ClypDat-Dev-Setup.exe
+            dev-setup/clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -313,7 +317,7 @@ jobs:
           Set-Location dev-release
           gh release view dev 2>$null
           if ($LASTEXITCODE -ne 0) { gh release create dev --prerelease --title "ClypDat Dev channel" --notes "Automated signed Dev builds." }
-          gh release upload dev ClypDat-Dev.zip ClypDat-Dev.manifest.json ClypDat-Dev.manifest.sig ClypDat-Dev-Setup.exe --clobber
+          gh release upload dev ClypDat-Dev.zip ClypDat-Dev.manifest.json ClypDat-Dev.manifest.sig ClypDat-Dev-Setup.exe clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip --clobber
           if ($LASTEXITCODE -ne 0) { throw "gh release upload failed with exit code $LASTEXITCODE" }
           gh release edit dev --target $env:TARGET_SHA --prerelease --title "ClypDat Dev channel"
           if ($LASTEXITCODE -ne 0) { throw "gh release edit failed with exit code $LASTEXITCODE" }

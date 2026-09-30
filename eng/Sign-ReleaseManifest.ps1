@@ -37,7 +37,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = $Artifa
 
 # ClypDat-Setup.exe is what the in-app updater downloads, so it must be covered.
 # The others are listed when present so a manual download can be checked too.
-$assetNames = @('ClypDat-Setup.exe', 'ClypDat-Portable.exe', 'ClypDat-win-x64.zip', 'ClypDat.msi')
+$assetNames = @('ClypDat-Setup.exe', 'ClypDat-Portable.exe', 'ClypDat-win-x64.zip', 'ClypDat.msi', 'clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip')
 
 $assets = @()
 foreach ($name in $assetNames) {
@@ -55,6 +55,11 @@ foreach ($name in $assetNames) {
 
 if ($assets.Count -eq 0) { throw "No known release assets found in $ArtifactDirectory." }
 if (-not ($assets.name -contains 'ClypDat-Setup.exe')) { throw "ClypDat-Setup.exe is required - the updater resolves that asset by name." }
+$ffmpegSource = 'clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip'
+if (-not ($assets.name -contains $ffmpegSource)) { throw "Matching FFmpeg corresponding source asset is required: $ffmpegSource" }
+if ((@($assets | Where-Object { $_.name -ceq $ffmpegSource })[0].sha256) -cne '2a41968c8e47a6e0b3b067c40bd43209af4539a89db712fae631a0d032943532') {
+    throw 'FFmpeg corresponding source hash does not match the accepted deterministic package.'
+}
 
 $manifest = [ordered]@{
     schema     = 1
