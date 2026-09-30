@@ -34,11 +34,13 @@
       <!-- The separator runs edge to edge, so it is this Border's bottom edge
            and the insets belong to the Grid inside it. -->
       <Border DockPanel.Dock="Top" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="0,0,0,1">
-        <!-- Right inset is 16, not 24: the close button is a 32px hit target
-             around a much smaller glyph, so its edge sits outside the gutter to
-             put the glyph itself near it. -->
-        <Grid ColumnDefinitions="*,Auto" Margin="24,20,16,18">
-          <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,12,0">
+        <!-- The insets belong to the title, not the Grid: the close button is the
+             full height of the header and flush to its top and right edges, the
+             same as every other dialog's, so its hover fill is a tile that
+             follows the popup's own rounded corner rather than a pill floating
+             inside it. -->
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel VerticalAlignment="Center" Spacing="2" Margin="24,20,12,18">
             <TextBlock x:Name="TitleText" Foreground="{StaticResource Text_EDF4FB}" FontSize="18" FontWeight="SemiBold"
                        TextTrimming="CharacterEllipsis" />
             <TextBlock x:Name="SubtitleText" Foreground="{StaticResource Text_8C98A7}" FontSize="12"
@@ -46,17 +48,17 @@
           </StackPanel>
           <!-- A drawn cross, not the "✕" character: that glyph comes from
                whichever fallback font the machine picks, so its weight and its
-               vertical centre changed with it and sat visibly off-centre inside
-               the hover tile. Two round-capped strokes on a 10px box are
+               vertical centre changed with it. Two strokes on an 11px box are
                centred by construction, and take the button's Foreground so the
-               hover colour still applies. -->
+               hover colour still applies. 13 = the card's 14px radius less its
+               1px border, which is what the button's corner has to match. -->
           <Button x:Name="CloseButton" Grid.Column="1" Classes="dialogClose"
-                  Width="32" Height="32" Padding="0" CornerRadius="16" VerticalAlignment="Top"
+                  Width="56" Padding="0" CornerRadius="0,13,0,0" VerticalAlignment="Stretch"
                   HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                   Click="CloseButton_OnClick">
-            <Path Data="M0,0 L10,10 M10,0 L0,10" Width="10" Height="10" Stretch="None"
-                  Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5"
-                  StrokeLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <Path Data="M0,0 L11,11 M11,0 L0,11" Width="11" Height="11" Stretch="None"
+                  Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.25"
+                  HorizontalAlignment="Center" VerticalAlignment="Center" />
           </Button>
         </Grid>
       </Border>
