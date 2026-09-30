@@ -194,6 +194,10 @@ public:
         context->UpdateSubresource(texture, 0, &box, input.bgra.data(), UINT(input.stride), 0);
     }
 };
+void require_window_available(uintptr_t window) {
+    if (window && !IsWindow(reinterpret_cast<HWND>(window)))
+        throw std::runtime_error("Selected recording window is unavailable");
+}
 bool window_eligible(HWND hwnd, bool background_allowed) {
     if (!hwnd) return true;
     if (!IsWindow(hwnd) || IsIconic(hwnd) || !IsWindowVisible(hwnd)) return false;
@@ -1056,6 +1060,10 @@ std::unique_ptr<RecordingFrameSource> create_windows_recording_source(const Reco
         },reinterpret_cast<LPARAM>(&search));
         if(!search.found)throw std::runtime_error("Selected recording window is unavailable");resolved.window=reinterpret_cast<uintptr_t>(search.found);
     }
+    // A target can close after selection or while a backend is opening. Do
+    // not turn that stale HWND into a desktop fallback that can never become
+    // eligible and holds up the next target until the startup timeout.
+    require_window_available(resolved.window);
     if(!resolved.window&&!resolved.monitor&&!resolved.monitor_device_name.empty()){
         struct Search{const std::wstring& name;uintptr_t result=0;}search{resolved.monitor_device_name};
         EnumDisplayMonitors(nullptr,nullptr,[](HMONITOR monitor,HDC,LPRECT,LPARAM parameter)->BOOL{
@@ -1073,10 +1081,11 @@ std::unique_ptr<RecordingFrameSource> create_windows_recording_source(const Reco
     resolved.capture_hdr=resolved.capture_hdr&&profile.hdr;resolved.sdr_white_nits=profile.white;
     std::unique_ptr<RecordingFrameSource> source;
     if (resolved.prefer_dxgi) {
-        try { source=std::make_unique<DxgiSource>(resolved); } catch (...) { source=std::make_unique<WgcSource>(resolved); }
+        try { source=std::make_unique<DxgiSource>(resolved); } catch (...) { require_window_available(resolved.window); source=std::make_unique<WgcSource>(resolved); }
     }else{
-        try { source=std::make_unique<WgcSource>(resolved); } catch (...) { source=std::make_unique<DxgiSource>(resolved); }
+        try { source=std::make_unique<WgcSource>(resolved); } catch (...) { require_window_available(resolved.window); source=std::make_unique<DxgiSource>(resolved); }
     }
+    require_window_available(resolved.window);
     return std::make_unique<AdaptiveSource>(resolved,std::move(source),config.capture_hdr);
 }
 }

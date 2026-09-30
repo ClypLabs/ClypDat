@@ -53,9 +53,12 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         Assert.Equal(layout.Window.Width, rect.Right - rect.Left);
         Assert.True(IsWindowVisible(handle));
         Assert.True(IsAbove(handle, game.Handle));
-        Assert.True(SpinWait.SpinUntil(() => game.RaiseAbove(handle), 1000));
-        Assert.True(SpinWait.SpinUntil(() => IsAbove(handle, game.Handle), 1000));
-        Assert.True(counters.TopmostRecoveries >= 1);
+        var recoveriesBeforeRaise = counters.TopmostRecoveries;
+        // The reorder hook can restore the overlay before RaiseAbove reads
+        // z-order back. Its recovery counter also proves the target got above
+        // it; requiring that transient state to remain observable is a race.
+        Assert.True(SpinWait.SpinUntil(() => game.RaiseAbove(handle) || counters.TopmostRecoveries > recoveriesBeforeRaise, 1000));
+        Assert.True(SpinWait.SpinUntil(() => IsAbove(handle, game.Handle) && counters.TopmostRecoveries > recoveriesBeforeRaise, 1000));
         Assert.NotEqual(handle, GetForegroundWindow());
         Assert.Equal(0u, Cloaked(handle));
         Assert.True(GetWindowDisplayAffinity(handle, out var affinity));

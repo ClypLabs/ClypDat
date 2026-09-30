@@ -639,6 +639,20 @@ int main(int argc, char** argv) {
     try {
         // Physical pixels, as the recorder (PerMonitorV2 manifest) sees them.
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        // A queued game start can outlive its HWND when the user closes the
+        // game or switches targets. Reject it before opening either backend;
+        // an ineligible desktop fallback would wait forever for game frames.
+        for (const bool prefer_dxgi : {false, true}) {
+            const auto window = CreateWindowExW(0, L"STATIC", L"Closed capture target", 0,
+                0, 0, 128, 72, nullptr, nullptr, nullptr, nullptr);
+            CHECK(window && DestroyWindow(window) && !IsWindow(window));
+            RecordingCaptureConfig config; config.window = reinterpret_cast<uintptr_t>(window);
+            config.prefer_dxgi = prefer_dxgi;
+            std::string failure;
+            try { auto source = create_windows_recording_source(config); }
+            catch (const std::runtime_error& error) { failure = error.what(); }
+            CHECK(failure == "Selected recording window is unavailable");
+        }
         if (argc > 1 && std::string(argv[1]) == "--cursor-bench") return cursor_bench(make_device(true));
         const bool gpu = argc > 1 && std::string(argv[1]) == "--gpu";
         const auto device = make_device(gpu);

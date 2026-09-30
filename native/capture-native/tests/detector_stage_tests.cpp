@@ -164,9 +164,14 @@ void reuse_and_region_readback(const Device& device) {
     const auto request = request_for(layouts()[0], 2560, 1440);
     DetectorStage stage; RecordingDetectorSnapshot snapshot;
     const uint64_t frame_bytes = uint64_t(image.width) * 4 * image.height;
-    for (int i = 0; i < 5; ++i) CHECK(stage.sample(texture_pixels(device, image, 1000000 * (i + 1)), request, [] { return false; }, snapshot));
-    const auto before = stage.counters(); const auto committed = private_bytes();
+    // Warm the retained source texture before measuring steady-state sampling;
+    // creating it afterwards also counts fixture/driver allocations as growth.
     const auto frame = texture_pixels(device, image);
+    for (int i = 0; i < 5; ++i) {
+        auto pixels = frame; pixels.timestamp_us = 1000000 * (i + 1);
+        CHECK(stage.sample(pixels, request, [] { return false; }, snapshot));
+    }
+    const auto before = stage.counters(); const auto committed = private_bytes();
     for (int i = 0; i < 40; ++i) {
         auto pixels = frame; pixels.timestamp_us = 1000000 * (i + 10);
         CHECK(stage.sample(pixels, request, [] { return false; }, snapshot));
