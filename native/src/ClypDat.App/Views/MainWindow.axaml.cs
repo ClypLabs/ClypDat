@@ -247,6 +247,11 @@ public sealed partial class MainWindow : Window
     // compositing keeps empty area transparent; see ServerPerPixelOverlay.
     private const double HoverControlsSlideDistance = 54;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(150);
+    private static readonly TimeSpan FullscreenControlsSlideDuration = TimeSpan.FromMilliseconds(220);
+    // Fullscreen uses a fraction so a changing panel height or display scale
+    // cannot leave an in-flight animation short of the screen edge.
+    private double HoverControlsHiddenOffset => _hoverControlsFullscreen ? 1 : HoverControlsSlideDistance;
+    private TimeSpan HoverControlsAnimationDuration => _hoverControlsFullscreen ? FullscreenControlsSlideDuration : HoverControlsSlideDuration;
     private static readonly TimeSpan HoverControlsAnimationStallGrace = TimeSpan.FromMilliseconds(250);
     private DateTime _hoverControlsAnimationStartedUtc;
     private TranslateTransform? _hoverControlsTranslate;
@@ -10074,7 +10079,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         // Cancels an in-flight slide-out: moving back over the video during
-        // the 150ms exit brings the bar straight back rather than letting it
+        // exit brings the bar straight back rather than letting it
         // finish leaving and then reappear. StartHoverControlsAnimation owns
         // that reversal; stopping here first would restart the same slide on
         // every hover poll and defeat its frame-synced guard.
@@ -10090,7 +10095,7 @@ public sealed partial class MainWindow : Window
         RepositionEditorHoverControls(window);
         if (!window.IsVisible)
         {
-            SetHoverControlsOffset(_hoverControlsFullscreen ? 0 : HoverControlsSlideDistance);
+            SetHoverControlsOffset(HoverControlsHiddenOffset);
             try
             {
                 AppLog.Debug($"Editor hover attempt={_hoverAttempt}: Show(owner={NativeHandleOf(this):X}, pre={DescribeNativeWindow(window)}).");
@@ -10144,8 +10149,7 @@ public sealed partial class MainWindow : Window
             Dispatcher.UIThread.Post(() =>
             {
                 if (!ReferenceEquals(_editorHoverControlsWindow, window) || !window.IsVisible) return;
-                if (_hoverControlsFullscreen) SetHoverControlsOffset(0);
-                else StartHoverControlsAnimation(0);
+                StartHoverControlsAnimation(0);
             }, DispatcherPriority.Loaded);
             var attempt = _hoverAttempt;
             var settledTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
@@ -10159,8 +10163,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            if (_hoverControlsFullscreen) SetHoverControlsOffset(0);
-            else StartHoverControlsAnimation(0);
+            StartHoverControlsAnimation(0);
         }
     }
 
@@ -10193,7 +10196,7 @@ public sealed partial class MainWindow : Window
 
     // immediate: true for leaving the editor or entering fullscreen (the bar
     // has no business animating out of a view that's already gone); false for
-    // the pointer moving off the video, which slides it away.
+    // the pointer moving off the video or fullscreen idle, which slides it away.
     private void HideEditorHoverControls(bool immediate)
     {
         if (_editorHoverControlsWindow is not { IsVisible: true } window)
@@ -10213,7 +10216,7 @@ public sealed partial class MainWindow : Window
 
         if (_hoverControlsSlidingOut) return;
         _hoverControlsSlidingOut = true;
-        StartHoverControlsAnimation(HoverControlsSlideDistance, () =>
+        StartHoverControlsAnimation(HoverControlsHiddenOffset, () =>
         {
             if (!_hoverControlsSlidingOut) return;
             _hoverControlsSlidingOut = false;
@@ -10258,14 +10261,15 @@ public sealed partial class MainWindow : Window
         _hoverControlsAnimationRunning = true;
         _hoverControlsAnimationStartedUtc = DateTime.UtcNow;
         var animationId = ++_hoverControlsAnimationId;
+        var duration = HoverControlsAnimationDuration;
         TimeSpan? startTime = null;
 
         void Step(TimeSpan frameTime)
         {
             if (animationId != _hoverControlsAnimationId) return;
             startTime ??= frameTime;
-            var progress = Math.Clamp((frameTime - startTime.Value).TotalMilliseconds / HoverControlsSlideDuration.TotalMilliseconds, 0, 1);
-            var eased = 1 - Math.Pow(1 - progress, 3);
+            var progress = Math.Clamp((frameTime - startTime.Value).TotalMilliseconds / duration.TotalMilliseconds, 0, 1);
+            var eased = _hoverControlsFullscreen ? progress * progress * (3 - 2 * progress) : 1 - Math.Pow(1 - progress, 3);
             SetHoverControlsOffset(_hoverControlsAnimationStartOffset + (_hoverControlsAnimationTargetOffset - _hoverControlsAnimationStartOffset) * eased);
             if (progress < 1)
             {
@@ -10288,7 +10292,7 @@ public sealed partial class MainWindow : Window
     private void RecoverStalledHoverControlsAnimation()
     {
         if (!_hoverControlsAnimationRunning) return;
-        if (DateTime.UtcNow - _hoverControlsAnimationStartedUtc < HoverControlsSlideDuration + HoverControlsAnimationStallGrace) return;
+        if (DateTime.UtcNow - _hoverControlsAnimationStartedUtc < HoverControlsAnimationDuration + HoverControlsAnimationStallGrace) return;
         AppLog.Debug($"Editor hover bar: slide to {_hoverControlsAnimationTargetOffset:0} stalled; finishing it directly.");
         var target = _hoverControlsAnimationTargetOffset;
         var completed = _hoverControlsAnimationComplete;
@@ -10307,9 +10311,14 @@ public sealed partial class MainWindow : Window
     private void SetHoverControlsOffset(double offset)
     {
         var scaling = RenderScaling > 0 ? RenderScaling : 1;
-        _hoverControlsOffset = Math.Round(Math.Clamp(offset, 0, HoverControlsSlideDistance) * scaling) / scaling;
+        offset = Math.Clamp(offset, 0, HoverControlsHiddenOffset);
+        _hoverControlsOffset = _hoverControlsFullscreen ? offset : Math.Round(offset * scaling) / scaling;
         if (_hoverControlsTranslate is null) return;
-        _hoverControlsTranslate.Y = _hoverControlsOffset;
+        _hoverControlsTranslate.Y = _hoverControlsFullscreen
+            ? Math.Round(_hoverControlsOffset * _fullscreenControlsSlideDistance * scaling) / scaling
+            : _hoverControlsOffset;
+        if (_hoverControlsBackdrop is { } backdrop)
+            backdrop.Opacity = _hoverControlsFullscreen ? 1 - _hoverControlsOffset : 1;
         if (_editorHoverControlsWindow?.IsVisible == true && _hoverControlsPerPixelOverlay is { IsReady: true } mirror && !mirror.Refresh())
             UseVisibleHoverFallback("mirror refresh failed");
     }
@@ -10629,10 +10638,12 @@ public sealed partial class MainWindow : Window
                 existing.Child = BuildPlaybackBarLayout(fullscreen);
                 existing.CornerRadius = new CornerRadius(fullscreen ? 12 : 0);
                 existing.BorderThickness = new Thickness(fullscreen ? 1 : 0);
+                existing.Height = double.NaN;
+                existing.VerticalAlignment = VerticalAlignment.Stretch;
                 existing.Background = _hoverControlsVisibleFallback
                     ? AppThemeService.Brush("Surface_0B0F14", "#0B0F14")
                     : fullscreen ? new SolidColorBrush(Color.Parse("#D90B1016")) : AppThemeService.Brush("Surface_8C0B1016", "#8C0B1016");
-                SetHoverControlsOffset(fullscreen ? 0 : HoverControlsSlideDistance);
+                SetHoverControlsOffset(HoverControlsHiddenOffset);
             }
             return _editorHoverControlsWindow;
         }

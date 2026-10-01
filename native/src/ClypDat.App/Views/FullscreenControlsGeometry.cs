@@ -24,5 +24,10 @@ internal static class FullscreenControlsGeometry
             viewport.Bottom - bottomInset - pixelsHigh, width, pixelsHigh);
     }
 
+    // Include the transparent bottom inset so the panel slides all the way to
+    // the screen edge, while the window clips it before an adjacent monitor.
+    internal static PixelRect AnimationWindow(PixelRect viewport, PixelRect panel) =>
+        new(panel.X, panel.Y, panel.Width, viewport.Bottom - panel.Y);
+
     private static double ValidScale(double scale) => double.IsFinite(scale) && scale > 0 ? scale : 1;
 }

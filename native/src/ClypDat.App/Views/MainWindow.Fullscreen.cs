@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using ClypDat.App.Services;
 
 namespace ClypDat.App.Views;
@@ -15,6 +16,8 @@ public sealed partial class MainWindow
     private IPointer? _fullscreenControlsPointer;
     private IPointer? _seekRailPointer;
     private bool _hoverControlsFullscreen;
+    private double _fullscreenControlsSlideDistance = HoverControlsSlideDistance;
+    private PixelRect _fullscreenControlsPanelBounds;
 
     private static TimeSpan FullscreenNow => TimeSpan.FromSeconds(Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency);
 
@@ -54,9 +57,10 @@ public sealed partial class MainWindow
         var root = GetAncestor(WindowFromPoint(cursor), GaRoot);
         var bar = NativeHandleOf(_editorHoverControlsWindow);
         var scene = NativeHandleOf(_spotifyWindow);
-        var overControls = bar != IntPtr.Zero && root == bar && _editorHoverControlsWindow?.IsVisible == true && IsWindowVisible(bar);
+        var overBar = bar != IntPtr.Zero && root == bar && _editorHoverControlsWindow?.IsVisible == true && IsWindowVisible(bar);
+        var overControls = overBar && !_hoverControlsSlidingOut && _fullscreenControlsPanelBounds.Contains(pointer);
         var overSurface = cursor.X >= top.X && cursor.X < bottom.X && cursor.Y >= top.Y && cursor.Y < bottom.Y &&
-            (root == owner || (scene != IntPtr.Zero && root == scene) || overControls);
+            (root == owner || (scene != IntPtr.Zero && root == scene) || overBar);
         var captured = _seekRailScrubActive ||
             (_fullscreenControlsPointer?.Captured is { } target && TopLevel.GetTopLevel(target as Visual) == _editorHoverControlsWindow) ||
             _spotifyGesture is not null || _capturedGesture is not null || _timedEffectLayer?.IsGestureActive == true;
@@ -67,7 +71,7 @@ public sealed partial class MainWindow
                 HideEditorHoverControls(immediate: true);
             ShowEditorHoverControls();
         }
-        else HideEditorHoverControls(immediate: true);
+        else HideEditorHoverControls(immediate: false);
 
         _fullscreenCursor.Update(owner, pointer, !_fullscreenActivity.ControlsVisible && overSurface,
             owner, NativeHandleOf(_editorHoverControlsWindow), scene);
@@ -84,7 +88,15 @@ public sealed partial class MainWindow
         if (_hoverControlsBackdrop?.Child is not FullscreenPlaybackBar content) return;
         content.SetAvailableWidth(width);
         content.Measure(new Size(width, double.PositiveInfinity));
-        var rect = FullscreenControlsGeometry.Place(viewport, scale, content.DesiredSize.Height + 2);
+        var panel = FullscreenControlsGeometry.Place(viewport, scale, content.DesiredSize.Height + 2);
+        _fullscreenControlsPanelBounds = panel;
+        var rect = FullscreenControlsGeometry.AnimationWindow(viewport, panel);
+        var slideDistance = rect.Height / scale;
+        var distanceChanged = Math.Abs(_fullscreenControlsSlideDistance - slideDistance) > 0.01;
+        _fullscreenControlsSlideDistance = slideDistance;
+        _hoverControlsBackdrop.Height = panel.Height / scale;
+        _hoverControlsBackdrop.VerticalAlignment = VerticalAlignment.Top;
+        if (distanceChanged) SetHoverControlsOffset(_hoverControlsOffset);
         var handle = NativeHandleOf(bar);
         if (!force && GetWindowRect(handle, out var current) && HoverBarGeometry.MatchesNative(
             current.Left, current.Top, current.Right, current.Bottom, rect.X, rect.Y, rect.Width, rect.Height)) return;

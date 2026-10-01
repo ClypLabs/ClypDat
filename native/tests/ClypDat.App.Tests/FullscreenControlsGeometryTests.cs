@@ -43,4 +43,21 @@ public sealed class FullscreenControlsGeometryTests
         Assert.True(controls.Right <= viewport.Right && controls.Bottom <= viewport.Bottom);
         Assert.True(controls.Width > 0 && controls.Height > 0);
     }
+
+    [Theory]
+    [InlineData(0, 0, 1920, 1080, 1)]
+    [InlineData(-1080, -1920, 1080, 1920, 1.5)]
+    [InlineData(0, 0, 2400, 1350, 1.25)]
+    [InlineData(-30, -20, 30, 20, 2)]
+    public void SlideWindowIncludesBottomInsetAndClipsAtMonitorEdge(int x, int y, int width, int height, double scale)
+    {
+        var viewport = new PixelRect(x, y, width, height);
+        var panel = FullscreenControlsGeometry.Place(viewport, scale, 108);
+        var window = FullscreenControlsGeometry.AnimationWindow(viewport, panel);
+        Assert.Equal(panel.Position, window.Position);
+        Assert.Equal(panel.Width, window.Width);
+        Assert.Equal(viewport.Bottom, window.Bottom);
+        Assert.True(window.Height >= panel.Height);
+        Assert.Equal(viewport.Bottom, panel.Y + window.Height);
+    }
 }
