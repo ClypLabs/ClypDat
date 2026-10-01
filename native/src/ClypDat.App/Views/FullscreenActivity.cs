@@ -13,6 +13,9 @@ internal sealed class FullscreenActivity
 
     internal bool ControlsVisible { get; private set; }
 
+    internal static bool HasForeground(nint foreground, nint owner, nint controls, nint scene) =>
+        owner != 0 && foreground != 0 && (foreground == owner || foreground == controls || foreground == scene);
+
     internal void Record(TimeSpan now)
     {
         _lastActivity = now;

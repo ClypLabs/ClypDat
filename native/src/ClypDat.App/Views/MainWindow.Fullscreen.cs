@@ -21,6 +21,17 @@ public sealed partial class MainWindow
 
     private static TimeSpan FullscreenNow => TimeSpan.FromSeconds(Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency);
 
+    private bool HasFullscreenForeground(nint foreground)
+    {
+        static nint VisibleHandle(Window? window)
+        {
+            var handle = NativeHandleOf(window);
+            return window?.IsVisible == true && IsWindowVisible(handle) ? handle : 0;
+        }
+        return FullscreenActivity.HasForeground(foreground, NativeHandleOf(this),
+            VisibleHandle(_editorHoverControlsWindow), VisibleHandle(_spotifyWindow));
+    }
+
     private void RecordFullscreenActivity()
     {
         if (ViewModel?.IsVideoFullscreen != true) return;
@@ -42,9 +53,10 @@ public sealed partial class MainWindow
     private void PollFullscreenControls()
     {
         var owner = NativeHandleOf(this);
+        var foreground = GetForegroundWindow();
         var enabled = IsVisible && WindowState == WindowState.FullScreen &&
             ViewModel is { IsEditorVisible: true, IsEditorVideoLoading: false } &&
-            _playback is not null && !IsEditorSurfaceCovered && GetForegroundWindow() == owner;
+            _playback is not null && !IsEditorSurfaceCovered && HasFullscreenForeground(foreground);
         if (!enabled || !GetCursorPos(out var cursor) || FullscreenVideoHost.Bounds.Width <= 0 || FullscreenVideoHost.Bounds.Height <= 0)
         {
             SuspendFullscreenPresentation();
@@ -73,7 +85,7 @@ public sealed partial class MainWindow
         }
         else HideEditorHoverControls(immediate: false);
 
-        _fullscreenCursor.Update(owner, pointer, !_fullscreenActivity.ControlsVisible && overSurface,
+        _fullscreenCursor.Update(foreground, pointer, !_fullscreenActivity.ControlsVisible && overSurface,
             owner, NativeHandleOf(_editorHoverControlsWindow), scene);
     }
 

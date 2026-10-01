@@ -578,7 +578,16 @@ public sealed partial class MainWindow : Window
         Activated += (_, _) => RecordFullscreenActivity();
         Deactivated += (_, _) =>
         {
-            if (ViewModel?.IsVideoFullscreen == true) SuspendFullscreenPresentation();
+            if (ViewModel?.IsVideoFullscreen != true) return;
+            _fullscreenCursor.Reveal();
+            // Win32's Avalonia backend calls SetFocus on pointer press even
+            // with WS_EX_NOACTIVATE. Wait for that handoff before deciding
+            // whether focus left fullscreen; hiding here cancels the click.
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (ViewModel?.IsVideoFullscreen == true && !HasFullscreenForeground(GetForegroundWindow()))
+                    SuspendFullscreenPresentation();
+            });
         };
         // Realise the clip badge now, off-screen, rather than on the first
         // notification: that first realise is the one show that happens before
