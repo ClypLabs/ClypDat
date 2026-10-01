@@ -23,7 +23,10 @@ public sealed record AppUpdateInfo(
     // URLs of the detached signed manifest and its signature, when the release
     // publishes them. Null on releases made before signing was set up.
     string? ManifestUrl = null,
-    string? ManifestSignatureUrl = null);
+    string? ManifestSignatureUrl = null)
+{
+    internal string VerificationRevision { get; init; } = string.Empty;
+}
 
 public sealed record UpdateDownloadProgress(string Status, double? Percentage, double? BytesPerSecond = null);
 
@@ -104,6 +107,7 @@ public static class AppUpdateService
     // which decrements on 304s too. This saves bandwidth, latency and the
     // deserialize; the poll interval is what protects the rate limit.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string ETag, string Body)> ConditionalCache = new();
+    private static readonly VerifiedUpdateCache VerifiedUpdates = new(ResolveVerifiedDownloadAsync);
 
     // GET url, conditionally. Returns the response body, either fresh or the
     // cached copy a 304 just confirmed is still current. Null when the request
@@ -248,7 +252,10 @@ public static class AppUpdateService
                 [],
                 ParseSha256Digest(asset.Digest),
                 manifestAsset?.DownloadUrl,
-                signatureAsset?.DownloadUrl), kind));
+                signatureAsset?.DownloadUrl)
+            {
+                VerificationRevision = JsonSerializer.Serialize(new[] { asset, manifestAsset, signatureAsset }),
+            }, kind));
         }
 
         // Newest first, and within one version in source order (GitHub first).
@@ -261,7 +268,7 @@ public static class AppUpdateService
             ordered,
             async (candidate, token) =>
             {
-                if (ReleaseSigning.IsConfigured) await ResolveVerifiedDownloadAsync(candidate.Info, token);
+                if (ReleaseSigning.IsConfigured) await VerifiedUpdates.VerifyAsync(candidate.Info, token);
             },
             candidate => $"{candidate.Info.TagName} from {candidate.Kind}",
             cancellationToken);
@@ -328,7 +335,7 @@ public static class AppUpdateService
         // is pinned this must come from the signed manifest; the release API's own digest
         // is not an independent control, because whoever serves the metadata serves both
         // it and the download URL.
-        var (expectedSha256, maximumBytes) = await ResolveVerifiedDownloadAsync(update, cancellationToken);
+        var (expectedSha256, maximumBytes) = await VerifiedUpdates.RefreshAsync(update, cancellationToken);
 
         var updateRoot = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "updates");
         Directory.CreateDirectory(updateRoot);
@@ -819,12 +826,15 @@ public static class AppUpdateService
         [property: JsonPropertyName("name")] string? Name,
         [property: JsonPropertyName("url")] string? Url,
         [property: JsonPropertyName("direct_asset_url")] string? DirectAssetUrl,
-        [property: JsonPropertyName("digest")] string? Digest = null);
+        [property: JsonPropertyName("digest")] string? Digest = null,
+        [property: JsonPropertyName("id")] long? Id = null);
 
     private sealed record ReleaseAsset(
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("browser_download_url")] string DownloadUrl,
-        [property: JsonPropertyName("digest")] string? Digest = null);
+        [property: JsonPropertyName("digest")] string? Digest = null,
+        [property: JsonPropertyName("id")] long? Id = null,
+        [property: JsonPropertyName("updated_at")] DateTimeOffset? UpdatedAt = null);
 
     private static ReleaseResponse? ParseRelease(string json, ReleaseSourceKind sourceKind) => sourceKind == ReleaseSourceKind.GitLab
         ? NormalizeGitLabRelease(JsonSerializer.Deserialize<GitLabReleaseResponse>(json))
@@ -870,7 +880,8 @@ public static class AppUpdateService
             .Select(link => new ReleaseAsset(
                 link.Name ?? string.Empty,
                 string.IsNullOrWhiteSpace(link.DirectAssetUrl) ? link.Url ?? string.Empty : link.DirectAssetUrl,
-                link.Digest))
+                link.Digest,
+                link.Id))
             .ToArray();
 
         return new ReleaseResponse(release.TagName, assets, release.Description, release.UpcomingRelease, false);
