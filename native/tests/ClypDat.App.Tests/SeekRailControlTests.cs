@@ -6,12 +6,14 @@ namespace ClypDat.App.Tests;
 public sealed class SeekRailControlTests
 {
     [Theory]
+    [InlineData(-100, 0)]
     [InlineData(0, 0)]
     [InlineData(8, 0)]
     [InlineData(50, 5)]
     [InlineData(92, 10)]
     [InlineData(100, 10)]
-    public void FullscreenThumbMapsToBothEnds(double x, double expectedSeconds)
+    [InlineData(200, 10)]
+    public void PlaybackThumbMapsToBothEnds(double x, double expectedSeconds)
     {
         var position = SeekRailControl.PositionForPointer(TimeSpan.FromSeconds(10), x, 100, 16);
         Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), position);
@@ -28,5 +30,25 @@ public sealed class SeekRailControlTests
     public void ZeroDurationHasNoSeekPosition()
     {
         Assert.Equal(TimeSpan.Zero, SeekRailControl.PositionForPointer(TimeSpan.Zero, 50, 100, 16));
+    }
+
+    [Theory]
+    [InlineData(100, 16, 8, 84)]
+    [InlineData(16, 16, 8, 0)]
+    [InlineData(10, 16, 5, 0)]
+    [InlineData(0, 16, 0, 0)]
+    [InlineData(100, 0, 0, 100)]
+    public void ThumbFitsInsideRailBounds(double width, double diameter, double left, double railWidth)
+    {
+        Assert.Equal((left, railWidth), SeekRailControl.RailBounds(width, diameter));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(8)]
+    [InlineData(16)]
+    public void CollapsedRailCannotSeek(double width)
+    {
+        Assert.Equal(TimeSpan.Zero, SeekRailControl.PositionForPointer(TimeSpan.FromSeconds(10), 200, width, 16));
     }
 }

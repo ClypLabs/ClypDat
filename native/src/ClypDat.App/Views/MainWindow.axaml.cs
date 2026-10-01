@@ -68,8 +68,8 @@ public sealed partial class MainWindow : Window
     // FullscreenProgressBar_OnPointerPressed). Only one rail is ever on
     // screen at a time - the fullscreen bar and the hover bar are mutually
     // exclusive - so a single flag covers both.
-    private bool _seekRailScrubActive;
-    private bool _seekRailScrubWasPlaying;
+    private readonly SeekRailScrub _seekRailScrub = new();
+    private bool _seekRailScrubActive => _seekRailScrub.Active;
     // Armed whenever a play session starts at/before TrimEnd, so playback
     // naturally running into it still auto-stops there (trim preview);
     // disarmed when the session instead started already past TrimEnd (user
@@ -245,7 +245,7 @@ public sealed partial class MainWindow : Window
     // The hover bar moves inside a fixed window, clipped at the video's lower
     // edge so it slips behind the timeline. On Server, native per-pixel
     // compositing keeps empty area transparent; see ServerPerPixelOverlay.
-    private const double HoverControlsSlideDistance = 52;
+    private const double HoverControlsSlideDistance = 54;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan HoverControlsAnimationStallGrace = TimeSpan.FromMilliseconds(250);
     private DateTime _hoverControlsAnimationStartedUtc;
@@ -445,6 +445,11 @@ public sealed partial class MainWindow : Window
                         Dispatcher.UIThread.Post(() => this.FindControl<Button>("OnboardingNextButton")?.Focus());
                     if (e.PropertyName == nameof(MainWindowViewModel.ActiveGameDetection)) _ = UpdateVideoOverlaySettingsAsync();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsEditorVideoLoading)) RestartEditorLoadingIndicator();
+                    if (e.PropertyName == nameof(MainWindowViewModel.IsVideoFullscreen) && !ViewModel.IsVideoFullscreen)
+                    {
+                        _fullscreenActivity.Suspend();
+                        _fullscreenCursor.Restore();
+                    }
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsHelpVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
                         UpdateEditorSurfaceVisibility();
                     if (e.PropertyName == nameof(MainWindowViewModel.IsHelpVisible) && ViewModel.IsHelpVisible)
@@ -565,6 +570,11 @@ public sealed partial class MainWindow : Window
         AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
         TrackEditorOverlaysToWindow();
         SetupEditorHoverControls();
+        Activated += (_, _) => RecordFullscreenActivity();
+        Deactivated += (_, _) =>
+        {
+            if (ViewModel?.IsVideoFullscreen == true) SuspendFullscreenPresentation();
+        };
         // Realise the clip badge now, off-screen, rather than on the first
         // notification: that first realise is the one show that happens before
         // WS_EX_NOACTIVATE is on the hwnd, and it used to land mid-game.
@@ -618,6 +628,9 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            SuspendFullscreenPresentation(settleSeek: false);
+            _hoverControlsHideTimer?.Stop();
+            _fullscreenCursor.Dispose();
             _clipHoverPreview.Dispose();
             CancelEditorHoverWarmup();
             CancelEditorHoverWarmup(_claimedEditorHoverWarmup);
@@ -3766,6 +3779,7 @@ public sealed partial class MainWindow : Window
         if (tiedTo is not null) tiedTo.Closed += (_, _) => cover.Dispose();
         AppLog.Debug($"Editor surface covered: {reason} (covers={_editorSurfaceCovers.Describe()}).");
         HideEditorHoverControls(immediate: true);
+        if (ViewModel?.IsVideoFullscreen == true) SuspendFullscreenPresentation();
         return cover;
     }
 
@@ -4592,6 +4606,7 @@ public sealed partial class MainWindow : Window
         // as covering the editor now, so its native Spotify card cannot linger
         // until the preview timer gets a turn.
         var showEditor = ViewModel.IsEditorVisible && !ViewModel.IsSettingsVisible;
+        if (ViewModel.IsVideoFullscreen && (!showEditor || ViewModel.IsEditorVideoLoading)) SuspendFullscreenPresentation();
         if (!showEditor) HideSpotifyPreview();
         EditorPanelRoot.Opacity = showEditor ? 1 : 0;
         EditorPanelRoot.IsHitTestVisible = showEditor;
@@ -5616,7 +5631,11 @@ public sealed partial class MainWindow : Window
             // both so the next poll tick re-shows them correctly instead of
             // trusting IsVisible state the OS invalidated while minimized.
             HideEditorHoverControls(immediate: true);
-            }
+            if (ViewModel?.IsVideoFullscreen == true) WindowState = WindowState.FullScreen;
+        }
+
+        if (change.Property == WindowStateProperty && WindowState == WindowState.Minimized && ViewModel?.IsVideoFullscreen == true)
+            SuspendFullscreenPresentation();
 
         if (change.Property == WindowStateProperty && MaximizeRestoreButton?.Content is PathIcon icon)
         {
@@ -5785,6 +5804,7 @@ public sealed partial class MainWindow : Window
         }
 
         _preFullscreenWindowState = WindowState;
+        SaveWindowBounds();
         WindowState = WindowState.FullScreen;
         ViewModel?.SetVideoFullscreen(true);
         HideEditorHoverControls(immediate: true);
@@ -5802,10 +5822,10 @@ public sealed partial class MainWindow : Window
         EditorVideoHost.Children.Remove(EditorVideoView);
         FullscreenVideoHost.Children.Add(EditorVideoView);
         Dispatcher.UIThread.Post(EditorVideoView.RefreshClickHook, DispatcherPriority.Loaded);
+        RecordFullscreenActivity();
+        Dispatcher.UIThread.Post(PollFullscreenControls, DispatcherPriority.Loaded);
         AppLog.Info("Video fullscreen entered: EditorVideoView reparented into FullscreenVideoHost.");
     }
-
-    private void ExitVideoFullscreenButton_OnClick(object? sender, RoutedEventArgs e) => ExitVideoFullscreen();
 
     // Scroll up = zoom in, scroll down = zoom out - wired to both
     // EditorVideoHost and FullscreenVideoHost (same handler, same
@@ -5813,6 +5833,7 @@ public sealed partial class MainWindow : Window
     // reparented between them).
     private void VideoHost_OnPointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
+        RecordFullscreenActivity();
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         if (e.Delta.Y == 0) return;
         const double zoomStep = 0.25;
@@ -5845,10 +5866,14 @@ public sealed partial class MainWindow : Window
         translate.Y = ViewModel.VideoPanY * maxPanPixels;
     }
 
-    private void ExitVideoFullscreen()
+    private void ExitVideoFullscreen(bool settleSeek = true)
     {
-        WindowState = _preFullscreenWindowState;
+        if (ViewModel?.IsVideoFullscreen != true) return;
+        SuspendFullscreenPresentation(settleSeek);
         ViewModel?.SetVideoFullscreen(false);
+        // Avalonia's fullscreen transition restores the native rectangle and
+        // decorations saved on entry, including a maximized owner's bounds.
+        WindowState = _preFullscreenWindowState;
 
         FullscreenVideoHost.Children.Remove(EditorVideoView);
         EditorVideoHost.Children.Insert(0, EditorVideoView);
@@ -5866,8 +5891,10 @@ public sealed partial class MainWindow : Window
     private void FullscreenProgressBar_OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (ViewModel is null || sender is not Control control || ViewModel.Duration <= TimeSpan.Zero) return;
-        _seekRailScrubActive = true;
-        _seekRailScrubWasPlaying = ViewModel.IsPlaying;
+        if (!e.GetCurrentPoint(control).Properties.IsLeftButtonPressed) return;
+        RecordFullscreenActivity();
+        if (!_seekRailScrub.Begin(ViewModel.IsPlaying)) return;
+        _seekRailPointer = e.Pointer;
         e.Pointer.Capture(control);
         ScrubSeekRail(control, e.GetPosition(control).X);
         e.Handled = true;
@@ -5876,6 +5903,7 @@ public sealed partial class MainWindow : Window
     private void FullscreenProgressBar_OnPointerMoved(object? sender, PointerEventArgs e)
     {
         if (!_seekRailScrubActive || ViewModel is null || sender is not Control control) return;
+        RecordFullscreenActivity();
         ScrubSeekRail(control, e.GetPosition(control).X);
         e.Handled = true;
     }
@@ -5883,9 +5911,7 @@ public sealed partial class MainWindow : Window
     private void FullscreenProgressBar_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (!_seekRailScrubActive || ViewModel is null) return;
-        _seekRailScrubActive = false;
-        e.Pointer.Capture(null);
-        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, _seekRailScrubWasPlaying);
+        FinishSeekRailScrub();
         e.Handled = true;
     }
 
@@ -6728,6 +6754,7 @@ public sealed partial class MainWindow : Window
 
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
+        RecordFullscreenActivity();
         if (ViewModel?.IsCapturingHotkey == true)
         {
             if (e.Key == Key.Escape)
@@ -6905,6 +6932,7 @@ public sealed partial class MainWindow : Window
 
     private async void PlayPauseButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        RecordFullscreenActivity();
         if (ViewModel is null || ViewModel.IsSelectedSpotifyProcessing) return;
         // A failed open's poster answers play with another attempt.
         if (_editorLoadError is not null)
@@ -6994,6 +7022,7 @@ public sealed partial class MainWindow : Window
 
     private void RestartButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        RecordFullscreenActivity();
         if (ViewModel is null) return;
         _endedAtTrimBoundary = false;
         ViewModel.RestartPlayback();
@@ -7005,6 +7034,7 @@ public sealed partial class MainWindow : Window
 
     private void StepBackButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        RecordFullscreenActivity();
         if (ViewModel is null) return;
         _endedAtTrimBoundary = false;
         var wasPlaying = ViewModel.IsPlaying;
@@ -7014,6 +7044,7 @@ public sealed partial class MainWindow : Window
 
     private void StepForwardButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        RecordFullscreenActivity();
         if (ViewModel is null) return;
         _endedAtTrimBoundary = false;
         var wasPlaying = ViewModel.IsPlaying;
@@ -7023,6 +7054,7 @@ public sealed partial class MainWindow : Window
 
     private void EndButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        RecordFullscreenActivity();
         if (ViewModel is null) return;
         var wasPlaying = ViewModel.IsPlaying;
         _endedAtTrimBoundary = true;
@@ -9683,6 +9715,8 @@ public sealed partial class MainWindow : Window
 
     private void StopEditorPlayback(bool cancelQueuedStart = true, PlaybackStopMode stopMode = PlaybackStopMode.Synchronous)
     {
+        if (ViewModel?.IsVideoFullscreen == true) ExitVideoFullscreen(settleSeek: false);
+        FinishSeekRailScrub(settle: false);
         if (cancelQueuedStart)
         {
             CancelEditorHoverWarmup();
@@ -9899,6 +9933,12 @@ public sealed partial class MainWindow : Window
 
         RecoverStalledHoverControlsAnimation();
 
+        if (ViewModel?.IsVideoFullscreen == true)
+        {
+            PollFullscreenControls();
+            return;
+        }
+
         // IsVisible is the main window's own. Closing ClypDat hides it to the
         // tray rather than exiting, and Avalonia refuses outright to show a
         // window whose owner isn't visible ("Cannot show window with
@@ -10050,7 +10090,7 @@ public sealed partial class MainWindow : Window
         RepositionEditorHoverControls(window);
         if (!window.IsVisible)
         {
-            SetHoverControlsOffset(HoverControlsSlideDistance);
+            SetHoverControlsOffset(_hoverControlsFullscreen ? 0 : HoverControlsSlideDistance);
             try
             {
                 AppLog.Debug($"Editor hover attempt={_hoverAttempt}: Show(owner={NativeHandleOf(this):X}, pre={DescribeNativeWindow(window)}).");
@@ -10101,7 +10141,12 @@ public sealed partial class MainWindow : Window
             if (!MakeWindowNonActivating(window, out var postShowStyleError))
                 LogHoverFailure($"WS_EX_NOACTIVATE missing after Show: error={postShowStyleError}");
             LogHoverControlsState($"sliding in (attempt={_hoverAttempt}, {DescribeNativeWindow(window)})");
-            Dispatcher.UIThread.Post(() => StartHoverControlsAnimation(0), DispatcherPriority.Loaded);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (!ReferenceEquals(_editorHoverControlsWindow, window) || !window.IsVisible) return;
+                if (_hoverControlsFullscreen) SetHoverControlsOffset(0);
+                else StartHoverControlsAnimation(0);
+            }, DispatcherPriority.Loaded);
             var attempt = _hoverAttempt;
             var settledTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
             settledTimer.Tick += (_, _) =>
@@ -10114,7 +10159,8 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            StartHoverControlsAnimation(0);
+            if (_hoverControlsFullscreen) SetHoverControlsOffset(0);
+            else StartHoverControlsAnimation(0);
         }
     }
 
@@ -10277,16 +10323,18 @@ public sealed partial class MainWindow : Window
     // pane's rect changed without EditorVideoView itself re-laying out.
     private void RepositionEditorHoverControls(Window bar, bool force = false)
     {
+        if (ViewModel?.IsVideoFullscreen == true)
+        {
+            RepositionFullscreenControls(bar, force);
+            return;
+        }
         // Same reasoning as PollEditorHoverControls - position against the
         // untransformed host, not the zoom-transformed/reparented view.
         if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
         var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var width = Math.Max(1, EditorVideoHost.Bounds.Width);
-        // 38 for the controls row plus the 14px scrub strip above it. The row
-        // clears the 34px buttons with a little to spare; the strip keeps its
-        // height because it is the seek hit target, and thinning that makes
-        // the bar harder to use rather than just slimmer.
-        const double barHeight = 52;
+        // 38 DIPs for the controls and 16 for the seek thumb and hit strip.
+        const double barHeight = 54;
         var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
         // The OWNER's scaling, not the bar's. Position is in physical pixels
         // while Height is in DIPs, so converting between them needs the real
@@ -10348,7 +10396,7 @@ public sealed partial class MainWindow : Window
     // Contents of the floating hover bar - the editor's only playback controls.
     // It carries the scrub strip and the elapsed/duration readout on top of the
     // transport and volume groups.
-    private Control BuildPlaybackBarLayout()
+    private Control BuildPlaybackBarLayout(bool fullscreen = false)
     {
         PathIcon Icon(string data, double size = 16) => new()
         {
@@ -10487,6 +10535,13 @@ public sealed partial class MainWindow : Window
             Children = { muteToggle, volumeSlider, volumePercentText, volumeResetButton },
         };
 
+        var timeGroup = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+            Children = { timeText, slashText, durationText },
+        };
         var volumeGroup = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -10495,34 +10550,25 @@ public sealed partial class MainWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Children =
             {
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 6, 0),
-                    Children = { timeText, slashText, durationText },
-                },
+                timeGroup,
                 volumeControls,
             },
         };
 
-        var fullscreenButton = TransportButton("M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick);
+        var fullscreenButton = TransportButton(fullscreen
+            ? "M5,16h3v3h2v-5H5V16z M8,8H5v2h5V5H8V8z M14,19h2v-3h3v-2h-5V19z M16,8V5h-2v5h5V8H16z"
+            : "M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick);
         fullscreenButton.HorizontalAlignment = HorizontalAlignment.Right;
 
-        // Scrub strip along the top edge, same control (and same handler) the
-        // fullscreen bar uses. Seeking previously meant leaving the picture for
-        // the timeline panel below, even for a small nudge. The 14px Border is
-        // the hit target; the 3px bar inside it is hit-test invisible so a
-        // click anywhere in that band seeks rather than only a hit on the rail.
+        // The 16-DIP strip contains the entire thumb, including its outline.
+        // Seeking uses the same inset rail bounds as drawing at both endpoints.
         var progressBar = new SeekRailControl
         {
-            Height = 3,
-            // Top, not Center: centering it in the 14px hit strip left a band
-            // of scrim sitting above the progress line, so the bar looked like
-            // it started with an empty grey strip instead of with the
-            // playback line itself. The strip keeps its full height as a hit
-            // target, the line just sits flush with the bar's top edge.
-            VerticalAlignment = VerticalAlignment.Top,
+            Height = 16,
+            RailThickness = 4,
+            RailCornerRadius = 4,
+            ThumbDiameter = 16,
+            VerticalAlignment = VerticalAlignment.Center,
             TrackBrush = new SolidColorBrush(Color.Parse("#33FFFFFF")),
             PlayedBrush = Application.Current?.Resources["AccentBrush"] as IBrush ?? AppThemeService.Brush("AccentBrush", "#5864E8"),
             IsHitTestVisible = false,
@@ -10534,7 +10580,7 @@ public sealed partial class MainWindow : Window
 
         var progressStrip = new Border
         {
-            Height = 14,
+            Height = 16,
             Background = Brushes.Transparent,
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = progressBar,
@@ -10542,6 +10588,13 @@ public sealed partial class MainWindow : Window
         progressStrip.PointerPressed += FullscreenProgressBar_OnPointerPressed;
         progressStrip.PointerMoved += FullscreenProgressBar_OnPointerMoved;
         progressStrip.PointerReleased += FullscreenProgressBar_OnPointerReleased;
+        progressStrip.PointerCaptureLost += FullscreenProgressBar_OnPointerCaptureLost;
+
+        if (fullscreen)
+        {
+            volumeGroup.Children.Clear();
+            return new FullscreenPlaybackBar(progressStrip, transportGroup, timeGroup, volumeControls, fullscreenButton);
+        }
 
         // One cell with all three groups stacked in it, each aligned to its own
         // edge, rather than three columns. In a three-column split the centre
@@ -10550,14 +10603,8 @@ public sealed partial class MainWindow : Window
         // the lone fullscreen button. Overlapping them in a single cell centres
         // the transport on the bar itself; at any width the video pane actually
         // gets there is far more room than the three groups need.
-        // Negative top rather than trimming the bottom, now the bar is slim
-        // enough that the controls row has little spare height: taking it off
-        // the bottom would shrink the space the 34px buttons have to fit in
-        // and start squeezing them, where a negative top gives the row MORE
-        // room and still moves the centre up by half the offset. The controls
-        // otherwise centre in the band below the progress strip, which leaves
-        // them sitting low against the scrim as a whole.
-        var layout = new Grid { Margin = new Thickness(14, -6, 14, 0) };
+        // Keep the button hit targets below the thumb's full 16-DIP strip.
+        var layout = new Grid { Margin = new Thickness(14, 0, 14, 0) };
         layout.Children.Add(volumeGroup);
         layout.Children.Add(transportGroup);
         layout.Children.Add(fullscreenButton);
@@ -10572,10 +10619,27 @@ public sealed partial class MainWindow : Window
 
     private Window EnsureEditorHoverControlsWindow()
     {
-        if (_editorHoverControlsWindow is not null) return _editorHoverControlsWindow;
+        var fullscreen = ViewModel?.IsVideoFullscreen == true;
+        if (_editorHoverControlsWindow is not null)
+        {
+            if (_hoverControlsFullscreen != fullscreen && _hoverControlsBackdrop is { } existing)
+            {
+                HideEditorHoverControls(immediate: true);
+                _hoverControlsFullscreen = fullscreen;
+                existing.Child = BuildPlaybackBarLayout(fullscreen);
+                existing.CornerRadius = new CornerRadius(fullscreen ? 12 : 0);
+                existing.BorderThickness = new Thickness(fullscreen ? 1 : 0);
+                existing.Background = _hoverControlsVisibleFallback
+                    ? AppThemeService.Brush("Surface_0B0F14", "#0B0F14")
+                    : fullscreen ? new SolidColorBrush(Color.Parse("#D90B1016")) : AppThemeService.Brush("Surface_8C0B1016", "#8C0B1016");
+                SetHoverControlsOffset(fullscreen ? 0 : HoverControlsSlideDistance);
+            }
+            return _editorHoverControlsWindow;
+        }
+        _hoverControlsFullscreen = fullscreen;
         _hoverControlsVisibleFallback = false;
 
-        var translate = new TranslateTransform { Y = HoverControlsSlideDistance };
+        var translate = new TranslateTransform { Y = fullscreen ? 0 : HoverControlsSlideDistance };
         var backdrop = new Border
         {
             // Translucent scrim behind the whole row, not an opaque plate -
@@ -10583,9 +10647,12 @@ public sealed partial class MainWindow : Window
             // far enough that the controls sit on a consistent surface
             // instead of fighting whatever frame is underneath. The progress
             // strip along the top edge is what separates it from the video,
-            // so there's no border line here.
-            Background = AppThemeService.Brush("Surface_8C0B1016", "#8C0B1016"),
-            Child = BuildPlaybackBarLayout(),
+            // so only fullscreen adds a border around the floating panel.
+            Background = fullscreen ? new SolidColorBrush(Color.Parse("#D90B1016")) : AppThemeService.Brush("Surface_8C0B1016", "#8C0B1016"),
+            CornerRadius = new CornerRadius(fullscreen ? 12 : 0),
+            BorderBrush = new SolidColorBrush(Color.Parse("#26FFFFFF")),
+            BorderThickness = new Thickness(fullscreen ? 1 : 0),
+            Child = BuildPlaybackBarLayout(fullscreen),
             RenderTransform = translate,
         };
         _hoverControlsBackdrop = backdrop;
@@ -10609,6 +10676,11 @@ public sealed partial class MainWindow : Window
             DataContext = DataContext,
             Content = root,
         };
+        window.AddHandler(PointerPressedEvent, PlaybackControls_OnPointerPressed, RoutingStrategies.Tunnel, true);
+        window.AddHandler(PointerReleasedEvent, PlaybackControls_OnPointerReleased, RoutingStrategies.Tunnel, true);
+        window.AddHandler(PointerCaptureLostEvent, PlaybackControls_OnPointerCaptureLost, RoutingStrategies.Bubble, true);
+        window.AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
+        window.AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
         window.Opened += (_, _) =>
         {
             OverlayTransparencyDiagnostics.Log(window, "hover-bar");
@@ -11186,6 +11258,11 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         var settings = ViewModel.Settings;
+        if (ViewModel.IsVideoFullscreen)
+        {
+            settings.IsWindowMaximized = _preFullscreenWindowState == WindowState.Maximized;
+            return;
+        }
         settings.IsWindowMaximized = WindowState == WindowState.Maximized;
         if (WindowState == WindowState.Normal)
         {

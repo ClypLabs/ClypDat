@@ -15,7 +15,7 @@ namespace ClypDat.App.Controls;
 ///
 /// The rail is display only. Seeking stays with the hit strip that wraps it
 /// (see FullscreenProgressBar_OnPointerPressed), so the trimmed-away spans
-/// remain seekable. Fullscreen adds a thumb; the hover bar keeps its geometry.
+/// remain seekable. Both playback bars use the same inset thumb geometry.
 /// </summary>
 public sealed class SeekRailControl : Control
 {

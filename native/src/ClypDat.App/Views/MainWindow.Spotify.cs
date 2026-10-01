@@ -185,6 +185,10 @@ public sealed partial class MainWindow
                     TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
                     Content = _spotifyViewport
                 };
+                _spotifyWindow.AddHandler(PointerWheelChangedEvent, (_, e) =>
+                {
+                    if (ViewModel?.IsVideoFullscreen == true) VideoHost_OnPointerWheelChanged(_spotifyWindow, e);
+                }, Avalonia.Interactivity.RoutingStrategies.Bubble);
                 _spotifyWindow.Opened += (_, _) =>
                 {
                     var handle = NativeHandleOf(_spotifyWindow);
@@ -296,6 +300,7 @@ public sealed partial class MainWindow
     /// claimed the top of the owner's z-band.</summary>
     private void RestoreOverlayChrome()
     {
+        if (ViewModel?.IsVideoFullscreen == true && !_fullscreenActivity.ControlsVisible) return;
         RepositionEditorHoverControlsSafe(force: true);
     }
 
