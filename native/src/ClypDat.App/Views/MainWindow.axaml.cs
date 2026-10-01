@@ -245,7 +245,7 @@ public sealed partial class MainWindow : Window
     // The hover bar moves inside a fixed window, clipped at the video's lower
     // edge so it slips behind the timeline. On Server, native per-pixel
     // compositing keeps empty area transparent; see ServerPerPixelOverlay.
-    private const double HoverControlsSlideDistance = 54;
+    private const double HoverControlsSlideDistance = 62;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan FullscreenControlsSlideDuration = TimeSpan.FromMilliseconds(220);
     // Fullscreen uses a fraction so a changing panel height or display scale
@@ -10351,8 +10351,8 @@ public sealed partial class MainWindow : Window
         if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
         var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var width = Math.Max(1, EditorVideoHost.Bounds.Width);
-        // 38 DIPs for the controls and 16 for the seek thumb and hit strip.
-        const double barHeight = 54;
+        // 38 DIPs for controls, 16 for the thumb strip, and 8 above the thumb.
+        const double barHeight = HoverControlsSlideDistance;
         var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
         // The OWNER's scaling, not the bar's. Position is in physical pixels
         // while Height is in DIPs, so converting between them needs the real
@@ -10627,7 +10627,11 @@ public sealed partial class MainWindow : Window
         layout.Children.Add(transportGroup);
         layout.Children.Add(fullscreenButton);
 
-        var barContent = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        var barContent = new Grid
+        {
+            RowDefinitions = new RowDefinitions("Auto,*"),
+            Margin = new Thickness(0, 8, 0, 0),
+        };
         Grid.SetRow(progressStrip, 0);
         Grid.SetRow(layout, 1);
         barContent.Children.Add(progressStrip);
