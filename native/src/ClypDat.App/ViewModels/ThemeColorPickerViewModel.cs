@@ -92,6 +92,24 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         Write(color, hue is { } h ? new HsvColor(1, h, hsv.S, hsv.V) : null);
     }
 
+    /// <summary>
+    /// Puts a different colour in the hex and RGB boxes while the spectrum
+    /// keeps its position: the base picker uses this to name the colour the
+    /// theme is painted in, which is a clamped version of the point under the
+    /// cursor. Moving the cursor to that colour instead pinned it inside the
+    /// band and stopped it being dragged anywhere else.
+    /// </summary>
+    public void ShowPainted(string hex)
+    {
+        if (!ThemeColor.TryParseHex(hex, out var color)) return;
+        _updating = true;
+        SetProperty(ref _hexText, color.Hex, nameof(HexText));
+        SetProperty(ref _redText, color.Red.ToString(), nameof(RedText));
+        SetProperty(ref _greenText, color.Green.ToString(), nameof(GreenText));
+        SetProperty(ref _blueText, color.Blue.ToString(), nameof(BlueText));
+        _updating = false;
+    }
+
     public void Set(ThemeColor color, HsvColor? hsv = null)
     {
         Write(color, hsv);

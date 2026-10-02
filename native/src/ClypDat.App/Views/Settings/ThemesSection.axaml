@@ -181,7 +181,11 @@
                     <!-- Bound on HsvColor, not Color. Dragging into pure black or
                          pure white throws the hue away in RGB, so the hue slider
                          would jump back to red the moment the spectrum hit an edge. -->
-                    <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8" />
+                    <!-- Cropped to the band a base is painted in (BaseSpectrumMinValue),
+                         so the whole square is usable rather than mostly colours
+                         that all paint the same. -->
+                    <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
+                                      MinValue="{Binding BaseSpectrumMinValue}" MaxValue="{Binding BaseSpectrumMaxValue}" MaxSaturation="{Binding BaseSpectrumMaxSaturation}" />
                     <cp:ColorSlider Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
                   </Grid>
                   <StackPanel Spacing="4">

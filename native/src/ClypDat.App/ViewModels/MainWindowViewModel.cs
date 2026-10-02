@@ -261,7 +261,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.RecentThemeColors ??= new();
         // Each picker owns one of the editor's two colours and writes straight
         // into it. Nothing sits between the spectrum and the value Apply saves.
-        BasePicker = new ThemeColorPickerViewModel(_themeEditorBaseColor, hex => { _themeEditorBasePick = hex; ThemeEditorBaseColor = SnapBasePicker(hex, ThemeEditorLightMode); PreviewThemeEditor(); });
+        BasePicker = new ThemeColorPickerViewModel(_themeEditorBaseColor, hex => { _themeEditorBasePick = hex; ThemeEditorBaseColor = PaintBase(hex, ThemeEditorLightMode, moveCursor: false); PreviewThemeEditor(); });
         AccentPicker = new ThemeColorPickerViewModel(_themeEditorAccentColor, hex => { ThemeEditorAccentColor = hex; PreviewThemeEditor(); });
         Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
@@ -525,24 +525,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _themeEditorLightMode, value)) return;
-            ThemeEditorBaseColor = SnapBasePicker(_themeEditorBasePick, value);
+            OnPropertyChanged(nameof(BaseSpectrumMinValue));
+            OnPropertyChanged(nameof(BaseSpectrumMaxValue));
+            OnPropertyChanged(nameof(BaseSpectrumMaxSaturation));
+            ThemeEditorBaseColor = PaintBase(_themeEditorBasePick, value, moveCursor: true);
             PreviewThemeEditor();
         }
     }
 
+    // The part of the HSV square the base spectrum shows, per mode. A custom
+    // theme's ground is clamped into a band text can be read on, so a full
+    // spectrum spent most of its area on colours that all paint the same deep
+    // or pale shade, and the cursor sat over a colour the app was not. Cropped
+    // to roughly the band, every point in the square is a different ground and
+    // looks close to it; the hex and RGB boxes give the exact one.
+    public int BaseSpectrumMinValue => ThemeEditorLightMode ? 86 : 3;
+    public int BaseSpectrumMaxValue => ThemeEditorLightMode ? 100 : 30;
+    public int BaseSpectrumMaxSaturation => ThemeEditorLightMode ? 30 : 100;
+
     /// <summary>
-    /// Moves the base picker onto the colour the theme is actually painted in
-    /// and returns it. A custom theme's ground is clamped into a band the UI can
-    /// be read on, so a pale pick on a dark theme paints a deep shade of it; the
-    /// picker showing the pale pick meant it named a colour the app was not.
+    /// The colour a custom theme with this base is actually painted in, shown in
+    /// the base picker's hex and RGB boxes. moveCursor also puts the spectrum
+    /// on it, for opening a theme or switching mode; while dragging, the cursor
+    /// stays where the pointer is.
     /// </summary>
-    private string SnapBasePicker(string hex, bool light)
+    private string PaintBase(string hex, bool light, bool moveCursor)
     {
         if (!Color.TryParse(hex, out var pick)) return hex;
         var ground = AppThemeService.CustomGround(pick, light);
         var groundHex = $"#{ground.R:X2}{ground.G:X2}{ground.B:X2}";
-        if (!string.Equals(groundHex, BasePicker.HexText, StringComparison.OrdinalIgnoreCase))
-            BasePicker.Load(groundHex, BasePicker.HsvColor.H);
+        if (moveCursor) BasePicker.Load(groundHex, BasePicker.HsvColor.H);
+        else BasePicker.ShowPainted(groundHex);
         return groundHex;
     }
     // One picker per colour, each writing straight into the theme it is editing.
@@ -698,10 +711,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // the user changing one, and must not repaint the app on the way in.
         BasePicker.Load(theme.BaseColor);
         _themeEditorBasePick = theme.BaseColor;
-        // Themes saved before the picker snapped hold the raw pick; open them on
-        // the colour they are painted in. Painting that colour again gives the
-        // same result, so this changes nothing on screen.
-        ThemeEditorBaseColor = SnapBasePicker(theme.BaseColor, theme.LightMode);
+        OnPropertyChanged(nameof(BaseSpectrumMinValue));
+        OnPropertyChanged(nameof(BaseSpectrumMaxValue));
+        OnPropertyChanged(nameof(BaseSpectrumMaxSaturation));
+        // Themes saved before this hold the raw pick; open them on the colour
+        // they are painted in. Painting that colour again gives the same
+        // result, so this changes nothing on screen.
+        ThemeEditorBaseColor = PaintBase(theme.BaseColor, theme.LightMode, moveCursor: true);
         AccentPicker.Load(theme.AccentColor);
         OnPropertyChanged(nameof(IsThemeEditorOpen));
         OnPropertyChanged(nameof(IsThemeEditorSaved));
