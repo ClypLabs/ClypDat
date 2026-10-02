@@ -143,6 +143,24 @@ internal static class ClipHostingService
         return await ReadBrowserUrlAsync(response, "The subscription page could not open. Try again shortly.", cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Redeems a plan key (CLYP-XXXX-XXXX-XXXX) for the signed-in account. Returns
+    /// the plan's name and when it ends (null for permanent); the site's refusal
+    /// (invalid, used, already redeemed, too many tries) comes back as its message.
+    /// </summary>
+    public static async Task<(string PlanName, DateTimeOffset? EndsAt)> RedeemKeyAsync(string token, string code, CancellationToken cancellationToken)
+    {
+        using var request = Authorized(HttpMethod.Post, "api/desktop/billing/redeem", token);
+        request.Content = JsonContent.Create(new RedeemRequest { Code = code });
+        using var response = await Api.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        // 404 here is the site's "that key isn't valid", worth showing as is.
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            throw new ClipHostingException("That key isn't valid. Check it and try again.", status: response.StatusCode);
+        await ThrowIfFailedAsync(response, "The key could not be redeemed. Try again shortly.", cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadFromJsonAsync<RedeemResponse>(cancellationToken).ConfigureAwait(false);
+        return (body?.PlanName ?? "Your plan", DateTimeOffset.TryParse(body?.EndsAt, out var ends) ? ends : null);
+    }
+
     // Opened with the shell, so only ever an https page.
     private static async Task<string> ReadBrowserUrlAsync(HttpResponseMessage response, string fallback, CancellationToken cancellationToken)
     {
@@ -280,6 +298,17 @@ internal static class ClipHostingService
     private sealed class CheckoutRequest
     {
         [JsonPropertyName("slug")] public string Slug { get; init; } = string.Empty;
+    }
+
+    private sealed class RedeemRequest
+    {
+        [JsonPropertyName("code")] public string Code { get; init; } = string.Empty;
+    }
+
+    private sealed class RedeemResponse
+    {
+        [JsonPropertyName("planName")] public string? PlanName { get; set; }
+        [JsonPropertyName("endsAt")] public string? EndsAt { get; set; }
     }
 
     private sealed class UrlResponse

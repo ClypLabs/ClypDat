@@ -353,6 +353,25 @@ public sealed partial class MainWindowViewModel
         ClipPlanMessage = "Finish checking out in your browser. Your plan shows up here as soon as it's paid.";
     });
 
+    private string _clipKeyCode = string.Empty;
+    // Settings > Account > Clip links: a key from a giveaway or a tester invite.
+    public string ClipKeyCode
+    {
+        get => _clipKeyCode;
+        set { if (SetProperty(ref _clipKeyCode, value ?? string.Empty)) OnPropertyChanged(nameof(CanRedeemClipKey)); }
+    }
+    public bool CanRedeemClipKey => ClipKeyCode.Trim().Length >= 12;
+
+    /// <summary>Redeems the typed key; the plan arrives with the account's next poll, which this brings forward.</summary>
+    public Task RedeemClipKeyAsync() => RunClipPlanActionAsync(async cancellationToken =>
+    {
+        var token = await GetClipHostingTokenAsync(cancellationToken);
+        var (planName, endsAt) = await ClipHostingService.RedeemKeyAsync(token, ClipKeyCode.Trim(), cancellationToken);
+        ClipKeyCode = string.Empty;
+        _clypDatAccount.ExpectLinkChange();
+        ClipPlanMessage = endsAt is { } until ? $"{planName} added until {FormatPlanDate(until)}." : $"{planName} added.";
+    });
+
     /// <summary>Card, invoices, changing plan and cancelling all live in the subscription portal.</summary>
     public Task ManageClipPlanAsync() => RunClipPlanActionAsync(async cancellationToken =>
     {

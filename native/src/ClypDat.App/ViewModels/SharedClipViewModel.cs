@@ -16,10 +16,10 @@ public sealed class SharedClipViewModel : ViewModelBase
         Bytes = clip.Bytes;
         ThumbnailUrl = clip.ThumbnailUrl;
         Title = string.IsNullOrWhiteSpace(clip.Title) ? "Untitled clip" : clip.Title;
-        var parts = new List<string> { clip.CreatedAt.ToLocalTime().ToString("d MMM yyyy", CultureInfo.CurrentCulture) };
-        if (clip.DurationMs is > 0 and var ms) parts.Add(ClipDurationFormatter.Format(TimeSpan.FromMilliseconds(ms)));
-        parts.Add(MainWindowViewModel.FormatStorage(clip.Bytes));
-        Details = string.Join(" · ", parts);
+        // The length sits on the thumbnail, as on library tiles; the line under
+        // the title is when it was shared and how much storage it takes.
+        DurationLabel = clip.DurationMs is > 0 and var ms ? ClipDurationFormatter.Format(TimeSpan.FromMilliseconds(ms)) : null;
+        Details = $"{clip.CreatedAt.ToLocalTime().ToString("d MMM yyyy", CultureInfo.CurrentCulture)} · {MainWindowViewModel.FormatStorage(clip.Bytes)}";
     }
 
     public string Id { get; }
@@ -27,6 +27,8 @@ public sealed class SharedClipViewModel : ViewModelBase
     public long Bytes { get; }
     public string Title { get; }
     public string Details { get; }
+    public string? DurationLabel { get; }
+    public bool HasDuration => DurationLabel is not null;
     internal string? ThumbnailUrl { get; }
 
     private Bitmap? _thumbnail;
@@ -52,7 +54,7 @@ public sealed class SharedClipViewModel : ViewModelBase
         set { if (SetProperty(ref _isBusy, value)) OnPropertyChanged(nameof(DeleteLabel)); }
     }
 
-    public string DeleteLabel => IsBusy ? "Deleting…" : ConfirmingDelete ? "Delete for good" : "Delete";
+    public string DeleteLabel => IsBusy ? "Deleting…" : ConfirmingDelete ? "Click again to delete for good" : "Delete";
 
     private bool _copied;
     public bool Copied

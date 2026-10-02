@@ -189,6 +189,22 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </Border>
+            <!-- A key from a giveaway or a tester invite adds a plan without paying. -->
+            <Border Classes="settingsRow static" Padding="20,0,20,16" MinHeight="0">
+              <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                <TextBlock Classes="settingsRowDescSm" Text="Have a key?" VerticalAlignment="Center" />
+                <TextBox Grid.Column="1" Classes="settingsInput" Text="{Binding ClipKeyCode}" PlaceholderText="CLYP-XXXX-XXXX-XXXX"
+                         MaxLength="40" FontFamily="Consolas, monospace" KeyDown="ClipKeyBox_OnKeyDown" />
+                <Button Grid.Column="2" Content="Redeem" Click="RedeemClipKeyButton_OnClick" VerticalAlignment="Center">
+                  <Button.IsEnabled>
+                    <MultiBinding Converter="{x:Static conv:BoolConverters.And}">
+                      <Binding Path="CanRedeemClipKey" />
+                      <Binding Path="!ClipPlanBusy" />
+                    </MultiBinding>
+                  </Button.IsEnabled>
+                </Button>
+              </Grid>
+            </Border>
             <Border Classes="settingsRow static" Padding="20,0,20,16" MinHeight="0" IsVisible="{Binding ClipPlanHasMessage}">
               <Border Classes="settingsNotice">
                 <TextBlock Classes="settingsNoticeText" Text="{Binding ClipPlanMessage}" TextWrapping="Wrap" />

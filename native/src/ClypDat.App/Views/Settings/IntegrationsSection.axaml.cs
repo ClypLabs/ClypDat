@@ -76,6 +76,18 @@ public sealed partial class IntegrationsSection : UserControl
         if (sender is Button { Tag: string slug } && DataContext is MainWindowViewModel vm) await vm.BuyClipPlanAsync(slug);
     }
 
+    private async void RedeemClipKeyButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) await vm.RedeemClipKeyAsync();
+    }
+
+    private async void ClipKeyBox_OnKeyDown(object? sender, Avalonia.Input.KeyEventArgs e)
+    {
+        if (e.Key != Avalonia.Input.Key.Enter || DataContext is not MainWindowViewModel { CanRedeemClipKey: true, ClipPlanBusy: false } vm) return;
+        e.Handled = true;
+        await vm.RedeemClipKeyAsync();
+    }
+
     private async void ManageClipPlanButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm) await vm.ManageClipPlanAsync();
