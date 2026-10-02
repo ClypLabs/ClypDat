@@ -81,9 +81,15 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     public string Error { get => _error; private set => SetProperty(ref _error, value); }
 
     /// <summary>Seeds the controls without reporting a change.</summary>
-    public void Load(string hex)
+    /// <param name="hue">
+    /// Kept instead of the hue the colour converts to. A grey or near-black has
+    /// no hue of its own, and the slider would otherwise jump to red.
+    /// </param>
+    public void Load(string hex, double? hue = null)
     {
-        if (ThemeColor.TryParseHex(hex, out var color)) Write(color);
+        if (!ThemeColor.TryParseHex(hex, out var color)) return;
+        var hsv = Color.FromRgb(color.Red, color.Green, color.Blue).ToHsv();
+        Write(color, hue is { } h ? new HsvColor(1, h, hsv.S, hsv.V) : null);
     }
 
     public void Set(ThemeColor color, HsvColor? hsv = null)

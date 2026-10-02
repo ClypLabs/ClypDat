@@ -595,6 +595,11 @@ internal static class AppThemeService
     private static (Color Ground, bool Light) SurfaceBase(Color picked, bool light)
     {
         var (hue, saturation, lightness) = ToHsl(picked);
+        // A colour that is already a usable ground is painted exactly as picked.
+        // The theme editor snaps its base picker to the ground it paints, so the
+        // colour it shows and saves is this one; damping it a second time would
+        // drift it away from what the picker says.
+        if (IsGround(picked, saturation, light)) return (picked, light);
         var ground = FitLuminance(
             hue,
             Damp(saturation, 0, CustomSurfaceSaturationKnee, 0, CustomSurfaceMaxSaturation),
@@ -607,6 +612,26 @@ internal static class AppThemeService
             light ? CustomLightMinLuminance : CustomDarkMinLuminance,
             light ? CustomLightMaxLuminance : CustomDarkMaxLuminance);
         return (ground, light);
+    }
+
+    /// <summary>The colour a custom theme with this base and Light mode is painted in.</summary>
+    public static Color CustomGround(Color picked, bool light) => SurfaceBase(picked, light).Ground;
+
+    // Inside the band SurfaceBase produces: saturation at most the ceiling and
+    // luminance inside the mode's range. The allowances absorb rounding the
+    // ground to 8-bit channels, which can step just past either edge.
+    private static bool IsGround(Color color, double saturation, bool light)
+    {
+        var luminance = RelativeLuminance(color);
+        // Sized by brute force over a 0..255 grid of picks in steps of 15, both
+        // modes: with these, every ground SurfaceBase returns paints back to
+        // itself. Near white a one-step rounding moves HSL saturation a lot,
+        // hence the wider saturation allowance in light mode.
+        var (minimum, maximum, tolerance, saturationAllowance) = light
+            ? (CustomLightMinLuminance, CustomLightMaxLuminance, 0.01, 0.10)
+            : (CustomDarkMinLuminance, CustomDarkMaxLuminance, 0.0015, 0.05);
+        return saturation <= CustomSurfaceMaxSaturation + saturationAllowance
+            && luminance >= minimum - tolerance && luminance <= maximum + tolerance;
     }
 
     // Luminance rises monotonically with lightness at a fixed hue and

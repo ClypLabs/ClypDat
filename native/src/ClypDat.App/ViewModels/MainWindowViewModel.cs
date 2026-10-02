@@ -261,7 +261,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.RecentThemeColors ??= new();
         // Each picker owns one of the editor's two colours and writes straight
         // into it. Nothing sits between the spectrum and the value Apply saves.
-        BasePicker = new ThemeColorPickerViewModel(_themeEditorBaseColor, hex => { ThemeEditorBaseColor = hex; PreviewThemeEditor(); });
+        BasePicker = new ThemeColorPickerViewModel(_themeEditorBaseColor, hex => { _themeEditorBasePick = hex; ThemeEditorBaseColor = SnapBasePicker(hex, ThemeEditorLightMode); PreviewThemeEditor(); });
         AccentPicker = new ThemeColorPickerViewModel(_themeEditorAccentColor, hex => { ThemeEditorAccentColor = hex; PreviewThemeEditor(); });
         Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
@@ -513,12 +513,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeEditorAccentColor { get => _themeEditorAccentColor; private set => SetProperty(ref _themeEditorAccentColor, value); }
     public string ThemeEditorError { get => _themeEditorError; private set => SetProperty(ref _themeEditorError, value); }
     private bool _themeEditorLightMode;
+    // The base colour as last picked, before snapping. Switching Light mode
+    // re-derives the ground from this rather than from the other mode's ground,
+    // so flipping it on and off lands back where it started.
+    private string _themeEditorBasePick = "#0D1116";
     // The user's choice, previewed live like the colours. Nothing else turns a
     // custom theme light.
     public bool ThemeEditorLightMode
     {
         get => _themeEditorLightMode;
-        set { if (SetProperty(ref _themeEditorLightMode, value)) PreviewThemeEditor(); }
+        set
+        {
+            if (!SetProperty(ref _themeEditorLightMode, value)) return;
+            ThemeEditorBaseColor = SnapBasePicker(_themeEditorBasePick, value);
+            PreviewThemeEditor();
+        }
+    }
+
+    /// <summary>
+    /// Moves the base picker onto the colour the theme is actually painted in
+    /// and returns it. A custom theme's ground is clamped into a band the UI can
+    /// be read on, so a pale pick on a dark theme paints a deep shade of it; the
+    /// picker showing the pale pick meant it named a colour the app was not.
+    /// </summary>
+    private string SnapBasePicker(string hex, bool light)
+    {
+        if (!Color.TryParse(hex, out var pick)) return hex;
+        var ground = AppThemeService.CustomGround(pick, light);
+        var groundHex = $"#{ground.R:X2}{ground.G:X2}{ground.B:X2}";
+        if (!string.Equals(groundHex, BasePicker.HexText, StringComparison.OrdinalIgnoreCase))
+            BasePicker.Load(groundHex, BasePicker.HsvColor.H);
+        return groundHex;
     }
     // One picker per colour, each writing straight into the theme it is editing.
     public ThemeColorPickerViewModel BasePicker { get; }
@@ -672,6 +697,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Load, not Set: seeding the controls with a theme's saved colours is not
         // the user changing one, and must not repaint the app on the way in.
         BasePicker.Load(theme.BaseColor);
+        _themeEditorBasePick = theme.BaseColor;
+        // Themes saved before the picker snapped hold the raw pick; open them on
+        // the colour they are painted in. Painting that colour again gives the
+        // same result, so this changes nothing on screen.
+        ThemeEditorBaseColor = SnapBasePicker(theme.BaseColor, theme.LightMode);
         AccentPicker.Load(theme.AccentColor);
         OnPropertyChanged(nameof(IsThemeEditorOpen));
         OnPropertyChanged(nameof(IsThemeEditorSaved));
@@ -1533,6 +1563,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         private set
         {
             if (!SetProperty(ref _isSettingsVisible, value)) return;
+            // Leaving Settings drops the editor's unapplied preview at once, the
+            // same as moving to another section does, so the app is never left
+            // painted in colours nobody saved.
+            if (!value && IsThemeEditorOpen) CancelCustomTheme();
             UpdateDiscordPresence();
             OnPropertyChanged(nameof(IsLibraryVisible));
             OnPropertyChanged(nameof(ShowLibraryActions));
