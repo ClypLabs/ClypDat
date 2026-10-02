@@ -148,13 +148,12 @@
          the spectrum previewed one colour live while Apply saved another. There
          is no shared state left to disagree, and the settings column had the
          width for both all along. -->
-    <!-- Sized to its content rather than to the settings column. The pickers
-         are fixed width - ColorSpectrum is always square, so a starred column
-         only ever padded one out with dead space - so the card stops where its
-         content does rather than trailing empty card off one side. -->
+    <!-- Full width like every other card, so its edges line up with the ones
+         above and below; the pickers are fixed width (ColorSpectrum is always
+         square), so they sit centred in it rather than hugging the left edge. -->
     <StackPanel Classes="settingsGroup" IsVisible="{Binding IsThemeEditorOpen}">
       <TextBlock Classes="settingsGroupLabel" Text="CUSTOM THEME EDITOR" />
-      <Border Classes="settingsGroupCard" HorizontalAlignment="Left">
+      <Border Classes="settingsGroupCard">
         <StackPanel>
           <Border Classes="settingsRow static">
             <StackPanel Spacing="5">
@@ -163,8 +162,18 @@
             </StackPanel>
           </Border>
           <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Light mode" />
+                <TextBlock Classes="settingsRowDesc" Text="Paint this theme on a light background. Off keeps it dark, however pale the base colour." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding ThemeEditorLightMode, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
           <Border Classes="settingsRow static">
-            <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16">
+            <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16" HorizontalAlignment="Center">
               <Border Grid.Column="0" Classes="providerSetting" Padding="14">
                 <StackPanel Spacing="10">
                   <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
@@ -252,12 +261,7 @@
           <Border Classes="settingsRowDivider" />
           <Border Classes="settingsRow static">
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="20">
-              <!-- MaxWidth so the sentence wraps instead of setting the card's width.
-                   TextWrapping only takes effect once something constrains the line;
-                   left unconstrained a TextBlock asks for its full unwrapped length
-                   at measure time, and this one was long enough to stretch the card
-                   back across the settings column no matter what the pickers wanted. -->
-              <StackPanel Spacing="6" MaxWidth="380" HorizontalAlignment="Left" VerticalAlignment="Center">
+              <StackPanel Spacing="6" HorizontalAlignment="Left" VerticalAlignment="Center">
                 <TextBlock Classes="settingsRowDesc" Text="Apply saves and selects this theme. Close drops anything you haven't applied." />
                 <TextBlock Classes="settingsRowError" Text="{Binding ThemeEditorError}" IsVisible="{Binding ThemeEditorError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
               </StackPanel>

@@ -140,26 +140,6 @@ internal static class AppThemeService
     private const double CustomLightMinLuminance = 0.62;
     private const double CustomLightMaxLuminance = 0.92;
 
-    // Which band a pick lands in. A light theme needs a pale colour, and pale
-    // means two things at once - bright AND washed out. Testing brightness alone
-    // does not work whichever measure you use:
-    //
-    //   Relative luminance weights green at 0.7152, so #22D011 - a fully
-    //   saturated green - scores 0.455 and a 0.45 threshold turns the app white.
-    //   Pure yellow scores 0.928 and pure cyan 0.787, and none of the three is a
-    //   colour anything can be read on.
-    //
-    //   HSL lightness alone has the opposite fault: it puts every fully
-    //   saturated hue at exactly 0.5, so a genuinely pale #B0B0B0 at 0.69 and a
-    //   pale green at 0.71 sit barely above colours that must stay dark.
-    //
-    // So both, with chroma - S scaled by how far L is from the extremes, which
-    // is what separates "pale" from "vivid" - carrying the second half. For
-    // reference the two grounds this has to agree with, #0D1116 and its light
-    // inverse, both sit at chroma 0.035.
-    private const double CustomLightMinPickLightness = 0.62;
-    private const double CustomLightMaxPickChroma = 0.35;
-
     private static readonly IReadOnlyDictionary<string, ThemeTransform> Transforms =
         new Dictionary<string, ThemeTransform>(StringComparer.OrdinalIgnoreCase)
         {
@@ -281,7 +261,7 @@ internal static class AppThemeService
         // Everything downstream reads the damped ground, never the raw pick: the
         // colour the theme is painted in and the colour the accent has to stay
         // legible against are the same colour, and it is this one.
-        var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor)) : (default, false);
+        var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor), customTheme.LightMode) : (default, false);
         var accent = isCustom ? AdjustAccent(Color.Parse(customTheme!.AccentColor), customBase) : useSystemAccent ? systemAccent : PresetAccent(preset);
         var appBackground = isCustom ? customBase : Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
 
@@ -603,18 +583,18 @@ internal static class AppThemeService
     // hue/lightness anchor changes; text is chosen from true contrast rather
     // than assuming every custom base is dark.
     /// <summary>
-    /// The ground a custom theme is actually painted in, and whether that ground
-    /// is a light one. The pick contributes its hue; its chroma and lightness are
-    /// clamped into the band ClypDat's own palette occupies, because a colour
-    /// chosen off a spectrum is a colour, not a UI background. Math.Clamp rather
-    /// than the file's own Clamp, which is a 0..1 clamp and would read
-    /// confusingly here.
+    /// The ground a custom theme is actually painted in. The pick contributes its
+    /// hue; its chroma and lightness are clamped into the band ClypDat's own
+    /// palette occupies, because a colour chosen off a spectrum is a colour, not
+    /// a UI background. Which band - dark or light - is the theme's Light mode
+    /// switch, never the pick: guessing it from how pale the pick was turned the
+    /// whole app white whenever the spectrum's cursor strayed toward its top-left
+    /// corner. Math.Clamp rather than the file's own Clamp, which is a 0..1 clamp
+    /// and would read confusingly here.
     /// </summary>
-    private static (Color Ground, bool Light) SurfaceBase(Color picked)
+    private static (Color Ground, bool Light) SurfaceBase(Color picked, bool light)
     {
         var (hue, saturation, lightness) = ToHsl(picked);
-        var chroma = saturation * (1 - Math.Abs(2 * lightness - 1));
-        var light = lightness >= CustomLightMinPickLightness && chroma <= CustomLightMaxPickChroma;
         var ground = FitLuminance(
             hue,
             Damp(saturation, 0, CustomSurfaceSaturationKnee, 0, CustomSurfaceMaxSaturation),

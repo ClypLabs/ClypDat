@@ -9,9 +9,12 @@ public sealed class CustomThemeSettings
     public string Name { get; set; } = "Custom theme";
     public string BaseColor { get; set; } = "#0D1116";
     public string AccentColor { get; set; } = "#5864E8";
+    // Off unless the user turns it on: a custom theme is dark however pale its
+    // base colour is.
+    public bool LightMode { get; set; }
 }
 
-public sealed record ThemeFile(int SchemaVersion, string Name, string BaseColor, string AccentColor);
+public sealed record ThemeFile(int SchemaVersion, string Name, string BaseColor, string AccentColor, bool LightMode = false);
 
 public static class CustomThemeLibrary
 {
@@ -63,7 +66,7 @@ public static class CustomThemeLibrary
     }
 
     public static string Export(CustomThemeSettings theme) => JsonSerializer.Serialize(
-        new ThemeFile(ThemeFileSchemaVersion, theme.Name, theme.BaseColor, theme.AccentColor),
+        new ThemeFile(ThemeFileSchemaVersion, theme.Name, theme.BaseColor, theme.AccentColor, theme.LightMode),
         new JsonSerializerOptions { WriteIndented = true });
 
     public static bool TryImport(string json, IEnumerable<CustomThemeSettings> existing,
@@ -76,7 +79,7 @@ public static class CustomThemeLibrary
             if (file is null || file.SchemaVersion != ThemeFileSchemaVersion) { error = "Unsupported theme schema."; return false; }
             if (!TryNormalizeName(file.Name, existing, null, out var name, out error) && error != "Theme name already exists.") return false;
             if (!IsColor(file.BaseColor) || !IsColor(file.AccentColor)) { error = "Theme colours must use #RRGGBB."; return false; }
-            theme = new CustomThemeSettings { Name = UniqueName(name, existing), BaseColor = file.BaseColor.ToUpperInvariant(), AccentColor = file.AccentColor.ToUpperInvariant() };
+            theme = new CustomThemeSettings { Name = UniqueName(name, existing), BaseColor = file.BaseColor.ToUpperInvariant(), AccentColor = file.AccentColor.ToUpperInvariant(), LightMode = file.LightMode };
             error = null;
             return true;
         }
