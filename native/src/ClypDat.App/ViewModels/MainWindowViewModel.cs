@@ -1476,6 +1476,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         private set
         {
             if (!SetProperty(ref _isEditorVisible, value)) return;
+            // Opening a clip from anywhere leaves the Shared clips page.
+            if (value) IsSharedClipsVisible = false;
             MemoryTrimmer.EditorOpen = value;
             // The idle filmstrip sweep is the heaviest thing the app does to
             // the library disk (up to 11 ffmpeg frame grabs per clip, across
@@ -1538,7 +1540,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible && !IsHelpVisible;
+    public bool IsLibraryVisible => !IsEditorVisible && !IsSettingsVisible && !IsHelpVisible && !IsSharedClipsVisible;
 
     public void OpenHelp()
     {

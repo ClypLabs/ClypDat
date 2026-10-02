@@ -116,6 +116,14 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// app shows it without asking the site again. The next refresh replaces
     /// it with the site's own figure.
     /// </summary>
+    /// <summary>The site's own storage figure from a fresher answer than the poll (the Shared clips list).</summary>
+    public void SetPlanUsage(long usedBytes)
+    {
+        if (_snapshot.Plan is not { } plan || plan.UsedBytes == usedBytes) return;
+        _snapshot = _snapshot with { Plan = plan with { UsedBytes = Math.Max(0, usedBytes) } };
+        Changed?.Invoke(this, _snapshot);
+    }
+
     public void AdjustPlanUsage(long deltaBytes)
     {
         if (_snapshot.Plan is not { } plan || deltaBytes == 0) return;

@@ -455,9 +455,10 @@ public sealed partial class MainWindow : Window
                         _fullscreenActivity.Suspend();
                         _fullscreenCursor.Restore();
                     }
-                    if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsHelpVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
+                    if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible) or nameof(MainWindowViewModel.IsHelpVisible) or nameof(MainWindowViewModel.IsSharedClipsVisible) or nameof(MainWindowViewModel.IsEditorVisible) or nameof(MainWindowViewModel.IsEditorVideoLoading))
                         UpdateEditorSurfaceVisibility();
-                    if (e.PropertyName == nameof(MainWindowViewModel.IsHelpVisible) && ViewModel.IsHelpVisible)
+                    if ((e.PropertyName == nameof(MainWindowViewModel.IsHelpVisible) && ViewModel.IsHelpVisible)
+                        || (e.PropertyName == nameof(MainWindowViewModel.IsSharedClipsVisible) && ViewModel.IsSharedClipsVisible))
                     {
                         PauseEditorPlayback();
                         _clipHoverPreview.Stop("help navigation");
@@ -534,6 +535,7 @@ public sealed partial class MainWindow : Window
                         QueueEditorCropPreview(flush: true);
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsHelpVisible)
+                        or nameof(MainWindowViewModel.IsSharedClipsVisible)
                         or nameof(MainWindowViewModel.IsEditorVisible)
                         or nameof(MainWindowViewModel.SelectedVideoPath)
                         or nameof(MainWindowViewModel.IsGameFilterActive)
@@ -1338,6 +1340,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return;
         if (ViewModel.IsEditorVisible) CloseEditorButton_OnClick(sender, e);
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
+        ViewModel.CloseSharedClips();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
         ViewModel.SelectGameSection(key?.Key);
         ResetLibraryFilterScroll();
@@ -1347,6 +1350,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
+        ViewModel.CloseSharedClips();
         var key = (sender as Button)?.DataContext as FilterOptionViewModel;
         if (key is null) ResetLibraryToAllClips();
         else ViewModel.SelectClipTypeSection(key.Key);
@@ -1374,6 +1378,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
+        ViewModel.CloseSharedClips();
         ViewModel.ClearAllFilters();
         ResetLibraryFilterScroll();
     }
@@ -2030,7 +2035,17 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.IsHelpVisible) return;
         if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings(returnToEditor: false);
+        ViewModel.CloseSharedClips();
         ViewModel.OpenHelp();
+    }
+
+    private void SharedClipsButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null || ViewModel.IsSharedClipsVisible) return;
+        if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings(returnToEditor: false);
+        if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
+        CloseEditorForNavigation();
+        ViewModel.OpenSharedClips();
     }
 
     private async Task ReadChangelogAsync()
@@ -5680,7 +5695,7 @@ public sealed partial class MainWindow : Window
     // it means reopening one specific clip rather than just flipping a flag -
     // without that it couldn't be in the history at all, which is why Back
     // sat permanently disabled while a clip was open.
-    private enum ViewHistoryKind { Library, Settings, Help, Editor }
+    private enum ViewHistoryKind { Library, Settings, Help, SharedClips, Editor }
 
     // GameKey/ClipTypeKey only mean anything for a Library entry - the rail
     // selection active at that point, so Back/Forward step through the
@@ -5697,6 +5712,7 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null) return new ViewHistoryEntry(ViewHistoryKind.Library, null);
         if (ViewModel.IsEditorVisible) return new ViewHistoryEntry(ViewHistoryKind.Editor, ViewModel.SelectedVideoPath);
         if (ViewModel.IsHelpVisible) return new ViewHistoryEntry(ViewHistoryKind.Help, null);
+        if (ViewModel.IsSharedClipsVisible) return new ViewHistoryEntry(ViewHistoryKind.SharedClips, null);
         if (ViewModel.IsSettingsVisible) return new ViewHistoryEntry(ViewHistoryKind.Settings, null);
         return new ViewHistoryEntry(ViewHistoryKind.Library, null, ViewModel.ActiveGameFilterKey, ViewModel.ActiveClipTypeFilterKey);
     }
@@ -5748,6 +5764,7 @@ public sealed partial class MainWindow : Window
             {
                 case ViewHistoryKind.Editor:
                     if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
+                    ViewModel.CloseSharedClips();
                     var clip = ViewModel.AllClips.FirstOrDefault(c => string.Equals(c.Path, entry.ClipPath, StringComparison.OrdinalIgnoreCase));
                     // Deleted or renamed since it was visited - drop the entry
                     // rather than stranding the user on a dead history slot.
@@ -5766,6 +5783,7 @@ public sealed partial class MainWindow : Window
 
                 case ViewHistoryKind.Settings:
                     if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
+                    ViewModel.CloseSharedClips();
                     // Close the editor first so CloseSettings' own
                     // "restore whatever was open before" doesn't bring it back.
                     CloseEditorForNavigation();
@@ -5774,12 +5792,21 @@ public sealed partial class MainWindow : Window
 
                 case ViewHistoryKind.Help:
                     if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings(returnToEditor: false);
+                    ViewModel.CloseSharedClips();
                     CloseEditorForNavigation();
                     ViewModel.OpenHelp();
                     break;
 
+                case ViewHistoryKind.SharedClips:
+                    if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings(returnToEditor: false);
+                    if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
+                    CloseEditorForNavigation();
+                    ViewModel.OpenSharedClips();
+                    break;
+
                 default:
                     if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
+                    ViewModel.CloseSharedClips();
                     if (ViewModel.IsSettingsVisible) ViewModel.CloseSettings();
                     CloseEditorForNavigation();
                     // Game first, then clip-type - SelectClipTypeSection's own
@@ -5967,6 +5994,12 @@ public sealed partial class MainWindow : Window
 
         ViewModel.ClearAllFilters();
 
+        if (ViewModel.IsSharedClipsVisible)
+        {
+            ViewModel.CloseSharedClips();
+            return;
+        }
+
         if (ViewModel.IsHelpVisible)
         {
             ViewModel.CloseHelp(restoreEditor: false);
@@ -5993,6 +6026,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null) return;
         if (ViewModel.IsHelpVisible) ViewModel.CloseHelp(restoreEditor: false);
+        ViewModel.CloseSharedClips();
         ViewModel.OpenSettings();
         await ViewModel.RefreshOpenProcessesAsync();
     }
@@ -6815,6 +6849,14 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
+            if (ViewModel.IsSharedClipsVisible)
+            {
+                if (_viewHistoryIndex > 0) BackNavButton_OnClick(this, new RoutedEventArgs());
+                else ViewModel.CloseSharedClips();
+                e.Handled = true;
+                return;
+            }
+
             if (ViewModel.IsSettingsVisible)
             {
                 ViewModel.CloseSettings();
@@ -6832,7 +6874,7 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        if (ViewModel?.IsHelpVisible == true) return;
+        if (ViewModel?.IsHelpVisible == true || ViewModel?.IsSharedClipsVisible == true) return;
 
         // Space is reserved app-wide for play/pause and must never activate
         // whatever control currently has keyboard focus instead (a Settings

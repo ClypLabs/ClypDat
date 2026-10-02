@@ -99,8 +99,150 @@ public sealed partial class MainWindowViewModel
         OnPropertyChanged(nameof(ClipStoragePercent));
         OnPropertyChanged(nameof(ClipPlanCanManage));
         OnPropertyChanged(nameof(ClipPlanCanBuy));
+        OnPropertyChanged(nameof(SharedClipsStorageLabel));
         // A plan that has just arrived closes the list it was bought from.
         if (ClipPlanCanManage && ClipPlansOpen) ClipPlansOpen = false;
+        // Signed out, or links no longer offered: nothing left to show there.
+        // Posted because the poll reports from a background thread, and the
+        // page's visibility drives the editor surface.
+        if (!ClipLinksOffered) Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (!ClipLinksOffered) CloseSharedClips(); });
+    }
+
+    // --- The Shared clips page -------------------------------------------
+
+    public ObservableCollection<SharedClipViewModel> SharedClips { get; } = [];
+    private CancellationTokenSource? _sharedClipsCts;
+
+    private bool _isSharedClipsVisible;
+    public bool IsSharedClipsVisible
+    {
+        get => _isSharedClipsVisible;
+        private set
+        {
+            if (!SetProperty(ref _isSharedClipsVisible, value)) return;
+            OnPropertyChanged(nameof(IsLibraryVisible));
+            OnPropertyChanged(nameof(ShowLibraryActions));
+            OnPropertyChanged(nameof(ShowLibraryStatus));
+            OnPropertyChanged(nameof(ShowHeaderUpdateButton));
+        }
+    }
+
+    private bool _sharedClipsLoading;
+    public bool SharedClipsLoading
+    {
+        get => _sharedClipsLoading;
+        private set { if (SetProperty(ref _sharedClipsLoading, value)) OnPropertyChanged(nameof(SharedClipsEmpty)); }
+    }
+
+    private bool _sharedClipsLoaded;
+    public bool SharedClipsEmpty => _sharedClipsLoaded && !SharedClipsLoading && SharedClips.Count == 0 && !SharedClipsHasMessage;
+
+    private string? _sharedClipsMessage;
+    public string? SharedClipsMessage
+    {
+        get => _sharedClipsMessage;
+        private set
+        {
+            if (!SetProperty(ref _sharedClipsMessage, value)) return;
+            OnPropertyChanged(nameof(SharedClipsHasMessage));
+            OnPropertyChanged(nameof(SharedClipsEmpty));
+        }
+    }
+    public bool SharedClipsHasMessage => !string.IsNullOrWhiteSpace(SharedClipsMessage);
+
+    public string SharedClipsStorageLabel => ClipPlan is { IsActive: true } plan
+        ? $"{FormatStorage(plan.UsedBytes)} of {FormatStorage(plan.StorageBytes)} used"
+        : ClipPlan is { } lapsed && lapsed.UsedBytes > 0 ? $"{FormatStorage(lapsed.UsedBytes)} used · no plan" : "No plan";
+
+    public void OpenSharedClips()
+    {
+        if (IsSharedClipsVisible) return;
+        IsSharedClipsVisible = true;
+        IsEditorVisible = false;
+        _ = LoadSharedClipsAsync();
+    }
+
+    public void CloseSharedClips()
+    {
+        if (!IsSharedClipsVisible) return;
+        IsSharedClipsVisible = false;
+        _sharedClipsCts?.Cancel();
+    }
+
+    /// <summary>Reads the list from clypdat.xyz. Also the page's Refresh button.</summary>
+    public async Task LoadSharedClipsAsync()
+    {
+        _sharedClipsCts?.Cancel();
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        _sharedClipsCts = cts;
+        SharedClipsLoading = true;
+        SharedClipsMessage = null;
+        try
+        {
+            var token = await GetClipHostingTokenAsync(cts.Token);
+            var list = await ClipHostingService.ListAsync(token, cts.Token);
+            if (!ReferenceEquals(_sharedClipsCts, cts)) return;
+            SharedClips.Clear();
+            foreach (var clip in list.Clips) SharedClips.Add(new SharedClipViewModel(clip));
+            _clypDatAccount.SetPlanUsage(list.UsedBytes);
+            foreach (var card in SharedClips) _ = card.LoadThumbnailAsync(cts.Token);
+        }
+        catch (OperationCanceledException) when (!ReferenceEquals(_sharedClipsCts, cts)) { return; }
+        catch (Exception error) when (error is ClipHostingException or InvalidOperationException)
+        {
+            SharedClipsMessage = error.Message;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Shared clips: listing failed.", error);
+            SharedClipsMessage = "ClypDat couldn't be reached. Check your connection and try again.";
+        }
+        finally
+        {
+            if (ReferenceEquals(_sharedClipsCts, cts))
+            {
+                _sharedClipsLoaded = true;
+                SharedClipsLoading = false;
+                OnPropertyChanged(nameof(SharedClipsEmpty));
+            }
+        }
+    }
+
+    /// <summary>First press arms the card; the second deletes the clip and its link for good.</summary>
+    public async Task DeleteSharedClipAsync(SharedClipViewModel clip)
+    {
+        if (clip.IsBusy) return;
+        if (!clip.ConfirmingDelete)
+        {
+            foreach (var other in SharedClips) other.ConfirmingDelete = false;
+            clip.ConfirmingDelete = true;
+            return;
+        }
+        clip.IsBusy = true;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var token = await GetClipHostingTokenAsync(timeout.Token);
+            await ClipHostingService.DeleteAsync(token, clip.Id, timeout.Token);
+            SharedClips.Remove(clip);
+            NoteClipStorageChange(-clip.Bytes);
+            SharedClipsMessage = null;
+            OnPropertyChanged(nameof(SharedClipsEmpty));
+        }
+        catch (Exception error) when (error is ClipHostingException or InvalidOperationException)
+        {
+            SharedClipsMessage = error.Message;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Shared clips: delete failed.", error);
+            SharedClipsMessage = "The clip could not be deleted. Check your connection and try again.";
+        }
+        finally
+        {
+            clip.IsBusy = false;
+            clip.ConfirmingDelete = false;
+        }
     }
 
     /// <summary>"See plans": shows the plans with this country's prices, or hides them again.</summary>
