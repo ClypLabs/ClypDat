@@ -181,11 +181,20 @@
                     <!-- Bound on HsvColor, not Color. Dragging into pure black or
                          pure white throws the hue away in RGB, so the hue slider
                          would jump back to red the moment the spectrum hit an edge. -->
-                    <!-- Cropped to the band a base is painted in (BaseSpectrumMinValue),
-                         so the whole square is usable rather than mostly colours
-                         that all paint the same. -->
-                    <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
-                                      MinValue="{Binding BaseSpectrumMinValue}" MaxValue="{Binding BaseSpectrumMaxValue}" MaxSaturation="{Binding BaseSpectrumMaxSaturation}" />
+                    <!-- Cropped to the band a base is painted in, so the whole square
+                         is usable rather than mostly colours that all paint the same.
+                         One spectrum per mode with fixed ranges, swapped by
+                         visibility: ColorSpectrum rebuilds its bitmap asynchronously
+                         on every range change, so binding the ranges and flipping
+                         three of them at once raced, and whichever rebuild finished
+                         last could leave a square that drew one range and picked from
+                         another - a cursor that would not move past a line. -->
+                    <Panel>
+                      <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
+                                        MinValue="3" MaxValue="30" IsVisible="{Binding !ThemeEditorLightMode}" />
+                      <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
+                                        MinValue="86" MaxSaturation="30" IsVisible="{Binding ThemeEditorLightMode}" />
+                    </Panel>
                     <cp:ColorSlider Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
                   </Grid>
                   <StackPanel Spacing="4">
@@ -226,7 +235,16 @@
                 <StackPanel Spacing="10">
                   <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
                   <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
-                    <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8" />
+                    <!-- The same, for the accent: bright enough to read on a dark
+                         ground, deep enough on a light one. Picks just outside are
+                         still lifted or deepened; the hex and RGB boxes give the
+                         accent as painted. -->
+                    <Panel>
+                      <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
+                                        MinValue="45" IsVisible="{Binding !ThemeEditorLightMode}" />
+                      <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
+                                        MinValue="10" MaxValue="75" IsVisible="{Binding ThemeEditorLightMode}" />
+                    </Panel>
                     <cp:ColorSlider Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
                   </Grid>
                   <StackPanel Spacing="4">

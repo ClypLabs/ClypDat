@@ -614,6 +614,9 @@ internal static class AppThemeService
         return (ground, light);
     }
 
+    /// <summary>The accent a custom theme paints, lifted or deepened until it reads on its ground.</summary>
+    public static Color CustomAccent(Color accent, Color ground) => AdjustAccent(accent, ground);
+
     /// <summary>The colour a custom theme with this base and Light mode is painted in.</summary>
     public static Color CustomGround(Color picked, bool light) => SurfaceBase(picked, light).Ground;
 
