@@ -11,6 +11,8 @@ public sealed class ClipPlanOfferViewModel
     internal ClipPlanOfferViewModel(ClipPlanOffer offer)
     {
         Name = offer.Name;
+        // Plus is the middle plan and the one most people should pick.
+        IsRecommended = offer.Id == "plus";
         StorageLabel = MainWindowViewModel.FormatStorage(offer.StorageBytes);
         MonthlySlug = offer.MonthlySlug;
         YearlySlug = offer.YearlySlug;
@@ -19,6 +21,7 @@ public sealed class ClipPlanOfferViewModel
     }
 
     public string Name { get; }
+    public bool IsRecommended { get; }
     public string StorageLabel { get; }
     public string MonthlySlug { get; }
     public string YearlySlug { get; }

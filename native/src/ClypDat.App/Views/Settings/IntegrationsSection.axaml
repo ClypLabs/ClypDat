@@ -170,7 +170,15 @@
                     <Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="10" Padding="16,12">
                       <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
                         <StackPanel VerticalAlignment="Center" Spacing="2">
-                          <TextBlock Classes="settingsRowTitle" Text="{Binding Name}" />
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Classes="settingsRowTitle" Text="{Binding Name}" VerticalAlignment="Center" />
+                            <Border Classes="statusPill ok" IsVisible="{Binding IsRecommended}" VerticalAlignment="Center">
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Ellipse />
+                                <TextBlock Text="Recommended" />
+                              </StackPanel>
+                            </Border>
+                          </StackPanel>
                           <TextBlock Classes="settingsRowDescSm" Text="{Binding StorageLabel}" />
                         </StackPanel>
                         <Button Grid.Column="1" Content="{Binding MonthlyLabel}" Tag="{Binding MonthlySlug}" Click="BuyClipPlanButton_OnClick" VerticalAlignment="Center" />
