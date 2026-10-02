@@ -768,27 +768,38 @@ public partial class ShareDialog : Window
             await CopyLinkAsync(link);
             return;
         }
-        if (_shareCts is not null || _sharePath is null) return;
-        if (_shareReadyForLink)
+        if (_shareCts is null && _sharePath is not null && _shareReadyForLink)
         {
             await UploadLinkAsync();
             return;
         }
 
-        // AV1 does not play everywhere a link gets opened, and the original
-        // file may not be H.264 at all, so either is encoded as H.264 first.
-        // The upload starts when that encode finishes (StartShareEncodeAsync).
+        // Anything else gets an H.264 encode first - AV1 does not play
+        // everywhere a link gets opened, and the original file may not be
+        // H.264 at all. The upload starts when that encode finishes
+        // (StartShareEncodeAsync).
         _linkAfterEncode = true;
         if (_hasEncodeSelection && ShareAv1Toggle.IsChecked == true)
         {
-            // Av1Toggle_OnChanged re-encodes at the size already picked.
+            // Av1Toggle_OnChanged re-encodes at the size already picked,
+            // replacing an AV1 encode still running.
             ShareAv1Toggle.IsChecked = false;
             return;
         }
-        // Original: no size cap, at the clip's own resolution and frame rate.
-        _lastTargetBytes = 0;
+        if (_shareCts is not null)
+        {
+            // Already encoding as H.264: the upload follows it.
+            ShareStatusText.Text = "Encoding as H.264 for the link...";
+            return;
+        }
+        // Nothing picked yet, or Original: no size cap, at the clip's own
+        // resolution and frame rate. A failed encode retries its own size.
+        // With nothing picked the toggle change below encodes nothing.
+        ShareAv1Toggle.IsChecked = false;
+        var targetBytes = _hasEncodeSelection ? _lastTargetBytes : 0;
+        _lastTargetBytes = targetBytes;
         _hasEncodeSelection = true;
-        await StartShareEncodeAsync(0);
+        await StartShareEncodeAsync(targetBytes);
     }
 
     private async Task UploadLinkAsync()
@@ -922,20 +933,14 @@ public partial class ShareDialog : Window
         return null;
     }
 
-    // Shown only to accounts that are offered clip links. Disabled while an
-    // encode runs; "Cancel upload" while one is going up; "Copy link" once
-    // this file has one.
+    // Shown only to accounts that are offered clip links, and always
+    // clickable: with nothing ready it encodes what it needs first.
+    // "Cancel upload" while one is going up; "Copy link" once this file has one.
     private void UpdateLinkButton()
     {
         ShareGetLinkButton.IsVisible = _viewModel.ClipLinksOffered;
-        if (_linkCts is not null)
-        {
-            ShareGetLinkButton.Content = "Cancel upload";
-            ShareGetLinkButton.IsEnabled = true;
-            return;
-        }
-        ShareGetLinkButton.Content = _sharedLink is not null ? "Copy link" : "Get link";
-        ShareGetLinkButton.IsEnabled = _shareCts is null && _sharePath is not null;
+        ShareGetLinkButton.IsEnabled = true;
+        ShareGetLinkButton.Content = _linkCts is not null ? "Cancel upload" : _sharedLink is not null ? "Copy link" : "Get link";
     }
 
     private void Thumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e)

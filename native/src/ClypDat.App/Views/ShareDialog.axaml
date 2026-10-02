@@ -102,7 +102,7 @@
             <!-- Only for accounts that are offered clip links (UpdateLinkButton).
                  Uploads the size picked above as H.264, which every browser and
                  chat embed plays, and copies the link. -->
-            <Button Grid.Column="1" x:Name="ShareGetLinkButton" Content="Get link" IsVisible="False" IsEnabled="False" Margin="0,0,8,0"
+            <Button Grid.Column="1" x:Name="ShareGetLinkButton" Content="Get link" IsVisible="False" Margin="0,0,8,0"
                     Click="GetLinkButton_OnClick"
                     ToolTip.Tip="Uploads this clip to your ClypDat storage and copies a link anyone can open." />
             <Button Grid.Column="2" Content="Show in folder" IsEnabled="False" x:Name="ShareShowInFolderButton" Click="ShowInFolderButton_OnClick" />
