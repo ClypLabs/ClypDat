@@ -4757,6 +4757,15 @@ public sealed partial class MainWindow : Window
         await ShareCurrentClipAsync();
     }
 
+    // The link button on a library tile: the Share dialog, already getting the
+    // link, so its progress, cancel and errors all live in one place.
+    private async void ClipCardGetLink_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+        if (!await ViewModel.PrepareClipForShareAsync(clip)) return;
+        await ShareCurrentClipAsync(getLink: true);
+    }
+
     private async void ClipContextRename_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
@@ -7880,14 +7889,15 @@ public sealed partial class MainWindow : Window
         int SourceHeight,
         Color OutlineColor);
 
-    private async Task ShareCurrentClipAsync()
+    /// <param name="getLink">Start Get link as soon as the dialog opens - the library tiles' link button.</param>
+    private async Task ShareCurrentClipAsync(bool getLink = false)
     {
         if (ViewModel is null || string.IsNullOrWhiteSpace(ViewModel.SelectedVideoPath)) return;
         using var fileOperation = SpotifyProcessingPaths.TryRead(ViewModel.SelectedVideoPath);
         if (fileOperation is null) return;
         _playback?.Pause();
         ViewModel.IsPlaying = false;
-        var dialog = new ShareDialog(this, ViewModel);
+        var dialog = new ShareDialog(this, ViewModel) { GetLinkOnOpen = getLink };
         using (CoverEditorSurface("share", dialog))
         {
             await dialog.ShowWithBackdropAsync(this);

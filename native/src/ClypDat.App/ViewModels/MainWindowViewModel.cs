@@ -7841,7 +7841,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // Null while plans are not offered to the signed-in account, which hides
     // everything about sharing clips as links.
     internal ClipPlan? ClipPlan => _clypDatAccount.IsAuthenticated ? _clypDatSnapshot.Plan : null;
-    internal bool ClipLinksOffered => ClipPlan is not null;
+    public bool ClipLinksOffered => ClipPlan is not null;
     internal void NoteClipStorageChange(long deltaBytes) => _clypDatAccount.AdjustPlanUsage(deltaBytes);
     public string ClypDatPairingCode => _clypDatAccount.ConnectionCode ?? string.Empty;
     public bool ClypDatPairingCodeVisible => _clypDatAccount.ConnectionCode is not null;

@@ -1167,6 +1167,17 @@
                                 </StackPanel>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                  <!-- Only for accounts offered clip links. Opens Share
+                                       already getting the link (ClipCardGetLink_OnClick).
+                                       The ClypDat chamfer-cut link mark. -->
+                                  <Button Classes="clipShareIconButton"
+                                          IsVisible="{Binding $parent[Window].DataContext.ClipLinksOffered}"
+                                          IsEnabled="{Binding IsOpenable}"
+                                          ToolTip.Tip="Get link"
+                                          Click="ClipCardGetLink_OnClick">
+                                    <Path Data="M106.85 99.61A5.04 5.04 0 0 0 102.44 97L26.04 97A5.04 5.04 0 0 1 21 91.96L21 26.04A5.04 5.04 0 0 1 26.04 21L84.6 21A5.04 5.04 0 0 1 89.02 23.61L151.05 136.39A5.04 5.04 0 0 0 155.46 139L252.31 139A5.04 5.04 0 0 0 255.88 137.52L284.42 108.98A5.04 5.04 0 0 0 285.9 105.41L285.9 12.59A5.04 5.04 0 0 0 284.42 9.02L255.88 -19.52A5.04 5.04 0 0 0 252.31 -21L144.91 -21A5.04 5.04 0 0 0 140.49 -13.53L158.05 18.39A5.04 5.04 0 0 0 162.46 21L238.86 21A5.04 5.04 0 0 1 243.9 26.04L243.9 91.96A5.04 5.04 0 0 1 238.86 97L180.3 97A5.04 5.04 0 0 1 175.88 94.39L113.85 -18.39A5.04 5.04 0 0 0 109.44 -21L12.59 -21A5.04 5.04 0 0 0 9.02 -19.52L-19.52 9.02A5.04 5.04 0 0 0 -21 12.59L-21 105.41A5.04 5.04 0 0 0 -19.52 108.98L9.02 137.52A5.04 5.04 0 0 0 12.59 139L119.99 139A5.04 5.04 0 0 0 124.41 131.53Z"
+                                          Fill="{StaticResource Text_C8D9E9}" Width="22" Height="12" Stretch="Uniform" />
+                                  </Button>
                                   <Button Classes="clipShareIconButton"
                                           IsEnabled="{Binding IsOpenable}"
                                           Click="ClipCardShare_OnClick">

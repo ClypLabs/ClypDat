@@ -94,7 +94,14 @@ public partial class ShareDialog : Window
         Opened += (_, _) => SweepStaleShareTempFiles();
         Opened += (_, _) => UpdateTrimmedOption();
         Opened += (_, _) => UpdateLinkButton();
+        Opened += (_, _) =>
+        {
+            if (GetLinkOnOpen && _viewModel.ClipLinksOffered) GetLinkButton_OnClick(this, new RoutedEventArgs());
+        };
     }
+
+    /// <summary>Press Get link as soon as the dialog opens (the library tiles' link button).</summary>
+    internal bool GetLinkOnOpen { get; init; }
 
     public async Task ShowWithBackdropAsync(Window owner)
     {
