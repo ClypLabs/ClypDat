@@ -29,17 +29,17 @@
   </UserControl.Resources>
 
   <UserControl.IsVisible>
-    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Connected Accounts">
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Account">
       <Binding Path="SettingsSearchText" />
       <Binding Path="SelectedSettingsSection" />
     </MultiBinding>
   </UserControl.IsVisible>
 
-  <StackPanel Spacing="24" Tag="Connected Accounts">
+  <StackPanel Spacing="24" Tag="Account">
     <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
     <StackPanel Spacing="6">
-      <TextBlock Classes="settingsSectionTitle" Text="Connected accounts" />
-      <TextBlock Classes="settingsSectionDesc" Text="Manage ClypDat sign-in, Spotify, optional social accounts and Xbox activity." />
+      <TextBlock Classes="settingsSectionTitle" Text="Account" />
+      <TextBlock Classes="settingsSectionDesc" Text="Your ClypDat sign-in and clip link plan, Spotify, and the Discord and Xbox accounts linked to it." />
     </StackPanel>
     <!-- DataContext switches to the PolicyPause, so visibility lives on the wrapper. -->
     <Panel IsVisible="{Binding SpotifyPolicyBlocked}">

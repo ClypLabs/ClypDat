@@ -3261,7 +3261,7 @@
     <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
   </Style>
 
-  <!-- Connected Accounts: one provider per row, each row its own bordered
+  <!-- Account: one provider per row, each row its own bordered
        tile. The section used to lay providers out in a WrapPanel with a fixed
        ItemWidth/ItemHeight, so a status line that wrapped to two lines - "Linked
        through ClypDat" - was clipped by the cell rather than growing it. A

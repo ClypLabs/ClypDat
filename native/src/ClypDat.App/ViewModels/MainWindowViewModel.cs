@@ -270,6 +270,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             _selectedSettingsSection = "Import Clips";
             Settings.LastSettingsSection = "Import Clips";
         }
+        else if (Settings.LastSettingsSection == "Connected Accounts")
+        {
+            // Renamed once it held the clip link plan as well as the linked accounts.
+            _selectedSettingsSection = "Account";
+            Settings.LastSettingsSection = "Account";
+        }
         else if (!string.IsNullOrWhiteSpace(Settings.LastSettingsSection)) _selectedSettingsSection = Settings.LastSettingsSection;
         // Curated game-icons.json entries (delisted store names, curated
         // Steam app IDs like the CS:GO fix) only reach a running app through

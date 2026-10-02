@@ -243,14 +243,14 @@ public sealed class AppSettings
 
     /// <summary>
     /// Whether ClypDat reads Spotify, and so reconnects to it on launch. Off
-    /// until the user turns it on in Connected Accounts, and cleared when they
+    /// until the user turns it on in Settings > Account, and cleared when they
     /// turn it off.
     /// </summary>
     public bool SpotifyEnabled { get; set; }
 
     /// <summary>
     /// Client ID of the user's own Spotify developer app, for the optional
-    /// Spotify sign-in (Settings > Connected Accounts > Spotify > Advanced).
+    /// Spotify sign-in (Settings > Account > Spotify > Advanced).
     /// A public identifier, not a secret. Null uses the Spotify app on this PC
     /// only.
     /// </summary>

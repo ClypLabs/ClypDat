@@ -14,7 +14,7 @@ namespace ClypDat.App.Views;
 /// <summary>
 /// Where the Spotify track sits on a clip, and whether it is drawn at all.
 ///
-/// A dialog rather than another card in Connected Accounts: this is one
+/// A dialog rather than another card in Settings > Account: this is one
 /// connection's own output settings, and the accounts page is a list of
 /// connections, not a place options accumulate under whichever provider
 /// happened to bring them.

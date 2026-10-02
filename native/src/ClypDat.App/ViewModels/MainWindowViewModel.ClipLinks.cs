@@ -29,7 +29,7 @@ public sealed class ClipPlanOfferViewModel
     public string YearlyLabel { get; }
 }
 
-// Settings -> Connected accounts -> the clip-link plan: storage used, the
+// Settings -> Account -> the clip-link plan: storage used, the
 // plans on offer, buying one and managing it. Everything here is for show and
 // for opening the right page; the site alone decides what an account may do.
 public sealed partial class MainWindowViewModel
