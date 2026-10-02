@@ -108,6 +108,8 @@ public sealed partial class MainWindowViewModel
         // Posted because the poll reports from a background thread, and the
         // page's visibility drives the editor surface.
         if (!ClipPlanActive) Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (!ClipPlanActive) CloseSharedClips(); });
+        // Another account (or none) may be signed in now.
+        if (!ClypDatAccountIsConnected) _liveSharedIds = null;
     }
 
     // --- The Shared clips page -------------------------------------------
@@ -186,6 +188,7 @@ public sealed partial class MainWindowViewModel
             if (!ReferenceEquals(_sharedClipsCts, cts)) return;
             SharedClips.Clear();
             foreach (var clip in list.Clips) SharedClips.Add(new SharedClipViewModel(clip));
+            _liveSharedIds = list.Clips.Select(clip => clip.Id).ToHashSet(StringComparer.Ordinal);
             _clypDatAccount.SetPlanUsage(list.UsedBytes);
             foreach (var card in SharedClips) _ = card.LoadThumbnailAsync(cts.Token);
         }
@@ -210,6 +213,67 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    // --- Links remembered on library clips -------------------------------
+
+    // IDs of the account's clips that are still live, from the site's list.
+    // Loaded once a session (or by the Shared clips page), so a remembered
+    // link is never copied after the clip behind it was deleted elsewhere.
+    private HashSet<string>? _liveSharedIds;
+
+    private async Task<HashSet<string>?> LiveSharedIdsAsync()
+    {
+        if (_liveSharedIds is not null) return _liveSharedIds;
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var token = await GetClipHostingTokenAsync(timeout.Token);
+            var list = await ClipHostingService.ListAsync(token, timeout.Token);
+            _liveSharedIds = list.Clips.Select(clip => clip.Id).ToHashSet(StringComparer.Ordinal);
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"Clip links: could not check which links are live ({error.Message}).");
+        }
+        return _liveSharedIds;
+    }
+
+    /// <summary>
+    /// The tile's link button, when the clip already has a link: copies it and
+    /// returns true. Returns false (and forgets the link) when the clip behind
+    /// it has been deleted, so the button uploads it again instead.
+    /// </summary>
+    internal async Task<bool> TryCopySharedLinkAsync(ClipCardViewModel card, Func<string, Task> copy)
+    {
+        if (card is not { HasSharedLink: true, SharedClipId: { } id, SharedClipUrl: { } url }) return false;
+        // Signed out or the site unreachable: the link is most likely still
+        // good, and copying it costs nothing if it is not.
+        var live = ClypDatAccountIsConnected ? await LiveSharedIdsAsync() : null;
+        if (live is not null && !live.Contains(id))
+        {
+            card.SetSharedLink(null, null);
+            return false;
+        }
+        await copy(url);
+        card.LinkCopied = true;
+        _ = Task.Delay(TimeSpan.FromSeconds(2)).ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.Post(() => card.LinkCopied = false));
+        return true;
+    }
+
+    /// <summary>Remembers a new link on the library clip it was made from.</summary>
+    internal void RecordSharedLink(string clipPath, HostedClip clip)
+    {
+        _liveSharedIds?.Add(clip.Id);
+        var card = AllClips.FirstOrDefault(item => string.Equals(item.Path, clipPath, StringComparison.OrdinalIgnoreCase));
+        if (card is not null) card.SetSharedLink(clip.Id, clip.Url);
+        else if (!string.IsNullOrWhiteSpace(Settings.LibraryFolder)) ClipInfoSidecar.SaveSharedLink(Settings.LibraryFolder, clipPath, clip.Id, clip.Url);
+    }
+
+    private void ForgetSharedLink(string clipId)
+    {
+        _liveSharedIds?.Remove(clipId);
+        foreach (var card in AllClips.Where(item => item.SharedClipId == clipId).ToArray()) card.SetSharedLink(null, null);
+    }
+
     /// <summary>First press arms the card; the second deletes the clip and its link for good.</summary>
     public async Task DeleteSharedClipAsync(SharedClipViewModel clip)
     {
@@ -227,6 +291,7 @@ public sealed partial class MainWindowViewModel
             var token = await GetClipHostingTokenAsync(timeout.Token);
             await ClipHostingService.DeleteAsync(token, clip.Id, timeout.Token);
             SharedClips.Remove(clip);
+            ForgetSharedLink(clip.Id);
             NoteClipStorageChange(-clip.Bytes);
             SharedClipsMessage = null;
             OnPropertyChanged(nameof(SharedClipsEmpty));

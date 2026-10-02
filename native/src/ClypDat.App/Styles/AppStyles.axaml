@@ -938,6 +938,13 @@
     <Setter Property="Background" Value="{StaticResource Surface_263544}" />
     <Setter Property="Foreground" Value="{StaticResource Text_D8E4F2}" />
   </Style>
+  <!-- The library tile's link mark: muted until the clip has a link, accent after. -->
+  <Style Selector="PathIcon.clipLinkIcon">
+    <Setter Property="Foreground" Value="{StaticResource Text_C8D9E9}" />
+  </Style>
+  <Style Selector="PathIcon.clipLinkIcon.shared">
+    <Setter Property="Foreground" Value="{StaticResource AccentSelectedIconBrush}" />
+  </Style>
   <Style Selector="Button.clipShareIconButton">
     <Setter Property="Background" Value="{StaticResource Surface_2A3844}" />
     <Setter Property="BorderThickness" Value="0" />

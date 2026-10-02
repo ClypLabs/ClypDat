@@ -1174,15 +1174,22 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                   <!-- Only for accounts offered clip links. Opens Share
-                                       already getting the link (ClipCardGetLink_OnClick).
+                                       already getting the link (ClipCardGetLink_OnClick), or
+                                       copies the clip's link if it already has one; the mark
+                                       turns accent then, and shows a tick once copied.
                                        The ClypDat rounded link mark. -->
                                   <Button Classes="clipShareIconButton"
                                           IsVisible="{Binding $parent[Window].DataContext.ClipLinksOffered}"
                                           IsEnabled="{Binding IsOpenable}"
-                                          ToolTip.Tip="Get link"
+                                          ToolTip.Tip="{Binding LinkButtonTip}"
                                           Click="ClipCardGetLink_OnClick">
-                                    <PathIcon Data="M106.85 99.61A5.04 5.04 0 0 0 102.44 97L26.04 97A5.04 5.04 0 0 1 21 91.96L21 26.04A5.04 5.04 0 0 1 26.04 21L84.6 21A5.04 5.04 0 0 1 89.02 23.61L151.05 136.39A5.04 5.04 0 0 0 155.46 139L248.1 139A37.8 37.8 0 0 0 285.9 101.2L285.9 16.8A37.8 37.8 0 0 0 248.1 -21L144.91 -21A5.04 5.04 0 0 0 140.49 -13.53L158.05 18.39A5.04 5.04 0 0 0 162.46 21L238.86 21A5.04 5.04 0 0 1 243.9 26.04L243.9 91.96A5.04 5.04 0 0 1 238.86 97L180.3 97A5.04 5.04 0 0 1 175.88 94.39L113.85 -18.39A5.04 5.04 0 0 0 109.44 -21L16.8 -21A37.8 37.8 0 0 0 -21 16.8L-21 101.2A37.8 37.8 0 0 0 16.8 139L119.99 139A5.04 5.04 0 0 0 124.41 131.53Z"
-                                              Width="19" Height="19" Foreground="{StaticResource Text_C8D9E9}" />
+                                    <Panel>
+                                      <PathIcon Classes="clipLinkIcon" Classes.shared="{Binding HasSharedLink}" IsVisible="{Binding !LinkCopied}"
+                                                Data="M106.85 99.61A5.04 5.04 0 0 0 102.44 97L26.04 97A5.04 5.04 0 0 1 21 91.96L21 26.04A5.04 5.04 0 0 1 26.04 21L84.6 21A5.04 5.04 0 0 1 89.02 23.61L151.05 136.39A5.04 5.04 0 0 0 155.46 139L248.1 139A37.8 37.8 0 0 0 285.9 101.2L285.9 16.8A37.8 37.8 0 0 0 248.1 -21L144.91 -21A5.04 5.04 0 0 0 140.49 -13.53L158.05 18.39A5.04 5.04 0 0 0 162.46 21L238.86 21A5.04 5.04 0 0 1 243.9 26.04L243.9 91.96A5.04 5.04 0 0 1 238.86 97L180.3 97A5.04 5.04 0 0 1 175.88 94.39L113.85 -18.39A5.04 5.04 0 0 0 109.44 -21L16.8 -21A37.8 37.8 0 0 0 -21 16.8L-21 101.2A37.8 37.8 0 0 0 16.8 139L119.99 139A5.04 5.04 0 0 0 124.41 131.53Z"
+                                                Width="19" Height="19" />
+                                      <PathIcon Classes="clipLinkIcon shared" IsVisible="{Binding LinkCopied}"
+                                                Data="M9,16.17L4.83,12L3.41,13.41L9,19L21,7L19.59,5.59Z" Width="17" Height="17" />
+                                    </Panel>
                                   </Button>
                                   <Button Classes="clipShareIconButton"
                                           IsEnabled="{Binding IsOpenable}"

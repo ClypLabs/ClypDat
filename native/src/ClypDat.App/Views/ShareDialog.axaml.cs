@@ -856,6 +856,8 @@ public partial class ShareDialog : Window
             var game = ResolveShareGame();
             var clip = await ClipHostingService.UploadAsync(token, path, thumbnail, string.IsNullOrWhiteSpace(game) ? null : game,
                 _preparedDuration, _preparedWidth, _preparedHeight, progress, cts.Token);
+            // The library tile copies this from now on instead of uploading again.
+            if (!string.IsNullOrWhiteSpace(_viewModel.SelectedVideoPath)) _viewModel.RecordSharedLink(_viewModel.SelectedVideoPath, clip);
             if (!Superseded())
             {
                 _sharedLink = clip.Url;

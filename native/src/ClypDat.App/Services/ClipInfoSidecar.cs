@@ -85,7 +85,11 @@ public sealed record ClipInfo(
     // Burn state is output provenance, never inferred from current settings.
     // A permanently drawn card must not be drawn again by editor/export.
     bool SpotifyOverlayBurned = false,
-    ClipOverlayManifest? OverlayManifest = null);
+    ClipOverlayManifest? OverlayManifest = null,
+    // The clip's most recent link from Get link (clypdat.xyz/c/<id>), so the
+    // library tile copies it instead of uploading the clip again.
+    string? SharedClipId = null,
+    string? SharedClipUrl = null);
 
 public static class ClipInfoSidecar
 {
@@ -126,6 +130,14 @@ public static class ClipInfoSidecar
             CaptureSource = details.CaptureSource,
             AutoClipMarkers = details.AutoClipMarkers
         });
+    }
+
+    /// <summary>Records (or, with nulls, forgets) the clip's shared link, keeping everything else.</summary>
+    public static ClipInfo SaveSharedLink(string libraryRoot, string clipPath, string? clipId, string? url)
+    {
+        var info = (Load(libraryRoot, clipPath) ?? new ClipInfo(null, null)) with { SharedClipId = clipId, SharedClipUrl = url };
+        Save(libraryRoot, clipPath, info);
+        return info;
     }
 
     public static ClipInfo? Load(string libraryRoot, string clipPath)

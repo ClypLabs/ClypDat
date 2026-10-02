@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -4777,6 +4778,10 @@ public sealed partial class MainWindow : Window
     private async void ClipCardGetLink_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+        // Already shared and still live: copy that link rather than upload the
+        // clip again (which would also count against storage twice).
+        if (await ViewModel.TryCopySharedLinkAsync(clip, async text => { if (Clipboard is { } clipboard) await clipboard.SetTextAsync(text); }))
+            return;
         // No plan: the plans to pick from, rather than an encode that the
         // site would refuse at the end.
         if (!ViewModel.ClipPlanActive)

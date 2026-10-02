@@ -50,4 +50,28 @@ public sealed class ClipInfoCaptureDetailsTests
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
+
+    [Fact]
+    public void SharedLinkIsRememberedAndForgottenWithoutTouchingTheRest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "clypdat-capture-details-" + Guid.NewGuid());
+        var clip = Path.Combine(root, "Clips", "clip.mp4");
+        try
+        {
+            var details = new ClipInfo("Fortnite", null, CustomTitle: "Clutch");
+            ClipInfoSidecar.Save(root, clip, details);
+            ClipInfoSidecar.SaveSharedLink(root, clip, "i2KExOXpKOkYq6i1OA3n7g", "https://www.clypdat.xyz/c/i2KExOXpKOkYq6i1OA3n7g");
+            var shared = ClipInfoSidecar.Load(root, clip)!;
+            Assert.Equal(details with { SharedClipId = "i2KExOXpKOkYq6i1OA3n7g", SharedClipUrl = "https://www.clypdat.xyz/c/i2KExOXpKOkYq6i1OA3n7g" }, shared);
+
+            ClipInfoSidecar.SaveSharedLink(root, clip, null, null);
+            Assert.Equal(details, ClipInfoSidecar.Load(root, clip));
+
+            // A clip with no details yet gets a file holding just the link.
+            var bare = Path.Combine(root, "Clips", "bare.mp4");
+            ClipInfoSidecar.SaveSharedLink(root, bare, "AAAAAAAAAAAAAAAAAAAAAA", "https://www.clypdat.xyz/c/AAAAAAAAAAAAAAAAAAAAAA");
+            Assert.Equal("https://www.clypdat.xyz/c/AAAAAAAAAAAAAAAAAAAAAA", ClipInfoSidecar.Load(root, bare)?.SharedClipUrl);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
 }

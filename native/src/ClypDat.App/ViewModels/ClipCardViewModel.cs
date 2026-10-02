@@ -202,6 +202,30 @@ public sealed class ClipCardViewModel : ViewModelBase
     // overwrites the game association or a Medal import's original title.
     public string? CustomTitle => _clipInfo?.CustomTitle;
 
+    // Get link on the tile: once the clip has a link, the button copies it.
+    public string? SharedClipId => _clipInfo?.SharedClipId;
+    public string? SharedClipUrl => _clipInfo?.SharedClipUrl;
+    public bool HasSharedLink => !string.IsNullOrWhiteSpace(_clipInfo?.SharedClipUrl);
+    public string LinkButtonTip => LinkCopied ? "Link copied" : HasSharedLink ? "Copy link" : "Get link";
+
+    private bool _linkCopied;
+    // A tick on the button for a moment after copying; there is no other
+    // confirmation on the library page.
+    public bool LinkCopied
+    {
+        get => _linkCopied;
+        set { if (SetProperty(ref _linkCopied, value)) OnPropertyChanged(nameof(LinkButtonTip)); }
+    }
+
+    internal void SetSharedLink(string? clipId, string? url)
+    {
+        _clipInfo = ClipInfoSidecar.SaveSharedLink(_libraryRoot, Path, clipId, url);
+        OnPropertyChanged(nameof(SharedClipId));
+        OnPropertyChanged(nameof(SharedClipUrl));
+        OnPropertyChanged(nameof(HasSharedLink));
+        OnPropertyChanged(nameof(LinkButtonTip));
+    }
+
     // For a CS2 auto-clip, GameNameLabel is really "<event> - <map>" (e.g.
     // "3K - Mirage") since that's what the auto-clip title became when it was
     // used to build the filename - swap the tile around for those: lead with
@@ -658,6 +682,8 @@ public sealed class ClipCardViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsExternalImport));
         OnPropertyChanged(nameof(CanChangeGame));
         OnPropertyChanged(nameof(IsManualClip));
+        OnPropertyChanged(nameof(HasSharedLink));
+        OnPropertyChanged(nameof(LinkButtonTip));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(CreatedAt));
         OnPropertyChanged(nameof(Duration));
