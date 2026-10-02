@@ -889,7 +889,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private static ClipPlan? ReadPlan(PlanResponse? plan) => plan is null ? null : new ClipPlan(plan.Plan, plan.PlanName,
         Math.Max(0, plan.StorageBytes), Math.Max(0, plan.UsedBytes), plan.Source,
         DateTimeOffset.TryParse(plan.RenewsAt, out var renews) ? renews : null,
-        DateTimeOffset.TryParse(plan.EndsAt, out var ends) ? ends : null);
+        DateTimeOffset.TryParse(plan.EndsAt, out var ends) ? ends : null,
+        DateTimeOffset.TryParse(plan.ClipsDeleteAt, out var deleteAt) ? deleteAt : null);
     private static DateTimeOffset ParseTimestamp(string? value) => DateTimeOffset.TryParse(value, out var parsed) ? parsed : DateTimeOffset.UtcNow;
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); CancelConnect(); _pollCts?.Cancel(); _pollCts?.Dispose(); _pollWake.Dispose(); _revokeGate.Dispose(); _http.Dispose(); }
@@ -921,6 +922,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         [JsonPropertyName("source")] public string? Source { get; set; }
         [JsonPropertyName("renewsAt")] public string? RenewsAt { get; set; }
         [JsonPropertyName("endsAt")] public string? EndsAt { get; set; }
+        [JsonPropertyName("clipsDeleteAt")] public string? ClipsDeleteAt { get; set; }
     }
     private sealed class Profile
     {

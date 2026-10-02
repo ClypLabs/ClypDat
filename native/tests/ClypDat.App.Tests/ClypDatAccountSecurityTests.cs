@@ -61,6 +61,18 @@ public sealed class ClypDatAccountSecurityTests
         Assert.Equal(new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero), plan.RenewsAt);
         Assert.Null(plan.EndsAt);
 
+        Assert.Null(plan.ClipsDeleteAt);
+
+        using var lapsed = new AccountFixture(HttpStatusCode.OK)
+        {
+            ActivityBody = "{\"connected\":false,\"providers\":[],\"plan\":{\"plan\":null,\"planName\":null,\"storageBytes\":0,"
+                + "\"source\":null,\"renewsAt\":null,\"endsAt\":null,\"usedBytes\":4000000,\"clipsDeleteAt\":\"2026-11-01T00:00:00Z\"}}",
+        };
+        Assert.True(await lapsed.Service.TryRestoreAsync());
+        var ended = Assert.IsType<ClipPlan>(lapsed.Service.Snapshot.Plan);
+        Assert.False(ended.IsActive);
+        Assert.Equal(new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero), ended.ClipsDeleteAt);
+
         offered.Service.AdjustPlanUsage(500_000_000);
         Assert.Equal(3_000_000_000, offered.Service.Snapshot.Plan!.UsedBytes);
         offered.Service.AdjustPlanUsage(-10_000_000_000);

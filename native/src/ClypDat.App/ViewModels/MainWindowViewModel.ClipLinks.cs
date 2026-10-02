@@ -47,6 +47,8 @@ public sealed partial class MainWindowViewModel
     {
         get
         {
+            if (ClipPlan is { IsActive: false, ClipsDeleteAt: { } deleteAt })
+                return $"Your plan has ended. Your shared clips stay up until {FormatPlanDate(deleteAt)}, then they and their links are deleted. Pick a plan to keep them.";
             if (ClipPlan is not { IsActive: true } plan) return "Share clips as links anyone can open. Plans start at 50 GB of storage.";
             if (plan.Source == "grant")
                 return plan.EndsAt is { } until ? $"Given to your account until {FormatPlanDate(until)}." : "Given to your account.";

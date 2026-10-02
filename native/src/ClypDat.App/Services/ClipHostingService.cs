@@ -11,8 +11,9 @@ namespace ClypDat.App.Services;
 /// sends none at all while plans are not offered to the account, so a null
 /// <see cref="XboxActivitySnapshot.Plan"/> means "hide everything about links".
 /// </summary>
+// ClipsDeleteAt: with no plan, when the site deletes the account's shared clips.
 internal sealed record ClipPlan(string? PlanId, string? PlanName, long StorageBytes, long UsedBytes, string? Source,
-    DateTimeOffset? RenewsAt, DateTimeOffset? EndsAt)
+    DateTimeOffset? RenewsAt, DateTimeOffset? EndsAt, DateTimeOffset? ClipsDeleteAt = null)
 {
     public bool IsActive => PlanId is not null && StorageBytes > 0;
 }
