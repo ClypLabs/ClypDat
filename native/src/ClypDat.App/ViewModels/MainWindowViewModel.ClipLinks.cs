@@ -102,10 +102,10 @@ public sealed partial class MainWindowViewModel
         OnPropertyChanged(nameof(SharedClipsStorageLabel));
         // A plan that has just arrived closes the list it was bought from.
         if (ClipPlanCanManage && ClipPlansOpen) ClipPlansOpen = false;
-        // Signed out, or links no longer offered: nothing left to show there.
+        // Signed out, or no active plan: the page goes with its rail button.
         // Posted because the poll reports from a background thread, and the
         // page's visibility drives the editor surface.
-        if (!ClipLinksOffered) Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (!ClipLinksOffered) CloseSharedClips(); });
+        if (!ClipPlanActive) Avalonia.Threading.Dispatcher.UIThread.Post(() => { if (!ClipPlanActive) CloseSharedClips(); });
     }
 
     // --- The Shared clips page -------------------------------------------
