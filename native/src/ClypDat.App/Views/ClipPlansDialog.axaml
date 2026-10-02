@@ -1,0 +1,94 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:ClypDat.App.ViewModels"
+        xmlns:controls="using:ClypDat.App.Controls"
+        x:Class="ClypDat.App.Views.ClipPlansDialog"
+        x:DataType="vm:MainWindowViewModel"
+        Title="Share clips as links"
+        WindowDecorations="None"
+        ShowInTaskbar="False"
+        CanResize="False"
+        Width="680"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        KeyDown="Dialog_OnKeyDown">
+  <!-- Get link for an account without a plan: the plans, priced for the
+       country this PC is in. Checkout opens in the browser; the dialog closes
+       itself once the plan arrives. -->
+  <Window.Styles>
+    <Style Selector="Border.planCard">
+      <Setter Property="Background" Value="{StaticResource Surface_0C1319}" />
+      <Setter Property="BorderBrush" Value="{StaticResource Surface_232F3A}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="10" />
+      <Setter Property="Padding" Value="16" />
+      <Setter Property="Margin" Value="6" />
+    </Style>
+    <Style Selector="Border.planCard Button">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+  </Window.Styles>
+
+  <Border CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True">
+    <DockPanel LastChildFill="True">
+      <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0" PointerPressed="TitleBar_OnPointerPressed">
+        <Grid ColumnDefinitions="*,Auto" Height="56">
+          <TextBlock Text="SHARE CLIPS AS LINKS" Foreground="{StaticResource Text_D8E4F2}" FontSize="15" FontWeight="Bold"
+                     VerticalAlignment="Center" Margin="22,0,0,0" />
+          <Button Grid.Column="1" Classes="dialogClose" Content="✕" Click="CloseButton_OnClick"
+                  Width="52" Height="56" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <StackPanel Margin="22,18,22,22" Spacing="14">
+        <TextBlock Classes="settingsRowDescSm" TextWrapping="Wrap"
+                   Text="Get link needs a ClypDat plan. Upload clips and share a link anyone can watch, in the browser or right in a Discord chat. Cancel any time." />
+
+        <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center" Margin="0,24"
+                    IsVisible="{Binding ClipPlanBusy}">
+          <controls:ClypDatLoader Width="20" Height="20" />
+          <TextBlock Classes="settingsRowDescSm" Text="Loading plans…" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <ItemsControl ItemsSource="{Binding ClipPlanOffers}" Margin="-6" IsVisible="{Binding !ClipPlanBusy}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <UniformGrid Rows="1" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:ClipPlanOfferViewModel">
+              <Border Classes="planCard">
+                <StackPanel Spacing="12">
+                  <StackPanel Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Classes="settingsRowTitle" Text="{Binding Name}" FontSize="17" VerticalAlignment="Center" />
+                      <Border Classes="statusPill ok" IsVisible="{Binding IsRecommended}" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Ellipse />
+                          <TextBlock Text="Recommended" />
+                        </StackPanel>
+                      </Border>
+                    </StackPanel>
+                    <TextBlock Classes="settingsRowDescSm" Text="{Binding StorageLabel, StringFormat='{}{0} of clip links'}" />
+                  </StackPanel>
+                  <StackPanel Spacing="8">
+                    <Button Classes="primaryButton" Content="{Binding MonthlyLabel}" Tag="{Binding MonthlySlug}" Click="Buy_OnClick" />
+                    <Button Content="{Binding YearlyLabel}" Tag="{Binding YearlySlug}" Click="Buy_OnClick" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border Classes="settingsNotice" IsVisible="{Binding ClipPlanHasMessage}">
+          <TextBlock Classes="settingsNoticeText" Text="{Binding ClipPlanMessage}" TextWrapping="Wrap" />
+        </Border>
+      </StackPanel>
+    </DockPanel>
+  </Border>
+</Window>

@@ -775,6 +775,13 @@ public partial class ShareDialog : Window
             await CopyLinkAsync(link);
             return;
         }
+        // No plan: show the plans instead of encoding for an upload the site
+        // would refuse.
+        if (!_viewModel.ClipPlanActive)
+        {
+            await new ClipPlansDialog(_viewModel).ShowDialog(this);
+            return;
+        }
         if (_shareCts is null && _sharePath is not null && _shareReadyForLink)
         {
             await UploadLinkAsync();

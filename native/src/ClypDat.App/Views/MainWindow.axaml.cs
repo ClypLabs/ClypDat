@@ -4777,6 +4777,13 @@ public sealed partial class MainWindow : Window
     private async void ClipCardGetLink_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button { DataContext: ClipCardViewModel clip } || ViewModel is null) return;
+        // No plan: the plans to pick from, rather than an encode that the
+        // site would refuse at the end.
+        if (!ViewModel.ClipPlanActive)
+        {
+            await new ClipPlansDialog(ViewModel).ShowDialog(this);
+            return;
+        }
         if (!await ViewModel.PrepareClipForShareAsync(clip)) return;
         await ShareCurrentClipAsync(getLink: true);
     }

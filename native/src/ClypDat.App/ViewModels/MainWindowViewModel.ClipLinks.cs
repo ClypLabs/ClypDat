@@ -255,15 +255,27 @@ public sealed partial class MainWindowViewModel
             ClipPlansOpen = false;
             return;
         }
+        ClipPlansOpen = await LoadClipPlanOffersAsync();
+    }
+
+    /// <summary>
+    /// Fills <see cref="ClipPlanOffers"/> with this country's prices. False,
+    /// with the reason in <see cref="ClipPlanMessage"/>, when there are none.
+    /// Settings' plan list and the plans dialog both draw from it.
+    /// </summary>
+    public async Task<bool> LoadClipPlanOffersAsync()
+    {
+        var loaded = false;
         await RunClipPlanActionAsync(async cancellationToken =>
         {
             var token = await GetClipHostingTokenAsync(cancellationToken);
             var offers = await ClipHostingService.GetPlansAsync(token, cancellationToken);
             ClipPlanOffers.Clear();
             foreach (var offer in offers) ClipPlanOffers.Add(new ClipPlanOfferViewModel(offer));
-            ClipPlansOpen = ClipPlanOffers.Count > 0;
-            if (!ClipPlansOpen) ClipPlanMessage = "Plans are unavailable right now.";
+            loaded = ClipPlanOffers.Count > 0;
+            if (!loaded) ClipPlanMessage = "Plans are unavailable right now.";
         });
+        return loaded;
     }
 
     /// <summary>Opens Polar's checkout for one plan in the browser, then watches for the plan to arrive.</summary>
