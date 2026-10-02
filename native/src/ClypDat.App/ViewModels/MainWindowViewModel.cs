@@ -8082,8 +8082,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClypDatHasAvatar));
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountIsConnected));
-        OnPropertyChanged(nameof(ClipPlan));
-        OnPropertyChanged(nameof(ClipLinksOffered));
+        RaiseClipPlanChanged();
         OnPropertyChanged(nameof(ClypDatXboxStatus));
         OnPropertyChanged(nameof(ClypDatXboxIsLinked));
         OnPropertyChanged(nameof(DiscordAccountStatus));

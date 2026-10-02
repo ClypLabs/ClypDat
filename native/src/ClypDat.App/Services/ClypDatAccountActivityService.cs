@@ -70,7 +70,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private DateTimeOffset _linkWatchUntil = DateTimeOffset.MinValue;
     private DateTimeOffset _linkWatchStarted = DateTimeOffset.MinValue;
     private DateTimeOffset _lastRefresh = DateTimeOffset.MinValue;
-    private (bool Xbox, bool Google, bool Discord) _linkWatchSignature;
+    private (bool Xbox, bool Google, bool Discord, string? Plan) _linkWatchSignature;
     private DesktopToken? _token;
     private XboxActivitySnapshot _snapshot = XboxActivitySnapshot.Disconnected;
     private bool _policyPaused;
@@ -96,7 +96,10 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     }
 
     private bool IsLiveActivityNeeded => LiveActivityNeeded?.Invoke() ?? true;
-    private (bool Xbox, bool Google, bool Discord) LinkSignature => (_snapshot.IsConnected, _snapshot.GoogleConnected, _snapshot.DiscordConnected);
+    // The plan rides along so a purchase or a change in the subscription portal
+    // ends the watch the same way linking a provider does.
+    private (bool Xbox, bool Google, bool Discord, string? Plan) LinkSignature => (_snapshot.IsConnected, _snapshot.GoogleConnected, _snapshot.DiscordConnected,
+        _snapshot.Plan is { } plan ? $"{plan.PlanId}|{plan.Source}|{plan.RenewsAt:O}|{plan.EndsAt:O}" : null);
     public bool IsAuthenticated => _token is { ExpiresAt: var expiresAt } && expiresAt > DateTimeOffset.UtcNow;
     internal Task<string> GetSupportTokenAsync(CancellationToken cancellationToken) =>
         GetAccessTokenAsync("Link your ClypDat account before sending diagnostics.", cancellationToken);
@@ -488,12 +491,13 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// This refreshes now and then watches at <see cref="LinkWatchInterval"/>
     /// until the set of linked providers actually changes, or the window closes.
     /// </summary>
-    public void ExpectLinkChange()
+    /// <param name="window">How long to watch; checkout pages take longer than a sign-in.</param>
+    public void ExpectLinkChange(TimeSpan? window = null)
     {
         if (!IsAuthenticated) return;
         _linkWatchSignature = LinkSignature;
         _linkWatchStarted = DateTimeOffset.UtcNow;
-        _linkWatchUntil = _linkWatchStarted.Add(LinkWatchWindow);
+        _linkWatchUntil = _linkWatchStarted.Add(window ?? LinkWatchWindow);
         _idleRefreshes = 0;
         WakePoll();
     }

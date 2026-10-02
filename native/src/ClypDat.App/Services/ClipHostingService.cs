@@ -21,6 +21,10 @@ internal sealed record ClipPlan(string? PlanId, string? PlanName, long StorageBy
 internal sealed record HostedClip(string Id, string Url, string VideoUrl, string? ThumbnailUrl, long Bytes, string? Title,
     long? DurationMs, int? Width, int? Height, DateTimeOffset CreatedAt);
 
+/// <summary>A plan on offer. Prices are already formatted for the buyer's currency; null when the site has none.</summary>
+internal sealed record ClipPlanOffer(string Id, string Name, long StorageBytes, string MonthlySlug, string YearlySlug,
+    string? MonthlyPrice, string? YearlyPrice);
+
 internal sealed record HostedClipList(IReadOnlyList<HostedClip> Clips, long UsedBytes, long LimitBytes, string? PlanId);
 
 /// <summary>A refusal from clypdat.xyz, worded for the user. Code is the site's machine-readable reason, if it gave one.</summary>
@@ -99,6 +103,70 @@ internal static class ClipHostingService
         // Already gone is what was asked for.
         if (response.StatusCode == HttpStatusCode.NotFound) return;
         await ThrowIfFailedAsync(response, "The clip could not be deleted. Try again shortly.", cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The plans on offer, priced in the currency of the country this PC is in.</summary>
+    public static async Task<IReadOnlyList<ClipPlanOffer>> GetPlansAsync(string token, CancellationToken cancellationToken)
+    {
+        using var request = Authorized(HttpMethod.Get, "api/desktop/billing/plans", token);
+        using var response = await Api.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await ThrowIfFailedAsync(response, "Plans are unavailable right now.", cancellationToken).ConfigureAwait(false);
+        var body = await response.Content.ReadFromJsonAsync<PlansResponse>(cancellationToken).ConfigureAwait(false);
+        return (body?.Plans ?? []).Where(plan => plan.MonthlySlug is not null && plan.YearlySlug is not null)
+            .Select(plan => new ClipPlanOffer(plan.Id ?? string.Empty, plan.Name ?? plan.Id ?? "Plan", plan.StorageBytes,
+                plan.MonthlySlug!, plan.YearlySlug!, FormatMoney(plan.MonthlyPrice), FormatMoney(plan.YearlyPrice)))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Polar's checkout page for one plan, for the signed-in account. The app
+    /// opens it in the browser; the plan arrives through the site's webhook
+    /// and the next poll.
+    /// </summary>
+    public static async Task<string> StartCheckoutAsync(string token, string slug, CancellationToken cancellationToken)
+    {
+        using var request = Authorized(HttpMethod.Post, "api/desktop/billing/checkout", token);
+        request.Content = JsonContent.Create(new CheckoutRequest { Slug = slug });
+        using var response = await Api.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await ThrowIfFailedAsync(response, "Checkout could not start. Try again shortly.", cancellationToken).ConfigureAwait(false);
+        return await ReadBrowserUrlAsync(response, "Checkout could not start. Try again shortly.", cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>A one-time link into the subscription portal (card, invoices, changing or cancelling the plan).</summary>
+    public static async Task<string> PortalAsync(string token, CancellationToken cancellationToken)
+    {
+        using var request = Authorized(HttpMethod.Post, "api/desktop/billing/portal", token);
+        using var response = await Api.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound) throw new ClipHostingException("There is no subscription to manage yet.");
+        await ThrowIfFailedAsync(response, "The subscription page could not open. Try again shortly.", cancellationToken).ConfigureAwait(false);
+        return await ReadBrowserUrlAsync(response, "The subscription page could not open. Try again shortly.", cancellationToken).ConfigureAwait(false);
+    }
+
+    // Opened with the shell, so only ever an https page.
+    private static async Task<string> ReadBrowserUrlAsync(HttpResponseMessage response, string fallback, CancellationToken cancellationToken)
+    {
+        var body = await response.Content.ReadFromJsonAsync<UrlResponse>(cancellationToken).ConfigureAwait(false);
+        return body?.Url is { } url && IsHttps(url) ? url : throw new ClipHostingException(fallback);
+    }
+
+    // The same short forms the website shows (en): A$3.99, US prices as $2.49.
+    internal static string? FormatMoney(MoneyResponse? money)
+    {
+        if (money is null || string.IsNullOrWhiteSpace(money.Currency)) return null;
+        var amount = (money.Amount / 100m).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+        return money.Currency.ToLowerInvariant() switch
+        {
+            "usd" => $"${amount}",
+            "aud" => $"A${amount}",
+            "nzd" => $"NZ${amount}",
+            "cad" => $"CA${amount}",
+            "mxn" => $"MX${amount}",
+            "brl" => $"R${amount}",
+            "eur" => $"€{amount}",
+            "gbp" => $"£{amount}",
+            "inr" => $"₹{amount}",
+            var other => $"{other.ToUpperInvariant()} {amount}",
+        };
     }
 
     private static async Task<StartResponse> StartAsync(string token, StartRequest body, CancellationToken cancellationToken)
@@ -206,6 +274,38 @@ internal static class ClipHostingService
         [JsonPropertyName("durationMs"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public long? DurationMs { get; init; }
         [JsonPropertyName("width"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? Width { get; init; }
         [JsonPropertyName("height"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? Height { get; init; }
+    }
+
+    private sealed class CheckoutRequest
+    {
+        [JsonPropertyName("slug")] public string Slug { get; init; } = string.Empty;
+    }
+
+    private sealed class UrlResponse
+    {
+        [JsonPropertyName("url")] public string? Url { get; set; }
+    }
+
+    private sealed class PlansResponse
+    {
+        [JsonPropertyName("plans")] public PlanOfferResponse[]? Plans { get; set; }
+    }
+
+    private sealed class PlanOfferResponse
+    {
+        [JsonPropertyName("id")] public string? Id { get; set; }
+        [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("storageBytes")] public long StorageBytes { get; set; }
+        [JsonPropertyName("monthlySlug")] public string? MonthlySlug { get; set; }
+        [JsonPropertyName("yearlySlug")] public string? YearlySlug { get; set; }
+        [JsonPropertyName("monthlyPrice")] public MoneyResponse? MonthlyPrice { get; set; }
+        [JsonPropertyName("yearlyPrice")] public MoneyResponse? YearlyPrice { get; set; }
+    }
+
+    internal sealed class MoneyResponse
+    {
+        [JsonPropertyName("amount")] public long Amount { get; set; }
+        [JsonPropertyName("currency")] public string? Currency { get; set; }
     }
 
     private sealed class StartResponse

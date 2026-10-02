@@ -66,6 +66,21 @@ public sealed partial class IntegrationsSection : UserControl
         if (DataContext is MainWindowViewModel vm) await vm.RefreshClypDatAccountAsync();
     }
 
+    private async void ClipPlansButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) await vm.ToggleClipPlansAsync();
+    }
+
+    private async void BuyClipPlanButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string slug } && DataContext is MainWindowViewModel vm) await vm.BuyClipPlanAsync(slug);
+    }
+
+    private async void ManageClipPlanButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm) await vm.ManageClipPlanAsync();
+    }
+
     private void ServiceStatusButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm) vm.OpenServiceStatus();
