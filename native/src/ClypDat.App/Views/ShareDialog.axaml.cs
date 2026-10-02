@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -22,6 +23,16 @@ public partial class ShareDialog : Window
     private string? _shareTempPath;
     private Point? _dragPressPoint;
     private PointerPressedEventArgs? _dragPressEvent;
+    // Clip links (GetLinkButton_OnClick). Only an H.264 encode goes up as it
+    // is - every browser and chat embed plays it. AV1, or the untouched
+    // original file, is encoded as H.264 first.
+    private bool _shareReadyForLink;
+    private bool _linkAfterEncode;
+    private CancellationTokenSource? _linkCts;
+    private string? _sharedLink;
+    private int _preparedWidth;
+    private int _preparedHeight;
+    private TimeSpan _preparedDuration;
 
     // Below 90% of the cap is worth spending a retry to close, above it the
     // gain isn't worth another full encode.
@@ -82,6 +93,7 @@ public partial class ShareDialog : Window
         // capture encoder that is protecting their gameplay.
         Opened += (_, _) => SweepStaleShareTempFiles();
         Opened += (_, _) => UpdateTrimmedOption();
+        Opened += (_, _) => UpdateLinkButton();
     }
 
     public async Task ShowWithBackdropAsync(Window owner)
@@ -182,6 +194,17 @@ public partial class ShareDialog : Window
 
     private string BuildShareFileName()
     {
+        var game = ResolveShareGame();
+        // Same date the editor shows as "Created:" - the clip's own recording
+        // date, not whenever Share happened to be clicked.
+        var timestamp = _viewModel.SelectedCreatedAtLocal > default(DateTime) ? _viewModel.SelectedCreatedAtLocal : DateTime.Now;
+        var date = timestamp.ToString("MMM-dd-yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        var stem = string.IsNullOrWhiteSpace(game) ? $"ClypDat - {date}" : $"ClypDat - {game} - {date}";
+        return $"{ClipFileNaming.SanitizeSegment(stem)}.mp4";
+    }
+
+    private string ResolveShareGame()
+    {
         var libraryRoot = string.IsNullOrWhiteSpace(_viewModel.Settings.LibraryFolder)
             ? null
             : _viewModel.Settings.LibraryFolder;
@@ -196,18 +219,13 @@ public partial class ShareDialog : Window
             // folder name, which ResolveExportGame already handles.
         }
 
-        var game = ClipFileNaming.SanitizeSegment(MainWindow.ResolveExportGame(_viewModel.SelectedVideoPath, sidecar));
-        // Same date the editor shows as "Created:" - the clip's own recording
-        // date, not whenever Share happened to be clicked.
-        var timestamp = _viewModel.SelectedCreatedAtLocal > default(DateTime) ? _viewModel.SelectedCreatedAtLocal : DateTime.Now;
-        var date = timestamp.ToString("MMM-dd-yyyy", System.Globalization.CultureInfo.InvariantCulture);
-        var stem = string.IsNullOrWhiteSpace(game) ? $"ClypDat - {date}" : $"ClypDat - {game} - {date}";
-        return $"{ClipFileNaming.SanitizeSegment(stem)}.mp4";
+        return ClipFileNaming.SanitizeSegment(MainWindow.ResolveExportGame(_viewModel.SelectedVideoPath, sidecar));
     }
 
     private void CleanUp()
     {
         _shareCts?.Cancel();
+        CancelLinkUpload();
         _dragCursorWatch?.Stop();
         _dragCursorWatch = null;
         // ffmpeg may still be letting go of the handle when a cancelled
@@ -281,6 +299,7 @@ public partial class ShareDialog : Window
     private void SizePreset_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not RadioButton radio) return;
+        _linkAfterEncode = false;
         var isCustom = ReferenceEquals(radio, ShareSizeCustom);
         ShareCustomSizeBox.IsVisible = isCustom;
         if (isCustom)
@@ -319,6 +338,7 @@ public partial class ShareDialog : Window
         if (e.Key != Key.Enter) return;
         if (double.TryParse(ShareCustomSizeBox.Text, out var mb) && mb > 0)
         {
+            _linkAfterEncode = false;
             _lastTargetBytes = MegabytesToTargetBytes(mb);
             _hasEncodeSelection = true;
             _ = StartShareEncodeAsync(_lastTargetBytes);
@@ -341,6 +361,9 @@ public partial class ShareDialog : Window
         var sourcePath = _viewModel.SelectedVideoPath;
         _shareCts?.Cancel();
         _shareCts = null;
+        CancelLinkUpload();
+        _sharedLink = null;
+        _shareReadyForLink = false;
         if (_shareTempPath is { } previous) _ = DeleteWithRetryAsync(previous);
         _shareTempPath = null;
         _sharePath = null;
@@ -349,6 +372,7 @@ public partial class ShareDialog : Window
         {
             ShareStatusText.Text = "Original clip is unavailable.";
             ShareShowInFolderButton.IsEnabled = false;
+            UpdateLinkButton();
             return;
         }
 
@@ -380,6 +404,7 @@ public partial class ShareDialog : Window
             ShareStatusText.Text = "Original clip is unavailable.";
             AppLog.Error("Share: could not prepare original clip", error);
         }
+        UpdateLinkButton();
     }
 
     private void Av1Toggle_OnChanged(object? sender, RoutedEventArgs e)
@@ -399,9 +424,13 @@ public partial class ShareDialog : Window
         if (string.IsNullOrWhiteSpace(_viewModel.SelectedVideoPath)) return;
 
         _shareCts?.Cancel();
+        // An upload still reading the old file has to let go of it first.
+        CancelLinkUpload();
         // Superseded by a different size - the old encode's file goes with it.
         if (_shareTempPath is { } previous) _ = DeleteWithRetryAsync(previous);
         _sharePath = null;
+        _sharedLink = null;
+        _shareReadyForLink = false;
 
         var cts = new CancellationTokenSource();
         _shareCts = cts;
@@ -421,7 +450,9 @@ public partial class ShareDialog : Window
         ShareProgressBar.Value = 0;
         ShareProgressPercentText.Text = "0%";
         ShareProgressEtaText.IsVisible = false;
-        ShareStatusText.Text = targetBytes > 0 ? "Encoding..." : "Encoding the trimmed range...";
+        ShareStatusText.Text = _linkAfterEncode ? "Encoding as H.264 for the link..."
+            : targetBytes > 0 ? "Encoding..." : "Encoding the trimmed range...";
+        UpdateLinkButton();
 
         try
         {
@@ -586,6 +617,8 @@ public partial class ShareDialog : Window
                 ShareShowInFolderButton.Content = "Show in folder";
                 ShareShowInFolderButton.IsEnabled = false;
                 ShareStatusText.Text = string.IsNullOrWhiteSpace(result.Error) ? "Encode failed." : result.Error;
+                _linkAfterEncode = false;
+                UpdateLinkButton();
                 return;
             }
 
@@ -613,6 +646,19 @@ public partial class ShareDialog : Window
             SizeSharePreviewBox();
             ShareDurationText.Text = FormatShareDuration(exportDuration);
             ShareDurationBadge.IsVisible = true;
+
+            _shareReadyForLink = !useAv1;
+            _preparedWidth = spec.Width;
+            _preparedHeight = spec.Height;
+            _preparedDuration = exportDuration;
+            UpdateLinkButton();
+            // Get link was pressed on an AV1 encode or the original file, and
+            // this is the H.264 encode it asked for.
+            if (_linkAfterEncode)
+            {
+                _linkAfterEncode = false;
+                if (_shareReadyForLink) await UploadLinkAsync();
+            }
         }
         catch (Exception error)
         {
@@ -623,6 +669,8 @@ public partial class ShareDialog : Window
             ShareShowInFolderButton.Content = "Show in folder";
             ShareShowInFolderButton.IsEnabled = false;
             ShareStatusText.Text = "Encode failed.";
+            _linkAfterEncode = false;
+            UpdateLinkButton();
         }
     }
 
@@ -700,10 +748,194 @@ public partial class ShareDialog : Window
             ShareShowInFolderButton.Content = "Show in folder";
             ShareShowInFolderButton.IsEnabled = false;
             ShareStatusText.Text = "Encoding cancelled.";
+            _linkAfterEncode = false;
+            UpdateLinkButton();
             return;
         }
 
         if (_sharePath is { } path) ExplorerService.Open(path, selectFile: true);
+    }
+
+    private async void GetLinkButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_linkCts is { } uploading)
+        {
+            uploading.Cancel();
+            return;
+        }
+        if (_sharedLink is { } link)
+        {
+            await CopyLinkAsync(link);
+            return;
+        }
+        if (_shareCts is not null || _sharePath is null) return;
+        if (_shareReadyForLink)
+        {
+            await UploadLinkAsync();
+            return;
+        }
+
+        // AV1 does not play everywhere a link gets opened, and the original
+        // file may not be H.264 at all, so either is encoded as H.264 first.
+        // The upload starts when that encode finishes (StartShareEncodeAsync).
+        _linkAfterEncode = true;
+        if (_hasEncodeSelection && ShareAv1Toggle.IsChecked == true)
+        {
+            // Av1Toggle_OnChanged re-encodes at the size already picked.
+            ShareAv1Toggle.IsChecked = false;
+            return;
+        }
+        // Original: no size cap, at the clip's own resolution and frame rate.
+        _lastTargetBytes = 0;
+        _hasEncodeSelection = true;
+        await StartShareEncodeAsync(0);
+    }
+
+    private async Task UploadLinkAsync()
+    {
+        if (_sharePath is not { } path || _linkCts is not null) return;
+        var cts = new CancellationTokenSource();
+        _linkCts = cts;
+        // Cancelled by a new size or the dialog closing rather than by the
+        // Cancel upload button: whatever replaced it owns the dialog now.
+        bool Superseded() => !ReferenceEquals(_linkCts, cts);
+
+        ShareThumbnail.IsVisible = false;
+        ShareDurationBadge.IsVisible = false;
+        ShareProgressPanel.IsVisible = true;
+        ShareProgressBar.IsIndeterminate = true;
+        ShareProgressPercentText.Text = string.Empty;
+        ShareProgressEtaText.IsVisible = false;
+        ShareStatusText.Text = "Uploading...";
+        UpdateLinkButton();
+
+        string? outcome = null;
+        try
+        {
+            var token = await _viewModel.GetClipHostingTokenAsync(cts.Token);
+            var thumbnail = await MakeLinkThumbnailAsync(path, cts.Token);
+            var uploadClock = System.Diagnostics.Stopwatch.StartNew();
+            var progress = new Progress<double>(fraction =>
+            {
+                if (Superseded() || cts.IsCancellationRequested) return;
+                ShareProgressBar.IsIndeterminate = false;
+                ShareProgressBar.Value = Math.Clamp(fraction * 100, 0, 100);
+                ShareProgressPercentText.Text = $"{ShareProgressBar.Value:0}%";
+                if (fraction > 0.03)
+                {
+                    var remaining = TimeSpan.FromMilliseconds(uploadClock.ElapsedMilliseconds * (1 - fraction) / fraction);
+                    ShareProgressEtaText.Text = $"About {MainWindow.FormatEta(remaining)} left";
+                    ShareProgressEtaText.IsVisible = true;
+                }
+            });
+            var game = ResolveShareGame();
+            var clip = await ClipHostingService.UploadAsync(token, path, thumbnail, string.IsNullOrWhiteSpace(game) ? null : game,
+                _preparedDuration, _preparedWidth, _preparedHeight, progress, cts.Token);
+            if (!Superseded())
+            {
+                _sharedLink = clip.Url;
+                AppLog.Info($"Share: clip link ready ({clip.Bytes / 1_000_000.0:0.#} MB).");
+            }
+            _viewModel.NoteClipStorageChange(clip.Bytes);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            outcome = "Upload cancelled.";
+        }
+        catch (Exception error) when (error is ClipHostingException or InvalidOperationException)
+        {
+            AppLog.Info($"Share: clip link refused: {error.Message}");
+            outcome = error.Message;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Share: clip link upload failed", error);
+            outcome = "The upload did not go through. Check your connection and try again.";
+        }
+        finally
+        {
+            if (!Superseded())
+            {
+                _linkCts = null;
+                ShareProgressPanel.IsVisible = false;
+                ShareThumbnail.IsVisible = ShareThumbnail.Source is not null;
+                ShareDurationBadge.IsVisible = true;
+                UpdateLinkButton();
+            }
+            cts.Dispose();
+        }
+
+        if (_linkCts is not null || !ReferenceEquals(_sharePath, path)) return;
+        if (_sharedLink is { } link) await CopyLinkAsync(link);
+        else if (outcome is not null) ShareStatusText.Text = outcome;
+    }
+
+    private void CancelLinkUpload()
+    {
+        var uploading = _linkCts;
+        _linkCts = null;
+        try { uploading?.Cancel(); } catch (ObjectDisposedException) { }
+    }
+
+    private async Task CopyLinkAsync(string link)
+    {
+        try
+        {
+            if (Clipboard is { } clipboard)
+            {
+                await clipboard.SetTextAsync(link);
+                ShareStatusText.Text = "Link copied. Paste it anywhere to share the clip.";
+                return;
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Share: could not copy the clip link", error);
+        }
+        ShareStatusText.Text = link;
+    }
+
+    // The clip page and chat embeds show this before the video loads. Taken
+    // from the file being uploaded, so it carries the crop and overlays too.
+    private async Task<string?> MakeLinkThumbnailAsync(string videoPath, CancellationToken cancellationToken)
+    {
+        var folder = Path.GetDirectoryName(videoPath);
+        if (folder is null) return null;
+        var thumbnailPath = Path.Combine(folder, "link-thumbnail.jpg");
+        var seconds = Math.Min(1.0, Math.Max(0, _preparedDuration.TotalSeconds / 2));
+        var arguments = new[]
+        {
+            "-y", "-ss", seconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), "-i", videoPath,
+            "-frames:v", "1", "-vf", "scale='min(1280,iw)':-2", "-q:v", "3", thumbnailPath,
+        };
+        try
+        {
+            var result = await MainWindow.RunProcessWithProgressAsync("ffmpeg", arguments, TimeSpan.Zero, null, cancellationToken, background: true);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result.ExitCode == 0 && File.Exists(thumbnailPath) && new FileInfo(thumbnailPath).Length is > 0 and <= 2_000_000) return thumbnailPath;
+            AppLog.Info($"Share: no thumbnail for the clip link. ffmpeg said: {result.Error}");
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            AppLog.Error("Share: thumbnail for the clip link failed", error);
+        }
+        return null;
+    }
+
+    // Shown only to accounts that are offered clip links. Disabled while an
+    // encode runs; "Cancel upload" while one is going up; "Copy link" once
+    // this file has one.
+    private void UpdateLinkButton()
+    {
+        ShareGetLinkButton.IsVisible = _viewModel.ClipLinksOffered;
+        if (_linkCts is not null)
+        {
+            ShareGetLinkButton.Content = "Cancel upload";
+            ShareGetLinkButton.IsEnabled = true;
+            return;
+        }
+        ShareGetLinkButton.Content = _sharedLink is not null ? "Copy link" : "Get link";
+        ShareGetLinkButton.IsEnabled = _shareCts is null && _sharePath is not null;
     }
 
     private void Thumbnail_OnPointerPressed(object? sender, PointerPressedEventArgs e)

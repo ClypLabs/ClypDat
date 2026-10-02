@@ -7836,6 +7836,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ClypDatAccountIsConnected => _clypDatAccount.IsAuthenticated;
     internal Task<string> GetDiagnosticUploadTokenAsync(CancellationToken cancellationToken) =>
         _clypDatAccount.GetSupportTokenAsync(cancellationToken);
+    internal Task<string> GetClipHostingTokenAsync(CancellationToken cancellationToken) =>
+        _clypDatAccount.GetAccessTokenAsync("Sign in to your ClypDat account in Settings to share clips as links.", cancellationToken);
+    // Null while plans are not offered to the signed-in account, which hides
+    // everything about sharing clips as links.
+    internal ClipPlan? ClipPlan => _clypDatAccount.IsAuthenticated ? _clypDatSnapshot.Plan : null;
+    internal bool ClipLinksOffered => ClipPlan is not null;
+    internal void NoteClipStorageChange(long deltaBytes) => _clypDatAccount.AdjustPlanUsage(deltaBytes);
     public string ClypDatPairingCode => _clypDatAccount.ConnectionCode ?? string.Empty;
     public bool ClypDatPairingCodeVisible => _clypDatAccount.ConnectionCode is not null;
     public bool ClypDatXboxIsLinked => _clypDatSnapshot.IsConnected;
@@ -8075,6 +8082,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(ClypDatHasAvatar));
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountIsConnected));
+        OnPropertyChanged(nameof(ClipPlan));
+        OnPropertyChanged(nameof(ClipLinksOffered));
         OnPropertyChanged(nameof(ClypDatXboxStatus));
         OnPropertyChanged(nameof(ClypDatXboxIsLinked));
         OnPropertyChanged(nameof(DiscordAccountStatus));

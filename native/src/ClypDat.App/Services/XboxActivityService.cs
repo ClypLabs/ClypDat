@@ -22,7 +22,9 @@ internal sealed record XboxActivitySnapshot(
     bool ServerUnavailable = false,
     // The Discord name and picture URL for the account card; null without Discord.
     string? ProfileName = null,
-    string? ProfileImage = null)
+    string? ProfileImage = null,
+    // The clip-link plan and storage; null while plans are not offered to the account.
+    ClipPlan? Plan = null)
 {
     public static XboxActivitySnapshot Disconnected { get; } = new(false, null, null, null, null, null);
 }

@@ -39,6 +39,35 @@ public sealed class ClypDatAccountSecurityTests
     }
 
     [Fact]
+    public async Task PollCarriesTheClipLinkPlanOnlyWhenTheSiteOffersIt()
+    {
+        using (var fixture = new AccountFixture(HttpStatusCode.OK))
+        {
+            Assert.True(await fixture.Service.TryRestoreAsync());
+            Assert.Null(fixture.Service.Snapshot.Plan);
+        }
+
+        using var offered = new AccountFixture(HttpStatusCode.OK)
+        {
+            ActivityBody = "{\"connected\":false,\"providers\":[],\"plan\":{\"plan\":\"plus\",\"planName\":\"Plus\",\"storageBytes\":100000000000,"
+                + "\"source\":\"subscription\",\"renewsAt\":\"2026-11-02T00:00:00Z\",\"endsAt\":null,\"usedBytes\":2500000000}}",
+        };
+        Assert.True(await offered.Service.TryRestoreAsync());
+        var plan = Assert.IsType<ClipPlan>(offered.Service.Snapshot.Plan);
+        Assert.True(plan.IsActive);
+        Assert.Equal("plus", plan.PlanId);
+        Assert.Equal(100_000_000_000, plan.StorageBytes);
+        Assert.Equal(2_500_000_000, plan.UsedBytes);
+        Assert.Equal(new DateTimeOffset(2026, 11, 2, 0, 0, 0, TimeSpan.Zero), plan.RenewsAt);
+        Assert.Null(plan.EndsAt);
+
+        offered.Service.AdjustPlanUsage(500_000_000);
+        Assert.Equal(3_000_000_000, offered.Service.Snapshot.Plan!.UsedBytes);
+        offered.Service.AdjustPlanUsage(-10_000_000_000);
+        Assert.Equal(0, offered.Service.Snapshot.Plan!.UsedBytes);
+    }
+
+    [Fact]
     public async Task AlreadyRevokedTokenCanBeRemovedLocally()
     {
         using var fixture = new AccountFixture(HttpStatusCode.Unauthorized);

@@ -98,12 +98,26 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     private bool IsLiveActivityNeeded => LiveActivityNeeded?.Invoke() ?? true;
     private (bool Xbox, bool Google, bool Discord) LinkSignature => (_snapshot.IsConnected, _snapshot.GoogleConnected, _snapshot.DiscordConnected);
     public bool IsAuthenticated => _token is { ExpiresAt: var expiresAt } && expiresAt > DateTimeOffset.UtcNow;
-    internal async Task<string> GetSupportTokenAsync(CancellationToken cancellationToken)
+    internal Task<string> GetSupportTokenAsync(CancellationToken cancellationToken) =>
+        GetAccessTokenAsync("Link your ClypDat account before sending diagnostics.", cancellationToken);
+    internal async Task<string> GetAccessTokenAsync(string signedOutMessage, CancellationToken cancellationToken)
     {
         await MaybeRenewAsync(cancellationToken).ConfigureAwait(false);
         return IsAuthenticated && _token is { } token
             ? token.AccessToken
-            : throw new InvalidOperationException("Link your ClypDat account before sending diagnostics.");
+            : throw new InvalidOperationException(signedOutMessage);
+    }
+
+    /// <summary>
+    /// Counts a clip just shared or deleted against the plan's storage, so the
+    /// app shows it without asking the site again. The next refresh replaces
+    /// it with the site's own figure.
+    /// </summary>
+    public void AdjustPlanUsage(long deltaBytes)
+    {
+        if (_snapshot.Plan is not { } plan || deltaBytes == 0) return;
+        _snapshot = _snapshot with { Plan = plan with { UsedBytes = Math.Max(0, plan.UsedBytes + deltaBytes) } };
+        Changed?.Invoke(this, _snapshot);
     }
     public bool IsConnecting => _connectCts is not null;
     public event EventHandler<XboxActivitySnapshot>? Changed;
@@ -600,7 +614,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         var providers = result.Providers ?? Array.Empty<string>();
         _snapshot = new XboxActivitySnapshot(result.Connected, null, activity?.Title, activity?.ConsoleName, activity is null ? DateTimeOffset.UtcNow : ParseTimestamp(activity.UpdatedAt), null,
             providers.Contains("google", StringComparer.OrdinalIgnoreCase), providers.Contains("discord", StringComparer.OrdinalIgnoreCase),
-            ProfileName: result.Profile?.Name, ProfileImage: result.Profile?.Image);
+            ProfileName: result.Profile?.Name, ProfileImage: result.Profile?.Image, Plan: ReadPlan(result.Plan));
         Changed?.Invoke(this, _snapshot);
         await MaybeRenewAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -860,6 +874,10 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         }
         catch (JsonException) { return null; }
     }
+    private static ClipPlan? ReadPlan(PlanResponse? plan) => plan is null ? null : new ClipPlan(plan.Plan, plan.PlanName,
+        Math.Max(0, plan.StorageBytes), Math.Max(0, plan.UsedBytes), plan.Source,
+        DateTimeOffset.TryParse(plan.RenewsAt, out var renews) ? renews : null,
+        DateTimeOffset.TryParse(plan.EndsAt, out var ends) ? ends : null);
     private static DateTimeOffset ParseTimestamp(string? value) => DateTimeOffset.TryParse(value, out var parsed) ? parsed : DateTimeOffset.UtcNow;
     private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     public void Dispose() { _lifetime.Cancel(); _lifetime.Dispose(); CancelConnect(); _pollCts?.Cancel(); _pollCts?.Dispose(); _pollWake.Dispose(); _revokeGate.Dispose(); _http.Dispose(); }
@@ -879,6 +897,18 @@ internal sealed class ClypDatAccountActivityService : IDisposable
         [JsonPropertyName("providers")] public string[]? Providers { get; set; }
         // Present only when the account has Discord linked.
         [JsonPropertyName("profile")] public Profile? Profile { get; set; }
+        // Absent from older sites, null while plans are not offered to the account.
+        [JsonPropertyName("plan")] public PlanResponse? Plan { get; set; }
+    }
+    private sealed class PlanResponse
+    {
+        [JsonPropertyName("plan")] public string? Plan { get; set; }
+        [JsonPropertyName("planName")] public string? PlanName { get; set; }
+        [JsonPropertyName("storageBytes")] public long StorageBytes { get; set; }
+        [JsonPropertyName("usedBytes")] public long UsedBytes { get; set; }
+        [JsonPropertyName("source")] public string? Source { get; set; }
+        [JsonPropertyName("renewsAt")] public string? RenewsAt { get; set; }
+        [JsonPropertyName("endsAt")] public string? EndsAt { get; set; }
     }
     private sealed class Profile
     {
