@@ -28,9 +28,72 @@ builds include that notice and the LGPL text under `licenses/`.
 ## Avalonia UI (MIT)
 
 ClypDat's user interface is built on the Avalonia UI framework, licensed under
-the **MIT License**.
+the **MIT License**. ClypDat ships a fork of it built from
+https://github.com/ClypLabs/clypdat-avalonia.
 
 - Project: https://github.com/AvaloniaUI/Avalonia
+- The licence text is in `licenses/Avalonia-LICENSE.md`.
+
+## SkiaSharp and Skia (MIT; bundled native libraries under their own licences)
+
+Avalonia renders through SkiaSharp (`libSkiaSharp.dll`), which incorporates
+Google's Skia (BSD-3-Clause) and further native libraries.
+
+- Project: https://github.com/mono/SkiaSharp
+- SkiaSharp's MIT licence is in `licenses/SkiaSharp/LICENSE.txt`; the notices
+  for every library compiled into the native binary (Skia, libpng, libjpeg-turbo,
+  libwebp, expat, zlib and others) are in `licenses/SkiaSharp/THIRD-PARTY-NOTICES.txt`.
+
+## HarfBuzzSharp and HarfBuzz (MIT)
+
+Text shaping uses HarfBuzzSharp (`libHarfBuzzSharp.dll`), which incorporates
+HarfBuzz.
+
+- Project: https://github.com/mono/SkiaSharp (HarfBuzzSharp) and https://github.com/harfbuzz/harfbuzz
+- Licence: `licenses/HarfBuzzSharp/LICENSE.txt`; native notices:
+  `licenses/HarfBuzzSharp/THIRD-PARTY-NOTICES.txt`.
+
+## ANGLE (BSD-3-Clause)
+
+Avalonia's GPU rendering on Windows uses ANGLE (`av_libglesv2.dll`, from
+`Avalonia.Angle.Windows.Natives`).
+
+- Project: https://chromium.googlesource.com/angle/angle
+- Licence: `licenses/ANGLE/LICENSE`.
+
+## Inter typeface (SIL Open Font License 1.1)
+
+ClypDat's interface font is Inter by Rasmus Andersson, embedded via
+`Avalonia.Fonts.Inter`. The font software is licensed under the **SIL Open Font
+License, Version 1.1**, which requires the licence to accompany the font.
+
+- Project: https://github.com/rsms/inter
+- Copyright notice and full licence text: `licenses/Inter-OFL-1.1.txt`.
+
+## .NET runtime (MIT)
+
+ClypDat is published self-contained, so it ships the .NET and Windows Desktop
+runtimes.
+
+- Project: https://github.com/dotnet/runtime
+- Licence: `licenses/dotnet/LICENSE.TXT` and `licenses/dotnet/WindowsDesktop-LICENSE`;
+  third-party notices for code inside the runtime: `licenses/dotnet/THIRD-PARTY-NOTICES.TXT`.
+
+## SQLitePCLRaw (Apache-2.0) and Microsoft.Data.Sqlite (MIT)
+
+The clip library cache uses Microsoft.Data.Sqlite over SQLitePCLRaw, bound to
+Windows' own `winsqlite3` (no SQLite binary is bundled).
+
+- Projects: https://github.com/ericsink/SQLitePCL.raw and https://github.com/dotnet/efcore
+- SQLitePCLRaw: Copyright 2014-2025 SourceGear, LLC, **Apache License 2.0**,
+  text in `licenses/Apache-2.0.txt`. Microsoft.Data.Sqlite: MIT, see
+  `licenses/MIT-components.txt`.
+
+## Other MIT runtime libraries
+
+SharpGen.Runtime, MicroCom.Runtime and Tmds.DBus.Protocol (Avalonia
+dependencies) are MIT-licensed. Their copyright notices and the MIT text are in
+`licenses/MIT-components.txt`.
 
 ## NAudio (MIT)
 
@@ -38,6 +101,7 @@ ClypDat's audio capture/mixing (editor playback and the Windows Capture
 backend's audio routing) uses NAudio, licensed under the **MIT License**.
 
 - Project: https://github.com/naudio/NAudio
+- Licence: `licenses/NAudio-LICENSE.txt`.
 
 ## Markdig (BSD-2-Clause)
 
@@ -68,6 +132,7 @@ editor preview, monitor thumbnails and HDR display checks
 Vortice.Windows, licensed under the **MIT License**.
 
 - Project: https://github.com/amerkoleci/Vortice.Windows
+- Copyright notice and MIT text: `licenses/MIT-components.txt`.
 
 ---
 

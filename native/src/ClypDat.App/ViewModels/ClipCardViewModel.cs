@@ -514,6 +514,23 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
+    // The same saved crop as a source-pixel rectangle, for the in-process
+    // hover decoder (NativeClipPreview).
+    internal (int X, int Y, int Width, int Height)? HoverPreviewCrop
+    {
+        get
+        {
+            if (_clipEdit is null) return null;
+            var crop = ClipRenderFilters.ComputeCrop(
+                _clipEdit.CropMode,
+                _clipEdit.CropOffsetX,
+                _clipEdit.CropOffsetY,
+                Media.Width,
+                Media.Height);
+            return crop is { } rect ? (rect.X, rect.Y, rect.Width, rect.Height) : null;
+        }
+    }
+
     // Called from MainWindow's realized-row diff. Decodes on row entry and
     // releases on row exit, bounding live thumbnails to viewport + overscan.
     public void SetPreviewVisible(bool visible) => SetPreviewLifecycle(visible, visible);

@@ -49,6 +49,9 @@ public sealed partial class ReplayBufferSection : UserControl
         if (e.Text is { Length: > 0 } text && !text.All(char.IsAsciiDigit)) e.Handled = true;
     }
 
+    private void LicenseLinkText_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+        => Owner?.LicenseLinkText_OnPointerPressed(sender, e);
+
     private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.HotkeyCaptureButton_OnClick(sender, e);
 

@@ -48,7 +48,8 @@ add_library(RecorderCore STATIC
     src/recording_verification.cpp src/recording_verification.h
     src/recording_overlays.cpp src/recording_overlays.h
     src/recording_overlays_input.cpp
-    src/recording_overlays_camera.cpp)
+    src/recording_overlays_camera.cpp
+    src/clip_preview_decoder.cpp src/clip_preview_decoder.h)
 add_dependencies(RecorderCore ClypDat.Capture.Native.FfmpegRuntime)
 target_compile_features(RecorderCore PUBLIC cxx_std_20)
 target_include_directories(RecorderCore PUBLIC src)
@@ -69,6 +70,8 @@ add_library(ClypDat.Capture.Native SHARED
     include/clypdat_recorder.h
     src/camera_preview_abi.cpp
     include/clypdat_camera_preview.h
+    src/clip_preview_abi.cpp
+    include/clypdat_clip_preview.h
     include/clypdat_capture_native.h)
 
 target_compile_features(ClypDat.Capture.Native PRIVATE cxx_std_20)

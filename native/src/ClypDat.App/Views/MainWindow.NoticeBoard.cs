@@ -41,6 +41,27 @@ public sealed partial class MainWindow
         _noticeTimer.Tick -= NoticeTimer_OnTick;
         _noticeTimer.Tick += NoticeTimer_OnTick;
         _noticeTimer.Start();
+        PropertyChanged -= NoticeBoard_OnWindowPropertyChanged;
+        PropertyChanged += NoticeBoard_OnWindowPropertyChanged;
+    }
+
+    // Notices that arrived while the window sat in the tray show the moment it
+    // is opened again.
+    private bool _noticesHeldWhileHidden;
+
+    private void NoticeBoard_OnWindowPropertyChanged(object? sender, Avalonia.AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property != IsVisibleProperty || !IsVisible || !_noticesHeldWhileHidden) return;
+        Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                var held = NoticesToShow();
+                if (held.Count > 0) await ShowNoticeDialogAsync(held, board: false);
+                else _noticesHeldWhileHidden = false;
+            }
+            catch (Exception error) { AppLog.Error("Notice board: showing held notices failed (non-fatal)", error); }
+        }, DispatcherPriority.Background);
     }
 
     private void StopNoticeBoardTimer() => _noticeTimer?.Stop();
@@ -105,18 +126,45 @@ public sealed partial class MainWindow
         if (ViewModel is not { } model || _updateDialogOpen) return;
         if (!board && notices.Count == 0) return;
 
-        foreach (var notice in notices) _noticesPoppedThisSession.Add(notice.Id);
-        // Opening counts as seen for everything except critical notices, which
-        // need the explicit "I understand".
-        var newlySeen = notices.Where(notice => !notice.IsCritical && !model.Settings.SeenNoticeIds.Contains(notice.Id)).Select(notice => notice.Id).ToList();
-        if (newlySeen.Count > 0)
+        // A window hidden in the tray cannot own the dialog - Show throws
+        // "Cannot show window with non-visible owner". These notices used to be
+        // marked seen before that throw, so anyone running ClypDat from the tray
+        // never saw them at all. Hold them until the window is opened instead.
+        if (!IsVisible)
         {
-            model.Settings.SeenNoticeIds.AddRange(newlySeen);
-            model.SaveSettings();
+            _noticesHeldWhileHidden = true;
+            AppLog.Info($"Notice board: {notices.Count} notice(s) held until the window is shown.");
+            return;
         }
-        UpdateNoticeBadge();
+        _noticesHeldWhileHidden = false;
 
-        await ShowUpdateDialogAsync(CreateNoticeDialog(notices, board));
+        var dialog = CreateNoticeDialog(notices, board);
+        var opened = false;
+        dialog.Opened += (_, _) =>
+        {
+            // Seen only once it is actually on screen. Opening counts as seen
+            // for everything except critical notices, which need the explicit
+            // "I understand".
+            opened = true;
+            foreach (var notice in notices) _noticesPoppedThisSession.Add(notice.Id);
+            var newlySeen = notices.Where(notice => !notice.IsCritical && !model.Settings.SeenNoticeIds.Contains(notice.Id)).Select(notice => notice.Id).ToList();
+            if (newlySeen.Count > 0)
+            {
+                model.Settings.SeenNoticeIds.AddRange(newlySeen);
+                model.SaveSettings();
+            }
+            UpdateNoticeBadge();
+        };
+        try
+        {
+            await ShowUpdateDialogAsync(dialog);
+        }
+        catch (InvalidOperationException) when (!opened && !IsVisible)
+        {
+            // Hidden between the check above and the show.
+            _noticesHeldWhileHidden = true;
+            AppLog.Info($"Notice board: {notices.Count} notice(s) held until the window is shown.");
+        }
         UpdateNoticeBadge();
     }
 

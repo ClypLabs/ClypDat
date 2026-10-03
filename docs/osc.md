@@ -4,6 +4,8 @@ Enable **Settings > Replay Buffer > Enable OSC** to receive Open Sound Control (
 
 The [website setup guide](https://www.clypdat.xyz/docs/osc) also generates Command Prompt examples for your target PC and port.
 
+**Stream Deck:** install the [OSC Remote](https://marketplace.elgato.com/product/osc-remote-9ccf7913-4532-4d68-8b1d-6c512923cda6) plugin from the Elgato Marketplace, put one of its actions on a key, and point it at the recording PC's IP and this port with the `/clypdat/clip` address (or `/clypdat/replay-duration` and a value such as `60`).
+
 **Anyone who can reach the enabled OSC port can save clips and change replay length.** There is no sender authentication or IP filtering. ClypDat does not create or change firewall rules. Enable OSC only on a network where you intend to allow this access. Turning OSC off, changing its port, or quitting closes the listener and discards pending commands.
 
 ## Commands

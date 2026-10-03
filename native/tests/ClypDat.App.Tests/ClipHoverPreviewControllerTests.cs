@@ -44,25 +44,42 @@ public sealed class ClipHoverPreviewControllerTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void BuildDecoderArguments_NormalClip_UsesCoverThenCenterCrop()
+    public async Task NativeDecoder_NormalClip_CoversTheCanvasEdgeToEdge()
     {
-        var arguments = ClipHoverPreviewController.BuildDecoderArguments(
-            "clip.mp4", (TimeSpan.Zero, TimeSpan.FromSeconds(3)), 60, new PixelSize(320, 180));
+        await using var fixture = await PreviewFixture.CreateAsync();
+        var frame = fixture.DecodeFirstFrame(crop: null);
 
-        Assert.Equal(
-            "fps=60,scale=w=320:h=180:flags=bilinear:force_original_aspect_ratio=increase,crop=320:180:(in_w-out_w)/2:(in_h-out_h)/2",
-            Filter(arguments));
+        // testsrc2 has no black at its edges, so a covered canvas has none either.
+        Assert.False(IsOpaqueBlack(frame, fixture.Size, 0, fixture.Size.Height / 2));
+        Assert.False(IsOpaqueBlack(frame, fixture.Size, fixture.Size.Width - 1, fixture.Size.Height / 2));
     }
 
     [Fact]
-    public void BuildDecoderArguments_EditedCrop_UsesCropThenContainAndCenterPad()
+    public async Task NativeDecoder_EditedCrop_FitsInsideWithBlackBars()
     {
-        var arguments = ClipHoverPreviewController.BuildDecoderArguments(
-            "clip.mp4", (TimeSpan.Zero, TimeSpan.FromSeconds(3)), 60, new PixelSize(320, 180), "crop=900:900:10:20");
+        await using var fixture = await PreviewFixture.CreateAsync();
+        // A square crop on a 16:9 canvas: pillarboxed, bars left and right.
+        var frame = fixture.DecodeFirstFrame(crop: (80, 0, 180, 180));
 
-        Assert.Equal(
-            "fps=60,crop=900:900:10:20,scale=w=320:h=180:flags=bilinear:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2",
-            Filter(arguments));
+        Assert.True(IsOpaqueBlack(frame, fixture.Size, 0, fixture.Size.Height / 2));
+        Assert.True(IsOpaqueBlack(frame, fixture.Size, fixture.Size.Width - 1, fixture.Size.Height / 2));
+        Assert.False(IsOpaqueBlack(frame, fixture.Size, fixture.Size.Width / 2, fixture.Size.Height / 2));
+    }
+
+    [Fact]
+    public async Task NativeDecoder_EmitsOneFramePerSixtiethOfTheRange()
+    {
+        await using var fixture = await PreviewFixture.CreateAsync();
+        var frames = await fixture.DecodeFramePrefixesAsync();
+
+        Assert.Equal(ClipHoverPreviewController.FramesPerLoop(fixture.Clip.HoverPreviewRange.Duration), frames.Count);
+        Assert.Equal(120, frames.Count);
+    }
+
+    private static bool IsOpaqueBlack(byte[] rgba, PixelSize size, int x, int y)
+    {
+        var offset = (y * size.Width + x) * 4;
+        return rgba[offset] < 8 && rgba[offset + 1] < 8 && rgba[offset + 2] < 8 && rgba[offset + 3] == 255;
     }
 
     [Fact]
@@ -150,8 +167,6 @@ public sealed class ClipHoverPreviewControllerTests(ITestOutputHelper output)
         controller.PointerLeft(otherClip);
         await WaitUntilAsync(() => second.ReleaseCount == 1);
     }
-
-    private static string Filter(IReadOnlyList<string> arguments) => arguments[Array.IndexOf(arguments.ToArray(), "-vf") + 1];
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
@@ -263,27 +278,37 @@ public sealed class ClipHoverPreviewControllerTests(ITestOutputHelper output)
             return new PreviewFixture(path, CreateClip(path, "hover"));
         }
 
-        public async Task<IReadOnlyList<byte[]>> DecodeFramePrefixesAsync()
+        // Every frame of one pass, in order: the decoder runs unpaced, so each
+        // frame waits to be taken and none is replaced.
+        public Task<IReadOnlyList<byte[]>> DecodeFramePrefixesAsync() => Task.Run<IReadOnlyList<byte[]>>(() =>
         {
-            var info = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
+            var range = Clip.HoverPreviewRange;
+            using var decoder = NativeClipPreview.Open(Path, range.Start, range.Duration, Size.Width, Size.Height,
+                ClipHoverPreviewController.MaximumFramesPerSecond, crop: null, paced: false);
+            var count = ClipHoverPreviewController.FramesPerLoop(range.Duration);
+            var buffer = new byte[Size.Width * Size.Height * 4];
+            var prefixes = new List<byte[]>(count);
+            ulong last = 0;
+            while (prefixes.Count < count)
             {
-                UseShellExecute = false, CreateNoWindow = true,
-                RedirectStandardOutput = true, RedirectStandardError = true
-            };
-            foreach (var argument in ClipHoverPreviewController.BuildDecoderArguments(
-                Path, Clip.HoverPreviewRange, ClipHoverPreviewController.MaximumFramesPerSecond, Size))
-                info.ArgumentList.Add(argument);
-            using var process = Process.Start(info)!;
-            var errors = process.StandardError.ReadToEndAsync();
-            using var decoded = new MemoryStream();
-            await process.StandardOutput.BaseStream.CopyToAsync(decoded);
-            await process.WaitForExitAsync();
-            Assert.True(process.ExitCode == 0, await errors);
-            var bytes = decoded.ToArray();
-            var frameBytes = Size.Width * Size.Height * 4;
-            Assert.Equal(0, bytes.Length % frameBytes);
-            return Enumerable.Range(0, bytes.Length / frameBytes)
-                .Select(index => bytes.AsSpan(index * frameBytes, 32).ToArray()).ToArray();
+                var taken = decoder.Take(last, buffer, 1000);
+                Assert.True(taken.Sequence != 0, $"Decoder stalled after {prefixes.Count} frames: {decoder.Error()}");
+                Assert.Equal(last + 1, taken.Sequence);
+                last = taken.Sequence;
+                prefixes.Add(buffer.AsSpan(0, 32).ToArray());
+            }
+            return prefixes;
+        });
+
+        public byte[] DecodeFirstFrame((int X, int Y, int Width, int Height)? crop)
+        {
+            var range = Clip.HoverPreviewRange;
+            using var decoder = NativeClipPreview.Open(Path, range.Start, range.Duration, Size.Width, Size.Height,
+                ClipHoverPreviewController.MaximumFramesPerSecond, crop, paced: false);
+            var buffer = new byte[Size.Width * Size.Height * 4];
+            var taken = decoder.Take(0, buffer, 1000);
+            Assert.True(taken.Sequence == 1, $"No first frame: {decoder.Error()}");
+            return buffer;
         }
 
         public ClipCardViewModel CreateClip(string name) => CreateClip(Path, name);

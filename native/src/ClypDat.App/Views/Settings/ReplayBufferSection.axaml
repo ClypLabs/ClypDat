@@ -239,7 +239,7 @@
       </StackPanel>
     </Border>
 
-    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=OSC|Open Sound Control|Network controls|UDP|Port|Listener status|OSC setup guide}">
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=OSC|Open Sound Control|Network controls|UDP|Port|Listener status|OSC setup guide|Stream Deck|OSC Remote}">
       <TextBlock Classes="settingsGroupLabel" Text="OSC NETWORK CONTROLS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
       <Border Classes="settingsGroupCard">
         <StackPanel>
@@ -248,6 +248,13 @@
               <StackPanel Classes="settingsRowText">
                 <TextBlock Classes="settingsRowTitle" Text="Enable OSC" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                 <TextBlock Classes="settingsRowDesc" Text="Save clips and change replay length from an OSC controller over UDP." />
+                <WrapPanel>
+                  <TextBlock Classes="settingsRowDesc" Text="Using a Stream Deck? Add the " />
+                  <TextBlock Classes="settingsLink" Text="OSC Remote" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}"
+                             Tag="https://marketplace.elgato.com/product/osc-remote-9ccf7913-4532-4d68-8b1d-6c512923cda6"
+                             PointerPressed="LicenseLinkText_OnPointerPressed" ToolTip.Tip="Open OSC Remote on the Elgato Marketplace" />
+                  <TextBlock Classes="settingsRowDesc" Text=" plugin and send its buttons to this PC on the port below." />
+                </WrapPanel>
                 <TextBlock Classes="settingsRowWarning" Text="Anyone who can reach the enabled OSC port can save clips and change replay length." TextWrapping="Wrap" />
               </StackPanel>
               <ToggleSwitch Grid.Column="1" IsChecked="{Binding OscEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
