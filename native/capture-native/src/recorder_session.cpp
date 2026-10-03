@@ -111,8 +111,8 @@ RecorderSession::RecorderSession(RecorderSessionConfig config, std::unique_ptr<R
         config.capture.qpc_frequency <= 0 || config.work_directory.empty())
         throw std::invalid_argument("Invalid recorder configuration");
     auto s = state_ = std::make_shared<State>(std::move(config));
-    s->audio = std::make_shared<AudioHistory>(s->config.work_directory / L"audio",
-        int64_t(s->config.history_seconds) * 1000000);
+    s->audio = std::make_shared<AudioHistory>(s->config.audio_lanes,
+        int64_t(s->config.history_seconds) * 1000000, AudioHistoryOptions{s->config.audio_codec});
     std::weak_ptr<State> weak = s;
     s->input->on_change([weak] { if (auto state = weak.lock()) state->notify(2); });
     s->overlays->reset(s->config.overlays.burned);
@@ -313,8 +313,7 @@ void RecorderSession::save(const std::string& id, int64_t start_us, int64_t end_
         if (s->results.contains(id)) throw std::invalid_argument("Save identifier already exists");
     }
     ReplaySaveRequest request;
-    request.id = id; request.output = output; request.ffmpeg = s->config.ffmpeg;
-    request.work_directory = s->config.work_directory / L"saves" / std::filesystem::path(id);
+    request.id = id; request.output = output;
     int64_t safe_start = start_us;
     if (!s->capture->safe_save_start(start_us, end_us, safe_start))
         throw std::logic_error("Replay capture is still recovering. Try again after recording resumes.");

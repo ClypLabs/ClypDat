@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 if ($Tag -cnotmatch '\Av[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?\z') {
     throw "Invalid release tag: $Tag"
 }
-$names = @("ClypDat-$Tag-Setup.exe", "ClypDat-$Tag.msi", "ClypDat-$Tag-Portable.exe", "ClypDat-$Tag-win-x64.zip", 'ClypDat-Setup.exe', 'clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip')
+$names = @("ClypDat-$Tag-Setup.exe", "ClypDat-$Tag.msi", "ClypDat-$Tag-Portable.exe", "ClypDat-$Tag-win-x64.zip", 'ClypDat-Setup.exe', 'clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip')
 foreach ($name in $names) {
     $path = Join-Path $ArtifactDirectory $name
     if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {

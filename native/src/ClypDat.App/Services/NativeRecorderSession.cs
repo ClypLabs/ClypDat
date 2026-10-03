@@ -46,6 +46,7 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
         public Text16 FullSessionCodec, FullSessionContainer, LibraryFolder;
         public Text16 FileNameScheme, CustomFileNameTemplate, SaveHotkey, FullSessionHotkey;
         public Text16 DiagnosticForceDxgi, DiagnosticDisableDirectBlt, DiagnosticPacingPolicy, DiagnosticNvencDelay, DiagnosticD3dDebug;
+        public Text16 AudioCodec;
     }
     [StructLayout(LayoutKind.Sequential, Pack = 8)] internal struct Contract
     {
@@ -184,7 +185,8 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
             FileNameScheme = memory.Text(s.ClipFileNameScheme), CustomFileNameTemplate = memory.Text(s.CustomClipFileNameTemplate), SaveHotkey = memory.Text(s.SaveReplayHotkey),
             FullSessionHotkey = memory.Text(s.FullSessionHotkey), DiagnosticForceDxgi = memory.Environment("CLYPDAT_FORCE_DXGI"),
             DiagnosticDisableDirectBlt = memory.Environment("CLYPDAT_DISABLE_DIRECT_BLT"), DiagnosticPacingPolicy = memory.Environment("CLYPDAT_PACING_POLICY"),
-            DiagnosticNvencDelay = memory.Environment("CLYPDAT_NVENC_DELAY"), DiagnosticD3dDebug = memory.Environment("CLYPDAT_D3D_DEBUG")
+            DiagnosticNvencDelay = memory.Environment("CLYPDAT_NVENC_DELAY"), DiagnosticD3dDebug = memory.Environment("CLYPDAT_D3D_DEBUG"),
+            AudioCodec = memory.Text(ClypDat.Core.Settings.RecordingAudioCodec.Normalize(s.AudioCodec))
         };
     }
     internal void Start() { Command(Api.Value.Start(handle), "start native recorder"); GC.KeepAlive(this); }

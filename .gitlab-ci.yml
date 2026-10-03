@@ -47,7 +47,7 @@ build_windows_installer:
       -p:Version=$version -o native\publish\win-x64-folder --nologo
     - .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
     - .\eng\Verify-CaptureFfmpegRuntime.ps1 -RuntimeDirectory native\publish\win-x64-folder\ffmpeg -VerifyPackage
-    - Copy-Item -LiteralPath eng\ffmpeg\artifacts\clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip -Destination .
+    - Copy-Item -LiteralPath eng\ffmpeg\artifacts\clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip -Destination .
     - |
       foreach ($tool in @(
         @{ Name = 'nsis'; Version = '3.12.0' },
@@ -114,7 +114,7 @@ build_windows_installer:
       - ClypDat-${CI_COMMIT_TAG}-Setup.exe
       - ClypDat-${CI_COMMIT_TAG}.msi
       - ClypDat-Setup.exe
-      - clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip
+      - clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip
     expire_in: 1 year
 
 # Manual on purpose. The release manifest is signed offline and this pipeline

@@ -1,4 +1,5 @@
 #include "recording_audio.h"
+#include "recording_audio_codec.h"
 #include "recording_audio_timing.h"
 #include <chrono>
 #include <cmath>
@@ -11,28 +12,23 @@
 using namespace clypdat;
 namespace {
 void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
-void jitter_history(const std::filesystem::path& root) {
-    AudioHistory history(root / "history", 5000000);
+void jitter_history() {
+    AudioLaneMixer mixer({{"mic", "Microphone", 1, 1, false}}, 960, 480000);
+    mixer.anchor(0);
     for (int packet = 0; packet < 600; ++packet) {
         PcmBlock block;
         block.lane = block.source = "mic";
         block.channels = 1;
         block.start_us = packet * 10000 + (packet == 0 ? 0 : packet % 2 ? 1 : -1);
         for (int i = 0; i < 480; ++i) block.samples.push_back(.2f + float(packet * 480 + i) / 1000000);
-        require(history.submit(std::move(block)), "Jitter packet rejected");
+        mixer.submit(block, audio_frames(block.start_us));
     }
-    auto snapshot = history.snapshot(0, 6000000).get();
-    require(snapshot.ranges.size() == 2, "History fixture did not cross file rotation");
-    history.stop();
-    std::atomic_bool cancel = false;
-    auto tracks = render_audio(snapshot, {{"mic", "Microphone", 1, 1, false}}, root / "render", cancel);
-    std::ifstream input(tracks.front().second, std::ios::binary);
-    input.seekg(44);
-    for (int frame = 0; frame < 288000; ++frame) {
-        float sample = 0;
-        input.read(reinterpret_cast<char*>(&sample), sizeof(sample));
-        require(bool(input) && std::abs(sample - (.2f + float(frame) / 1000000)) < .0000001f,
-            "Continuous PCM contains an inserted zero or missing sample under +/-1 us jitter");
+    mixer.flush();
+    for (int frame = 0; frame < 288000; frame += 960) {
+        auto samples = mixer.take()[0].samples;
+        for (int i = 0; i < 960; ++i)
+            require(std::abs(samples[size_t(i)] - (.2f + float(frame + i) / 1000000)) < .0000001f,
+                "Continuous PCM contains an inserted zero or missing sample under +/-1 us jitter");
     }
 }
 PcmBlock packet(int rate, int channels, int frames, int64_t time) {
@@ -114,8 +110,9 @@ void interruptions() {
     reset.submit(packet(48000, 1, 4800, 50000), 0);
     reset.finish(); require(end == 7200, "Backward reset duplicated or lost its tail");
 }
-void suppression(const std::filesystem::path& root, bool enabled, int rate, int channels) {
-    AudioHistory history(root / ("suppression-" + std::to_string(enabled) + "-" + std::to_string(rate) + "-" + std::to_string(channels)), 10000000);
+void suppression(bool enabled, int rate, int channels) {
+    AudioLaneMixer mixer({{"mic", "Microphone", channels, 1, false}}, 960, 480000);
+    mixer.anchor(0);
     int64_t end = 0;
     bool filtered = false;
     auto sink = [&](PcmBlock block) {
@@ -125,7 +122,7 @@ void suppression(const std::filesystem::path& root, bool enabled, int rate, int 
             require(std::isfinite(block.samples[i]), "Suppression produced invalid PCM");
             filtered |= std::abs(block.samples[i] - (.25f + .125f * (i % channels))) > .001f;
         }
-        require(history.submit(std::move(block)), "Suppressed history rejected PCM");
+        mixer.submit(block, audio_frames(block.start_us));
     };
     auto vendor = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() / "vendor";
     std::unique_ptr<RecordingMicrophoneFilter> filter;
@@ -141,11 +138,8 @@ void suppression(const std::filesystem::path& root, bool enabled, int rate, int 
     if (filter) require(filter->stop(), "Suppression failed to drain");
     require(filtered == enabled, "Suppression test silently fell back or changed unfiltered PCM");
     require(end == 48000, "Suppression drain lost timing output");
-    auto snapshot = history.snapshot(0, 1000000).get();
-    history.stop();
-    uint64_t frames = 0;
-    for (auto& range : snapshot.ranges) frames += range.frame_count;
-    require(frames == 48000, "History lost suppressed frames");
+    mixer.flush();
+    require(mixer.converted_frames() == 48000, "Mixer lost suppressed frames");
 }
 }
 int main() {
@@ -155,10 +149,10 @@ int main() {
     try {
         owned = std::filesystem::create_directory(root);
         require(owned, "Timing fixture already exists");
-        jitter_history(root);
+        jitter_history();
         for (int rate : {44100, 48000}) for (int channels : {1, 2}) {
             for (int ppm : {-500, 0, 500}) clock_test(rate, channels, ppm);
-            for (bool enabled : {false, true}) suppression(root, enabled, rate, channels);
+            for (bool enabled : {false, true}) suppression(enabled, rate, channels);
         }
         interruptions();
         std::filesystem::remove_all(root);

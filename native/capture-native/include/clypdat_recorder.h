@@ -28,6 +28,7 @@ typedef struct cd_session_config {
     cd_string16 file_name_scheme, custom_file_name_template, save_hotkey, full_session_hotkey;
     cd_string16 diagnostic_force_dxgi, diagnostic_disable_direct_blt, diagnostic_pacing_policy;
     cd_string16 diagnostic_nvenc_delay, diagnostic_d3d_debug;
+    cd_string16 audio_codec; /* "Opus" (default), "AAC" or "Vorbis". */
 } cd_session_config;
 enum cd_session_flags {
     CD_SESSION_CURSOR = 1, CD_SESSION_FULL = 2, CD_SESSION_BACKGROUND_FINALIZE = 4,

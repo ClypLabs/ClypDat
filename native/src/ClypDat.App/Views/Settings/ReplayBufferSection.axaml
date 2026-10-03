@@ -158,8 +158,14 @@
                     </ComboBox>
                   </StackPanel>
                   <StackPanel Spacing="5">
-                    <TextBlock Classes="settingsFieldLabel" Text="Codec" />
+                    <TextBlock Classes="settingsFieldLabel" Text="Video codec" />
                     <ComboBox Classes="settingsInput recordingCodecPicker" Width="170" ItemsSource="{Binding ReplayVideoCodecs}" SelectedItem="{Binding SelectedReplayVideoCodec}" IsEnabled="{Binding !IsReplayEncoderCpu}">
+                      <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+                    </ComboBox>
+                  </StackPanel>
+                  <StackPanel Spacing="5">
+                    <TextBlock Classes="settingsFieldLabel" Text="Audio codec" />
+                    <ComboBox Classes="settingsInput recordingCodecPicker" Width="170" ItemsSource="{Binding ReplayAudioCodecs}" SelectedItem="{Binding SelectedReplayAudioCodec}">
                       <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
                     </ComboBox>
                   </StackPanel>
@@ -167,6 +173,7 @@
                 <StackPanel Spacing="2">
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayEncoderModeStatus}" />
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayVideoCodecStatus}" />
+                  <TextBlock Classes="settingsRowDescSm" Text="{Binding SelectedReplayAudioCodec.Description}" />
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding ReplayFrameTimingMetrics}" IsVisible="{Binding ReplayFrameTimingMetrics, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
                 </StackPanel>
                 <Border Classes="settingsNotice" IsVisible="{Binding CpuEncoderHardwareWarningVisible}">
@@ -260,6 +267,7 @@
                   <TextBlock Classes="settingsRowTitle" Text="File format" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                   <TextBlock Classes="settingsRowDesc" Text="Uses the Recording quality settings above. Format changes apply to the next Full Session." />
                   <TextBlock Classes="settingsRowDescSm" Text="{Binding FullSessionFormatRecommendation}" IsVisible="{Binding !IsFullSessionMp4}" />
+                  <TextBlock Classes="settingsRowDescSm" Text="Vorbis audio can't be stored in MP4, so Full Sessions save as MKV." IsVisible="{Binding IsFullSessionVorbisNoticeVisible}" />
                 </StackPanel>
                 <ComboBox Grid.Column="1" Classes="settingsInput" MinWidth="240" HorizontalAlignment="Right" VerticalAlignment="Center" ItemsSource="{Binding FullSessionFormats}" SelectedItem="{Binding SelectedFullSessionFormat}" />
               </Grid>

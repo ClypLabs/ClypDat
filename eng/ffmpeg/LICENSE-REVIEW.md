@@ -12,6 +12,8 @@ This review applies to the candidate's explicit configure command, not to a gene
 | oneVPL | v2.16.0 commit `778a66d6c6537f08eabb91955dbbf1bce3812894`; single shared libvpl.dll, BUILD_EXPERIMENTAL=ON | MIT; include copyright/permission notice and source. Intel driver runtime is discovered on the user's machine, not redistributed. |
 | NV codec headers | n13.0.19.0 | MIT-style NVIDIA header copyright/permission text. No NVIDIA SDK or driver binaries bundled. |
 | AMF headers | v1.4.36 commit `16f7d73e0b45c473e903e46981ed0b91efc4c091` (annotated tag object `86b1b09ca5c0572ab710ee7b6b174f8c7aa00119`) | MIT and AMD standards notice; retain LICENSE.txt and documented C compatibility header patch. No AMD driver runtime bundled. |
+| libopus | 1.5.2 release archive; static codec library inside avcodec | BSD-3-Clause; retain COPYING. The Opus codec is royalty-free (RFC 6716); patent licences from Xiph.Org, Microsoft and Broadcom are royalty-free. |
+| libvorbis, libogg | 1.3.7 and 1.3.6 release archives; static libraries inside avcodec | BSD-3-Clause; retain each COPYING. Vorbis is patent-free. |
 | zlib | 1.3.1 | zlib license; retain zlib.h notice, source and documented MSVC header-guard patch. Static inside FFmpeg; no zlib DLL needed. |
 | Microsoft C/C++ runtime | release x64 DLLs from installed VC/Redist/MSVC/14.51.36231 | Microsoft redistributable terms, separate from GPL component licenses. Preserve binaries unchanged, include provenance/terms links. Only release redistribution files, never debug or preview files. |
 | FFmpeg IJG-derived routines | unmodified jfdctfst.c, jfdctint_template.c, jrevdct.c | Include the required IJG acknowledgement and original notices. Source archive retains all per-file licenses. |

@@ -334,6 +334,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             new("H.264", "H.264", "Widest playback compatibility. Default codec."),
             new("AV1", "AV1", "Requires a supported hardware AV1 encoder.", isEnabled: false)
         };
+        ReplayAudioCodecs = new ObservableCollection<ReplayVideoCodecOption>
+        {
+            new("Opus", RecordingAudioCodec.Opus, "Opus at 128 kb/s. Best quality for its size. Default codec."),
+            new("AAC", RecordingAudioCodec.Aac, "AAC at 192 kb/s. Plays on older devices and editors."),
+            new("Vorbis", RecordingAudioCodec.Vorbis, "Vorbis at 192 kb/s. Clips and sessions save as MKV.")
+        };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
             // No H.265: the option was still being offered after the feature
@@ -910,6 +916,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ReplayFrameTimingOption> ReplayFrameTimingModes { get; }
     public ObservableCollection<string> ReplayBitrateOptions { get; }
     public ObservableCollection<ReplayVideoCodecOption> ReplayVideoCodecs { get; }
+    public ObservableCollection<ReplayVideoCodecOption> ReplayAudioCodecs { get; }
     public ObservableCollection<string> ReplayCaptureSources { get; }
     public ObservableCollection<DesktopMonitorOption> DesktopMonitors { get; }
     public ObservableCollection<ExportCodecOption> ExportCodecs { get; }
@@ -2344,6 +2351,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         ? "Waiting for game foreground before replay frames begin."
         : $"{(string.Equals(_activeReplayFrameTimingMode, ReplayFrameTimingPolicy.Constant, StringComparison.Ordinal) ? "CFR" : "VFR")}: Output {_activeReplayOutputFrameRate:0.0}/{_activeReplayTargetFrameRate} FPS · {_activeReplaySourceName} {_activeReplaySourceFrameRate:0.0} FPS · Fresh {_activeReplayUniqueGameFrameRate:0.0} FPS";
 
+    public ReplayVideoCodecOption SelectedReplayAudioCodec
+    {
+        get => ReplayAudioCodecs.FirstOrDefault(codec => codec.Value == RecordingAudioCodec.Normalize(Settings.ReplayAudioCodec))
+               ?? ReplayAudioCodecs.First(codec => codec.Value == RecordingAudioCodec.Opus);
+        set
+        {
+            if (value is null || string.Equals(Settings.ReplayAudioCodec, value.Value, StringComparison.OrdinalIgnoreCase)) return;
+            Settings.ReplayAudioCodec = value.Value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsFullSessionVorbisNoticeVisible));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
     public ReplayVideoCodecOption SelectedReplayVideoCodec
     {
         get => ReplayVideoCodecs.FirstOrDefault(codec => string.Equals(codec.Value, Settings.ReplayVideoCodec, StringComparison.OrdinalIgnoreCase))
@@ -2536,7 +2558,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}|{Settings.ReplayHdrCompatibilityEnabled}|{string.Join(',', Settings.AdditionalAudioProcesses.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value}"))}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayAudioCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}|{Settings.ReplayHdrCompatibilityEnabled}|{string.Join(',', Settings.AdditionalAudioProcesses.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value}"))}";
 
     public bool ReplayHdrCompatibilityEnabled
     {
@@ -4329,9 +4351,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             FullSessionFormatSelection.Selected = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsFullSessionMp4));
+            OnPropertyChanged(nameof(IsFullSessionVorbisNoticeVisible));
         }
     }
     public bool IsFullSessionMp4 => FullSessionFormatSelection.IsMp4;
+    // MP4 cannot hold Vorbis, so the recorder writes MKV instead.
+    public bool IsFullSessionVorbisNoticeVisible => IsFullSessionMp4 && RecordingAudioCodec.RequiresMatroska(Settings.ReplayAudioCodec);
     public string FullSessionFormatRecommendation => FullSessionFormatSelection.Recommendation;
     public string FullSessionFormatWarning => FullSessionFormatSelection.Warning;
     public void UseMkv() => SelectedFullSessionFormat = "MKV";
@@ -8939,7 +8964,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             AdaptiveFrameRateProtectionEnabled: Settings.ReplayAdaptiveFrameRateEnabled,
             ReplayHdrCompatibilityEnabled: Settings.ReplayHdrCompatibilityEnabled,
             SystemAudioEnabled: Settings.SystemAudioEnabled,
-            SystemAudioVolumePercent: Settings.SystemAudioVolumePercent);
+            SystemAudioVolumePercent: Settings.SystemAudioVolumePercent,
+            AudioCodec: RecordingAudioCodec.Normalize(Settings.ReplayAudioCodec));
     }
 
     public void SetDuration(TimeSpan duration)

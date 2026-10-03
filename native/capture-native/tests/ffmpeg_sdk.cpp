@@ -163,6 +163,8 @@ int main(int argc, char** argv) {
     CHECK(swresample_version() == LIBSWRESAMPLE_VERSION_INT);
     CHECK(swscale_version() == LIBSWSCALE_VERSION_INT);
     av_log_set_level(AV_LOG_ERROR);
+    // Replay and full-session audio codecs ship inside the bundled avcodec.
+    for (const char* name : { "libopus", "aac", "libvorbis" }) CHECK(avcodec_find_encoder_by_name(name) != nullptr);
     for (const int fps : { 30, 60, 90, 120 }) {
         video_round_trip(fps);
         if (gpu) {

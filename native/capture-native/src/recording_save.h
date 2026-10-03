@@ -69,9 +69,11 @@ private:
     VideoHistoryStats stats_;
     std::array<uint32_t, 1024> hold_ns_{}; size_t holds_ = 0;
 };
+// Muxed in-process from memory: video packets plus the snapshot's encoded
+// audio tracks. Nothing but the output is written.
 struct ReplaySaveRequest {
     std::string id;
-    std::filesystem::path output,work_directory,ffmpeg;
+    std::filesystem::path output;
     VideoSnapshot video;
     std::shared_future<AudioSnapshot> audio;
     std::vector<AudioLaneConfig> lanes;
@@ -104,6 +106,7 @@ struct FullSessionConfig {
     std::filesystem::path output;
     std::vector<AudioLaneConfig> lanes;
     size_t queue_bytes=64*1024*1024,queue_items=8192;
+    AudioCodec codec=AudioCodec::Opus;
 };
 struct FullSessionStatus { bool running=false,finished=false; std::string error; int64_t duration_us=0; uint64_t converted_audio_frames=0; };
 class FullSessionWriter {

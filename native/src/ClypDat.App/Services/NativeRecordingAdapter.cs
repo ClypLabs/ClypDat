@@ -359,7 +359,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             var game = string.IsNullOrWhiteSpace(gameDisplayNameOverride) ? configuration.GameDisplayName : gameDisplayNameOverride;
             var title = string.IsNullOrWhiteSpace(titleOverride) ? game : titleOverride;
             var folder = Path.Combine(outputFolder, ClipFileNaming.BuildBaseName(game)); Directory.CreateDirectory(folder);
-            var output = ClipFileNaming.BuildUniquePath(folder, ClipFileNaming.BuildFileName(title, DateTime.Now, "mp4", configuration.ClipFileNameScheme, configuration.CustomClipFileNameTemplate, game));
+            var output = ClipFileNaming.BuildUniquePath(folder, ClipFileNaming.BuildFileName(title, DateTime.Now, RecordingAudioCodec.ClipExtension(configuration.AudioCodec), configuration.ClipFileNameScheme, configuration.CustomClipFileNameTemplate, game));
             session.BeginSave(id, ToUs(start), ToUs(end), output); accepted = true;
             var cancelled = false;
             while (true)
@@ -394,7 +394,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
         Directory.CreateDirectory(configuration.FullSessionRecordingFolder);
         var title = string.IsNullOrWhiteSpace(configuration.GameDisplayName) ? "Session" : "Session - " + configuration.GameDisplayName;
         return ClipFileNaming.BuildUniquePath(configuration.FullSessionRecordingFolder,
-            ClipFileNaming.BuildFileName(title, DateTime.Now, FullSessionFormat.Extension(configuration.FullSessionContainer),
+            ClipFileNaming.BuildFileName(title, DateTime.Now, RecordingAudioCodec.FullSessionExtension(configuration.AudioCodec, configuration.FullSessionContainer),
                 configuration.ClipFileNameScheme, configuration.CustomClipFileNameTemplate, configuration.GameDisplayName));
     }
     internal static long NowUs() => checked((long)(MonotonicClock.SharedSeconds * 1_000_000));

@@ -67,6 +67,9 @@ public sealed class AppSettings
     // H.264 is default for widest playback compatibility. AV1Preferred uses
     // hardware AV1 when available, then falls back through H.264.
     public string ReplayVideoCodec { get; set; } = "H.264";
+    // Opus is the default: the best quality for its size. AAC suits older
+    // players; Vorbis saves recordings as MKV.
+    public string ReplayAudioCodec { get; set; } = RecordingAudioCodec.Opus;
     public string ReplayEncoderMode { get; set; } = "GPU";
     // Sustained encoder overload may lower live target FPS, then restore it
     // after recovery. Users can disable this protection.

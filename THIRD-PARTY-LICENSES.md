@@ -51,11 +51,12 @@ Release-note formatting uses Markdig by Alexandre Mutel, licensed under the
 
 ClypDat distributes one coherent FFmpeg 8.1.2 shared package for the native recorder and bundled `ffmpeg.exe` / `ffprobe.exe`. Its FFmpeg source commit is `38b88335f99e76ed89ff3c93f877fdefce736c13`. The build recipe, locked dependencies and reproducibility instructions are in `eng/ffmpeg/`. The FFmpeg DLLs, command-line tools, matching SDK headers/import libraries and oneVPL dispatcher originate from the same accepted package.
 
-- Binary package SHA-256: `c3fa9bf41f61658c046c286b7f020d0997b891c49a50a1eaba2c4dc6ec3f951f` (`clypdat-ffmpeg-8.1.2-win64-shared-r2.zip`).
-- Matching source package SHA-256: `2a41968c8e47a6e0b3b067c40bd43209af4539a89db712fae631a0d032943532` (`clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip`). The source ZIP is included in the repository under `eng/ffmpeg/artifacts/` and published alongside each release's installers.
+- Binary package SHA-256: `064c2f354be3cd5ccdd17fc6a9026ca6ece27101b454394b8d4d56d55de4bec6` (`clypdat-ffmpeg-8.1.2-win64-shared-r3.zip`).
+- Matching source package SHA-256: `03289ac6a72fa6bd825f4de2cab4781388e5704a0fa74846f53c5889ad13b499` (`clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip`). The source ZIP is included in the repository under `eng/ffmpeg/artifacts/` and published alongside each release's installers.
 - The runtime's individual file hashes and sizes are in `native/vendor/ffmpeg/runtime-manifest.json`. Build and publish verification reject missing, changed or extra runtime files.
 - The build enables `--enable-gpl --enable-version3` and has no `--enable-nonfree`; the combined FFmpeg binaries are **GPL-3.0-or-later**, matching ClypDat's GPLv3 distribution. FFmpeg's original license texts and notices ship in `licenses/ffmpeg/`.
 - oneVPL **2.16.0** uses one imported `libvpl.dll` with consistent experimental ABI settings. Its MIT notice is `licenses/ffmpeg/onevpl/LICENSE`.
+- libopus **1.5.2**, libvorbis **1.3.7** and libogg **1.3.6** (BSD-3-Clause) are linked into avcodec for Opus and Vorbis recording audio. Their notices are `licenses/ffmpeg/opus/COPYING`, `licenses/ffmpeg/vorbis/COPYING` and `licenses/ffmpeg/ogg/COPYING`.
 - x264, x265, libaom, dav1d, zlib, AMD AMF and NVIDIA codec header notices, the LLVM compiler notice, IJG acknowledgement and Microsoft runtime provenance are in `licenses/ffmpeg/`. See `eng/ffmpeg/LICENSE-REVIEW.md` for the exact enabled libraries and obligations. LLVM clang-cl is a pinned build tool for libaom only; no LLVM runtime library is bundled.
 - The complete GPLv3 text is in ClypDat's `LICENSE`. Original FFmpeg/codec sources and patches, the pinned build recipe and matching license material are in the source ZIP. See https://ffmpeg.org/legal.html for upstream component licensing.
 

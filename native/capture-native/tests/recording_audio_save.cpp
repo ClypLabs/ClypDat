@@ -1,4 +1,5 @@
 #include "recording_audio.h"
+#include "recording_audio_codec.h"
 #include "recording_audio_timing.h"
 #include "recording_save.h"
 #include "recording_process.h"
@@ -17,57 +18,88 @@ using namespace clypdat;
 namespace {
 void require(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 PcmBlock pcm(int64_t start,uint64_t generation,float value,int count=4800){PcmBlock block;block.lane="game";block.source="game:1";block.start_us=start;block.generation=generation;block.sample_rate=48000;block.channels=2;block.samples.assign(size_t(count)*2,value);return block;}
-float sample(const std::filesystem::path& path,int64_t frame){std::ifstream input(path,std::ios::binary);input.seekg(44+frame*8);float result=0;input.read(reinterpret_cast<char*>(&result),4);require(bool(input),"Cannot read rendered PCM");return result;}
+PcmBlock tone(const char* lane,int channels,double frequency,float amplitude,int64_t start_us,int64_t frames){PcmBlock block;block.lane=lane;block.source=lane;block.generation=1;block.start_us=start_us;block.sample_rate=48000;block.channels=channels;block.samples.resize(size_t(frames)*channels);for(int64_t i=0;i<frames;++i)for(int ch=0;ch<channels;++ch)block.samples[size_t(i)*channels+ch]=float(amplitude*std::sin(2*3.141592653589793*frequency*double(i)/48000));return block;}
 void decode_and_seek(const std::filesystem::path& path,int expected_streams){auto p=path.u8string();std::string utf8(p.begin(),p.end());AVFormatContext* input=nullptr;require(avformat_open_input(&input,utf8.c_str(),nullptr,nullptr)>=0,"Cannot open media");struct Input{AVFormatContext* p;~Input(){avformat_close_input(&p);}} cleanup{input};require(avformat_find_stream_info(input,nullptr)>=0,"Cannot probe media");require(int(input->nb_streams)==expected_streams,"Incorrect saved stream count");int video=av_find_best_stream(input,AVMEDIA_TYPE_VIDEO,-1,-1,nullptr,0);require(video>=0,"Saved video stream missing");const auto* decoder=avcodec_find_decoder(input->streams[video]->codecpar->codec_id);CodecContext context(avcodec_alloc_context3(decoder));require(context&&avcodec_parameters_to_context(context.get(),input->streams[video]->codecpar)>=0&&avcodec_open2(context.get(),decoder,nullptr)>=0,"Cannot open saved decoder");Packet packet(av_packet_alloc());AVFrame* frame=av_frame_alloc();require(frame!=nullptr,"Cannot allocate decode frame");int decoded=0;while(av_read_frame(input,packet.get())>=0){if(packet->stream_index==video){require(avcodec_send_packet(context.get(),packet.get())>=0,"Saved packet rejected by decoder");while(avcodec_receive_frame(context.get(),frame)>=0){++decoded;av_frame_unref(frame);}}av_packet_unref(packet.get());}require(decoded>0,"Saved file produced no decoded video");require(av_seek_frame(input,-1,input->duration/2,AVSEEK_FLAG_BACKWARD)>=0,"Saved file cannot seek");avcodec_flush_buffers(context.get());bool sought=false;while(!sought&&av_read_frame(input,packet.get())>=0){if(packet->stream_index==video&&avcodec_send_packet(context.get(),packet.get())>=0)sought=avcodec_receive_frame(context.get(),frame)>=0;av_packet_unref(packet.get());}av_frame_free(&frame);require(sought,"Saved seek produced no frame");if(expected_streams>1){auto* title=av_dict_get(input->streams[1]->metadata,"title",nullptr,0);auto* handler=av_dict_get(input->streams[1]->metadata,"handler_name",nullptr,0);require((title&&std::string(title->value)=="Game Audio")||(handler&&std::string(handler->value)=="Game Audio"),"Saved named audio lane missing");}}
 std::filesystem::path bundled_ffmpeg(){return std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()/L"vendor"/L"ffmpeg"/L"ffmpeg.exe";}
-float decoded_sample(const std::filesystem::path& path,int audio_index){
+// Interleaved 48 kHz PCM of one saved audio stream, placed by timestamp from
+// presentation zero, as a player would.
+std::vector<float> decoded(const std::filesystem::path& path,int audio_index,int channels=2){
     std::atomic_bool cancel=false;
-    auto result=ProcessRunner::run(bundled_ffmpeg(),{L"-v",L"error",L"-nostdin",L"-i",path.wstring(),L"-map",L"0:a:"+std::to_wstring(audio_index),L"-ac",L"2",L"-ar",L"48000",L"-f",L"f32le",L"pipe:1"},cancel);
-    constexpr size_t offset=4800*2*sizeof(float);
-    require(result.output.size()>=offset+sizeof(float),"Decoded audio too short");
-    float value=0;std::memcpy(&value,result.output.data()+offset,sizeof(value));return value;
+    auto result=ProcessRunner::run(bundled_ffmpeg(),{L"-v",L"error",L"-nostdin",L"-i",path.wstring(),L"-map",L"0:a:"+std::to_wstring(audio_index),L"-af",L"aresample=async=1:first_pts=0",L"-ac",std::to_wstring(channels),L"-ar",L"48000",L"-f",L"f32le",L"pipe:1"},cancel);
+    std::vector<float> samples(result.output.size()/sizeof(float));std::memcpy(samples.data(),result.output.data(),samples.size()*sizeof(float));return samples;
 }
-void check_replay_audio(const std::filesystem::path& root,const VideoSnapshot& video){
-    AudioHistory audio(root/L"replay-history",3000000);
-    auto submit=[&](const char* lane,int channels,float level){auto block=pcm(video.start_us,1,level,int(video.duration_us*48000/1000000));block.lane=lane;block.source=lane;block.channels=channels;block.samples.assign(size_t(block.samples.size()/2)*channels,level);require(audio.submit(std::move(block)),"Replay audio rejected");};
-    submit("game",2,.1f);submit("discord",2,.2f);submit("mic",1,.3f);submit("system",2,.4f);submit("mic:default",1,.3f);
-    auto snapshot=audio.snapshot(video.start_us,video.end_us).get();audio.stop();
-    auto save=[&](const char* id,std::vector<AudioLaneConfig> lanes){
-        std::promise<AudioSnapshot> promise;promise.set_value(snapshot);
-        ReplaySaveRequest request;request.id=id;request.output=root/(std::string(id)+".mp4");request.work_directory=root;request.ffmpeg=bundled_ffmpeg();request.video=video;request.audio=promise.get_future().share();request.lanes=std::move(lanes);
-        SaveCoordinator coordinator;auto result=coordinator.begin(std::move(request)).get();require(result.error.empty(),"Replay save failed");return result.output;
-    };
-    auto mixed=save("mixed-replay",{{"game","Game Audio",2,.5f,false},{"discord","Discord",2,.75f,false},{"mic","Microphone",1,.5f,false}});
-    auto path=mixed.u8string();std::string utf8(path.begin(),path.end());AVFormatContext* input=nullptr;require(avformat_open_input(&input,utf8.c_str(),nullptr,nullptr)>=0,"Cannot open mixed replay");
-    require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==5,"Mixed replay stream count wrong");
-    for(int i=0;i<4;++i){auto* stream=input->streams[i+1];auto* title=av_dict_get(stream->metadata,"title",nullptr,0);auto* handler=av_dict_get(stream->metadata,"handler_name",nullptr,0);const char* expected[]={"All Tracks","Game Audio","Discord","Microphone"};require(stream->codecpar->codec_type==AVMEDIA_TYPE_AUDIO&&((title&&std::string(title->value)==expected[i])||(handler&&std::string(handler->value)==expected[i])),"Mixed replay stream title or order wrong");require(bool(stream->disposition&AV_DISPOSITION_DEFAULT)==(i==0),"Mixed replay default audio disposition wrong");}
-    avformat_close_input(&input);
-    std::atomic_bool cancel=false;auto ffprobe=bundled_ffmpeg();ffprobe.replace_filename(L"ffprobe.exe");
-    auto probe=ProcessRunner::run(ffprobe,{L"-v",L"error",L"-show_entries",L"stream=index,codec_type:stream_tags=title,handler_name:stream_disposition=default",L"-of",L"compact=p=0",mixed.wstring()},cancel);
-    require(probe.output.find("All Tracks")!=std::string::npos&&probe.output.find("Discord")!=std::string::npos,"ffprobe lost replay audio titles");
-    std::cout<<"ffprobe mixed replay:\n"<<probe.output;
-    auto all=decoded_sample(mixed,0),game=decoded_sample(mixed,1),chat=decoded_sample(mixed,2),mic=decoded_sample(mixed,3);
-    require(std::abs(game-.05f)<.02f&&std::abs(chat-.15f)<.02f&&mic>.08f,"Separate replay audio gains or sources wrong");
-    require(std::abs(all-(game+chat+mic))<.025f,"All Tracks does not contain each separate source once");
-    auto single=save("single-replay",{{"game","Game Audio",2,.5f,false}});
-    auto single_path=single.u8string();std::string single_utf8(single_path.begin(),single_path.end());require(avformat_open_input(&input,single_utf8.c_str(),nullptr,nullptr)>=0,"Cannot open single-track replay");require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==2,"Single-track replay gained duplicate mix");avformat_close_input(&input);
+// RMS over the steady middle of a stereo stream, skipping codec edges.
+double rms(const std::vector<float>& samples){require(samples.size()>2*19200,"Decoded audio too short");double sum=0;size_t count=0;for(size_t i=2*4800;i+2*4800<samples.size();++i,++count)sum+=double(samples[i])*samples[i];return std::sqrt(sum/double(count));}
+bool close_to(double value,double expected,double tolerance=.15){return std::abs(value-expected)<=expected*tolerance;}
+AVCodecID codec_id(AudioCodec codec){return codec==AudioCodec::Aac?AV_CODEC_ID_AAC:codec==AudioCodec::Vorbis?AV_CODEC_ID_VORBIS:AV_CODEC_ID_OPUS;}
+std::filesystem::path save_replay(const std::filesystem::path& root,const std::string& id,AudioCodec codec,const VideoSnapshot& video,const AudioSnapshot& snapshot,std::vector<AudioLaneConfig> lanes){
+    std::promise<AudioSnapshot> promise;promise.set_value(snapshot);
+    ReplaySaveRequest request;request.id=id;request.output=root/(id+(audio_codec_needs_matroska(codec)?".mkv":".mp4"));request.video=video;request.audio=promise.get_future().share();request.lanes=std::move(lanes);
+    SaveCoordinator coordinator;auto result=coordinator.begin(std::move(request)).get();if(!result.error.empty())throw std::runtime_error("Replay save failed: "+result.error);return result.output;
+}
+struct Opened{AVFormatContext* p=nullptr;explicit Opened(const std::filesystem::path& path){auto text=path.u8string();std::string utf8(text.begin(),text.end());require(avformat_open_input(&p,utf8.c_str(),nullptr,nullptr)>=0&&avformat_find_stream_info(p,nullptr)>=0,"Cannot open saved replay");}~Opened(){avformat_close_input(&p);}};
+std::string label(const AVStream* stream){for(const char* key:{"title","handler_name"})if(auto* tag=av_dict_get(stream->metadata,key,nullptr,0))return tag->value;return {};}
+void check_replay_audio(const std::filesystem::path& root,const VideoSnapshot& video,AudioCodec codec){
+    const auto name=std::string(audio_codec_label(codec));const auto frames=audio_frames(video.end_us)-audio_frames(video.start_us);
+    // Capture delivers small interleaved packets; the encode lag lets every
+    // source land before a block is encoded.
+    AudioHistoryOptions options;options.codec=codec;
+    AudioHistory history({{"game","Game Audio",2,.5f,false},{"discord","Discord",2,.75f,false},{"mic","Microphone",1,.5f,false}},3000000,options);
     AudioGraphConfig system_config;system_config.system_audio=true;system_config.game_gain=.5f;
     system_config.applications={{L"Discord",1}};system_config.microphone_device_ids={L"default"};
-    // The snapshot also contains the old game/app routes. Saving system mode
-    // must select only system playback and the separate microphone.
-    auto system=save("system-replay",recording_audio_lanes(system_config));
-    auto system_path=system.u8string();std::string system_utf8(system_path.begin(),system_path.end());
-    require(avformat_open_input(&input,system_utf8.c_str(),nullptr,nullptr)>=0,"Cannot open system-audio replay");
-    require(avformat_find_stream_info(input,nullptr)>=0&&input->nb_streams==4,"System-audio replay retained game or app tracks");
-    auto* system_title=av_dict_get(input->streams[2]->metadata,"handler_name",nullptr,0);
-    require(system_title&&std::string(system_title->value)=="Full System Audio","System-audio track label lost");
-    avformat_close_input(&input);
-    auto system_mix=decoded_sample(system,0),playback=decoded_sample(system,1),system_mic=decoded_sample(system,2);
-    require(std::abs(playback-.2f)<.02f&&system_mic>.15f,"System-audio capture gain or microphone source wrong");
-    require(std::abs(system_mix-(playback+system_mic))<.025f,"System-audio replay mixed duplicate game or app sources");
+    AudioHistory system(recording_audio_lanes(system_config),3000000,options);
+    // Both histories see every route. Each encodes only its configured lanes.
+    const std::vector<PcmBlock> routes{tone("game",2,440,.2f,video.start_us,frames),tone("discord",2,660,.2f,video.start_us,frames),
+        tone("mic",1,880,.3f,video.start_us,frames),tone("system",2,550,.4f,video.start_us,frames),tone("mic:default",1,990,.3f,video.start_us,frames)};
+    for(int64_t offset=0;offset<frames;offset+=960)for(const auto& route:routes)for(auto* target:{&history,&system}){
+        auto chunk=route;const auto count=(std::min)(int64_t(960),frames-offset);chunk.start_us=video.start_us+audio_time(offset);
+        chunk.samples.assign(route.samples.begin()+offset*route.channels,route.samples.begin()+(offset+count)*route.channels);
+        require(target->submit(std::move(chunk)),"Replay audio rejected");
+    }
+    auto snapshot=history.snapshot(video.start_us,video.end_us).get();history.stop();
+    auto system_snapshot=system.snapshot(video.start_us,video.end_us).get();system.stop();
+    for(const auto& track:snapshot.tracks){require(track.parameters&&track.parameters->codec_id==codec_id(codec),"Snapshot track used the wrong codec");if(codec==AudioCodec::Opus)require(track.parameters->bit_rate==128000,"Opus track is not 128 kb/s");require(!track.packets.empty(),"Snapshot track has no packets");}
+    auto mixed=save_replay(root,"mixed-"+name,codec,video,snapshot,{{"game","Game Audio",2,.5f,false},{"discord","Discord",2,.75f,false},{"mic","Microphone",1,.5f,false}});
+    {
+        Opened input(mixed);require(input.p->nb_streams==5,"Mixed replay stream count wrong");
+        const char* expected[]={"All Tracks","Game Audio","Discord","Microphone"};
+        for(int i=0;i<4;++i){auto* stream=input.p->streams[i+1];require(stream->codecpar->codec_type==AVMEDIA_TYPE_AUDIO&&stream->codecpar->codec_id==codec_id(codec)&&label(stream)==expected[i],"Mixed replay stream codec, title or order wrong");require(bool(stream->disposition&AV_DISPOSITION_DEFAULT)==(i==0),"Mixed replay default audio disposition wrong");}
+        const auto audio_duration=input.p->streams[1]->duration*av_q2d(input.p->streams[1]->time_base);
+        require(std::abs(audio_duration-video.duration_us/1e6)<.05||input.p->streams[1]->duration==AV_NOPTS_VALUE,"Saved audio length does not match video");
+    }
+    auto all=rms(decoded(mixed,0)),game=rms(decoded(mixed,1)),chat=rms(decoded(mixed,2)),mic=rms(decoded(mixed,3));
+    std::cout<<name<<" replay rms all "<<all<<" game "<<game<<" chat "<<chat<<" mic "<<mic<<'\n';
+    require(close_to(game,.2*.5/std::sqrt(2.0))&&close_to(chat,.2*.75/std::sqrt(2.0))&&close_to(mic,.3*.5*.70710678/std::sqrt(2.0)),"Separate replay audio gains or sources wrong");
+    require(close_to(all,std::sqrt(game*game+chat*chat+mic*mic)),"All Tracks does not contain each separate source once");
+    auto single=save_replay(root,"single-"+name,codec,video,snapshot,{{"game","Game Audio",2,.5f,false}});
+    {Opened input(single);require(input.p->nb_streams==2,"Single-track replay gained duplicate mix");}
+    auto system_replay=save_replay(root,"system-"+name,codec,video,system_snapshot,recording_audio_lanes(system_config));
+    {Opened input(system_replay);require(input.p->nb_streams==4,"System-audio replay retained game or app tracks");require(label(input.p->streams[2])=="Full System Audio","System-audio track label lost");}
+    auto system_mix=rms(decoded(system_replay,0)),playback=rms(decoded(system_replay,1)),system_mic=rms(decoded(system_replay,2));
+    require(close_to(playback,.4*.5/std::sqrt(2.0))&&close_to(system_mic,.3*.70710678/std::sqrt(2.0)),"System-audio capture gain or microphone source wrong");
+    require(close_to(system_mix,std::sqrt(playback*playback+system_mic*system_mic)),"System-audio replay mixed duplicate game or app sources");
+}
+// A tone that starts mid-window lands at the same time in the saved clip:
+// preroll before the cut is trimmed, not shifted into the clip.
+void check_alignment(const std::filesystem::path& root,const VideoSnapshot& video,AudioCodec codec){
+    AudioHistoryOptions options;options.codec=codec;options.encode_lag_us=0;
+    AudioHistory history({{"game","Game Audio",2,1,false}},3000000,options);
+    const int64_t lead=24000,onset=9600,frames=audio_frames(video.end_us)-audio_frames(video.start_us);
+    auto block=tone("game",2,1000,.5f,video.start_us-audio_time(lead),lead+frames);
+    for(int64_t i=0;i<lead+onset;++i)block.samples[size_t(i)*2]=block.samples[size_t(i)*2+1]=0;
+    require(history.submit(std::move(block)),"Alignment audio rejected");
+    auto snapshot=history.snapshot(video.start_us,video.end_us).get();history.stop();
+    auto path=save_replay(root,std::string("aligned-")+audio_codec_label(codec),codec,video,snapshot,{{"game","Game Audio",2,1,false}});
+    auto samples=decoded(path,0);size_t first=samples.size();
+    for(size_t i=0;i<samples.size();i+=2)if(std::abs(samples[i])>.25f){first=i/2;break;}
+    // A sine at phase zero crosses half amplitude 1/12 of a cycle after onset.
+    const auto error=int64_t(first)-(onset+4);
+    std::cout<<audio_codec_label(codec)<<" onset error "<<error<<" frames\n";
+    require(std::abs(error)<=48,"Saved audio is not aligned with video within 1 ms");
 }
 void check_timed_microphone_save(const std::filesystem::path& root, const VideoSnapshot& video) {
-    AudioHistory history(root / L"timed-mic-history", 3000000);
+    AudioHistoryOptions options; options.encode_lag_us = 0;
+    AudioHistory history({{"mic", "Microphone", 1, 1, false}}, 3000000, options);
     FullSessionWriter session({root / L"timed-mic-session.mkv", {{"mic", "Microphone", 1, 1, false}}}, video.packets.front().generation);
     require(session.video(video.packets.front().generation, *video.packets.front().packet), "Timed microphone session rejected first video");
     RecordingAudioTiming timing([&](PcmBlock block) {
@@ -93,20 +125,9 @@ void check_timed_microphone_save(const std::filesystem::path& root, const VideoS
         require(session.video(video.packets[i].generation, *video.packets[i].packet), "Timed microphone session rejected video");
     require(session.stop() && session.status().error.empty(), "Timed microphone session failed to finalize");
     auto snapshot = history.snapshot(video.start_us, video.end_us).get(); history.stop();
-    std::promise<AudioSnapshot> promise; promise.set_value(snapshot);
-    ReplaySaveRequest request;
-    request.id = "timed-mic-replay"; request.output = root / L"timed-mic-replay.mp4";
-    request.work_directory = root; request.ffmpeg = bundled_ffmpeg(); request.video = video;
-    request.audio = promise.get_future().share(); request.lanes = {{"mic", "Microphone", 1, 1, false}};
-    SaveCoordinator coordinator;
-    const auto saved = coordinator.begin(std::move(request)).get();
-    require(saved.error.empty(), "Timed microphone replay failed to save");
-    for (const auto& path : {saved.output, root / L"timed-mic-session.mkv"}) {
-        std::atomic_bool cancel = false;
-        const auto decoded = ProcessRunner::run(bundled_ffmpeg(), {L"-v", L"error", L"-nostdin", L"-i", path.wstring(),
-            L"-map", L"0:a:0", L"-ac", L"1", L"-ar", L"48000", L"-f", L"f32le", L"pipe:1"}, cancel);
-        std::vector<float> samples(decoded.output.size() / sizeof(float));
-        std::memcpy(samples.data(), decoded.output.data(), samples.size() * sizeof(float));
+    const auto saved = save_replay(root, "timed-mic-replay", AudioCodec::Opus, video, snapshot, {{"mic", "Microphone", 1, 1, false}});
+    for (const auto& path : {saved, root / L"timed-mic-session.mkv"}) {
+        auto samples = decoded(path, 0, 1);
         require(samples.size() > 9600, "Saved microphone audio too short");
         double maximum_curvature = 0, energy = 0;
         for (size_t i = 2401; i + 2400 < samples.size(); ++i) {
@@ -116,40 +137,65 @@ void check_timed_microphone_save(const std::filesystem::path& root, const VideoS
             energy += samples[i] * samples[i];
         }
         require(energy / (samples.size() - 4801) > .02, "Saved microphone lost its signal");
-        // The 997 Hz fixture has curvature .0051. Leave room for AAC error,
+        // The 997 Hz fixture has curvature .0051. Leave room for codec error,
         // while rejecting abrupt packet-edge holes in newly saved audio.
         require(maximum_curvature < .02, "Newly saved microphone audio contains a packet-edge glitch");
         std::cout << path.filename().string() << " glitch check: " << maximum_curvature << '\n';
     }
 }
+// Exact placement is checked before encoding, where it is lossless.
+void mixer_test(){
+    AudioLaneMixer mixer({{"game","Game Audio",2,1,false}},960,480000);mixer.anchor(0);
+    std::vector<float> lane;auto drain=[&]{while(mixer.next()<28800){auto blocks=mixer.take();lane.insert(lane.end(),blocks[0].samples.begin(),blocks[0].samples.end());}};
+    mixer.submit(pcm(0,1,.25f),0);
+    // Within 100 ms of the expected position a source is continuous jitter.
+    mixer.submit(pcm(50000,1,.5f),audio_frames(50000));
+    mixer.submit(pcm(200000,2,.75f),audio_frames(200000));
+    mixer.submit(pcm(150000,1,.9f),audio_frames(150000));
+    mixer.submit(pcm(500000,2,.6f),audio_frames(500000));
+    drain();auto at=[&](int64_t frame){return lane[size_t(frame)*2];};
+    require(std::abs(at(0)-.25f)<.0001,"First samples changed");
+    require(std::abs(at(6000)-.5f)<.0001,"Continuous source jitter opened a hole");
+    require(std::abs(at(12000)-.75f)<.0001,"Replacement source lost or older generation mixed in");
+    require(at(20000)==0,"Audio silence gap not preserved");
+    require(std::abs(at(24500)-.6f)<.0001,"Source after a gap misplaced");
+    AudioLaneMixer mixed({{"game","Game Audio",2,1.5f,false},{"spotify","Spotify",2,1,true}},960,480000);mixed.anchor(0);
+    auto first=pcm(0,1,.2f,4410);first.sample_rate=44100;first.channels=1;first.samples.resize(4410);first.source="first";auto second=first;second.source="second";second.samples.assign(4410,.3f);
+    mixed.submit(first,0);mixed.submit(second,0);auto quiet=pcm(0,1,.000002f);quiet.lane="spotify";quiet.source="spotify";
+    std::vector<AudioLaneMixer::Block> blocks;for(int i=0;i<3;++i)blocks=mixed.take();
+    require(std::abs(blocks[0].samples[0]-float(.75/std::sqrt(2.0)))<.002,"Resample/mixed-source gain incorrect");require(!blocks[1].audible,"Silent Spotify lane reported audible");
+    mixed.submit(quiet,mixed.next());require(mixed.take()[1].audible,"Quiet meaningful Spotify samples were treated as silence");
+}
 void audio_test(const std::filesystem::path& root){
-    AudioSnapshot pinned;
+    mixer_test();
+    AudioHistoryOptions fast;fast.encode_lag_us=0;
     {
-        AudioHistory history(root/L"history",1000000);
+        AudioHistory history({{"game","Game Audio",2,1,false},{"spotify","Spotify",2,1,true}},1000000,fast);
         require(history.submit(pcm(0,1,.25f)),"First PCM rejected");
-        require(history.submit(pcm(50000,1,.5f)),"Overlapping PCM rejected");
-        require(history.submit(pcm(200000,2,.75f)),"Replacement PCM rejected");
-        auto barrier=history.snapshot(0,300000);
-        require(history.submit(pcm(300000,2,1.f)),"Post-barrier PCM rejected");
-        pinned=barrier.get();require(pinned.ranges.size()==2,"Snapshot did not pin exact generations");
-        history.stop();require(history.error().empty(),"Audio history failed");auto final_snapshot=history.snapshot(0,400000).get();require(final_snapshot.ranges.size()==2&&final_snapshot.ranges.back().frame_count==9600,"Final post-stop audio boundary lost accepted packet");
+        auto barrier=history.snapshot(0,100000);
+        require(history.submit(pcm(100000,1,1.f)),"Post-barrier PCM rejected");
+        auto pinned=barrier.get();require(pinned.tracks.size()==3&&pinned.tracks[2].mix&&pinned.tracks[2].key==kAllTracksKey,"Snapshot did not return every lane and the mix");
+        require(!pinned.tracks[0].packets.empty()&&pinned.tracks[0].audible,"Snapshot lost encoded game audio");
+        require(!pinned.tracks[1].audible,"Silent Spotify lane reported audible");
+        const auto& last=*pinned.tracks[0].packets.back();require(last.pts+last.duration>=4800,"Snapshot does not reach its window end");
+        history.stop();require(history.error().empty(),"Audio history failed");
+        auto final_snapshot=history.snapshot(0,200000).get();const auto& tail=*final_snapshot.tracks[0].packets.back();
+        require(tail.pts+tail.duration>=9600,"Final post-stop audio boundary lost accepted packet");
     }
-    std::atomic_bool cancel=false;auto tracks=render_audio(pinned,{{"game","Game Audio",2,1,false}},root/L"render",cancel);
-    require(tracks.size()==1,"Missing logical lane");
-    require(std::abs(sample(tracks[0].second,0)-.25f)<.0001,"First samples changed");
-    require(std::abs(sample(tracks[0].second,6000)-.5f)<.0001,"Overlap not trimmed");
-    require(sample(tracks[0].second,8000)==0,"Audio silence gap not preserved");
-    require(std::abs(sample(tracks[0].second,12000)-.75f)<.0001,"Replacement source lost");
-    cancel=true;bool cancelled=false;try{render_audio(pinned,{{"game","Game Audio",2,1,false}},root/L"cancel",cancel);}catch(...){cancelled=true;}require(cancelled,"Audio cancellation ignored");
-    AudioHistory bound(root/L"bound",1000000);require(!bound.submit(pcm(0,1,1.f,1440001)),"Thirty-second audio bound ignored");require(bound.lost_samples()==2880002,"Lost audio accounting wrong");
-    require(bound.error().empty(),"Audio bound overflow poisoned the history");require(bound.submit(pcm(0,1,.5f)),"Audio after a shed block rejected");require(bound.snapshot(0,100000).get().ranges.size()==1,"Save after a shed block failed");bound.stop();
-    AudioHistory failed(root/L"failure",1000000,{[]{throw std::runtime_error("Injected disk failure");},{}});
-    failed.submit(pcm(0,1,.5f));auto failed_snapshot=failed.snapshot(0,100000);bool failed_barrier=false;try{failed_snapshot.get();}catch(...){failed_barrier=true;}require(failed_barrier,"Writer failure did not fail snapshot barrier");failed.stop();
+    AudioHistory bound({{"game","Game Audio",2,1,false}},1000000,fast);require(!bound.submit(pcm(0,1,1.f,1440001)),"Thirty-second audio bound ignored");require(bound.lost_samples()==2880002,"Lost audio accounting wrong");
+    require(bound.error().empty(),"Audio bound overflow poisoned the history");require(bound.submit(pcm(0,1,.5f)),"Audio after a shed block rejected");require(!bound.snapshot(0,100000).get().tracks[0].packets.empty(),"Save after a shed block failed");bound.stop();
+    AudioHistoryOptions failing=fast;failing.before_write=[]{throw std::runtime_error("Injected encoder failure");};
+    AudioHistory failed({{"game","Game Audio",2,1,false}},1000000,failing);
+    failed.submit(pcm(0,1,.5f));auto failed_snapshot=failed.snapshot(0,100000);bool failed_barrier=false;try{failed_snapshot.get();}catch(...){failed_barrier=true;}require(failed_barrier,"Encoder failure did not fail snapshot barrier");failed.stop();
     std::promise<void> entered,release;auto released=release.get_future().share();
-    AudioHistory blocked(root/L"blocked",1000000,{[&]{entered.set_value();released.wait();},{}});
+    AudioHistoryOptions blocking=fast;blocking.before_write=[&]{static bool first=true;if(first){first=false;entered.set_value();released.wait();}};
+    AudioHistory blocked({{"game","Game Audio",2,1,false}},1000000,blocking);
     blocked.submit(pcm(0,1,.5f,1440000));entered.get_future().wait();require(!blocked.submit(pcm(30000000,1,.5f,1)),"In-flight buffer excluded from audio bound");release.set_value();
-    require(blocked.snapshot(0,100000).get().ranges.size()==1,"Stalled writer poisoned later saves");require(blocked.error().empty(),"Stalled writer recorded a failure");blocked.stop();
-    AudioHistory mixed(root/L"mixed",1000000);auto first=pcm(0,1,.2f,4410);first.sample_rate=44100;first.channels=1;first.samples.resize(4410);first.source="first";auto second=first;second.source="second";second.samples.assign(4410,.3f);mixed.submit(std::move(first));mixed.submit(std::move(second));auto mixture=mixed.snapshot(0,100000).get();cancel=false;auto rendered=render_audio(mixture,{{"game","Game Audio",2,1.5f,false},{"spotify","Spotify",2,1,true}},root/L"mix-output",cancel);require(rendered.size()==1,"Silent Spotify lane retained");require(std::abs(sample(rendered[0].second,2400)-float(.75/std::sqrt(2.0)))<.002,"Resample/mixed-source gain incorrect");auto quiet=pcm(0,1,.000002f);quiet.lane="spotify";quiet.source="spotify";mixed.submit(std::move(quiet));auto quiet_snapshot=mixed.snapshot(0,100000).get();auto quiet_tracks=render_audio(quiet_snapshot,{{"spotify","Spotify",2,1,true}},root/L"quiet-output",cancel);require(quiet_tracks.size()==1,"Quiet meaningful Spotify samples were omitted");mixed.stop();
+    require(!blocked.snapshot(29000000,30000000).get().tracks[0].packets.empty(),"Stalled encoder poisoned later saves");require(blocked.error().empty(),"Stalled encoder recorded a failure");blocked.stop();
+    // A save with no audio at all still gets silent, decodable tracks.
+    AudioHistory quiet({{"game","Game Audio",2,1,false}},1000000,fast);
+    auto empty=quiet.snapshot(0,100000).get();require(!empty.tracks[0].packets.empty()&&!empty.tracks[0].audible,"Silent history produced no audio packets");quiet.stop();
+    for(const auto& entry:std::filesystem::recursive_directory_iterator(root))require(entry.path().extension()!=L".wav","Audio history wrote PCM to disk");
 }
 void video_test(const std::filesystem::path& root){
     VideoEncoderConfig config;config.width=64;config.height=64;config.fps=30;config.name="libx264";
@@ -164,8 +210,15 @@ void video_test(const std::filesystem::path& root){
     std::atomic_bool cancel=false;auto output=root/L"replay.mp4";remux_video(snapshot,output,cancel);
     AVFormatContext* input=nullptr;auto p=output.u8string();std::string path(p.begin(),p.end());require(avformat_open_input(&input,path.c_str(),nullptr,nullptr)>=0,"Saved video cannot open");require(avformat_find_stream_info(input,nullptr)>=0,"Saved video cannot probe");require(input->duration>0&&input->nb_streams==1,"Saved video invalid");avformat_close_input(&input);
     decode_and_seek(output,1);
-    check_replay_audio(root,snapshot);
+    for(auto codec:{AudioCodec::Opus,AudioCodec::Aac,AudioCodec::Vorbis}){check_replay_audio(root,snapshot,codec);check_alignment(root,snapshot,codec);}
     check_timed_microphone_save(root,snapshot);
+    for(auto codec:{AudioCodec::Opus,AudioCodec::Aac,AudioCodec::Vorbis})for(const wchar_t* extension:{L".mkv",L".mp4"}){
+        if(codec==AudioCodec::Vorbis&&std::wstring(extension)==L".mp4")continue;
+        FullSessionConfig config{root/(std::wstring(L"codec-session-")+std::to_wstring(int(codec))+extension),{{"game","Game Audio",2,1,false}}};config.codec=codec;
+        FullSessionWriter writer(config,generation);for(const auto& packet:snapshot.packets){require(writer.video(generation,*packet.packet),"Codec session video rejected");require(writer.audio(tone("game",2,440,.2f,packet.packet->pts,1600)),"Codec session PCM rejected");}
+        require(writer.stop()&&writer.status().error.empty(),"Codec session failed to finalize");
+        Opened input(config.output);require(input.p->nb_streams==2&&input.p->streams[1]->codecpar->codec_id==codec_id(codec),"Full session used the wrong audio codec");
+    }
     FullSessionWriter session({root/L"session.mkv",{{"game","Game Audio",2,1,false}}},generation);
     for(const auto& packet:snapshot.packets){require(session.video(generation,*packet.packet),"Session video rejected");auto block=pcm(packet.packet->pts,packet.packet->pts<700000?1:2,.1f,1470);block.sample_rate=44100;block.channels=1;block.samples.resize(1470);require(session.audio(std::move(block)),"Session PCM rejected");}
     require(session.stop(),"Session did not stop");require(session.status().error.empty(),"Session mux failed");

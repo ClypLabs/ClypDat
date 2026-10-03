@@ -14,6 +14,7 @@ struct RecorderSessionConfig {
     std::filesystem::path work_directory, ffmpeg;
     std::vector<WasapiConfig> audio_sources;
     std::vector<AudioLaneConfig> audio_lanes;
+    AudioCodec audio_codec = AudioCodec::Opus;
     std::optional<AudioGraphConfig> audio_graph;
     OverlaySettingsNative overlays;
     bool capture_input = true;

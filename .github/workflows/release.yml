@@ -112,7 +112,7 @@ jobs:
         run: |
           .\eng\Test-SelfContainedPublish.ps1 -PublishDirectory native\publish\win-x64-folder
           .\eng\Verify-CaptureFfmpegRuntime.ps1 -RuntimeDirectory native\publish\win-x64-folder\ffmpeg -VerifyPackage
-          $source = 'eng\ffmpeg\artifacts\clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip'
+          $source = 'eng\ffmpeg\artifacts\clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip'
           Copy-Item -LiteralPath $source -Destination .
 
       - name: Trim non-Windows runtime assets
@@ -266,7 +266,7 @@ jobs:
             ClypDat-${{ steps.version.outputs.tag }}-Setup.exe
             ClypDat-${{ steps.version.outputs.tag }}.msi
             ClypDat-Setup.exe
-            clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip
+            clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip
           if-no-files-found: error
           retention-days: 3
           compression-level: 0
@@ -311,7 +311,7 @@ jobs:
           gh release create $tag `
             "ClypDat-$tag-win-x64.zip" "ClypDat-$tag-Portable.exe" "ClypDat-$tag-Setup.exe" "ClypDat-$tag.msi" `
             "ClypDat-Setup.exe#ClypDat Windows Updater" `
-            clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip `
+            clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip `
             --title "ClypDat $tag" `
             --generate-notes `
             --verify-tag `

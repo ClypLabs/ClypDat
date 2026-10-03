@@ -1,5 +1,6 @@
 #include "clypdat_recorder.h"
 #include "recorder_session.h"
+#include "recording_audio_codec.h"
 #include "recording_verification.h"
 #include <Windows.h>
 #include <algorithm>
@@ -152,7 +153,8 @@ int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder*
     native.history_seconds = config->duration_seconds;
     native.work_directory = copy(config->work_directory); native.ffmpeg = copy(config->ffmpeg_path);
     AudioGraphConfig audio;
-    audio.history_directory = native.work_directory / L"audio"; audio.ffmpeg = native.ffmpeg;
+    native.audio_codec = parse_audio_codec(copy(config->audio_codec));
+    audio.codec = native.audio_codec; audio.ffmpeg = native.ffmpeg;
     audio.rnnoise_model = copy(config->rnnoise_model); audio.retention_us = int64_t(config->duration_seconds) * 1000000;
     audio.qpc_anchor = config->qpc_anchor; audio.qpc_frequency = config->qpc_frequency;
     audio.monotonic_anchor_us = native.capture.monotonic_anchor_us;
@@ -168,7 +170,10 @@ int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder*
     audio.noise_suppression = (config->flags & CD_SESSION_NOISE_SUPPRESSION) != 0;
     audio.gate_threshold_db = config->microphone_gate_db;
     native.audio_graph = audio;
-    if (config->flags & CD_SESSION_FULL) native.full_session = FullSessionConfig{copy(config->full_session_path)};
+    if (config->flags & CD_SESSION_FULL) {
+        FullSessionConfig session; session.output = copy(config->full_session_path); session.codec = native.audio_codec;
+        native.full_session = std::move(session);
+    }
     // Every string is copied at the call boundary, including publication-only
     // settings which the managed host uses after completion.
     const cd_string16 values[] = {config->chat_device_name, config->chat_device_id, config->microphone_device_name,
@@ -179,7 +184,7 @@ int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder*
         config->full_session_codec, config->full_session_container, config->library_folder, config->file_name_scheme,
         config->custom_file_name_template, config->save_hotkey, config->full_session_hotkey,
         config->diagnostic_force_dxgi, config->diagnostic_disable_direct_blt, config->diagnostic_pacing_policy,
-        config->diagnostic_nvenc_delay, config->diagnostic_d3d_debug};
+        config->diagnostic_nvenc_delay, config->diagnostic_d3d_debug, config->audio_codec};
     for (auto value : values) result->copied_strings.push_back(copy(value));
     result->session = std::make_unique<RecorderSession>(std::move(native));
     *recorder = result.release(); return CD_OK;

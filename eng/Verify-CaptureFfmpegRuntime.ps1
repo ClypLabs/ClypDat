@@ -16,9 +16,9 @@ function Get-FileSha256([string]$Path) {
 $vendor = Join-Path $PSScriptRoot '../native/vendor/ffmpeg'
 $manifestPath = Join-Path $vendor 'runtime-manifest.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-if ($manifest.schema -ne 1 -or $manifest.packageSha256 -cne 'c3fa9bf41f61658c046c286b7f020d0997b891c49a50a1eaba2c4dc6ec3f951f' -or
-    $manifest.sourceSha256 -cne '2a41968c8e47a6e0b3b067c40bd43209af4539a89db712fae631a0d032943532') {
-    throw 'FFmpeg runtime manifest is not the accepted deterministic r2 package.'
+if ($manifest.schema -ne 1 -or $manifest.packageSha256 -cne '064c2f354be3cd5ccdd17fc6a9026ca6ece27101b454394b8d4d56d55de4bec6' -or
+    $manifest.sourceSha256 -cne '03289ac6a72fa6bd825f4de2cab4781388e5704a0fa74846f53c5889ad13b499') {
+    throw 'FFmpeg runtime manifest is not the accepted deterministic r3 package.'
 }
 $expected = @($manifest.runtime)
 if ($expected.Count -ne 13 -or @($expected.file | Select-Object -Unique).Count -ne 13) { throw 'FFmpeg runtime manifest is incomplete or duplicated.' }

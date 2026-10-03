@@ -4,9 +4,9 @@ $rsa = [Security.Cryptography.RSA]::Create(2048)
 try {
     New-Item -ItemType Directory -Path $fixture | Out-Null
     foreach ($tag in @('v1.2.3', 'v1.2.3-rc.1')) {
-        $names = @("ClypDat-$tag-Setup.exe", "ClypDat-$tag.msi", "ClypDat-$tag-Portable.exe", "ClypDat-$tag-win-x64.zip", 'ClypDat-Setup.exe', 'clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip')
+        $names = @("ClypDat-$tag-Setup.exe", "ClypDat-$tag.msi", "ClypDat-$tag-Portable.exe", "ClypDat-$tag-win-x64.zip", 'ClypDat-Setup.exe', 'clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip')
         foreach ($name in $names) { [IO.File]::WriteAllText((Join-Path $fixture $name), $(if ($name -like '*Setup.exe') { 'same setup bytes' } else { $name })) }
-        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ffmpeg/artifacts/clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip') -Destination $fixture -Force
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ffmpeg/artifacts/clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip') -Destination $fixture -Force
         $key = Join-Path $fixture 'fixture.pem'
         [IO.File]::WriteAllText($key, $rsa.ExportPkcs8PrivateKeyPem())
         & (Join-Path $PSScriptRoot 'Sign-ReleaseManifest.ps1') -Tag $tag -ArtifactDirectory $fixture -PrivateKeyPath $key
@@ -29,7 +29,7 @@ try {
         [IO.File]::WriteAllText((Join-Path $fixture 'ClypDat-Setup.exe'), 'different bytes')
         Assert-Rejected { & (Join-Path $PSScriptRoot 'Sign-ReleaseManifest.ps1') -Tag $tag -ArtifactDirectory $fixture -PrivateKeyPath $key }
         Copy-Item -LiteralPath (Join-Path $fixture "ClypDat-$tag-Setup.exe") -Destination (Join-Path $fixture 'ClypDat-Setup.exe') -Force
-        $source = Join-Path $fixture 'clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip'
+        $source = Join-Path $fixture 'clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip'
         [IO.File]::Delete($source)
         Assert-Rejected { & (Join-Path $PSScriptRoot 'Sign-ReleaseManifest.ps1') -Tag $tag -ArtifactDirectory $fixture -PrivateKeyPath $key }
         [IO.File]::WriteAllText($source, '')

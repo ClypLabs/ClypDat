@@ -55,9 +55,9 @@ foreach ($name in $assetNames) {
 
 if ($assets.Count -eq 0) { throw "No known release assets found in $ArtifactDirectory." }
 if (-not ($assets.name -contains 'ClypDat-Setup.exe')) { throw "ClypDat-Setup.exe is required - the updater resolves that asset by name." }
-$ffmpegSource = 'clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip'
+$ffmpegSource = 'clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip'
 if (-not ($assets.name -contains $ffmpegSource)) { throw "Matching FFmpeg corresponding source asset is required: $ffmpegSource" }
-if ((@($assets | Where-Object { $_.name -ceq $ffmpegSource })[0].sha256) -cne '2a41968c8e47a6e0b3b067c40bd43209af4539a89db712fae631a0d032943532') {
+if ((@($assets | Where-Object { $_.name -ceq $ffmpegSource })[0].sha256) -cne '03289ac6a72fa6bd825f4de2cab4781388e5704a0fa74846f53c5889ad13b499') {
     throw 'FFmpeg corresponding source hash does not match the accepted deterministic package.'
 }
 

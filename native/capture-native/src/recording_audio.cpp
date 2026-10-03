@@ -1,4 +1,5 @@
 #include "recording_audio.h"
+#include "recording_audio_codec.h"
 #include "recording_audio_timing.h"
 #include "recording_process.h"
 #include <Windows.h>
@@ -15,11 +16,13 @@
 #include <cwctype>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <stdexcept>
 extern "C" {
@@ -31,205 +34,187 @@ namespace clypdat {
 namespace {
 void require(bool condition, const char* message) { if (!condition) throw std::runtime_error(message); }
 void hr(HRESULT result, const char* operation) { if (FAILED(result)) throw std::runtime_error(std::string(operation) + ": " + std::to_string(uint32_t(result))); }
-void wav_header(std::fstream& out, int rate, int channels, uint64_t frames) {
-    const uint64_t bytes = frames * channels * sizeof(float);
-    require(bytes <= UINT32_MAX - 36, "Audio WAV RIFF size limit exceeded");
-    auto u16 = [&](uint16_t v) { out.write(reinterpret_cast<const char*>(&v), 2); };
-    auto u32 = [&](uint32_t v) { out.write(reinterpret_cast<const char*>(&v), 4); };
-    out.seekp(0); out.write("RIFF", 4); u32(uint32_t(bytes + 36)); out.write("WAVEfmt ", 8); u32(16);
-    u16(3); u16(uint16_t(channels)); u32(rate); u32(rate * channels * 4); u16(uint16_t(channels * 4)); u16(32);
-    out.write("data", 4); u32(uint32_t(bytes));
 }
-std::atomic_uint64_t file_sequence{0};
-}
-struct AudioFile {
-    std::filesystem::path path;
-    ~AudioFile() { std::error_code ignored; std::filesystem::remove(path, ignored); }
-};
 struct AudioHistory::State {
-    struct Source {
-        std::shared_ptr<AudioFile> file;
-        std::fstream stream;
-        std::string lane,source;
-        uint64_t generation = 0, frames = 0;
-        int rate = 48000, channels = 2;
-        int64_t start_us = 0;
-    };
-    struct Work { PcmBlock block; std::shared_ptr<std::promise<AudioSnapshot>> barrier; int64_t start = 0, end = 0; };
-    std::filesystem::path directory;
-    AudioHistoryCalls calls;
-    int64_t retention_us;
+    using Clock = std::chrono::steady_clock;
+    struct Entry { std::shared_ptr<const AVPacket> packet; bool audible = false; };
+    struct Ring { std::shared_ptr<const AVCodecParameters> parameters; std::deque<Entry> packets; int64_t end = INT64_MIN; };
+    struct Work { PcmBlock block; std::shared_ptr<std::promise<AudioSnapshot>> barrier; std::optional<std::vector<AudioLaneConfig>> lanes; int64_t start = 0, end = 0; };
+    struct Pending { std::shared_ptr<std::promise<AudioSnapshot>> promise; int64_t start = 0, end = 0; Clock::time_point deadline; };
+    AudioHistoryOptions options;
+    int64_t retention_us = 0;
     mutable std::mutex mutex;
     std::condition_variable ready, exited;
     std::deque<Work> queue;
-    std::map<std::tuple<std::string,uint64_t,int64_t>, std::unique_ptr<Source>> sources;
     uint64_t queued_duration_us = 0;
     std::atomic_uint64_t lost{0};
     bool closed = false, done = false;
     std::string failure;
-    void write(PcmBlock& block) {
-        if(calls.before_write)calls.before_write();
-        // Rotate bounded files even when a source never changes devices. This
-        // also bounds silence padding and keeps every file below RIFF limits.
-        auto segment_us=std::clamp(retention_us,int64_t(5000000),int64_t(60000000));
-        auto key = std::make_tuple(block.lane+":"+block.source, block.generation,block.start_us/segment_us);
-        auto& source = sources[key];
-        if (!source) {
-            source = std::make_unique<Source>(); source->lane = block.lane; source->source=block.source; source->generation = block.generation;
-            source->rate = block.sample_rate; source->channels = block.channels; source->start_us = block.start_us;
-            source->file = std::make_shared<AudioFile>();
-            source->file->path = directory / (L"audio-" + std::to_wstring(++file_sequence) + L".wav");
-            source->stream.open(source->file->path, std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc);
-            source->stream.exceptions(std::ios::badbit | std::ios::failbit);
-            wav_header(source->stream, source->rate, source->channels, 0);
-        }
-        auto& s = *source;
-        require(s.rate == block.sample_rate && s.channels == block.channels, "Audio format changed without a generation change");
-        int64_t target = audio_frames(block.start_us, s.rate) - audio_frames(s.start_us, s.rate);
-        uint64_t skip = target < int64_t(s.frames) ? uint64_t(int64_t(s.frames) - target) : 0;
-        uint64_t frames = block.samples.size() / s.channels;
-        if (skip >= frames) return;
-        uint64_t gap = target > int64_t(s.frames) ? uint64_t(target) - s.frames : 0;
-        require((s.frames + gap + frames - skip) * s.channels * 4 <= UINT32_MAX - 36, "Audio WAV RIFF size limit exceeded");
-        s.stream.seekp(44 + std::streamoff(s.frames * s.channels * 4));
-        float silence[8192]{};
-        uint64_t missing = gap * s.channels;
-        while (missing) { auto count = (std::min)(missing, uint64_t(std::size(silence))); s.stream.write(reinterpret_cast<char*>(silence), count * 4); missing -= count; }
-        s.stream.write(reinterpret_cast<const char*>(block.samples.data() + skip * s.channels), (frames - skip) * s.channels * 4);
-        s.frames += gap + frames - skip;
-        // File lifetime is pinned by snapshots. Pruning never removes a file a save uses.
-        const auto cutoff = block.start_us - retention_us;
-        for (auto it = sources.begin(); it != sources.end();) {
-            auto& old = *it->second;
-            if (it->first != key && audio_offset_time(old.start_us, int64_t(old.frames), old.rate) < cutoff) it = sources.erase(it); else ++it;
+    // Worker-owned until done.
+    std::unique_ptr<AudioTrackEncoder> encoder;
+    std::map<std::string, Ring> rings;
+    std::vector<Pending> pending;
+    int64_t latest = INT64_MIN; Clock::time_point latest_at;
+    int64_t lag() const { return audio_frames(options.encode_lag_us); }
+    // Packets a save can still ask for: retention, keyframe lead-in and preroll.
+    int64_t kept() const { return audio_frames(retention_us) + 5 * 48000 + encoder->preroll(); }
+    void sync_rings() {
+        std::map<std::string, Ring> kept_rings;
+        auto keep = [&](const std::string& key) {
+            auto parameters = encoder->parameters(key); auto& ring = kept_rings[key];
+            auto found = rings.find(key);
+            if (found != rings.end() && found->second.parameters == parameters) ring = std::move(found->second);
+            ring.parameters = std::move(parameters);
+        };
+        for (const auto& lane : encoder->lanes()) keep(lane.key);
+        keep(kAllTracksKey);
+        rings = std::move(kept_rings);
+    }
+    void packet(const std::string& key, Packet value, bool audible) {
+        auto& ring = rings[key];
+        ring.end = (std::max)(ring.end, value->pts + value->duration);
+        std::shared_ptr<const AVPacket> owned(value.release(), [](const AVPacket* p) { auto mutable_packet = const_cast<AVPacket*>(p); av_packet_free(&mutable_packet); });
+        ring.packets.push_back({std::move(owned), audible});
+        const auto cutoff = ring.end - kept();
+        while (!ring.packets.empty() && ring.packets.front().packet->pts + ring.packets.front().packet->duration < cutoff) ring.packets.pop_front();
+    }
+    void write(const PcmBlock& block) {
+        if (options.before_write) options.before_write();
+        const auto position = audio_frames(block.start_us);
+        const auto end = position + av_rescale(int64_t(block.samples.size() / block.channels), 48000, block.sample_rate);
+        encoder->anchor(position);
+        if (end > latest) { latest = end; latest_at = Clock::now(); }
+        // Never encode past this block's start before it is mixed in.
+        encoder->encode_through((std::min)(position, latest - lag()));
+        encoder->submit(block, position);
+        encoder->encode_through(latest - lag());
+    }
+    // Sources that go quiet stop delivering PCM. Keep the timeline moving in
+    // real time so saves never wait on, or burst-encode, a long silent gap.
+    void advance() {
+        if (latest == INT64_MIN || !encoder->anchored()) return;
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - latest_at).count();
+        encoder->encode_through(latest + audio_frames(elapsed) - lag());
+    }
+    bool covered(const Pending& request) const {
+        const auto end = audio_frames(request.end);
+        for (const auto& [key, ring] : rings) if (ring.end < end) return false;
+        return true;
+    }
+    AudioSnapshot collect(int64_t start, int64_t end) const {
+        AudioSnapshot result{start, end, {}};
+        const auto first = audio_frames(start), last = audio_frames(end), lead = first - encoder->preroll();
+        auto add = [&](const std::string& key, const std::string& title, int channels, bool mix) {
+            auto found = rings.find(key); if (found == rings.end()) return;
+            AudioTrack track{key, title, channels, mix, false, found->second.parameters, {}};
+            for (const auto& entry : found->second.packets) {
+                const auto pts = entry.packet->pts, stop = pts + entry.packet->duration;
+                if (stop <= lead || pts >= last) continue;
+                track.packets.push_back(entry.packet);
+                track.audible |= entry.audible && stop > first;
+            }
+            result.tracks.push_back(std::move(track));
+        };
+        for (const auto& lane : encoder->lanes()) add(lane.key, lane.title, lane.channels, false);
+        add(kAllTracksKey, kAllTracksTitle, 2, true);
+        return result;
+    }
+    void service(bool force) {
+        const auto now = Clock::now();
+        for (auto it = pending.begin(); it != pending.end();) {
+            if (!covered(*it) && (force || now >= it->deadline)) {
+                // Nothing reached the window yet, or a source stalled: pad with silence.
+                encoder->anchor(audio_frames(it->start) - encoder->preroll());
+                encoder->encode_through(audio_frames(it->end) + 4096 + 3 * encoder->block());
+            }
+            if (force || covered(*it)) { it->promise->set_value(collect(it->start, it->end)); it = pending.erase(it); } else ++it;
         }
     }
-    AudioSnapshot snapshot(int64_t start, int64_t end) {
-        if(calls.before_flush)calls.before_flush();
-        AudioSnapshot result{start, end, {}};
-        for (auto& [key, pointer] : sources) {
-            auto& s = *pointer;
-            int64_t first = (std::max)(int64_t(0), audio_frames(start, s.rate) - audio_frames(s.start_us, s.rate));
-            int64_t last = (std::min)(int64_t(s.frames), audio_frames(end, s.rate) - audio_frames(s.start_us, s.rate));
-            if (last <= first) continue;
-            wav_header(s.stream, s.rate, s.channels, s.frames); s.stream.flush();
-            result.ranges.push_back({s.file,s.lane,s.source,s.generation,uint64_t(first),uint64_t(last-first),audio_offset_time(s.start_us,first,s.rate),s.rate,s.channels});
-        }
-        return result;
+    void fail(std::exception_ptr error) {
+        for (auto& request : pending) request.promise->set_exception(error);
+        pending.clear();
+    }
+    void record(std::exception_ptr error) {
+        try { std::rethrow_exception(error); }
+        catch (const std::exception& e) { std::lock_guard lock(mutex); if (failure.empty()) failure = std::string(e.what()) + "; audio worker restart required"; }
+        catch (...) { std::lock_guard lock(mutex); if (failure.empty()) failure = "Audio encoder failed; audio worker restart required"; }
     }
     void run() {
         for (;;) {
-            Work work;
-            { std::unique_lock lock(mutex); ready.wait(lock, [&] { return closed || !queue.empty(); }); if (queue.empty()) break; work = std::move(queue.front()); queue.pop_front(); }
+            Work work; bool have = false;
+            {
+                std::unique_lock lock(mutex);
+                ready.wait_for(lock, std::chrono::milliseconds(50), [&] { return closed || !queue.empty(); });
+                if (!queue.empty()) { work = std::move(queue.front()); queue.pop_front(); have = true; }
+                else if (closed) break;
+            }
+            const bool pcm = have && !work.barrier && !work.lanes;
             try {
                 std::string error; { std::lock_guard lock(mutex); error = failure; }
                 if (!error.empty()) throw std::runtime_error(error);
-                if (work.barrier) work.barrier->set_value(snapshot(work.start, work.end)); else write(work.block);
+                if (have && work.barrier) {
+                    if (options.before_flush) options.before_flush();
+                    pending.push_back({work.barrier, work.start, work.end, Clock::now() + std::chrono::microseconds(options.encode_lag_us) + std::chrono::milliseconds(500)});
+                    work.barrier.reset();
+                } else if (have && work.lanes) { encoder->configure(std::move(*work.lanes)); sync_rings(); }
+                else if (have) write(work.block);
+                advance(); service(false);
             } catch (...) {
-                if (work.barrier) work.barrier->set_exception(std::current_exception());
-                try { throw; } catch (const std::exception& e) { std::lock_guard lock(mutex); if (failure.empty()) failure = std::string(e.what())+"; audio worker restart required"; }
+                auto error = std::current_exception();
+                if (work.barrier) work.barrier->set_exception(error);
+                fail(error); record(error);
             }
-            if (!work.barrier) { std::lock_guard lock(mutex); queued_duration_us -= work.block.duration_us(); }
+            if (pcm) { std::lock_guard lock(mutex); queued_duration_us -= work.block.duration_us(); }
         }
-        for (auto& [key, source] : sources) { try { wav_header(source->stream,source->rate,source->channels,source->frames); source->stream.flush(); } catch (...) {} }
+        try {
+            std::string error; { std::lock_guard lock(mutex); error = failure; }
+            if (!error.empty()) throw std::runtime_error(error);
+            if (latest != INT64_MIN) encoder->finish(latest);
+            service(true);
+        } catch (...) { auto error = std::current_exception(); fail(error); record(error); }
         { std::lock_guard lock(mutex); done = true; } exited.notify_all();
     }
 };
-AudioHistory::AudioHistory(std::filesystem::path directory, int64_t retention_us,AudioHistoryCalls calls) : state_(std::make_shared<State>()) {
-    state_->directory = std::move(directory); state_->retention_us = retention_us;
-    state_->calls=std::move(calls);
-    std::filesystem::create_directories(state_->directory);
-    std::thread([state=state_] { state->run(); }).detach();
+AudioHistory::AudioHistory(std::vector<AudioLaneConfig> lanes, int64_t retention_us, AudioHistoryOptions options) : state_(std::make_shared<State>()) {
+    auto s = state_; s->retention_us = retention_us; s->options = std::move(options);
+    State* raw = s.get();
+    s->encoder = std::make_unique<AudioTrackEncoder>(s->options.codec, std::move(lanes), true, int64_t(48000) * 120,
+        [raw](const std::string& key, Packet packet, bool audible) { raw->packet(key, std::move(packet), audible); });
+    s->sync_rings();
+    std::thread([s] { s->run(); }).detach();
 }
 AudioHistory::~AudioHistory() { stop(); }
 bool AudioHistory::submit(PcmBlock block) {
     if (block.channels < 1 || block.channels > 32 || block.sample_rate < 8000 || block.sample_rate > 384000 || block.samples.size() % block.channels) throw std::invalid_argument("Invalid PCM block");
     auto s = state_; std::lock_guard lock(s->mutex);
-    // A writer that falls behind sheds new audio instead of failing the session:
-    // write() pads the hole with silence once it catches up, so later saves
-    // keep working. Only real writer errors are sticky.
+    // A worker that falls behind sheds new audio instead of failing the session:
+    // the encoders continue with silence once it catches up, so later saves
+    // keep working. Only real encoder errors are sticky.
     constexpr uint64_t max_queued_us = 30000000;
     if (s->closed || !s->failure.empty() || s->queued_duration_us + block.duration_us() > max_queued_us) {
         s->lost += block.samples.size();
         return false;
     }
-    s->queued_duration_us += block.duration_us(); s->queue.push_back({std::move(block),{},0,0}); s->ready.notify_one(); return true;
+    s->queued_duration_us += block.duration_us(); s->queue.push_back({std::move(block), {}, {}, 0, 0}); s->ready.notify_one(); return true;
+}
+void AudioHistory::configure(std::vector<AudioLaneConfig> lanes) {
+    auto s = state_; std::lock_guard lock(s->mutex); if (s->closed) return;
+    s->queue.push_back({{}, {}, std::move(lanes), 0, 0}); s->ready.notify_one();
 }
 std::future<AudioSnapshot> AudioHistory::snapshot(int64_t start_us, int64_t end_us) {
     auto promise = std::make_shared<std::promise<AudioSnapshot>>(); auto future = promise->get_future();
     auto s = state_; std::lock_guard lock(s->mutex);
-    if(s->done){try{if(!s->failure.empty())throw std::runtime_error(s->failure);promise->set_value(s->snapshot(start_us,end_us));}catch(...){promise->set_exception(std::current_exception());}}
-    else if (s->closed) {try{std::thread([s,promise,start_us,end_us]{std::unique_lock lock(s->mutex);s->exited.wait(lock,[&]{return s->done;});try{if(!s->failure.empty())throw std::runtime_error(s->failure);promise->set_value(s->snapshot(start_us,end_us));}catch(...){promise->set_exception(std::current_exception());}}).detach();}catch(...){promise->set_exception(std::current_exception());}}
-    else { s->queue.push_back({{},promise,start_us,end_us}); s->ready.notify_one(); }
+    if(s->done){try{if(!s->failure.empty())throw std::runtime_error(s->failure);promise->set_value(s->collect(start_us,end_us));}catch(...){promise->set_exception(std::current_exception());}}
+    else if (s->closed) {try{std::thread([s,promise,start_us,end_us]{std::unique_lock lock(s->mutex);s->exited.wait(lock,[&]{return s->done;});try{if(!s->failure.empty())throw std::runtime_error(s->failure);promise->set_value(s->collect(start_us,end_us));}catch(...){promise->set_exception(std::current_exception());}}).detach();}catch(...){promise->set_exception(std::current_exception());}}
+    else { s->queue.push_back({{}, promise, {}, start_us, end_us}); s->ready.notify_one(); }
     return future;
 }
 void AudioHistory::stop() {
     auto s = state_; std::unique_lock lock(s->mutex); s->closed = true; s->ready.notify_one();
-    if (!s->exited.wait_for(lock, std::chrono::seconds(5), [&] { return s->done; }) && s->failure.empty()) s->failure = "Audio writer shutdown timed out; resource graph retained; worker restart required";
+    if (!s->exited.wait_for(lock, std::chrono::seconds(5), [&] { return s->done; }) && s->failure.empty()) s->failure = "Audio encoder shutdown timed out; resource graph retained; worker restart required";
 }
 uint64_t AudioHistory::lost_samples() const { return state_->lost.load(); }
 std::string AudioHistory::error() const { std::lock_guard lock(state_->mutex); return state_->failure; }
-
-std::vector<std::pair<std::string,std::filesystem::path>> render_audio(const AudioSnapshot& snapshot,
-    const std::vector<AudioLaneConfig>& lanes, const std::filesystem::path& directory, const std::atomic_bool& cancel) {
-    require(snapshot.end_us > snapshot.start_us, "Invalid audio snapshot window");
-    std::filesystem::create_directories(directory);
-    const int64_t total = audio_frames(snapshot.end_us) - audio_frames(snapshot.start_us);
-    std::vector<std::pair<std::string,std::filesystem::path>> result;
-    for (size_t lane_index = 0; lane_index < lanes.size(); ++lane_index) {
-        const auto& lane = lanes[lane_index]; require(lane.channels == 1 || lane.channels == 2, "Invalid output audio channels");
-        auto path = directory / (L"lane-" + std::to_wstring(lane_index) + L".wav");
-        std::fstream output(path, std::ios::binary | std::ios::in | std::ios::out | std::ios::trunc); output.exceptions(std::ios::badbit|std::ios::failbit);
-        wav_header(output,48000,lane.channels,total);
-        std::vector<AudioRange> ranges;
-        for (const auto& r : snapshot.ranges) if (r.lane == lane.key) ranges.push_back(r);
-        std::sort(ranges.begin(),ranges.end(),[](const auto& a,const auto& b) { return a.start_us < b.start_us || (a.start_us == b.start_us && a.generation < b.generation); });
-        struct Reader { AudioRange range; std::ifstream input; SwrContext* swr = nullptr; std::vector<float> data; int64_t output_start = 0; ~Reader(){swr_free(&swr);} };
-        std::vector<std::unique_ptr<Reader>> readers;
-        for (const auto& range : ranges) {
-            auto reader = std::make_unique<Reader>(); reader->range = range;
-            reader->input.open(range.file->path,std::ios::binary); reader->input.exceptions(std::ios::badbit|std::ios::failbit);
-            reader->input.seekg(44 + std::streamoff(range.first_frame * range.channels * 4));
-            AVChannelLayout input_layout{},output_layout{};
-            av_channel_layout_default(&input_layout,range.channels); av_channel_layout_default(&output_layout,lane.channels);
-            int code = swr_alloc_set_opts2(&reader->swr,&output_layout,AV_SAMPLE_FMT_FLT,48000,&input_layout,AV_SAMPLE_FMT_FLT,range.sample_rate,0,nullptr);
-            av_channel_layout_uninit(&input_layout); av_channel_layout_uninit(&output_layout);
-            require(code >= 0 && swr_init(reader->swr) >= 0,"Audio resampler initialization failed");
-            reader->output_start = audio_frames(range.start_us) - audio_frames(snapshot.start_us);
-            readers.push_back(std::move(reader));
-        }
-        // Stream sources into sparse aligned output; each input chunk is bounded.
-        std::vector<float> zero(48000 * lane.channels,0);
-        for(int64_t position=0;position<total;position+=48000) { if(cancel.load()) throw std::runtime_error("Audio render cancelled"); output.write(reinterpret_cast<char*>(zero.data()), (std::min)(int64_t(48000),total-position)*lane.channels*4); }
-        bool audible = false;
-        std::map<std::string,int64_t> source_ends;
-        for(auto& ptr:readers) {
-            auto& reader=*ptr; uint64_t remaining=reader.range.frame_count; int64_t cursor=reader.output_start;
-            auto& previous_end=source_ends[reader.range.source];
-            bool flushed=false;
-            while(remaining||!flushed) {
-                if(cancel.load()) throw std::runtime_error("Audio render cancelled");
-                int count=int((std::min)(remaining,uint64_t(8192))); std::vector<float> input(size_t(count)*reader.range.channels);
-                if(count)reader.input.read(reinterpret_cast<char*>(input.data()),input.size()*4);else flushed=true;
-                int capacity=swr_get_out_samples(reader.swr,count); std::vector<float> converted(size_t(capacity)*lane.channels);
-                const uint8_t* source=reinterpret_cast<const uint8_t*>(input.data()); uint8_t* target=reinterpret_cast<uint8_t*>(converted.data());
-                int actual=swr_convert(reader.swr,&target,capacity,count?&source:nullptr,count); require(actual>=0,"Audio conversion failed");
-                int64_t first=(std::max)({int64_t(0),-cursor,previous_end-cursor}); int64_t last=(std::min)(int64_t(actual),total-cursor);
-                if(last>first) {
-                    for(int64_t i=first*lane.channels;i<last*lane.channels;++i) { converted[size_t(i)]*=std::clamp(lane.gain,0.f,1.5f); audible|=std::abs(converted[size_t(i)])>0.000001f; }
-                    std::vector<float> existing(size_t(last-first)*lane.channels);output.seekg(44+(cursor+first)*lane.channels*4);output.read(reinterpret_cast<char*>(existing.data()),existing.size()*4);
-                    for(size_t i=0;i<existing.size();++i)existing[i]+=converted[size_t(first)*lane.channels+i];
-                    output.seekp(44+(cursor+first)*lane.channels*4); output.write(reinterpret_cast<char*>(existing.data()),existing.size()*4);
-                }
-                cursor+=actual; remaining-=count;
-            }
-            previous_end=(std::max)(previous_end,cursor);
-        }
-        output.close();
-        if(lane.omit_if_silent&&!audible) std::filesystem::remove(path); else result.emplace_back(lane.title,path);
-    }
-    return result;
-}
 
 struct WasapiSource::State {
     WasapiConfig config; Sink sink;
@@ -469,26 +454,23 @@ struct AudioGraph::State:public std::enable_shared_from_this<AudioGraph::State> 
     }
     void run(){HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);uint64_t seen=UINT64_MAX;try{hr(com,"Initialize audio routing COM");Microsoft::WRL::ComPtr<IMMDeviceEnumerator> notifications;hr(CoCreateInstance(__uuidof(MMDeviceEnumerator),nullptr,CLSCTX_ALL,IID_PPV_ARGS(&notifications)),"Create audio endpoint watcher");auto watcher=Microsoft::WRL::Make<EndpointChanges>();watcher->changed=[weak=weak_from_this()]{if(auto owner=weak.lock()){std::lock_guard lock(owner->mutex);++owner->revision;owner->changed.notify_all();}};hr(notifications->RegisterEndpointNotificationCallback(watcher.Get()),"Register audio endpoint watcher");struct Registration{IMMDeviceEnumerator* owner;IMMNotificationClient* watcher;~Registration(){owner->UnregisterEndpointNotificationCallback(watcher);}} registration{notifications.Get(),watcher.Get()};for(;;){AudioGraphConfig settings;{std::lock_guard lock(mutex);if(stopping)break;settings=config;seen=revision;}try{refresh(settings);}catch(const std::exception& e){std::lock_guard lock(mutex);failure=e.what();}std::unique_lock lock(mutex);changed.wait_for(lock,std::chrono::seconds(stable_passes>=5?5:2),[&]{return stopping||revision!=seen;});}}catch(const std::exception& e){std::lock_guard lock(mutex);failure=e.what();}for(auto& [key,route]:routes){route.capture->stop();if(route.capture->error().find("worker restart required")!=std::string::npos){std::lock_guard lock(mutex);failure=route.capture->error();}if(route.filter&&!route.filter->stop()){std::lock_guard lock(mutex);failure="Microphone filter shutdown timed out; worker restart required";}}routes.clear();history->stop();if(SUCCEEDED(com))CoUninitialize();{std::lock_guard lock(mutex);done=true;running=false;}changed.notify_all();}
 };
-AudioGraph::AudioGraph(AudioGraphConfig config,WasapiSource::Sink live):state_(std::make_shared<State>()){state_->history=std::make_shared<AudioHistory>(config.history_directory,config.retention_us);state_->config=std::move(config);state_->live=std::move(live);}
+AudioGraph::AudioGraph(AudioGraphConfig config,WasapiSource::Sink live):state_(std::make_shared<State>()){state_->history=std::make_shared<AudioHistory>(graph_lanes(config),config.retention_us,AudioHistoryOptions{config.codec});state_->config=std::move(config);state_->live=std::move(live);}
 AudioGraph::~AudioGraph(){stop();}
 void AudioGraph::start(){auto s=state_;std::lock_guard lock(s->mutex);if(s->running)return;if(s->stopping)throw std::runtime_error("Audio graph cannot restart after stop");s->running=true;std::thread([s]{s->run();}).detach();}
 bool AudioGraph::stop(){auto s=state_;std::unique_lock lock(s->mutex);if(!s->running){lock.unlock();s->history->stop();return !restart_required();}s->stopping=true;s->changed.notify_all();if(!s->changed.wait_for(lock,std::chrono::seconds(10),[&]{return s->done;})){s->failure="Audio graph shutdown timed out; resource graph retained; worker restart required";return false;}lock.unlock();return !restart_required();}
-void AudioGraph::update(AudioGraphConfig config){auto s=state_;std::lock_guard lock(s->mutex);s->config=std::move(config);++s->revision;s->changed.notify_all();}
+void AudioGraph::update(AudioGraphConfig config){auto s=state_;s->history->configure(graph_lanes(config));std::lock_guard lock(s->mutex);s->config=std::move(config);++s->revision;s->changed.notify_all();}
 std::future<AudioSnapshot> AudioGraph::snapshot(int64_t start,int64_t end){
-    auto history=state_->history;auto initial=history->snapshot(start,end);
+    auto history=state_->history;
     std::vector<std::shared_ptr<MicrophoneFilter>> filters;{std::lock_guard lock(state_->mutex);filters=state_->filters;}
-    if(filters.empty())return initial;
+    if(filters.empty())return history->snapshot(start,end);
     std::vector<std::shared_future<void>> tickets;for(const auto& filter:filters)tickets.push_back(filter->barrier());
     auto promise=std::make_shared<std::promise<AudioSnapshot>>();auto result=promise->get_future();
-    try{std::thread([owner=state_,history,promise,initial=std::move(initial),filters=std::move(filters),tickets=std::move(tickets),start,end]()mutable{
+    try{std::thread([owner=state_,history,promise,filters=std::move(filters),tickets=std::move(tickets),start,end]()mutable{
         try{
-            // Pin currently-written generations immediately, before delayed
-            // suppression can let retention pruning discard their prefixes.
-            auto snapshot=initial.get();
+            // Suppressed microphone PCM admitted before the save must reach the
+            // encoders before the snapshot barrier does.
             for(size_t i=0;i<tickets.size();++i){if(tickets[i].wait_for(std::chrono::seconds(5))!=std::future_status::ready)filters[i]->abort();if(tickets[i].wait_for(std::chrono::seconds(5))!=std::future_status::ready)throw std::runtime_error("Audio suppression snapshot barrier timed out; worker restart required");tickets[i].get();}
-            auto tail=history->snapshot(start,end).get();
-            for(auto& range:tail.ranges){auto existing=std::find_if(snapshot.ranges.begin(),snapshot.ranges.end(),[&](const AudioRange& value){return value.file==range.file&&value.first_frame==range.first_frame;});if(existing==snapshot.ranges.end())snapshot.ranges.push_back(std::move(range));else if(range.frame_count>existing->frame_count)*existing=std::move(range);}
-            promise->set_value(std::move(snapshot));
+            promise->set_value(history->snapshot(start,end).get());
         }catch(const std::exception& error){if(std::string(error.what()).find("worker restart required")!=std::string::npos){std::lock_guard lock(owner->mutex);owner->failure=error.what();}promise->set_exception(std::current_exception());}catch(...){promise->set_exception(std::current_exception());}
     }).detach();}catch(...){promise->set_exception(std::current_exception());}
     return result;

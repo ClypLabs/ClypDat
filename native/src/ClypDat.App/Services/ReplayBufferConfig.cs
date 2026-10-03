@@ -52,5 +52,6 @@ public sealed record ReplayBufferConfig(
     string FullSessionContainer = "MKV",
     bool ReplayHdrCompatibilityEnabled = true,
     bool SystemAudioEnabled = false,
-    int SystemAudioVolumePercent = 100);
+    int SystemAudioVolumePercent = 100,
+    string AudioCodec = ClypDat.Core.Settings.RecordingAudioCodec.Opus);
 

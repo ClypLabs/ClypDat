@@ -40,6 +40,7 @@ add_library(RecorderCore STATIC
     src/recording_capture.cpp src/recording_capture.h src/encoder_input_diagnostics.h
     src/recording_windows_source.cpp
     src/recording_audio.cpp src/recording_audio.h
+    src/recording_audio_codec.cpp src/recording_audio_codec.h
     src/recording_audio_timing.cpp src/recording_audio_timing.h
     src/recording_process.cpp src/recording_process.h
     src/recording_save.cpp src/recording_save.h

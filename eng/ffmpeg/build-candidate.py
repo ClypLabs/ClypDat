@@ -62,7 +62,7 @@ def run(name,args,cwd=ROOT,env=ENV):
     print('PASS',name,flush=True)
 
 def cmake_dep(name,sub='',flags=()):
-    if '--from=aom' in sys.argv and name in ('onevpl','zlib'): return
+    if '--from=aom' in sys.argv and name in ('onevpl','zlib','ogg','opus','vorbis'): return
     if '--from=x264' in sys.argv: return
     src=source(name)/sub
     build=ROOT/'build'/('aom-nasm216' if name=='aom' else name)
@@ -134,6 +134,10 @@ def deps():
     if old not in original and new not in original:raise RuntimeError('Unexpected zlib header template')
     template.write_text(original.replace(old,new))
     cmake_dep('zlib',flags=['-DZLIB_BUILD_EXAMPLES=OFF'])
+    # Opus and Vorbis audio encoders for replay and full-session recording.
+    cmake_dep('ogg',flags=['-DBUILD_SHARED_LIBS=OFF','-DBUILD_TESTING=OFF','-DINSTALL_DOCS=OFF'])
+    cmake_dep('opus',flags=['-DOPUS_BUILD_SHARED_LIBRARY=OFF','-DOPUS_BUILD_TESTING=OFF','-DOPUS_BUILD_PROGRAMS=OFF'])
+    cmake_dep('vorbis',flags=['-DBUILD_SHARED_LIBS=OFF','-DBUILD_TESTING=OFF','-DCMAKE_PREFIX_PATH='+PREFIX.as_posix()])
     if '--from=aom' not in sys.argv and '--from=x264' not in sys.argv:x265_multilib()
     cmake_dep('aom',flags=['-DBUILD_SHARED_LIBS=OFF','-DENABLE_TESTS=OFF','-DENABLE_DOCS=OFF','-DENABLE_EXAMPLES=OFF','-DENABLE_TOOLS=OFF'])
     dav1d()
@@ -152,8 +156,11 @@ def deps():
     pc=PREFIX/'lib/pkgconfig';pc.mkdir(parents=True,exist_ok=True)
     # FFmpeg's MSVC linker consumes these import/static libraries directly.
     # Explicit .lib paths prevent pkgconf from guessing MinGW archive names.
-    for name,ver,lib in [('vpl','2.16.0','vpl.lib'),('x264','0.165.0','libx264.lib'),('x265','4.1','x265-static.lib'),('aom','3.13.1','aom.lib'),('zlib','1.3.1','zlibstatic.lib')]:
-        (pc/(name+'.pc')).write_text(f'prefix={PREFIX.as_posix()}\nName: {name}\nDescription: pinned ClypDat dependency\nVersion: {ver}\nLibs: ${{prefix}}/lib/{lib}\nCflags: -I${{prefix}}/include'+(' -I${prefix}/include/vpl -DONEVPL_EXPERIMENTAL=1' if name=='vpl' else '')+'\n')
+    # Static Vorbis archives list the archives they depend on after themselves.
+    for name,ver,lib in [('vpl','2.16.0','vpl.lib'),('x264','0.165.0','libx264.lib'),('x265','4.1','x265-static.lib'),('aom','3.13.1','aom.lib'),('zlib','1.3.1','zlibstatic.lib'),
+                         ('ogg','1.3.6','ogg.lib'),('opus','1.5.2','opus.lib'),('vorbis','1.3.7','vorbis.lib ${prefix}/lib/ogg.lib'),
+                         ('vorbisenc','1.3.7','vorbisenc.lib ${prefix}/lib/vorbis.lib ${prefix}/lib/ogg.lib')]:
+        (pc/(name+'.pc')).write_text(f'prefix={PREFIX.as_posix()}\nName: {name}\nDescription: pinned ClypDat dependency\nVersion: {ver}\nLibs: ${{prefix}}/lib/{lib}\nCflags: -I${{prefix}}/include'+(' -I${prefix}/include/vpl -DONEVPL_EXPERIMENTAL=1' if name=='vpl' else ' -I${prefix}/include/opus' if name=='opus' else '')+'\n')
     (pc/'ffnvcodec.pc').write_text(f'prefix={PREFIX.as_posix()}\nName: ffnvcodec\nDescription: NV codec headers\nVersion: 13.0.19.0\nCflags: -I${{prefix}}/include\n')
 
 def ffmpeg():
@@ -163,7 +170,7 @@ def ffmpeg():
         '--enable-shared','--disable-static','--disable-autodetect','--disable-doc','--disable-debug',
         '--enable-gpl','--enable-version3','--enable-libvpl','--enable-d3d11va','--enable-dxva2',
         '--enable-ffnvcodec','--enable-nvenc','--enable-nvdec','--enable-cuvid','--enable-amf',
-        '--enable-libx264','--enable-libx265','--enable-libaom','--enable-libdav1d','--enable-zlib','--enable-schannel',
+        '--enable-libx264','--enable-libx265','--enable-libaom','--enable-libdav1d','--enable-libopus','--enable-libvorbis','--enable-zlib','--enable-schannel',
         '--extra-cflags=-MD -ID:/ClypDatFfmpeg812/deps/include -DONEVPL_EXPERIMENTAL=1',
         '--extra-cxxflags=-MD -DONEVPL_EXPERIMENTAL=1',
         '--extra-ldflags=-LIBPATH:D:/ClypDatFfmpeg812/deps/lib -Brepro','--pkg-config=pkgconf']

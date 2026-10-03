@@ -11,6 +11,7 @@ This recipe builds a separate candidate. It does not call `Prepare-CaptureFfmpeg
 - Default AV1 decoding: dav1d 1.5.4, commit `54706fc6bc0cdecab7e9593974a4039cc038fca7`, built with pinned Meson 1.9.1 and `b_vscrt=md`. This preserves the baseline's automatically selected AV1 decoder; libaom also remains available for CPU AV1 export.
 - GPU headers: nv-codec-headers n13.0.19.0 and AMF v1.4.36. GPU driver runtimes are not bundled.
 - `patches/amf-display-c-compat.patch` makes the AMF 1.4.36 display-capture declaration valid in C as well as C++. It preserves the AMF version and ABI; no encoder logic changes. The original tag object is `86b1b09ca5c0572ab710ee7b6b174f8c7aa00119`, resolving to commit `16f7d73e0b45c473e903e46981ed0b91efc4c091`.
+- Audio encoders: libogg 1.3.6, libopus 1.5.2 and libvorbis 1.3.7 from the Xiph release archives, static with `/MD`. They provide the `libopus` and `libvorbis` encoders used for replay and full-session audio. Their hashes match Xiph's published `SHA256SUMS`. No source patches.
 - zlib 1.3.1, static. `patches/zlib-msvc-unistd.patch` fixes a header conditional: FFmpeg defines `HAVE_UNISTD_H=0`, while zlib 1.3.1 tests only whether the macro exists. The recipe applies this exact Windows guard to the CMake header template before compilation. No FFmpeg or oneVPL source patches.
 - Complete immutable revisions, download locations and SHA-256 values: `sources.lock.json`.
 
@@ -29,7 +30,7 @@ Other prerequisites: Git for Windows 2.55.0.windows.3 at `C:/Program Files/Git`,
 From the directory containing this recipe:
 
 ```powershell
-python bootstrap.py 'D:/ClypDat-builds/ffmpeg-8.1.2-shared-r2'
+python bootstrap.py 'D:/ClypDat-builds/ffmpeg-8.1.2-shared-r3'
 ```
 
 The target must not exist. The fixed build junction `D:/ClypDatFfmpeg812` must also be free. The bootstrap downloads and verifies every locked source/tool archive, extracts into the target, creates that junction, builds dependencies and FFmpeg, installs only into `candidate/`, assembles notices and runtime files, and creates binary/source ZIPs with manifests. Download hash mismatches fail closed.
@@ -44,7 +45,7 @@ The fixed path avoids MSYS quoting problems and stabilizes embedded configure pa
 
 `configure-command.json` holds the exact argument array. `build-candidate.py` is the executable recipe. It enables full default built-in codecs, formats, filters and Windows devices, plus required external libraries. It does not use `--disable-everything`. `--disable-autodetect` prevents unpinned external dependencies from entering the build.
 
-FFmpeg uses shared DLLs, MSVC x64, native Windows threads, NASM optimization, `/MD`, GPLv3 mode, QSV/D3D11VA/DXVA2, NVENC/NVDEC/CUVID, AMF, x264, x265, libaom, dav1d, zlib and SChannel. `make REVISION=8.1.2` fixes release identity for an archive source tree. All dependency headers/import libraries come from the same staging prefix.
+FFmpeg uses shared DLLs, MSVC x64, native Windows threads, NASM optimization, `/MD`, GPLv3 mode, QSV/D3D11VA/DXVA2, NVENC/NVDEC/CUVID, AMF, x264, x265, libaom, dav1d, libopus, libvorbis, zlib and SChannel. `make REVISION=8.1.2` fixes release identity for an archive source tree. All dependency headers/import libraries come from the same staging prefix.
 
 For an interrupted build in this exact existing staging directory:
 
@@ -64,8 +65,10 @@ python package.py
 - `candidate/include`, `candidate/lib`: matching public development headers and import libraries. Shared-only pkg-config metadata uses a relocatable prefix; build-machine static dependency paths are removed.
 - `candidate/licenses`, `candidate/BUILD.md`, source/configuration locks and dependency patches: redistribution material.
 - `candidate/SHA256SUMS`, `candidate/manifest.json`: final file hashes.
-- `clypdat-ffmpeg-8.1.2-win64-shared-r2.zip` and matching `.sha256`.
-- `clypdat-ffmpeg-8.1.2-win64-shared-r2-sources.zip` and matching `.sha256`: corresponding sources and recipe. Publish beside the binaries if released.
+- `clypdat-ffmpeg-8.1.2-win64-shared-r3.zip` and matching `.sha256`.
+- `clypdat-ffmpeg-8.1.2-win64-shared-r3-sources.zip` and matching `.sha256`: corresponding sources and recipe. Publish beside the binaries if released.
+
+Revision r3 adds libogg, libopus and libvorbis and enables `--enable-libopus --enable-libvorbis`. Every other source, tool, flag and the r2 determinism controls are unchanged.
 
 Revision r2 addresses two independently reproduced defects in r1:
 

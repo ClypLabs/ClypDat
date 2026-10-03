@@ -1,4 +1,5 @@
 #include "recording_save.h"
+#include "recording_audio_codec.h"
 #include "recording_audio_timing.h"
 #include "recording_process.h"
 #include <Windows.h>
@@ -7,19 +8,18 @@
 #include <condition_variable>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <thread>
 #include <stdexcept>
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/opt.h>
-#include <libswresample/swresample.h>
 }
 namespace clypdat {
 namespace {
 void check(int code,const char* operation){if(code<0){char error[256]{};av_strerror(code,error,sizeof(error));throw std::runtime_error(std::string(operation)+": "+error);}}
 std::string utf8(const std::filesystem::path& path){auto text=path.u8string();return std::string(text.begin(),text.end());}
-std::wstring wide(const std::string& text){if(text.empty())return {};int count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),int(text.size()),nullptr,0);if(!count)throw std::runtime_error("Invalid UTF-8 audio lane name");std::wstring result(count,L'\0');MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),int(text.size()),result.data(),count);return result;}
 struct Format {
     AVFormatContext* value=nullptr;
     ~Format(){if(value){if(value->pb)avio_closep(&value->pb);avformat_free_context(value);}}
@@ -156,59 +156,101 @@ VideoHistoryStats VideoHistory::stats()const{
     return result;
 }
 void VideoHistory::inspect(const std::function<void(const std::deque<HistoryPacket>&)>& reader)const{std::lock_guard lock(mutex_);reader(packets_);}
-void remux_video(const VideoSnapshot& video,const std::filesystem::path& output,const std::atomic_bool& cancel,bool fragmented){
+namespace {
+AVStream* add_video(AVFormatContext* format,const VideoSnapshot& video){
     if(video.packets.empty())throw std::runtime_error("Empty video snapshot");
-    Format format;open_output(format,output);auto* stream=avformat_new_stream(format.value,nullptr);if(!stream)throw std::bad_alloc();
-    check(avcodec_parameters_copy(stream->codecpar,video.packets.front().generation->codec.get()),"Copy video parameters");stream->codecpar->codec_tag=0;stream->time_base={1,1000000};header(format.value,fragmented);
-    const auto& first=video.packets.front();auto origin=packet_us(first,first.packet->dts==AV_NOPTS_VALUE?first.packet->pts:first.packet->dts);
-    int64_t last_dts=AV_NOPTS_VALUE;
-    for(size_t index=0;index<video.packets.size();++index){const auto& item=video.packets[index];if(cancel.load())throw std::runtime_error("Video save cancelled");Packet packet(av_packet_clone(item.packet.get()));if(!packet)throw std::bad_alloc();av_packet_rescale_ts(packet.get(),item.generation->time_base,stream->time_base);auto next_pts=index+1<video.packets.size()?packet_us(video.packets[index+1],video.packets[index+1].packet->pts):packet_us(video.packets.front(),video.packets.front().packet->pts)+video.duration_us;packet->duration=av_rescale_q((std::max)(int64_t(1),next_pts-packet_us(item,item.packet->pts)),{1,1000000},stream->time_base);const auto offset=av_rescale_q(origin,{1,1000000},stream->time_base);if(packet->pts!=AV_NOPTS_VALUE)packet->pts-=offset;if(packet->dts!=AV_NOPTS_VALUE)packet->dts-=offset;packet->stream_index=stream->index;packet->pos=-1;if(packet->dts!=AV_NOPTS_VALUE&&last_dts!=AV_NOPTS_VALUE&&packet->dts<=last_dts)throw std::runtime_error("Non-increasing video DTS across generations");last_dts=packet->dts;check(av_interleaved_write_frame(format.value,packet.get()),"Write replay packet");}
+    auto* stream=avformat_new_stream(format,nullptr);if(!stream)throw std::bad_alloc();
+    check(avcodec_parameters_copy(stream->codecpar,video.packets.front().generation->codec.get()),"Copy video parameters");stream->codecpar->codec_tag=0;stream->time_base={1,1000000};return stream;
+}
+// Rebases snapshot packets so the first decode timestamp is zero.
+struct VideoRebase {
+    const VideoSnapshot& video;AVStream* stream;int64_t origin=0,last_dts=AV_NOPTS_VALUE;
+    VideoRebase(const VideoSnapshot& value,AVStream* target):video(value),stream(target){const auto& first=video.packets.front();origin=packet_us(first,first.packet->dts==AV_NOPTS_VALUE?first.packet->pts:first.packet->dts);}
+    // Output decode time of a packet, for interleaving.
+    int64_t at_us(size_t index)const{const auto& item=video.packets[index];return packet_us(item,item.packet->dts==AV_NOPTS_VALUE?item.packet->pts:item.packet->dts)-origin;}
+    Packet packet(size_t index){
+        const auto& item=video.packets[index];Packet packet(av_packet_clone(item.packet.get()));if(!packet)throw std::bad_alloc();av_packet_rescale_ts(packet.get(),item.generation->time_base,stream->time_base);
+        auto next_pts=index+1<video.packets.size()?packet_us(video.packets[index+1],video.packets[index+1].packet->pts):packet_us(video.packets.front(),video.packets.front().packet->pts)+video.duration_us;
+        packet->duration=av_rescale_q((std::max)(int64_t(1),next_pts-packet_us(item,item.packet->pts)),{1,1000000},stream->time_base);
+        const auto offset=av_rescale_q(origin,{1,1000000},stream->time_base);if(packet->pts!=AV_NOPTS_VALUE)packet->pts-=offset;if(packet->dts!=AV_NOPTS_VALUE)packet->dts-=offset;packet->stream_index=stream->index;packet->pos=-1;
+        if(packet->dts!=AV_NOPTS_VALUE&&last_dts!=AV_NOPTS_VALUE&&packet->dts<=last_dts)throw std::runtime_error("Non-increasing video DTS across generations");last_dts=packet->dts;return packet;
+    }
+};
+// One saved audio stream and the snapshot packets it still has to write.
+struct AudioOutput {const AudioTrack* track;AVStream* stream;std::vector<std::shared_ptr<const AVPacket>> packets;size_t next=0;int64_t origin=0;};
+void write_replay(const ReplaySaveRequest& request,const AudioSnapshot* audio,const std::filesystem::path& output,const std::atomic_bool& cancel){
+    Format format;open_output(format,output);auto* video_stream=add_video(format.value,request.video);
+    std::vector<AudioOutput> outputs;
+    if(audio){
+        // Lanes in configured order; silent optional lanes are left out. A mix
+        // leads only when it combines more than one saved lane.
+        std::vector<std::pair<const AudioTrack*,std::string>> chosen;
+        for(const auto& lane:request.lanes){
+            auto track=std::find_if(audio->tracks.begin(),audio->tracks.end(),[&](const AudioTrack& t){return !t.mix&&t.key==lane.key;});
+            if(track==audio->tracks.end()||!track->parameters||(lane.omit_if_silent&&!track->audible))continue;
+            chosen.emplace_back(&*track,lane.title);
+        }
+        if(chosen.size()>1){auto mix=std::find_if(audio->tracks.begin(),audio->tracks.end(),[](const AudioTrack& t){return t.mix;});if(mix!=audio->tracks.end()&&mix->parameters)chosen.insert(chosen.begin(),{&*mix,kAllTracksTitle});}
+        const bool negative=(format.value->oformat->flags&AVFMT_TS_NEGATIVE)!=0;
+        const auto origin=audio_frames(request.video.start_us),end=audio_frames(request.video.end_us)-origin;
+        for(size_t i=0;i<chosen.size();++i){
+            auto [track,title]=chosen[i];auto* stream=avformat_new_stream(format.value,nullptr);if(!stream)throw std::bad_alloc();
+            check(avcodec_parameters_copy(stream->codecpar,track->parameters.get()),"Copy audio parameters");stream->codecpar->codec_tag=0;stream->time_base={1,48000};
+            av_dict_set(&stream->metadata,"title",title.c_str(),0);av_dict_set(&stream->metadata,"handler_name",title.c_str(),0);
+            stream->disposition=i==0?AV_DISPOSITION_DEFAULT:0;
+            AudioOutput result{track,stream,{},0,origin};
+            // Preroll before zero lets the decoder converge; containers without
+            // negative timestamps start on the first whole packet instead.
+            for(const auto& packet:track->packets){const auto at=packet->pts-origin;if(at>=end||(!negative&&at<0))continue;result.packets.push_back(packet);}
+            outputs.push_back(std::move(result));
+        }
+    }
+    header(format.value,false);
+    VideoRebase video(request.video,video_stream);size_t next_video=0;
+    auto audio_us=[](const AudioOutput& o){return av_rescale(o.packets[o.next]->pts-o.origin,1000000,48000);};
+    for(;;){
+        if(cancel.load())throw std::runtime_error("Replay save cancelled");
+        AudioOutput* earliest=nullptr;for(auto& o:outputs)if(o.next<o.packets.size()&&(!earliest||audio_us(o)<audio_us(*earliest)))earliest=&o;
+        const bool video_left=next_video<request.video.packets.size();
+        if(!video_left&&!earliest)break;
+        if(video_left&&(!earliest||video.at_us(next_video)<=audio_us(*earliest))){auto packet=video.packet(next_video++);check(av_interleaved_write_frame(format.value,packet.get()),"Write replay packet");continue;}
+        auto& o=*earliest;Packet packet(av_packet_clone(o.packets[o.next++].get()));if(!packet)throw std::bad_alloc();
+        packet->pts-=o.origin;packet->dts=packet->pts;packet->stream_index=o.stream->index;packet->pos=-1;
+        av_packet_rescale_ts(packet.get(),{1,48000},o.stream->time_base);check(av_interleaved_write_frame(format.value,packet.get()),"Write replay audio");
+    }
+    check(av_write_trailer(format.value),"Finalize replay");
+}
+}
+void remux_video(const VideoSnapshot& video,const std::filesystem::path& output,const std::atomic_bool& cancel,bool fragmented){
+    Format format;open_output(format,output);auto* stream=add_video(format.value,video);header(format.value,fragmented);
+    VideoRebase rebase(video,stream);
+    for(size_t index=0;index<video.packets.size();++index){if(cancel.load())throw std::runtime_error("Video save cancelled");auto packet=rebase.packet(index);check(av_interleaved_write_frame(format.value,packet.get()),"Write replay packet");}
     check(av_write_trailer(format.value),"Finalize replay video");
 }
 struct SaveCoordinator::State {mutable std::mutex mutex;bool active=false;std::string id;std::shared_ptr<std::atomic_bool> cancel;};
 SaveCoordinator::SaveCoordinator():state_(std::make_shared<State>()){}
 SaveCoordinator::~SaveCoordinator()=default;
 std::shared_future<ReplaySaveResult> SaveCoordinator::begin(ReplaySaveRequest request){
-    static std::atomic_uint64_t sequence{0};
-    if(request.id.empty()||!request.output.is_absolute()||!request.work_directory.is_absolute())throw std::invalid_argument("Save requires stable ID and absolute paths");
-    request.work_directory/=L"native-save-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(++sequence);
+    if(request.id.empty()||!request.output.is_absolute())throw std::invalid_argument("Save requires stable ID and absolute path");
     auto promise=std::make_shared<std::promise<ReplaySaveResult>>();auto future=promise->get_future().share();auto s=state_;auto cancel=std::make_shared<std::atomic_bool>(false);
     {std::lock_guard lock(s->mutex);if(s->active)throw std::runtime_error("A replay save is already in progress");s->active=true;s->id=request.id;s->cancel=cancel;}
     try{std::thread([s,promise,cancel,request=std::move(request)]()mutable{
         ReplaySaveResult result;result.id=request.id;result.output=request.output;result.duration_us=request.video.duration_us;result.generation=request.video.generation;result.frozen=request.video.frozen;result.audio_mappings=request.video.mappings;result.overlay_mappings=request.video.overlay_mappings;
         std::filesystem::path partial=request.output;partial+=L".partial"+request.output.extension().wstring();
-        bool published=false,work_created=false;
+        bool published=false;
         try{
-            if(request.id.empty()||!request.output.is_absolute()||!request.work_directory.is_absolute())throw std::invalid_argument("Save requires stable ID and absolute paths");
             if(std::filesystem::exists(request.output))throw std::runtime_error("Replay output already exists");
-            work_created=std::filesystem::create_directories(request.work_directory);if(!work_created)throw std::runtime_error("Replay work directory already exists");
-            auto video=request.work_directory/L"video.mp4";remux_video(request.video,video,*cancel);
-            std::vector<std::pair<std::string,std::filesystem::path>> tracks;
+            std::optional<AudioSnapshot> audio;
             if(request.audio.valid()){
                 while(request.audio.wait_for(std::chrono::milliseconds(25))!=std::future_status::ready){if(cancel->load())throw std::runtime_error("Replay save cancelled");}
-                auto snapshot=request.audio.get();snapshot.start_us=request.video.start_us;snapshot.end_us=request.video.end_us;
-                tracks=render_audio(snapshot,request.lanes,request.work_directory,*cancel);
+                audio=request.audio.get();
             }
-            std::vector<std::wstring> args{L"-v",L"error",L"-nostdin",L"-y",L"-i",video.wstring()};
-            for(const auto& track:tracks){args.push_back(L"-i");args.push_back(track.second.wstring());}
-            args.insert(args.end(),{L"-map",L"0:v:0",L"-c:v",L"copy"});
-            if(tracks.size()>1){
-                std::wstring filter;
-                for(size_t i=0;i<tracks.size();++i)filter+=L"["+std::to_wstring(i+1)+L":a:0]aformat=sample_fmts=fltp:channel_layouts=stereo[mix"+std::to_wstring(i)+L"];";
-                for(size_t i=0;i<tracks.size();++i)filter+=L"[mix"+std::to_wstring(i)+L"]";
-                filter+=L"amix=inputs="+std::to_wstring(tracks.size())+L":normalize=0[all_tracks]";
-                args.insert(args.end(),{L"-filter_complex",filter,L"-map",L"[all_tracks]",L"-metadata:s:a:0",L"title=All Tracks",L"-metadata:s:a:0",L"handler_name=All Tracks",L"-disposition:a:0",L"default"});
-            }
-            for(size_t i=0;i<tracks.size();++i){auto title=wide(tracks[i].first);auto index=std::to_wstring(i+(tracks.size()>1?1:0));args.insert(args.end(),{L"-map",std::to_wstring(i+1)+L":a:0",L"-metadata:s:a:"+index,L"title="+title,L"-metadata:s:a:"+index,L"handler_name="+title});if(tracks.size()>1)args.insert(args.end(),{L"-disposition:a:"+index,L"0"});}
-            args.insert(args.end(),{L"-c:a",L"aac",L"-b:a",L"192k"});if(request.output.extension()==L".mp4")args.insert(args.end(),{L"-movflags",L"+faststart"});args.push_back(partial.wstring());
-            ProcessRunner::run(request.ffmpeg,args,*cancel,std::chrono::minutes(10));
+            write_replay(request,audio?&*audio:nullptr,partial,*cancel);
             if(cancel->load())throw std::runtime_error("Replay save cancelled");
             if(request.publish_overlays)request.publish_overlays(partial,result.overlay_mappings,*cancel);
             std::filesystem::rename(partial,request.output);published=true;
         }catch(const std::exception& e){result.error=e.what();result.cancelled=cancel->load();}
         std::error_code ignored;if(!published)std::filesystem::remove(partial,ignored);
-        // Only remove files created in this request's dedicated work directory.
-        if(work_created)std::filesystem::remove_all(request.work_directory,ignored);
         if(request.completed){try{request.completed();}catch(...){}}
         {std::lock_guard lock(s->mutex);s->active=false;s->cancel.reset();}promise->set_value(std::move(result));
     }).detach();}catch(...){std::lock_guard lock(s->mutex);s->active=false;s->cancel.reset();throw;}return future;
@@ -227,49 +269,28 @@ bool recover_recording(const std::filesystem::path& input,const std::filesystem:
 
 struct FullSessionWriter::State {
     struct Work {std::shared_ptr<const CaptureGeneration> generation;Packet packet;PcmBlock pcm;size_t bytes=0;};
-    struct Lane {AudioLaneConfig config;CodecContext codec;AVStream* stream=nullptr;int64_t next=0;std::map<int64_t,std::vector<float>> blocks;};
-    struct Converter {SwrContext* swr=nullptr;Lane* lane=nullptr;std::string logical;int rate=0,channels=0;int64_t next=0;bool anchored=false;~Converter(){swr_free(&swr);}};
     FullSessionConfig config;std::shared_ptr<const CaptureGeneration> generation;
     mutable std::mutex mutex;std::condition_variable ready,exited;std::deque<Work> queue;size_t queued=0;bool closed=false,done=false;FullSessionStatus status;
-    Format format;AVStream* video_stream=nullptr;std::vector<Lane> lanes;int64_t origin=AV_NOPTS_VALUE,video_end=0;HANDLE lease=INVALID_HANDLE_VALUE;
-    std::map<std::pair<std::string,uint64_t>,std::unique_ptr<Converter>> converters;
-    std::map<std::string,int64_t> source_ends;
-    std::map<std::string,uint64_t> source_generations;
+    Format format;AVStream* video_stream=nullptr;std::unique_ptr<AudioTrackEncoder> encoder;std::map<std::string,AVStream*> audio_streams;
+    int64_t origin=AV_NOPTS_VALUE,video_end=0;HANDLE lease=INVALID_HANDLE_VALUE;
     std::deque<PcmBlock> early_audio;size_t early_bytes=0;
     ~State(){if(lease!=INVALID_HANDLE_VALUE)CloseHandle(lease);}
     void initialize(){
         lease=CreateFileW((config.output.wstring()+L".recording").c_str(),GENERIC_READ|GENERIC_WRITE,FILE_SHARE_DELETE,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(lease==INVALID_HANDLE_VALUE)throw std::runtime_error("Full-session recording lease unavailable");
         std::ofstream(config.output.wstring()+L".interrupted").put('\n');open_output(format,config.output);format.value->flags|=AVFMT_FLAG_FLUSH_PACKETS;
         video_stream=avformat_new_stream(format.value,nullptr);if(!video_stream)throw std::bad_alloc();check(avcodec_parameters_copy(video_stream->codecpar,generation->codec.get()),"Copy session video parameters");video_stream->codecpar->codec_tag=0;video_stream->time_base=generation->time_base;
-        for(auto& config_lane:config.lanes){Lane lane;lane.config=config_lane;auto* codec=avcodec_find_encoder(AV_CODEC_ID_AAC);if(!codec)throw std::runtime_error("AAC encoder unavailable");lane.codec.reset(avcodec_alloc_context3(codec));if(!lane.codec)throw std::bad_alloc();lane.codec->sample_rate=48000;lane.codec->sample_fmt=AV_SAMPLE_FMT_FLTP;av_channel_layout_default(&lane.codec->ch_layout,config_lane.channels);lane.codec->bit_rate=192000;lane.codec->time_base={1,48000};if(format.value->oformat->flags&AVFMT_GLOBALHEADER)lane.codec->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;check(avcodec_open2(lane.codec.get(),codec,nullptr),"Open session AAC encoder");lane.stream=avformat_new_stream(format.value,nullptr);if(!lane.stream)throw std::bad_alloc();check(avcodec_parameters_from_context(lane.stream->codecpar,lane.codec.get()),"Copy session AAC parameters");lane.stream->time_base={1,48000};av_dict_set(&lane.stream->metadata,"title",config_lane.title.c_str(),0);av_dict_set(&lane.stream->metadata,"handler_name",config_lane.title.c_str(),0);lanes.push_back(std::move(lane));}
+        encoder=std::make_unique<AudioTrackEncoder>(config.codec,config.lanes,false,480000,[this](const std::string& key,Packet packet,bool){auto* stream=audio_streams.at(key);av_packet_rescale_ts(packet.get(),{1,48000},stream->time_base);packet->stream_index=stream->index;check(av_interleaved_write_frame(format.value,packet.get()),"Write session audio");});
+        encoder->anchor(0);
+        for(const auto& lane:config.lanes){auto* stream=avformat_new_stream(format.value,nullptr);if(!stream)throw std::bad_alloc();check(avcodec_parameters_copy(stream->codecpar,encoder->parameters(lane.key).get()),"Copy session audio parameters");stream->codecpar->codec_tag=0;stream->time_base={1,48000};av_dict_set(&stream->metadata,"title",lane.title.c_str(),0);av_dict_set(&stream->metadata,"handler_name",lane.title.c_str(),0);audio_streams[lane.key]=stream;}
         header(format.value,true);std::lock_guard lock(mutex);status.running=true;
     }
-    void receive(Lane& lane){Packet packet(av_packet_alloc());if(!packet)throw std::bad_alloc();for(;;){auto code=avcodec_receive_packet(lane.codec.get(),packet.get());if(code==AVERROR(EAGAIN)||code==AVERROR_EOF)break;check(code,"Receive session AAC packet");av_packet_rescale_ts(packet.get(),lane.codec->time_base,lane.stream->time_base);packet->stream_index=lane.stream->index;check(av_interleaved_write_frame(format.value,packet.get()),"Write session AAC");}}
-    void encode_audio(Lane& lane,int64_t through,bool finish){const int block=lane.codec->frame_size;while(lane.next+block<=through||(finish&&lane.next<through)){AVFrame* raw=av_frame_alloc();if(!raw)throw std::bad_alloc();struct Frame{AVFrame* p;~Frame(){av_frame_free(&p);}} frame{raw};raw->format=lane.codec->sample_fmt;raw->sample_rate=48000;raw->nb_samples=block;raw->pts=lane.next;check(av_channel_layout_copy(&raw->ch_layout,&lane.codec->ch_layout),"Set AAC channels");check(av_frame_get_buffer(raw,0),"Allocate session audio frame");auto found=lane.blocks.find(lane.next/block);for(int ch=0;ch<lane.config.channels;++ch){auto* samples=reinterpret_cast<float*>(raw->data[ch]);for(int i=0;i<block;++i)samples[i]=found==lane.blocks.end()?0:found->second[size_t(i)*lane.config.channels+ch];}if(found!=lane.blocks.end())lane.blocks.erase(found);int code=avcodec_send_frame(lane.codec.get(),raw);if(code==AVERROR(EAGAIN)){receive(lane);code=avcodec_send_frame(lane.codec.get(),raw);}check(code,"Send session AAC frame");receive(lane);lane.next+=block;}}
-    void append_samples(Converter& source,int64_t start,const std::vector<float>& samples,int count){
-        {std::lock_guard lock(mutex);status.converted_audio_frames+=count;}
-        auto& lane=*source.lane;const int block=lane.codec->frame_size;auto& prior_end=source_ends[source.logical];
-        for(int i=0;i<count;++i){auto position=start+i;if(position<lane.next||position<0||position<prior_end)continue;if(position-lane.next>480000)throw std::runtime_error("Full-session secondary audio bound exceeded");auto& target=lane.blocks[position/block];if(target.empty())target.resize(size_t(block)*lane.config.channels);for(int ch=0;ch<lane.config.channels;++ch)target[size_t(position%block)*lane.config.channels+ch]+=samples[size_t(i)*lane.config.channels+ch]*std::clamp(lane.config.gain,0.f,1.5f);}
-        prior_end=(std::max)(prior_end,start+count);
-    }
-    void flush_source(Converter& source){
-        if(!source.anchored)return;int capacity=swr_get_out_samples(source.swr,0);check(capacity,"Measure session resampler tail");if(!capacity)return;
-        std::vector<float> samples(size_t(capacity)*source.lane->config.channels);uint8_t* output=reinterpret_cast<uint8_t*>(samples.data());int count=swr_convert(source.swr,&output,capacity,nullptr,0);check(count,"Drain session resampler tail");append_samples(source,source.next,samples,count);source.next+=count;
-    }
+    void converted(){std::lock_guard lock(mutex);status.converted_audio_frames=encoder->converted_frames();}
     void audio(PcmBlock& pcm){
         if(origin==AV_NOPTS_VALUE){auto bytes=pcm.samples.size()*4;if(early_bytes+bytes>16*1024*1024)throw std::runtime_error("Full-session early audio bound exceeded");early_bytes+=bytes;early_audio.push_back(std::move(pcm));return;}
-        auto found=std::find_if(lanes.begin(),lanes.end(),[&](const Lane& l){return l.config.key==pcm.lane;});if(found==lanes.end())return;auto& lane=*found;
-        auto logical=pcm.lane+":"+pcm.source;auto& latest=source_generations[logical];if(pcm.generation<latest)return;
-        if(pcm.generation>latest){for(auto it=converters.begin();it!=converters.end();){if(it->first.first==logical){flush_source(*it->second);it=converters.erase(it);}else ++it;}latest=pcm.generation;}
-        auto key=std::make_pair(logical,pcm.generation);auto& converter=converters[key];
-        if(!converter){converter=std::make_unique<Converter>();converter->lane=&lane;converter->logical=logical;converter->rate=pcm.sample_rate;converter->channels=pcm.channels;AVChannelLayout input{};av_channel_layout_default(&input,pcm.channels);auto code=swr_alloc_set_opts2(&converter->swr,&lane.codec->ch_layout,AV_SAMPLE_FMT_FLT,48000,&input,AV_SAMPLE_FMT_FLT,pcm.sample_rate,0,nullptr);av_channel_layout_uninit(&input);check(code,"Allocate session resampler");check(swr_init(converter->swr),"Initialize session resampler");}
-        auto& source=*converter;if(source.rate!=pcm.sample_rate||source.channels!=pcm.channels)throw std::runtime_error("Session PCM format changed without generation");
-        int count=int(pcm.samples.size()/pcm.channels);int capacity=swr_get_out_samples(source.swr,count);std::vector<float> samples(size_t(capacity)*lane.config.channels);const uint8_t* src=reinterpret_cast<const uint8_t*>(pcm.samples.data());uint8_t* dst=reinterpret_cast<uint8_t*>(samples.data());int actual=swr_convert(source.swr,&dst,capacity,&src,count);check(actual,"Convert session audio");
-        auto timestamp=audio_frames(pcm.start_us)-audio_frames(origin);auto start=source.anchored?source.next:timestamp;if(!source.anchored||std::abs(timestamp-source.next)>4800)start=timestamp;source.anchored=true;source.next=start+actual;
-        append_samples(source,start,samples,actual);
+        encoder->submit(pcm,audio_frames(pcm.start_us)-audio_frames(origin));converted();
     }
-    void video(Work& work){if(work.generation->id!=generation->id)throw std::runtime_error("Full-session encoder generation changed; rotate output");auto& packet=*work.packet;auto pts=av_rescale_q(packet.pts,generation->time_base,{1,1000000});if(origin==AV_NOPTS_VALUE){if(!(packet.flags&AV_PKT_FLAG_KEY))return;origin=pts;while(!early_audio.empty()){auto pending=std::move(early_audio.front());early_audio.pop_front();audio(pending);}early_bytes=0;}av_packet_rescale_ts(&packet,generation->time_base,video_stream->time_base);auto offset=av_rescale_q(origin,{1,1000000},video_stream->time_base);if(packet.pts!=AV_NOPTS_VALUE)packet.pts-=offset;if(packet.dts!=AV_NOPTS_VALUE)packet.dts-=offset;packet.stream_index=video_stream->index;video_end=pts-origin+av_rescale_q(packet.duration,video_stream->time_base,{1,1000000});check(av_interleaved_write_frame(format.value,&packet),"Write full-session video");for(auto& lane:lanes)encode_audio(lane,(std::max)(int64_t(0),audio_frames(video_end)-48000),false);avio_flush(format.value->pb);check(format.value->pb->error,"Flush full-session file");std::lock_guard lock(mutex);status.duration_us=video_end;}
-    void run(){try{initialize();for(;;){Work work;{std::unique_lock lock(mutex);ready.wait(lock,[&]{return closed||!queue.empty();});if(queue.empty())break;work=std::move(queue.front());queue.pop_front();}if(work.packet)video(work);else audio(work.pcm);{std::lock_guard lock(mutex);queued-=work.bytes;}}for(auto& [key,source]:converters)flush_source(*source);for(auto& lane:lanes){encode_audio(lane,audio_frames(video_end),true);int code=avcodec_send_frame(lane.codec.get(),nullptr);if(code==AVERROR(EAGAIN)){receive(lane);code=avcodec_send_frame(lane.codec.get(),nullptr);}check(code,"Flush session AAC");receive(lane);}check(av_write_trailer(format.value),"Finalize full session");avio_flush(format.value->pb);check(format.value->pb->error,"Flush finalized full-session file");if(format.value->pb)avio_closep(&format.value->pb);std::filesystem::remove(config.output.wstring()+L".interrupted");}catch(const std::exception& e){std::lock_guard lock(mutex);status.error=e.what();}if(format.value&&format.value->pb)avio_closep(&format.value->pb);if(lease!=INVALID_HANDLE_VALUE){DeleteFileW((config.output.wstring()+L".recording").c_str());CloseHandle(lease);lease=INVALID_HANDLE_VALUE;} {std::lock_guard lock(mutex);closed=true;done=true;status.running=false;status.finished=true;queue.clear();queued=0;}exited.notify_all();}
+    void video(Work& work){if(work.generation->id!=generation->id)throw std::runtime_error("Full-session encoder generation changed; rotate output");auto& packet=*work.packet;auto pts=av_rescale_q(packet.pts,generation->time_base,{1,1000000});if(origin==AV_NOPTS_VALUE){if(!(packet.flags&AV_PKT_FLAG_KEY))return;origin=pts;while(!early_audio.empty()){auto pending=std::move(early_audio.front());early_audio.pop_front();audio(pending);}early_bytes=0;}av_packet_rescale_ts(&packet,generation->time_base,video_stream->time_base);auto offset=av_rescale_q(origin,{1,1000000},video_stream->time_base);if(packet.pts!=AV_NOPTS_VALUE)packet.pts-=offset;if(packet.dts!=AV_NOPTS_VALUE)packet.dts-=offset;packet.stream_index=video_stream->index;video_end=pts-origin+av_rescale_q(packet.duration,video_stream->time_base,{1,1000000});check(av_interleaved_write_frame(format.value,&packet),"Write full-session video");encoder->encode_through((std::max)(int64_t(0),audio_frames(video_end)-48000));avio_flush(format.value->pb);check(format.value->pb->error,"Flush full-session file");std::lock_guard lock(mutex);status.duration_us=video_end;}
+    void run(){try{initialize();for(;;){Work work;{std::unique_lock lock(mutex);ready.wait(lock,[&]{return closed||!queue.empty();});if(queue.empty())break;work=std::move(queue.front());queue.pop_front();}if(work.packet)video(work);else audio(work.pcm);{std::lock_guard lock(mutex);queued-=work.bytes;}}encoder->finish(audio_frames(video_end));converted();check(av_write_trailer(format.value),"Finalize full session");avio_flush(format.value->pb);check(format.value->pb->error,"Flush finalized full-session file");if(format.value->pb)avio_closep(&format.value->pb);std::filesystem::remove(config.output.wstring()+L".interrupted");}catch(const std::exception& e){std::lock_guard lock(mutex);status.error=e.what();}if(format.value&&format.value->pb)avio_closep(&format.value->pb);if(lease!=INVALID_HANDLE_VALUE){DeleteFileW((config.output.wstring()+L".recording").c_str());CloseHandle(lease);lease=INVALID_HANDLE_VALUE;} {std::lock_guard lock(mutex);closed=true;done=true;status.running=false;status.finished=true;queue.clear();queued=0;}exited.notify_all();}
     bool admit(Work work){std::lock_guard lock(mutex);if(closed)return false;if(queue.size()>=config.queue_items||queued+work.bytes>config.queue_bytes){closed=true;status.error="Full-session 64 MiB/8192-item queue bound exceeded";ready.notify_one();return false;}queued+=work.bytes;queue.push_back(std::move(work));ready.notify_one();return true;}
 };
 FullSessionWriter::FullSessionWriter(FullSessionConfig config,std::shared_ptr<const CaptureGeneration> generation):state_(std::make_shared<State>()){if(!generation||!generation->codec)throw std::invalid_argument("Session requires encoder generation");state_->config=std::move(config);state_->generation=std::move(generation);std::thread([state=state_]{state->run();}).detach();}

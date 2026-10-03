@@ -100,6 +100,7 @@ public static class AppSettingsStore
         settings.ReplayVideoCodec = string.Equals(settings.ReplayVideoCodec, "AV1", StringComparison.OrdinalIgnoreCase)
             ? "AV1"
             : "H.264";
+        settings.ReplayAudioCodec = RecordingAudioCodec.Normalize(settings.ReplayAudioCodec);
         settings.ReplayEncoderMode = string.Equals(settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase)
             ? "CPU"
             : "GPU";
