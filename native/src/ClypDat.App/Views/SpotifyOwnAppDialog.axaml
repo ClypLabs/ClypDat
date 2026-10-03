@@ -170,9 +170,9 @@
           </StackPanel>
           <StackPanel Grid.Column="1" Spacing="8" VerticalAlignment="Top">
             <Button x:Name="OpenAppSettingsButton" Content="Open my app" Click="OpenAppSettings_OnClick" IsEnabled="False"
-                    ToolTip.Tip="Your Spotify app's page, once ClypDat knows its Client ID." />
+                    />
             <Button Content="Forget this app" Click="Forget_OnClick" IsVisible="{Binding SpotifyHasOwnApp}"
-                    ToolTip.Tip="Sign out and forget your Spotify app. ClypDat keeps reading the Spotify app on this PC." />
+                    />
           </StackPanel>
         </Grid>
       </StackPanel>

@@ -151,8 +151,7 @@
                       <TextBlock Text="Hide plans" IsVisible="{Binding ClipPlansOpen}" VerticalAlignment="Center" />
                     </Grid>
                   </Button>
-                  <Button Content="Manage" Click="ManageClipPlanButton_OnClick" IsVisible="{Binding ClipPlanCanManage}" IsEnabled="{Binding !ClipPlanBusy}"
-                          ToolTip.Tip="Change plan, update your card, see invoices or cancel." />
+                  <Button Content="Manage" Click="ManageClipPlanButton_OnClick" IsVisible="{Binding ClipPlanCanManage}" IsEnabled="{Binding !ClipPlanBusy}" />
                 </StackPanel>
               </Grid>
             </Border>

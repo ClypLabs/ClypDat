@@ -252,7 +252,7 @@
                   <TextBlock Classes="settingsRowDesc" Text="Using a Stream Deck? Add the " />
                   <TextBlock Classes="settingsLink" Text="OSC Remote" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}"
                              Tag="https://marketplace.elgato.com/product/osc-remote-9ccf7913-4532-4d68-8b1d-6c512923cda6"
-                             PointerPressed="LicenseLinkText_OnPointerPressed" ToolTip.Tip="Open OSC Remote on the Elgato Marketplace" />
+                             PointerPressed="LicenseLinkText_OnPointerPressed" />
                   <TextBlock Classes="settingsRowDesc" Text=" plugin and send its buttons to this PC on the port below." />
                 </WrapPanel>
                 <TextBlock Classes="settingsRowWarning" Text="Anyone who can reach the enabled OSC port can save clips and change replay length." TextWrapping="Wrap" />

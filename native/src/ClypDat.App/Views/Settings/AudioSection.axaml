@@ -183,7 +183,7 @@
               </StackPanel>
               <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <ComboBox Classes="settingsInput" Width="260" VerticalAlignment="Center" ItemsSource="{Binding MicrophoneDevices}" SelectedItem="{Binding SelectedMicrophoneDevice}" />
-                <Button Content="Refresh" Click="RefreshMicrophonesButton_OnClick" VerticalAlignment="Center" ToolTip.Tip="Look for newly connected microphones" />
+                <Button Content="Refresh" Click="RefreshMicrophonesButton_OnClick" VerticalAlignment="Center" />
               </StackPanel>
             </Grid>
           </Border>
@@ -200,7 +200,7 @@
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" IsVisible="{Binding MultiMicrophoneEnabled}">
                 <ComboBox Classes="settingsInput" ItemsSource="{Binding MicrophonesToAdd}" SelectedItem="{Binding MicrophoneToAdd}" HorizontalAlignment="Stretch" PlaceholderText="Every microphone is already added" />
                 <Button Grid.Column="1" Classes="primaryButton" Content="Add" Click="AddSelectedMicrophoneButton_OnClick" IsEnabled="{Binding MicrophoneToAdd, Converter={x:Static ObjectConverters.IsNotNull}}" />
-                <Button Grid.Column="2" Content="Refresh" Click="RefreshMicrophonesButton_OnClick" ToolTip.Tip="Look for newly connected microphones" />
+                <Button Grid.Column="2" Content="Refresh" Click="RefreshMicrophonesButton_OnClick" />
               </Grid>
             </StackPanel>
           </Border>
