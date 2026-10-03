@@ -223,6 +223,10 @@ public static class AppUpdateService
         using var client = CreateClient();
         var releases = await GetJsonFromAllSourcesAsync(client, LatestReleaseSources, ParseRelease, cancellationToken);
         var candidates = new List<(AppUpdateInfo Info, ReleaseSourceKind Kind)>();
+        var mirroredReleases = releases
+            .Where(source => source.Kind == ReleaseSourceKind.Mirror)
+            .Select(source => source.Value)
+            .ToArray();
         foreach (var (release, kind) in releases)
         {
             if (!IsNewerStableRelease(release.Draft, release.Prerelease, release.TagName, CurrentVersion, out var version))
@@ -243,19 +247,46 @@ public static class AppUpdateService
 
             var manifestAsset = release.Assets.FirstOrDefault(item => item.Name.Equals(ReleaseSigning.ManifestAssetName, StringComparison.OrdinalIgnoreCase));
             var signatureAsset = release.Assets.FirstOrDefault(item => item.Name.Equals(ReleaseSigning.SignatureAssetName, StringComparison.OrdinalIgnoreCase));
-            candidates.Add((new AppUpdateInfo(
-                CurrentVersion,
-                version,
-                release.TagName,
-                asset.DownloadUrl,
-                [],
-                [],
-                ParseSha256Digest(asset.Digest),
-                manifestAsset?.DownloadUrl,
-                signatureAsset?.DownloadUrl)
+
+            // Keep this candidate's installer URL, but verify signed metadata
+            // from the R2 mirror first. GitHub counts each manifest/signature
+            // asset fetch as a release download, and the updater checks those
+            // files more often than people download the installer.
+            var mirroredRelease = kind == ReleaseSourceKind.Mirror
+                ? null
+                : mirroredReleases.FirstOrDefault(candidate =>
+                    string.Equals(candidate.TagName, release.TagName, StringComparison.OrdinalIgnoreCase));
+            var mirroredManifest = mirroredRelease?.Assets.FirstOrDefault(item =>
+                item.Name.Equals(ReleaseSigning.ManifestAssetName, StringComparison.OrdinalIgnoreCase));
+            var mirroredSignature = mirroredRelease?.Assets.FirstOrDefault(item =>
+                item.Name.Equals(ReleaseSigning.SignatureAssetName, StringComparison.OrdinalIgnoreCase));
+
+            if (IsMirrorReleaseAssetUrl(mirroredManifest?.DownloadUrl) &&
+                IsMirrorReleaseAssetUrl(mirroredSignature?.DownloadUrl))
             {
-                VerificationRevision = JsonSerializer.Serialize(new[] { asset, manifestAsset, signatureAsset }),
-            }, kind));
+                AddCandidate(mirroredManifest, mirroredSignature);
+            }
+
+            // Preserve the source URLs as a fallback while the mirror catches
+            // up after a release or if its R2 copy is unavailable.
+            AddCandidate(manifestAsset, signatureAsset);
+
+            void AddCandidate(ReleaseAsset? metadata, ReleaseAsset? signature)
+            {
+                candidates.Add((new AppUpdateInfo(
+                    CurrentVersion,
+                    version,
+                    release.TagName,
+                    asset.DownloadUrl,
+                    [],
+                    [],
+                    ParseSha256Digest(asset.Digest),
+                    metadata?.DownloadUrl,
+                    signature?.DownloadUrl)
+                {
+                    VerificationRevision = JsonSerializer.Serialize(new[] { asset, metadata, signature }),
+                }, kind));
+            }
         }
 
         // Newest first, and within one version in source order (GitHub first).
@@ -714,6 +745,13 @@ public static class AppUpdateService
 
         return isMirrorHost && uri.AbsolutePath.StartsWith("/download/", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsMirrorReleaseAssetUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+        uri.Scheme == Uri.UriSchemeHttps &&
+        (string.Equals(uri.Host, MirrorHost, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(uri.Host, MirrorApexHost, StringComparison.OrdinalIgnoreCase)) &&
+        uri.AbsolutePath.StartsWith("/download/", StringComparison.OrdinalIgnoreCase);
 
     // Hosts a trusted release URL is allowed to redirect INTO. None of these are
     // valid as a starting URL - they are the CDN/storage endpoints the three
