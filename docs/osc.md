@@ -1,6 +1,6 @@
 # OSC network controls
 
-Enable **Settings > Replay Buffer > Enable OSC** to receive Open Sound Control (OSC) messages over UDP. OSC starts disabled; the default port is **9001**. The listener binds all IPv4 and IPv6 interfaces, with IPv4 fallback when IPv6 is unavailable. Listener status shows the bound port or the reason listening failed. A port conflict requires choosing another port or closing the other listener; ClypDat does not substitute a port.
+Enable **Settings > Replay Buffer > Enable OSC** to receive Open Sound Control (OSC) messages over UDP. OSC starts disabled; the default port is **9001**. The listener binds all IPv4 and IPv6 interfaces, with IPv4 fallback when IPv6 is unavailable. Listener status shows the bound port or the reason listening failed. A port conflict requires choosing another port or closing the other listener; ClypDat does not substitute a port. The port is bound exclusively: if another program already holds it, ClypDat's listener fails rather than sharing it, and while ClypDat holds it, other programs cannot open it. Give each OSC receiver its own port.
 
 The [website setup guide](https://www.clypdat.xyz/docs/osc) also generates Command Prompt examples for your target PC and port.
 
