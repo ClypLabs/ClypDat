@@ -36,6 +36,46 @@ std::vector<CameraPreviewModeNative> camera_preview_modes(const std::string& out
     std::stable_sort(modes.begin(),modes.end(),[&](const auto& a,const auto& b) { return key(a)<key(b); });
     return modes;
 }
+bool camera_busy(const std::string& error) {
+    return error.find("Could not run graph")!=std::string::npos || error.find("already in use")!=std::string::npos;
+}
+std::vector<std::wstring> camera_users(const std::filesystem::path& own_ffmpeg) {
+    std::vector<std::wstring> users;
+    auto add=[&](std::wstring name) { if(!name.empty() && std::find(users.begin(),users.end(),name)==users.end()) users.push_back(std::move(name)); };
+    const std::wstring store=L"Software\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\webcam";
+    // An app using the camera has a start time and no stop time yet.
+    auto scan=[&](const std::wstring& path,bool packaged) {
+        HKEY key=nullptr; if(RegOpenKeyExW(HKEY_CURRENT_USER,path.c_str(),0,KEY_READ,&key)!=ERROR_SUCCESS) return;
+        for(DWORD index=0;;++index) {
+            wchar_t name[1024]; DWORD length=DWORD(std::size(name));
+            if(RegEnumKeyExW(key,index,name,&length,nullptr,nullptr,nullptr,nullptr)!=ERROR_SUCCESS) break;
+            std::wstring child(name,length); if(packaged && child==L"NonPackaged") continue;
+            uint64_t start=0,stop=1; DWORD size=sizeof(start);
+            if(RegGetValueW(key,child.c_str(),L"LastUsedTimeStart",RRF_RT_QWORD,nullptr,&start,&size)!=ERROR_SUCCESS || !start) continue;
+            size=sizeof(stop);
+            if(RegGetValueW(key,child.c_str(),L"LastUsedTimeStop",RRF_RT_QWORD,nullptr,&stop,&size)!=ERROR_SUCCESS || stop) continue;
+            if(packaged) { const auto family=child.substr(0,child.find(L'_')); add(family.substr(family.rfind(L'.')+1)); continue; }
+            std::replace(child.begin(),child.end(),L'#',L'\\');
+            const std::filesystem::path executable(child); std::error_code ignored;
+            add(!own_ffmpeg.empty() && std::filesystem::equivalent(executable,own_ffmpeg,ignored)?L"ClypDat":executable.stem().wstring());
+        }
+        RegCloseKey(key);
+    };
+    scan(store,true); scan(store+L"\\NonPackaged",false);
+    return users;
+}
+std::string camera_busy_message(const std::wstring& device,const std::vector<std::wstring>& users) {
+    auto utf8=[](const std::wstring& text) {
+        std::string result(size_t(WideCharToMultiByte(CP_UTF8,0,text.data(),int(text.size()),nullptr,0,nullptr,nullptr)),'\0');
+        WideCharToMultiByte(CP_UTF8,0,text.data(),int(text.size()),result.data(),int(result.size()),nullptr,nullptr); return result;
+    };
+    const auto camera=device.empty()||device.starts_with(L"@device")?std::string("The camera"):utf8(device);
+    if(users.size()==1 && users[0]==L"ClypDat") return camera+" is already in use by ClypDat's camera overlay recording.";
+    std::string who;
+    for(size_t i=0;i<users.size();++i) who+=(i==0?"":i+1==users.size()?" and ":", ")+utf8(users[i]);
+    if(who.empty()) who="another app";
+    return camera+" is being used by "+who+". Close "+(users.size()>1?"those apps":"that app")+", or select its virtual camera if it has one.";
+}
 struct RecordingCamera::State {
     std::shared_ptr<OverlayHistory> history;
     OverlayClock clock;
@@ -115,6 +155,11 @@ struct RecordingCamera::State {
                         ProcessRunner::run(ffmpeg,arguments,attempt_cancel,std::chrono::milliseconds::zero(),[this](const uint8_t* data,size_t count) { bytes(data,count); });
                         attempt_done=true; watchdog.join();
                         if(sequence.load()>0 || cancel) break;
+                    } catch(const std::exception& error) {
+                        attempt_done=true; watchdog.join();
+                        // Another app holding the camera fails every mode alike.
+                        if(!cancel && sequence.load()==0 && camera_busy(error.what())) throw std::runtime_error(camera_busy_message(moniker,camera_users(ffmpeg)));
+                        if(sequence.load()>0 || cancel || mode.fps==0) throw;
                     } catch(...) {
                         attempt_done=true; watchdog.join();
                         if(sequence.load()>0 || cancel || mode.fps==0) throw;
@@ -163,7 +208,12 @@ struct RecordingCamera::State {
             arguments.insert(arguments.end(),preview.begin(),preview.end());
             ProcessRunner::run(ffmpeg,arguments,cancel,std::chrono::milliseconds::zero(),[this](const uint8_t* data,size_t count) { bytes(data,count); });
             if(!cancel) { std::lock_guard lock(mutex); if(failure.empty()) failure=sequence==0?"Camera stopped before delivering frames.":"Camera stopped."; }
-        } catch(const std::exception& exception) { if(!cancel) { std::lock_guard lock(mutex); failure=exception.what(); } }
+        } catch(const std::exception& exception) {
+            if(!cancel) {
+                auto reason=sequence.load()==0 && camera_busy(exception.what())?camera_busy_message(moniker,camera_users(ffmpeg)):std::string(exception.what());
+                std::lock_guard lock(mutex); failure=std::move(reason);
+            }
+        }
         catch(...) { std::lock_guard lock(mutex); failure="Camera capture failed."; }
         process_done=true;
         if(watcher.joinable()) watcher.join();

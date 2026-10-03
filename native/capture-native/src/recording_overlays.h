@@ -214,4 +214,11 @@ struct CameraPreviewModeNative {
     bool operator==(const CameraPreviewModeNative&) const = default;
 };
 std::vector<CameraPreviewModeNative> camera_preview_modes(const std::string& probe_output);
+// DirectShow opens a camera for one process at a time. These explain an open
+// that failed because another app already holds the camera.
+bool camera_busy(const std::string& ffmpeg_error);
+// Apps Windows reports as using a camera right now, from the privacy
+// indicator's consent store. ClypDat's own FFmpeg is reported as "ClypDat".
+std::vector<std::wstring> camera_users(const std::filesystem::path& own_ffmpeg);
+std::string camera_busy_message(const std::wstring& device, const std::vector<std::wstring>& users);
 }

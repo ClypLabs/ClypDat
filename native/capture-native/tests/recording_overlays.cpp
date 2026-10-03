@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <chrono>
 #include <fstream>
+#include <thread>
 extern "C" {
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
@@ -77,11 +78,43 @@ void camera_layers() {
     CHECK(!overlays->frame(3000000).any_requested());
     overlays->reset(false); CHECK(!overlays->frame(0).burned);
 }
+// Manual: CLYPDAT_TEST_CAMERA=<DirectShow camera name>. Another app holds the
+// camera; the settings preview must name that app, not FFmpeg's graph error.
+void camera_in_use(const std::wstring& device) {
+    const auto vendor=std::filesystem::path(__FILE__).parent_path().parent_path().parent_path()/L"vendor"/L"ffmpeg";
+    const auto root=std::filesystem::current_path()/(L"camera-in-use-"+std::to_wstring(std::chrono::steady_clock::now().time_since_epoch().count()));
+    CHECK(std::filesystem::create_directories(root/L"holder"));
+    struct Cleanup { std::filesystem::path path; ~Cleanup() { std::error_code ignored; std::filesystem::remove_all(path,ignored); } } cleanup{root};
+    for(const auto& item:std::filesystem::directory_iterator(vendor)) std::filesystem::copy_file(item.path(),root/L"holder"/item.path().filename());
+    std::filesystem::rename(root/L"holder"/L"ffmpeg.exe",root/L"holder"/L"CameraHolder.exe");
+    std::atomic_bool release=false;
+    std::jthread holder([&] { try { ProcessRunner::run(root/L"holder"/L"CameraHolder.exe",{L"-hide_banner",L"-nostdin",L"-f",L"dshow",L"-i",L"video="+device,L"-f",L"null",L"-"},release); } catch(...) {} });
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    auto input=std::make_shared<InputHistory>(); auto history=std::make_shared<OverlayHistory>(input);
+    RecordingCamera camera(history,[] { return int64_t(0); });
+    CHECK(camera.start(vendor/L"ffmpeg.exe",root,device,false,true));
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(60);
+    while(camera.running() && std::chrono::steady_clock::now()<deadline) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const auto error=camera.error(); release=true;
+    std::cout<<"busy camera error: "<<error<<'\n';
+    CHECK(!camera.running());
+    CHECK(error.find("is being used by CameraHolder")!=std::string::npos);
+}
 int main() {
+    if(const auto* device=_wgetenv(L"CLYPDAT_TEST_CAMERA")) { camera_in_use(device); std::cout<<"Camera in-use test passed\n"; return 0; }
     auto modes=camera_preview_modes("pixel_format=yuyv422 min s=640x480 fps=30 max s=1920x1080 fps=30\n"
         "vcodec=mjpeg min s=640x360 fps=60 max s=1280x720 fps=60\n"
         "pixel_format=nv12 min s=640x360 fps=60 max s=640x360 fps=60\n");
     CHECK(modes.size()==3 && modes[0].format=="nv12" && modes[1].format=="mjpeg");
+    // A camera another app holds: FFmpeg's DirectShow graph error becomes a
+    // message naming the app, as Windows' privacy indicator reports it.
+    const std::string busy="[in#0 @ 000001F6139B7300] Could not run graph (sometimes caused by a device already in use by other application)\n"
+        "Error opening input file video=EMEET SmartCam C960 Ultra.\nError opening input files: I/O error";
+    CHECK(camera_busy(busy) && !camera_busy("Error opening input file video=Missing. No such device"));
+    CHECK(camera_busy_message(L"EMEET SmartCam C960 Ultra",{L"EMEET STUDIO"})=="EMEET SmartCam C960 Ultra is being used by EMEET STUDIO. Close that app, or select its virtual camera if it has one.");
+    CHECK(camera_busy_message(L"EMEET SmartCam C960 Ultra",{})=="EMEET SmartCam C960 Ultra is being used by another app. Close that app, or select its virtual camera if it has one.");
+    CHECK(camera_busy_message(L"Cam",{L"Discord",L"obs64",L"WindowsCamera"})=="Cam is being used by Discord, obs64 and WindowsCamera. Close those apps, or select its virtual camera if it has one.");
+    CHECK(camera_busy_message(L"@device_pnp_\\\\?\\usb#vid",{L"ClypDat"})=="The camera is already in use by ClypDat's camera overlay recording.");
     auto input=std::make_shared<InputHistory>(); input->reset(true);
     const PhysicalKey left{0x1d,false,false,0}, right{0x1d,true,false,0}, back{0,false,false,4}, forward{0,false,false,5};
     CHECK(input->add(100,left,true)); CHECK(!input->add(110,left,true));
