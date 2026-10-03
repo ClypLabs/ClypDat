@@ -69,42 +69,6 @@
       </Border>
     </StackPanel>
 
-    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=OSC|Open Sound Control|Network controls|UDP|Port|Listener status|OSC setup guide}">
-      <TextBlock Classes="settingsGroupLabel" Text="OSC NETWORK CONTROLS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-      <Border Classes="settingsGroupCard">
-        <StackPanel>
-          <Border Classes="settingsRow">
-            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
-              <StackPanel Classes="settingsRowText">
-                <TextBlock Classes="settingsRowTitle" Text="Enable OSC" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                <TextBlock Classes="settingsRowDesc" Text="Save clips and change replay length from an OSC controller over UDP." />
-                <TextBlock Classes="settingsRowWarning" Text="Anyone who can reach the enabled OSC port can save clips and change replay length." TextWrapping="Wrap" />
-              </StackPanel>
-              <ToggleSwitch Grid.Column="1" IsChecked="{Binding OscEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
-            </Grid>
-          </Border>
-          <Border Classes="settingsRowDivider" />
-          <Border Classes="settingsRow">
-            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
-              <StackPanel Classes="settingsRowText">
-                <TextBlock Classes="settingsRowTitle" Text="UDP port" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                <TextBlock Classes="settingsRowDesc" Text="Default: 9001. Changing the port reconnects the listener. Firewall rules are managed by you." />
-              </StackPanel>
-              <NumericUpDown Grid.Column="1" Classes="settingsInput" Width="150" Minimum="1" Maximum="65535" Increment="1" FormatString="0" Value="{Binding OscPort}" />
-            </Grid>
-          </Border>
-          <Border Classes="settingsRowDivider" />
-          <Border Classes="settingsRow static">
-            <StackPanel Spacing="10">
-              <TextBlock Classes="settingsRowTitle" Text="Listener status" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              <TextBlock Classes="settingsRowDesc" Text="{Binding OscListenerStatus}" />
-              <Button Content="OSC setup guide" Click="OscGuide_OnClick" HorizontalAlignment="Left" />
-            </StackPanel>
-          </Border>
-        </StackPanel>
-      </Border>
-    </StackPanel>
-
     <!-- Named: opening Settings from a quality warning scrolls here. -->
     <Border x:Name="RecordingQualityCard" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Recording quality|Resolution|Frame rate|FPS|Bitrate|Codec|Encoder|Quality|Encoding}">
       <StackPanel Classes="settingsGroup">
@@ -274,6 +238,42 @@
         </Border>
       </StackPanel>
     </Border>
+
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=OSC|Open Sound Control|Network controls|UDP|Port|Listener status|OSC setup guide}">
+      <TextBlock Classes="settingsGroupLabel" Text="OSC NETWORK CONTROLS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Enable OSC" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Save clips and change replay length from an OSC controller over UDP." />
+                <TextBlock Classes="settingsRowWarning" Text="Anyone who can reach the enabled OSC port can save clips and change replay length." TextWrapping="Wrap" />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding OscEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="UDP port" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Default: 9001. Changing the port reconnects the listener. Firewall rules are managed by you." />
+              </StackPanel>
+              <NumericUpDown Grid.Column="1" Classes="settingsInput" Width="150" Minimum="1" Maximum="65535" Increment="1" FormatString="0" Value="{Binding OscPort}" VerticalAlignment="Center" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow static">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="settingsRowTitle" Text="Listener status" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              <TextBlock Classes="settingsRowDesc" Text="{Binding OscListenerStatus}" />
+              <Button Content="OSC setup guide" Click="OscGuide_OnClick" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
 
     <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Full session recording|Destination folder|File Format|MKV|MP4|Storage limit|Custom limit|Full Session Recording}">
       <TextBlock Classes="settingsGroupLabel" Text="FULL SESSION RECORDING" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />

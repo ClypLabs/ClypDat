@@ -6768,10 +6768,13 @@ public sealed partial class MainWindow : Window
 
     internal void RemoveMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button { DataContext: AudioDeviceOption device })
+        var device = (sender as Button)?.DataContext switch
         {
-            ViewModel?.RemoveMicrophone(device.Id);
-        }
+            MicrophoneTrackRow row => row.Device,
+            AudioDeviceOption option => option,
+            _ => null
+        };
+        if (device is not null) ViewModel?.RemoveMicrophone(device.Id);
     }
 
     // ---- Custom Game Settings -------------------------------------------

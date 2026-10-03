@@ -375,6 +375,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         ChatAudioApps = new ObservableCollection<string>(Settings.ChatAudioProcessNames);
         ActiveAudioProcesses = new ObservableCollection<AudioTrackProcessViewModel>();
         SelectedMicrophones = new ObservableCollection<AudioDeviceOption>();
+        SelectedMicrophones.CollectionChanged += (_, _) => RebuildMicrophoneRows();
         GameCaptureRows = new ObservableCollection<GameBackendRowViewModel>();
         foreach (var folder in Settings.GameDiscoveryFolders.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase)) GameDiscoveryFolders.Add(folder);
         EnsureAutoClipSettings();
@@ -923,6 +924,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<string> ExcludedProcesses { get; }
     public ObservableCollection<string> ChatAudioApps { get; }
     public ObservableCollection<AudioDeviceOption> SelectedMicrophones { get; }
+    // SelectedMicrophones as listed in Settings, numbered the way saved clips
+    // name their tracks, so which device is "Microphone 2" is never a guess.
+    public ObservableCollection<MicrophoneTrackRow> MicrophoneTrackRows { get; } = new();
+    // The Add picker's choices: devices not already recording, and never both
+    // "Default" and the physical device it currently resolves to.
+    public ObservableCollection<AudioDeviceOption> MicrophonesToAdd { get; } = new();
     public ObservableCollection<GameBackendRowViewModel> GameCaptureRows { get; }
     public ObservableCollection<string> GameDiscoveryFolders { get; } = new();
     public ObservableCollection<DiscoveredGameRowViewModel> DiscoveredGameReviews { get; } = new();
@@ -4000,9 +4007,58 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (Settings.MultiMicrophoneEnabled == value) return;
             Settings.MultiMicrophoneEnabled = value;
+            if (value) SeedFirstMicrophone();
             OnPropertyChanged();
             SaveSettings();
         }
+    }
+
+    // Separate from SelectedMicrophoneDevice: choosing what to add must not
+    // also change the single-microphone setting behind it.
+    public AudioDeviceOption? MicrophoneToAdd
+    {
+        get => _microphoneToAdd;
+        set => SetProperty(ref _microphoneToAdd, value);
+    }
+    private AudioDeviceOption? _microphoneToAdd;
+    private string? _defaultMicrophoneName;
+
+    // The microphone already being recorded becomes Microphone 1. An empty list
+    // made whatever got added first track 1 - pushing the user's own (default)
+    // mic to track 2 - and recorded no microphone at all until then.
+    private void SeedFirstMicrophone()
+    {
+        if (Settings.MicrophoneDeviceIds.Count > 0) return;
+        var current = SelectedMicrophoneDevice
+            ?? MicrophoneDevices.FirstOrDefault(device => device.Id == AudioDeviceOption.DefaultDeviceId);
+        var id = current?.Id ?? (string.IsNullOrWhiteSpace(Settings.MicrophoneDeviceId) ? AudioDeviceOption.DefaultDeviceId : Settings.MicrophoneDeviceId);
+        Settings.MicrophoneDeviceIds.Add(id);
+        if (!SelectedMicrophones.Any(device => device.Id == id))
+            SelectedMicrophones.Add(current ?? new AudioDeviceOption(id, id == AudioDeviceOption.DefaultDeviceId ? "Default" : id));
+    }
+
+    private void RebuildMicrophoneRows()
+    {
+        MicrophoneTrackRows.Clear();
+        for (var i = 0; i < SelectedMicrophones.Count; i++)
+            MicrophoneTrackRows.Add(new MicrophoneTrackRow($"Microphone {i + 1}", SelectedMicrophones[i]));
+        RebuildMicrophonesToAdd();
+    }
+
+    private void RebuildMicrophonesToAdd()
+    {
+        var addsDefault = SelectedMicrophones.Any(device => device.Id == AudioDeviceOption.DefaultDeviceId);
+        var addsDefaultDevice = _defaultMicrophoneName is not null &&
+            SelectedMicrophones.Any(device => string.Equals(device.Name, _defaultMicrophoneName, StringComparison.Ordinal));
+        MicrophonesToAdd.Clear();
+        foreach (var device in MicrophoneDevices)
+        {
+            if (SelectedMicrophones.Any(existing => existing.Id == device.Id)) continue;
+            if (device.Id == AudioDeviceOption.DefaultDeviceId && addsDefaultDevice) continue;
+            if (addsDefault && string.Equals(device.Name, _defaultMicrophoneName, StringComparison.Ordinal)) continue;
+            MicrophonesToAdd.Add(device);
+        }
+        MicrophoneToAdd = MicrophonesToAdd.FirstOrDefault();
     }
 
     private void SetAdditionalAudioProcess(AudioTrackProcessViewModel process)
@@ -4275,7 +4331,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void AddSelectedMicrophone()
     {
-        var device = SelectedMicrophoneDevice;
+        var device = MicrophoneToAdd;
         if (device is null) return;
         if (SelectedMicrophones.Any(existing => existing.Id == device.Id)) return;
         SelectedMicrophones.Add(device);
@@ -8790,6 +8846,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 var match = MicrophoneDevices.FirstOrDefault(device => device.Id == id);
                 SelectedMicrophones.Add(match ?? new AudioDeviceOption(id, id));
             }
+
+            _defaultMicrophoneName = string.IsNullOrWhiteSpace(snapshot.DefaultMicrophoneName) ? null : snapshot.DefaultMicrophoneName;
+            // Users who turned the toggle on before the list was seeded have
+            // been recording no microphone at all.
+            if (Settings.MultiMicrophoneEnabled && Settings.MicrophoneDeviceIds.Count == 0)
+            {
+                SeedFirstMicrophone();
+                SaveSettings();
+            }
+            RebuildMicrophonesToAdd();
         }
         finally
         {

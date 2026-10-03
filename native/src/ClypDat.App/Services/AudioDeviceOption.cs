@@ -11,6 +11,9 @@ public sealed record AudioDeviceOption(string Id, string Name, bool IsDisabled =
     public override string ToString() => Name;
 }
 
+/// <summary>One recorded microphone, labelled with the track name saved clips give it.</summary>
+public sealed record MicrophoneTrackRow(string Label, AudioDeviceOption Device);
+
 internal readonly record struct AudioDeviceSelectionChange(bool ShouldPersist, string DeviceId)
 {
     public static AudioDeviceSelectionChange FromPicker(AudioDeviceOption? selection, bool isApplyingSnapshot) =>

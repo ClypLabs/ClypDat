@@ -32,6 +32,15 @@ public sealed partial class AudioSection : UserControl
     private void RemoveMicrophoneButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.RemoveMicrophoneButton_OnClick(sender, e);
 
+    private async void RefreshMicrophonesButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm || sender is not Button button) return;
+        button.IsEnabled = false;
+        try { await vm.RefreshAudioDevicesAsync(); }
+        catch (Exception error) { ClypDat.App.Services.AppLog.Error("Microphone refresh failed.", error); }
+        finally { button.IsEnabled = true; }
+    }
+
     private void ToggleMicTestButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.ToggleMicTestButton_OnClick(sender, e);
 
