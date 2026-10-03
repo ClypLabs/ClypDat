@@ -145,9 +145,12 @@ AudioHistory::~AudioHistory() { stop(); }
 bool AudioHistory::submit(PcmBlock block) {
     if (block.channels < 1 || block.channels > 32 || block.sample_rate < 8000 || block.sample_rate > 384000 || block.samples.size() % block.channels) throw std::invalid_argument("Invalid PCM block");
     auto s = state_; std::lock_guard lock(s->mutex);
-    if (s->closed || !s->failure.empty() || s->queued_duration_us + block.duration_us() > 10000000) {
+    // A writer that falls behind sheds new audio instead of failing the session:
+    // write() pads the hole with silence once it catches up, so later saves
+    // keep working. Only real writer errors are sticky.
+    constexpr uint64_t max_queued_us = 30000000;
+    if (s->closed || !s->failure.empty() || s->queued_duration_us + block.duration_us() > max_queued_us) {
         s->lost += block.samples.size();
-        if (!s->closed && s->failure.empty()) s->failure = "Audio writer ten-second queued/in-flight bound exceeded; worker restart required";
         return false;
     }
     s->queued_duration_us += block.duration_us(); s->queue.push_back({std::move(block),{},0,0}); s->ready.notify_one(); return true;

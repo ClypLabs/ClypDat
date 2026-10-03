@@ -141,12 +141,14 @@ void audio_test(const std::filesystem::path& root){
     require(sample(tracks[0].second,8000)==0,"Audio silence gap not preserved");
     require(std::abs(sample(tracks[0].second,12000)-.75f)<.0001,"Replacement source lost");
     cancel=true;bool cancelled=false;try{render_audio(pinned,{{"game","Game Audio",2,1,false}},root/L"cancel",cancel);}catch(...){cancelled=true;}require(cancelled,"Audio cancellation ignored");
-    AudioHistory bound(root/L"bound",1000000);require(!bound.submit(pcm(0,1,1.f,480001)),"Ten-second audio bound ignored");require(bound.lost_samples()==960002,"Lost audio accounting wrong");bound.stop();
+    AudioHistory bound(root/L"bound",1000000);require(!bound.submit(pcm(0,1,1.f,1440001)),"Thirty-second audio bound ignored");require(bound.lost_samples()==2880002,"Lost audio accounting wrong");
+    require(bound.error().empty(),"Audio bound overflow poisoned the history");require(bound.submit(pcm(0,1,.5f)),"Audio after a shed block rejected");require(bound.snapshot(0,100000).get().ranges.size()==1,"Save after a shed block failed");bound.stop();
     AudioHistory failed(root/L"failure",1000000,{[]{throw std::runtime_error("Injected disk failure");},{}});
     failed.submit(pcm(0,1,.5f));auto failed_snapshot=failed.snapshot(0,100000);bool failed_barrier=false;try{failed_snapshot.get();}catch(...){failed_barrier=true;}require(failed_barrier,"Writer failure did not fail snapshot barrier");failed.stop();
     std::promise<void> entered,release;auto released=release.get_future().share();
     AudioHistory blocked(root/L"blocked",1000000,{[&]{entered.set_value();released.wait();},{}});
-    blocked.submit(pcm(0,1,.5f,480000));entered.get_future().wait();require(!blocked.submit(pcm(10000000,1,.5f,1)),"In-flight buffer excluded from audio bound");release.set_value();blocked.stop();
+    blocked.submit(pcm(0,1,.5f,1440000));entered.get_future().wait();require(!blocked.submit(pcm(30000000,1,.5f,1)),"In-flight buffer excluded from audio bound");release.set_value();
+    require(blocked.snapshot(0,100000).get().ranges.size()==1,"Stalled writer poisoned later saves");require(blocked.error().empty(),"Stalled writer recorded a failure");blocked.stop();
     AudioHistory mixed(root/L"mixed",1000000);auto first=pcm(0,1,.2f,4410);first.sample_rate=44100;first.channels=1;first.samples.resize(4410);first.source="first";auto second=first;second.source="second";second.samples.assign(4410,.3f);mixed.submit(std::move(first));mixed.submit(std::move(second));auto mixture=mixed.snapshot(0,100000).get();cancel=false;auto rendered=render_audio(mixture,{{"game","Game Audio",2,1.5f,false},{"spotify","Spotify",2,1,true}},root/L"mix-output",cancel);require(rendered.size()==1,"Silent Spotify lane retained");require(std::abs(sample(rendered[0].second,2400)-float(.75/std::sqrt(2.0)))<.002,"Resample/mixed-source gain incorrect");auto quiet=pcm(0,1,.000002f);quiet.lane="spotify";quiet.source="spotify";mixed.submit(std::move(quiet));auto quiet_snapshot=mixed.snapshot(0,100000).get();auto quiet_tracks=render_audio(quiet_snapshot,{{"spotify","Spotify",2,1,true}},root/L"quiet-output",cancel);require(quiet_tracks.size()==1,"Quiet meaningful Spotify samples were omitted");mixed.stop();
 }
 void video_test(const std::filesystem::path& root){
