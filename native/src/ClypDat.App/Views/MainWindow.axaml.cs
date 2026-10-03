@@ -3667,14 +3667,6 @@ public sealed partial class MainWindow : Window
                 SyncNewClipsDeleteButton();
             };
         }
-        foreach (var entry in entries)
-        {
-            // The library only decodes a card's thumbnail while it is actually
-            // scrolled into view, so a card that has never been on screen has a
-            // null PreviewImage until asked.
-            entry.Clip.SetPreviewVisible(true);
-        }
-
         var single = entries.Count == 1;
         const int cardSpacing = 16;
         // The same 24px gutter NewClipsPanel gives its title and buttons, so the
@@ -3748,7 +3740,37 @@ public sealed partial class MainWindow : Window
             panel.SetCardWidth(dialogWidth);
             NewClipsOverlay.IsVisible = true;
         }
+        ScheduleNewClipsThumbnailLoading(entries, panel);
         AppLog.Info($"New Clips popup shown: {entries.Count} clip(s).");
+    }
+
+    private void ScheduleNewClipsThumbnailLoading(IReadOnlyList<NewClipEntryViewModel> entries, NewClipsPanel panel)
+    {
+        var scheduledEntries = entries.ToArray();
+        _ = LoadNewClipsThumbnailsWhenIdleAsync(scheduledEntries, panel);
+    }
+
+    private async Task LoadNewClipsThumbnailsWhenIdleAsync(NewClipEntryViewModel[] scheduledEntries, NewClipsPanel panel)
+    {
+        // Give the native hover decoder a short head start. New clips can all
+        // miss the thumbnail cache, so starting their poster decodes together
+        // can compete with the first moving frame in the popup.
+        await Task.Delay(TimeSpan.FromMilliseconds(200)).ConfigureAwait(false);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!ReferenceEquals(_activeNewClipsPanel, panel)
+                || !panel.IsVisible
+                || scheduledEntries.Any(entry => !_currentNewClipsEntries.Contains(entry))) return;
+
+            // Let the popup paint and service pointer input first. A hover can
+            // then start the native preview before poster-image decodes use the
+            // same CPU and disk bandwidth. Posters fill in in the background;
+            // a card skipped while hovered is loaded when the pointer leaves.
+            foreach (var entry in scheduledEntries)
+            {
+                if (!entry.IsHovered) entry.Clip.SetPreviewVisible(true);
+            }
+        }, DispatcherPriority.Background);
     }
 
     private void ShowPendingNewClipsDialog()
@@ -4145,15 +4167,17 @@ public sealed partial class MainWindow : Window
         card.PointerEntered += (_, _) =>
         {
             entry.IsHovered = true;
-            var previewSize = ClipHoverPreviewController.ResolvePreviewSize(preview.Bounds.Size, RenderScaling);
-            _clipHoverPreview.Request(entry.Clip, ViewModel?.EnableClipHoverPreview == true, preview, previewSize);
-            if (ViewModel?.EnableClipHoverPreview == true) StartEditorHoverWarmup(entry.Clip);
+            RequestClipHoverPreview(entry.Clip, preview, allowWhenLibraryHidden: true);
         };
         card.PointerExited += (_, _) =>
         {
             entry.IsHovered = false;
             _clipHoverPreview.PointerLeft(entry.Clip);
             CancelEditorHoverWarmup(entry.Clip.Path);
+            if (_activeNewClipsPanel is { } activePanel)
+                ScheduleNewClipsThumbnailLoading(new[] { entry }, activePanel);
+            else
+                entry.Clip.SetPreviewVisible(true);
         };
         // Card body opens the clip; the checkbox above marks it for the Delete
         // button instead, and swallows its own click so the two don't collide.
@@ -5390,14 +5414,21 @@ public sealed partial class MainWindow : Window
 
     private void RequestLibraryHoverPreview(Control control, ClipCardViewModel clip)
     {
+        var presenter = control.GetVisualDescendants().OfType<ClipPreviewPresenter>().FirstOrDefault();
+        RequestClipHoverPreview(clip, presenter, allowWhenLibraryHidden: false);
+    }
+
+    private void RequestClipHoverPreview(ClipCardViewModel clip, ClipPreviewPresenter? presenter, bool allowWhenLibraryHidden)
+    {
         // A live recording owns this file until its mux worker closes it.
         if (RecordingFileOwnership.IsActive(clip.Path)) return;
-        var presenter = control.GetVisualDescendants().OfType<ClipPreviewPresenter>().FirstOrDefault();
         // Decode at the size this card actually paints at, not the clip's own
         // resolution - see ClipHoverPreviewController's class comment.
         var previewSize = ClipHoverPreviewController.ResolvePreviewSize(
             presenter?.Bounds.Size ?? default, RenderScaling);
-        _clipHoverPreview.Request(clip, ViewModel?.EnableClipHoverPreview == true && ViewModel.IsLibraryVisible,
+        var enabled = ViewModel?.EnableClipHoverPreview == true
+            && (allowWhenLibraryHidden || ViewModel.IsLibraryVisible);
+        _clipHoverPreview.Request(clip, enabled,
             presenter, previewSize);
         if (ViewModel?.EnableClipHoverPreview == true) StartEditorHoverWarmup(clip);
     }
