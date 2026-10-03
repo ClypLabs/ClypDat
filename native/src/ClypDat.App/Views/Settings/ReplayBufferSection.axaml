@@ -258,9 +258,10 @@
             <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
               <StackPanel Classes="settingsRowText">
                 <TextBlock Classes="settingsRowTitle" Text="UDP port" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                <TextBlock Classes="settingsRowDesc" Text="Default: 9001. Changing the port reconnects the listener. Firewall rules are managed by you." />
+                <TextBlock Classes="settingsRowDesc" Text="Any port from 1 to 65535. Default: 9001. Changing the port reconnects the listener. Firewall rules are managed by you." />
+                <TextBlock Classes="settingsRowWarning" Text="{Binding OscPortError}" IsVisible="{Binding HasOscPortError}" TextWrapping="Wrap" />
               </StackPanel>
-              <NumericUpDown Grid.Column="1" Classes="settingsInput" Width="150" Minimum="1" Maximum="65535" Increment="1" FormatString="0" Value="{Binding OscPort}" VerticalAlignment="Center" />
+              <TextBox x:Name="OscPortBox" Grid.Column="1" Classes="settingsInput" Width="150" MaxLength="5" VerticalAlignment="Center" Text="{Binding OscPortText}" LostFocus="OscPort_OnLostFocus" KeyDown="OscPort_OnKeyDown" />
             </Grid>
           </Border>
           <Border Classes="settingsRowDivider" />

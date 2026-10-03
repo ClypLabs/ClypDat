@@ -1645,43 +1645,6 @@
     <Setter Property="TextAlignment" Value="Center" />
   </Style>
 
-  <!-- NumericUpDown had no settings styling at all, so it rendered as Fluent's
-       stock control on the settings cards: a black well with a bright frame,
-       text sitting high, and two oversized boxed spinner buttons. It is now the
-       same field as TextBox.settingsInput - palette, radius, height and
-       hover/focus states. The spinner buttons are hidden rather than restyled
-       (their divider borders are template-bound, which a style cannot
-       override); arrow keys and the mouse wheel still step the value. The
-       ButtonSpinner draws the frame; the inner TextBox stays borderless in
-       every state because Fluent repaints its PART_BorderElement itself. -->
-  <Style Selector="NumericUpDown.settingsInput">
-    <Setter Property="Background" Value="{StaticResource SurfaceRaisedBrush}" />
-    <Setter Property="Foreground" Value="{StaticResource TextStrongBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource EdgeStrongBrush}" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="Padding" Value="13,0" />
-    <Setter Property="FontSize" Value="14" />
-    <Setter Property="MinHeight" Value="38" />
-    <Setter Property="VerticalContentAlignment" Value="Center" />
-    <Setter Property="ShowButtonSpinner" Value="False" />
-  </Style>
-  <Style Selector="NumericUpDown.settingsInput:pointerover">
-    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource Surface_3A4C5C}" />
-  </Style>
-  <Style Selector="NumericUpDown.settingsInput:focus-within">
-    <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
-    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-  </Style>
-  <Style Selector="NumericUpDown.settingsInput /template/ TextBox#PART_TextBox /template/ Border#PART_BorderElement,
-                   NumericUpDown.settingsInput /template/ TextBox#PART_TextBox:pointerover /template/ Border#PART_BorderElement,
-                   NumericUpDown.settingsInput /template/ TextBox#PART_TextBox:focus /template/ Border#PART_BorderElement">
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="Transparent" />
-    <Setter Property="BorderThickness" Value="0" />
-  </Style>
-
   <Style Selector="TextBox.inlineTitleEdit /template/ TextBlock#PART_Watermark">
     <Setter Property="Foreground" Value="{StaticResource Text_5C6D7E}" />
   </Style>
