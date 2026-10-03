@@ -169,7 +169,8 @@ public sealed partial class PlaybackSession : IDisposable
         // reads DisplayedPictures out of it to tell a frozen picture from a
         // healthy one, and without this the counters can stay at zero and that
         // detector goes blind.
-        _libVlc = new LibVLC(LibVlcOptions);
+        _libVlc = new LibVLC(LibVlcPluginCache.Options(LibVlcOptions, out var pluginCacheFingerprint));
+        if (pluginCacheFingerprint is not null) LibVlcPluginCache.Commit(pluginCacheFingerprint);
         VideoPlayer = new MediaPlayer(_libVlc);
         _overlayClock = new EditorOverlayClock(() => Duration);
         VideoPlayer.EnableKeyInput = false;
