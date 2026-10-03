@@ -9,6 +9,18 @@ namespace ClypDat.App.Tests;
 
 public sealed class CaptureWorkerRecoveryTests
 {
+    [Theory]
+    [InlineData(0, "clean quit")]
+    [InlineData(1, "terminated from outside")]
+    [InlineData(-1, "terminated from outside")]
+    [InlineData(unchecked((int)0xC0000005), "access violation")]
+    [InlineData(unchecked((int)0xE0434352), ".NET unhandled exception")]
+    [InlineData(42, "unrecognised")]
+    public void DescribeAppExit_NamesHowTheAppEnded(int code, string expected)
+    {
+        Assert.Contains(expected, CaptureWorkerHost.DescribeAppExit(code), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task RestoreUsesLatestTargetAudioHotkeysAndPauseAfterStartup()
     {

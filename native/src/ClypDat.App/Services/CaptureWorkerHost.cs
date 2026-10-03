@@ -125,6 +125,7 @@ internal static class CaptureWorkerHost
             }
             hadClient = true;
             _client = server;
+            var app = OpenClientProcess(server);
             try
             {
                 await ClientLoopAsync(server, Shutdown.Token);
@@ -136,9 +137,69 @@ internal static class CaptureWorkerHost
             finally
             {
                 if (ReferenceEquals(_client, server)) _client = null;
+                // Off the loop: a pipe hiccup reconnects within the grace, and
+                // waiting here for the app to exit would eat into it.
+                if (app is not null) _ = Task.Run(() => LogClientExit(app));
             }
         }
     }
+
+    // An app that vanishes leaves no log of its own: a native crash cannot be
+    // caught, and Task Manager's End task gives it no chance to write one.
+    // Windows keeps the exit code, which says which of those it was, so the
+    // worker holds a handle to the connected app and records it.
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeClientProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe, out uint processId);
+
+    private static Process? OpenClientProcess(NamedPipeServerStream server)
+    {
+        try
+        {
+            if (!GetNamedPipeClientProcessId(server.SafePipeHandle, out var id)) return null;
+            var process = Process.GetProcessById((int)id);
+            // Opened now, while it is alive, so the exit code is readable after it exits.
+            _ = process.SafeHandle;
+            return process;
+        }
+        catch (Exception error)
+        {
+            CaptureWorkerLog.Error("Could not open the connected ClypDat app's process.", error);
+            return null;
+        }
+    }
+
+    private static void LogClientExit(Process app)
+    {
+        using (app)
+        {
+            try
+            {
+                if (!app.WaitForExit(3000))
+                {
+                    CaptureWorkerLog.Info($"ClypDat app (pid {app.Id}) disconnected but is still running.");
+                    return;
+                }
+                CaptureWorkerLog.Info($"ClypDat app (pid {app.Id}) ended: exit code 0x{app.ExitCode:X8} - {DescribeAppExit(app.ExitCode)}.");
+            }
+            catch (Exception error)
+            {
+                CaptureWorkerLog.Error("Could not read the ClypDat app's exit code.", error);
+            }
+        }
+    }
+
+    internal static string DescribeAppExit(int code) => unchecked((uint)code) switch
+    {
+        0 => "clean quit",
+        1 => "terminated from outside (Task Manager End task, taskkill, or another program)",
+        0xFFFFFFFF => "terminated from outside (killed by a script or tool)",
+        0xC0000005 => "native crash (access violation)",
+        0xC0000409 => "native fail-fast (abort or stack buffer overrun)",
+        0xC00000FD => "stack overflow",
+        0xE0434352 => ".NET unhandled exception",
+        0x80131623 => ".NET fail-fast",
+        _ => "unrecognised exit code"
+    };
 
     // What a "shutdown" from the app does, for an app that can no longer send
     // one: finish any save already under way, stop capture, and let a Full
