@@ -271,6 +271,9 @@ public sealed partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             AppLog.Error("Unhandled exception (fatal).", e.ExceptionObject as Exception);
+            // AppLog only queues; the process dies as soon as this returns, so
+            // without the flush the one line explaining the crash never lands.
+            AppLog.Flush();
         };
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {

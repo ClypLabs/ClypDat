@@ -127,6 +127,39 @@ public sealed class CaptureDiagnosticBundleTests
         }
     }
 
+    [Fact]
+    public void ClypDatCrashEvents_KeepsOnlyClypDatRecords()
+    {
+        var text = string.Join("\r\n",
+            "Event[0]:", "  Source: Application Error", "Description:", "Faulting application name: ClypDat.exe", "Faulting module name: libvlccore.dll",
+            "Event[1]:", "  Source: Application Error", "Description:", "Faulting application name: other.exe",
+            "Event[2]:", "  Source: .NET Runtime", "Description:", "Application: ClypDatRecorder.exe", "Exception Info: System.IO.IOException");
+
+        var events = CaptureDiagnosticBundle.ClypDatCrashEvents(text);
+
+        Assert.Equal(2, events.Count);
+        Assert.Contains("libvlccore.dll", events[0], StringComparison.Ordinal);
+        Assert.Contains("ClypDatRecorder.exe", events[1], StringComparison.Ordinal);
+        Assert.DoesNotContain(events, record => record.Contains("other.exe", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Create_IncludesCrashEvents()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ClypDat-CaptureDiagnosticBundleTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var bundle = CaptureDiagnosticBundle.Create(null, null, root, DateTime.Now);
+            using var archive = ZipFile.OpenRead(bundle);
+            Assert.False(string.IsNullOrWhiteSpace(ReadEntry(archive, "crash-events.txt")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static string ReadEntry(ZipArchive archive, string name)
     {
         var entry = archive.GetEntry(name);

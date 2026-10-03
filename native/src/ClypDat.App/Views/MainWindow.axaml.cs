@@ -673,6 +673,19 @@ public sealed partial class MainWindow : Window
             }
             _replayBuffer?.Dispose();
             _clipOverlayCoordinator?.Dispose();
+            // The view's native host is destroyed after Closed and clears Hwnd
+            // on whatever player it still holds. Disposing the session first
+            // handed libvlc a freed player there - an access violation .NET
+            // cannot catch, so the process died with nothing logged. Stop and
+            // detach while the player is alive (the Synchronous stop's order).
+            try
+            {
+                _editorHoverStopTask?.GetAwaiter().GetResult();
+                _playback?.Stop();
+                EditorVideoView.WatchMediaPlayer(null);
+                EditorVideoView.MediaPlayer = null;
+            }
+            catch (Exception error) { AppLog.Error("Editor video detach on close failed.", error); }
             _playbackSessionOwner.Dispose();
             _editorHoverControlsWindow?.Close();
             EditorVideoView.DisposeClickHandling();

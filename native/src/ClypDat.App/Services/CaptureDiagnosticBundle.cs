@@ -61,6 +61,8 @@ public static class CaptureDiagnosticBundle
                     utc = DateTime.UtcNow
                 });
 
+                WriteCrashEvents(archive, redactions);
+
                 if (recentOnly) WriteJson(archive, "bundle-scope.json", new
                 {
                     recentLogsOnly = true, maximumAppLogs = 4, maximumBytesPerLog = 512 * 1024
@@ -113,6 +115,80 @@ public static class CaptureDiagnosticBundle
         var archiveBytes = new FileInfo(path).Length;
         AppLog.Info($"Capture diagnostic bundle created: {path}; sourceBytes={sourceBytes} archiveBytes={archiveBytes} elapsedMs={stopwatch.Elapsed.TotalMilliseconds:F0}.");
         return path;
+    }
+
+    // A native crash (access violation in libvlc, ffmpeg, a driver) or a hang
+    // the user ended never reaches AppLog. Windows records all of them in the
+    // Application event log with the faulting module, exception code and, for
+    // .NET Runtime events, the managed stack - the one place that says why the
+    // app closed with no [Quit] line.
+    private const string CrashEventQuery =
+        "*[System[(Provider[@Name='Application Error'] or Provider[@Name='Application Hang'] or " +
+        "Provider[@Name='.NET Runtime'] or Provider[@Name='Windows Error Reporting']) and " +
+        "TimeCreated[timediff(@SystemTime) <= 1209600000]]]";
+
+    private static void WriteCrashEvents(ZipArchive archive, IReadOnlyList<(string Value, string Token)> redactions)
+    {
+        string text;
+        try { text = ReadCrashEventText(); }
+        catch (Exception error) { text = $"Could not read the Windows Application event log: {error.Message}"; }
+        var events = ClypDatCrashEvents(text);
+        var entry = archive.CreateEntry("crash-events.txt", CompressionLevel.Optimal);
+        using var output = new StreamWriter(entry.Open());
+        if (events.Count == 0)
+        {
+            output.WriteLine(text.StartsWith("Could not", StringComparison.Ordinal)
+                ? text
+                : "No ClypDat crash or hang events in the Windows Application event log for the last 14 days.");
+            return;
+        }
+        foreach (var crash in events)
+        {
+            output.WriteLine(Scrub(crash, redactions));
+            output.WriteLine();
+        }
+    }
+
+    private static string ReadCrashEventText()
+    {
+        using var process = Process.Start(new ProcessStartInfo("wevtutil.exe")
+        {
+            ArgumentList = { "qe", "Application", $"/q:{CrashEventQuery}", "/rd:true", "/c:300", "/f:text" },
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        }) ?? throw new InvalidOperationException("wevtutil did not start.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        _ = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(10_000))
+        {
+            try { process.Kill(); } catch { /* already gone */ }
+            throw new TimeoutException("wevtutil timed out.");
+        }
+        return output.GetAwaiter().GetResult();
+    }
+
+    // wevtutil's text format starts every record with an "Event[n]:" line.
+    // Only records naming ClypDat (app, recorder or detector host) are kept;
+    // other programs' crashes are none of the bundle's business.
+    internal static IReadOnlyList<string> ClypDatCrashEvents(string wevtutilText)
+    {
+        var events = new List<string>();
+        var current = new StringBuilder();
+        void Finish()
+        {
+            var record = current.ToString().Trim();
+            if (record.Contains("ClypDat", StringComparison.OrdinalIgnoreCase)) events.Add(record);
+            current.Clear();
+        }
+        foreach (var line in wevtutilText.Split('\n'))
+        {
+            if (line.StartsWith("Event[", StringComparison.Ordinal)) Finish();
+            current.Append(line.TrimEnd('\r')).Append('\n');
+        }
+        Finish();
+        return events;
     }
 
     private sealed record LogSnapshot(string Path, long Length);
