@@ -3,6 +3,7 @@
 ## Working rules
 
 - Don't reiterate AGENTS.md related stuff in plans, you will be reading AGENTS.md anyway.
+- Don't add hover text (tooltips) that repeats a control's visible label or states the obvious. Use one only where it carries something the user can't otherwise see: the name of an icon-only control whose icon doesn't already say what it does (not the logo, back/forward or close), a hidden interaction, truncated text, or behaviour the label doesn't explain. Tooltips don't show on disabled controls unless `ToolTip.ShowOnDisabled` is set.
 
 ## Build/Test discipline
 
