@@ -34,7 +34,10 @@ public sealed class EditorHoverWarmupReadinessTests
     public async Task ClaimBeforePlayerStartsFallsBack()
     {
         var readiness = new EditorHoverWarmupReadiness();
-        Assert.False(await readiness.CanAdoptAsync(Task.CompletedTask, () => false, () => true, CancellationToken.None));
+        string? reason = null;
+        Assert.False(await readiness.CanAdoptAsync(Task.CompletedTask, () => false, () => true,
+            CancellationToken.None, onFailure: value => reason = value));
+        Assert.Equal("player-not-attached", reason);
     }
 
     [Theory]
@@ -44,15 +47,20 @@ public sealed class EditorHoverWarmupReadinessTests
     {
         var readiness = new EditorHoverWarmupReadiness();
         readiness.Complete(seekSucceeded);
-        Assert.False(await readiness.CanAdoptAsync(Task.CompletedTask, () => true, () => presented, CancellationToken.None));
+        string? reason = null;
+        Assert.False(await readiness.CanAdoptAsync(Task.CompletedTask, () => true, () => presented,
+            CancellationToken.None, onFailure: value => reason = value));
+        Assert.Equal(seekSucceeded ? "native-frame-missing" : "seek-failed", reason);
     }
 
     [Fact]
     public async Task PendingSeekTimesOutAndFallsBack()
     {
         var readiness = new EditorHoverWarmupReadiness();
+        string? reason = null;
         Assert.False(await readiness.CanAdoptAsync(Task.CompletedTask, () => true, () => true,
-            CancellationToken.None, TimeSpan.FromMilliseconds(20)));
+            CancellationToken.None, TimeSpan.FromMilliseconds(20), value => reason = value));
+        Assert.Equal("seek-timeout", reason);
     }
 
     [Fact]

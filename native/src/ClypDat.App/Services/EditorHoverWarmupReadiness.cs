@@ -9,21 +9,45 @@ internal sealed class EditorHoverWarmupReadiness
     internal void Complete(bool succeeded) => _seekCompleted.TrySetResult(succeeded);
 
     internal async Task<bool> CanAdoptAsync(Task videoLoaded, Func<bool> playerAttached,
-        Func<bool> nativeFramePresented, CancellationToken cancellationToken, TimeSpan? wait = null)
+        Func<bool> nativeFramePresented, CancellationToken cancellationToken, TimeSpan? wait = null,
+        Action<string>? onFailure = null)
     {
         await videoLoaded.WaitAsync(cancellationToken).ConfigureAwait(false);
-        if (!playerAttached()) return false;
-
-        try
+        if (!playerAttached())
         {
-            if (!await _seekCompleted.Task.WaitAsync(wait ?? TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false))
-                return false;
-        }
-        catch (TimeoutException)
-        {
+            onFailure?.Invoke("player-not-attached");
             return false;
         }
 
-        return playerAttached() && nativeFramePresented();
+        bool seekSucceeded;
+        try
+        {
+            seekSucceeded = await _seekCompleted.Task.WaitAsync(wait ?? TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            onFailure?.Invoke("seek-timeout");
+            return false;
+        }
+
+        if (!seekSucceeded)
+        {
+            onFailure?.Invoke("seek-failed");
+            return false;
+        }
+
+        if (!playerAttached())
+        {
+            onFailure?.Invoke("player-detached");
+            return false;
+        }
+
+        if (!nativeFramePresented())
+        {
+            onFailure?.Invoke("native-frame-missing");
+            return false;
+        }
+
+        return true;
     }
 }

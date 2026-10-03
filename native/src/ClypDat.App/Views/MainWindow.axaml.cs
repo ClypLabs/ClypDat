@@ -5427,6 +5427,7 @@ public sealed partial class MainWindow : Window
             Duration = duration;
         }
 
+        public Stopwatch Clock { get; } = Stopwatch.StartNew();
         public IReadOnlyList<int> AudioStreams { get; }
         public TimeSpan Duration { get; }
         public string Path { get; }
@@ -5466,6 +5467,7 @@ public sealed partial class MainWindow : Window
             range.Start, ViewModel.IsReplayRecording,
             MainWindowViewModel.PlayableAudioStreamIndexes(clip.Media.Tracks, clip.IsMedalImport), clip.Media.Duration);
         _editorHoverWarmup = warmup;
+        AppLog.Debug($"[DEBUG-editor-open-latency] warm-up started: {Path.GetFileName(warmup.Path)} at={warmup.Start.TotalSeconds:0.###}s.");
         _ = PrepareEditorHoverWarmupAsync(warmup);
     }
 
@@ -5477,17 +5479,24 @@ public sealed partial class MainWindow : Window
             // Keep the native target attached until Stop has completely unwound.
             // Reusing or replacing the player earlier lets libvlc set Hwnd to zero
             // while its old vout is still active, which creates VLC's fallback window.
+            var stopClock = Stopwatch.StartNew();
             await AwaitEditorHoverStopAsync().ConfigureAwait(false);
+            AppLog.Debug($"[DEBUG-editor-open-latency] warm-up stop wait: {Path.GetFileName(warmup.Path)} waitMs={stopClock.ElapsedMilliseconds}, sinceStartMs={warmup.Clock.ElapsedMilliseconds}.");
             warmup.Cancellation.Token.ThrowIfCancellationRequested();
+            var sessionClock = Stopwatch.StartNew();
             session = _playback ?? await _playbackSessionOwner.GetAsync().WaitAsync(warmup.Cancellation.Token).ConfigureAwait(false);
             warmup.Session = session;
             warmup.SessionReady.TrySetResult(session);
+            AppLog.Debug($"[DEBUG-editor-open-latency] warm-up session ready: {Path.GetFileName(warmup.Path)} waitMs={sessionClock.ElapsedMilliseconds}, sinceStartMs={warmup.Clock.ElapsedMilliseconds}.");
+            var loadClock = Stopwatch.StartNew();
             await session.LoadVideoAsync(warmup.Path, warmup.Codec, warmup.ReplayArmed, warmup.Cancellation.Token).ConfigureAwait(false);
             warmup.VideoLoaded.TrySetResult();
+            AppLog.Debug($"[DEBUG-editor-open-latency] warm-up video loaded: {Path.GetFileName(warmup.Path)} loadMs={loadClock.ElapsedMilliseconds}, sinceStartMs={warmup.Clock.ElapsedMilliseconds}.");
             await Dispatcher.UIThread.InvokeAsync(() => StartWarmEditorOutput(warmup, session));
         }
         catch (OperationCanceledException)
         {
+            AppLog.Debug($"[DEBUG-editor-open-latency] warm-up cancelled: {Path.GetFileName(warmup.Path)} sinceStartMs={warmup.Clock.ElapsedMilliseconds}.");
             warmup.SessionReady.TrySetCanceled();
             warmup.VideoLoaded.TrySetCanceled();
             warmup.Readiness.Complete(false);
@@ -5537,7 +5546,9 @@ public sealed partial class MainWindow : Window
             var succeeded = false;
             try
             {
+                var seekClock = Stopwatch.StartNew();
                 var result = await session.SeekAsync(warmup.Start, cancellationToken: warmup.Cancellation.Token);
+                AppLog.Debug($"[DEBUG-editor-open-latency] warm-up seek finished: {Path.GetFileName(warmup.Path)} outcome={result.Outcome}, seekMs={seekClock.ElapsedMilliseconds}, sinceStartMs={warmup.Clock.ElapsedMilliseconds}.");
                 if (result.Outcome == PlaybackSeekOutcome.Failed) warmup.MarkFailed();
                 if (result.Outcome == PlaybackSeekOutcome.Completed && !warmup.Cancellation.IsCancellationRequested)
                 {
@@ -9357,14 +9368,18 @@ public sealed partial class MainWindow : Window
             {
                 if (cts.IsCancellationRequested) return;
                 var openCold = false;
+                var adoptionClock = Stopwatch.StartNew();
+                string? adoptionFailure = warmup.Failed ? "warm-up-failed" : null;
                 try
                 {
                     var session = await warmup.SessionReady.Task.WaitAsync(cts.Token);
                     if (cts.IsCancellationRequested) return;
-                    if (!warmup.Failed && await warmup.Readiness.CanAdoptAsync(warmup.VideoLoaded.Task,
+                    var canAdopt = !warmup.Failed && await warmup.Readiness.CanAdoptAsync(warmup.VideoLoaded.Task,
                         () => warmup.PlayerAttached && !warmup.Cancellation.IsCancellationRequested,
                         () => session.VideoPlayer.VoutCount > 0 && session.Composition?.HasPresentedPicture == true,
-                        cts.Token))
+                        cts.Token, onFailure: reason => adoptionFailure = reason);
+                    AppLog.Debug($"[DEBUG-editor-open-latency] warm-up adoption: {Path.GetFileName(warmup.Path)} result={canAdopt}, clickWaitMs={openClock.ElapsedMilliseconds}, readinessWaitMs={adoptionClock.ElapsedMilliseconds}, warmupMs={warmup.Clock.ElapsedMilliseconds}, reason={adoptionFailure ?? "ready"}.");
+                    if (canAdopt)
                     {
                         await StartEditorPlaybackAsync(session, warmup.VideoLoaded.Task, warmup.Codec, cts.Token, openClock, foregroundScope, warmup);
                     }
@@ -9379,6 +9394,7 @@ public sealed partial class MainWindow : Window
                     // The warm-up was torn down under the click - its hover
                     // ended in the same instant, or a stop overtook it - but the
                     // open itself still stands. Nothing else would lift the poster.
+                    adoptionFailure = "warm-up-cancelled";
                     AppLog.Info($"Editor hover warm-up cancelled before adoption; opening cold: {Path.GetFileName(warmup.Path)}.");
                     openCold = true;
                 }
@@ -9387,6 +9403,7 @@ public sealed partial class MainWindow : Window
                 }
                 catch (Exception error)
                 {
+                    adoptionFailure = "adoption-error";
                     AppLog.Error("Editor hover warm-up could not be adopted; opening cold", error);
                     openCold = !cts.IsCancellationRequested;
                 }
@@ -9397,8 +9414,12 @@ public sealed partial class MainWindow : Window
                 }
                 if (openCold)
                 {
+                    var stopClock = Stopwatch.StartNew();
                     await AwaitEditorHoverStopAsync();
+                    var stopWaitMs = stopClock.ElapsedMilliseconds;
+                    var frameClock = Stopwatch.StartNew();
                     if (warmup.FramePreparation is { } framePreparation) await framePreparation;
+                    AppLog.Debug($"[DEBUG-editor-open-latency] warm-up cold fallback: {Path.GetFileName(warmup.Path)} reason={adoptionFailure ?? "unknown"}, clickWaitMs={openClock.ElapsedMilliseconds}, stopWaitMs={stopWaitMs}, frameWaitMs={frameClock.ElapsedMilliseconds}, warmupMs={warmup.Clock.ElapsedMilliseconds}.");
                     if (!cts.IsCancellationRequested) QueueColdEditorPlayback(cts, openClock);
                 }
             },
@@ -9817,12 +9838,20 @@ public sealed partial class MainWindow : Window
 
     private async Task<PlaybackSession> GetEditorPlaybackSessionAfterPendingStopAsync(CancellationToken cancellationToken, Stopwatch openClock)
     {
+        var stopClock = Stopwatch.StartNew();
         await AwaitEditorHoverStopAsync();
+        AppLog.Debug($"[DEBUG-editor-open-latency] cold path stop wait: clickMs={openClock.ElapsedMilliseconds}, waitMs={stopClock.ElapsedMilliseconds}.");
         cancellationToken.ThrowIfCancellationRequested();
-        if (_playback is not null) return _playback;
+        if (_playback is not null)
+        {
+            AppLog.Debug($"[DEBUG-editor-open-latency] cold path session ready: clickMs={openClock.ElapsedMilliseconds}, waitMs=0, source=reused.");
+            return _playback;
+        }
 
         AppLog.Debug($"Editor open trace: shared engine requested at {openClock.ElapsedMilliseconds}ms.");
+        var sessionClock = Stopwatch.StartNew();
         var session = await _playbackSessionOwner.GetAsync().WaitAsync(cancellationToken);
+        AppLog.Debug($"[DEBUG-editor-open-latency] cold path session ready: clickMs={openClock.ElapsedMilliseconds}, waitMs={sessionClock.ElapsedMilliseconds}.");
         AppLog.Debug($"Editor open trace: shared engine ready at {openClock.ElapsedMilliseconds}ms.");
         return session;
     }
