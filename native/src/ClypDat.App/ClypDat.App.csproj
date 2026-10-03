@@ -190,6 +190,14 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <!-- Ships libvlc's plugins.dat (and the fingerprint that vouches for it), so
+       the first launch after an install or update does not scan all ~320
+       plugin DLLs. Run by the published app itself so the fingerprint comes
+       from the same code that checks it at runtime (LibVlcPluginCache). -->
+  <Target Name="BuildLibVlcPluginCacheForPublish" AfterTargets="CopyLibVlcRuntimeToPublish" Condition="'$(ClypDatUiPreview)' != 'true'">
+    <Exec Command="&quot;$([System.IO.Path]::GetFullPath('$(PublishDir)'))ClypDat.exe&quot; --build-libvlc-plugin-cache" />
+  </Target>
+
   <Target Name="VerifyFfmpegVendor" BeforeTargets="CopyFfmpegToPublish;CopyFfmpegToOutput">
     <Exec Command="powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\..\eng\Verify-CaptureFfmpegRuntime.ps1&quot; -VerifyPackage" />
   </Target>

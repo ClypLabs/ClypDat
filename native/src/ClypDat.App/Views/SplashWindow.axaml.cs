@@ -25,7 +25,13 @@ public sealed partial class SplashWindow : Window
     // network share or a cold spinning disk hands over anyway and finishes
     // filling the grid behind the open window.
     private static readonly TimeSpan LibraryBudget = TimeSpan.FromSeconds(2.5);
-    private static readonly TimeSpan PlaybackBudget = TimeSpan.FromSeconds(30);
+    // Playback is not something the user waits on either. With libvlc's plugin
+    // cache current it is ready in well under 100ms; without it (first launch
+    // after an install that rewrote file times) the cold plugin scan took 13-60s
+    // and the loader sat through all of it. Past this the window opens and
+    // libvlc finishes behind it - opening a clip early shows the editor's own
+    // loading state.
+    private static readonly TimeSpan PlaybackBudget = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan FadeStep = TimeSpan.FromMilliseconds(16);
 
     private CancellationTokenSource? _skip;
@@ -101,9 +107,7 @@ public sealed partial class SplashWindow : Window
         }
         catch (TimeoutException)
         {
-            AppLog.Info("Startup: playback preparation exceeded 30s; opening with playback still preparing.");
-            SetStage("Playback still preparing - starting anyway");
-            onPlaybackWarning("Playback is still preparing. Opening a clip may take longer than usual.");
+            AppLog.Info("Startup: playback still preparing; opening the window while it finishes.");
         }
         catch (Exception error)
         {

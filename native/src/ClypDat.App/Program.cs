@@ -64,6 +64,13 @@ internal static class Program
             Environment.ExitCode = NativeRecordingVerification.Run(verifyArguments[0], rounds);
             return;
         }
+        // Publish runs this against the published libvlc plugins, before any
+        // user data, single-instance or UI setup (see LibVlcPluginCache).
+        if (args.Contains("--build-libvlc-plugin-cache", StringComparer.Ordinal))
+        {
+            Environment.ExitCode = LibVlcPluginCache.Build();
+            return;
+        }
         DevChannelMode.ConfigureDataRoot();
         // Release packaging calls this after publish. Reaching Main proves the
         // app host loaded ClypDat with its bundled runtime before any user data,
