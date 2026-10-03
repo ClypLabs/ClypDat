@@ -255,7 +255,7 @@
           <Border Grid.Column="8" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="9" Text="{Binding SelectedCreated}" Foreground="{StaticResource Text_93A6B8}" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
           <Border Grid.Column="10" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
-          <TextBlock Grid.Column="11" Text="{Binding SelectedQuality}" Foreground="{StaticResource Text_93A6B8}" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="180" Margin="10,0,0,0" />
+          <TextBlock Grid.Column="11" Text="{Binding SelectedQuality}" Foreground="{StaticResource Text_93A6B8}" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="260" Margin="10,0,0,0" />
           <Border Grid.Column="12" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding IsEditorVisible}" Margin="10,0,0,0" />
           <TextBlock Grid.Column="13" Text="{Binding SelectedSize}" Foreground="{StaticResource Text_93A6B8}" VerticalAlignment="Center" IsVisible="{Binding IsEditorVisible}" TextTrimming="CharacterEllipsis" MaxWidth="110" Margin="10,0,0,0" />
           <Border Grid.Column="14" Width="1" Height="20" Background="{StaticResource Surface_2A3640}" IsVisible="{Binding HasSelectedCaptureBackend}" Margin="10,0,0,0" />

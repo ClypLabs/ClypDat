@@ -9582,7 +9582,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedCreatedAtLocal = media.CreatedAt.ToLocalTime().DateTime;
         SelectedCreated = $"Created: {SelectedCreatedAtLocal:d MMM yyyy, H:mm}";
         SelectedQuality = media.Height > 0
-            ? $"Video Quality: {ResolutionLabel(media.Height)}{FpsSuffix(media.Fps)}"
+            ? $"Video Quality: {ResolutionLabel(media.Height)}{FpsSuffix(media.Fps)}{BitrateSuffix(media.SizeBytes, media.Duration)}"
             : "Video Quality: Unknown";
         var clipInfo = ClipInfoSidecar.Load(Settings.LibraryFolder, media.Path);
         var totalSizeBytes = ClipStorageCalculator.Calculate(Settings.LibraryFolder, media.Path, clipInfo);
@@ -12055,6 +12055,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static string FpsSuffix(double fps)
     {
         return fps > 0 ? $"@{Math.Round(fps):0}" : string.Empty;
+    }
+
+    // Average over the whole video file (audio tracks included - a small share
+    // next to the video): the probe keeps no per-stream bitrate.
+    internal static string BitrateSuffix(long sizeBytes, TimeSpan duration)
+    {
+        if (sizeBytes <= 0 || duration.TotalSeconds < 0.5) return string.Empty;
+        var bitsPerSecond = sizeBytes * 8d / duration.TotalSeconds;
+        return bitsPerSecond >= 1_000_000
+            ? $" · {bitsPerSecond / 1_000_000:0.#} Mbps"
+            : $" · {bitsPerSecond / 1_000:0} kbps";
     }
 
     private static string AudioLabel(int audioIndex)
