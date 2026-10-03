@@ -445,6 +445,7 @@ public sealed partial class MainWindow : Window
                     ShowGameDetectedNotification(ViewModel.ActiveGameDetection.IsDetected
                         ? ViewModel.ActiveGameDetection.DisplayName : "Your game", preview: true);
                 ViewModel.RecordingSettingsSaved += ApplySavedRecordingSettings;
+                InitializeOscControls();
                 ViewModel.PropertyChanged += (_, e) =>
                 {
                     if (e.PropertyName == nameof(MainWindowViewModel.IsOnboardingVisible) && ViewModel.IsOnboardingVisible)
@@ -645,6 +646,7 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            StopOscControls();
             SuspendFullscreenPresentation(settleSeek: false);
             _hoverControlsHideTimer?.Stop();
             _fullscreenCursor.Dispose();
@@ -1028,6 +1030,7 @@ public sealed partial class MainWindow : Window
                 AppLog.Info("Replay resumed: the display or session is available again.");
             ViewModel.IsReplaySuspended = suspended;
             ViewModel.IsReplayRecording = buffer.IsRecording;
+            RefreshOscCaptureSnapshot();
             if (!buffer.IsRecording) UpdateRecorderStatusFromState();
             UpdateDetectorPackAutoClipStates();
         });
@@ -1250,6 +1253,7 @@ public sealed partial class MainWindow : Window
         _encoderTuning.OnHealth(health);
         ViewModel?.UpdateReplayStorageHealth(health.Storage);
         ViewModel?.UpdateReplayEncoderHealth(health);
+        RefreshOscCaptureSnapshot();
         if (ViewModel is null) return;
         if (health.FullSession.State == FullSessionState.Failed)
         {
@@ -1327,6 +1331,7 @@ public sealed partial class MainWindow : Window
 
     public async Task ShutdownCaptureWorkerAsync()
     {
+        StopOscControls();
         if (_replayBuffer is IReplayCaptureWorkerControl worker)
         {
             try { await worker.ShutdownWorkerAsync(); }
@@ -3051,11 +3056,12 @@ public sealed partial class MainWindow : Window
         ScheduleReplayRestart();
     }
 
-    private void ScheduleReplayRestart()
+    private void ScheduleReplayRestart(bool showErrors = true)
     {
         _replayRestartDebounceTimer?.Stop();
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(900) };
         _replayRestartDebounceTimer = timer;
+        InvalidateOscCapture();
         timer.Tick += async (_, _) =>
         {
             timer.Stop();
@@ -3075,7 +3081,7 @@ public sealed partial class MainWindow : Window
             // out and leaving its temporary status behind.
             if (_replayTransitioning)
             {
-                ScheduleReplayRestart();
+                ScheduleReplayRestart(showErrors);
                 return;
             }
 
@@ -3085,7 +3091,7 @@ public sealed partial class MainWindow : Window
             {
                 if (ViewModel.IsReplayRecording) await StopReplayBufferAsync();
                 if (ViewModel is not null) ViewModel.RecorderStatus = "Switching capture...";
-                await StartReplayBufferAsync(showErrors: true, isQualityRestart: !startNewGameSession);
+                await StartReplayBufferAsync(showErrors, isQualityRestart: !startNewGameSession);
             }
             finally
             {
@@ -3097,6 +3103,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateRecorderStatusFromState()
     {
+        RefreshOscCaptureSnapshot();
         if (ViewModel is null) return;
         ViewModel.RecorderStatus = ViewModel.IsReplayRecording
             ? ViewModel.IsReplayArming ? "Replay Arming" : "Replay On"
@@ -3145,7 +3152,7 @@ public sealed partial class MainWindow : Window
     {
         if (!Dispatcher.UIThread.CheckAccess()) { Dispatcher.UIThread.Post(ApplySavedRecordingSettings); return; }
         if (_applyingWorkerSessionToggle || ViewModel is null || _activeReplayConfigSnapshot is not { } active) return;
-        if (ViewModel.IsReplayRecording && RuntimeSettingsDiffer(active, ViewModel.CreateReplayConfig())) ScheduleReplayRestart();
+        if (ViewModel.IsReplayRecording && RuntimeSettingsDiffer(active, ViewModel.CreateReplayConfig())) ScheduleReplayRestart(showErrors: !_applyingOscDuration);
     }
 
     private static bool RuntimeSettingsDiffer(ReplayBufferConfig active, ReplayBufferConfig desired) =>
@@ -3191,6 +3198,7 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || _replayBuffer is null || _replayTransitioning) return;
         _replayTransitioning = true;
+        InvalidateOscCapture();
         // Full Session recording's finalization (ffmpeg muxing the whole
         // session's audio against the video, "-c:v copy" but still real time
         // for a long session) runs inside _replayBuffer.StopAsync() below -
@@ -3215,6 +3223,7 @@ public sealed partial class MainWindow : Window
         {
             CaptureBackgroundWorkGate.EndCapture();
             _replayTransitioning = false;
+            RefreshOscCaptureSnapshot();
         }
     }
 
@@ -3239,6 +3248,7 @@ public sealed partial class MainWindow : Window
         try
         {
             _replayTransitioning = true;
+            InvalidateOscCapture();
             if (!ShouldRecordReplay(ViewModel.ActiveGameDetection))
             {
                 ViewModel.RecorderStatus = ReplayIdleStatus;
@@ -3300,15 +3310,23 @@ public sealed partial class MainWindow : Window
         finally
         {
             _replayTransitioning = false;
+            ReconcileOscDuration();
+            RefreshOscCaptureSnapshot();
         }
     }
 
-    private async Task<bool> SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null, IReadOnlyList<AutoClipEvent>? autoClipEvents = null, bool clampToReplayHistory = false)
+    private async Task<bool> SaveReplayClipAsync(string? autoClipLabel = null, ReplayClipWindow? clipWindow = null, string? autoClipGameName = null, string? autoClipEventType = null, IReadOnlyList<AutoClipEvent>? autoClipEvents = null, bool clampToReplayHistory = false, OscClipRequest? oscRequest = null)
     {
         var isAutoClip = autoClipLabel is not null;
+        var isOsc = oscRequest is not null;
+        if (oscRequest is not null && OscClipPolicy.Validate(oscRequest, CreateOscCaptureSnapshot()) is { } initialRefusal)
+        {
+            AppLog.Info($"[OSC] Clip rejected: {initialRefusal}.");
+            return false;
+        }
         var saveId = Guid.NewGuid();
         ViewModel?.PinSpotifySave(saveId);
-        var requestedUtc = DateTime.UtcNow;
+        var requestedUtc = oscRequest?.ReceivedUtc ?? DateTime.UtcNow;
         if (!isAutoClip)
         {
             RememberUiOwnedSave(saveId);
@@ -3337,6 +3355,7 @@ public sealed partial class MainWindow : Window
         {
             if (ViewModel is null) return false;
             ViewModel.IsSavingReplayClip = true;
+            RefreshOscCaptureSnapshot();
             InitializeReplayServices();
             // Suspended capture keeps replay on but holds no video: the
             // existing no-save policy, with the reason named.
@@ -3344,7 +3363,7 @@ public sealed partial class MainWindow : Window
             {
                 if (isAutoClip) return false;
                 ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
-                await ShowMessageAsync("Clip failed", CaptureWorkerProxy.SuspendedSaveMessage);
+                if (!isOsc) await ShowMessageAsync("Clip failed", CaptureWorkerProxy.SuspendedSaveMessage);
                 return false;
             }
             if (_replayBuffer is null || !_replayBuffer.IsRecording)
@@ -3354,6 +3373,7 @@ public sealed partial class MainWindow : Window
                 // recording (e.g. CS2 launched but ClypDat hasn't caught up yet) isn't
                 // worth interrupting the user over - just drop it.
                 if (isAutoClip) return false;
+                if (isOsc) return false;
                 if (ViewModel.IsReplayRecording) ViewModel.IsReplayRecording = false;
                 await ShowMessageAsync("Clip failed", ViewModel.Settings.ReplayBufferEnabled
                     ? "Replay is armed, but no game is being captured yet."
@@ -3368,6 +3388,7 @@ public sealed partial class MainWindow : Window
             {
                 if (!folderReady)
                 {
+                    if (isOsc) throw new IOException("Configured library folder is unavailable. Restore it before sending OSC clips.");
                     await EnsureLibraryFolderAsync();
                     outputFolder = ViewModel.Settings.LibraryFolder;
                 }
@@ -3397,15 +3418,25 @@ public sealed partial class MainWindow : Window
                         if (clamped.StartUtc >= clamped.EndUtc) return false;
                         clipWindow = clipWindow with { StartUtc = clamped.StartUtc };
                     }
-                    RememberUiOwnedSave(saveId);
-                    ShowClipNotification("ui-save", $"Saving {autoClipLabel} Clip…", playSound: false, saveStart: true, saveId: saveId, requestedUtc: requestedUtc);
+                    if (isAutoClip)
+                    {
+                        RememberUiOwnedSave(saveId);
+                        ShowClipNotification("ui-save", $"Saving {autoClipLabel} Clip…", playSound: false, saveStart: true, saveId: saveId, requestedUtc: requestedUtc);
+                    }
                 }
 
-                var replayConfig = _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
+                var replayConfig = oscRequest?.Capture.Config ?? _activeReplayConfigSnapshot ?? _replayConfigSnapshot ?? ViewModel.CreateReplayConfig();
                 // Snapshot Xbox activity before encoding starts. Folder, filename,
                 // sidecar, and tile must retain this one capture identity.
-                var effectiveGameName = ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName, replayConfig.CaptureSource);
-                var outputPath = await Task.Run(() => _replayBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow, gameDisplayNameOverride: effectiveGameName, saveId: saveId));
+                var effectiveGameName = oscRequest?.Capture.GameName ?? ViewModel.EffectiveClipGameName(replayConfig.GameDisplayName, replayConfig.CaptureSource);
+                if (oscRequest is not null && OscClipPolicy.Validate(oscRequest, CreateOscCaptureSnapshot(ownsSave: true)) is { } refusal)
+                    throw new InvalidOperationException($"OSC clip rejected before submission: {refusal}.");
+                var captureBuffer = oscRequest?.Capture.Buffer ?? _replayBuffer;
+                // The OSC check and IPC submission share this UI turn. Capturing
+                // the buffer also keeps metadata tied to the reception identity.
+                var outputPath = isOsc
+                    ? await captureBuffer.SaveReplayAsync(outputFolder, clipWindow: clipWindow, gameDisplayNameOverride: effectiveGameName, saveId: saveId)
+                    : await Task.Run(() => captureBuffer.SaveReplayAsync(outputFolder, titleOverride: autoClipLabel, clipWindow: clipWindow, gameDisplayNameOverride: effectiveGameName, saveId: saveId));
                 SpotifyProcessingPaths.Reserve(outputPath);
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 RememberSessionClip(outputPath);
@@ -3414,7 +3445,7 @@ public sealed partial class MainWindow : Window
                 // The save itself succeeded, but if the capture source had
                 // stopped delivering frames the video is a single frozen frame -
                 // say so now rather than let it be discovered on playback later.
-                if (_replayBuffer.LastSaveVideoWasFrozen)
+                if (captureBuffer.LastSaveVideoWasFrozen)
                 {
                     ShowClipNotification("ui-save", "Clip Saved - video was frozen", playSound: true, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
                 }
@@ -3453,7 +3484,7 @@ public sealed partial class MainWindow : Window
                 AppLog.Error("Replay clip save failed", error);
                 if (isAutoClip) ShowAutoClipFailedNotification();
                 ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
-                if (!isAutoClip) await ShowMessageAsync("Clip Failed", error.Message);
+                if (!isAutoClip && !isOsc) await ShowMessageAsync("Clip Failed", error.Message);
                 return false;
             }
         }
@@ -3462,6 +3493,7 @@ public sealed partial class MainWindow : Window
             ViewModel?.ReleaseSpotifySave(saveId);
             if (ViewModel is not null) ViewModel.IsSavingReplayClip = false;
             _clipSaveLock.Release();
+            RefreshOscCaptureSnapshot();
         }
     }
 

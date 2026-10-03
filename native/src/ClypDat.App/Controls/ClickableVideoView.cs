@@ -74,12 +74,27 @@ internal sealed class ClickableVideoView : VideoView
     protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
     {
         var control = base.CreateNativeControlCore(parent);
+        if (control.HandleDescriptor == "HWND") EnsureChildClipping(control.Handle);
         Volatile.Write(ref _hostHandle, control.Handle);
         _nativeWidth = 0;
         _nativeHeight = 0;
         RequestNativeSizeSync();
         EnsureHook();
         return control;
+    }
+
+    internal static void EnsureChildClipping(IntPtr window)
+    {
+        if (!OperatingSystem.IsWindows() || window == IntPtr.Zero) return;
+        // Avalonia's default native child only has WS_CHILD. LibVLC requires
+        // its HWND host to exclude child video surfaces from parent painting;
+        // a Debug plugin asserts this before it creates the output window.
+        const int styleIndex = -16;
+        const int clipChildren = 0x02000000;
+        var style = GetWindowLongW(window, styleIndex);
+        if ((style & clipChildren) != 0) return;
+        if (SetWindowLongW(window, styleIndex, style | clipChildren) == 0 && Marshal.GetLastWin32Error() != 0)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(), "Could not enable child clipping on the video host.");
     }
 
     protected override void DestroyNativeControlCore(IPlatformHandle control)
@@ -285,6 +300,12 @@ internal sealed class ClickableVideoView : VideoView
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnhookWindowsHookEx(IntPtr hook);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLongW(IntPtr window, int index);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLongW(IntPtr window, int index, int value);
 
     [DllImport("user32.dll")]
     private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);

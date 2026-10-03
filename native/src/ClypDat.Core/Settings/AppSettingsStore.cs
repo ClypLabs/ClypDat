@@ -74,6 +74,7 @@ public static class AppSettingsStore
     {
         var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new AppSettings();
         var migrated = AppSettingsMigrations.Apply(settings);
+        if (settings.OscPort is < 1 or > 65535) settings.OscPort = 9001;
         var hasExplicitReplayBitrate = MigrateReplayBitrate(json, settings);
         if (!settings.ReplayBitrateDefault15Applied)
         {

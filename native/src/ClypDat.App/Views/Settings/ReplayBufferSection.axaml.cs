@@ -21,6 +21,16 @@ public sealed partial class ReplayBufferSection : UserControl
 
     private MainWindow? Owner => TopLevel.GetTopLevel(this) as MainWindow;
 
+    private void OscGuide_OnClick(object? sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                "https://www.clypdat.xyz/docs/osc") { UseShellExecute = true });
+        }
+        catch (Exception error) { Services.AppLog.Error("Opening OSC setup guide failed", error); }
+    }
+
     private void HotkeyCaptureButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.HotkeyCaptureButton_OnClick(sender, e);
 

@@ -35,6 +35,8 @@ Windows Graphics Capture is the primary capture path, with Desktop Duplication a
 
 Set resolution, frame rate, quality, replay duration and hotkeys in Settings. Individual games can override these settings. On a supported NVIDIA card, automatic hardware recording uses NVENC.
 
+[OSC network controls](docs/osc.md) can save clips and change replay length over UDP. Enable them under **Settings > Replay Buffer**; the guide includes Command Prompt examples and access/firewall details.
+
 **Game Capture** follows the detected game window. **Desktop Capture** records the selected display. Add an unlisted game through **Settings > Game Detection** by choosing a running process or its executable. Detection also uses ClypDat's game catalog and local Steam library manifests.
 
 **Full Session Recording** writes a separate recording alongside the replay buffer. After a graphics-device interruption, recovery starts a fresh replay buffer and an active full-session recording continues in a new file.

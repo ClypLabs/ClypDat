@@ -419,6 +419,13 @@ public sealed class CustomGameTabViewModel : ViewModelBase
 
     private ReplayDurationPreset? _selectedDurationPreset;
 
+    internal void RefreshReplayDuration()
+    {
+        _selectedDurationPreset = null;
+        OnPropertyChanged(nameof(ReplayDurationSeconds));
+        OnPropertyChanged(nameof(SelectedDurationPreset));
+    }
+
     // Null when the stored length matches no preset - only reachable from a
     // hand-edited settings file, and the pills simply show nothing selected
     // rather than silently rounding the user's value to the nearest one.

@@ -54,7 +54,8 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
             "Hotkey", "Save hotkey", "Recording", "Replay length", "Resolution", "Frame rate",
             "Encoding", "Encoder Preset", "Rate control", "Quality", "Bitrate",
             "Full session recording", "Destination folder", "Session codec",
-            "Finalize in background", "Storage limit", "Custom limit"
+            "Finalize in background", "Storage limit", "Custom limit",
+            "OSC", "Open Sound Control", "Network controls", "UDP", "Port", "Listener status", "OSC setup guide"
         },
         ["Video Overlays"] = new[]
         {

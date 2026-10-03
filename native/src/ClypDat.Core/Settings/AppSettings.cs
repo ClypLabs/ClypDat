@@ -64,6 +64,8 @@ public sealed class AppSettings
     // resumes as soon as the game exits.
     public bool ReplayAutoSwitchToGameCapture { get; set; } = true;
     public int ReplayDurationSeconds { get; set; } = 60;
+    public bool OscEnabled { get; set; }
+    public int OscPort { get; set; } = 9001;
     // H.264 is default for widest playback compatibility. AV1Preferred uses
     // hardware AV1 when available, then falls back through H.264.
     public string ReplayVideoCodec { get; set; } = "H.264";

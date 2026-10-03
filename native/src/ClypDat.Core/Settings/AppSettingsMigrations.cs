@@ -2,7 +2,7 @@ namespace ClypDat.Core.Settings;
 
 public static class AppSettingsMigrations
 {
-public const int CurrentSchemaVersion = 14;
+public const int CurrentSchemaVersion = 15;
 
     private static bool IsLegacyDefaultSaveHotkey(string? hotkey) =>
         string.Equals(hotkey?.Replace(" ", string.Empty), "Ctrl+Shift+F9", StringComparison.OrdinalIgnoreCase);
@@ -109,6 +109,13 @@ public const int CurrentSchemaVersion = 14;
             // app, which is gone; that sign-in is dropped at launch, and turning
             // Spotify back on is one press (it reads the Spotify app on the PC).
             settings.SpotifyEnabled = false;
+        }
+
+        if (settings.SettingsSchemaVersion < 15)
+        {
+            // Apply Mono to every existing installation once on upgrade.
+            // A later explicit Stereo choice remains available and persists.
+            settings.MicrophoneChannelMode = "Mono";
         }
 
         settings.CustomThemes ??= new();

@@ -9,6 +9,31 @@ namespace ClypDat.App.Tests;
 public sealed class DefaultMicrophoneTests
 {
     [Fact]
+    public void MonoIsDefaultAndUpgradeForcesItOnceForExistingStereoSettings()
+    {
+        Assert.Equal("Mono", new AppSettings().MicrophoneChannelMode);
+        var settings = new AppSettings { SettingsSchemaVersion = 14, MicrophoneChannelMode = "Stereo" };
+        Assert.True(AppSettingsMigrations.Apply(settings));
+        Assert.Equal("Mono", settings.MicrophoneChannelMode);
+        settings.MicrophoneChannelMode = "Stereo";
+        Assert.False(AppSettingsMigrations.Apply(settings));
+        Assert.Equal("Stereo", settings.MicrophoneChannelMode);
+    }
+
+    [Fact]
+    public void MonoUpgradePersistsThroughSettingsLoading() => OscSettingsIntegrationTests.Isolated(() =>
+    {
+        var settings = new AppSettings { SettingsSchemaVersion = 14, MicrophoneChannelMode = "Stereo" };
+        Assert.True(AppSettingsStore.Save(settings));
+        var loaded = AppSettingsStore.Load();
+        Assert.Equal("Mono", loaded.MicrophoneChannelMode);
+        Assert.Equal(AppSettingsMigrations.CurrentSchemaVersion, loaded.SettingsSchemaVersion);
+        loaded.MicrophoneChannelMode = "Stereo";
+        Assert.True(AppSettingsStore.Save(loaded));
+        Assert.Equal("Stereo", AppSettingsStore.Load().MicrophoneChannelMode);
+    });
+
+    [Fact]
     public void WatcherRootsCallbackUntilSuccessfulUnregistration()
     {
         var registration = new FakeRegistration();

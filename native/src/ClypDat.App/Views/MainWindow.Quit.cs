@@ -59,6 +59,7 @@ public sealed partial class MainWindow
 
     private async Task RunQuitAsync(string reason)
     {
+        StopOscControls();
         AppLog.Info($"[Quit] reason={reason}, busy=[{string.Join(", ", ShutdownGuard.ActiveLabels)}]");
         var clock = Stopwatch.StartNew();
         var quitAnyway = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

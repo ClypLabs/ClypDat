@@ -68,6 +68,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     public event EventHandler<AutoClipDetectorEvent>? AutoClipDetected;
     public event EventHandler<AutoClipDetectorStatus>? AutoClipStatusChanged;
     public ReplayCaptureHealth GetHealthSnapshot() => _health;
+    internal long CaptureGeneration => Interlocked.Read(ref _generation);
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
