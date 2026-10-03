@@ -44,7 +44,7 @@
     <Border Grid.Row="0" Background="{StaticResource Surface_171F27}" BorderBrush="{StaticResource Surface_1E2A33}" BorderThickness="0,0,0,1" PointerPressed="HeaderBar_OnPointerPressed">
       <Grid ColumnDefinitions="Auto,*,Auto,16,Auto" Margin="12,2,0,0" VerticalAlignment="Stretch">
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-          <Button Classes="brandButton" Padding="3,5" Click="LibraryHomeButton_OnClick" ToolTip.Tip="Library">
+          <Button Classes="brandButton" Padding="3,5" Click="LibraryHomeButton_OnClick">
             <!-- 256px source downscaled to the actual 26px on-screen size
                  (bigger than the display size, not a change to it) still
                  looked soft - RenderOptions.BitmapInterpolationMode
