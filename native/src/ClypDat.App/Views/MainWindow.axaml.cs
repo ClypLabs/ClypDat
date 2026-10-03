@@ -5449,7 +5449,11 @@ public sealed partial class MainWindow : Window
 
         public bool PlayerAttached => Volatile.Read(ref _playerAttached) != 0;
         public bool FirstFrameReady => Volatile.Read(ref _firstFrameReady) != 0;
-        public void MarkPlayerAttached() => Volatile.Write(ref _playerAttached, 1);
+        public void MarkPlayerAttached()
+        {
+            Volatile.Write(ref _playerAttached, 1);
+            Readiness.MarkPlayerAttached();
+        }
         public void MarkFirstFrameReady() => Volatile.Write(ref _firstFrameReady, 1);
     }
 
@@ -5518,7 +5522,7 @@ public sealed partial class MainWindow : Window
 
     private void StartWarmEditorOutput(EditorHoverWarmup warmup, PlaybackSession session)
     {
-        if (warmup.Cancellation.IsCancellationRequested || warmup.Claimed || !ReferenceEquals(_editorHoverWarmup, warmup))
+        if (warmup.Cancellation.IsCancellationRequested || (!warmup.Claimed && !ReferenceEquals(_editorHoverWarmup, warmup)))
         {
             warmup.Readiness.Complete(false);
             return;
@@ -9372,12 +9376,14 @@ public sealed partial class MainWindow : Window
                 string? adoptionFailure = warmup.Failed ? "warm-up-failed" : null;
                 try
                 {
-                    var session = await warmup.SessionReady.Task.WaitAsync(cts.Token);
+                    var session = await warmup.SessionReady.Task.WaitAsync(RemainingEditorOpenTime(openClock), cts.Token);
                     if (cts.IsCancellationRequested) return;
+                    using var adoptionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, warmup.Cancellation.Token);
                     var canAdopt = !warmup.Failed && await warmup.Readiness.CanAdoptAsync(warmup.VideoLoaded.Task,
                         () => warmup.PlayerAttached && !warmup.Cancellation.IsCancellationRequested,
                         () => session.VideoPlayer.VoutCount > 0 && session.Composition?.HasPresentedPicture == true,
-                        cts.Token, onFailure: reason => adoptionFailure = reason);
+                        adoptionCancellation.Token, RemainingEditorOpenTime(openClock),
+                        reason => adoptionFailure = reason);
                     AppLog.Debug($"[DEBUG-editor-open-latency] warm-up adoption: {Path.GetFileName(warmup.Path)} result={canAdopt}, clickWaitMs={openClock.ElapsedMilliseconds}, readinessWaitMs={adoptionClock.ElapsedMilliseconds}, warmupMs={warmup.Clock.ElapsedMilliseconds}, reason={adoptionFailure ?? "ready"}.");
                     if (canAdopt)
                     {
@@ -9400,6 +9406,11 @@ public sealed partial class MainWindow : Window
                 }
                 catch (OperationCanceledException)
                 {
+                }
+                catch (TimeoutException)
+                {
+                    adoptionFailure = "session-ready-timeout";
+                    openCold = !cts.IsCancellationRequested;
                 }
                 catch (Exception error)
                 {

@@ -31,13 +31,30 @@ public sealed class EditorHoverWarmupReadinessTests
     }
 
     [Fact]
-    public async Task ClaimBeforePlayerStartsFallsBack()
+    public async Task ClaimWithoutPlayerAttachmentTimesOut()
     {
         var readiness = new EditorHoverWarmupReadiness();
         string? reason = null;
         Assert.False(await readiness.CanAdoptAsync(Task.CompletedTask, () => false, () => true,
-            CancellationToken.None, onFailure: value => reason = value));
-        Assert.Equal("player-not-attached", reason);
+            CancellationToken.None, TimeSpan.FromMilliseconds(20), value => reason = value));
+        Assert.Equal("player-attach-timeout", reason);
+    }
+
+    [Fact]
+    public async Task ClaimWaitsForPlayerAttachmentBeforeCheckingSeek()
+    {
+        var readiness = new EditorHoverWarmupReadiness();
+        readiness.Complete(true);
+        var attached = false;
+        var claim = readiness.CanAdoptAsync(Task.CompletedTask, () => attached, () => true,
+            CancellationToken.None, TimeSpan.FromSeconds(1));
+
+        await Task.Delay(20);
+        Assert.False(claim.IsCompleted);
+
+        attached = true;
+        readiness.MarkPlayerAttached();
+        Assert.True(await claim);
     }
 
     [Theory]
