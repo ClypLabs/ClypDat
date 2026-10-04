@@ -234,6 +234,8 @@ internal static class AppThemeService
     public static bool IsLight(string preset) =>
         Transforms.TryGetValue(Normalize(preset), out var transform) && transform.IsLight;
 
+    public static bool IsLightTheme => _isLightTheme;
+
     public static string Normalize(string? preset)
     {
         if (string.Equals(preset, "Violet", StringComparison.OrdinalIgnoreCase)) return "Berry";

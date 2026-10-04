@@ -534,7 +534,10 @@ public sealed partial class MainWindow : Window
                     if (e.PropertyName == nameof(MainWindowViewModel.ClipSpeed)) ApplyEditorSpeedPreview();
                     if (e.PropertyName == nameof(MainWindowViewModel.ClipCropMode)) QueueEditorCropPreview();
                     if (e.PropertyName is nameof(MainWindowViewModel.SelectedThemePreset) or nameof(MainWindowViewModel.UseSystemAccentColor))
+                    {
+                        UpdateHoverControlsTheme();
                         QueueEditorCropPreview(flush: true);
+                    }
                     if (e.PropertyName is nameof(MainWindowViewModel.IsSettingsVisible)
                         or nameof(MainWindowViewModel.IsHelpVisible)
                         or nameof(MainWindowViewModel.IsSharedClipsVisible)
@@ -10836,9 +10839,8 @@ public sealed partial class MainWindow : Window
                 existing.BorderThickness = new Thickness(fullscreen ? 1 : 0);
                 existing.Height = double.NaN;
                 existing.VerticalAlignment = VerticalAlignment.Stretch;
-                existing.Background = _hoverControlsVisibleFallback
-                    ? AppThemeService.Brush("Surface_0B0F14", "#0B0F14")
-                    : fullscreen ? new SolidColorBrush(Color.Parse("#D90B1016")) : AppThemeService.Brush("Surface_8C0B1016", "#8C0B1016");
+                existing.Background = HoverControlsBackdropBrush(fullscreen);
+                existing.BorderBrush = HoverControlsBorderBrush(fullscreen);
                 SetHoverControlsOffset(HoverControlsHiddenOffset);
             }
             return _editorHoverControlsWindow;
@@ -10855,9 +10857,9 @@ public sealed partial class MainWindow : Window
             // instead of fighting whatever frame is underneath. The progress
             // strip along the top edge is what separates it from the video,
             // so only fullscreen adds a border around the floating panel.
-            Background = fullscreen ? new SolidColorBrush(Color.Parse("#D90B1016")) : AppThemeService.Brush("Surface_8C0B1016", "#8C0B1016"),
+            Background = HoverControlsBackdropBrush(fullscreen),
             CornerRadius = new CornerRadius(fullscreen ? 12 : 0),
-            BorderBrush = new SolidColorBrush(Color.Parse("#26FFFFFF")),
+            BorderBrush = HoverControlsBorderBrush(fullscreen),
             BorderThickness = new Thickness(fullscreen ? 1 : 0),
             Child = BuildPlaybackBarLayout(fullscreen),
             RenderTransform = translate,
@@ -10874,6 +10876,7 @@ public sealed partial class MainWindow : Window
         var window = new Window
         {
             WindowDecorations = WindowDecorations.None,
+            RequestedThemeVariant = Application.Current?.RequestedThemeVariant,
             ShowInTaskbar = false,
             CanResize = false,
             ShowActivated = false,
@@ -10920,6 +10923,29 @@ public sealed partial class MainWindow : Window
         };
         _editorHoverControlsWindow = window;
         return window;
+    }
+
+    private IBrush HoverControlsBackdropBrush(bool fullscreen)
+    {
+        if (_hoverControlsVisibleFallback) return AppThemeService.Brush("Surface_0B0F14", "#0B0F14");
+        if (!fullscreen) return AppThemeService.Brush("Surface_8C0B1016", "#8C0B1016");
+        return new SolidColorBrush(Color.Parse(AppThemeService.IsLightTheme ? "#D9F1EDF5" : "#D90B1016"));
+    }
+
+    private static IBrush HoverControlsBorderBrush(bool fullscreen) =>
+        new SolidColorBrush(Color.Parse(fullscreen && AppThemeService.IsLightTheme ? "#26000000" : "#26FFFFFF"));
+
+    private void UpdateHoverControlsTheme()
+    {
+        if (_hoverControlsBackdrop is not { } backdrop) return;
+        if (_editorHoverControlsWindow is { } window)
+            window.RequestedThemeVariant = Application.Current?.RequestedThemeVariant;
+        backdrop.Background = HoverControlsBackdropBrush(_hoverControlsFullscreen);
+        backdrop.BorderBrush = HoverControlsBorderBrush(_hoverControlsFullscreen);
+        if (_editorHoverControlsWindow?.IsVisible == true && _hoverControlsPerPixelOverlay is { IsReady: true } mirror)
+        {
+            if (!mirror.Refresh()) UseVisibleHoverFallback("theme change mirror refresh failed");
+        }
     }
 
     private void UseVisibleHoverFallback(string reason)
