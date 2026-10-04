@@ -1,13 +1,19 @@
 namespace ClypDat.App.Services;
 
-/// <summary>
-/// One recorder profile instead of exposing vendor-specific quality presets.
-/// The native recorder sizes its encoder pipeline per backend
-/// (encoder_backend.h); this only names the profile it is handed.
-/// </summary>
+/// <summary>Normalizes the user-selected NVIDIA NVENC preset.</summary>
 public static class ReplayEncoderProfilePolicy
 {
     public const string Automatic = "Automatic";
+    public const string DefaultPreset = "P1";
 
-    public static string Resolve() => Automatic;
+    public static string Resolve(string? mode, string? requestedPreset)
+    {
+        if (!string.Equals(mode, "Manual", StringComparison.OrdinalIgnoreCase)) return Automatic;
+        return NormalizePreset(requestedPreset);
+    }
+
+    public static string NormalizePreset(string? requestedPreset) => requestedPreset?.ToUpperInvariant() switch
+    {
+        "P1" => "P1", "P2" => "P2", "P3" => "P3", "P4" => "P4", "P5" => "P5", _ => DefaultPreset
+    };
 }

@@ -72,6 +72,12 @@ public sealed class AppSettings
     // Opus is the default: the best quality for its size. AAC suits older
     // players; Vorbis saves recordings as MKV.
     public string ReplayAudioCodec { get; set; } = RecordingAudioCodec.Opus;
+    // NVENC presets run from fastest (P1) to highest quality (P5). Non-NVIDIA
+    // encoders ignore this preference.
+    public string ReplayEncoderPresetMode { get; set; } = "Automatic";
+    public string ReplayEncoderPreset { get; set; } = "P1";
+    // Zero keeps each audio codec's existing default bitrate.
+    public int ReplayAudioBitrateKbps { get; set; }
     public string ReplayEncoderMode { get; set; } = "GPU";
     // Sustained encoder overload may lower live target FPS, then restore it
     // after recovery. Users can disable this protection.

@@ -889,6 +889,7 @@ struct RecordingCapture::State : std::enable_shared_from_this<RecordingCapture::
                 const int capacity = plan ? plan->pool_capacity : legacy_surface_capacity(config.fps);
                 VideoEncoderConfig ec; ec.width = config.width; ec.height = config.height; ec.fps = fps;
                 ec.bitrate_mbps = config.bitrate_mbps; ec.name = candidate.name; ec.low_power = candidate.low_power;
+                ec.preset = config.nvenc_preset;
                 if (plan) {
                     ec.resource_options = plan->options;
                     if (plan->low_delay_flag) ec.codec_flags |= AV_CODEC_FLAG_LOW_DELAY;

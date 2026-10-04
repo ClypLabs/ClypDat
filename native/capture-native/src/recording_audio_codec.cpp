@@ -33,7 +33,7 @@ const char* audio_codec_label(AudioCodec codec) {
 }
 bool audio_codec_needs_matroska(AudioCodec codec) { return codec == AudioCodec::Vorbis; }
 
-CodecContext open_audio_encoder(AudioCodec codec, int channels) {
+CodecContext open_audio_encoder(AudioCodec codec, int channels, int bitrate_kbps) {
     const char* name = codec == AudioCodec::Aac ? "aac" : codec == AudioCodec::Vorbis ? "libvorbis" : "libopus";
     const auto* encoder = avcodec_find_encoder_by_name(name);
     if (!encoder) throw std::runtime_error(std::string(audio_codec_label(codec)) + " audio encoder unavailable");
@@ -49,7 +49,8 @@ CodecContext open_audio_encoder(AudioCodec codec, int channels) {
     else throw std::runtime_error(std::string(audio_codec_label(codec)) + " encoder has no float input");
     context->sample_rate = 48000; context->time_base = {1, 48000};
     av_channel_layout_default(&context->ch_layout, channels);
-    context->bit_rate = codec == AudioCodec::Opus ? 128000 : 192000;
+    const int default_bitrate = codec == AudioCodec::Opus ? 128 : 192;
+    context->bit_rate = int64_t(bitrate_kbps > 0 ? std::clamp(bitrate_kbps, 32, 320) : default_bitrate) * 1000;
     context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     check(avcodec_open2(context.get(), encoder, nullptr), "Open audio encoder");
     if (context->frame_size <= 0) throw std::runtime_error("Audio encoder has no fixed frame size");
@@ -188,12 +189,12 @@ struct AudioTrackEncoder::State {
         // Audible flag of each frame still inside the encoder.
         std::deque<std::pair<int64_t, bool>> frames;
     };
-    AudioCodec codec = AudioCodec::Opus; bool mix = false; Sink sink;
+    AudioCodec codec = AudioCodec::Opus; int bitrate_kbps = 0; bool mix = false; Sink sink;
     std::unique_ptr<AudioLaneMixer> mixer;
     std::map<std::string, Track> tracks;
     int block = 0, preroll = 0; bool finished = false;
     Track make(const std::string& key, int channels) {
-        Track track; track.key = key; track.channels = channels; track.codec = open_audio_encoder(codec, channels);
+        Track track; track.key = key; track.channels = channels; track.codec = open_audio_encoder(codec, channels, bitrate_kbps);
         auto* parameters = avcodec_parameters_alloc(); if (!parameters) throw std::bad_alloc();
         std::shared_ptr<AVCodecParameters> owned(parameters, [](AVCodecParameters* p) { avcodec_parameters_free(&p); });
         check(avcodec_parameters_from_context(parameters, track.codec.get()), "Copy audio encoder parameters");
@@ -258,9 +259,9 @@ struct AudioTrackEncoder::State {
         tracks = std::move(kept);
     }
 };
-AudioTrackEncoder::AudioTrackEncoder(AudioCodec codec, std::vector<AudioLaneConfig> lanes, bool mix, int64_t bound, Sink sink) : state_(std::make_unique<State>()) {
-    auto& s = *state_; s.codec = codec; s.mix = mix; s.sink = std::move(sink);
-    auto probe = open_audio_encoder(codec, 2); s.block = probe->frame_size;
+AudioTrackEncoder::AudioTrackEncoder(AudioCodec codec, int bitrate_kbps, std::vector<AudioLaneConfig> lanes, bool mix, int64_t bound, Sink sink) : state_(std::make_unique<State>()) {
+    auto& s = *state_; s.codec = codec; s.bitrate_kbps = bitrate_kbps; s.mix = mix; s.sink = std::move(sink);
+    auto probe = open_audio_encoder(codec, 2, bitrate_kbps); s.block = probe->frame_size;
     // Opus needs 80 ms to converge after a cut; the others need one frame of overlap.
     s.preroll = codec == AudioCodec::Opus ? 3840 : (std::max)(s.block, probe->initial_padding);
     s.mixer = std::make_unique<AudioLaneMixer>(std::move(lanes), s.block, bound);

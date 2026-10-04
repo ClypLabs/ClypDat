@@ -102,6 +102,14 @@ public static class AppSettingsStore
             ? "AV1"
             : "H.264";
         settings.ReplayAudioCodec = RecordingAudioCodec.Normalize(settings.ReplayAudioCodec);
+        settings.ReplayEncoderPresetMode = string.Equals(settings.ReplayEncoderPresetMode, "Manual", StringComparison.OrdinalIgnoreCase)
+            ? "Manual" : "Automatic";
+        settings.ReplayEncoderPreset = settings.ReplayEncoderPreset?.ToUpperInvariant() switch
+        {
+            "P1" => "P1", "P2" => "P2", "P3" => "P3", "P4" => "P4", "P5" => "P5", _ => "P1"
+        };
+        if (settings.ReplayAudioBitrateKbps is not (0 or 64 or 96 or 128 or 160 or 192 or 256 or 320))
+            settings.ReplayAudioBitrateKbps = 0;
         settings.ReplayEncoderMode = string.Equals(settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase)
             ? "CPU"
             : "GPU";

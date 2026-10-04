@@ -1,0 +1,113 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:conv="using:Avalonia.Data.Converters"
+             xmlns:opconv="using:ClypDat.App.Converters"
+             x:Class="ClypDat.App.Views.Settings.AdvancedSection"
+             x:DataType="vm:MainWindowViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static opconv:SettingsSectionVisibleConverter.Instance}" ConverterParameter="Advanced">
+      <Binding Path="SettingsSearchText" />
+      <Binding Path="SelectedSettingsSection" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <StackPanel Spacing="24" Tag="Advanced">
+    <Border Classes="settingsDivider" Margin="0,0,0,4" IsVisible="{Binding IsSettingsSearchActive}" />
+    <StackPanel Spacing="6">
+      <TextBlock Classes="settingsSectionTitle" Text="Advanced" />
+      <TextBlock Classes="settingsSectionDesc" Text="Fine-tune recording, audio quality, and OSC controls." />
+    </StackPanel>
+
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Encoder preset|NVENC|P1|P2|P3|P4|P5|Automatic|Manual|Encoding quality|GPU load|High resolution}">
+      <TextBlock Classes="settingsGroupLabel" Text="ENCODER PRESET" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Preset mode" />
+                <TextBlock Classes="settingsRowDesc" Text="Automatic keeps ClypDat's encoder selection; NVENC uses P1. Manual lets you choose another NVIDIA NVENC preset." />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Classes="settingsInput" Width="150" VerticalAlignment="Center"
+                        ItemsSource="{Binding ReplayEncoderPresetModes}" SelectedItem="{Binding SelectedReplayEncoderPresetMode}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow static" IsEnabled="{Binding IsReplayEncoderPresetManual}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="NVENC preset" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="P1 encodes fastest. P5 uses more GPU time for higher quality. High resolutions and frame rates increase work per frame; P4 and P5 can lower capture throughput and drop frames on a busy GPU. Start with P1 or P2, then raise it if capture stays smooth." TextWrapping="Wrap" />
+                <TextBlock Classes="settingsRowDescSm" Text="Used only when NVIDIA NVENC is the active video encoder." />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Classes="settingsInput" Width="110" VerticalAlignment="Center"
+                        ItemsSource="{Binding ReplayEncoderPresets}" SelectedItem="{Binding SelectedReplayEncoderPreset}" />
+            </Grid>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Audio bitrate|kb/s|Audio quality|Codec default}">
+      <TextBlock Classes="settingsGroupLabel" Text="AUDIO BITRATE" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <Border Classes="settingsRow static">
+          <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+            <StackPanel Classes="settingsRowText">
+              <TextBlock Classes="settingsRowTitle" Text="Audio bitrate" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              <TextBlock Classes="settingsRowDesc" Text="Applies to saved clips and Full Session recordings. Codec default keeps Opus at 128 kb/s and AAC or Vorbis at 192 kb/s. Higher bitrates use more storage." TextWrapping="Wrap" />
+            </StackPanel>
+            <ComboBox Grid.Column="1" Classes="settingsInput" Width="150" VerticalAlignment="Center"
+                      ItemsSource="{Binding ReplayAudioBitrates}" SelectedItem="{Binding SelectedReplayAudioBitrate}">
+              <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+          </Grid>
+        </Border>
+      </Border>
+    </StackPanel>
+
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=OSC|Open Sound Control|Network controls|UDP|Port|Listener status|OSC setup guide|Stream Deck|OSC Remote}">
+      <TextBlock Classes="settingsGroupLabel" Text="OSC NETWORK CONTROLS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Enable OSC" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Save clips and change replay length from an OSC controller over UDP." />
+                <WrapPanel>
+                  <TextBlock Classes="settingsRowDesc" Text="Using a Stream Deck? Add the " />
+                  <TextBlock Classes="settingsLink" Text="OSC Remote" VerticalAlignment="Center" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}"
+                             Tag="https://marketplace.elgato.com/product/osc-remote-9ccf7913-4532-4d68-8b1d-6c512923cda6"
+                             PointerPressed="LicenseLinkText_OnPointerPressed" />
+                  <TextBlock Classes="settingsRowDesc" Text=" plugin and send its buttons to this PC on the port below." />
+                </WrapPanel>
+                <TextBlock Classes="settingsRowWarning" Text="Anyone who can reach the enabled OSC port can save clips and change replay length." TextWrapping="Wrap" />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding OscEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="UDP port" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Any port from 1 to 65535. Default: 9001. Changing the port reconnects the listener. Firewall rules are managed by you." />
+                <TextBlock Classes="settingsRowWarning" Text="{Binding OscPortError}" IsVisible="{Binding HasOscPortError}" TextWrapping="Wrap" />
+              </StackPanel>
+              <TextBox x:Name="OscPortBox" Grid.Column="1" Classes="settingsInput" Width="150" MaxLength="5" VerticalAlignment="Center" Text="{Binding OscPortText}" LostFocus="OscPort_OnLostFocus" KeyDown="OscPort_OnKeyDown" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow static">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="settingsRowTitle" Text="Listener status" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              <TextBlock Classes="settingsRowDesc" Text="{Binding OscListenerStatus}" />
+              <Button Content="OSC setup guide" Click="OscGuide_OnClick" HorizontalAlignment="Left" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </StackPanel>
+</UserControl>

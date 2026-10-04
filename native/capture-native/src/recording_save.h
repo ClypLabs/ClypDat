@@ -107,6 +107,7 @@ struct FullSessionConfig {
     std::vector<AudioLaneConfig> lanes;
     size_t queue_bytes=64*1024*1024,queue_items=8192;
     AudioCodec codec=AudioCodec::Opus;
+    int audio_bitrate_kbps=0;
 };
 struct FullSessionStatus { bool running=false,finished=false; std::string error; int64_t duration_us=0; uint64_t converted_audio_frames=0; };
 class FullSessionWriter {

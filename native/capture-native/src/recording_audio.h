@@ -44,6 +44,7 @@ struct AudioSnapshot {
 };
 struct AudioHistoryOptions {
     AudioCodec codec = AudioCodec::Opus;
+    int bitrate_kbps = 0;
     // PCM held back from the encoders so late sources still mix in.
     int64_t encode_lag_us = 500000;
     std::function<void()> before_write, before_flush;
@@ -90,6 +91,7 @@ struct AudioApplicationConfig { std::wstring process_name; float gain=1; };
 struct AudioGraphConfig {
     std::filesystem::path ffmpeg,rnnoise_model;
     AudioCodec codec=AudioCodec::Opus;
+    int bitrate_kbps=0;
     int64_t retention_us=60000000,qpc_anchor=0,qpc_frequency=0,monotonic_anchor_us=0;
     std::wstring game_executable,output_device_id;
     std::vector<std::wstring> excluded_processes,microphone_device_ids;

@@ -19,7 +19,7 @@ typedef struct cd_session_config {
     cd_string16 chat_device_name, chat_device_id, microphone_device_name;
     cd_strings16 chat_processes, microphone_devices, excluded_processes;
     const cd_audio_application* applications;
-    uint32_t application_count, reserved;
+    uint32_t application_count, audio_bitrate_kbps;
     cd_string16 game_name, game_executable, game_window_title, game_window_class;
     cd_string16 video_codec, encoder_mode, encoder_profile, frame_rate_mode, pacing_mode;
     cd_string16 capture_source, monitor_device_name, process_priority, microphone_channel_mode;

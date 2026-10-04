@@ -134,6 +134,9 @@ int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder*
     native.capture.fps = config->frame_rate; native.capture.bitrate_mbps = config->bitrate_mbps;
     native.capture.cpu_encoder = copy(config->encoder_mode) == L"CPU";
     native.capture.av1 = copy(config->video_codec) == L"AV1";
+    const auto encoder_profile = copy(config->encoder_profile);
+    native.capture.nvenc_preset = encoder_profile == L"P2" ? "p2" : encoder_profile == L"P3" ? "p3" :
+        encoder_profile == L"P4" ? "p4" : encoder_profile == L"P5" ? "p5" : "p1";
     native.capture.variable_frame_rate = copy(config->frame_rate_mode) == L"VFR";
     native.capture.capture_cursor = (config->flags & CD_SESSION_CURSOR) != 0;
     native.capture.protect_frame_rate = (config->flags & CD_SESSION_ADAPTIVE_FPS) != 0;
@@ -154,7 +157,8 @@ int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder*
     native.work_directory = copy(config->work_directory); native.ffmpeg = copy(config->ffmpeg_path);
     AudioGraphConfig audio;
     native.audio_codec = parse_audio_codec(copy(config->audio_codec));
-    audio.codec = native.audio_codec; audio.ffmpeg = native.ffmpeg;
+    native.audio_bitrate_kbps = static_cast<int>(std::min(config->audio_bitrate_kbps, 320u));
+    audio.codec = native.audio_codec; audio.bitrate_kbps = native.audio_bitrate_kbps; audio.ffmpeg = native.ffmpeg;
     audio.rnnoise_model = copy(config->rnnoise_model); audio.retention_us = int64_t(config->duration_seconds) * 1000000;
     audio.qpc_anchor = config->qpc_anchor; audio.qpc_frequency = config->qpc_frequency;
     audio.monotonic_anchor_us = native.capture.monotonic_anchor_us;
@@ -172,6 +176,7 @@ int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder*
     native.audio_graph = audio;
     if (config->flags & CD_SESSION_FULL) {
         FullSessionConfig session; session.output = copy(config->full_session_path); session.codec = native.audio_codec;
+        session.audio_bitrate_kbps = native.audio_bitrate_kbps;
         native.full_session = std::move(session);
     }
     // Every string is copied at the call boundary, including publication-only

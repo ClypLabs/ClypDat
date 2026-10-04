@@ -133,6 +133,7 @@ struct RecordingCaptureConfig {
     int width = 1920, height = 1080, fps = 60, bitrate_mbps = 20;
     bool variable_frame_rate = false, capture_cursor = true, prefer_dxgi = false;
     bool cpu_encoder = false, av1 = false, protect_frame_rate = false;
+    std::string nvenc_preset = "p1";
     bool capture_hdr = false;
     bool display_hdr=false,display_profile_available=false;
     bool disable_gpu_processing = false;

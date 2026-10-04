@@ -311,6 +311,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             new("UHD 4K (2160p)", 2160)
         };
         ReplayQualityPresets = new ObservableCollection<ReplayQualityPreset>(QualityPresets);
+        ReplayEncoderPresetModes = new ObservableCollection<string> { "Automatic", "Manual" };
+        ReplayEncoderPresets = new ObservableCollection<string> { "P1", "P2", "P3", "P4", "P5" };
+        ReplayAudioBitrates = new ObservableCollection<ReplayAudioBitrateOption>
+        {
+            new("Codec default", 0), new("64 kb/s", 64), new("96 kb/s", 96), new("128 kb/s", 128),
+            new("160 kb/s", 160), new("192 kb/s", 192), new("256 kb/s", 256), new("320 kb/s", 320)
+        };
         ReplayEncoderModes = new ObservableCollection<ReplayEncoderModeOption>
         {
             new("GPU", "Hardware encoding. Recommended for most systems."),
@@ -336,9 +343,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayAudioCodecs = new ObservableCollection<ReplayVideoCodecOption>
         {
-            new("Opus", RecordingAudioCodec.Opus, "Opus at 128 kb/s. Best quality for its size. Default codec."),
-            new("AAC", RecordingAudioCodec.Aac, "AAC at 192 kb/s. Plays on older devices and editors."),
-            new("Vorbis", RecordingAudioCodec.Vorbis, "Vorbis at 192 kb/s. Clips and sessions save as MKV.")
+            new("Opus", RecordingAudioCodec.Opus, "Best quality for its size. Default codec."),
+            new("AAC", RecordingAudioCodec.Aac, "Plays on older devices and editors."),
+            new("Vorbis", RecordingAudioCodec.Vorbis, "Clips and sessions save as MKV.")
         };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
         {
@@ -912,6 +919,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public ObservableCollection<ReplayEncoderModeOption> ReplayEncoderModes { get; }
+    public ObservableCollection<string> ReplayEncoderPresetModes { get; }
+    public ObservableCollection<string> ReplayEncoderPresets { get; }
+    public sealed record ReplayAudioBitrateOption(string Label, int Value);
+    public ObservableCollection<ReplayAudioBitrateOption> ReplayAudioBitrates { get; }
     public ObservableCollection<int> ReplayFrameRates { get; }
     public sealed record ReplayFrameTimingOption(string Label, string Value, string Description);
     public ObservableCollection<ReplayFrameTimingOption> ReplayFrameTimingModes { get; }
@@ -2272,6 +2283,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool IsReplayEncoderCpu => string.Equals(Settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase);
 
+    public string SelectedReplayEncoderPreset
+    {
+        get => ReplayEncoderProfilePolicy.Resolve("Manual", Settings.ReplayEncoderPreset);
+        set
+        {
+            var preset = ReplayEncoderProfilePolicy.NormalizePreset(value);
+            if (string.Equals(Settings.ReplayEncoderPreset, preset, StringComparison.Ordinal)) return;
+            Settings.ReplayEncoderPreset = preset;
+            OnPropertyChanged();
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public string SelectedReplayEncoderPresetMode
+    {
+        get => string.Equals(Settings.ReplayEncoderPresetMode, "Manual", StringComparison.OrdinalIgnoreCase) ? "Manual" : "Automatic";
+        set
+        {
+            var mode = string.Equals(value, "Manual", StringComparison.OrdinalIgnoreCase) ? "Manual" : "Automatic";
+            if (string.Equals(Settings.ReplayEncoderPresetMode, mode, StringComparison.Ordinal)) return;
+            Settings.ReplayEncoderPresetMode = mode;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsReplayEncoderPresetManual));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public bool IsReplayEncoderPresetManual => string.Equals(Settings.ReplayEncoderPresetMode, "Manual", StringComparison.OrdinalIgnoreCase);
+
     // The probe runs a small real encode, so this means a hardware encoder is
     // usable, not merely that Windows reports a graphics adapter. Keep CPU-only
     // systems free of a warning that they cannot act on.
@@ -2370,6 +2412,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             Settings.ReplayAudioCodec = value.Value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsFullSessionVorbisNoticeVisible));
+            SaveSettings();
+            UpdateReplayQualityRestartRequired();
+        }
+    }
+
+    public ReplayAudioBitrateOption SelectedReplayAudioBitrate
+    {
+        get => ReplayAudioBitrates.FirstOrDefault(option => option.Value == Settings.ReplayAudioBitrateKbps)
+               ?? ReplayAudioBitrates[0];
+        set
+        {
+            if (value is null || Settings.ReplayAudioBitrateKbps == value.Value) return;
+            Settings.ReplayAudioBitrateKbps = value.Value;
+            OnPropertyChanged();
             SaveSettings();
             UpdateReplayQualityRestartRequired();
         }
@@ -2567,7 +2623,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // One string covering everything the running buffer baked in at start, so
     // the restart notice doesn't need a field per encoder setting.
     private string EncoderSignature =>
-        $"{Settings.ReplayVideoCodec}|{Settings.ReplayAudioCodec}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}|{Settings.ReplayHdrCompatibilityEnabled}|{string.Join(',', Settings.AdditionalAudioProcesses.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value}"))}";
+        $"{Settings.ReplayVideoCodec}|{Settings.ReplayAudioCodec}|{Settings.ReplayEncoderPresetMode}|{Settings.ReplayEncoderPreset}|{Settings.ReplayAudioBitrateKbps}|{Settings.ReplayEncoderMode}|{Settings.ReplayBitrateMbps}|{Settings.ReplayFrameRateMode}|{Settings.ReplayHdrCompatibilityEnabled}|{string.Join(',', Settings.AdditionalAudioProcesses.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(pair => $"{pair.Key}:{pair.Value}"))}";
 
     public bool ReplayHdrCompatibilityEnabled
     {
@@ -9012,7 +9068,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             ClipFileNameScheme: Settings.ClipFileNameScheme,
             CustomClipFileNameTemplate: Settings.CustomClipFileNameTemplate,
             LibraryFolder: Settings.LibraryFolder,
-            EncoderProfile: ReplayEncoderProfilePolicy.Resolve(),
+            EncoderProfile: ReplayEncoderProfilePolicy.Resolve(Settings.ReplayEncoderPresetMode, Settings.ReplayEncoderPreset),
             BitrateMbps: effective.ReplayBitrateMbps,
             VideoCodec: effective.ReplayVideoCodec,
             EncoderMode: effective.ReplayEncoderMode,
@@ -9033,7 +9089,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             ReplayHdrCompatibilityEnabled: Settings.ReplayHdrCompatibilityEnabled,
             SystemAudioEnabled: Settings.SystemAudioEnabled,
             SystemAudioVolumePercent: Settings.SystemAudioVolumePercent,
-            AudioCodec: RecordingAudioCodec.Normalize(Settings.ReplayAudioCodec));
+            AudioCodec: RecordingAudioCodec.Normalize(Settings.ReplayAudioCodec),
+            AudioBitrateKbps: Settings.ReplayAudioBitrateKbps);
     }
 
     public void SetDuration(TimeSpan duration)
@@ -11023,7 +11080,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string[] SettingsSectionNames =
     {
         "General", "Game Detection", "Import Clips",
-        "Replay Buffer", "Custom Game Settings", "Auto-Clip", "Audio", "Game Audio Exclusions",
+        "Replay Buffer", "Custom Game Settings", "Auto-Clip", "Audio", "Game Audio Exclusions", "Advanced",
         "Appearance", "Overlays and Notifications", "Discord Rich Presence",
         "About"
     };

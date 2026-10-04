@@ -38,7 +38,7 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
         public Text16 ChatDeviceName, ChatDeviceId, MicrophoneDeviceName;
         public Texts16 ChatProcesses, MicrophoneDevices, ExcludedProcesses;
         public IntPtr Applications;
-        public uint ApplicationCount, Reserved;
+        public uint ApplicationCount, AudioBitrateKbps;
         public Text16 GameName, GameExecutable, GameWindowTitle, GameWindowClass;
         public Text16 VideoCodec, EncoderMode, EncoderProfile, FrameRateMode, PacingMode;
         public Text16 CaptureSource, MonitorDeviceName, ProcessPriority, MicrophoneChannelMode;
@@ -174,6 +174,7 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
             MicrophoneDeviceName = memory.Text(s.MicrophoneDeviceName), ChatProcesses = memory.Texts(s.ChatAudioProcessNames),
             MicrophoneDevices = memory.Texts(s.MicrophoneDeviceIds), ExcludedProcesses = memory.Texts(s.GameAudioExcludedProcesses),
             Applications = memory.Array(applications), ApplicationCount = (uint)applications.Length,
+            AudioBitrateKbps = checked((uint)s.AudioBitrateKbps),
             GameName = memory.Text(s.GameDisplayName), GameExecutable = memory.Text(s.GameExecutableName), GameWindowTitle = memory.Text(s.GameWindowTitle),
             GameWindowClass = memory.Text(s.GameWindowClass), VideoCodec = memory.Text(s.VideoCodec), EncoderMode = memory.Text(s.EncoderMode),
             EncoderProfile = memory.Text(s.EncoderProfile), FrameRateMode = memory.Text(s.FrameRateMode), PacingMode = memory.Text(s.FramePacingMode),

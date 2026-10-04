@@ -52,10 +52,15 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         ["Replay Buffer"] = new[]
         {
             "Hotkey", "Save hotkey", "Recording", "Replay length", "Resolution", "Frame rate",
-            "Encoding", "Encoder Preset", "Rate control", "Quality", "Bitrate",
+            "Encoding", "Quality", "Bitrate",
             "Full session recording", "Destination folder", "Session codec",
             "Finalize in background", "Storage limit", "Custom limit",
-            "OSC", "Open Sound Control", "Network controls", "UDP", "Port", "Listener status", "OSC setup guide"
+        },
+        ["Advanced"] = new[]
+        {
+            "OSC", "Open Sound Control", "Network controls", "UDP", "Port", "Listener status", "OSC setup guide",
+            "Encoding", "Encoder preset", "NVENC", "P1", "P2", "P3", "P4", "P5", "Automatic", "Manual",
+            "Audio codec", "Audio bitrate", "kb/s", "Audio quality", "Codec default"
         },
         ["Video Overlays"] = new[]
         {

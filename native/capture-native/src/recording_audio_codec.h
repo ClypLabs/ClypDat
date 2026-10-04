@@ -11,7 +11,7 @@ const char* audio_codec_label(AudioCodec codec);
 bool audio_codec_needs_matroska(AudioCodec codec);
 // One 48 kHz track: Opus at 128 kb/s, AAC or Vorbis at 192 kb/s. Global
 // headers are always requested so packets can be muxed into MP4 or Matroska.
-CodecContext open_audio_encoder(AudioCodec codec, int channels);
+CodecContext open_audio_encoder(AudioCodec codec, int channels, int bitrate_kbps = 0);
 
 // Track key and title of the stereo mix of every lane.
 inline constexpr const char* kAllTracksKey = "*all";
@@ -55,7 +55,7 @@ private:
 class AudioTrackEncoder {
 public:
     using Sink = std::function<void(const std::string& key, Packet packet, bool audible)>;
-    AudioTrackEncoder(AudioCodec codec, std::vector<AudioLaneConfig> lanes, bool mix, int64_t bound, Sink sink);
+    AudioTrackEncoder(AudioCodec codec, int bitrate_kbps, std::vector<AudioLaneConfig> lanes, bool mix, int64_t bound, Sink sink);
     ~AudioTrackEncoder();
     AudioTrackEncoder(const AudioTrackEncoder&) = delete;
     AudioTrackEncoder& operator=(const AudioTrackEncoder&) = delete;

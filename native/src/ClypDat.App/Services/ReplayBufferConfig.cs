@@ -53,5 +53,6 @@ public sealed record ReplayBufferConfig(
     bool ReplayHdrCompatibilityEnabled = true,
     bool SystemAudioEnabled = false,
     int SystemAudioVolumePercent = 100,
-    string AudioCodec = ClypDat.Core.Settings.RecordingAudioCodec.Opus);
+    string AudioCodec = ClypDat.Core.Settings.RecordingAudioCodec.Opus,
+    int AudioBitrateKbps = 0);
 

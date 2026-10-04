@@ -43,6 +43,7 @@ struct VideoEncoderConfig {
     // encoder. QSV allocates each packet at its VBV size and only shrinks
     // `size`, so history would otherwise pin the whole allocation.
     bool right_size_packets = false;
+    std::string preset = "p1";
 };
 
 enum class SubmitStatus { Accepted, Busy };

@@ -91,7 +91,10 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         checked(av_opt_set(context.priv_data,key,"1",0),"Configure explicit recording IDRs");
     };
     if (name.ends_with("_nvenc")) {
-        option("preset", "p1");
+        if (config.preset != "p1" && config.preset != "p2" && config.preset != "p3" &&
+            config.preset != "p4" && config.preset != "p5")
+            throw std::invalid_argument("Unsupported NVENC preset");
+        checked(av_opt_set(context.priv_data, "preset", config.preset.c_str(), 0), "Configure NVENC preset");
         if (name == "h264_nvenc") option("profile", "high");
         option("tune", "ll");
         option("spatial-aq", "0");

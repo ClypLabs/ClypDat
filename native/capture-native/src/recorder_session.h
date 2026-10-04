@@ -15,6 +15,7 @@ struct RecorderSessionConfig {
     std::vector<WasapiConfig> audio_sources;
     std::vector<AudioLaneConfig> audio_lanes;
     AudioCodec audio_codec = AudioCodec::Opus;
+    int audio_bitrate_kbps = 0;
     std::optional<AudioGraphConfig> audio_graph;
     OverlaySettingsNative overlays;
     bool capture_input = true;

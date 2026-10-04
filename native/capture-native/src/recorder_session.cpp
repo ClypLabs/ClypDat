@@ -112,7 +112,7 @@ RecorderSession::RecorderSession(RecorderSessionConfig config, std::unique_ptr<R
         throw std::invalid_argument("Invalid recorder configuration");
     auto s = state_ = std::make_shared<State>(std::move(config));
     s->audio = std::make_shared<AudioHistory>(s->config.audio_lanes,
-        int64_t(s->config.history_seconds) * 1000000, AudioHistoryOptions{s->config.audio_codec});
+        int64_t(s->config.history_seconds) * 1000000, AudioHistoryOptions{s->config.audio_codec, s->config.audio_bitrate_kbps});
     std::weak_ptr<State> weak = s;
     s->input->on_change([weak] { if (auto state = weak.lock()) state->notify(2); });
     s->overlays->reset(s->config.overlays.burned);
