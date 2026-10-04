@@ -18,6 +18,7 @@
       <TextBlock Classes="settingsSectionDesc" Text="Fine-tune recording, audio quality, and OSC controls." />
     </StackPanel>
 
+    <StackPanel IsVisible="{Binding IsReplayNvencAvailable}">
     <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Encoder preset|NVENC|P1|P2|P3|P4|P5|Automatic|Manual|Encoding quality|GPU load|High resolution}">
       <TextBlock Classes="settingsGroupLabel" Text="ENCODER PRESET" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
       <Border Classes="settingsGroupCard">
@@ -33,7 +34,7 @@
             </Grid>
           </Border>
           <Border Classes="settingsRowDivider" />
-          <Border Classes="settingsRow static" IsEnabled="{Binding IsReplayEncoderPresetManual}">
+          <Border Classes="settingsRow static" IsVisible="{Binding IsReplayEncoderPresetManual}">
             <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
               <StackPanel Classes="settingsRowText">
                 <TextBlock Classes="settingsRowTitle" Text="NVENC preset" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -47,6 +48,7 @@
         </StackPanel>
       </Border>
     </StackPanel>
+    </StackPanel>
 
     <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Audio bitrate|kb/s|Audio quality|Codec default}">
       <TextBlock Classes="settingsGroupLabel" Text="AUDIO BITRATE" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
@@ -57,7 +59,7 @@
               <TextBlock Classes="settingsRowTitle" Text="Audio bitrate" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
               <TextBlock Classes="settingsRowDesc" Text="Applies to saved clips and Full Session recordings. Codec default keeps Opus at 128 kb/s and AAC or Vorbis at 192 kb/s. Higher bitrates use more storage." TextWrapping="Wrap" />
             </StackPanel>
-            <ComboBox Grid.Column="1" Classes="settingsInput" Width="150" VerticalAlignment="Center"
+            <ComboBox Grid.Column="1" Classes="settingsInput" Width="180" VerticalAlignment="Center"
                       ItemsSource="{Binding ReplayAudioBitrates}" SelectedItem="{Binding SelectedReplayAudioBitrate}">
               <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" /></DataTemplate></ComboBox.ItemTemplate>
             </ComboBox>

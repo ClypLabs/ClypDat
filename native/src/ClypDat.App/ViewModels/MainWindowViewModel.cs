@@ -147,6 +147,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private int _selectedReplayFrameRate;
     private ReplayQualityPreset? _selectedReplayQualityPreset;
     private ReplayEncoderModeOption? _selectedReplayEncoderMode;
+    private bool _replayNvencAvailable;
     private string _selectedReplayCaptureSource = "Game";
     private DesktopMonitorOption? _selectedDesktopMonitor;
     private string _newCustomGameExecutable = string.Empty;
@@ -432,8 +433,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _ = Task.Run(() => ExportEncoderProbe.Av1Family).ContinueWith(result =>
             Dispatcher.UIThread.Post(() => ApplyReplayAv1ProbeResult(result.IsCompletedSuccessfully ? result.Result : null)),
             TaskScheduler.Default);
-        _ = Task.Run(() => ExportEncoderProbe.Family).ContinueWith(_ =>
-            Dispatcher.UIThread.Post(() => OnPropertyChanged(nameof(CpuEncoderHardwareWarningVisible))),
+        _ = Task.Run(() => ExportEncoderProbe.Family).ContinueWith(result =>
+            Dispatcher.UIThread.Post(() =>
+            {
+                _replayNvencAvailable = result.IsCompletedSuccessfully && string.Equals(result.Result, "nvenc", StringComparison.OrdinalIgnoreCase);
+                OnPropertyChanged(nameof(IsReplayNvencAvailable));
+                OnPropertyChanged(nameof(CpuEncoderHardwareWarningVisible));
+            }),
             TaskScheduler.Default);
         RefreshDesktopMonitors();
         _appFontFamilySave.Tick += (_, _) => FlushAppFontFamilySave();
@@ -2282,6 +2288,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     public bool IsReplayEncoderCpu => string.Equals(Settings.ReplayEncoderMode, "CPU", StringComparison.OrdinalIgnoreCase);
+
+    public bool IsReplayNvencAvailable => _replayNvencAvailable;
 
     public string SelectedReplayEncoderPreset
     {
