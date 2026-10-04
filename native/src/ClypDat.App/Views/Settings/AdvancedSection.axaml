@@ -33,7 +33,7 @@
                         ItemsSource="{Binding ReplayEncoderPresetModes}" SelectedItem="{Binding SelectedReplayEncoderPresetMode}" />
             </Grid>
           </Border>
-          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRowDivider" IsVisible="{Binding IsReplayEncoderPresetManual}" />
           <Border Classes="settingsRow static" IsVisible="{Binding IsReplayEncoderPresetManual}">
             <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
               <StackPanel Classes="settingsRowText">
