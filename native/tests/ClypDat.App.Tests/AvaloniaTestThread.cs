@@ -43,7 +43,18 @@ internal static class AvaloniaTestThread
 #pragma warning disable CA2255 // Module initializers are for exactly this kind of process-wide setup in a test assembly.
     [ModuleInitializer]
 #pragma warning restore CA2255
-    internal static void ClaimDispatcherFirst() => EnsureStarted();
+    internal static void ClaimDispatcherFirst()
+    {
+        // Before anything can touch AppLog or AppDataPaths - including the
+        // Avalonia thread started below, which runs app code. Without this,
+        // every test run wrote its fixture failures ("DXGI_ERROR_DEVICE_REMOVED",
+        // "playback would not unload") into the user's real
+        // %LOCALAPPDATA%\ClypDat\logs, where they read as genuine app errors.
+        ClypDat.Core.Settings.AppDataPaths.ConfigureProductFolder(TestAppDataFolder);
+        EnsureStarted();
+    }
+
+    internal const string TestAppDataFolder = "ClypDat-Tests";
 
     /// <summary>Blocks until Avalonia is set up on this thread (or failed to be).</summary>
     internal static void WaitUntilReady()
