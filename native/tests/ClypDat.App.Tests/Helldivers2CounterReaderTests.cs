@@ -25,6 +25,7 @@ public sealed class Helldivers2CounterReaderTests(ITestOutputHelper output)
     [InlineData("58", "Killstreak ×58", 23)]
     [InlineData("77", null, 0)]
     [InlineData("45", null, 0)]
+    [InlineData("22", null, 0)]
     public async Task BrightGameplayKeepsOneStreakUntilHudDisappears(string recording, string? expectedLabel, double disappearance)
     {
         var reader = new Helldivers2CounterReader(new WindowsOcrFrameReader().ReadTextAsync);
@@ -49,7 +50,7 @@ public sealed class Helldivers2CounterReaderTests(ITestOutputHelper output)
         if (expectedLabel is null)
         {
             Assert.Empty(events);
-            Assert.True(maximumRead >= (recording == "77" ? 100 : 55));
+            Assert.True(maximumRead >= recording switch { "77" => 100, "22" => 30, _ => 55 });
             Assert.NotEqual(Helldivers2CounterVisibility.Absent, lastVisibility);
         }
         else
@@ -58,6 +59,21 @@ public sealed class Helldivers2CounterReaderTests(ITestOutputHelper output)
             Assert.Equal(expectedLabel, item.Label);
             Assert.InRange(item.Timestamp.TotalSeconds, disappearance - 0.5, disappearance + 0.5);
             Assert.Equal(item.Timestamp.TotalSeconds + 1, confirmedAt);
+        }
+    }
+
+    [Fact]
+    public async Task OrangeSkullBetweenGoldAndPinkIsNotAbsent()
+    {
+        // Replay-22 frames 58-65 show ×28-×30 with the skull mid-transition;
+        // live capture read them as absent and split one streak into two clips.
+        var reader = new Helldivers2CounterReader(new WindowsOcrFrameReader().ReadTextAsync);
+        for (var index = 58; index <= 65; index++)
+        {
+            var images = await GrayPng.ReadCounterAsync(Path.Combine(FixtureRoot, "replay-22", $"counter-{index:D3}.png"));
+            var reading = await reader.ReadAsync(images.Gray, images.Mask);
+            Assert.NotEqual(Helldivers2CounterVisibility.Absent, reading.Visibility);
+            if (index <= 61) Assert.Equal(Helldivers2CounterVisibility.Present, reading.Visibility);
         }
     }
 

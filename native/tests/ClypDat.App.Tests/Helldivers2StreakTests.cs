@@ -6,8 +6,8 @@ namespace ClypDat.App.Tests;
 public sealed class Helldivers2StreakTests
 {
     [Theory]
-    [InlineData(19, null)]
-    [InlineData(20, "killstreak")]
+    [InlineData(29, null)]
+    [InlineData(30, "killstreak")]
     [InlineData(49, "killstreak")]
     [InlineData(50, "killstreak")]
     [InlineData(99, "killstreak")]
@@ -84,8 +84,8 @@ public sealed class Helldivers2StreakTests
     public void InterruptedAbsenceRestartsConfirmation(Helldivers2CounterVisibility interruption)
     {
         var detector = new Helldivers2Detector();
-        Present(detector, 0, 20);
-        Present(detector, 0.5, 20);
+        Present(detector, 0, 30);
+        Present(detector, 0.5, 30);
         Absent(detector, 1);
         Absent(detector, 1.5);
         Assert.Empty(detector.Observe(Frame(2, interruption)));
@@ -96,8 +96,8 @@ public sealed class Helldivers2StreakTests
     public void AbsenceNeedsThreeDistinctSamplesAndOneSecond()
     {
         var detector = new Helldivers2Detector();
-        Present(detector, 0, 20);
-        Present(detector, 0.5, 20);
+        Present(detector, 0, 30);
+        Present(detector, 0.5, 30);
         Absent(detector, 1);
         Assert.Empty(Absent(detector, 1));
         Assert.Empty(Absent(detector, 1.1));
@@ -109,8 +109,8 @@ public sealed class Helldivers2StreakTests
     public void CaptureFailureCancelsAbsenceConfirmation()
     {
         var detector = new Helldivers2Detector();
-        Present(detector, 0, 20);
-        Present(detector, 0.5, 20);
+        Present(detector, 0, 30);
+        Present(detector, 0.5, 30);
         Absent(detector, 1);
         Absent(detector, 1.5);
         detector.ObserveCaptureFailure();
@@ -128,9 +128,9 @@ public sealed class Helldivers2StreakTests
         Assert.Empty(Absent(detector, 0));
         Assert.Empty(Absent(detector, 1));
         Assert.Empty(Absent(detector, 2));
-        Present(detector, 3, 20);
-        Present(detector, 4, 20);
-        Assert.Equal("Killstreak ×20", Complete(detector, 5).Label);
+        Present(detector, 3, 30);
+        Present(detector, 4, 30);
+        Assert.Equal("Killstreak ×30", Complete(detector, 5).Label);
     }
 
     [Fact]
@@ -140,11 +140,11 @@ public sealed class Helldivers2StreakTests
         Present(detector, 0, 57);
         Present(detector, 0.5, 57);
         var first = Complete(detector, 1);
-        Present(detector, 2.5, 20);
-        Present(detector, 3, 20);
+        Present(detector, 2.5, 30);
+        Present(detector, 3, 30);
         var second = Complete(detector, 3.5);
         Assert.Equal("Killstreak ×57", first.Label);
-        Assert.Equal("Killstreak ×20", second.Label);
+        Assert.Equal("Killstreak ×30", second.Label);
         Assert.NotEqual(first.OccurrenceId, second.OccurrenceId);
         Assert.Equal(TimeSpan.FromSeconds(2.5), second.StreakStart);
     }

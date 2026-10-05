@@ -73,7 +73,7 @@ public static class AutoClipCatalog
         {
             Event("eliminated", "Eliminated", priority: 10, lead: 12, tail: 6),
             new AutoClipEventDefinition("killstreak", "Killstreaks", Priority: 100, DefaultEnabled: true, LeadSeconds: 10, TailSeconds: 6,
-                Description: "Saves one clip for a streak of 20+ kills after the HUD counter disappears for one second. Uses the highest confirmed count in the title and includes the streak, plus 10 seconds before and 6 seconds after, within your replay buffer."),
+                Description: "Saves one clip for a streak of 30+ kills after the HUD counter disappears for one second. Uses the highest confirmed count in the title and includes the streak, plus 10 seconds before and 6 seconds after, within your replay buffer."),
             Event("successful-mission", "Successful Mission", "missions", 80, true, 15, 10)
         }, new[]
         {

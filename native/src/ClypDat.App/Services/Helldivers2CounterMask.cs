@@ -45,10 +45,12 @@ public static class Helldivers2CounterMask
     private static byte Select(double r, double g, double b, int x, int width)
     {
         var skullArea = (long)x * 308 < (long)width * 120;
-        // The skull turns gold before pink, and remains visible while fading.
+        // The skull turns gold, then orange, then pink, and remains visible while
+        // fading. Gold reaches down to orange (about 252,165,38) so it overlaps
+        // pink; a gap between them read a live ×28 as absent and split the streak.
         // These wider colour bounds apply only left of the multiplier.
         var pink = skullArea && r > 70 && r > 1.6 * g && r > b + 35 && b > 0.15 * r;
-        var gold = skullArea && r > 140 && g > 130 && b < 0.45 * Math.Min(r, g) && Math.Abs(r - g) < 80;
+        var gold = skullArea && r > 140 && g > 130 && b < 0.45 * Math.Min(r, g) && Math.Abs(r - g) < 110;
         var yellow = r > 140 && g > 130 && b < 0.45 * Math.Min(r, g) && Math.Abs(r - g) < 35;
         return pink || gold || yellow ? (byte)255 : (byte)0;
     }

@@ -61,7 +61,7 @@ public sealed class AutoClipCatalogTests
         Assert.True(streak.DefaultEnabled);
         Assert.Equal("killstreak", streak.Id);
         Assert.Null(streak.GroupId);
-        Assert.Contains("20+", streak.Description);
+        Assert.Contains("30+", streak.Description);
         Assert.Contains("one second", streak.Description);
         var successfulMission = helldivers.Events.Single(item => item.Id == "successful-mission");
         Assert.True(successfulMission.DefaultEnabled);

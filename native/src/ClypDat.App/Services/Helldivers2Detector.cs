@@ -26,7 +26,7 @@ public sealed record Helldivers2DetectedEvent(
 /// </summary>
 public sealed partial class Helldivers2Detector
 {
-    private const int MinimumKillstreak = 20;
+    private const int MinimumKillstreak = 30;
     private readonly PhraseLatch _eliminated = new("ELIMINATED", confirmationFrames: 2, resetFrames: 6);
     private readonly PhraseLatch _successfulMission = new("SQUAD PAYOUT", confirmationFrames: 2, resetFrames: 20);
     private TimeSpan? _streakStart;
