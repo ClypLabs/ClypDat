@@ -1200,11 +1200,39 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryStorageLimitSummary));
         OnPropertyChanged(nameof(LibraryStorageLimitShortDisplay));
     }
-    public double LibraryUsedFractionOfDrive => HasDriveStats ? Math.Clamp(LibraryUsedBytes / (double)DriveStats.Total, 0, 1) : 0;
+    // The library total still drives the limit and the clip estimate; the
+    // storage card splits it by where the clips came from.
+    private (long Bytes, int Count) LibraryUsage(Func<ClipCardViewModel, bool> include)
+    {
+        long bytes = 0;
+        var count = 0;
+        foreach (var clip in AllClips)
+        {
+            if (!include(clip)) continue;
+            bytes += clip.TotalSizeBytes;
+            count++;
+        }
+        return (bytes, count);
+    }
+
+    private (long Bytes, int Count) ClypDatClipUsage => LibraryUsage(clip => !clip.IsExternalImport);
+    private (long Bytes, int Count) MedalImportUsage => LibraryUsage(clip => clip.IsMedalImport);
+    private (long Bytes, int Count) SteelSeriesImportUsage => LibraryUsage(clip => clip.IsSteelSeriesImport && !clip.IsMedalImport);
+
+    private double FractionOfDrive(long bytes) => HasDriveStats ? Math.Clamp(bytes / (double)DriveStats.Total, 0, 1) : 0;
+    public double LibraryUsedFractionOfDrive => FractionOfDrive(ClypDatClipUsage.Bytes);
+    public double MedalImportFractionOfDrive => FractionOfDrive(MedalImportUsage.Bytes);
+    public double SteelSeriesImportFractionOfDrive => FractionOfDrive(SteelSeriesImportUsage.Bytes);
     public double LibraryOtherUsedFractionOfDrive => HasDriveStats
         ? Math.Clamp((DriveStats.Total - DriveStats.Free - LibraryUsedBytes) / (double)DriveStats.Total, 0, 1)
         : 0;
-    public string LibraryClipsUsageDisplay => $"ClypDat clips: {FormatBytes(LibraryUsedBytes)} ({AllClips.Count} clips)";
+    public string LibraryClipsUsageDisplay => UsageLine("ClypDat clips", ClypDatClipUsage);
+    public bool HasMedalImports => MedalImportUsage.Count > 0;
+    public string MedalImportUsageDisplay => UsageLine("Medal imports", MedalImportUsage);
+    public bool HasSteelSeriesImports => SteelSeriesImportUsage.Count > 0;
+    public string SteelSeriesImportUsageDisplay => UsageLine("SteelSeries imports", SteelSeriesImportUsage);
+    private static string UsageLine(string label, (long Bytes, int Count) usage) =>
+        $"{label}: {FormatBytes(usage.Bytes)} ({usage.Count} {(usage.Count == 1 ? "clip" : "clips")})";
     public string LibraryOtherUsageDisplay => HasDriveStats
         ? $"Rest of drive: {FormatBytes(Math.Max(0, DriveStats.Total - DriveStats.Free - LibraryUsedBytes))}"
         : string.Empty;
@@ -9985,7 +10013,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(LibraryDriveUsedFraction));
         OnPropertyChanged(nameof(LibraryUsedFractionOfDrive));
         OnPropertyChanged(nameof(LibraryOtherUsedFractionOfDrive));
+        OnPropertyChanged(nameof(MedalImportFractionOfDrive));
+        OnPropertyChanged(nameof(SteelSeriesImportFractionOfDrive));
         OnPropertyChanged(nameof(LibraryClipsUsageDisplay));
+        OnPropertyChanged(nameof(HasMedalImports));
+        OnPropertyChanged(nameof(MedalImportUsageDisplay));
+        OnPropertyChanged(nameof(HasSteelSeriesImports));
+        OnPropertyChanged(nameof(SteelSeriesImportUsageDisplay));
         OnPropertyChanged(nameof(LibraryOtherUsageDisplay));
         OnPropertyChanged(nameof(LibraryPossibleClipsDisplay));
         NotifyStorageChrome();
