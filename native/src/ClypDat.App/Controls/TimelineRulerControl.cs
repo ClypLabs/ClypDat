@@ -78,8 +78,12 @@ public sealed class TimelineRulerControl : Control
         // Real clip durations are almost never an exact multiple of the step
         // (e.g. 60.99s, not 60.00s) - only draw the "true end" tick when
         // there's enough separation from the last regular major tick that
-        // their labels can't collide into garbage.
-        if (seconds % majorStep > majorStep * 0.4)
+        // their labels can't collide into garbage. Labels show whole seconds,
+        // so with 1s steps a 30.5s clip's end read "0:30" right beside the
+        // 0:30 tick; an end label that reads the same says nothing new.
+        var lastMajor = Math.Floor(seconds / majorStep) * majorStep;
+        if (seconds % majorStep > majorStep * 0.4 && (seconds - lastMajor) * pixelsPerSecond >= 40 &&
+            FormatTime(TimeSpan.FromSeconds(seconds)) != FormatTime(TimeSpan.FromSeconds(lastMajor)))
         {
             DrawTick(context, seconds, seconds, width, bottom, true, minorPen, majorPen, textBrush);
         }
