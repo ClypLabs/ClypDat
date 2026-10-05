@@ -87,6 +87,19 @@ public sealed partial class MainWindow : Window
     // through it to the end of the clip. A seek meant as "preview the footage
     // after the trim point" lands well clear of this.
     private static readonly TimeSpan TrimBoundaryTolerance = TimeSpan.FromMilliseconds(80);
+    // How close to the end of the media the editor will park or seek. A seek
+    // to the last instant makes libvlc report end-of-media and tear down its
+    // video output, which showed as a black flash. An untrimmed clip's TrimEnd
+    // is exactly that instant, so every park at the end used to land on it.
+    private static readonly TimeSpan MediaEndMargin = TimeSpan.FromMilliseconds(150);
+
+    private TimeSpan ParkableTime(TimeSpan time)
+    {
+        var duration = ViewModel?.Duration ?? TimeSpan.Zero;
+        if (duration <= MediaEndMargin) return time;
+        var limit = duration - MediaEndMargin;
+        return time > limit ? limit : time;
+    }
     // Where the playhead stopped on the last pause, while libvlc still agrees.
     // LibVLC 3 publishes its time on a ~250ms grid (a play from 44.102s paused
     // 245ms later reported 44.601s; one from 40.352s paused 184ms later still
@@ -7166,9 +7179,10 @@ public sealed partial class MainWindow : Window
         // TrimEnd without the media ever ending, and pressing Play there used to
         // run on past the trim point instead. Bounded above as well, so a seek
         // deliberately placed beyond TrimEnd still previews forward from there.
+        var trimStop = ParkableTime(ViewModel.TrimEnd);
         if (_endedAtTrimBoundary ||
             (ViewModel.TrimEnd > TimeSpan.Zero
-             && startTime >= ViewModel.TrimEnd - TrimBoundaryTolerance
+             && startTime >= trimStop - TrimBoundaryTolerance
              && startTime <= ViewModel.TrimEnd + TrimBoundaryTolerance))
         {
             startTime = ViewModel.TrimStart;
@@ -7396,7 +7410,7 @@ public sealed partial class MainWindow : Window
         await ApplyTimelineSeekAsync(trimEnd, resumePlayback: false);
         // A later seek (a click elsewhere mid-settle) supersedes this one.
         if (ViewModel is not null && !ViewModel.IsPlaying && ViewModel.TrimEnd == trimEnd
-            && (ViewModel.CurrentTime - trimEnd).Duration() <= TrimBoundaryTolerance)
+            && (ViewModel.CurrentTime - ParkableTime(trimEnd)).Duration() <= TrimBoundaryTolerance)
             _endedAtTrimBoundary = true;
     }
 
@@ -11234,11 +11248,19 @@ public sealed partial class MainWindow : Window
         // it (see _trimEndGuardArmed) - a session explicitly started past
         // TrimEnd (user seeked there and hit play) is left alone so the
         // footage after the trim-out point can still be previewed.
-        if (_trimEndGuardArmed && ViewModel.TrimEnd > TimeSpan.Zero && ViewModel.CurrentTime >= ViewModel.TrimEnd)
+        // The end of the media is a stop point for every session, and is
+        // checked against libvlc's own time as well: the playhead can trail it,
+        // and libvlc reaching end-of-media closes its video output - the
+        // picture flashed black at the end of a clip.
+        var mediaStop = ParkableTime(ViewModel.Duration);
+        var stop = _trimEndGuardArmed && ViewModel.TrimEnd > TimeSpan.Zero ? ParkableTime(ViewModel.TrimEnd) : mediaStop;
+        var reachedStop = ViewModel.Duration > TimeSpan.Zero &&
+            (ViewModel.CurrentTime >= stop || (stop >= mediaStop && _playback.Position >= mediaStop));
+        if (reachedStop)
         {
             _playback.Pause();
-            _ = _playback.SeekAsync(ViewModel.TrimEnd);
-            ViewModel.CurrentTime = ViewModel.TrimEnd;
+            _ = _playback.SeekAsync(stop);
+            ViewModel.CurrentTime = stop;
             SetPlayheadBase(ViewModel.CurrentTime);
             ViewModel.IsPlaying = false;
             _playbackTimer.Stop();
@@ -11303,6 +11325,7 @@ public sealed partial class MainWindow : Window
     private async Task ApplyTimelineSeekAsync(TimeSpan time, bool resumePlayback)
     {
         if (ViewModel is null || ViewModel.IsSelectedSpotifyProcessing) return;
+        time = ParkableTime(time);
         resumePlayback = TimelineSeekResumePolicy.Resolve(resumePlayback, _editorSeekResumeIntent);
         _editorSeekResumeIntent = resumePlayback;
         // Clicking the same frame again while its seek is still settling must

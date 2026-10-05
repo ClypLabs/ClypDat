@@ -87,7 +87,9 @@ internal sealed class SpotifyLocalSource : IDisposable
                 }
                 await ReadAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+            // Dispose() cancels, then disposes _wake; a pass already past its
+            // cancellation check can meet the disposed semaphore. That is a stop.
+            catch (Exception) when (cancellationToken.IsCancellationRequested) { return; }
             catch (Exception error)
             {
                 AppLog.Error("Spotify (this PC): reading media controls failed.", error);
@@ -101,7 +103,7 @@ internal sealed class SpotifyLocalSource : IDisposable
                 await _wake.WaitAsync(SafetyPoll, cancellationToken).ConfigureAwait(false);
                 await Task.Delay(EventSettle, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) { return; }
+            catch (Exception error) when (error is OperationCanceledException or ObjectDisposedException) { return; }
         }
     }
 

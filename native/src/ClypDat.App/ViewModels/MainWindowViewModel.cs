@@ -10390,8 +10390,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        // Cancel only: the running sweep still reads its token and disposes
+        // the source in its own finally. Disposing it here as well threw
+        // ObjectDisposedException inside that sweep, unobserved.
         try { _gameIconSweepCts?.Cancel(); } catch (ObjectDisposedException) { }
-        _gameIconSweepCts?.Dispose();
         var cts = CancellationTokenSource.CreateLinkedTokenSource(CaptureBackgroundWorkGate.CaptureCancellation);
         _gameIconSweepCts = cts;
 

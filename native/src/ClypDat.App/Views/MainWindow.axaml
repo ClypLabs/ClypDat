@@ -694,7 +694,7 @@
                           <Border Width="{Binding SteelSeriesImportFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=320}"
                                   Height="8" Background="{StaticResource Semantic_FF8A8F}" />
                           <Border Width="{Binding LibraryOtherUsedFractionOfDrive, Converter={x:Static opconv:FractionToWidthConverter.Instance}, ConverterParameter=320}"
-                                  Height="8" Background="{StaticResource AccentBrush}" />
+                                  Height="8" Background="{StaticResource Text_5C6D7E}" />
                         </StackPanel>
                       </Border>
                       <StackPanel Spacing="6">
@@ -711,7 +711,7 @@
                           <TextBlock Text="{Binding SteelSeriesImportUsageDisplay}" Foreground="{StaticResource Text_B8C7D8}" FontSize="12" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                          <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource AccentBrush}" />
+                          <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource Text_5C6D7E}" />
                           <TextBlock Text="{Binding LibraryOtherUsageDisplay}" Foreground="{StaticResource Text_B8C7D8}" FontSize="12" />
                         </StackPanel>
                       </StackPanel>

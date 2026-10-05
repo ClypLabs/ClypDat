@@ -184,8 +184,13 @@ public sealed class OscSettingsIntegrationTests
 
     [Theory]
     [InlineData("OSC")] [InlineData("Open Sound Control")] [InlineData("Network controls")]
-    [InlineData("UDP")] [InlineData("Listener status")]
-    public void OscSearchFindsReplayBuffer(string query) => Assert.True(SettingsSearchMatchConverter.MatchesSection(query, "Replay Buffer"));
+    [InlineData("UDP")] [InlineData("Listener status")] [InlineData("Stream Deck")]
+    public void OscSearchFindsAdvanced(string query)
+    {
+        // OSC moved from Replay Buffer to Advanced with the advanced recording controls.
+        Assert.True(SettingsSearchMatchConverter.MatchesSection(query, "Advanced"));
+        Assert.False(SettingsSearchMatchConverter.MatchesSection(query, "Replay Buffer"));
+    }
 
     [Fact]
     public void OscDefaultsAndSavedSettingsLoadWithoutChangingOtherSettings() => Isolated(() =>
