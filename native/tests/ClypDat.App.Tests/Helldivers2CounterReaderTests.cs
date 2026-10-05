@@ -26,6 +26,7 @@ public sealed class Helldivers2CounterReaderTests(ITestOutputHelper output)
     [InlineData("77", null, 0)]
     [InlineData("45", null, 0)]
     [InlineData("22", null, 0)]
+    [InlineData("80", "Killstreak ×80", 38.5)]
     public async Task BrightGameplayKeepsOneStreakUntilHudDisappears(string recording, string? expectedLabel, double disappearance)
     {
         var reader = new Helldivers2CounterReader(new WindowsOcrFrameReader().ReadTextAsync);

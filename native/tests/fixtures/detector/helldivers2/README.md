@@ -28,6 +28,7 @@ the end of each supplied recording:
 | `replay-45` | `Killstreak ×45 - Sep-18-2026 - 18-59-37.mp4` | No completion before the file ends; counter passes 45 |
 | `replay-58` | `Killstreak ×58 - Sep-18-2026 - 18-59-51.mp4` | One `Killstreak ×58`, disappearance at 23s, confirmation at 24s |
 | `replay-22` | `Killstreak ×22 - Oct-05-2026 - 00-25-50.mp4` | No completion before the file ends; orange skull at ×28-×30 (29-32.5s) is never absent |
+| `replay-80` | `Killstreak ×80 - Oct-05-2026 - 00-47-29.mp4` | One `Killstreak ×80`, disappearance at 38.5s, confirmation at 39.5s; ×80 is read once before the HUD fades |
 
 These colour crops exercise the same mask predicates as live NV12 capture.
 Tests assert exact labels, no extra completions, and the unchanged one-second

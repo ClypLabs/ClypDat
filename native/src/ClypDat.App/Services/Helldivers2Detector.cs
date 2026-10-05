@@ -27,6 +27,7 @@ public sealed record Helldivers2DetectedEvent(
 public sealed partial class Helldivers2Detector
 {
     private const int MinimumKillstreak = 30;
+    private const int MaximumUnconfirmedFinalStep = 3;
     private readonly PhraseLatch _eliminated = new("ELIMINATED", confirmationFrames: 2, resetFrames: 6);
     private readonly PhraseLatch _successfulMission = new("SQUAD PAYOUT", confirmationFrames: 2, resetFrames: 20);
     private TimeSpan? _streakStart;
@@ -74,6 +75,11 @@ public sealed partial class Helldivers2Detector
             _firstAbsent ??= frame.Timestamp;
             if (++_absentSamples >= 3 && frame.Timestamp - _firstAbsent.Value >= TimeSpan.FromSeconds(1))
             {
+                // The final kill is often read once before the HUD fades, so it
+                // never gets a second reading. Accept it when it is a small step
+                // up; a large jump is still treated as a misread.
+                if (_pendingPeak is { } final && _peak > 0 && final - _peak <= MaximumUnconfirmedFinalStep)
+                    _peak = final;
                 if (_peak >= MinimumKillstreak && (enabledEvents is null || enabledEvents.Contains("killstreak")))
                     events.Add(Create("killstreak", $"Killstreak ×{_peak}", _firstAbsent.Value, 0.95)
                         with { StreakStart = start });

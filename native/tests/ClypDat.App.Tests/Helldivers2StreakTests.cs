@@ -79,6 +79,20 @@ public sealed class Helldivers2StreakTests
     }
 
     [Theory]
+    [InlineData(80, "Killstreak ×80")]
+    [InlineData(82, "Killstreak ×82")]
+    [InlineData(83, "Killstreak ×79")]
+    public void FinalKillReadOnceCountsWhenSmallStep(int final, string expected)
+    {
+        var detector = new Helldivers2Detector();
+        Present(detector, 0, 79);
+        Present(detector, 1, 79);
+        Present(detector, 2, final);
+        Present(detector, 3, null);
+        Assert.Equal(expected, Complete(detector, 4).Label);
+    }
+
+    [Theory]
     [InlineData(Helldivers2CounterVisibility.Present)]
     [InlineData(Helldivers2CounterVisibility.Unknown)]
     public void InterruptedAbsenceRestartsConfirmation(Helldivers2CounterVisibility interruption)
