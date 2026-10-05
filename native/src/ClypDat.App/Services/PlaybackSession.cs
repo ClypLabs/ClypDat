@@ -38,6 +38,7 @@ public sealed partial class PlaybackSession : IDisposable
     private TimeSpan _audioDuration = TimeSpan.Zero;
     private readonly Dictionary<int, double> _audioVolumes = new();
     private WasapiOut? _audioOutput;
+    private int _expectedAudioStops;
     private MixingSampleProvider? _audioMixer;
     private VolumeSampleProvider? _masterVolume;
     private PlaybackRateSampleProvider? _rateStage;
@@ -577,10 +578,14 @@ public sealed partial class PlaybackSession : IDisposable
         // so this is normally a no-op; the timeout is only so a WasapiOut whose
         // PlaybackStopped never fires can't wedge the rebuild forever.
         try { _audioOutputRelease.Wait(TimeSpan.FromMilliseconds(500)); } catch { }
-        _audioOutput = new WasapiOut(AudioClientShareMode.Shared, false, 120);
-        _audioOutput.PlaybackStopped += (_, args) =>
+        var output = new WasapiOut(AudioClientShareMode.Shared, false, 120);
+        Interlocked.Exchange(ref _expectedAudioStops, 0);
+        _audioOutput = output;
+        output.PlaybackStopped += (_, args) =>
         {
-            if (_disposed) return;
+            // A released output's teardown stop is not this session's audio.
+            if (_disposed || !ReferenceEquals(output, _audioOutput)) return;
+            if (args.Exception is null && ConsumeExpectedAudioStop()) return;
             AppLog.Error($"Editor audio stopped unexpectedly: shouldPlay={_shouldPlay}, rate={_playbackRate:0.###}x, seekGeneration={Interlocked.Read(ref _seekVersion)}, error={args.Exception?.Message ?? "none"}.");
         };
         _audioOutput.Init(limited);
@@ -701,7 +706,7 @@ public sealed partial class PlaybackSession : IDisposable
         lock (_transportLock)
         {
             StopAudioClockMonitoring();
-            _audioOutput?.Stop();
+            StopAudioOutput();
             VideoPlayer.SetPause(true);
             // WasapiOut's 120ms buffer (see RebuildAudioOutput) means the audio
             // readers already got pulled ~120ms ahead of what was actually
@@ -726,7 +731,7 @@ public sealed partial class PlaybackSession : IDisposable
             lock (_transportLock)
             {
                 StopAudioClockMonitoring();
-                _audioOutput?.Stop();
+                StopAudioOutput();
                 VideoPlayer.Stop();
             }
             _ended = false;
@@ -812,7 +817,7 @@ public sealed partial class PlaybackSession : IDisposable
                             if (!_previewAudioPaused)
                             {
                                 StopAudioClockMonitoring();
-                                _audioOutput?.Stop();
+                                StopAudioOutput();
                                 _previewAudioPaused = true;
                             }
                             ForceVideoSilent();
@@ -1295,6 +1300,25 @@ public sealed partial class PlaybackSession : IDisposable
         }
     }
 
+    // Every deliberate stop (pause, seek, scrub, A/V correction) goes through
+    // here. WasapiOut raises PlaybackStopped for those too, and logging each
+    // one as "stopped unexpectedly" buried real dropouts under ~100 false
+    // errors a day. Stop() on a stopped output raises nothing, so only a
+    // running output is counted.
+    private void StopAudioOutput()
+    {
+        if (_audioOutput is not { } output || output.PlaybackState == PlaybackState.Stopped) return;
+        Interlocked.Increment(ref _expectedAudioStops);
+        output.Stop();
+    }
+
+    private bool ConsumeExpectedAudioStop()
+    {
+        if (Interlocked.Decrement(ref _expectedAudioStops) >= 0) return true;
+        Interlocked.Increment(ref _expectedAudioStops);
+        return false;
+    }
+
     private void StartAudioAt(TimeSpan anchor, long generation)
     {
         if (_audioOutput is null) return;
@@ -1351,7 +1375,7 @@ public sealed partial class PlaybackSession : IDisposable
             if (generation != Interlocked.Read(ref _seekVersion) || !_shouldPlay || _audioOutput is null) return;
             lock (_transportLock)
             {
-                _audioOutput.Stop();
+                StopAudioOutput();
                 SeekAudio(correction);
                 _audioOutput.Play();
                 _audioAnchorMediaTime = correction;
@@ -1441,7 +1465,7 @@ public sealed partial class PlaybackSession : IDisposable
             lock (session._transportLock)
             {
                 session.StopAudioClockMonitoring();
-                session._audioOutput?.Stop();
+                session.StopAudioOutput();
                 session.ForceVideoSilent();
             }
         }
@@ -1499,7 +1523,7 @@ public sealed partial class PlaybackSession : IDisposable
             {
                 session.SeekAudio(position);
                 session.StopAudioClockMonitoring();
-                session._audioOutput?.Stop();
+                session.StopAudioOutput();
                 session.VideoPlayer.SetPause(true);
             }
         }

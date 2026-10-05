@@ -278,4 +278,49 @@ internal readonly record struct EditorPlaybackStartResult(EditorPlaybackStartOut
 }
 
 internal sealed class EditorAvClockPolicy
-{ private const double DriftThresholdMilliseconds=150; private int _direction; private bool _corrected; private long _generation; public void Begin(long generation) { _generation=generation; _direction=0; _corrected=false; } public bool TryGetCorrection(long generation, TimeSpan elapsed, TimeSpan audible, TimeSpan video, out TimeSpan correction) { correction=default; if(generation!=_generation||_corrected||elapsed<TimeSpan.FromMilliseconds(250)||elapsed>TimeSpan.FromSeconds(1.5)) return false; var drift=video-audible; if(Math.Abs(drift.TotalMilliseconds)<=DriftThresholdMilliseconds) { _direction=0; return false; } var direction=Math.Sign(drift.TotalMilliseconds); if(_direction!=direction) { _direction=direction; return false; } _corrected=true; correction=video<TimeSpan.Zero?TimeSpan.Zero:video; return true; } public static TimeSpan ToMediaTime(TimeSpan anchor,long anchorDevicePosition,long devicePosition,int bytesPerSecond) => bytesPerSecond<=0?anchor:anchor+TimeSpan.FromSeconds(Math.Max(0,devicePosition-anchorDevicePosition)/(double)bytesPerSecond); }
+{
+    // LibVLC 3 reports video time on a ~250ms grid that runs ahead of the
+    // picture just after a resume: measured 160-480ms ahead while the audio
+    // clock matched wall time within 20ms. A 150ms limit in that direction
+    // "corrected" audio forward on most plays - an audible skip that left audio
+    // ahead of the picture. Video falling behind audio is a real stall, so that
+    // direction keeps the tight limit.
+    private const double VideoAheadThresholdMilliseconds = 750;
+    private const double VideoBehindThresholdMilliseconds = 150;
+    private int _direction;
+    private bool _corrected;
+    private long _generation;
+
+    public void Begin(long generation)
+    {
+        _generation = generation;
+        _direction = 0;
+        _corrected = false;
+    }
+
+    public bool TryGetCorrection(long generation, TimeSpan elapsed, TimeSpan audible, TimeSpan video, out TimeSpan correction)
+    {
+        correction = default;
+        if (generation != _generation || _corrected || elapsed < TimeSpan.FromMilliseconds(250) || elapsed > TimeSpan.FromSeconds(1.5))
+            return false;
+        var drift = (video - audible).TotalMilliseconds;
+        var threshold = drift > 0 ? VideoAheadThresholdMilliseconds : VideoBehindThresholdMilliseconds;
+        if (Math.Abs(drift) <= threshold)
+        {
+            _direction = 0;
+            return false;
+        }
+        var direction = Math.Sign(drift);
+        if (_direction != direction)
+        {
+            _direction = direction;
+            return false;
+        }
+        _corrected = true;
+        correction = video < TimeSpan.Zero ? TimeSpan.Zero : video;
+        return true;
+    }
+
+    public static TimeSpan ToMediaTime(TimeSpan anchor, long anchorDevicePosition, long devicePosition, int bytesPerSecond) =>
+        bytesPerSecond <= 0 ? anchor : anchor + TimeSpan.FromSeconds(Math.Max(0, devicePosition - anchorDevicePosition) / (double)bytesPerSecond);
+}
