@@ -87,6 +87,14 @@ public sealed partial class MainWindow : Window
     // through it to the end of the clip. A seek meant as "preview the footage
     // after the trim point" lands well clear of this.
     private static readonly TimeSpan TrimBoundaryTolerance = TimeSpan.FromMilliseconds(80);
+    // Where the playhead stopped on the last pause, while libvlc still agrees.
+    // LibVLC 3 publishes its time on a ~250ms grid (a play from 44.102s paused
+    // 245ms later reported 44.601s; one from 40.352s paused 184ms later still
+    // reported 40.352s), so snapping to it on pause threw the playhead up to a
+    // quarter second back or forward. The smooth position is held instead, and
+    // resume continues from libvlc's own position so no seek is needed.
+    private TimeSpan? _pauseHoldPosition;
+    private static readonly TimeSpan PauseHoldTolerance = TimeSpan.FromMilliseconds(300);
     private bool _timelineWasPlayingBeforeDrag;
     private long _timelineGestureGeneration;
     private TimelineGesture? _timelineGesture;
@@ -7136,9 +7144,10 @@ public sealed partial class MainWindow : Window
             // PlayFrom's 150ms needsSeek threshold over a longer playback
             // stretch, which was turning an ordinary pause-then-resume into
             // an unwanted real seek - the ~1s "snap" the video visibly does
-            // before landing. Pausing at the actual position instead of the
-            // smoothed estimate keeps resume within that threshold so it can
-            // stay a plain unpause.
+            // before landing. PauseEditorPlayback keeps the smoothed estimate
+            // only while libvlc agrees within its time grid (_pauseHoldPosition),
+            // and a held resume unpauses from libvlc's own position, so resume
+            // stays a plain unpause either way.
             //
             // Position is read AFTER Pause() (not before) - VideoPlayer.SetPause(true)
             // doesn't land instantly, so a snapshot taken beforehand is a moment
@@ -7167,6 +7176,8 @@ public sealed partial class MainWindow : Window
         }
 
         _endedAtTrimBoundary = false;
+        var resumeHeld = _pauseHoldPosition == startTime;
+        _pauseHoldPosition = null;
         if (_playback.IsSeeking)
         {
             // A seek owns VLC transport until it settles. Replace its paused
@@ -7175,7 +7186,8 @@ public sealed partial class MainWindow : Window
             _ = ApplyTimelineSeekAsync(startTime, resumePlayback: true);
             return;
         }
-        _playback.PlayFrom(startTime);
+        // A held pause is a plain unpause: libvlc is already on that frame.
+        _playback.PlayFrom(resumeHeld ? _playback.Position : startTime);
         StartPlayheadClock(startTime);
         ViewModel.IsPlaying = true;
         _playbackTimer.Start();
@@ -7186,8 +7198,13 @@ public sealed partial class MainWindow : Window
         if (ViewModel is null || !ViewModel.IsPlaying || _playback is null) return;
         _editorSeekResumeIntent = false;
         _editorSeekCts?.Cancel();
+        var shown = SmoothPlaybackPosition();
         _playback.Pause();
-        var pauseTime = _playback.Position;
+        // A larger gap is a real stall, not libvlc's time grid; trust libvlc.
+        var actual = _playback.Position;
+        var held = (shown - actual).Duration() <= PauseHoldTolerance;
+        var pauseTime = held ? shown : actual;
+        _pauseHoldPosition = held ? shown : null;
         ViewModel.CurrentTime = pauseTime;
         SetPlayheadBase(pauseTime);
         ViewModel.IsPlaying = false;
@@ -9972,6 +9989,7 @@ public sealed partial class MainWindow : Window
         _keyboardSeekActive = false;
         _editorSeekInFlight = false;
         _endedAtTrimBoundary = false;
+        _pauseHoldPosition = null;
         ResetEditorCropPreview();
         // Stop and detach the view instead of disposing - the session (and its
         // underlying LibVLC engine) stays alive and gets reused on the next
@@ -11204,7 +11222,10 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            ViewModel.CurrentTime = _playback.Position;
+            var position = _playback.Position;
+            if (_pauseHoldPosition is { } hold && (position - hold).Duration() <= PauseHoldTolerance) position = hold;
+            else _pauseHoldPosition = null;
+            ViewModel.CurrentTime = position;
             SetPlayheadBase(ViewModel.CurrentTime);
             _playback.EnsurePausedIfNeeded();
         }
@@ -11302,6 +11323,7 @@ public sealed partial class MainWindow : Window
         _editorSeekTarget = time;
         _editorSeekTargetResume = resumePlayback;
         _endedAtTrimBoundary = false;
+        _pauseHoldPosition = null;
         ViewModel.CurrentTime = time;
         // Render requested position immediately, then hold it until native
         // presentation and transport resume agree.

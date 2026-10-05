@@ -105,9 +105,19 @@ internal sealed class ClickableVideoView : VideoView
         base.DestroyNativeControlCore(control);
     }
 
+    // The host handle is kept across a detach. Fullscreen reparents this view in
+    // one frame, and NativeControlHost defers destruction, so the same HWND is
+    // reattached without CreateNativeControlCore running again. Clearing it here
+    // left the hook with no host, and clicks on fullscreen video did nothing.
+    // DestroyNativeControlCore clears it when the HWND really goes away.
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        if (Volatile.Read(ref _hostHandle) != IntPtr.Zero) EnsureHook();
+    }
+
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        Volatile.Write(ref _hostHandle, IntPtr.Zero);
         _nativeWidth = 0;
         _nativeHeight = 0;
         RemoveHook();
