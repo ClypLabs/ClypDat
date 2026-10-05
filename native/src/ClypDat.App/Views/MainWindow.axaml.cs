@@ -7353,11 +7353,34 @@ public sealed partial class MainWindow : Window
         var gesture = _timelineGesture;
         _timelineGesture = null;
         var wasPlaying = gesture?.WasPlaying ?? _timelineWasPlayingBeforeDrag;
+        var mode = gesture?.Mode ?? _timelineDragMode;
         _timelineDragMode = TimelineDragMode.None;
         _timelineWasPlayingBeforeDrag = false;
         _timelineGesturePaused = false;
         if (ViewModel is null) return;
-        _ = ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
+        _ = SettleTrimHandleSeekAsync(mode, wasPlaying);
+    }
+
+    // Moving the trim-out point ends the preview on it, the same as playback
+    // reaching it: the playhead is parked on TrimEnd, so resuming would run
+    // straight past the new boundary. Paused there, Play restarts at TrimStart.
+    // The in-flight resume intent is cleared too - TimelineSeekResumePolicy ORs
+    // it in, and it is still set from the seek that last started playback.
+    private async Task SettleTrimHandleSeekAsync(TimelineDragMode mode, bool wasPlaying)
+    {
+        if (ViewModel is null) return;
+        if (mode != TimelineDragMode.TrimEnd)
+        {
+            await ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
+            return;
+        }
+        _editorSeekResumeIntent = false;
+        var trimEnd = ViewModel.TrimEnd;
+        await ApplyTimelineSeekAsync(trimEnd, resumePlayback: false);
+        // A later seek (a click elsewhere mid-settle) supersedes this one.
+        if (ViewModel is not null && !ViewModel.IsPlaying && ViewModel.TrimEnd == trimEnd
+            && (ViewModel.CurrentTime - trimEnd).Duration() <= TrimBoundaryTolerance)
+            _endedAtTrimBoundary = true;
     }
 
     private async void TimelineSurface_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
@@ -7387,7 +7410,7 @@ public sealed partial class MainWindow : Window
         }
         else if (ViewModel is not null)
         {
-            await ApplyTimelineSeekAsync(ViewModel.CurrentTime, wasPlaying);
+            await SettleTrimHandleSeekAsync(mode, wasPlaying);
             ViewModel.SaveSelectedClipEditState();
             if (mode == TimelineDragMode.TrimStart) ViewModel.RegenerateThumbnailAtTrimStart();
             // Warm the audio chunk cache at both trim markers - the very next
