@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
   bool software = argc > 2 && !strcmp(argv[2], "software");
   unsigned seconds = argc > 3 ? unsigned(atoi(argv[3])) : 3;
   HWND hwnd = CreateWindowExW(0, L"STATIC", L"ClypDat compositor test",
-                              WS_OVERLAPPEDWINDOW, 0, 0, 640, 360, nullptr,
+                              WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, 640, 360, nullptr,
                               nullptr, GetModuleHandleW(nullptr), nullptr);
   const char *options[] = {"--no-audio",
                            "--no-osd",
@@ -150,8 +150,9 @@ int main(int argc, char **argv) {
     bool paused = status.redraws > redraws &&
                   status.decoded_picture == picture &&
                   libvlc_media_player_get_time(player) == time;
-    printf("paused_edit=%s picture=%llu redraws=%llu\n",
-           paused ? "PASS" : "FAIL", status.decoded_picture, status.redraws);
+    printf("paused_edit=%s picture=%llu->%llu redraws=%llu->%llu time=%lld->%lld\n",
+           paused ? "PASS" : "FAIL", picture, status.decoded_picture, redraws,
+           status.redraws, time, libvlc_media_player_get_time(player));
     ok &= paused;
     libvlc_media_player_set_rate(player, 2);
     state.rate = 2;
