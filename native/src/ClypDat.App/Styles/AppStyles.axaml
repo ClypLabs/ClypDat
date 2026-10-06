@@ -2242,15 +2242,14 @@
     </Setter>
   </Style>
   <!-- Feedback and Settings are persistent rail destinations. Keep their
-       accent/hover surface as rounded squares, while the library filters keep
-       their existing circular glyph treatment. -->
+       accent/hover surface as rounded squares. -->
   <Style Selector="Button.railIconButton.boxedRailFooterButton">
     <Setter Property="CornerRadius" Value="12" />
   </Style>
-  <!-- All Clips is the library's home tile, not a glyph filter - it carries a
-       square 3x3 grid mark and sits above square game artwork, so it takes the
-       same rounded-square surface as the footer destinations. -->
-  <Style Selector="Button.railIconButton.boxedRailButton">
+  <!-- All Clips, the clip-type filters under it and All Games share one
+       rounded-square surface with the game tiles and footer destinations, so
+       the rail reads as one column of tiles rather than squares and circles. -->
+  <Style Selector="Button.railIconButton.boxedRailButton, Button.railIconButton.libraryFilterButton, Button.railIconButton.allGamesRailButton">
     <Setter Property="CornerRadius" Value="12" />
   </Style>
   <!-- Game rows hold square artwork, so their hover/active backdrop is a

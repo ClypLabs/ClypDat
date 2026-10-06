@@ -188,6 +188,15 @@
     <Copy SourceFiles="@(LibVlcRuntimeFiles)"
           DestinationFiles="@(LibVlcRuntimeFiles->'$(PublishDir)libvlc\win-x64\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+    <!-- Before the plugin cache is built: ClypDat ships its patched libvlccore. -->
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\vlc-core\prebuilt\libvlccore.dll" DestinationFolder="$(PublishDir)libvlc\win-x64" />
+  </Target>
+
+  <!-- VLC 3.0.23's libvlccore rebuilt with native/vlc-core/patches applied
+       (same revision and exports as the package's). It replaces the package
+       copy everywhere the runtime lands; NativeVideoOutput pins its hash. -->
+  <Target Name="CopyPatchedLibVlcCoreToOutput" AfterTargets="Build" Condition="'$(ClypDatUiPreview)' != 'true'">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\vlc-core\prebuilt\libvlccore.dll" DestinationFolder="$(OutDir)libvlc\win-x64" />
   </Target>
 
   <!-- Ships libvlc's plugins.dat (and the fingerprint that vouches for it), so

@@ -13,7 +13,9 @@ namespace ClypDat.App.Services;
 internal sealed unsafe class NativeVideoOutput : IDisposable
 {
     internal const uint Abi = 2;
-    private const string CoreSha256 = "D3475B834DD3EB77910F37F71B0341D358BCBDDA5B9F04CC4A3A8E2BE1BC8E35";
+    // ClypDat's patched build of VLC 3.0.23's libvlccore (native/vlc-core), not
+    // the package's: same revision and exports, plus the decoder flush fix.
+    private const string CoreSha256 = "345E30C289B86CCEFDB6AA28E70BF99A70ABD26DB12C34A851549C6BAC4C298D";
     private static readonly Lazy<nint> Module = new(LoadModule);
     private readonly object _gate = new();
     private ulong _token;

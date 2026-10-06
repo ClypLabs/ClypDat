@@ -1,0 +1,33 @@
+From: ClypDat <noreply@clypdat.xyz>
+Subject: [PATCH] decoder: a flush cancels a pending drain
+
+input_DecoderDrain() is called when the demuxer reaches end-of-file, and only
+sets b_draining; DecoderThread drains once its FIFO is empty. A seek arriving
+before that point flushes the FIFO but left b_draining set, so the stale drain
+ran as soon as the post-seek blocks were consumed. Draining flushes the codec,
+which throws away its reference pictures: every following P-frame then decoded
+against nothing and came out grey or ghosted until the next keyframe. Near the
+end of a file there is no next keyframe, so playback stayed corrupt.
+
+Seeking in the last second of a clip reliably triggers it, because the demuxer
+reads ahead to end-of-file while prerolling, even when paused.
+
+The drain request belongs to the stream position the flush discards.
+---
+ src/input/decoder.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+--- a/src/input/decoder.c
++++ b/src/input/decoder.c
+@@ -2133,6 +2133,11 @@ void input_DecoderFlush( decoder_t *p_dec )
+      * a row. */
+     p_owner->flushing = true;
+ 
++    /* A drain requested before this flush was for the discarded stream
++     * position. Left pending, it would flush the codec right after the
++     * post-flush blocks are decoded, losing their reference pictures. */
++    p_owner->b_draining = false;
++
+     /* Flush video/spu decoder when paused: increment frames_countdown in order
+      * to display one frame/subtitle */
+     if( p_owner->paused

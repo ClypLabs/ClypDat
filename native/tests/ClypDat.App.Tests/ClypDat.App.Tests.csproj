@@ -25,4 +25,8 @@
     <Copy SourceFiles="../../capture-native/build/$(Configuration)/ClypDat.Capture.Native.dll"
           DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>
+  <!-- Same patched libvlccore the app ships (see ClypDat.App.csproj). -->
+  <Target Name="CopyPatchedLibVlcCoreToTestOutput" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\vlc-core\prebuilt\libvlccore.dll" DestinationFolder="$(OutDir)libvlc\win-x64" />
+  </Target>
 </Project>
