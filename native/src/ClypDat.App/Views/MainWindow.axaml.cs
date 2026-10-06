@@ -11357,6 +11357,27 @@ public sealed partial class MainWindow : Window
         // lagging the picture in even though both were released together.
         // Accepted transport targets own audio preparation.
         var seekResult = PlaybackSeekResult.Failed;
+        // Playback is committed (picture landed, video unpaused, audio
+        // anchored) well before the seek completes: completion waits for
+        // libvlc's time to move, which it reports on a ~250ms grid. Holding
+        // the playhead until then froze it and then snapped it to that grid,
+        // and it suspended SyncPlaybackPosition's end-of-range stop - near the
+        // end of a clip libvlc reached end-of-file first, tore its decoder
+        // down, and the picture went grey until the next click.
+        var committedPlaying = false;
+        var settled = false;
+        Action<TimeSpan>? committed = resumePlayback
+            ? landed => Dispatcher.UIThread.Post(() =>
+            {
+                if (settled || _editorSeekCts != seekCts || ViewModel is null) return;
+                committedPlaying = true;
+                _editorSeekInFlight = false;
+                _editorSeekResumeIntent = true;
+                StartPlayheadClock(landed);
+                ViewModel.IsPlaying = true;
+                _playbackTimer.Start();
+            })
+            : null;
         if (_playback is not null)
         {
             try
@@ -11371,10 +11392,11 @@ public sealed partial class MainWindow : Window
                 // timer off the position for the seek's duration without
                 // restoring the drag.
                 _editorSeekInFlight = true;
-                seekResult = await _playback.SeekAsync(time, resumePlayback, seekCts.Token);
+                seekResult = await _playback.SeekAsync(time, resumePlayback, seekCts.Token, committed);
             }
             catch (OperationCanceledException)
             {
+                settled = true;
                 return;
             }
             finally
@@ -11385,13 +11407,19 @@ public sealed partial class MainWindow : Window
                 }
             }
         }
+        settled = true;
         if (_editorSeekCts != seekCts) return;
         if (resumePlayback && seekResult.Resumed)
         {
-            _editorSeekResumeIntent = true;
-            StartPlayheadClock(_playback?.Position ?? time);
-            ViewModel.IsPlaying = true;
-            _playbackTimer.Start();
+            // Already running from the commit; re-anchoring to libvlc's
+            // coarse time here is what made the playhead snap.
+            if (!committedPlaying)
+            {
+                _editorSeekResumeIntent = true;
+                StartPlayheadClock(_playback?.Position ?? time);
+                ViewModel.IsPlaying = true;
+                _playbackTimer.Start();
+            }
         }
         else
         {

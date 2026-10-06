@@ -856,14 +856,14 @@ public sealed partial class PlaybackSession : IDisposable
         }
     }
 
-    public Task<PlaybackSeekResult> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default)
+    public Task<PlaybackSeekResult> SeekAsync(TimeSpan time, bool resumePlayback = false, CancellationToken cancellationToken = default, Action<TimeSpan>? committed = null)
     {
         if (_graphicsRecoveryActive || _graphicsRestartRequired) { _lastRequestedPosition = time; _shouldPlay = resumePlayback; return Task.FromResult(PlaybackSeekResult.Completed(false)); }
         lock (_seekTaskLock)
         {
             if (_disposed) return Task.FromCanceled<PlaybackSeekResult>(_disposeCts.Token);
 
-            var seekTask = SeekCoreAsync(time, resumePlayback, cancellationToken);
+            var seekTask = SeekCoreAsync(time, resumePlayback, cancellationToken, committed);
             _seekTasks.Add(seekTask);
             _ = seekTask.ContinueWith(
                 completed =>
@@ -877,7 +877,7 @@ public sealed partial class PlaybackSession : IDisposable
         }
     }
 
-    private async Task<PlaybackSeekResult> SeekCoreAsync(TimeSpan time, bool resumePlayback, CancellationToken cancellationToken)
+    private async Task<PlaybackSeekResult> SeekCoreAsync(TimeSpan time, bool resumePlayback, CancellationToken cancellationToken, Action<TimeSpan>? committed = null)
     {
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
         cancellationToken = linkedCts.Token;
@@ -918,7 +918,8 @@ public sealed partial class PlaybackSession : IDisposable
                 resumePlayback,
                 seekId,
                 () => seekVersion == Interlocked.Read(ref _seekVersion),
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                committed).ConfigureAwait(false);
 
             var handoff = _previewRequests.GetHandoffSummary();
             AppLog.Debug($"seek={seekId} preview-summary: requests={finalRequest.PreviewRequestCount}, writes={finalRequest.PreviewWriteCount}, coalesced={Math.Max(0, finalRequest.PreviewRequestCount - finalRequest.PreviewWriteCount)}, quietMs={finalRequest.QuietPeriod.TotalMilliseconds:0}, handoff={handoff.Outcome}, staleParkSuppressed={handoff.SuppressedStaleParks}.");

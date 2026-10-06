@@ -30,7 +30,7 @@ internal sealed class EditorSeekCoordinator
     private TimeSpan AttemptTimeout()
     { var rate = _rate?.Invoke() ?? 1; if (double.IsNaN(rate) || double.IsInfinity(rate)) rate = 1; return _attemptTimeout / Math.Clamp(rate, .25, 1); }
 
-    public async Task<EditorSeekResult> SeekAsync(IEditorSeekTransport transport, TimeSpan target, bool resume, string seekId, Func<bool> isCurrent, CancellationToken cancellationToken)
+    public async Task<EditorSeekResult> SeekAsync(IEditorSeekTransport transport, TimeSpan target, bool resume, string seekId, Func<bool> isCurrent, CancellationToken cancellationToken, Action<TimeSpan>? committed = null)
     {
         target = target < TimeSpan.Zero ? TimeSpan.Zero : target;
         var clock = Stopwatch.StartNew(); var recovery = 0;
@@ -75,6 +75,11 @@ internal sealed class EditorSeekCoordinator
                     transport.LogDebug($"seek={seekId} commit: mode={(ready.Pending ? "deferred" : "silent")}, audioAnchor=none, video={transport.VideoState}, wasapi=stopped, bufferMs=120.");
                     if (ready.Pending) _ = StartDeferredAsync(transport, preparation, target, seekId, isCurrent);
                 }
+                // Playback is running from here. The roll check below reads
+                // libvlc's time, which moves on a ~250ms grid and never moves
+                // at all when the clip ends first, so callers must not hold
+                // their playhead (or their end-of-range stop) until it passes.
+                committed?.Invoke(landed.Value);
                 // Audio is already audible. Do not reset and replay it if VLC
                 // rolls slowly; wait for the slow clips seen in production,
                 // then fail cleanly rather than committing audio a second time.

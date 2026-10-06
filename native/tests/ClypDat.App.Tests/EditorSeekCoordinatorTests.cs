@@ -48,6 +48,50 @@ public sealed class EditorSeekCoordinatorTests
         Assert.Equal(1, transport.AudioStarts);
     }
 
+    // Near the end of a clip libvlc reaches end-of-file before its time ever
+    // moves, so the roll check never passes. The caller still has to learn
+    // that playback was committed, or it holds its playhead and its
+    // end-of-range stop until the seek gives up - by then libvlc has ended.
+    [Fact]
+    public async Task Resume_ReportsCommitBeforeRollIsConfirmed()
+    {
+        var transport = new RecoveryTransport(videoRolls: false);
+        var coordinator = new EditorSeekCoordinator(
+            pollInterval: TimeSpan.FromMilliseconds(1),
+            attemptTimeout: TimeSpan.FromMilliseconds(12),
+            rollTimeout: TimeSpan.FromMilliseconds(12));
+        TimeSpan? committedAt = null;
+        var audioStartsAtCommit = -1;
+
+        await coordinator.SeekAsync(
+            transport,
+            TimeSpan.FromSeconds(10),
+            resume: true,
+            seekId: "test",
+            isCurrent: () => true,
+            CancellationToken.None,
+            committed: landed => { committedAt = landed; audioStartsAtCommit = transport.AudioStarts; });
+
+        Assert.Equal(TimeSpan.FromSeconds(10), committedAt);
+        Assert.Equal(1, audioStartsAtCommit);
+    }
+
+    [Fact]
+    public async Task PausedSeek_DoesNotReportPlaybackCommit()
+    {
+        var transport = new RecoveryTransport(videoRolls: false);
+        var coordinator = new EditorSeekCoordinator(
+            pollInterval: TimeSpan.FromMilliseconds(1),
+            attemptTimeout: TimeSpan.FromMilliseconds(12),
+            rollTimeout: TimeSpan.FromMilliseconds(12));
+        var reported = false;
+
+        await coordinator.SeekAsync(transport, TimeSpan.FromSeconds(10), resume: false, seekId: "test",
+            isCurrent: () => true, CancellationToken.None, committed: _ => reported = true);
+
+        Assert.False(reported);
+    }
+
     [Fact]
     public async Task ExhaustedLandingRecovery_LeavesTransportPaused()
     {
