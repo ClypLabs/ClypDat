@@ -22,6 +22,20 @@ every following P-frame decoded grey or ghosted until the end of the clip.
 `EditorEndSeekTests` reproduces it (red on the package's libvlccore, green on
 this one).
 
+## Why not 3.0.24
+
+VLC 3.0.24 (FFmpeg 8.1) still has the drain bug, and the patch applies to it
+unchanged, but it regresses software H.264 decoding: on a 640x360 24fps clip,
+VLC's own stock Direct3D11 output waited 12.1 s for the first picture and showed
+0 frames in 3 s, against 0.85 s and 81 frames on 3.0.23.1. The editor decodes
+H.264 in software unless a clip passes the IDR check, so clips would take over
+ten seconds to open. Before moving to a later 3.x, measure first-picture time
+with software decoding (libvlc's "Decoder wait done" debug message) on both
+VLC's stock output and ours, run
+`EditorEndSeekTests` on the unpatched core to see whether the patch is still
+needed, and port upstream's changes to the files under
+`video-output-native/vendor/vlc`.
+
 ## Rebuilding
 
 ```sh
