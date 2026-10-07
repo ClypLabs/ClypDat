@@ -216,6 +216,10 @@ public sealed partial class MainWindow : Window
     private EditorHoverWarmup? _adoptingEditorHoverWarmup;
     private Task? _editorHoverStopTask;
     private static readonly TimeSpan EditorHoverWarmupMaximumDecode = TimeSpan.FromSeconds(2);
+    // 530 of 1274 logged warm-ups started under 75ms after the previous one:
+    // the pointer crossing tiles. Each paid a libvlc open plus a 125-330ms
+    // stop the next tile then waited behind. A click ends the wait at once.
+    private static readonly TimeSpan EditorHoverWarmupSweepDelay = TimeSpan.FromMilliseconds(75);
     // Loading poster (EditorLoadingOverlay in MainWindow.axaml): the clip's
     // thumbnail shows the moment it is clicked, and only an open still going
     // after this long dims it and adds the spinner - a warm or fast open goes
@@ -5492,6 +5496,7 @@ public sealed partial class MainWindow : Window
         public CancellationTokenSource Cancellation { get; } = new();
         public TaskCompletionSource<PlaybackSession> SessionReady { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource VideoLoaded { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ClaimSignal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public EditorHoverWarmupReadiness Readiness { get; } = new();
         public Task? FramePreparation { get; set; }
         public PlaybackSession? Session { get; set; }
@@ -5535,6 +5540,16 @@ public sealed partial class MainWindow : Window
         PlaybackSession? session = null;
         try
         {
+            // Cancelled here, a passed-over tile costs nothing: no Session yet, so
+            // CancelEditorHoverWarmup queues no libvlc stop.
+            await Task.WhenAny(Task.Delay(EditorHoverWarmupSweepDelay, warmup.Cancellation.Token), warmup.ClaimSignal.Task).ConfigureAwait(false);
+            warmup.Cancellation.Token.ThrowIfCancellationRequested();
+            // Audio, not video, decides when an open reveals: chunk 0 of every
+            // track took 511ms against a 218ms first frame. Waiting for the warm
+            // frame before extracting left a quick click to start it itself.
+            // Not while a game runs - the extraction is ffmpeg CPU it would lose.
+            if (!MemoryTrimmer.GameRunning)
+                PlaybackSession.PrefetchOpeningAudio(warmup.Path, warmup.AudioStreams, warmup.Duration, warmup.Start, "hover");
             // Keep the native target attached until Stop has completely unwound.
             // Reusing or replacing the player earlier lets libvlc set Hwnd to zero
             // while its old vout is still active, which creates VLC's fallback window.
@@ -5614,13 +5629,9 @@ public sealed partial class MainWindow : Window
                     succeeded = true;
                     warmup.MarkFirstFrameReady();
                     AppLog.Debug($"Editor hover warm-up frame ready: {Path.GetFileName(warmup.Path)}.");
-                    // The pointer has stayed long enough to land a frame, so a
-                    // click is likely: have the first audio chunks extracted
-                    // before it comes. The chunk wait was most of what a warm
-                    // open still sat through (476ms of a 563ms open). Not while
-                    // a game runs - the extraction is ffmpeg CPU it would lose.
-                    if (!MemoryTrimmer.GameRunning)
-                        PlaybackSession.PrefetchOpeningAudio(warmup.Path, warmup.AudioStreams, warmup.Duration, warmup.Start, "hover");
+                    // Older clips get qualified here, after the frame has landed
+                    // so the probe never competes with it.
+                    if (PlaybackSession.IsH264(warmup.Codec)) H264HardwareDecodeProbe.QualifyWhenIdle(warmup.Path);
                 }
             }
             catch (OperationCanceledException) { }
@@ -5656,6 +5667,7 @@ public sealed partial class MainWindow : Window
         if (warmup is null || !string.Equals(warmup.Path, path, StringComparison.OrdinalIgnoreCase)) return null;
         _editorHoverWarmup = null;
         warmup.Claimed = true;
+        warmup.ClaimSignal.TrySetResult();
         return warmup;
     }
 

@@ -6605,6 +6605,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
         });
 
+        // Qualify while nobody is waiting on it, so the first open of a clip
+        // just saved already decodes on the GPU instead of only the second.
+        if (result.Media?.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec is { } videoCodec && PlaybackSession.IsH264(videoCodec))
+            H264HardwareDecodeProbe.QualifyWhenIdle(filePath);
+
         if (hydrateImages) _ = HydrateClipImagesAsync(clip, filePath);
     }
 
