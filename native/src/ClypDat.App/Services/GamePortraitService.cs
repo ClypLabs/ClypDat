@@ -26,7 +26,7 @@ public static class GamePortraitService
     private static readonly TimeSpan RefreshAfter = TimeSpan.FromDays(30);
 
     private static readonly HttpClient Http = CreateHttpClient();
-    private static readonly HashSet<string> InFlight = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, Task<bool>> InFlight = new(StringComparer.OrdinalIgnoreCase);
 
     private static HttpClient CreateHttpClient()
     {
@@ -129,9 +129,27 @@ public static class GamePortraitService
     /// so callers can refresh exactly once instead of re-reading a bitmap they
     /// already have.
     /// </summary>
-    public static async Task<bool> EnsureCachedAsync(string detectionKey, string displayName, CancellationToken cancellationToken = default)
+    public static Task<bool> EnsureCachedAsync(string detectionKey, string displayName, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(displayName)) return false;
+        if (string.IsNullOrWhiteSpace(displayName)) return Task.FromResult(false);
+        // One check per name at a time, and every card asking shares its
+        // answer. A second card used to get "nothing new" while the first one's
+        // download ran: the Auto Clip and game-settings cards both ask for
+        // Fortnite at startup, so one showed the new art and the other kept the old.
+        lock (InFlight)
+        {
+            if (InFlight.TryGetValue(displayName, out var running)) return running;
+            var task = EnsureCachedCoreAsync(detectionKey, displayName, cancellationToken);
+            InFlight[displayName] = task;
+            _ = task.ContinueWith(_ => { lock (InFlight) InFlight.Remove(displayName); }, CancellationToken.None,
+                TaskContinuationOptions.None, TaskScheduler.Default);
+            return task;
+        }
+    }
+
+    private static async Task<bool> EnsureCachedCoreAsync(string detectionKey, string displayName, CancellationToken cancellationToken)
+    {
+        await Task.Yield();
 
         // A game that missed before can gain art the moment game-icons.json
         // grows an entry for it, and that file refreshes daily - so a miss
@@ -152,12 +170,6 @@ public static class GamePortraitService
             if (refreshUrl is null) return false;
         }
         else if (offlineUrl is null && IsNegativeCacheFresh(displayName)) return false;
-
-        // One download per name per session even if several cards ask at once.
-        lock (InFlight)
-        {
-            if (!InFlight.Add(displayName)) return false;
-        }
 
         // A failed refresh keeps the portrait already on screen and marks no
         // miss: the game has art, it just could not be updated this time.
@@ -211,10 +223,6 @@ public static class GamePortraitService
             AppLog.Error($"Game portrait fetch failed for '{displayName}'", error);
             Missed();
             return false;
-        }
-        finally
-        {
-            lock (InFlight) InFlight.Remove(displayName);
         }
     }
 
