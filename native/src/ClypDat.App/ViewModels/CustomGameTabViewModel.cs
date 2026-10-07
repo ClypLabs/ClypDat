@@ -44,15 +44,19 @@ public sealed class CustomGameTabViewModel : ViewModelBase
         {
             // Decode first: a portrait already on disk should appear on the
             // next frame, not after a round trip that will find nothing new.
-            var portrait = await Task.Run(() => GamePortraitService.TryLoadStandalone(_executablePath) ?? GamePortraitService.TryLoad(DisplayName)).ConfigureAwait(false);
-            if (portrait is null)
+            var standalone = await Task.Run(() => GamePortraitService.TryLoadStandalone(_executablePath)).ConfigureAwait(false);
+            if (standalone is not null)
             {
-                if (!await GamePortraitService.EnsureCachedAsync(DetectionKey, DisplayName).ConfigureAwait(false)) return;
-                portrait = await Task.Run(() => GamePortraitService.TryLoad(DisplayName)).ConfigureAwait(false);
-                if (portrait is null) return;
+                await Dispatcher.UIThread.InvokeAsync(() => Portrait = standalone);
+                return;
             }
+            var portrait = await Task.Run(() => GamePortraitService.TryLoad(DisplayName)).ConfigureAwait(false);
+            if (portrait is not null) await Dispatcher.UIThread.InvokeAsync(() => Portrait = portrait);
 
-            await Dispatcher.UIThread.InvokeAsync(() => Portrait = portrait);
+            // Runs for cached art too, replacing it when the store's has changed.
+            if (!await GamePortraitService.EnsureCachedAsync(DetectionKey, DisplayName).ConfigureAwait(false)) return;
+            portrait = await Task.Run(() => GamePortraitService.TryLoad(DisplayName)).ConfigureAwait(false);
+            if (portrait is not null) await Dispatcher.UIThread.InvokeAsync(() => Portrait = portrait);
         }
         catch (Exception error)
         {

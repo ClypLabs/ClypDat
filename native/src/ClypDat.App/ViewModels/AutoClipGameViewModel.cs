@@ -142,12 +142,12 @@ public sealed class AutoClipGameViewModel : ViewModelBase
         var displayName = Definition.PortraitDisplayName ?? Name;
         try
         {
+            // Cached art shows at once; the check after it replaces art whose
+            // store image has since changed.
             var portrait = await Task.Run(() => GamePortraitService.TryLoad(displayName)).ConfigureAwait(false);
-            if (portrait is null)
-            {
-                await GamePortraitService.EnsureCachedAsync(Definition.PortraitDetectionKey!, displayName).ConfigureAwait(false);
-                portrait = await Task.Run(() => GamePortraitService.TryLoad(displayName)).ConfigureAwait(false);
-            }
+            if (portrait is not null) await Dispatcher.UIThread.InvokeAsync(() => CoverImage = portrait);
+            if (!await GamePortraitService.EnsureCachedAsync(Definition.PortraitDetectionKey!, displayName).ConfigureAwait(false)) return;
+            portrait = await Task.Run(() => GamePortraitService.TryLoad(displayName)).ConfigureAwait(false);
             if (portrait is not null) await Dispatcher.UIThread.InvokeAsync(() => CoverImage = portrait);
         }
         catch (Exception error)

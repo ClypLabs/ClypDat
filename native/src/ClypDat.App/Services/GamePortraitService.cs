@@ -21,6 +21,10 @@ public static class GamePortraitService
     // have none.
     private static readonly TimeSpan NegativeCacheRetryAfter = TimeSpan.FromDays(7);
 
+    // Stores repaint cover art in place: Steam keeps the same URL, so only age
+    // can tell. Epic and curated art move to a new URL, which is caught at once.
+    private static readonly TimeSpan RefreshAfter = TimeSpan.FromDays(30);
+
     private static readonly HttpClient Http = CreateHttpClient();
     private static readonly HashSet<string> InFlight = new(StringComparer.OrdinalIgnoreCase);
 
@@ -34,6 +38,14 @@ public static class GamePortraitService
     private static string SafeFileName(string value) => string.Join("_", value.Split(Path.GetInvalidFileNameChars()));
     private static string CachePathFor(string displayName) => Path.Combine(CacheFolder, $"{SafeFileName(displayName)}.jpg");
     private static string NegativeMarkerPathFor(string displayName) => Path.Combine(CacheFolder, $"{SafeFileName(displayName)}.miss");
+    // The URL a cached portrait came from, so a source that moves on is noticed.
+    private static string SourcePathFor(string displayName) => Path.Combine(CacheFolder, $"{SafeFileName(displayName)}.src");
+
+    private static string? ReadSource(string displayName)
+    {
+        try { var path = SourcePathFor(displayName); return File.Exists(path) ? File.ReadAllText(path).Trim() : null; }
+        catch { return null; }
+    }
 
     public static Bitmap? TryLoad(string displayName)
     {
@@ -112,14 +124,14 @@ public static class GamePortraitService
     }
 
     /// <summary>
-    /// Downloads the portrait if it is not cached yet. Returns true only when
-    /// a new file was written, so callers can refresh exactly once instead of
-    /// re-reading a bitmap they already have.
+    /// Downloads the portrait if it is not cached yet, or replaces a cached one
+    /// whose source has moved on. Returns true only when a new file was written,
+    /// so callers can refresh exactly once instead of re-reading a bitmap they
+    /// already have.
     /// </summary>
     public static async Task<bool> EnsureCachedAsync(string detectionKey, string displayName, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(displayName)) return false;
-        if (File.Exists(CachePathFor(displayName))) return false;
 
         // A game that missed before can gain art the moment game-icons.json
         // grows an entry for it, and that file refreshes daily - so a miss
@@ -127,7 +139,19 @@ public static class GamePortraitService
         // resolves offline. Without this, adding curated art left everyone who
         // had already seen the game with no portrait for another week.
         var offlineUrl = ResolveOfflinePortraitUrl(detectionKey, displayName);
-        if (offlineUrl is null && IsNegativeCacheFresh(displayName)) return false;
+
+        // A cached portrait used to be final. Fortnite's Epic art moved to its
+        // season key art while the card kept the copy from a month before.
+        var cached = new FileInfo(CachePathFor(displayName));
+        string? refreshUrl = null;
+        if (cached.Exists)
+        {
+            var recorded = ReadSource(displayName);
+            if (offlineUrl is not null && !string.Equals(offlineUrl, recorded, StringComparison.Ordinal)) refreshUrl = offlineUrl;
+            else if ((offlineUrl ?? recorded) is { } known && DateTime.UtcNow - cached.LastWriteTimeUtc > RefreshAfter) refreshUrl = known;
+            if (refreshUrl is null) return false;
+        }
+        else if (offlineUrl is null && IsNegativeCacheFresh(displayName)) return false;
 
         // One download per name per session even if several cards ask at once.
         lock (InFlight)
@@ -135,12 +159,17 @@ public static class GamePortraitService
             if (!InFlight.Add(displayName)) return false;
         }
 
+        // A failed refresh keeps the portrait already on screen and marks no
+        // miss: the game has art, it just could not be updated this time.
+        var refreshing = refreshUrl is not null;
+        void Missed() { if (!refreshing) MarkMiss(displayName); }
+
         try
         {
-            var url = offlineUrl ?? await SearchPortraitUrlAsync(displayName, cancellationToken).ConfigureAwait(false);
+            var url = refreshUrl ?? offlineUrl ?? await SearchPortraitUrlAsync(displayName, cancellationToken).ConfigureAwait(false);
             if (url is null)
             {
-                MarkMiss(displayName);
+                Missed();
                 return false;
             }
 
@@ -148,7 +177,7 @@ public static class GamePortraitService
             using var response = await Http.GetAsync(url, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                MarkMiss(displayName);
+                Missed();
                 return false;
             }
 
@@ -157,7 +186,7 @@ public static class GamePortraitService
             {
                 // Steam answers some missing art with a tiny placeholder rather
                 // than a 404.
-                MarkMiss(displayName);
+                Missed();
                 return false;
             }
 
@@ -167,7 +196,10 @@ public static class GamePortraitService
             var temp = target + ".tmp";
             await File.WriteAllBytesAsync(temp, bytes, cancellationToken).ConfigureAwait(false);
             File.Move(temp, target, overwrite: true);
-            AppLog.Info($"Game portrait cached: '{displayName}'.");
+            // Written after the image, so a crash in between only costs one
+            // more download next time rather than a source that lies.
+            await File.WriteAllTextAsync(SourcePathFor(displayName), url, CancellationToken.None).ConfigureAwait(false);
+            AppLog.Info($"Game portrait {(refreshing ? "refreshed" : "cached")}: '{displayName}'.");
             return true;
         }
         catch (OperationCanceledException)
@@ -177,7 +209,7 @@ public static class GamePortraitService
         catch (Exception error)
         {
             AppLog.Error($"Game portrait fetch failed for '{displayName}'", error);
-            MarkMiss(displayName);
+            Missed();
             return false;
         }
         finally
