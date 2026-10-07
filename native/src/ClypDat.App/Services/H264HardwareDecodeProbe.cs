@@ -81,22 +81,22 @@ internal static class H264HardwareDecodeProbe
         }
     }
 
-    internal static void QualifyWhenIdle(string path)
+    internal static Task QualifyWhenIdle(string path)
     {
         string key;
         try
         {
             key = CacheKey(path);
-            if (Cache.ContainsKey(key)) return;
+            if (Cache.ContainsKey(key)) return Task.CompletedTask;
         }
         catch
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        if (!PendingQualifications.TryAdd(key, 0)) return;
+        if (!PendingQualifications.TryAdd(key, 0)) return Task.CompletedTask;
 
-        _ = Task.Run(async () =>
+        return Task.Run(async () =>
         {
             try
             {

@@ -108,6 +108,69 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
     public static Task PrefetchStartChunk(string inputPath, int streamIndex, TimeSpan duration, TimeSpan start, string cacheKey) =>
         ScheduleExtraction(inputPath, streamIndex, cacheKey, TotalFramesFor(duration), ChunkIndexAt(start), priority: true);
 
+    // Same, for every track at once, in ONE ffmpeg run. Separate runs each
+    // demuxed the same 30s of the file: four tracks took 511ms in the app
+    // (240ms on an idle machine) against ~185ms for one run writing all four,
+    // and this chunk is what an editor open waits on before it plays. Each
+    // track's flight key points at the shared run, so readers built meanwhile
+    // join it exactly as they would a per-track extraction.
+    public static Task PrefetchStartChunks(string inputPath, IReadOnlyList<(int StreamIndex, string CacheKey)> tracks, TimeSpan duration, TimeSpan start)
+    {
+        var chunkIndex = ChunkIndexAt(start);
+        if ((long)chunkIndex * ChunkFrames >= TotalFramesFor(duration)) return Task.CompletedTask;
+        if (tracks.Count == 1) return PrefetchStartChunk(inputPath, tracks[0].StreamIndex, duration, start, tracks[0].CacheKey);
+
+        var batch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var claimed = new List<(int StreamIndex, string CacheKey, string FlightKey)>();
+        foreach (var (streamIndex, cacheKey) in tracks)
+        {
+            if (AudioChunkCache.Contains(cacheKey, chunkIndex)) continue;
+            var flightKey = $"{cacheKey}-c{chunkIndex:0000}";
+            if (InFlightExtractions.TryAdd(flightKey, batch.Task)) claimed.Add((streamIndex, cacheKey, flightKey));
+        }
+        if (claimed.Count == 0) return Task.CompletedTask;
+
+        Interlocked.Increment(ref _pendingPriority);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ExtractionGate.WaitAsync().ConfigureAwait(false);
+                var networkEntered = false;
+                try
+                {
+                    if (PlaybackSession.IsNetworkPath(inputPath))
+                    {
+                        await NetworkExtractionGate.WaitAsync().ConfigureAwait(false);
+                        networkEntered = true;
+                    }
+                    var pending = claimed.Where(track => !AudioChunkCache.Contains(track.CacheKey, chunkIndex)).ToList();
+                    if (pending.Count > 1) await ExtractChunksAsync(inputPath, pending.Select(track => (track.StreamIndex, track.CacheKey)).ToList(), chunkIndex);
+                    // One run failing must not cost a track its audio: anything
+                    // it left uncached gets the established per-track run.
+                    foreach (var track in pending.Where(track => !AudioChunkCache.Contains(track.CacheKey, chunkIndex)))
+                        await ExtractChunkAsync(inputPath, track.StreamIndex, track.CacheKey, chunkIndex);
+                }
+                finally
+                {
+                    if (networkEntered) NetworkExtractionGate.Release();
+                    ExtractionGate.Release();
+                }
+            }
+            catch (Exception error)
+            {
+                AppLog.Error($"Editor audio chunk batch failed: input={inputPath}, chunk={chunkIndex}", error);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _pendingPriority);
+                foreach (var track in claimed) InFlightExtractions.TryRemove(new KeyValuePair<string, Task>(track.FlightKey, batch.Task));
+                batch.TrySetResult();
+            }
+        });
+        return batch.Task;
+    }
+
     private static int ChunkIndexAt(TimeSpan time) => (int)(Math.Max(0, time.TotalSeconds) / ChunkSeconds);
 
     public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels);
@@ -350,6 +413,71 @@ public sealed class ChunkedAudioReader : ISampleProvider, IDisposable
                 }
             });
         });
+    }
+
+    // One ffmpeg run, one output per track. Outputs go to temporary files
+    // because a process has only one stdout; they are read back and deleted
+    // here. Anything that goes wrong leaves its track uncached, and the caller
+    // falls back to the per-track run for it.
+    private static async Task ExtractChunksAsync(string inputPath, IReadOnlyList<(int StreamIndex, string CacheKey)> tracks, int chunkIndex)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), $"ClypDat-audio-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var startInfo = new ProcessStartInfo(FfmpegPathResolver.FfmpegPath)
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = FfmpegPathResolver.WorkingDirectory,
+            };
+            foreach (var argument in new[] { "-y", "-v", "error", "-threads", "1", "-ss", (chunkIndex * ChunkSeconds).ToString(), "-t", ChunkSeconds.ToString(), "-i", inputPath })
+                startInfo.ArgumentList.Add(argument);
+            foreach (var (streamIndex, _) in tracks)
+            {
+                foreach (var argument in new[] { "-map", $"0:{streamIndex}", "-ac", Channels.ToString(), "-ar", SampleRate.ToString(), "-f", "s16le", "-c:a", "pcm_s16le", Path.Combine(folder, $"{streamIndex}.pcm") })
+                    startInfo.ArgumentList.Add(argument);
+            }
+
+            var clock = Stopwatch.StartNew();
+            using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start ffmpeg.");
+            var errorTask = process.StandardError.ReadToEndAsync();
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var timeout = PlaybackSession.IsNetworkPath(inputPath) ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(10);
+            using var timeoutCts = new CancellationTokenSource(timeout);
+            try { await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                AppLog.Info($"Editor audio chunk batch timeout: streams={string.Join(",", tracks.Select(track => track.StreamIndex))}, chunk={chunkIndex}, timeoutMs={timeout.TotalMilliseconds:0}.");
+                return;
+            }
+            var error = await errorTask.ConfigureAwait(false);
+            await outputTask.ConfigureAwait(false);
+            if (process.ExitCode != 0)
+            {
+                AppLog.Info($"Editor audio chunk batch failed; extracting per track: input={inputPath}, chunk={chunkIndex}: {error.Trim()}");
+                return;
+            }
+
+            foreach (var (streamIndex, cacheKey) in tracks)
+            {
+                var file = new FileInfo(Path.Combine(folder, $"{streamIndex}.pcm"));
+                if (!file.Exists || file.Length == 0 || file.Length > MaximumChunkPcmBytes) continue;
+                AudioChunkCache.Store(cacheKey, chunkIndex, await File.ReadAllBytesAsync(file.FullName).ConfigureAwait(false));
+            }
+            AppLog.Debug($"Editor audio chunks extracted: streams={string.Join(",", tracks.Select(track => track.StreamIndex))}, chunk={chunkIndex}, ms={clock.ElapsedMilliseconds}, network={PlaybackSession.IsNetworkPath(inputPath)}.");
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"Editor audio chunk batch failed; extracting per track: input={inputPath}, chunk={chunkIndex}: {error.Message}");
+        }
+        finally
+        {
+            try { Directory.Delete(folder, recursive: true); } catch { }
+        }
     }
 
     private static async Task ExtractChunkAsync(string inputPath, int streamIndex, string cacheKey, int chunkIndex)

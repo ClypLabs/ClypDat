@@ -22,6 +22,8 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
     private ulong _generation = 1, _revision;
     private bool _seeking;
     private readonly Dictionary<ulong, (byte[] Pixels, uint Width, uint Height)> _artwork = [];
+    // Uploaded since the last accepted submit, so still pending natively.
+    private readonly HashSet<ulong> _pendingArtwork = [];
     private readonly Stopwatch _opened = Stopwatch.StartNew();
     private bool _wasAttached;
 
@@ -99,6 +101,17 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
                 ClockMicroseconds = libvlc_clock()
             };
             if (SubmitState(_token, &state) == 0) throw new InvalidOperationException("Could not reset editor composition after seeking.");
+            // The compositor drops uncommitted artwork when the generation moves
+            // on. A hover warm-up's seek landing between an open's artwork upload
+            // and its scene submit left that scene naming an image the compositor
+            // no longer had, so it rejected it and paused the preview.
+            foreach (var id in _pendingArtwork)
+            {
+                if (!_artwork.TryGetValue(id, out var image)) continue;
+                fixed (byte* p = image.Pixels)
+                    if (Upload(_token, _generation, id, image.Width, image.Height, image.Width * 4, p) == 0)
+                        throw new InvalidOperationException("Could not restore editor artwork after seeking.");
+            }
         }
     }
     internal void EndSeek(TimeSpan position)
@@ -125,6 +138,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
                 if (_token != 0 && Upload(_token, _generation, id, (uint)width, (uint)height, (uint)(width * 4), p) == 0)
                     throw new InvalidOperationException("Could not upload editor artwork to the GPU compositor.");
                 _artwork[id] = (pixels, (uint)width, (uint)height);
+                _pendingArtwork.Add(id);
             }
         }
     }
@@ -139,6 +153,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
                     throw new InvalidOperationException("Could not restore editor artwork.");
             }
             _artwork[entry.Key] = pixels;
+            _pendingArtwork.Add(entry.Key);
         }
     }
     internal void Submit(Blur[] blurs, Artwork[] artwork, TimeSpan position, double rate, long? anchorMicroseconds = null)
@@ -163,6 +178,7 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
                     Artworks = a
                 };
                 if (SubmitState(_token, &state) == 0) throw new InvalidOperationException("The GPU compositor rejected an editor update.");
+                _pendingArtwork.Clear();
                 if (!_seeking) foreach (var obsolete in _artwork.Keys.Where(id => !artwork.Any(item => item.Id == id)).ToArray()) _artwork.Remove(obsolete);
             }
         }

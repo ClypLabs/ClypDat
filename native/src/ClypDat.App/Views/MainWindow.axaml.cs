@@ -5631,7 +5631,7 @@ public sealed partial class MainWindow : Window
                     AppLog.Debug($"Editor hover warm-up frame ready: {Path.GetFileName(warmup.Path)}.");
                     // Older clips get qualified here, after the frame has landed
                     // so the probe never competes with it.
-                    if (PlaybackSession.IsH264(warmup.Codec)) H264HardwareDecodeProbe.QualifyWhenIdle(warmup.Path);
+                    if (PlaybackSession.IsH264(warmup.Codec)) _ = H264HardwareDecodeProbe.QualifyWhenIdle(warmup.Path);
                 }
             }
             catch (OperationCanceledException) { }
@@ -9908,7 +9908,7 @@ public sealed partial class MainWindow : Window
             // the picture, and the chunk extractions behind it are exactly the work that
             // was losing the race to library hydration.
             foregroundScope?.Dispose();
-            if (PlaybackSession.IsH264(videoCodec)) H264HardwareDecodeProbe.QualifyWhenIdle(videoPath);
+            if (PlaybackSession.IsH264(videoCodec)) _ = H264HardwareDecodeProbe.QualifyWhenIdle(videoPath);
         }
     }
 

@@ -513,10 +513,7 @@ public sealed partial class PlaybackSession : IDisposable
             try
             {
                 // AudioCacheKey stats the file - never on the UI thread.
-                foreach (var stream in streams)
-                {
-                    _ = ChunkedAudioReader.PrefetchStartChunk(path, stream, duration, start, AudioCacheKey(path, stream));
-                }
+                _ = ChunkedAudioReader.PrefetchStartChunks(path, streams.Select(stream => (stream, AudioCacheKey(path, stream))).ToList(), duration, start);
                 AppLog.Debug($"Editor audio prefetch ({reason}): streams={string.Join(",", streams)}, start={start.TotalSeconds:0.###}s, file={Path.GetFileName(path)}.");
             }
             catch (Exception error)

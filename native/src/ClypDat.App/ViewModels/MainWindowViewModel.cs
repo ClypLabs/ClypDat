@@ -6608,7 +6608,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Qualify while nobody is waiting on it, so the first open of a clip
         // just saved already decodes on the GPU instead of only the second.
         if (result.Media?.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec is { } videoCodec && PlaybackSession.IsH264(videoCodec))
-            H264HardwareDecodeProbe.QualifyWhenIdle(filePath);
+            _ = H264HardwareDecodeProbe.QualifyWhenIdle(filePath);
 
         if (hydrateImages) _ = HydrateClipImagesAsync(clip, filePath);
     }
@@ -11350,6 +11350,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 // to interrupt a decode already in flight.
                 await EditorForegroundWork.ParkWhileActiveAsync(cancellationToken).ConfigureAwait(false);
                 await _mediaProbe.EnsureWaveformsAsync(media, warmed < ResidentWarmClips, cancellationToken).ConfigureAwait(false);
+                // Same idle window qualifies GPU decode, so a clip never opened
+                // or hovered this session still decodes on the GPU first time.
+                // A cached verdict costs one file stat; local files only.
+                if (!PlaybackSession.IsNetworkPath(media.Path) &&
+                    media.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec is { } videoCodec && PlaybackSession.IsH264(videoCodec))
+                    await H264HardwareDecodeProbe.QualifyWhenIdle(media.Path).WaitAsync(cancellationToken).ConfigureAwait(false);
                 warmed++;
             }
 
