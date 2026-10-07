@@ -68,12 +68,17 @@ internal static class NoticeBoardService
     public static async Task<bool> RefreshAsync(CancellationToken cancellationToken = default)
     {
         EnsureCacheLoaded();
+        // Offline, back off from the 15s tick: two hosts every 15s is a lot of
+        // failed lookups for a feed that changes a few times a week.
+        if (DateTime.UtcNow < _offlineRetryUtc) return false;
         foreach (var url in FeedUrls)
         {
             try
             {
                 var json = await FetchAsync(url, cancellationToken);
                 if (json is null) continue;
+                NetworkFailureLog.Succeeded(NetworkSource);
+                _offlineRetryUtc = DateTime.MinValue;
                 var feed = NoticeBoardRules.ParsePolicy(json, NoticeSigning.PinnedPublicKeys);
                 lock (Gate)
                 {
@@ -109,12 +114,20 @@ internal static class NoticeBoardService
             {
                 // A feed that fails verification is not retried from the other
                 // host - both are the same deployment - but a network failure is.
-                AppLog.Error($"Notice board: refresh from {url} failed (non-fatal)", error);
+                if (!NetworkFailureLog.Failed(NetworkSource, error))
+                    AppLog.Error($"Notice board: refresh from {url} failed (non-fatal)", error);
                 if (error is System.Security.Cryptography.CryptographicException or InvalidDataException) return false;
             }
         }
+        // Each refresh tries both hosts, so two failures a round: 15s, 30s,
+        // 60s ... capped at five minutes.
+        if (NetworkFailureLog.Failures(NetworkSource) is > 0 and var failures)
+            _offlineRetryUtc = DateTime.UtcNow + TimeSpan.FromSeconds(Math.Min(300, 15 * Math.Pow(2, Math.Min(failures / 2, 5))));
         return false;
     }
+
+    private const string NetworkSource = "Notice board";
+    private static DateTime _offlineRetryUtc = DateTime.MinValue;
 
     private static async Task<string?> FetchAsync(string url, CancellationToken cancellationToken)
     {

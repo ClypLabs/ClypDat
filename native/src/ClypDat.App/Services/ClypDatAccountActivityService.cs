@@ -162,7 +162,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             // The site being down, or the network not up yet at Windows
             // startup, is no reason to sign the user out. Keep the token and
             // let the poll retry.
-            AppLog.Error("ClypDat account: restore could not reach clypdat.xyz.", error);
+            if (!NetworkFailureLog.Failed(NetworkSource, error))
+                AppLog.Error("ClypDat account: restore could not reach clypdat.xyz.", error);
             ReportServerProblem();
             StartPolling();
             return true;
@@ -570,6 +571,7 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             {
                 await _pollWake.WaitAsync(NextPollDelay(), cancellationToken).ConfigureAwait(false);
                 await RefreshAsync(cancellationToken).ConfigureAwait(false);
+                NetworkFailureLog.Succeeded(NetworkSource);
                 _idleRefreshes = _snapshot.CurrentTitle is null ? _idleRefreshes + 1 : 0;
                 // Whatever the user went to the browser to do, they have done it.
                 if (LinkSignature != _linkWatchSignature) _linkWatchUntil = DateTimeOffset.MinValue;
@@ -581,7 +583,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
             catch (ClypDatSignedOutException) { return; }
             catch (Exception error)
             {
-                AppLog.Error("ClypDat account: activity refresh failed.", error);
+                if (!NetworkFailureLog.Failed(NetworkSource, error))
+                    AppLog.Error("ClypDat account: activity refresh failed.", error);
                 if (IsServerProblem(error)) ReportServerProblem();
                 else
                 {
@@ -860,6 +863,8 @@ internal sealed class ClypDatAccountActivityService : IDisposable
     /// answered with a server error. Rejections the site means - 4xx, a refused
     /// unlink - are not this: they carry a message the user can act on.
     /// </summary>
+    private const string NetworkSource = "ClypDat account";
+
     private static bool IsServerProblem(Exception error) => error switch
     {
         HttpRequestException { StatusCode: null } => true,

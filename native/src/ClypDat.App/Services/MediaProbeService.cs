@@ -902,6 +902,59 @@ public sealed class MediaProbeService
         return job.WaitAsync(cancellationToken);
     }
 
+    // The single pass hstacks every seek point, so one that decodes nothing -
+    // damaged data, or a container claiming more duration than its video holds -
+    // fails the whole strip. A tester's 36 older recordings had no filmstrip
+    // for that. Retry each point on its own and stand the nearest good frame in
+    // for any that still fail. Returns how many points decoded, or null.
+    private static async Task<int?> GenerateFilmstripFrameByFrameAsync(string filePath, TimeSpan duration, int frameCount, string output)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), $"ClypDat-filmstrip-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var frames = new string?[frameCount];
+            for (var i = 0; i < frameCount; i++)
+            {
+                var frame = Path.Combine(folder, $"{i}.jpg");
+                var seek = ((i + 0.5) / frameCount * duration.TotalSeconds).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                var result = await RunProcessAsync("ffmpeg", ["-y", "-v", "error", "-ss", seek, "-i", filePath,
+                    "-frames:v", "1", "-vf", $"scale=-2:{FilmstripFrameHeight}", "-an", "-q:v", "2", frame]).ConfigureAwait(false);
+                if (result.ExitCode == 0 && File.Exists(frame) && new FileInfo(frame).Length > 0) frames[i] = frame;
+            }
+
+            var decoded = frames.Count(frame => frame is not null);
+            if (decoded == 0) return null;
+            for (var i = 0; i < frameCount; i++)
+            {
+                if (frames[i] is not null) continue;
+                for (var distance = 1; frames[i] is null; distance++)
+                    frames[i] = (i - distance >= 0 ? frames[i - distance] : null) ?? (i + distance < frameCount ? frames[i + distance] : null);
+            }
+
+            if (frameCount == 1)
+            {
+                File.Copy(frames[0]!, output, overwrite: true);
+                return decoded;
+            }
+            var arguments = new List<string> { "-y", "-v", "error" };
+            foreach (var frame in frames) { arguments.Add("-i"); arguments.Add(frame!); }
+            var filter = string.Concat(Enumerable.Range(0, frameCount).Select(i => $"[{i}:v]")) + $"hstack=inputs={frameCount}[strip]";
+            arguments.AddRange(["-filter_complex", filter, "-map", "[strip]", "-frames:v", "1", "-update", "1", "-q:v", "2", output]);
+            var combined = await RunProcessAsync("ffmpeg", arguments.ToArray()).ConfigureAwait(false);
+            return combined.ExitCode == 0 && File.Exists(output) ? decoded : null;
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"Filmstrip frame-by-frame retry failed for {filePath}: {error.Message}");
+            return null;
+        }
+        finally
+        {
+            try { Directory.Delete(folder, recursive: true); } catch { }
+        }
+    }
+
     private static async Task<string> GenerateFilmstripAsync(string filePath, TimeSpan duration, int frameCount, string output)
     {
         using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
@@ -944,13 +997,16 @@ public sealed class MediaProbeService
             });
 
             var result = await RunProcessAsync("ffmpeg", arguments.ToArray()).ConfigureAwait(false);
-            if (result.ExitCode != 0 || !File.Exists(output))
-            {
-                AppLog.Error($"Filmstrip generation failed for {filePath}: {(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed" : result.Error.Trim())}");
-                return string.Empty;
-            }
+            if (result.ExitCode == 0 && File.Exists(output)) return output;
 
-            return output;
+            var fallback = await GenerateFilmstripFrameByFrameAsync(filePath, duration, frameCount, output).ConfigureAwait(false);
+            if (fallback is { } usable)
+            {
+                AppLog.Info($"Filmstrip built frame by frame for {filePath}: {usable} of {frameCount} seek points decoded.");
+                return output;
+            }
+            AppLog.Error($"Filmstrip generation failed for {filePath}: {(string.IsNullOrWhiteSpace(result.Error) ? "ffmpeg failed" : result.Error.Trim())}");
+            return string.Empty;
         }
         catch (Exception error)
         {
