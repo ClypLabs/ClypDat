@@ -182,10 +182,10 @@ public static class GamePortraitService
 
         // A game that missed before can gain art the moment game-icons.json
         // grows an entry for it, and that file refreshes daily - so a miss
-        // marker only holds off the network search, never a source that
-        // resolves offline. Without this, adding curated art left everyone who
-        // had already seen the game with no portrait for another week.
-        var offlineUrl = ResolveOfflinePortraitUrl(detectionKey, displayName);
+        // marker only holds off the name search, never a source known from the
+        // game's own identity. Without this, adding curated art left everyone
+        // who had already seen the game with no portrait for another week.
+        var offlineUrl = await ResolveKnownPortraitUrlAsync(detectionKey, displayName, cancellationToken).ConfigureAwait(false);
 
         // A cached portrait used to be final. Fortnite's Epic art moved to its
         // season key art while the card kept the copy from a month before.
@@ -194,7 +194,10 @@ public static class GamePortraitService
         if (cached.Exists)
         {
             var recorded = ReadSource(displayName);
-            if (offlineUrl is not null && !string.Equals(offlineUrl, recorded, StringComparison.Ordinal)) refreshUrl = offlineUrl;
+            // The legacy Steam URL is only a fallback for a failed store lookup:
+            // never let it replace art recorded from a better source.
+            var fallback = offlineUrl is not null && recorded is not null && offlineUrl.StartsWith(LegacySteamPrefix, StringComparison.Ordinal);
+            if (offlineUrl is not null && !fallback && !string.Equals(offlineUrl, recorded, StringComparison.Ordinal)) refreshUrl = offlineUrl;
             else if (DateTime.UtcNow - cached.LastWriteTimeUtc > RefreshAfter)
             {
                 // Art found by a Steam name search has no store entry to compare
@@ -270,14 +273,14 @@ public static class GamePortraitService
         }
     }
 
-    // Order matters: the cheapest and most certain source first, the one that
-    // costs a network search last. Everything here answers without touching the
-    // network, which is also what lets a miss marker be ignored for these.
-    private static string? ResolveOfflinePortraitUrl(string detectionKey, string displayName)
+    // Order matters: the most certain source first, the name search last.
+    // Everything here comes from the game's identity rather than a guess at its
+    // name, which is what lets a miss marker be ignored for these.
+    private static async Task<string?> ResolveKnownPortraitUrlAsync(string detectionKey, string displayName, CancellationToken cancellationToken)
     {
-        // 1. Steam, straight off the detection key - no lookup, no ambiguity.
+        // 1. Steam, straight off the detection key - no name matching, no ambiguity.
         var appId = ResolveAppId(detectionKey, displayName);
-        if (appId is not null) return SteamPortraitUrl(appId.Value);
+        if (appId is not null) return await SteamPortraitUrlAsync(appId.Value, cancellationToken).ConfigureAwait(false);
 
         // 2. Curated art, which is the only source for a launcher exclusive
         //    that has no Steam page - see LoadCachedPortraits.
@@ -302,13 +305,53 @@ public static class GamePortraitService
     private static async Task<string?> SearchPortraitUrlAsync(string displayName, CancellationToken cancellationToken)
     {
         var searched = await GameIconService.ResolveSteamAppIdForAsync(displayName, cancellationToken).ConfigureAwait(false);
-        return searched is > 0 ? SteamPortraitUrl(searched.Value) : null;
+        return searched is > 0 ? await SteamPortraitUrlAsync(searched.Value, cancellationToken).ConfigureAwait(false) : null;
     }
 
-    // library_600x900 is Steam's portrait shelf art. Games predating it answer
-    // 404, which the caller treats as a miss.
-    private static string SteamPortraitUrl(int appId) =>
-        $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/library_600x900.jpg";
+    // library_600x900 at the fixed per-app URL is Steam's old portrait path,
+    // frozen when Steam moved store art to hashed paths: Overwatch's still
+    // served the "Overwatch 2" art from February 2024 after the game was
+    // renamed and repainted. Kept as the fallback when the store API fails;
+    // games predating portrait art answer 404, which the caller treats as a miss.
+    private const string LegacySteamPrefix = "https://cdn.cloudflare.steamstatic.com/steam/apps/";
+    private static string LegacySteamPortraitUrl(int appId) => $"{LegacySteamPrefix}{appId}/library_600x900.jpg";
+
+    // Asked once per app per session; several cards and the startup sweep
+    // all want the same answer.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> SteamPortraitUrls = new();
+
+    // The store's own record of the current portrait. Its path carries a hash
+    // that changes with the art, so a recorded source that differs means new
+    // art. The ?t= stamp is left off: it moves when ANY store asset changes.
+    private static async Task<string> SteamPortraitUrlAsync(int appId, CancellationToken cancellationToken)
+    {
+        if (SteamPortraitUrls.TryGetValue(appId, out var known)) return known;
+        var url = LegacySteamPortraitUrl(appId);
+        try
+        {
+            var input = $"{{\"ids\":[{{\"appid\":{appId}}}],\"context\":{{\"language\":\"english\",\"country_code\":\"US\"}},\"data_request\":{{\"include_assets\":true}}}}";
+            var json = await Http.GetStringAsync("https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=" + Uri.EscapeDataString(input), cancellationToken).ConfigureAwait(false);
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            if (document.RootElement.TryGetProperty("response", out var response)
+                && response.TryGetProperty("store_items", out var items) && items.GetArrayLength() > 0
+                && items[0].TryGetProperty("assets", out var assets)
+                && assets.TryGetProperty("asset_url_format", out var format)
+                && (assets.TryGetProperty("library_capsule_2x", out var file) || assets.TryGetProperty("library_capsule", out file))
+                && format.GetString() is { } pattern && file.GetString() is { Length: > 0 } name)
+            {
+                var path = pattern.Replace("${FILENAME}", name, StringComparison.Ordinal);
+                var query = path.IndexOf('?');
+                url = "https://shared.steamstatic.com/store_item_assets/" + (query >= 0 ? path[..query] : path);
+            }
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            AppLog.Info($"Steam portrait lookup failed for app {appId}; using the legacy URL: {error.Message}");
+            return url;
+        }
+        SteamPortraitUrls[appId] = url;
+        return url;
+    }
 
     // %ProgramData%\Epic\EpicGamesLauncher\Data\Catalog\catcache.bin is
     // base64-encoded JSON: every catalogue entry the launcher knows about, each
