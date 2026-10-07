@@ -26,6 +26,14 @@ public sealed class H264HardwareDecodeProbeTests
         Assert.True(H264HardwareDecodeProbe.ContainsIdrPayload(packet, H264PacketFormat.Avcc));
     }
 
+    // Only a prefix of each key packet is read; the IDR slice runs past it.
+    [Fact]
+    public void FindsIdrWhoseSliceRunsPastThePrefix()
+    {
+        byte[] prefix = [0, 0, 0, 2, 0x06, 0xAA, 0, 0x01, 0x80, 0x00, 0x65, 0x88, 0x80];
+        Assert.True(H264HardwareDecodeProbe.ContainsIdrPayload(prefix, H264PacketFormat.Avcc));
+    }
+
     [Fact]
     public void RecoveryPointIntraFrameIsNotIdr()
     {

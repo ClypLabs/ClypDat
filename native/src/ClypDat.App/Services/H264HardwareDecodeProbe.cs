@@ -26,7 +26,8 @@ internal static class H264HardwareDecodeProbe
     // simply misses.
     private static readonly Lazy<ConcurrentDictionary<string, bool>> LoadedCache = new(LoadCache);
     private static ConcurrentDictionary<string, bool> Cache => LoadedCache.Value;
-    private static string CachePath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "h264-hardware-decode.json");
+    // Bump the version when the verdict logic changes, so old verdicts are dropped.
+    private static string CachePath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "h264-hardware-decode-v2.json");
     private static readonly ConcurrentDictionary<string, byte> PendingQualifications = new(StringComparer.OrdinalIgnoreCase);
     private static readonly SemaphoreSlim QualificationGate = new(1, 1);
 
@@ -294,8 +295,11 @@ internal static class H264HardwareDecodeProbe
             // offset += length also goes negative. The span's own bounds check turned
             // that into an IndexOutOfRangeException rather than a read out of bounds,
             // but the arithmetic was wrong and this path parses untrusted media.
-            if (length <= 0 || length > bytes.Length - offset) return false;
+            if (length <= 0 || offset >= bytes.Length) return false;
+            // Type before fit: only a 64KB prefix is read, and an IDR slice is
+            // usually bigger, so requiring it to fit rejected every real clip.
             if ((bytes[offset] & 0x1f) == 5) return true;
+            if (length > bytes.Length - offset) return false;
             offset += length;
         }
         return false;
