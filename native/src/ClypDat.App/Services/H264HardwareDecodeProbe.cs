@@ -10,21 +10,56 @@ namespace ClypDat.App.Services;
 // legacy files retain the known-safe software path.
 internal static class H264HardwareDecodeProbe
 {
-    private const int ProbeTimeoutMilliseconds = 250;
+    // Background-only (see QualifyWhenIdle), so this guards a hung ffprobe, not
+    // an open. Listing a 186MB clip's packets takes ~220ms; at the old 250ms
+    // most probes timed out and every clip stayed on software decode.
+    private const int ProbeTimeoutMilliseconds = 5000;
     private const int MaximumPacketPrefixBytes = 64 * 1024;
     // Bounded: the key is path|length|mtime, so a library browsed over a long session
     // - or one whose clips are re-encoded, changing their mtime - grows this
     // indefinitely for the life of the process. Cheap eviction: once the cap is hit,
     // clear and start again. The probe costs one bounded ffprobe run to repopulate.
     private const int MaximumCacheEntries = 4096;
-    private static readonly ConcurrentDictionary<string, bool> Cache = new(StringComparer.OrdinalIgnoreCase);
+    // Persisted, because qualification only ever helps the NEXT open of a file:
+    // in memory alone, every restart put each clip's first open back on
+    // software decode. The key carries length and mtime, so a changed file
+    // simply misses.
+    private static readonly Lazy<ConcurrentDictionary<string, bool>> LoadedCache = new(LoadCache);
+    private static ConcurrentDictionary<string, bool> Cache => LoadedCache.Value;
+    private static string CachePath => Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "h264-hardware-decode.json");
     private static readonly ConcurrentDictionary<string, byte> PendingQualifications = new(StringComparer.OrdinalIgnoreCase);
     private static readonly SemaphoreSlim QualificationGate = new(1, 1);
 
+    // Only called under QualificationGate, so saves never race each other.
     private static void CacheResult(string key, bool value)
     {
         if (Cache.Count >= MaximumCacheEntries) Cache.Clear();
         Cache[key] = value;
+        try
+        {
+            var temporary = CachePath + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new Dictionary<string, bool>(Cache)));
+            File.Move(temporary, CachePath, overwrite: true);
+        }
+        catch (Exception error)
+        {
+            AppLog.Debug($"Editor H.264 hardware-decode cache save failed: {error.Message}");
+        }
+    }
+
+    private static ConcurrentDictionary<string, bool> LoadCache()
+    {
+        try
+        {
+            if (File.Exists(CachePath) &&
+                JsonSerializer.Deserialize<Dictionary<string, bool>>(File.ReadAllText(CachePath)) is { Count: <= MaximumCacheEntries } saved)
+                return new ConcurrentDictionary<string, bool>(saved, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception error)
+        {
+            AppLog.Debug($"Editor H.264 hardware-decode cache load failed: {error.Message}");
+        }
+        return new ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
     }
 
     // Never scan the complete packet index while a user waits for a clip to
@@ -72,7 +107,9 @@ internal static class H264HardwareDecodeProbe
                     // A newer open may have started while this request waited
                     // its turn, so yield once more immediately before ffprobe.
                     await EditorForegroundWork.ParkWhileActiveAsync(CancellationToken.None).ConfigureAwait(false);
-                    CacheResult(key, Probe(path));
+                    // An inconclusive probe is not a verdict: leave it uncached
+                    // so the next open of this file tries again.
+                    if (Probe(path) is { } safe) CacheResult(key, safe);
                 }
                 finally
                 {
@@ -92,12 +129,20 @@ internal static class H264HardwareDecodeProbe
         return $"{Path.GetFullPath(path)}|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
     }
 
-    private static bool Probe(string path)
+    private static bool? Probe(string path)
     {
         try
         {
+            var clock = Stopwatch.StartNew();
             var metadata = ReadPacketIndex(path);
-            return metadata is not null && HasOnlyIdrRandomAccessPoints(path, metadata.Value.Format, metadata.Value.KeyPackets);
+            var safe = metadata is not null && HasOnlyIdrRandomAccessPoints(path, metadata.Value.Format, metadata.Value.KeyPackets);
+            AppLog.Debug($"Editor H.264 hardware-decode probe: safe={safe}, keyPackets={metadata?.KeyPackets.Count ?? 0}, ms={clock.ElapsedMilliseconds}, file={Path.GetFileName(path)}.");
+            return safe;
+        }
+        catch (TimeoutException)
+        {
+            AppLog.Debug($"Editor H.264 hardware-decode probe timed out after {ProbeTimeoutMilliseconds}ms; will retry: {Path.GetFileName(path)}.");
+            return null;
         }
         catch (Exception error)
         {
@@ -148,14 +193,14 @@ internal static class H264HardwareDecodeProbe
         // ArgumentList rather than a hand-quoted Arguments string: this was the only
         // site in the codebase building one by hand, and its escaping was wrong for a
         // path ending in a backslash, which would escape the closing quote.
-        // Deliberately omit packet=data. Only compact index metadata and
-        // bounded codec configuration reach managed memory.
+        // No -show_data: it hex-dumps every packet even when only flags, pos and
+        // size are printed, which took a 186MB clip from ~220ms to 9s. The
+        // packet format comes from the codec tag instead of the extradata dump.
         foreach (var argument in new[]
         {
             "-v", "error",
             "-select_streams", "v:0",
-            "-show_entries", "stream=codec_name,extradata:packet=flags,pos,size",
-            "-show_data",
+            "-show_entries", "stream=codec_name,codec_tag_string:packet=flags,pos,size",
             "-of", "json",
             path,
         })
@@ -177,7 +222,7 @@ internal static class H264HardwareDecodeProbe
             // asynchronously so no unobserved task exception is left behind.
             ObserveFault(outputTask);
             ObserveFault(errorTask);
-            return null;
+            throw new TimeoutException();
         }
         var output = outputTask.GetAwaiter().GetResult();
         _ = errorTask.GetAwaiter().GetResult();
@@ -186,8 +231,10 @@ internal static class H264HardwareDecodeProbe
         if (!document.RootElement.TryGetProperty("streams", out var streams) || streams.GetArrayLength() != 1 ||
             !streams[0].TryGetProperty("codec_name", out var codec) || !string.Equals(codec.GetString(), "h264", StringComparison.OrdinalIgnoreCase) ||
             !document.RootElement.TryGetProperty("packets", out var packets)) return null;
-        var format = streams[0].TryGetProperty("extradata", out var extra) && ContainsStartCode(extra.GetString())
-            ? H264PacketFormat.AnnexB : H264PacketFormat.Avcc;
+        // MP4's avc1/avc3 always carry length-prefixed (AVCC) samples. Other
+        // containers are not guessed at: they keep the software path.
+        if (PacketFormatFor(streams[0].TryGetProperty("codec_tag_string", out var tag) ? tag.GetString() : null) is not { } format)
+            return null;
         var result = new List<H264KeyPacket>();
         foreach (var packet in packets.EnumerateArray())
         {
@@ -211,12 +258,11 @@ internal static class H264HardwareDecodeProbe
         return packet.TryGetProperty(name, out var field) && long.TryParse(field.GetString(), out value);
     }
 
-    private static bool ContainsStartCode(string? dump)
-    {
-        if (string.IsNullOrEmpty(dump)) return false;
-        var hex = new string(dump.Where(Uri.IsHexDigit).ToArray());
-        return hex.Contains("000001", StringComparison.Ordinal);
-    }
+    internal static H264PacketFormat? PacketFormatFor(string? codecTag) =>
+        string.Equals(codecTag, "avc1", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(codecTag, "avc3", StringComparison.OrdinalIgnoreCase)
+            ? H264PacketFormat.Avcc
+            : null;
 
     internal static bool ContainsIdrPayload(ReadOnlySpan<byte> bytes) => ContainsIdrPayload(bytes, H264PacketFormat.Auto);
 
