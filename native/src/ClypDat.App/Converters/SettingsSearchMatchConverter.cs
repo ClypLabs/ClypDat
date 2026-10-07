@@ -58,7 +58,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         },
         ["Advanced"] = new[]
         {
-            "OSC", "Open Sound Control", "Network controls", "UDP", "Port", "Listener status", "OSC setup guide", "Stream Deck", "OSC Remote",
+            "OSC", "Open Sound Control", "Network controls", "UDP", "Port", "Listener status", "OSC setup guide", "OSC setup walkthrough", "Stream Deck", "OSC Remote",
             "Encoding", "Encoder preset", "NVENC", "P1", "P2", "P3", "P4", "P5", "Automatic", "Manual",
             "Audio codec", "Audio bitrate", "kb/s", "Audio quality", "Codec default"
         },

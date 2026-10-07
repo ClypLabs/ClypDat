@@ -1,7 +1,7 @@
 namespace ClypDat.Core.Settings;
 
 // Audio codec of replay clips and full-session recordings. The native recorder
-// encodes it in memory; Opus is the default.
+// encodes it in memory; AAC is the default.
 public static class RecordingAudioCodec
 {
     public const string Opus = "Opus";
@@ -9,8 +9,8 @@ public static class RecordingAudioCodec
     public const string Vorbis = "Vorbis";
 
     public static string Normalize(string? value) =>
-        string.Equals(value, Aac, StringComparison.OrdinalIgnoreCase) ? Aac :
-        string.Equals(value, Vorbis, StringComparison.OrdinalIgnoreCase) ? Vorbis : Opus;
+        string.Equals(value, Opus, StringComparison.OrdinalIgnoreCase) ? Opus :
+        string.Equals(value, Vorbis, StringComparison.OrdinalIgnoreCase) ? Vorbis : Aac;
 
     // MP4 has no Vorbis mapping, so Vorbis recordings are always Matroska.
     public static bool RequiresMatroska(string? value) => Normalize(value) == Vorbis;

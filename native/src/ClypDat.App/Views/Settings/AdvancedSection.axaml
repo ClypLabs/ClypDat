@@ -68,7 +68,7 @@
       </Border>
     </StackPanel>
 
-    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=OSC|Open Sound Control|Network controls|UDP|Port|Listener status|OSC setup guide|Stream Deck|OSC Remote}">
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=OSC|Open Sound Control|Network controls|UDP|Port|Listener status|OSC setup guide|OSC setup walkthrough|Stream Deck|OSC Remote}">
       <TextBlock Classes="settingsGroupLabel" Text="OSC NETWORK CONTROLS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
       <Border Classes="settingsGroupCard">
         <StackPanel>
@@ -84,6 +84,7 @@
                              PointerPressed="LicenseLinkText_OnPointerPressed" />
                   <TextBlock Classes="settingsRowDesc" Text=" plugin and send its buttons to this PC on the port below." />
                 </WrapPanel>
+                <Button Content="OSC setup walkthrough" Click="OscGuide_OnClick" HorizontalAlignment="Left" Margin="0,6,0,0" />
                 <TextBlock Classes="settingsRowWarning" Text="Anyone who can reach the enabled OSC port can save clips and change replay length." TextWrapping="Wrap" />
               </StackPanel>
               <ToggleSwitch Grid.Column="1" IsChecked="{Binding OscEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
@@ -105,7 +106,6 @@
             <StackPanel Spacing="10">
               <TextBlock Classes="settingsRowTitle" Text="Listener status" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
               <TextBlock Classes="settingsRowDesc" Text="{Binding OscListenerStatus}" />
-              <Button Content="OSC setup guide" Click="OscGuide_OnClick" HorizontalAlignment="Left" />
             </StackPanel>
           </Border>
         </StackPanel>

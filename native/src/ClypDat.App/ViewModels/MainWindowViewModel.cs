@@ -189,6 +189,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string? _replayAv1Family;
     private string _selectedThumbnailPath = string.Empty;
     private Avalonia.Media.Imaging.Bitmap? _selectedThumbnail;
+    private string? _selectedThumbnailVideoPath;
     private bool _isEditorVideoLoading;
     private bool _isHydratingLibrary;
     private int _hydrationTotal;
@@ -345,8 +346,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         };
         ReplayAudioCodecs = new ObservableCollection<ReplayVideoCodecOption>
         {
-            new("Opus", RecordingAudioCodec.Opus, "Best quality for its size. Default codec."),
-            new("AAC", RecordingAudioCodec.Aac, "Plays on older devices and editors."),
+            new("AAC", RecordingAudioCodec.Aac, "Plays on older devices and editors. Default codec."),
+            new("Opus", RecordingAudioCodec.Opus, "Best quality for its size."),
             new("Vorbis", RecordingAudioCodec.Vorbis, "Clips and sessions save as MKV.")
         };
         ExportCodecs = new ObservableCollection<ExportCodecOption>
@@ -2447,7 +2448,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ReplayVideoCodecOption SelectedReplayAudioCodec
     {
         get => ReplayAudioCodecs.FirstOrDefault(codec => codec.Value == RecordingAudioCodec.Normalize(Settings.ReplayAudioCodec))
-               ?? ReplayAudioCodecs.First(codec => codec.Value == RecordingAudioCodec.Opus);
+               ?? ReplayAudioCodecs.First(codec => codec.Value == RecordingAudioCodec.Aac);
         set
         {
             if (value is null || string.Equals(Settings.ReplayAudioCodec, value.Value, StringComparison.OrdinalIgnoreCase)) return;
@@ -6654,8 +6655,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
                 if (!string.IsNullOrEmpty(thumbnailPath))
                 {
-                    SelectedThumbnailPath = thumbnailPath;
-                    SelectedThumbnail = LoadBitmap(thumbnailPath);
+                    SelectMediaThumbnail(filePath, thumbnailPath);
                 }
 
                 if (!string.IsNullOrEmpty(filmstripPath))
@@ -6744,7 +6744,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (media is null) return false;
         if (ClipNotReadyMessage == ClipOpenMessages.Loading) ClipNotReadyMessage = string.Empty;
         // See OpenVideoFileAsync - hydration keeps running in the background.
-        OpenMedia(media);
+        OpenMedia(media, previewImage: clip.PreviewImage);
         return true;
     }
 
@@ -9715,7 +9715,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         };
     }
 
-    private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false, bool showEditor = true)
+    private void OpenMedia(MediaFileInfo media, bool preserveEditorText = false, bool showEditor = true,
+        Avalonia.Media.Imaging.Bitmap? previewImage = null)
     {
         if (SpotifyProcessingPaths.IsProcessing(media.Path)) return;
         ResetVideoZoom();
@@ -9734,8 +9735,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedVideoName = media.Name;
         SelectedVideoPath = media.Path;
         _selectedVideoCodec = media.Tracks.FirstOrDefault(track => track.Type == "video")?.Codec ?? string.Empty;
-        SelectedThumbnailPath = media.ThumbnailPath;
-        SelectedThumbnail = LoadBitmap(media.ThumbnailPath);
+        SelectMediaThumbnail(media.Path, media.ThumbnailPath, previewImage);
         // Set here, synchronously, so the thumbnail placeholder is already
         // showing by the moment IsEditorVisible flips true below - the actual
         // video load/decode is deferred a tick later (QueueEditorPlayback),
@@ -11648,7 +11648,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 if (cancellationToken.IsCancellationRequested) return;
                 if (string.Equals(SelectedVideoPath, path, StringComparison.OrdinalIgnoreCase))
                 {
-                    SelectedThumbnail = LoadBitmap(thumbnailPath);
+                    SelectMediaThumbnail(path, thumbnailPath);
                 }
                 AllClips.FirstOrDefault(clip => string.Equals(clip.Path, path, StringComparison.OrdinalIgnoreCase))?.RefreshPreviewImage();
             });
@@ -12185,6 +12185,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return Duration <= TimeSpan.Zero
             ? 0
             : Math.Clamp(time.TotalMilliseconds / Duration.TotalMilliseconds * 100, 0, 100);
+    }
+
+    internal void SelectMediaThumbnail(string videoPath, string thumbnailPath,
+        Avalonia.Media.Imaging.Bitmap? previewImage = null)
+    {
+        var thumbnail = LoadBitmap(thumbnailPath);
+        // Metadata hydration and image generation can finish in either order.
+        // Keep this clip's displayed poster until a replacement has decoded;
+        // another clip must never inherit the previous selection's image.
+        if (thumbnail is null && SelectedThumbnail is not null &&
+            string.Equals(_selectedThumbnailVideoPath, videoPath, StringComparison.OrdinalIgnoreCase)) return;
+
+        thumbnail ??= previewImage;
+        _selectedThumbnailVideoPath = videoPath;
+        SelectedThumbnailPath = thumbnailPath;
+        SelectedThumbnail = thumbnail;
     }
 
     private static Avalonia.Media.Imaging.Bitmap? LoadBitmap(string path)
