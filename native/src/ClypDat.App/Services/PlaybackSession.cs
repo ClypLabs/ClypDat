@@ -728,12 +728,24 @@ public sealed partial class PlaybackSession : IDisposable
         try
         {
             Interlocked.Increment(ref _playVersion);
+            // Hover warm-ups wait on this stop before the next tile can load, and
+            // it ranges from 0 to 1.6s; split it so a slow one says which part.
+            var started = Stopwatch.GetTimestamp();
+            long locked, audio;
             lock (_transportLock)
             {
+                locked = Stopwatch.GetTimestamp();
                 StopAudioClockMonitoring();
                 StopAudioOutput();
+                audio = Stopwatch.GetTimestamp();
                 VideoPlayer.Stop();
             }
+            var total = Stopwatch.GetElapsedTime(started);
+            if (total.TotalMilliseconds >= 100)
+                AppLog.Debug($"[DEBUG-editor-open-latency] session stop: totalMs={total.TotalMilliseconds:0}, " +
+                    $"lockMs={Stopwatch.GetElapsedTime(started, locked).TotalMilliseconds:0}, " +
+                    $"audioMs={Stopwatch.GetElapsedTime(locked, audio).TotalMilliseconds:0}, " +
+                    $"vlcStopMs={Stopwatch.GetElapsedTime(audio).TotalMilliseconds:0}, path={Path.GetFileName(LoadedPath)}.");
             _ended = false;
             _shouldPlay = false;
             FreezeOverlayClock(TimeSpan.Zero);

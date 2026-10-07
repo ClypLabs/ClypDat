@@ -510,6 +510,12 @@ void AlignRect(RECT *r, int align_boundary, int align_size)
 /* */
 static void CommonChangeThumbnailClip(vout_display_t *vd, bool show)
 {
+    /* ClypDat: the video is one control inside the app window, not the whole
+     * player, so VLC must not crop the app's taskbar thumbnail to it. Hover
+     * warm-up outputs are 1x1 and hidden, and clearing the clip after the root
+     * window is gone failed with 0x800706f4 on every teardown. */
+    VLC_UNUSED(vd); VLC_UNUSED(show);
+#if 0
     vout_display_sys_t *sys = vd->sys;
 
     /* Windows 7 taskbar thumbnail code */
@@ -553,6 +559,7 @@ static void CommonChangeThumbnailClip(vout_display_t *vd, bool show)
         taskbl->lpVtbl->Release(taskbl);
     }
     CoUninitialize();
+#endif
 }
 
 static int CommonControlSetFullscreen(vout_display_t *vd, bool is_fullscreen)

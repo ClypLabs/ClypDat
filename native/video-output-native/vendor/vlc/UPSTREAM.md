@@ -19,6 +19,8 @@ ClypDat modifications, September 2026:
 
 - `direct3d11.c`: editor context selection, original-size decoded texture retention,
   composition before presentation, paused redraw, status reporting and failure handling.
+- `common.c`: taskbar thumbnail clipping disabled; the video is one control inside
+  ClypDat's window, so VLC must not crop the app's taskbar preview to it.
 - Private D3D11, chroma and window helpers: MSVC-compatible array parameters,
   variadic macros, stack allocation and nonempty structs.
 - `compat/vlc_atomic.h`: copy of the bundled SDK header with MSVC C11 atomics enabled.
