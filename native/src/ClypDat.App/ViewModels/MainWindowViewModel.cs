@@ -302,6 +302,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MicrophoneDevices = new ObservableCollection<AudioDeviceOption>();
         OpenProcesses = new ObservableCollection<ProcessOption>();
         GameCandidateProcesses = new ObservableCollection<ProcessOption>();
+        GameCandidateProcesses.CollectionChanged += (_, _) => OnPropertyChanged(nameof(GameCandidatePlaceholder));
         ReplayDurationPresets = new ObservableCollection<ReplayDurationPreset>(DurationPresets);
         ReplayResolutions = new ObservableCollection<ResolutionOption>
         {
@@ -4454,6 +4455,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         get => _selectedGameProcess;
         set => SetProperty(ref _selectedGameProcess, value);
     }
+
+    public string GameCandidatePlaceholder => GameCandidateProcesses.Count == 0
+        ? "No new apps open - start the game, then Refresh"
+        : "Click to select a game";
 
     public void ApplyFullSessionToggle(bool enabled)
     {

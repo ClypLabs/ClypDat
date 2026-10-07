@@ -30,7 +30,7 @@
                 <TextBlock Classes="settingsRowDesc" Text="Start the game, then pick it from the apps that are open right now." />
               </StackPanel>
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
-                <ComboBox Classes="settingsInput" ItemsSource="{Binding GameCandidateProcesses}" SelectedItem="{Binding SelectedGameProcess}" HorizontalAlignment="Stretch" />
+                <ComboBox Classes="settingsInput" ItemsSource="{Binding GameCandidateProcesses}" SelectedItem="{Binding SelectedGameProcess}" HorizontalAlignment="Stretch" PlaceholderText="{Binding GameCandidatePlaceholder}" />
                 <Button Grid.Column="1" Content="Refresh" Click="RefreshProcessesButton_OnClick" />
                 <Button Grid.Column="2" Classes="primaryButton" Content="Add" Click="AddGameFromProcessButton_OnClick" />
               </Grid>
