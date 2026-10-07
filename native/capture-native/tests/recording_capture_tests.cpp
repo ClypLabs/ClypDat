@@ -2009,6 +2009,7 @@ int main(int argc,char**argv) {
     try{
     av_log_set_level(AV_LOG_ERROR);
     if(argc>1&&std::string_view(argv[1])=="--graphics-loss"){graphics_loss_boundaries();return 0;}
+    if(argc>1&&std::string_view(argv[1])=="--aspect-fit-gpu"){aspect_fit_processing(true);return 0;}
     if(argc>1&&std::string_view(argv[1])=="--qsv-ledger"){qsv_submission_ledger();return 0;}
     if(argc>1&&std::string_view(argv[1])=="--encoder-input"){encoder_input_diagnostics();return 0;}
 #ifdef CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS

@@ -39,6 +39,7 @@ add_library(RecorderCore STATIC
     src/overlay_compositor.cpp src/overlay_compositor.h
     src/recording_capture.cpp src/recording_capture.h src/encoder_input_diagnostics.h
     src/recording_windows_source.cpp
+    src/window_capture_bounds.cpp src/window_capture_bounds.h
     src/recording_audio.cpp src/recording_audio.h
     src/recording_audio_codec.cpp src/recording_audio_codec.h
     src/recording_audio_timing.cpp src/recording_audio_timing.h
@@ -92,6 +93,16 @@ add_custom_command(TARGET ClypDat.Capture.Native POST_BUILD
 
 enable_testing()
 option(CLYPDAT_TEST_GPU "Run tests requiring a physical D3D11 device" OFF)
+
+add_executable(ClypDat.Capture.Native.WindowCaptureTests tests/window_capture_tests.cpp)
+target_link_libraries(ClypDat.Capture.Native.WindowCaptureTests PRIVATE RecorderCore)
+target_compile_definitions(ClypDat.Capture.Native.WindowCaptureTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+set_target_properties(ClypDat.Capture.Native.WindowCaptureTests PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_test(NAME ClypDat.Capture.Native.WindowCapture COMMAND ClypDat.Capture.Native.WindowCaptureTests)
+if(CLYPDAT_TEST_GPU)
+    add_test(NAME ClypDat.Capture.Native.GpuWindowCapture COMMAND ClypDat.Capture.Native.WindowCaptureTests --gpu)
+endif()
 
 add_executable(ClypDat.Capture.Native.KeyframeTests tests/replay_keyframe_tests.cpp)
 target_link_libraries(ClypDat.Capture.Native.KeyframeTests PRIVATE RecorderCore)

@@ -6,6 +6,7 @@
 #include <functional>
 #include <exception>
 #include <memory>
+#include <optional>
 #include <string>
 struct ID3D11Device;
 struct ID3D11Texture2D;
@@ -54,14 +55,16 @@ public:
     // `timestamp`. Returns false when the frame was dropped: the region lies
     // outside it, or every pooled texture is held. Keeps no reference to
     // `input`, so the caller may release its buffer on return.
-    bool deliver(ID3D11Texture2D* input, int64_t timestamp, const Timing& timing = {});
+    // A per-frame region overrides the store region. It is captured at arrival
+    // so delayed copies retain the right origin across window moves/resizes.
+    bool deliver(ID3D11Texture2D* input, int64_t timestamp, const Timing& timing = {}, std::optional<CaptureRect> region = {});
     // Publishes the capture API's buffer as the newest frame without copying
     // it (copy on selection). take() hands it out as a deferred texture whose
     // materialize() makes the only copy. `release` hands the buffer back to
     // the capture API, exactly once: when the frame is superseded or dropped
     // uncopied, when it is discarded, or as soon as its copy is issued.
     // False (and released at once) when the region lies outside the frame.
-    bool publish(ID3D11Texture2D* input, std::function<void()> release, int64_t timestamp, const Timing& timing = {});
+    bool publish(ID3D11Texture2D* input, std::function<void()> release, int64_t timestamp, const Timing& timing = {}, std::optional<CaptureRect> region = {});
     // Copies every borrowed frame still referenced, handing its buffer back
     // (before the capture API recreates its pool at a new size).
     void materialize_borrowed();

@@ -2,6 +2,7 @@
 #include "captured_frames.h"
 #include "cursor_compositor.h"
 #include "output_orientation.h"
+#include "window_capture_bounds.h"
 #include <Windows.h>
 #include <d3d11.h>
 #include <d3d11_4.h>
@@ -287,7 +288,8 @@ public:
         pool_ = Direct3D11CaptureFramePool::CreateFreeThreaded(direct_device_, format, buffers_, size);
         auto shared = shared_; auto direct = direct_device_; const bool dwm_timing = config.wgc_dwm_timing;
         const bool borrow = config.wgc_copy_on_selection; const int buffers = buffers_;
-        arrived_ = pool_.FrameArrived([shared, direct, format, dwm_timing, borrow, buffers](const Direct3D11CaptureFramePool& pool, auto&&) {
+        const auto window = config.window;
+        arrived_ = pool_.FrameArrived([shared, direct, format, dwm_timing, borrow, buffers, window](const Direct3D11CaptureFramePool& pool, auto&&) {
             const auto entered = std::chrono::steady_clock::now();
             CapturedFrameStore::Timing timing; LARGE_INTEGER qpc{}; QueryPerformanceCounter(&qpc); timing.callback_qpc = qpc.QuadPart;
             if (dwm_timing) { DWM_TIMING_INFO dwm{}; dwm.cbSize = sizeof(dwm);
@@ -316,19 +318,29 @@ public:
                             pool.Recreate(direct, format, buffers, content);
                         break;
                     }
+                    std::optional<CaptureRect> region;
+                    if (window) {
+                        const auto bounds = capture_window_bounds(window);
+                        if (bounds) region = capture_window_region(*bounds, {0, 0, content.Width, content.Height});
+                        // A resize can race the callback. Never replace missing
+                        // or inconsistent client bounds with a whole-window copy.
+                        if (!region) {
+                            texture.Reset(); frame.Close(); frame = pool.TryGetNextFrame(); continue;
+                        }
+                    }
                     // SystemRelativeTime: 100 ns QPC time of the vblank the
                     // composition is shown at (after this callback runs).
                     const auto timestamp = frame.SystemRelativeTime().count() / 10;
                     if (borrow) {
                         // Borrowed until the pacer picks or passes it over;
                         // only a picked (or detector-sampled) frame is copied.
-                        shared->frames.publish(texture.Get(), [held = frame]() mutable { try { held.Close(); } catch (...) {} }, timestamp, timing);
+                        shared->frames.publish(texture.Get(), [held = frame]() mutable { try { held.Close(); } catch (...) {} }, timestamp, timing, region);
                         texture.Reset();
                     } else {
                         // The copy goes to a pooled texture (none free:
                         // counted and dropped), so the WGC buffer is
                         // released at once.
-                        shared->frames.deliver(texture.Get(), timestamp, timing);
+                        shared->frames.deliver(texture.Get(), timestamp, timing, region);
                         texture.Reset(); frame.Close();
                     }
                     frame = pool.TryGetNextFrame();
@@ -399,6 +411,10 @@ public:
     const char* name() const override { return "Windows Graphics Capture"; }
     ID3D11Device* d3d_device() const override { return shared_->gpu.device.Get(); }
     CaptureRect content_bounds() const override {
+        if (config_.window) {
+            const auto bounds = capture_window_bounds(config_.window);
+            return bounds ? CaptureRect{0, 0, bounds->client.width, bounds->client.height} : CaptureRect{};
+        }
         if(!config_.window&&config_.capture_region.width>0&&config_.capture_region.height>0)return{0,0,config_.capture_region.width,config_.capture_region.height};
         const auto size=item_.Size();return{0,0,size.Width,size.Height};
     }
@@ -534,10 +550,9 @@ public:
         ComPtr<ID3D11Texture2D> texture; checked(resource.As(&texture), "Query desktop frame texture");
         CaptureRect crop;
         if (config_.window) {
-            RECT rect{}; const auto hwnd = reinterpret_cast<HWND>(config_.window);
-            if (!GetClientRect(hwnd, &rect)) return false;
-            POINT origin{}; if (!ClientToScreen(hwnd, &origin)) return false;
-            crop = {origin.x - desktop_.left, origin.y - desktop_.top, rect.right, rect.bottom};
+            const auto bounds = capture_window_bounds(config_.window);
+            if (!bounds) return false;
+            crop = {bounds->client.x - desktop_.left, bounds->client.y - desktop_.top, bounds->client.width, bounds->client.height};
             if (crop.width!=candidate_.width||crop.height!=candidate_.height) { candidate_ = crop; crop_samples_ = 1; }
             else ++crop_samples_;
             if(stable_.width==0)stable_=crop;
@@ -609,7 +624,7 @@ public:
     }
     bool recover() override { if (FAILED(device_removed_reason())) return false; try{open();reopener_.reset();return true;}catch(...){return false;} }
     CaptureRect content_bounds() const override {
-        if(config_.window){RECT rect{};if(GetClientRect(reinterpret_cast<HWND>(config_.window),&rect))return{0,0,rect.right,rect.bottom};}
+        if(config_.window){const auto bounds=capture_window_bounds(config_.window);return bounds?CaptureRect{0,0,bounds->client.width,bounds->client.height}:CaptureRect{};}
         if(config_.capture_region.width>0&&config_.capture_region.height>0)return{0,0,config_.capture_region.width,config_.capture_region.height};
         return{0,0,desktop_.right-desktop_.left,desktop_.bottom-desktop_.top};
     }
@@ -757,16 +772,17 @@ struct CapturedFrameStore::Impl : std::enable_shared_from_this<CapturedFrameStor
     }
     // The store's crop of a frame described by `desc`; false when the
     // region lies outside it.
-    bool crop_of(const D3D11_TEXTURE2D_DESC& desc, CaptureRect& crop) const {
-        crop = region.width > 0 ? region : CaptureRect{0, 0, int(desc.Width), int(desc.Height)};
-        return crop.x >= 0 && crop.y >= 0 && int64_t(crop.x) + crop.width <= desc.Width && int64_t(crop.y) + crop.height <= desc.Height;
+    bool crop_of(const D3D11_TEXTURE2D_DESC& desc, CaptureRect& crop, std::optional<CaptureRect> requested = {}) const {
+        crop = requested.value_or(region.width > 0 ? region : CaptureRect{0, 0, int(desc.Width), int(desc.Height)});
+        return crop.width > 0 && crop.height > 0 && crop.x >= 0 && crop.y >= 0 &&
+            int64_t(crop.x) + crop.width <= desc.Width && int64_t(crop.y) + crop.height <= desc.Height;
     }
     // A pooled copy of a borrowed buffer, cropped and tone-mapped exactly as
     // deliver() does; null when every pooled texture is held.
-    std::shared_ptr<ID3D11Texture2D> copy_borrowed(ID3D11Texture2D* input) {
+    std::shared_ptr<ID3D11Texture2D> copy_borrowed(ID3D11Texture2D* input, CaptureRect crop) {
         std::lock_guard serial(delivering);
         D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
-        CaptureRect crop; if (!crop_of(desc, crop)) return {};
+        if (!crop_of(desc, crop, crop)) return {};
         std::shared_ptr<ID3D11Texture2D> target, stale;
         {
             std::lock_guard lock(mutex);
@@ -836,6 +852,7 @@ struct CapturedFrameStore::Impl::Borrowed final : CaptureDeferredTexture {
     ComPtr<ID3D11Texture2D> input;
     std::function<void()> release;
     int width = 0, height = 0;
+    CaptureRect region;
     std::mutex mutex;
     std::shared_ptr<ID3D11Texture2D> owned;
     std::shared_ptr<ID3D11Texture2D> materialize() override {
@@ -844,7 +861,7 @@ struct CapturedFrameStore::Impl::Borrowed final : CaptureDeferredTexture {
             std::lock_guard lock(mutex);
             if (owned || !input) return owned;
             const auto impl = store.lock();
-            if (impl) owned = impl->copy_borrowed(input.Get());
+            if (impl) owned = impl->copy_borrowed(input.Get(), region);
             result = owned; input.Reset(); give_back = std::move(release);
             if (impl) impl->returned(bool(owned));
         }
@@ -864,15 +881,15 @@ struct CapturedFrameStore::Impl::Borrowed final : CaptureDeferredTexture {
     ~Borrowed() override { discard(); }
 };
 
-bool CapturedFrameStore::publish(ID3D11Texture2D* input, std::function<void()> release, int64_t timestamp, const Timing& timing) {
+bool CapturedFrameStore::publish(ID3D11Texture2D* input, std::function<void()> release, int64_t timestamp, const Timing& timing, std::optional<CaptureRect> region) {
     auto& s = *impl_;
     if (!input) { if (release) release(); throw std::invalid_argument("Missing captured frame"); }
     D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
     if (desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) { if (release) release(); throw std::runtime_error("Unsupported capture texture format"); }
-    CaptureRect crop; if (!s.crop_of(desc, crop)) { if (release) release(); return false; }
+    CaptureRect crop; if (!s.crop_of(desc, crop, region)) { if (release) release(); return false; }
     auto frame = std::make_shared<Impl::Borrowed>();
     frame->store = s.weak_from_this(); frame->input = input; frame->release = std::move(release);
-    frame->width = crop.width; frame->height = crop.height;
+    frame->width = crop.width; frame->height = crop.height; frame->region = crop;
     auto published = timing; LARGE_INTEGER now{}; QueryPerformanceCounter(&now); published.published_qpc = now.QuadPart;
     std::shared_ptr<Impl::Borrowed> superseded; // Handed back outside the lock.
     {
@@ -902,15 +919,14 @@ CapturedFrameStore::CapturedFrameStore(ID3D11Device* device, int capacity, float
 }
 CapturedFrameStore::~CapturedFrameStore() { close(); }
 
-bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp, const Timing& timing) {
+bool CapturedFrameStore::deliver(ID3D11Texture2D* input, int64_t timestamp, const Timing& timing, std::optional<CaptureRect> region) {
     auto& s = *impl_;
     if (!input) throw std::invalid_argument("Missing captured frame");
     std::lock_guard serial(s.delivering);
     D3D11_TEXTURE2D_DESC desc{}; input->GetDesc(&desc);
     const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
     if (!hdr && desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM) throw std::runtime_error("Unsupported capture texture format");
-    const auto crop = s.region.width > 0 ? s.region : CaptureRect{0, 0, int(desc.Width), int(desc.Height)};
-    if (crop.x < 0 || crop.y < 0 || int64_t(crop.x) + crop.width > desc.Width || int64_t(crop.y) + crop.height > desc.Height) return false;
+    CaptureRect crop; if (!s.crop_of(desc, crop, region)) return false;
     // Released only outside the lock: a lease's return takes it.
     std::shared_ptr<ID3D11Texture2D> target, stale;
     {

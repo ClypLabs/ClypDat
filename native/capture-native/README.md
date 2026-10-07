@@ -40,6 +40,16 @@ Build and run native tests from the project root:
 ./eng/Build-NativeCapture.ps1 -Configuration Release -TestGpu
 ```
 
+Window recordings crop to the physical client area before pacing, detector
+sampling and encoding. WGC matches each frame's content size to DWM's visible
+frame or the physical window rect, retaining that crop with borrowed buffers;
+DXGI uses the same physical client bounds. Missing or inconsistent geometry is
+skipped during resize. The initial recording aspect ratio also uses the client.
+`ClypDat.Capture.Native.WindowCaptureTests` checks generated window pixels,
+hidden-window DPI queries and decoded video; `--gpu` checks generated NVENC
+output without capturing a screen or visible window. See
+[window capture validation](../../docs/window-capture-validation.md).
+
 `-TestGpu` uses generated D3D11 textures and NVENC, never the desktop or user
 input devices. The native tests cover generated H.264/AV1 at 30, 60, 90 and
 120 fps in CFR and VFR, forced NVENC generation replacement, decode and seek,
