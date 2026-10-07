@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ClypDat.Capture.Abstractions;
 
 namespace ClypDat.App.Services;
@@ -170,8 +171,14 @@ public static class CaptureDiagnosticBundle
     }
 
     // wevtutil's text format starts every record with an "Event[n]:" line.
-    // Only records naming ClypDat (app, recorder or detector host) are kept;
-    // other programs' crashes are none of the bundle's business.
+    // Only records whose crashing or hung program IS ClypDat (app, recorder or
+    // detector host) are kept; other programs' crashes are none of the
+    // bundle's business. Matching the word anywhere let in other programs
+    // whose stack merely ran through a folder named ClypDat.
+    private static readonly Regex ClypDatProcessLine = new(
+        @"^\s*(?:Application:|Faulting application name:|The program|P1:)\s*(?:ClypDat|ClypDatRecorder|ClypDatDetectorHost)\.exe\b",
+        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
     internal static IReadOnlyList<string> ClypDatCrashEvents(string wevtutilText)
     {
         var events = new List<string>();
@@ -179,10 +186,13 @@ public static class CaptureDiagnosticBundle
         void Finish()
         {
             var record = current.ToString().Trim();
-            if (record.Contains("ClypDat", StringComparison.OrdinalIgnoreCase)) events.Add(record);
+            if (ClypDatProcessLine.IsMatch(record)) events.Add(record);
             current.Clear();
         }
-        foreach (var line in wevtutilText.Split('\n'))
+        // wevtutil ends some localized fields with a NUL ("Task: None\0").
+        // Written through, those made Notepad read the file as UTF-16, which
+        // turns plain English into what looks like Chinese.
+        foreach (var line in wevtutilText.Replace("\0", string.Empty).Split('\n'))
         {
             if (line.StartsWith("Event[", StringComparison.Ordinal)) Finish();
             current.Append(line.TrimEnd('\r')).Append('\n');

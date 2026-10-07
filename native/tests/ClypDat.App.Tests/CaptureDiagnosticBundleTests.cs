@@ -143,6 +143,24 @@ public sealed class CaptureDiagnosticBundleTests
         Assert.DoesNotContain(events, record => record.Contains("other.exe", StringComparison.Ordinal));
     }
 
+    // A tester's bundle: another program's crash whose stack ran through a
+    // folder named ClypDat, with wevtutil's NUL-terminated fields.
+    [Fact]
+    public void ClypDatCrashEvents_IgnoresOtherProgramsMentioningClypDatAndDropsNuls()
+    {
+        var text = string.Join("\r\n",
+            "Event[201]", "  Source: .NET Runtime", "  Task: None\0", "Description: ", "Application: dotnet.exe",
+            @"   at Program.<Main>$(String[] args) in D:\Development\ClypDat\clypdat-app\.local\audit\Program.cs:line 32", "\0",
+            "Event[202]", "  Source: Application Hang", "  Task: None\0", "Description: ",
+            "The program ClypDat.exe version 2.2.0.0 stopped interacting with Windows and was closed.");
+
+        var events = CaptureDiagnosticBundle.ClypDatCrashEvents(text);
+
+        var hang = Assert.Single(events);
+        Assert.Contains("stopped interacting", hang, StringComparison.Ordinal);
+        Assert.DoesNotContain('\0', hang);
+    }
+
     [Fact]
     public void Create_IncludesCrashEvents()
     {

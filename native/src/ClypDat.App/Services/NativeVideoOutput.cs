@@ -21,8 +21,14 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
     private ulong _token;
     private ulong _generation = 1, _revision;
     private bool _seeking;
+    // Pixels of every image uploaded to this output, kept for its lifetime (one
+    // clip load) so an image the compositor dropped can be sent again.
     private readonly Dictionary<ulong, (byte[] Pixels, uint Width, uint Height)> _artwork = [];
-    // Uploaded since the last accepted submit, so still pending natively.
+    // What the compositor holds, mirrored from its rules: uploads wait as
+    // pending until a submit commits them, a new generation discards pending,
+    // and a non-barrier submit drops committed images its scene does not name.
+    // A scene naming an image in neither set is rejected outright.
+    private readonly HashSet<ulong> _committedArtwork = [];
     private readonly HashSet<ulong> _pendingArtwork = [];
     private readonly Stopwatch _opened = Stopwatch.StartNew();
     private bool _wasAttached;
@@ -101,17 +107,9 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
                 ClockMicroseconds = libvlc_clock()
             };
             if (SubmitState(_token, &state) == 0) throw new InvalidOperationException("Could not reset editor composition after seeking.");
-            // The compositor drops uncommitted artwork when the generation moves
-            // on. A hover warm-up's seek landing between an open's artwork upload
-            // and its scene submit left that scene naming an image the compositor
-            // no longer had, so it rejected it and paused the preview.
-            foreach (var id in _pendingArtwork)
-            {
-                if (!_artwork.TryGetValue(id, out var image)) continue;
-                fixed (byte* p = image.Pixels)
-                    if (Upload(_token, _generation, id, image.Width, image.Height, image.Width * 4, p) == 0)
-                        throw new InvalidOperationException("Could not restore editor artwork after seeking.");
-            }
+            // A new generation discards uploads not yet committed; Submit sends
+            // any its scene still needs again.
+            _pendingArtwork.Clear();
         }
     }
     internal void EndSeek(TimeSpan position)
@@ -177,12 +175,57 @@ internal sealed unsafe class NativeVideoOutput : IDisposable
                     Blurs = b,
                     Artworks = a
                 };
-                if (SubmitState(_token, &state) == 0) throw new InvalidOperationException("The GPU compositor rejected an editor update.");
+                    // Two scenes share an output: a hover warm-up publishes an empty
+                // one, and the editor's names its overlay images. When the
+                // warm-up reloaded the clip still open in the editor, its empty
+                // scene dropped those images, and the editor's next update named
+                // images the compositor no longer had - rejected, preview paused.
+                foreach (var item in artwork)
+                {
+                    if (_committedArtwork.Contains(item.Id) || _pendingArtwork.Contains(item.Id) || !_artwork.TryGetValue(item.Id, out var image)) continue;
+                    fixed (byte* p = image.Pixels)
+                        if (Upload(_token, _generation, item.Id, image.Width, image.Height, image.Width * 4, p) != 0) _pendingArtwork.Add(item.Id);
+                }
+                if (SubmitState(_token, &state) == 0)
+                {
+                    AppLog.Info($"Editor GPU compositor rejected a scene: {DescribeRejectionLocked(state, blurs, artwork)}.");
+                    throw new InvalidOperationException("The GPU compositor rejected an editor update.");
+                }
+                _committedArtwork.UnionWith(_pendingArtwork);
+                if (state.Revision != 0) _committedArtwork.IntersectWith(artwork.Select(item => item.Id));
                 _pendingArtwork.Clear();
-                if (!_seeking) foreach (var obsolete in _artwork.Keys.Where(id => !artwork.Any(item => item.Id == id)).ToArray()) _artwork.Remove(obsolete);
             }
         }
     }
+    // The compositor answers a rejected submit with a bare zero for any of six
+    // reasons. Name the ones visible from here, plus its own counters, so the
+    // next report says which.
+    private string DescribeRejectionLocked(State state, Blur[] blurs, Artwork[] artwork)
+    {
+        var reasons = new List<string>();
+        var status = new Status { Size = (uint)sizeof(Status), Version = Abi };
+        if (Query(_token, &status) == 0) reasons.Add("context-unavailable");
+        else
+        {
+            if (status.Failed != 0) reasons.Add($"failed '{status.ErrorMessage}'");
+            if (state.Generation < status.Generation) reasons.Add($"stale-generation native={status.Generation}");
+        }
+        if (!double.IsFinite(state.MediaSeconds) || !double.IsFinite(state.Rate) || state.Rate is < 0 or > 16)
+            reasons.Add($"invalid-clock seconds={state.MediaSeconds} rate={state.Rate}");
+        foreach (var blur in blurs)
+            if (!(blur.Sigma > 0 && blur.Sigma <= 256) || blur.Shape > 2 || !double.IsFinite(blur.Start) || !double.IsFinite(blur.End) || blur.End <= blur.Start)
+                reasons.Add($"invalid-blur sigma={blur.Sigma} shape={blur.Shape} {blur.Start}-{blur.End}");
+        foreach (var item in artwork)
+        {
+            if (item.Layer > 2 || !double.IsFinite(item.Start) || !double.IsFinite(item.End) || item.End <= item.Start)
+                reasons.Add($"invalid-artwork id={item.Id} layer={item.Layer} {item.Start}-{item.End}");
+            if (!_committedArtwork.Contains(item.Id) && !_pendingArtwork.Contains(item.Id))
+                reasons.Add($"missing-image id={item.Id} cached={_artwork.ContainsKey(item.Id)}");
+        }
+        return $"generation={state.Generation} revision={state.Revision} seeking={_seeking} blurs={blurs.Length} artwork={artwork.Length} " +
+            $"nativeRevision={status.Revision} reasons=[{(reasons.Count == 0 ? "stale-revision or non-finite bounds" : string.Join("; ", reasons))}]";
+    }
+
     internal Status ReadStatus()
     {
         lock (_gate)

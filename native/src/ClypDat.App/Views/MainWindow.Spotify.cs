@@ -286,6 +286,13 @@ public sealed partial class MainWindow
             if (error is GraphicsDeviceUnavailableException || output.TryReadStatus(out var status) && status.FailureKind == (uint)ClypDat.Capture.Abstractions.GraphicsFailureKind.DeviceLost) {
                 BeginEditorGraphicsRecovery(session, model, time); return false;
             }
+            // From the Library this is a hover warm-up's output: nothing on
+            // screen depends on it, so a dialog over the Library is all noise.
+            if (!model.IsEditorVisible)
+            {
+                AppLog.Info($"Editor GPU composition update skipped outside the editor: {error.Message}");
+                return false;
+            }
             session.Pause();
             model.IsPlaying = false;
             if (_compositionErrorOutput == output) return false;
