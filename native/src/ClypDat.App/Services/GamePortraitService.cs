@@ -124,6 +124,35 @@ public static class GamePortraitService
     }
 
     /// <summary>
+    /// Checks every known game's cached portrait once, after startup settles.
+    /// Cards only check the games they show, and most detected games have no
+    /// card, so their art otherwise never refreshed. Games with no cached
+    /// portrait are skipped: this keeps art current, it does not fetch new art.
+    /// </summary>
+    public static async Task RefreshCachedAsync(IReadOnlyList<(string DetectionKey, string DisplayName)> games, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+            var refreshed = 0;
+            foreach (var (detectionKey, displayName) in games
+                         .Where(game => !string.IsNullOrWhiteSpace(game.DisplayName))
+                         .DistinctBy(game => game.DisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                if (!File.Exists(CachePathFor(displayName))) continue;
+                await EditorForegroundWork.ParkWhileActiveAsync(cancellationToken).ConfigureAwait(false);
+                if (await EnsureCachedAsync(detectionKey ?? string.Empty, displayName, cancellationToken).ConfigureAwait(false)) refreshed++;
+            }
+            if (refreshed > 0) AppLog.Info($"Game portraits: refreshed {refreshed} cached portrait(s).");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error)
+        {
+            AppLog.Error("Game portrait refresh sweep failed", error);
+        }
+    }
+
+    /// <summary>
     /// Downloads the portrait if it is not cached yet, or replaces a cached one
     /// whose source has moved on. Returns true only when a new file was written,
     /// so callers can refresh exactly once instead of re-reading a bitmap they

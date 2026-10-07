@@ -398,6 +398,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RebuildGameCaptureRows();
         RebuildCustomGameTabs();
         SyncIgnoredGameExecutableRows();
+        // Snapshotted here, on the UI thread; the sweep itself runs in the background.
+        var portraitGames = Settings.GameCaptureOverrides.Select(game => (game.ExecutableName, game.DisplayName))
+            .Concat(Settings.CustomGameSettings.Select(pair => (pair.Key, pair.Value.DisplayName)))
+            .ToList();
+        _ = Task.Run(() => GamePortraitService.RefreshCachedAsync(portraitGames));
         // Three synchronous MMDeviceEnumerator COM enumerations. At cold boot
         // the Windows Audio service and USB/Bluetooth drivers are often still
         // coming up and this can block for seconds. Keep both enumeration and
