@@ -166,7 +166,22 @@ public static class GamePortraitService
         {
             var recorded = ReadSource(displayName);
             if (offlineUrl is not null && !string.Equals(offlineUrl, recorded, StringComparison.Ordinal)) refreshUrl = offlineUrl;
-            else if ((offlineUrl ?? recorded) is { } known && DateTime.UtcNow - cached.LastWriteTimeUtc > RefreshAfter) refreshUrl = known;
+            else if (DateTime.UtcNow - cached.LastWriteTimeUtc > RefreshAfter)
+            {
+                // Art found by a Steam name search has no store entry to compare
+                // with, so age is all there is: search again, falling back to the
+                // URL it came from last time.
+                string? searched = null;
+                if (offlineUrl is null)
+                {
+                    try { searched = await SearchPortraitUrlAsync(displayName, cancellationToken).ConfigureAwait(false); }
+                    catch (Exception error) when (error is not OperationCanceledException) { AppLog.Info($"Game portrait refresh search failed for '{displayName}': {error.Message}"); }
+                }
+                refreshUrl = offlineUrl ?? searched ?? recorded;
+                // Nothing to refresh from: hold off another 30 days rather than
+                // repeat the search on every launch.
+                if (refreshUrl is null) TouchCached(cached);
+            }
             if (refreshUrl is null) return false;
         }
         else if (offlineUrl is null && IsNegativeCacheFresh(displayName)) return false;
@@ -351,6 +366,12 @@ public static class GamePortraitService
         return RemoteGameIconsService.LoadCachedAppIds().TryGetValue(displayName, out var appId) && appId > 0
             ? appId
             : null;
+    }
+
+    private static void TouchCached(FileInfo cached)
+    {
+        try { cached.LastWriteTimeUtc = DateTime.UtcNow; }
+        catch { /* only postpones the next check */ }
     }
 
     private static bool IsNegativeCacheFresh(string displayName)
