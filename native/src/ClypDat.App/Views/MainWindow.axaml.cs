@@ -271,6 +271,7 @@ public sealed partial class MainWindow : Window
     // The hover bar moves inside a fixed window, clipped at the video's lower
     // edge so it slips behind the timeline. On Server, native per-pixel
     // compositing keeps empty area transparent; see ServerPerPixelOverlay.
+    private const double HoverControlsTopInset = 8;
     private const double HoverControlsSlideDistance = 62;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan FullscreenControlsSlideDuration = TimeSpan.FromMilliseconds(220);
@@ -10604,7 +10605,7 @@ public sealed partial class MainWindow : Window
         if (EditorVideoHost.Bounds.Width <= 0 || EditorVideoHost.Bounds.Height <= 0) return;
         var topLeft = EditorVideoHost.PointToScreen(new Point(0, 0));
         var width = Math.Max(1, EditorVideoHost.Bounds.Width);
-        // 38 DIPs for controls, 16 for the thumb strip, and 8 above the thumb.
+        // 38 DIPs for controls, 16 for the thumb strip, and 8 transparent DIPs above it.
         const double barHeight = HoverControlsSlideDistance;
         var bottomOnScreen = EditorVideoHost.PointToScreen(new Point(0, EditorVideoHost.Bounds.Height));
         // The OWNER's scaling, not the bar's. Position is in physical pixels
@@ -10891,7 +10892,6 @@ public sealed partial class MainWindow : Window
         var barContent = new Grid
         {
             RowDefinitions = new RowDefinitions("Auto,*"),
-            Margin = new Thickness(0, 8, 0, 0),
         };
         Grid.SetRow(progressStrip, 0);
         Grid.SetRow(layout, 1);
@@ -10913,6 +10913,7 @@ public sealed partial class MainWindow : Window
                 _editorHoverControlsWindow.Classes.Set("hoverPlayback", !fullscreen);
                 _editorHoverControlsWindow.Classes.Set("fullscreenPlayback", fullscreen);
                 existing.Child = BuildPlaybackBarLayout(fullscreen);
+                existing.Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0);
                 existing.CornerRadius = new CornerRadius(fullscreen ? 12 : 0);
                 existing.BorderThickness = new Thickness(fullscreen ? 1 : 0);
                 existing.Height = double.NaN;
@@ -10936,6 +10937,7 @@ public sealed partial class MainWindow : Window
             // strip along the top edge is what separates it from the video,
             // so only fullscreen adds a border around the floating panel.
             Background = HoverControlsBackdropBrush(fullscreen),
+            Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0),
             CornerRadius = new CornerRadius(fullscreen ? 12 : 0),
             BorderBrush = HoverControlsBorderBrush(fullscreen),
             BorderThickness = new Thickness(fullscreen ? 1 : 0),
