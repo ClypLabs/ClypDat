@@ -50,8 +50,11 @@ Skips and scaled crops are reported as `sourceWindowCropSkips` and
 `sourceWindowCropScaled`. The initial recording aspect ratio also uses the
 client, or the capture item's size when the window starts minimised.
 `ClypDat.Capture.Native.WindowCaptureTests` checks generated window pixels,
-hidden-window DPI queries and decoded video; `--gpu` checks generated NVENC
-output without capturing a screen or visible window. See
+hidden-window DPI queries and decoded video; `--gpu` checks the D3D11 video
+processor with whichever hardware encoder the device selects (NVENC, AMF or
+QSV) and prints it, without capturing a screen or visible window.
+`ClypDat.Capture.Native.CaptureTests --aspect-fit-gpu` runs only the GPU
+aspect-fit check, which `--gpu` already includes. See
 [window capture validation](../../docs/window-capture-validation.md).
 
 `-TestGpu` uses generated D3D11 textures and NVENC, never the desktop or user

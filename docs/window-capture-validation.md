@@ -32,7 +32,9 @@ The generated regression failed before the crop fix with
 - Every generated client pixel through immediate and deferred copies, retained
   crops, invalid crops, default monitor regions and CPU/GPU encoded video.
 - Every decoded luma/chroma pixel, including canvas padding, at the client
-  aspect ratio through CPU conversion and the D3D11 video processor/NVENC.
+  aspect ratio through CPU conversion and the D3D11 video processor with the
+  device's hardware encoder. Only NVENC has run this so far; AMF and QSV are
+  accepted by the test but unverified.
 
 Run `ClypDat.Capture.Native.WindowCaptureTests.exe` and repeat with `--gpu`
 from `native/capture-native/build/Release`. The existing aspect-fit GPU check

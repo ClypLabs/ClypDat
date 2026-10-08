@@ -181,7 +181,12 @@ void generated_window(bool hardware) {
     { std::unique_lock lock(mutex); CHECK(changed.wait_for(lock, std::chrono::seconds(5), [&] { return packets.size() >= 3; })); }
     CHECK(capture.stop()); const auto health = capture.health(); CHECK(health.error.empty()); CHECK(generation);
     CHECK(health.output_width == 846 && health.output_height == 480);
-    if (hardware) CHECK(health.hardware_input && health.processing_path == "d3d11-video-processor");
+    // Any vendor's encoder: GPU conversion must run without a CPU fallback,
+    // with D3D11 input unless the selected encoder reads frames back.
+    if (hardware) {
+        CHECK(health.processing_path.rfind("d3d11-video-processor", 0) == 0);
+        CHECK(health.hardware_input == (health.processing_path != "d3d11-video-processor-readback"));
+    }
     CodecContext decoder(avcodec_alloc_context3(avcodec_find_decoder(generation->codec->codec_id)));
     CHECK(decoder); CHECK(avcodec_parameters_to_context(decoder.get(), generation->codec.get()) == 0);
     CHECK(avcodec_open2(decoder.get(), decoder->codec, nullptr) == 0);
@@ -206,7 +211,7 @@ void generated_window(bool hardware) {
     };
     for (const auto& packet : packets) { CHECK(avcodec_send_packet(decoder.get(), packet.get()) == 0); receive(); }
     CHECK(avcodec_send_packet(decoder.get(), nullptr) == 0); receive(); CHECK(decoded >= 3);
-    std::cout << "Client-aspect video: " << decoded << " frames decoded, all edge pixels checked (" << health.processing_path << ")\n";
+    std::cout << "Client-aspect video: " << decoded << " frames decoded, all edge pixels checked (" << health.processing_path << ", " << health.encoder << ")\n";
 }
 int main(int argc, char** argv) {
     try { av_log_set_level(AV_LOG_ERROR); geometry_cases(); persistent_mismatch(); physical_bounds(); generated_window(argc > 1 && std::string(argv[1]) == "--gpu"); return 0; }
