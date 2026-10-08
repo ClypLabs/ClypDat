@@ -44,6 +44,15 @@ std::optional<WindowCaptureBounds> capture_window_bounds(uintptr_t window) {
         if (const auto bounds = query_window_bounds(hwnd)) return bounds;
     return {};
 }
+std::optional<CaptureRect> capture_window_restored_shape(uintptr_t window) {
+    const auto hwnd = reinterpret_cast<HWND>(window);
+    if (!hwnd || !IsWindow(hwnd)) return {};
+    WINDOWPLACEMENT placement{sizeof(placement)};
+    if (!GetWindowPlacement(hwnd, &placement)) return {};
+    const auto& normal = placement.rcNormalPosition;
+    if (normal.right <= normal.left || normal.bottom <= normal.top) return {};
+    return CaptureRect{0, 0, normal.right - normal.left, normal.bottom - normal.top};
+}
 std::optional<CaptureRect> capture_window_region(const WindowCaptureBounds& bounds, CaptureRect content) {
     if (content.width <= 0 || content.height <= 0) return {};
     const auto matches = [&](CaptureRect rect) {

@@ -19,8 +19,9 @@ instead of copying decorations; after eight frames of the same mismatch it maps
 the client by the content's uniform scale, so a DPI-virtualised window still
 records. Both backends count skipped frames in health. Each borrowed frame
 retains its arrival crop; later geometry changes cannot alter that copy. Output
-sizing uses the client aspect ratio, or the capture item's size when the window
-starts minimised.
+sizing uses the client aspect ratio. A window minimised at start uses the WGC
+item's size, or under DXGI the restored placement's shape: placement is in the
+window's own DPI space, so only its aspect ratio is used.
 
 The generated regression failed before the crop fix with
 `Window capture includes title bar or green right border`. The fixed test checks:

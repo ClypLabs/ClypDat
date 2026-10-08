@@ -47,8 +47,10 @@ DXGI uses the same physical client bounds. Missing or inconsistent geometry is
 skipped during resize; a WGC size that persistently matches neither rect (a
 DPI-virtualised window composed at logical size) is mapped by scale instead.
 Skips and scaled crops are reported as `sourceWindowCropSkips` and
-`sourceWindowCropScaled`. The initial recording aspect ratio also uses the
-client, or the capture item's size when the window starts minimised.
+`sourceWindowCropScaled`; the app logs when every frame is being skipped and
+when scaled crops start. The initial recording aspect ratio also uses the
+client. A window minimised at start uses the WGC item's size, or under DXGI
+its restored placement's shape.
 `ClypDat.Capture.Native.WindowCaptureTests` checks generated window pixels,
 hidden-window DPI queries and decoded video; `--gpu` checks the D3D11 video
 processor with whichever hardware encoder the device selects (NVENC, AMF or

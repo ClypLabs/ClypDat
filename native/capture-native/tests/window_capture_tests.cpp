@@ -91,11 +91,16 @@ void physical_bounds() {
             const auto before = GetThreadDpiAwarenessContext();
             const auto bounds = capture_window_bounds(reinterpret_cast<uintptr_t>(hwnd));
             CHECK(bounds && bounds->client == expected);
+            // Not minimised: the restored shape has the physical window's
+            // aspect ratio, whatever DPI space the placement is in.
+            const auto shape = capture_window_restored_shape(reinterpret_cast<uintptr_t>(hwnd));
+            CHECK(shape && std::abs(double(shape->width) / shape->height - double(bounds->window.width) / bounds->window.height) < 0.01);
             CHECK(AreDpiAwarenessContextsEqual(before, GetThreadDpiAwarenessContext()));
             ++cases;
         }
     }
     CHECK(!capture_window_bounds(0)); CHECK(!capture_window_bounds(1));
+    CHECK(!capture_window_restored_shape(0)); CHECK(!capture_window_restored_shape(1));
     std::cout << "Win32 physical bounds: " << cases << " hidden-window DPI cases; caller context restored\n";
 }
 void check_content(CapturePixels& output, uint32_t color) {

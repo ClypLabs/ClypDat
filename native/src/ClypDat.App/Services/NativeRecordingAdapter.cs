@@ -26,6 +26,8 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
     private string? _lastLoggedCaptureSource;
     private long _lastLoggedSourceRecoveries = -1;
     private string _lastLoggedOverlayState = "";
+    private long _lastWindowCropSkips, _lastWindowCropScaled;
+    private bool _windowCropStallLogged;
     private bool _recording;
     private volatile bool _lastFrozen;
     private string _fullSessionPath = "";
@@ -286,12 +288,36 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             AppLog.Info($"Burned overlays: state={overlayState} path={Text(details, "overlayPath")}" +
                 (overlayReason.Length > 0 ? $" reason='{overlayReason}'" : "") + (overlayGpuFailure.Length > 0 ? $" gpuFailure='{overlayGpuFailure}'" : "") + ".");
         }
+        // A window recording whose crop keeps failing is otherwise just black
+        // or frozen video. Counters restart with each new capture source.
+        var cropSkips = (long)Number(details, "sourceWindowCropSkips");
+        var cropScaled = (long)Number(details, "sourceWindowCropScaled");
+        if (cropSkips < _lastWindowCropSkips || cropScaled < _lastWindowCropScaled)
+        {
+            _lastWindowCropSkips = _lastWindowCropScaled = 0;
+            _windowCropStallLogged = false;
+        }
+        if (cropScaled > 0 && _lastWindowCropScaled == 0)
+            AppLog.Info($"Window capture frames match no window rect (DPI-virtualised window?); cropping the client by scale. scaledCrops={cropScaled}.");
+        if (cropSkips > _lastWindowCropSkips && health.UniqueFrameRate <= 0)
+        {
+            if (!_windowCropStallLogged)
+                AppLog.Info($"Window capture is skipping every frame: client bounds unavailable (minimised?) or matching no frame size. source={captureSource} cropSkips={cropSkips}.");
+            _windowCropStallLogged = true;
+        }
+        else if (_windowCropStallLogged && health.UniqueFrameRate > 0)
+        {
+            AppLog.Info($"Window capture frames resumed after crop skips. cropSkips={cropSkips}.");
+            _windowCropStallLogged = false;
+        }
+        _lastWindowCropSkips = cropSkips;
+        _lastWindowCropScaled = cropScaled;
         var diagnosticNow = Stopwatch.GetTimestamp();
         var previousDiagnostic = Volatile.Read(ref _lastNativeDiagnosticLogTicks);
         if (diagnosticNow - previousDiagnostic >= Stopwatch.Frequency &&
             Interlocked.CompareExchange(ref _lastNativeDiagnosticLogTicks, diagnosticNow, previousDiagnostic) == previousDiagnostic)
         {
-            AppLog.Debug($"Native capture: source={captureSource}; input={health.InputFrameRate:F1} fresh={health.UniqueFrameRate:F1} output={health.OutputFrameRate:F1}fps; queue={health.QueueDepth}/{health.EncodeQueueCapacity}; dropped={health.TotalDroppedFrames}; processingMax={health.ProcessingMaxMs:F2}ms path={health.ProcessingPath}; readback={health.TextureReadbackMs:F2}ms sourceCursorComposition={Number(details, "sourceCursorCompositionMs"):F2}ms videoProcessor={health.VideoProcessorMs:F2}ms softwareConvert={health.SoftwareConvertMs:F2}ms upload={health.HardwareUploadMs:F2}ms overlay={health.OverlayComposeMs:F2}ms; GPU fallbacks={health.GpuConversionFallbacks} error='{health.GpuConversionFallbackError}' processGpuPriority={health.ProcessGpuPriority?.ToString() ?? "unavailable"}; " +
+            AppLog.Debug($"Native capture: source={captureSource}; input={health.InputFrameRate:F1} fresh={health.UniqueFrameRate:F1} output={health.OutputFrameRate:F1}fps; queue={health.QueueDepth}/{health.EncodeQueueCapacity}; dropped={health.TotalDroppedFrames} windowCropSkips={cropSkips} windowCropScaled={cropScaled}; processingMax={health.ProcessingMaxMs:F2}ms path={health.ProcessingPath}; readback={health.TextureReadbackMs:F2}ms sourceCursorComposition={Number(details, "sourceCursorCompositionMs"):F2}ms videoProcessor={health.VideoProcessorMs:F2}ms softwareConvert={health.SoftwareConvertMs:F2}ms upload={health.HardwareUploadMs:F2}ms overlay={health.OverlayComposeMs:F2}ms; GPU fallbacks={health.GpuConversionFallbacks} error='{health.GpuConversionFallbackError}' processGpuPriority={health.ProcessGpuPriority?.ToString() ?? "unavailable"}; " +
                 $"encoder={Text(details, "encoder")} planned={Bool(details, "encoderPlanned")} zeroCopy={Text(details, "zeroCopyStatus")} slots={Number(details, "encoderSlots")} delay={Number(details, "encoderDelay")} maxInFlight={Number(details, "maxInFlight")} " +
                 $"surfaces inUse={health.SurfacesInUse} peak={Number(details, "surfacesInUsePeak")} allocated={Number(details, "surfacesAllocated")} capacity={health.SurfaceCapacity} poolBytes={Number(details, "poolBytes")}; " +
                 $"packets payload={Number(details, "packetPayloadBytes")} buffer={Number(details, "packetBufferBytes")} bytes; " +

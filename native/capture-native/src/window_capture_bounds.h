@@ -10,6 +10,10 @@ struct WindowCaptureBounds {
 };
 // Retries a move/resize that races the queries; null when minimised or gone.
 std::optional<WindowCaptureBounds> capture_window_bounds(uintptr_t window);
+// The restored window's shape, decorations included, for the canvas of a
+// window minimised when recording starts. Placement is in the window's own
+// DPI space, not physical pixels, so only the aspect ratio is reliable.
+std::optional<CaptureRect> capture_window_restored_shape(uintptr_t window);
 // Match the frame's ContentSize, not its texture allocation. An unmatched size
 // during a resize is skipped rather than guessing an origin or including chrome.
 std::optional<CaptureRect> capture_window_region(const WindowCaptureBounds& bounds, CaptureRect content);
