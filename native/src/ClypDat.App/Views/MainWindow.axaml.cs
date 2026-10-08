@@ -272,6 +272,7 @@ public sealed partial class MainWindow : Window
     // edge so it slips behind the timeline. On Server, native per-pixel
     // compositing keeps empty area transparent; see ServerPerPixelOverlay.
     private const double HoverControlsTopInset = 8;
+    private const double HoverControlsRailInset = 6; // (16-DIP seek strip - 4-DIP rail) / 2.
     private const double HoverControlsSlideDistance = 62;
     private static readonly TimeSpan HoverControlsSlideDuration = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan FullscreenControlsSlideDuration = TimeSpan.FromMilliseconds(220);
@@ -10892,6 +10893,8 @@ public sealed partial class MainWindow : Window
         var barContent = new Grid
         {
             RowDefinitions = new RowDefinitions("Auto,*"),
+            // Let the thumb extend above the scrim while the rail defines its top edge.
+            Margin = new Thickness(0, -HoverControlsRailInset, 0, 0),
         };
         Grid.SetRow(progressStrip, 0);
         Grid.SetRow(layout, 1);
@@ -10913,7 +10916,7 @@ public sealed partial class MainWindow : Window
                 _editorHoverControlsWindow.Classes.Set("hoverPlayback", !fullscreen);
                 _editorHoverControlsWindow.Classes.Set("fullscreenPlayback", fullscreen);
                 existing.Child = BuildPlaybackBarLayout(fullscreen);
-                existing.Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0);
+                existing.Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset + HoverControlsRailInset, 0, 0);
                 existing.CornerRadius = new CornerRadius(fullscreen ? 12 : 0);
                 existing.BorderThickness = new Thickness(fullscreen ? 1 : 0);
                 existing.Height = double.NaN;
@@ -10937,7 +10940,7 @@ public sealed partial class MainWindow : Window
             // strip along the top edge is what separates it from the video,
             // so only fullscreen adds a border around the floating panel.
             Background = HoverControlsBackdropBrush(fullscreen),
-            Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0),
+            Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset + HoverControlsRailInset, 0, 0),
             CornerRadius = new CornerRadius(fullscreen ? 12 : 0),
             BorderBrush = HoverControlsBorderBrush(fullscreen),
             BorderThickness = new Thickness(fullscreen ? 1 : 0),
