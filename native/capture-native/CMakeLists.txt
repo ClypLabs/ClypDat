@@ -6,6 +6,10 @@ option(CLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS "Enable private encoder input se
 if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "ClypDat recording requires MSVC x64")
 endif()
+# Parallel compiles within each target; eng/Build-NativeCapture.ps1 sets the
+# count. (MultiToolTask's shared limit recompiled every file on each build.)
+set(CLYPDAT_COMPILE_JOBS "" CACHE STRING "cl.exe /MP process count; empty uses every processor")
+add_compile_options(/MP${CLYPDAT_COMPILE_JOBS})
 set(CLYPDAT_FFMPEG_SDK "${CMAKE_CURRENT_SOURCE_DIR}/build/sdk" CACHE PATH "Verified FFmpeg development SDK")
 set(ffmpeg_include "${CLYPDAT_FFMPEG_SDK}/include")
 if(NOT EXISTS "${ffmpeg_include}/libavcodec/avcodec.h")

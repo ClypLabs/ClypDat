@@ -837,20 +837,38 @@ try {
     Stop-InstalledClypDatProcesses -InstallDirectories @($installDirectory, $legacyInstallDirectory)
 
     $previousInstallDirectory = $null
+    $replacedInPlace = $false
     if (Test-Path -LiteralPath $installDirectory) {
         $previousInstallDirectory = Join-Path $installParent ('.ClypDat.previous-' + [Guid]::NewGuid().ToString('N'))
         Write-Host 'Replacing previous local ClypDat installation.'
-        Move-Item -LiteralPath $installDirectory -Destination $previousInstallDirectory
+        try {
+            Move-Item -LiteralPath $installDirectory -Destination $previousInstallDirectory -ErrorAction Stop
+        }
+        catch {
+            # Explorer keeps a handle on a folder it has shown, even after its
+            # window closes. That blocks renaming the folder but not changing
+            # its contents (ClypDat itself is already stopped), so mirror the
+            # publish into place instead.
+            Write-Host "Install folder is held open; replacing its contents in place. ($($_.Exception.Message))"
+            $previousInstallDirectory = $null
+            & robocopy $publishStagingDirectory $installDirectory /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:1 | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "Replacing the install folder contents failed (robocopy exit $LASTEXITCODE)." }
+            $global:LASTEXITCODE = 0
+            Remove-Item -LiteralPath $publishStagingDirectory -Recurse -Force
+            $replacedInPlace = $true
+        }
     }
 
-    try {
-        Move-Item -LiteralPath $publishStagingDirectory -Destination $installDirectory
-    }
-    catch {
-        if ($previousInstallDirectory -and (Test-Path -LiteralPath $previousInstallDirectory) -and -not (Test-Path -LiteralPath $installDirectory)) {
-            Move-Item -LiteralPath $previousInstallDirectory -Destination $installDirectory
+    if (-not $replacedInPlace) {
+        try {
+            Move-Item -LiteralPath $publishStagingDirectory -Destination $installDirectory
         }
-        throw
+        catch {
+            if ($previousInstallDirectory -and (Test-Path -LiteralPath $previousInstallDirectory) -and -not (Test-Path -LiteralPath $installDirectory)) {
+                Move-Item -LiteralPath $previousInstallDirectory -Destination $installDirectory
+            }
+            throw
+        }
     }
 
     if ($previousInstallDirectory -and (Test-Path -LiteralPath $previousInstallDirectory)) {
