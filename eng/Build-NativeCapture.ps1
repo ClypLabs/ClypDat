@@ -24,7 +24,18 @@ $sdk = & (Join-Path $PSScriptRoot 'Prepare-CaptureFfmpegSdk.ps1') -MsvcBin $msvc
 $encoderInputDiagnostics = if ($EnableEncoderInputDiagnostics) { 'ON' } else { 'OFF' }
 & $cmake -S $source -B $build -G $generator -A x64 "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)" "-DCLYPDAT_FFMPEG_SDK=$sdk" "-DCLYPDAT_TEST_GPU=$($TestGpu.IsPresent.ToString().ToUpperInvariant())" "-DCLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS=$encoderInputDiagnostics"
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)." }
-& $cmake --build $build --config $Configuration
+# Uses about three quarters of the logical processors (CLYPDAT_BUILD_JOBS
+# overrides). MultiToolTask shares one compiler-process limit across every
+# project, and below-normal priority, inherited by MSBuild and cl, yields to
+# the desktop or a running game.
+$jobs = if ($env:CLYPDAT_BUILD_JOBS) { [int]$env:CLYPDAT_BUILD_JOBS } else { [Math]::Max(1, [int][Math]::Floor([Environment]::ProcessorCount * 0.75)) }
+$process = [Diagnostics.Process]::GetCurrentProcess()
+$priority = $process.PriorityClass
+try {
+    $process.PriorityClass = [Diagnostics.ProcessPriorityClass]::BelowNormal
+    & $cmake --build $build --config $Configuration --parallel $jobs -- /nodeReuse:false /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:MultiProcMaxCount=$jobs
+}
+finally { $process.PriorityClass = $priority }
 if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE)." }
 if ($Test -or $TestGpu) {
     & (Join-Path (Split-Path $cmake -Parent) 'ctest.exe') --test-dir $build -C $Configuration --output-on-failure --no-tests=error --timeout 600

@@ -23,7 +23,9 @@ if (-not $sdkRoot.Equals((Join-Path $buildRoot 'sdk'), [StringComparison]::Ordin
 $sdk = $sdkRoot
 New-Item -ItemType Directory -Path $sdk -Force | Out-Null
 if (((Get-Item -LiteralPath $sdkRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'FFmpeg SDK staging must not be a junction.' }
-foreach ($directory in @('include','lib','extracted')) {
+# include/lib are kept so unchanged headers keep their timestamps; replacing
+# them every build made MSBuild recompile everything that includes FFmpeg.
+foreach ($directory in @('extracted')) {
     $target = Join-Path $sdkRoot $directory
     if (-not ([IO.Path]::GetFullPath($target)).StartsWith($sdkRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'FFmpeg SDK cleanup escaped staging.' }
     if (Test-Path -LiteralPath $target) {
@@ -33,7 +35,8 @@ foreach ($directory in @('include','lib','extracted')) {
 }
 
 # The package SHA authenticates its own manifest and every header/import library.
-# Re-extract on each configure so an edited SDK cache never changes the ABI.
+# Every staged file is hashed on each configure and re-extracted unless it
+# matches, so an edited SDK cache never changes the ABI.
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::OpenRead($archive)
@@ -55,6 +58,10 @@ try {
         $relative = [string]$item.path
         if ($relative.Contains('..') -or $relative.StartsWith('/') -or $relative.Contains('\')) { throw 'Unsafe FFmpeg SDK entry path.' }
         $target = Join-Path $sdk ($relative -replace '/', [IO.Path]::DirectorySeparatorChar)
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            if (((Get-Item -LiteralPath $target -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "FFmpeg SDK file must not be a link: $relative" }
+            if ((Get-Sha256 $target) -ceq $item.sha256) { continue }
+        }
         New-Item -ItemType Directory -Path (Split-Path $target -Parent) -Force | Out-Null
         $inputStream = $entry.Open()
         $outputStream = [IO.File]::Create($target)
@@ -65,8 +72,9 @@ try {
     foreach ($directory in @('include','lib')) {
         $expectedNames = @($sdkFiles | Where-Object { $_.path -like "$directory/*" } | ForEach-Object { $_.path.Substring($directory.Length + 1).Replace('/', '\') })
         $actualNames = @(Get-ChildItem -LiteralPath (Join-Path $sdk $directory) -File -Recurse | ForEach-Object { $_.FullName.Substring((Join-Path $sdk $directory).Length + 1) })
-        $unexpected = @($actualNames | Where-Object { $_ -notin $expectedNames })
-        if ($unexpected.Count -ne 0) { throw "Unverified file remains in FFmpeg SDK ${directory}: $($unexpected[0])" }
+        foreach ($name in @($actualNames | Where-Object { $_ -notin $expectedNames })) {
+            Remove-Item -LiteralPath (Join-Path (Join-Path $sdk $directory) $name) -Force
+        }
     }
 }
 finally { $zip.Dispose() }
