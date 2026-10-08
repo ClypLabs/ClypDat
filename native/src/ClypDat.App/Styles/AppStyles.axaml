@@ -2744,20 +2744,20 @@
     <Setter Property="RenderTransform" Value="scale(1.05)" />
   </Style>
   <Style Selector="Window.hoverPlayback Slider.volumeSlider">
-    <Setter Property="Foreground" Value="#5864E8" />
+    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
     <Setter Property="Background" Value="#33FFFFFF" />
   </Style>
   <Style Selector="Window.hoverPlayback Slider.volumeSlider /template/ Thumb">
     <Setter Property="Background" Value="#EEF4FF" />
-    <Setter Property="BorderBrush" Value="#5864E8" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="Window.hoverPlayback Slider.volumeSlider /template/ Thumb:pointerover">
     <Setter Property="Background" Value="#FFFFFF" />
-    <Setter Property="BorderBrush" Value="#6D77F0" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrushHover}" />
   </Style>
   <Style Selector="Window.hoverPlayback Slider.volumeSlider /template/ Thumb:pressed">
     <Setter Property="Background" Value="#EAF0FF" />
-    <Setter Property="BorderBrush" Value="#5864E8" />
+    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider">
     <Style.Resources>

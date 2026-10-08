@@ -10849,7 +10849,7 @@ public sealed partial class MainWindow : Window
             ThumbDiameter = 16,
             VerticalAlignment = VerticalAlignment.Center,
             TrackBrush = PlaybackBrush("Text_33FFFFFF", "#33FFFFFF"),
-            PlayedBrush = PlaybackBrush("AccentBrush", "#5864E8"),
+            PlayedBrush = AppThemeService.Brush("AccentBrush", "#5864E8"),
             IsHitTestVisible = false,
         };
         progressBar.Bind(SeekRailControl.DurationProperty, new Binding("Duration"));
