@@ -15,7 +15,8 @@ namespace ClypDat.App.Controls;
 ///
 /// The rail is display only. Seeking stays with the hit strip that wraps it
 /// (see FullscreenProgressBar_OnPointerPressed), so the trimmed-away spans
-/// remain seekable. Both playback bars use the same inset thumb geometry.
+/// remain seekable. Fullscreen insets the rail for its thumb; the editor rail
+/// reaches both video edges while keeping its thumb visible.
 /// </summary>
 public sealed class SeekRailControl : Control
 {
@@ -47,6 +48,9 @@ public sealed class SeekRailControl : Control
 
     public static readonly StyledProperty<double> ThumbDiameterProperty =
         AvaloniaProperty.Register<SeekRailControl, double>(nameof(ThumbDiameter));
+
+    public static readonly StyledProperty<bool> InsetForThumbProperty =
+        AvaloniaProperty.Register<SeekRailControl, bool>(nameof(InsetForThumb), true);
 
     public TimeSpan Duration
     {
@@ -103,6 +107,12 @@ public sealed class SeekRailControl : Control
         set => SetValue(ThumbDiameterProperty, value);
     }
 
+    public bool InsetForThumb
+    {
+        get => GetValue(InsetForThumbProperty);
+        set => SetValue(InsetForThumbProperty, value);
+    }
+
     static SeekRailControl()
     {
         AffectsRender<SeekRailControl>(
@@ -114,7 +124,8 @@ public sealed class SeekRailControl : Control
             PlayedBrushProperty,
             RailCornerRadiusProperty,
             RailThicknessProperty,
-            ThumbDiameterProperty);
+            ThumbDiameterProperty,
+            InsetForThumbProperty);
     }
 
     // The trimmed-away spans are the SAME rail, drawn faint - not the rail
@@ -133,7 +144,7 @@ public sealed class SeekRailControl : Control
         var bounds = new Rect(Bounds.Size);
         if (bounds.Width <= 0 || bounds.Height <= 0) return;
 
-        var (left, width) = RailBounds(bounds.Width, ThumbDiameter);
+        var (left, width) = RailBounds(bounds.Width, ThumbDiameter, InsetForThumb);
         var height = RailThickness > 0 ? Math.Min(RailThickness, bounds.Height) : bounds.Height;
         var rect = new Rect(left, (bounds.Height - height) / 2, width, height);
         if (rect.Width <= 0) return;
@@ -160,7 +171,8 @@ public sealed class SeekRailControl : Control
 
         if (ThumbDiameter > 0)
         {
-            var center = new Point(rect.X + played, bounds.Height / 2);
+            var thumbInset = Math.Min(ThumbDiameter / 2, bounds.Width / 2);
+            var center = new Point(Math.Clamp(rect.X + played, thumbInset, bounds.Width - thumbInset), bounds.Height / 2);
             context.DrawEllipse(Brushes.White, new Pen(PlayedBrush ?? Brushes.White, 2), center,
                 ThumbDiameter / 2 - 1, ThumbDiameter / 2 - 1);
         }
@@ -196,16 +208,16 @@ public sealed class SeekRailControl : Control
         return Math.Clamp(Position.TotalSeconds / total, 0, 1) * width;
     }
 
-    internal static (double Left, double Width) RailBounds(double width, double thumbDiameter)
+    internal static (double Left, double Width) RailBounds(double width, double thumbDiameter, bool insetForThumb = true)
     {
-        var inset = Math.Min(Math.Max(0, thumbDiameter) / 2, Math.Max(0, width) / 2);
+        var inset = insetForThumb ? Math.Min(Math.Max(0, thumbDiameter) / 2, Math.Max(0, width) / 2) : 0;
         return (inset, Math.Max(0, width - inset * 2));
     }
 
-    internal static TimeSpan PositionForPointer(TimeSpan duration, double x, double width, double thumbDiameter)
+    internal static TimeSpan PositionForPointer(TimeSpan duration, double x, double width, double thumbDiameter, bool insetForThumb = true)
     {
         if (duration <= TimeSpan.Zero) return TimeSpan.Zero;
-        var (left, railWidth) = RailBounds(width, thumbDiameter);
+        var (left, railWidth) = RailBounds(width, thumbDiameter, insetForThumb);
         if (railWidth <= 0) return TimeSpan.Zero;
         var fraction = Math.Clamp((x - left) / railWidth, 0, 1);
         return TimeSpan.FromMilliseconds(duration.TotalMilliseconds * fraction);

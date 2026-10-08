@@ -6110,8 +6110,9 @@ public sealed partial class MainWindow : Window
     {
         if (ViewModel is null || ViewModel.Duration <= TimeSpan.Zero) return;
         _endedAtTrimBoundary = false;
-        var thumbDiameter = (control as Border)?.Child is SeekRailControl rail ? rail.ThumbDiameter : 0;
-        ViewModel.CurrentTime = SeekRailControl.PositionForPointer(ViewModel.Duration, x, control.Bounds.Width, thumbDiameter);
+        var rail = (control as Border)?.Child as SeekRailControl;
+        ViewModel.CurrentTime = SeekRailControl.PositionForPointer(ViewModel.Duration, x, control.Bounds.Width,
+            rail?.ThumbDiameter ?? 0, rail?.InsetForThumb ?? true);
         ResetPlayheadClockAfterSeek(ViewModel.CurrentTime);
         UpdateTimelineChrome();
         _playback?.SeekPreview(ViewModel.CurrentTime);
@@ -10297,7 +10298,7 @@ public sealed partial class MainWindow : Window
                       && _editorHoverControlsWindow is { IsVisible: true }
                       && GetAncestor(WindowFromPoint(cursor), GaRoot) == barHandle;
 
-        if (overVideo || overBar)
+        if (overVideo || overBar || _seekRailScrubActive)
         {
             _hoverControlsActiveUntilUtc = DateTime.UtcNow + HoverControlsGrace;
             if (_editorHoverControlsWindow is not { IsVisible: true } && _hoverControlsLastState != "eligible")
@@ -10841,14 +10842,15 @@ public sealed partial class MainWindow : Window
             : "M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z", FullscreenButton_OnClick);
         fullscreenButton.HorizontalAlignment = HorizontalAlignment.Right;
 
-        // The 16-DIP strip contains the entire thumb, including its outline.
-        // Seeking uses the same inset rail bounds as drawing at both endpoints.
+        // The 16-DIP hit strip contains the entire thumb. The editor's rail
+        // spans the video; fullscreen leaves room for its thumb at both ends.
         var progressBar = new SeekRailControl
         {
             Height = 16,
             RailThickness = 4,
-            RailCornerRadius = 4,
+            RailCornerRadius = fullscreen ? 4 : 0,
             ThumbDiameter = 16,
+            InsetForThumb = fullscreen,
             VerticalAlignment = VerticalAlignment.Center,
             TrackBrush = PlaybackBrush("Text_33FFFFFF", "#33FFFFFF"),
             PlayedBrush = AppThemeService.Brush("AccentBrush", "#5864E8"),
@@ -10862,7 +10864,9 @@ public sealed partial class MainWindow : Window
         var progressStrip = new Border
         {
             Height = 16,
-            Background = Brushes.Transparent,
+            // Alpha zero can lose native mouse input on transparent windows.
+            // One alpha step keeps the whole hit strip usable above the scrim.
+            Background = fullscreen ? Brushes.Transparent : new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)),
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = progressBar,
         };
@@ -10893,7 +10897,7 @@ public sealed partial class MainWindow : Window
         var barContent = new Grid
         {
             RowDefinitions = new RowDefinitions("Auto,*"),
-            // Let the thumb extend above the scrim while the rail defines its top edge.
+            // The transparent top border reserves this space inside the backdrop.
             Margin = new Thickness(0, -HoverControlsRailInset, 0, 0),
         };
         Grid.SetRow(progressStrip, 0);
@@ -10902,6 +10906,18 @@ public sealed partial class MainWindow : Window
         barContent.Children.Add(layout);
         return barContent;
     }
+
+    private Border BuildPlaybackControlsBackdrop(bool fullscreen, TranslateTransform translate) => new()
+    {
+        Background = HoverControlsBackdropBrush(fullscreen),
+        Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0),
+        CornerRadius = new CornerRadius(fullscreen ? 12 : 0),
+        BorderBrush = HoverControlsBorderBrush(fullscreen),
+        BorderThickness = fullscreen ? new Thickness(1) : new Thickness(0, HoverControlsRailInset, 0, 0),
+        BackgroundSizing = fullscreen ? BackgroundSizing.CenterBorder : BackgroundSizing.InnerBorderEdge,
+        Child = BuildPlaybackBarLayout(fullscreen),
+        RenderTransform = translate,
+    };
 
     private Window EnsureEditorHoverControlsWindow()
     {
@@ -10916,9 +10932,10 @@ public sealed partial class MainWindow : Window
                 _editorHoverControlsWindow.Classes.Set("hoverPlayback", !fullscreen);
                 _editorHoverControlsWindow.Classes.Set("fullscreenPlayback", fullscreen);
                 existing.Child = BuildPlaybackBarLayout(fullscreen);
-                existing.Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset + HoverControlsRailInset, 0, 0);
+                existing.Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0);
                 existing.CornerRadius = new CornerRadius(fullscreen ? 12 : 0);
-                existing.BorderThickness = new Thickness(fullscreen ? 1 : 0);
+                existing.BorderThickness = fullscreen ? new Thickness(1) : new Thickness(0, HoverControlsRailInset, 0, 0);
+                existing.BackgroundSizing = fullscreen ? BackgroundSizing.CenterBorder : BackgroundSizing.InnerBorderEdge;
                 existing.Height = double.NaN;
                 existing.VerticalAlignment = VerticalAlignment.Stretch;
                 existing.Background = HoverControlsBackdropBrush(fullscreen);
@@ -10931,22 +10948,7 @@ public sealed partial class MainWindow : Window
         _hoverControlsVisibleFallback = false;
 
         var translate = new TranslateTransform { Y = fullscreen ? 0 : HoverControlsSlideDistance };
-        var backdrop = new Border
-        {
-            // Translucent scrim behind the whole row, not an opaque plate -
-            // the picture still reads through it, it just gets knocked back
-            // far enough that the controls sit on a consistent surface
-            // instead of fighting whatever frame is underneath. The progress
-            // strip along the top edge is what separates it from the video,
-            // so only fullscreen adds a border around the floating panel.
-            Background = HoverControlsBackdropBrush(fullscreen),
-            Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset + HoverControlsRailInset, 0, 0),
-            CornerRadius = new CornerRadius(fullscreen ? 12 : 0),
-            BorderBrush = HoverControlsBorderBrush(fullscreen),
-            BorderThickness = new Thickness(fullscreen ? 1 : 0),
-            Child = BuildPlaybackBarLayout(fullscreen),
-            RenderTransform = translate,
-        };
+        var backdrop = BuildPlaybackControlsBackdrop(fullscreen, translate);
         _hoverControlsBackdrop = backdrop;
         _hoverControlsTranslate = translate;
 
@@ -11018,7 +11020,7 @@ public sealed partial class MainWindow : Window
     }
 
     private static IBrush HoverControlsBorderBrush(bool fullscreen) =>
-        fullscreen ? AppThemeService.Brush("Text_26FFFFFF", "#26FFFFFF") : new SolidColorBrush(Color.Parse("#26FFFFFF"));
+        fullscreen ? AppThemeService.Brush("Text_26FFFFFF", "#26FFFFFF") : Brushes.Transparent;
 
     private void UpdateHoverControlsTheme()
     {
