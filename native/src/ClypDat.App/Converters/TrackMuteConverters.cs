@@ -40,8 +40,12 @@ public sealed class BoolToMuteBrushConverter : IValueConverter
 {
     public static readonly BoolToMuteBrushConverter Instance = new();
 
-    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        value is true ? AppThemeService.Brush("Semantic_E5707A", "#E5707A") : AppThemeService.Brush("Text_B9C9DA", "#B9C9DA");
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var key = value is true ? "Semantic_E5707A" : "Text_B9C9DA";
+        var hex = value is true ? "#E5707A" : "#B9C9DA";
+        return parameter is false ? new SolidColorBrush(Color.Parse(hex)) : AppThemeService.Brush(key, hex);
+    }
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }

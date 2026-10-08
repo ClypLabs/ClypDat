@@ -10669,11 +10669,15 @@ public sealed partial class MainWindow : Window
     // transport and volume groups.
     private Control BuildPlaybackBarLayout(bool fullscreen = false)
     {
+        IBrush PlaybackBrush(string key, string hex) => fullscreen
+            ? AppThemeService.Brush(key, hex)
+            : new SolidColorBrush(Color.Parse(hex));
+
         PathIcon Icon(string data, double size = 16) => new()
         {
             Width = size,
             Height = size,
-            Foreground = AppThemeService.Brush("Text_C8D6E6", "#C8D6E6"),
+            Foreground = PlaybackBrush("Text_C8D6E6", "#C8D6E6"),
             Data = Geometry.Parse(data),
         };
 
@@ -10685,16 +10689,20 @@ public sealed partial class MainWindow : Window
         }
 
         var playIcon = Icon("M8 5v14l11-7z", 16);
-        playIcon.Foreground = AppThemeService.Brush("Text_DDE8F6", "#DDE8F6");
+        playIcon.Foreground = PlaybackBrush("Text_DDE8F6", "#DDE8F6");
         playIcon.Bind(IsVisibleProperty, new Binding("!IsPlaying"));
         var pauseIcon = Icon("M6 19h4V5H6v14zm8-14v14h4V5h-4z", 16);
-        pauseIcon.Foreground = AppThemeService.Brush("Text_DDE8F6", "#DDE8F6");
+        pauseIcon.Foreground = PlaybackBrush("Text_DDE8F6", "#DDE8F6");
         pauseIcon.Bind(IsVisibleProperty, new Binding("IsPlaying"));
         var playPauseButton = new Button { Classes = { "playButton", "flatControl" }, Content = new Grid { Children = { playIcon, pauseIcon } } };
         playPauseButton.Click += PlayPauseButton_OnClick;
 
         var muteIcon = new PathIcon { Width = 15, Height = 15, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-        muteIcon.Bind(PathIcon.ForegroundProperty, new Binding("IsMasterMuted") { Converter = BoolToMuteBrushConverter.Instance });
+        muteIcon.Bind(PathIcon.ForegroundProperty, new Binding("IsMasterMuted")
+        {
+            Converter = BoolToMuteBrushConverter.Instance,
+            ConverterParameter = fullscreen,
+        });
         muteIcon.Bind(PathIcon.DataProperty, new Binding("EffectiveMasterVolumePercent") { Converter = VolumeLevelToIconConverter.Instance });
         var muteToggle = new Border
         {
@@ -10733,10 +10741,10 @@ public sealed partial class MainWindow : Window
         // Bumped a point and lightened from the original #5C6D7E/#8C98A7 -
         // both read as too dim/small against the bar's dark scrim, especially
         // over a bright part of the video underneath.
-        var timeText = new TextBlock { Foreground = AppThemeService.Brush("Text_EDF4FB", "#EDF4FB"), FontSize = 14, FontWeight = FontWeight.Bold, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        var timeText = new TextBlock { Foreground = PlaybackBrush("Text_EDF4FB", "#EDF4FB"), FontSize = 14, FontWeight = FontWeight.Bold, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         timeText.Bind(TextBlock.TextProperty, new Binding("CurrentTimeLabel"));
-        var slashText = new TextBlock { Text = " / ", Foreground = AppThemeService.Brush("Text_8C98A7", "#8C98A7"), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
-        var durationText = new TextBlock { Foreground = AppThemeService.Brush("Text_B7C4D2", "#B7C4D2"), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        var slashText = new TextBlock { Text = " / ", Foreground = PlaybackBrush("Text_8C98A7", "#8C98A7"), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
+        var durationText = new TextBlock { Foreground = PlaybackBrush("Text_B7C4D2", "#B7C4D2"), FontSize = 14, FontFamily = "Consolas", VerticalAlignment = VerticalAlignment.Center };
         durationText.Bind(TextBlock.TextProperty, new Binding("DurationLabel"));
 
         // Nothing but the five transport buttons, so the row is symmetric about
@@ -10769,7 +10777,7 @@ public sealed partial class MainWindow : Window
         // reasoning: collapsing it would shuffle everything beside it.
         var volumePercentText = new TextBlock
         {
-            Foreground = AppThemeService.Brush("Text_C8D6E6", "#C8D6E6"),
+            Foreground = PlaybackBrush("Text_C8D6E6", "#C8D6E6"),
             FontSize = 12,
             Width = 30,
             // Steps in 2s for the same reason as volumeSlider's margin above -
@@ -10840,8 +10848,8 @@ public sealed partial class MainWindow : Window
             RailCornerRadius = 4,
             ThumbDiameter = 16,
             VerticalAlignment = VerticalAlignment.Center,
-            TrackBrush = new SolidColorBrush(Color.Parse("#33FFFFFF")),
-            PlayedBrush = Application.Current?.Resources["AccentBrush"] as IBrush ?? AppThemeService.Brush("AccentBrush", "#5864E8"),
+            TrackBrush = PlaybackBrush("Text_33FFFFFF", "#33FFFFFF"),
+            PlayedBrush = PlaybackBrush("AccentBrush", "#5864E8"),
             IsHitTestVisible = false,
         };
         progressBar.Bind(SeekRailControl.DurationProperty, new Binding("Duration"));
@@ -10901,6 +10909,9 @@ public sealed partial class MainWindow : Window
             {
                 HideEditorHoverControls(immediate: true);
                 _hoverControlsFullscreen = fullscreen;
+                _editorHoverControlsWindow.RequestedThemeVariant = fullscreen ? ThemeVariant.Default : ThemeVariant.Dark;
+                _editorHoverControlsWindow.Classes.Set("hoverPlayback", !fullscreen);
+                _editorHoverControlsWindow.Classes.Set("fullscreenPlayback", fullscreen);
                 existing.Child = BuildPlaybackBarLayout(fullscreen);
                 existing.CornerRadius = new CornerRadius(fullscreen ? 12 : 0);
                 existing.BorderThickness = new Thickness(fullscreen ? 1 : 0);
@@ -10943,7 +10954,8 @@ public sealed partial class MainWindow : Window
         var window = new Window
         {
             WindowDecorations = WindowDecorations.None,
-            RequestedThemeVariant = Application.Current?.RequestedThemeVariant,
+            RequestedThemeVariant = fullscreen ? ThemeVariant.Default : ThemeVariant.Dark,
+            Classes = { fullscreen ? "fullscreenPlayback" : "hoverPlayback" },
             ShowInTaskbar = false,
             CanResize = false,
             ShowActivated = false,
@@ -10994,19 +11006,20 @@ public sealed partial class MainWindow : Window
 
     private IBrush HoverControlsBackdropBrush(bool fullscreen)
     {
-        if (_hoverControlsVisibleFallback) return AppThemeService.Brush("Surface_0B0F14", "#0B0F14");
-        if (!fullscreen) return AppThemeService.Brush("Surface_8C0B1016", "#8C0B1016");
-        return new SolidColorBrush(Color.Parse(AppThemeService.IsLightTheme ? "#D9F1EDF5" : "#D90B1016"));
+        if (!fullscreen) return new SolidColorBrush(Color.Parse(_hoverControlsVisibleFallback ? "#000000" : "#8C000000"));
+        return _hoverControlsVisibleFallback
+            ? AppThemeService.Brush("Surface_0B0F14", "#0B0F14")
+            : AppThemeService.Brush("Surface_D90B1016", "#D90B1016");
     }
 
     private static IBrush HoverControlsBorderBrush(bool fullscreen) =>
-        new SolidColorBrush(Color.Parse(fullscreen && AppThemeService.IsLightTheme ? "#26000000" : "#26FFFFFF"));
+        fullscreen ? AppThemeService.Brush("Text_26FFFFFF", "#26FFFFFF") : new SolidColorBrush(Color.Parse("#26FFFFFF"));
 
     private void UpdateHoverControlsTheme()
     {
         if (_hoverControlsBackdrop is not { } backdrop) return;
         if (_editorHoverControlsWindow is { } window)
-            window.RequestedThemeVariant = Application.Current?.RequestedThemeVariant;
+            window.RequestedThemeVariant = _hoverControlsFullscreen ? ThemeVariant.Default : ThemeVariant.Dark;
         backdrop.Background = HoverControlsBackdropBrush(_hoverControlsFullscreen);
         backdrop.BorderBrush = HoverControlsBorderBrush(_hoverControlsFullscreen);
         if (_editorHoverControlsWindow?.IsVisible == true && _hoverControlsPerPixelOverlay is { IsReady: true } mirror)

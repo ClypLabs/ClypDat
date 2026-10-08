@@ -143,11 +143,16 @@
   <SolidColorBrush x:Key="Surface_CC0B1116" Color="#CC0B1116" />
   <SolidColorBrush x:Key="Surface_CC0C1319" Color="#CC0C1319" />
   <SolidColorBrush x:Key="Surface_CC0E151C" Color="#CC0E151C" />
+  <SolidColorBrush x:Key="Surface_D90B1016" Color="#D90B1016" />
   <SolidColorBrush x:Key="Surface_EE141D24" Color="#EE141D24" />
   <SolidColorBrush x:Key="Surface_EE1B2733" Color="#EE1B2733" />
   <SolidColorBrush x:Key="Surface_F5141D24" Color="#F5141D24" />
 
   <!-- Text, icons and glyphs -->
+  <!-- Translucent playback controls invert with light themes. -->
+  <SolidColorBrush x:Key="Text_26FFFFFF" Color="#26FFFFFF" />
+  <SolidColorBrush x:Key="Text_33FFFFFF" Color="#33FFFFFF" />
+  <SolidColorBrush x:Key="Text_3DFFFFFF" Color="#3DFFFFFF" />
   <SolidColorBrush x:Key="Text_5C6D7E" Color="#5C6D7E" />
   <SolidColorBrush x:Key="Text_6B7C8C" Color="#6B7C8C" />
   <SolidColorBrush x:Key="Text_7C86C0" Color="#7C86C0" />

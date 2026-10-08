@@ -340,6 +340,15 @@
   <Style Selector="Border.muteToggle.flatControl:pointerover">
     <Setter Property="Background" Value="#26FFFFFF" />
   </Style>
+  <Style Selector="Window.fullscreenPlayback Button.transportButton.flatControl:pointerover, Window.fullscreenPlayback Button.playButton.flatControl:pointerover">
+    <Setter Property="Background" Value="{StaticResource Text_26FFFFFF}" />
+  </Style>
+  <Style Selector="Window.fullscreenPlayback Border.muteToggle.flatControl:pointerover">
+    <Setter Property="Background" Value="{StaticResource Text_26FFFFFF}" />
+  </Style>
+  <Style Selector="Window.fullscreenPlayback Button.transportButton.flatControl:pressed, Window.fullscreenPlayback Button.playButton.flatControl:pressed">
+    <Setter Property="Background" Value="{StaticResource Text_3DFFFFFF}" />
+  </Style>
   <!--
     Fullscreen playbar seek rail. The Border is the hit target (a press
     anywhere in the 16px band seeks); the rail inside it is hit-test
@@ -615,6 +624,15 @@
   </Style>
   <Style Selector="Button.linkButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="{StaticResource Text_D2DEEC}" />
+  </Style>
+  <!-- The editor hover bar stays readable on its fixed black scrim. -->
+  <Style Selector="Window.hoverPlayback Button.linkButton">
+    <Setter Property="Background" Value="#00FFFFFF" />
+    <Setter Property="Foreground" Value="#BDD4EE" />
+  </Style>
+  <Style Selector="Window.hoverPlayback Button.linkButton:pointerover">
+    <Setter Property="Background" Value="#26FFFFFF" />
+    <Setter Property="Foreground" Value="#FFFFFF" />
   </Style>
   <Style Selector="Button.brandButton">
     <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
@@ -2724,6 +2742,22 @@
     <Setter Property="Background" Value="{StaticResource Text_EAF0FF}" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
     <Setter Property="RenderTransform" Value="scale(1.05)" />
+  </Style>
+  <Style Selector="Window.hoverPlayback Slider.volumeSlider">
+    <Setter Property="Foreground" Value="#5864E8" />
+    <Setter Property="Background" Value="#33FFFFFF" />
+  </Style>
+  <Style Selector="Window.hoverPlayback Slider.volumeSlider /template/ Thumb">
+    <Setter Property="Background" Value="#EEF4FF" />
+    <Setter Property="BorderBrush" Value="#5864E8" />
+  </Style>
+  <Style Selector="Window.hoverPlayback Slider.volumeSlider /template/ Thumb:pointerover">
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="BorderBrush" Value="#6D77F0" />
+  </Style>
+  <Style Selector="Window.hoverPlayback Slider.volumeSlider /template/ Thumb:pressed">
+    <Setter Property="Background" Value="#EAF0FF" />
+    <Setter Property="BorderBrush" Value="#5864E8" />
   </Style>
   <Style Selector="Slider.volumeSlider.appVolumeSlider">
     <Style.Resources>
