@@ -311,6 +311,7 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
         << ",\"sdrWhiteNits\":" << h.source_details.sdr_white_nits
         << ",\"sourceCallbacks\":" << h.source_details.callbacks << ",\"sourceDelivered\":" << h.source_details.frames_delivered
         << ",\"sourceOverwritten\":" << h.source_details.overwritten << ",\"sourceResizes\":" << h.source_details.resizes
+        << ",\"sourceWindowCropSkips\":" << h.source_details.window_crop_skips << ",\"sourceWindowCropScaled\":" << h.source_details.window_crop_scaled
         << ",\"sourceDuplicationReopens\":" << h.source_details.duplication_reopens << ",\"sourceDuplicationReopenFailures\":" << h.source_details.duplication_reopen_failures
         << ",\"sourceProfileSwitchFailures\":" << h.source_details.profile_switch_failures
         << ",\"sourceOwnedTextureCapacity\":" << h.source_details.owned_texture_capacity

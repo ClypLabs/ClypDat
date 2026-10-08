@@ -17,6 +17,7 @@
 #include <winrt/Windows.Graphics.DirectX.h>
 #include <wrl/client.h>
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <cmath>
 #include <cstring>
@@ -250,6 +251,7 @@ class WgcSource final : public RecordingFrameSource {
             : gpu(device, debug), frames(gpu.device.Get(), capacity, white, region) {}
         std::mutex mutex;
         RecordingSourceHealth diagnostics;
+        WindowCropSelector crops; // Guarded by mutex.
     };
     RecordingCaptureConfig config_;
     std::shared_ptr<Shared> shared_;
@@ -321,9 +323,10 @@ public:
                     std::optional<CaptureRect> region;
                     if (window) {
                         const auto bounds = capture_window_bounds(window);
-                        if (bounds) region = capture_window_region(*bounds, {0, 0, content.Width, content.Height});
-                        // A resize can race the callback. Never replace missing
-                        // or inconsistent client bounds with a whole-window copy.
+                        { std::lock_guard lock(shared->mutex); region = shared->crops.select(bounds, {0, 0, content.Width, content.Height}); }
+                        // A resize can race the callback: skip the frame, never
+                        // copy it whole with decorations. A mismatch that
+                        // persists is not a race and is mapped by scale.
                         if (!region) {
                             texture.Reset(); frame.Close(); frame = pool.TryGetNextFrame(); continue;
                         }
@@ -411,16 +414,17 @@ public:
     const char* name() const override { return "Windows Graphics Capture"; }
     ID3D11Device* d3d_device() const override { return shared_->gpu.device.Get(); }
     CaptureRect content_bounds() const override {
-        if (config_.window) {
-            const auto bounds = capture_window_bounds(config_.window);
-            return bounds ? CaptureRect{0, 0, bounds->client.width, bounds->client.height} : CaptureRect{};
-        }
+        // Minimised at start: the item's decorated size still sizes the
+        // canvas, and frames are cropped to the client once it is restored.
+        if (config_.window)
+            if (const auto bounds = capture_window_bounds(config_.window)) return {0, 0, bounds->client.width, bounds->client.height};
         if(!config_.window&&config_.capture_region.width>0&&config_.capture_region.height>0)return{0,0,config_.capture_region.width,config_.capture_region.height};
         const auto size=item_.Size();return{0,0,size.Width,size.Height};
     }
     RecordingSourceHealth diagnostics() const override {
         const auto frames=shared_->frames.stats();
         std::lock_guard lock(shared_->mutex);auto result=shared_->diagnostics;
+        result.window_crop_skips=shared_->crops.skipped();result.window_crop_scaled=shared_->crops.scaled();
         result.frames_delivered=frames.delivered;result.overwritten=frames.superseded;
         result.owned_texture_capacity=frames.capacity;result.owned_textures_allocated=frames.allocated;result.owned_textures_leased=frames.leased;
         result.owned_textures_peak=frames.peak_leased;result.owned_texture_pressure_drops=frames.pressure_drops;
@@ -454,6 +458,7 @@ class DxgiSource final : public RecordingFrameSource {
     OutputRotation rotation_ = OutputRotation::Identity;
     CaptureRect stable_{}, candidate_{};
     int crop_samples_ = 0;
+    std::atomic<uint64_t> crop_skips_{0};
     // Access lost to a mode, rotation or desktop change: reopened on later
     // acquisitions, an error only after 5 s.
     CaptureReopener reopener_{std::chrono::seconds(5)};
@@ -551,13 +556,13 @@ public:
         CaptureRect crop;
         if (config_.window) {
             const auto bounds = capture_window_bounds(config_.window);
-            if (!bounds) return false;
+            if (!bounds) { ++crop_skips_; return false; }
             crop = {bounds->client.x - desktop_.left, bounds->client.y - desktop_.top, bounds->client.width, bounds->client.height};
             if (crop.width!=candidate_.width||crop.height!=candidate_.height) { candidate_ = crop; crop_samples_ = 1; }
             else ++crop_samples_;
             if(stable_.width==0)stable_=crop;
             if(crop.width!=stable_.width||crop.height!=stable_.height){
-                if(crop_samples_<3)return false;
+                if(crop_samples_<3){++crop_skips_;return false;}
                 stable_=crop;crop_samples_=0;
             }
         }else if(config_.capture_region.width>0&&config_.capture_region.height>0)crop={config_.capture_region.x-desktop_.left,config_.capture_region.y-desktop_.top,config_.capture_region.width,config_.capture_region.height};
@@ -609,6 +614,7 @@ public:
     RecordingSourceHealth diagnostics() const override {
         auto result=gpu_.diagnostics;result.display_profile_available=config_.display_profile_available;
         result.duplication_reopens = reopener_.reopens; result.duplication_reopen_failures = reopener_.failures;
+        result.window_crop_skips = crop_skips_;
         result.cursor_composition_ms = cursor_composition_samples_
             ? cursor_composition_ms_ / double(cursor_composition_samples_) : 0;
         const auto frames=frames_.stats();

@@ -64,6 +64,10 @@ struct CaptureFrameTimeline { int64_t timestamp_us = 0; CaptureFrameTiming timin
 struct RecordingSourceHealth {
     // overwritten counts delivered frames dropped before acquisition consumed them.
     uint64_t callbacks = 0, frames_delivered = 0, overwritten = 0, resizes = 0;
+    // Window frames dropped because the client could not be located or was
+    // still settling after a resize, and WGC frames cropped by scale because
+    // their size persistently matched no window rect.
+    uint64_t window_crop_skips = 0, window_crop_scaled = 0;
     // Owned WGC frame copies from a bounded texture pool (CapturedFrameStore):
     // capacity, textures created, leased now and at most, frames dropped
     // because every owned texture was held, and CPU time to issue each copy.

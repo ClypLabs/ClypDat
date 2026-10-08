@@ -15,9 +15,12 @@ for DPI, whereas DWM frame bounds are physical pixels.
 Both backends now query physical client bounds under a scoped per-monitor DPI
 context. WGC selects the frame origin only when both content dimensions match
 the DWM frame or window rectangle. It skips unavailable or inconsistent bounds
-instead of copying decorations. Each borrowed frame retains its arrival crop;
-later geometry changes cannot alter that copy. Output sizing uses the client
-aspect ratio.
+instead of copying decorations; after eight frames of the same mismatch it maps
+the client by the content's uniform scale, so a DPI-virtualised window still
+records. Both backends count skipped frames in health. Each borrowed frame
+retains its arrival crop; later geometry changes cannot alter that copy. Output
+sizing uses the client aspect ratio, or the capture item's size when the window
+starts minimised.
 
 The generated regression failed before the crop fix with
 `Window capture includes title bar or green right border`. The fixed test checks:

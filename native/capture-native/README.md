@@ -44,7 +44,11 @@ Window recordings crop to the physical client area before pacing, detector
 sampling and encoding. WGC matches each frame's content size to DWM's visible
 frame or the physical window rect, retaining that crop with borrowed buffers;
 DXGI uses the same physical client bounds. Missing or inconsistent geometry is
-skipped during resize. The initial recording aspect ratio also uses the client.
+skipped during resize; a WGC size that persistently matches neither rect (a
+DPI-virtualised window composed at logical size) is mapped by scale instead.
+Skips and scaled crops are reported as `sourceWindowCropSkips` and
+`sourceWindowCropScaled`. The initial recording aspect ratio also uses the
+client, or the capture item's size when the window starts minimised.
 `ClypDat.Capture.Native.WindowCaptureTests` checks generated window pixels,
 hidden-window DPI queries and decoded video; `--gpu` checks generated NVENC
 output without capturing a screen or visible window. See

@@ -42,6 +42,30 @@ void geometry_cases() {
     CHECK(!capture_window_region(borderless, {}));
     std::cout << "Geometry: " << cases << " DPI/monitor cases; borderless, maximized, DWM fallback, resize races\n";
 }
+void persistent_mismatch() {
+    // A DPI-unaware window at 150%: DWM bounds are physical, but its content
+    // arrives at the logical 640 x 428 with a 28-pixel caption.
+    const WindowCaptureBounds unaware{{952, 142, 976, 658}, {960, 150, 960, 642}, {960, 192, 960, 600}};
+    const CaptureRect logical{0, 0, 640, 428};
+    CHECK(!capture_window_region(unaware, logical));
+    CHECK(capture_window_scaled_region(unaware, logical) == (CaptureRect{0, 28, 640, 400}));
+    // A different shape is a resize, not a scale.
+    CHECK(!capture_window_scaled_region(unaware, {0, 0, 640, 500}));
+    WindowCropSelector selector;
+    for (int frame = 1; frame < WindowCropSelector::persistent_frames; ++frame) CHECK(!selector.select(unaware, logical));
+    CHECK(selector.select(unaware, logical) == (CaptureRect{0, 28, 640, 400}));
+    CHECK(selector.skipped() == WindowCropSelector::persistent_frames - 1 && selector.scaled() == 1);
+    // Exact matches win and reset the streak; changing sizes during a drag and
+    // missing bounds (minimised) never reach the scaled fallback.
+    CHECK(selector.select(unaware, {0, 0, 960, 642}) == (CaptureRect{0, 42, 960, 600}));
+    for (int frame = 0; frame < 2 * WindowCropSelector::persistent_frames; ++frame) {
+        CHECK(!selector.select(unaware, {0, 0, 700 + frame, 450 + frame}));
+        CHECK(!selector.select(std::nullopt, logical));
+    }
+    CHECK(selector.scaled() == 1);
+    std::cout << "Persistent mismatch: DPI-virtualised content scaled after " << WindowCropSelector::persistent_frames
+              << " frames; resize races and minimised windows skipped and counted\n";
+}
 void physical_bounds() {
     // Hidden owned windows exercise Win32 coordinates across caller/target DPI
     // contexts. Nothing is shown, captured or brought to the foreground.
@@ -185,6 +209,6 @@ void generated_window(bool hardware) {
     std::cout << "Client-aspect video: " << decoded << " frames decoded, all edge pixels checked (" << health.processing_path << ")\n";
 }
 int main(int argc, char** argv) {
-    try { av_log_set_level(AV_LOG_ERROR); geometry_cases(); physical_bounds(); generated_window(argc > 1 && std::string(argv[1]) == "--gpu"); return 0; }
+    try { av_log_set_level(AV_LOG_ERROR); geometry_cases(); persistent_mismatch(); physical_bounds(); generated_window(argc > 1 && std::string(argv[1]) == "--gpu"); return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
