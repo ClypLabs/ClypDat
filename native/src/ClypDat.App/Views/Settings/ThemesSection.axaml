@@ -197,10 +197,31 @@
                     </Panel>
                     <cp:ColorSlider Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
                   </Grid>
-                  <StackPanel Spacing="4">
-                    <TextBlock Classes="settingsPickerLabel" Text="HEX" />
-                    <TextBox Classes="settingsInput" Text="{Binding BasePicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
-                  </StackPanel>
+                  <!-- New over current, as in Photoshop's picker and PhotoCraft's after
+                       it; current is the colour the editor opened on and a click
+                       on it goes back there. Pick screen colour samples any pixel
+                       on any monitor (ScreenColorPicker). -->
+                  <Grid ColumnDefinitions="64,*" ColumnSpacing="12">
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="settingsPickerLabel" Text="NEW" HorizontalAlignment="Center" />
+                      <Border Height="24" CornerRadius="6,6,0,0" BorderThickness="1,1,1,0" BorderBrush="{StaticResource EdgeStrongBrush}">
+                        <Border.Background><SolidColorBrush Color="{Binding BasePicker.ShownColor}" /></Border.Background>
+                      </Border>
+                      <Button Classes="themeSwatch" Width="64" Height="24" Margin="0,-4,0,0" Tag="{Binding BasePicker}" Click="RestoreCurrentColorButton_OnClick"
+                              ToolTip.Tip="Click to go back to this colour">
+                        <Border CornerRadius="0,0,6,6"><Border.Background><SolidColorBrush Color="{Binding BasePicker.CurrentColor}" /></Border.Background></Border>
+                      </Button>
+                      <TextBlock Classes="settingsPickerLabel" Text="CURRENT" HorizontalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="10" VerticalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="settingsPickerLabel" Text="HEX" />
+                        <TextBox Classes="settingsInput" Text="{Binding BasePicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
+                      </StackPanel>
+                      <Button Content="Pick screen colour" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Tag="{Binding BasePicker}"
+                              IsVisible="{x:Static services:ScreenColorPicker.IsSupported}" Click="PickScreenColorButton_OnClick" />
+                    </StackPanel>
+                  </Grid>
                   <!-- Labelled, because a placeholder disappears the moment the box
                        has a value in it and three bare numbers say nothing about
                        which channel is which. -->
@@ -247,10 +268,27 @@
                     </Panel>
                     <cp:ColorSlider Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
                   </Grid>
-                  <StackPanel Spacing="4">
-                    <TextBlock Classes="settingsPickerLabel" Text="HEX" />
-                    <TextBox Classes="settingsInput" Text="{Binding AccentPicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
-                  </StackPanel>
+                  <Grid ColumnDefinitions="64,*" ColumnSpacing="12">
+                    <StackPanel Spacing="4">
+                      <TextBlock Classes="settingsPickerLabel" Text="NEW" HorizontalAlignment="Center" />
+                      <Border Height="24" CornerRadius="6,6,0,0" BorderThickness="1,1,1,0" BorderBrush="{StaticResource EdgeStrongBrush}">
+                        <Border.Background><SolidColorBrush Color="{Binding AccentPicker.ShownColor}" /></Border.Background>
+                      </Border>
+                      <Button Classes="themeSwatch" Width="64" Height="24" Margin="0,-4,0,0" Tag="{Binding AccentPicker}" Click="RestoreCurrentColorButton_OnClick"
+                              ToolTip.Tip="Click to go back to this colour">
+                        <Border CornerRadius="0,0,6,6"><Border.Background><SolidColorBrush Color="{Binding AccentPicker.CurrentColor}" /></Border.Background></Border>
+                      </Button>
+                      <TextBlock Classes="settingsPickerLabel" Text="CURRENT" HorizontalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="10" VerticalAlignment="Center">
+                      <StackPanel Spacing="4">
+                        <TextBlock Classes="settingsPickerLabel" Text="HEX" />
+                        <TextBox Classes="settingsInput" Text="{Binding AccentPicker.HexText, Mode=TwoWay}" PlaceholderText="#RRGGBB" />
+                      </StackPanel>
+                      <Button Content="Pick screen colour" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Tag="{Binding AccentPicker}"
+                              IsVisible="{x:Static services:ScreenColorPicker.IsSupported}" Click="PickScreenColorButton_OnClick" />
+                    </StackPanel>
+                  </Grid>
                   <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
                     <StackPanel Spacing="4">
                       <TextBlock Classes="settingsPickerLabel" Text="R" />

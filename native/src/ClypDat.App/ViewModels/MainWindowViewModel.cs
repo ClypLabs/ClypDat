@@ -750,6 +750,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         ThemeEditorBaseColor = PaintBase(theme.BaseColor, theme.LightMode, moveCursor: true);
         AccentPicker.Load(theme.AccentColor);
         ShowPaintedAccent();
+        BasePicker.MarkCurrent();
+        AccentPicker.MarkCurrent();
         OnPropertyChanged(nameof(IsThemeEditorOpen));
         OnPropertyChanged(nameof(IsThemeEditorSaved));
         // Deliberately no preview here. Opening the editor is not a change to

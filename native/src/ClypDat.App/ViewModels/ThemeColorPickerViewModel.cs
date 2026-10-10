@@ -27,6 +27,10 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     private string _blueText;
     private string _error = string.Empty;
     private bool _updating;
+    private Color _shownColor;
+    private Color _currentColor;
+    private ThemeColor _currentPick;
+    private HsvColor _currentHsv;
 
     /// <param name="committed">
     /// Called with the new #RRGGBB whenever the colour changes by a user action.
@@ -43,6 +47,8 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         _redText = seed.Red.ToString();
         _greenText = seed.Green.ToString();
         _blueText = seed.Blue.ToString();
+        _shownColor = _color;
+        MarkCurrent();
     }
 
     public Color Color { get => _color; set { if (_updating) return; Set(new ThemeColor(value.R, value.G, value.B)); } }
@@ -80,6 +86,28 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     public string BlueText { get => _blueText; set => SetChannel(ref _blueText, value); }
     public string Error { get => _error; private set => SetProperty(ref _error, value); }
 
+    // The "new" and "current" swatches, after Photoshop's picker by way of
+    // PhotoCraft's. New is the colour the hex box names - for the base and
+    // accent that is the colour as painted, not the point under the cursor.
+    // Current is what the editor opened on, and clicking it goes back there.
+    public Color ShownColor { get => _shownColor; private set => SetProperty(ref _shownColor, value); }
+    public Color CurrentColor { get => _currentColor; private set => SetProperty(ref _currentColor, value); }
+
+    /// <summary>
+    /// Makes the colour on show the "current" one. Called once the editor has
+    /// finished loading a theme; not from <see cref="Load"/>, which also runs
+    /// when Light mode repaints the base and must not move the swatch.
+    /// </summary>
+    public void MarkCurrent()
+    {
+        _currentPick = new ThemeColor(_color.R, _color.G, _color.B);
+        _currentHsv = _hsvColor;
+        CurrentColor = _shownColor;
+    }
+
+    /// <summary>Goes back to the colour the editor opened on.</summary>
+    public void RestoreCurrent() => Set(_currentPick, _currentHsv);
+
     /// <summary>Seeds the controls without reporting a change.</summary>
     /// <param name="hue">
     /// Kept instead of the hue the colour converts to. A grey or near-black has
@@ -107,6 +135,7 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         SetProperty(ref _redText, color.Red.ToString(), nameof(RedText));
         SetProperty(ref _greenText, color.Green.ToString(), nameof(GreenText));
         SetProperty(ref _blueText, color.Blue.ToString(), nameof(BlueText));
+        ShownColor = Color.FromRgb(color.Red, color.Green, color.Blue);
         _updating = false;
     }
 
@@ -134,6 +163,7 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         SetProperty(ref _redText, color.Red.ToString(), nameof(RedText));
         SetProperty(ref _greenText, color.Green.ToString(), nameof(GreenText));
         SetProperty(ref _blueText, color.Blue.ToString(), nameof(BlueText));
+        ShownColor = value;
         _updating = false;
         Error = string.Empty;
     }
