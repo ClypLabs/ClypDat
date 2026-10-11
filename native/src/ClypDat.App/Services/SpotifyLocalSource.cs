@@ -90,6 +90,17 @@ internal sealed class SpotifyLocalSource : IDisposable
             // Dispose() cancels, then disposes _wake; a pass already past its
             // cancellation check can meet the disposed semaphore. That is a stop.
             catch (Exception) when (cancellationToken.IsCancellationRequested) { return; }
+            // Spotify closed between picking its session and reading it. Not a
+            // fault: drop the dead session and look again at the next wake,
+            // rather than logging an error and going blind for ten seconds.
+            catch (Exception error) when (IsSessionGone(error))
+            {
+                lock (_gate)
+                {
+                    if (!cancellationToken.IsCancellationRequested) AttachSession(null);
+                }
+                Publish(null, cancellationToken);
+            }
             catch (Exception error)
             {
                 AppLog.Error("Spotify (this PC): reading media controls failed.", error);
@@ -199,6 +210,11 @@ internal sealed class SpotifyLocalSource : IDisposable
         track is not null && artist is null &&
         (track.Equals("Advertisement", StringComparison.OrdinalIgnoreCase) || track.StartsWith("Spotify", StringComparison.OrdinalIgnoreCase));
 
+    // RPC_S_SERVER_UNAVAILABLE and RPC_E_DISCONNECTED: the app behind a media
+    // session has exited, so the session object is dead.
+    internal static bool IsSessionGone(Exception error) =>
+        error is System.Runtime.InteropServices.COMException { HResult: unchecked((int)0x800706BA) or unchecked((int)0x80010108) };
+
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private void AttachSession(GlobalSystemMediaTransportControlsSession? session)
@@ -206,9 +222,15 @@ internal sealed class SpotifyLocalSource : IDisposable
         if (ReferenceEquals(session, _session)) return;
         if (_session is not null)
         {
-            _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
-            _session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
-            _session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
+            try
+            {
+                _session.MediaPropertiesChanged -= OnMediaPropertiesChanged;
+                _session.PlaybackInfoChanged -= OnPlaybackInfoChanged;
+                _session.TimelinePropertiesChanged -= OnTimelinePropertiesChanged;
+            }
+            // A session whose app has exited cannot be unsubscribed from, and
+            // will never raise anything again.
+            catch (Exception error) when (IsSessionGone(error)) { }
         }
         _session = session;
         _artKey = null;

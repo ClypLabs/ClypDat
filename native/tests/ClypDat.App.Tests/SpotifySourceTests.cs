@@ -117,6 +117,13 @@ public sealed class SpotifySourceTests : IDisposable
     public void AdvertsAreNotStampedAsSongs(string track, string? artist, bool expected) =>
         Assert.Equal(expected, SpotifyLocalSource.IsAdvert(track, artist));
 
+    [Theory]
+    [InlineData(unchecked((int)0x800706BA), true)] // RPC_S_SERVER_UNAVAILABLE: Spotify exited mid-read
+    [InlineData(unchecked((int)0x80010108), true)] // RPC_E_DISCONNECTED
+    [InlineData(unchecked((int)0x80004005), false)] // E_FAIL stays an error
+    public void AClosedSpotifySessionIsNotAnError(int hresult, bool expected) =>
+        Assert.Equal(expected, SpotifyLocalSource.IsSessionGone(new System.Runtime.InteropServices.COMException("test", hresult)));
+
     [Fact]
     public void OnlyFlatHashNamedCoversInTheCacheFolderAreTrusted()
     {

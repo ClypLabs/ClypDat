@@ -1463,6 +1463,9 @@ public sealed partial class PlaybackSession : IDisposable
             var results = await Task.WhenAll(readers.Select(async reader =>
             {
                 try { return await reader.EnsureReadyAsync(target, cancellationToken).ConfigureAwait(false); }
+                // A newer seek replaced this one: every track's wait is
+                // cancelled at once, which is not a failure worth an error each.
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return false; }
                 catch (Exception error) { AppLog.Error($"seek={seekId} audio-prepare track failed: {error.Message}"); return false; }
             })).ConfigureAwait(false);
             var ready = results.Count(result => result);
