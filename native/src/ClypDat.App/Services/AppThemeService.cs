@@ -624,6 +624,13 @@ internal static class AppThemeService
     public static Color CustomGround(Color picked, bool light) => SurfaceBase(picked, light).Ground;
 
     /// <summary>
+    /// The window, panel, card and raised surfaces a custom theme on this ground
+    /// paints, as Apply paints them.
+    /// </summary>
+    public static IReadOnlyList<Color> CustomSurfaces(Color ground, bool light) =>
+        NamedTokens.Take(4).Select(token => RecolorCustom(token.Source, token.Role, ground, light)).ToArray();
+
+    /// <summary>
     /// The theme editor's base field: the band SurfaceBase paints a pick
     /// unchanged, so every colour the field shows is the colour the theme gets.
     /// </summary>

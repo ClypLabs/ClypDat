@@ -1,4 +1,6 @@
+using Avalonia;
 using Avalonia.Media;
+using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
 using ClypDat.Core.Settings;
 using Xunit;
@@ -35,14 +37,18 @@ public sealed class ThemeColorPickerViewModelTests
     }
 
     [Fact]
-    public void NewSwatchShowsThePaintedColour()
+    public void LoadAtShowsTheFieldColourThereWithoutReporting()
     {
-        var picker = new ThemeColorPickerViewModel("#112233", _ => { });
+        var committed = new List<string>();
+        var picker = new ThemeColorPickerViewModel("#112233", committed.Add) { Model = AppThemeService.CustomBaseField(light: false) };
 
-        picker.ShowPainted("#0A0B0C");
-        Assert.Equal(Color.Parse("#0A0B0C"), picker.ShownColor);
+        var shown = picker.LoadAt(new Point(0.5, 0.5));
+        Assert.Equal(picker.Model!.At(picker.Hue, 0.5, 0.5), shown);
+        Assert.Equal(shown, picker.ShownColor);
+        Assert.Equal(new Point(0.5, 0.5), picker.Position);
+        Assert.Empty(committed);
 
         picker.MarkCurrent();
-        Assert.Equal(Color.Parse("#0A0B0C"), picker.CurrentColor);
+        Assert.Equal(shown, picker.CurrentColor);
     }
 }

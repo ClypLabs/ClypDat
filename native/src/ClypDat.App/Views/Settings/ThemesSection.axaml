@@ -152,9 +152,9 @@
          above and below; the pickers are fixed width (each field is
          square), so they sit centred in it rather than hugging the left edge. -->
     <!-- The field and hue strip are ColorField's, not ColorSpectrum and
-         ColorSlider: they compute the colour straight from the pointer, the
-         way PhotoCraft's picker does, and the field only shows colours the
-         theme paints exactly, so the swatch is the pixel under the thumb. -->
+         ColorSlider: they compute the colour straight from the pointer, and
+         the field only shows colours the theme paints exactly, so the swatch
+         is the pixel under the thumb. -->
     <StackPanel Classes="settingsGroup" IsVisible="{Binding IsThemeEditorOpen}">
       <TextBlock Classes="settingsGroupLabel" Text="CUSTOM THEME EDITOR" />
       <Border Classes="settingsGroupCard">
@@ -189,9 +189,8 @@
                                          Position="{Binding BasePicker.Position, Mode=TwoWay}" Width="232" Height="232" />
                     <controls:HueStrip Grid.Column="1" Hue="{Binding BasePicker.Hue, Mode=TwoWay}" Height="232" />
                   </Grid>
-                  <!-- New over current, as in Photoshop's picker and PhotoCraft's after
-                       it; current is the colour the editor opened on and a click
-                       on it goes back there. Pick screen colour samples any pixel
+                  <!-- New over current: current is the colour the editor opened
+                       on and a click on it goes back there. Pick screen colour samples any pixel
                        on any monitor (ScreenColorPicker). -->
                   <Grid ColumnDefinitions="64,*" ColumnSpacing="12">
                     <StackPanel Spacing="4">
@@ -231,6 +230,25 @@
                       <TextBox Classes="settingsInput" Text="{Binding BasePicker.BlueText, Mode=TwoWay}" />
                     </StackPanel>
                   </Grid>
+                  <!-- What the base turns into: it is the window, and the panels and
+                       cards on it are each a step away. The base swatch sits on a
+                       card, so without these it reads as the wrong colour. -->
+                  <StackPanel Spacing="4">
+                    <TextBlock Classes="settingsPickerLabel" Text="SHADES" />
+                    <ItemsControl ItemsSource="{Binding ThemeEditorShades}">
+                      <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1" ColumnSpacing="6" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ThemeShade">
+                          <StackPanel Spacing="4">
+                            <Border Height="24" CornerRadius="6" BorderThickness="1" BorderBrush="{StaticResource EdgeStrongBrush}">
+                              <Border.Background><SolidColorBrush Color="{Binding Color}" /></Border.Background>
+                            </Border>
+                            <TextBlock Classes="settingsPickerLabel" Text="{Binding Name}" HorizontalAlignment="Center" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
                   <TextBlock Classes="settingsRowError" Text="{Binding BasePicker.Error}" MaxWidth="264"
                              IsVisible="{Binding BasePicker.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                   <StackPanel Spacing="6" IsVisible="{Binding HasRecentThemeColors}">

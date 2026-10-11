@@ -73,6 +73,40 @@ public sealed class ColorFieldTests
     }
 
     [Theory]
+    [InlineData("#2E1E33", "#3030C0", false)]
+    [InlineData("#0D1116", "#5A1A8C", false)]
+    [InlineData("#F4F1EC", "#E8E060", true)]
+    public void AnAccentThatDoesNotReadIsFittedToTheFieldUnderTheThumb(string baseHex, string accentHex, bool light)
+    {
+        // What the editor does when the ground leaves an accent outside the
+        // field: the accent becomes the field's colour where the painter would
+        // have taken it, so the swatch is the pixel under the thumb and the
+        // theme paints it unchanged.
+        var ground = AppThemeService.CustomGround(Color.Parse(baseHex), light);
+        var pick = Color.Parse(accentHex);
+        var painted = AppThemeService.CustomAccent(pick, ground);
+        Assert.NotEqual(pick, painted);
+
+        var picker = new ThemeColorPickerViewModel(accentHex, _ => { }) { Model = AppThemeService.CustomAccentField(ground) };
+        var fitted = picker.LoadAt(picker.Model!.Locate(painted));
+
+        Assert.Equal(picker.Model.At(picker.Hue, picker.Position.X, picker.Position.Y), fitted);
+        Assert.Equal(fitted, AppThemeService.CustomAccent(fitted, ground));
+        Assert.Equal(fitted, picker.ShownColor);
+    }
+
+    [Fact]
+    public void ShadesStartAtTheBaseAndStepAwayFromIt()
+    {
+        var ground = AppThemeService.CustomGround(Color.Parse("#580B50"), light: false);
+        var surfaces = AppThemeService.CustomSurfaces(ground, light: false);
+        Assert.Equal(4, surfaces.Count);
+        for (var i = 1; i < surfaces.Count; i++)
+            Assert.True(Luminance(surfaces[i]) > Luminance(surfaces[i - 1]));
+        Assert.True(Math.Abs(surfaces[0].R - ground.R) <= 1 && Math.Abs(surfaces[0].G - ground.G) <= 1 && Math.Abs(surfaces[0].B - ground.B) <= 1);
+    }
+
+    [Theory]
     [InlineData(false, 285)]
     [InlineData(true, 40)]
     public void DrawnPixelsAreThePickedColours(bool light, double hue)

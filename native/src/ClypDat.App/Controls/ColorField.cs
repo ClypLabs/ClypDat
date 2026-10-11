@@ -8,10 +8,10 @@ using Avalonia.Platform;
 
 namespace ClypDat.App.Controls;
 
-// The theme editor's colour field and hue strip, after PhotoCraft's picker:
-// the colour under the pointer is a function of where the pointer is and
-// nothing else. Avalonia's ColorSpectrum instead looked the colour up in a
-// table it rebuilt on a background thread, and drifted from the cursor.
+// The theme editor's colour field and hue strip: the colour under the
+// pointer is a function of where the pointer is and nothing else.
+// Avalonia's ColorSpectrum instead looked the colour up in a table it
+// rebuilt on a background thread, and drifted from the cursor.
 //
 // The field is also only ever colours the theme paints exactly. A plain HSV
 // square showed colours the theme then clamped into its band - a top edge of
@@ -86,35 +86,39 @@ public sealed class ColorFieldModel
     /// </summary>
     public void Fill(double hue, int width, int height, int[] pixels)
     {
-        var luminances = new double[Steps];
         var targets = new double[height];
         for (var row = 0; row < height; row++) targets[row] = LuminanceAt((row + 0.5) / height);
-        var painted = new Dictionary<int, int>();
-        for (var column = 0; column < width; column++)
-        {
-            var saturation = SaturationAt((column + 0.5) / width);
-            Array.Fill(luminances, double.NaN);
-            for (var row = 0; row < height; row++)
+        // Columns are independent, so they are spread over the cores: a hue
+        // drag redraws the whole field on every move.
+        Parallel.For(0, width,
+            () => (Luminances: new double[Steps], Painted: new Dictionary<int, int>()),
+            (column, _, local) =>
             {
-                int low = 0, high = Steps - 1;
-                while (low < high)
+                var saturation = SaturationAt((column + 0.5) / width);
+                Array.Fill(local.Luminances, double.NaN);
+                for (var row = 0; row < height; row++)
                 {
-                    var middle = (low + high) / 2;
-                    if (double.IsNaN(luminances[middle])) luminances[middle] = Luminance(Step(hue, saturation, middle));
-                    if (luminances[middle] >= targets[row]) high = middle;
-                    else low = middle + 1;
+                    int low = 0, high = Steps - 1;
+                    while (low < high)
+                    {
+                        var middle = (low + high) / 2;
+                        if (double.IsNaN(local.Luminances[middle])) local.Luminances[middle] = Luminance(Step(hue, saturation, middle));
+                        if (local.Luminances[middle] >= targets[row]) high = middle;
+                        else low = middle + 1;
+                    }
+                    var raw = Step(hue, saturation, low);
+                    var key = (raw.R << 16) | (raw.G << 8) | raw.B;
+                    if (!local.Painted.TryGetValue(key, out var pixel))
+                    {
+                        var color = Paint(raw);
+                        pixel = unchecked((int)(0xFF000000u | ((uint)color.R << 16) | ((uint)color.G << 8) | color.B));
+                        local.Painted[key] = pixel;
+                    }
+                    pixels[row * width + column] = pixel;
                 }
-                var raw = Step(hue, saturation, low);
-                var key = (raw.R << 16) | (raw.G << 8) | raw.B;
-                if (!painted.TryGetValue(key, out var pixel))
-                {
-                    var color = Paint(raw);
-                    pixel = unchecked((int)(0xFF000000u | ((uint)color.R << 16) | ((uint)color.G << 8) | color.B));
-                    painted[key] = pixel;
-                }
-                pixels[row * width + column] = pixel;
-            }
-        }
+                return local;
+            },
+            _ => { });
     }
 
     /// <summary>CIE L* of a relative luminance.</summary>
@@ -288,7 +292,7 @@ public sealed class ColorField : Control
     }
 }
 
-/// <summary>Hue from 360° at the top to 0° at the bottom, as in Photoshop and PhotoCraft.</summary>
+/// <summary>Hue from 360° at the top to 0° at the bottom.</summary>
 public sealed class HueStrip : Control
 {
     public static readonly StyledProperty<double> HueProperty =

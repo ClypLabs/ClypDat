@@ -105,9 +105,8 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     public string BlueText { get => _blueText; set => SetChannel(ref _blueText, value); }
     public string Error { get => _error; private set => SetProperty(ref _error, value); }
 
-    // The "new" and "current" swatches, after Photoshop's picker by way of
-    // PhotoCraft's. New is the colour the hex box names - for the base and
-    // accent that is the colour as painted, not the point under the cursor.
+    // The "new" and "current" swatches. New is the colour the hex box names,
+    // which is the colour painted and the pixel under the thumb.
     // Current is what the editor opened on, and clicking it goes back there.
     public Color ShownColor { get => _shownColor; private set => SetProperty(ref _shownColor, value); }
     public Color CurrentColor { get => _currentColor; private set => SetProperty(ref _currentColor, value); }
@@ -139,21 +138,20 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Puts a different colour in the hex and RGB boxes while the thumb stays:
-    /// the accent picker uses this to name the accent as painted. A pick from
-    /// the field already is; an accent from before the ground last moved can
-    /// sit outside it now, and is lifted or deepened until it reads.
+    /// Puts the thumb at a point and shows the field's colour there, without
+    /// reporting a change. The accent picker uses this when a new ground leaves
+    /// its accent outside the field: the accent becomes the nearest colour the
+    /// field holds, so the swatch is still the pixel under the thumb.
     /// </summary>
-    public void ShowPainted(string hex)
+    public Color LoadAt(Point position)
     {
-        if (!ThemeColor.TryParseHex(hex, out var color)) return;
+        if (_model is null) return _color;
+        var picked = _model.At(_hue, position.X, position.Y);
         _updating = true;
-        SetProperty(ref _hexText, color.Hex, nameof(HexText));
-        SetProperty(ref _redText, color.Red.ToString(), nameof(RedText));
-        SetProperty(ref _greenText, color.Green.ToString(), nameof(GreenText));
-        SetProperty(ref _blueText, color.Blue.ToString(), nameof(BlueText));
-        ShownColor = Color.FromRgb(color.Red, color.Green, color.Blue);
+        SetProperty(ref _position, position, nameof(Position));
         _updating = false;
+        Write(new ThemeColor(picked.R, picked.G, picked.B), locate: false);
+        return picked;
     }
 
     /// <summary>A colour from outside the field - typed, recent, screen: the thumb moves onto it.</summary>

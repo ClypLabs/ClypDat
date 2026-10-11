@@ -12,9 +12,9 @@ using Avalonia.Platform;
 namespace ClypDat.App.Services;
 
 /// <summary>
-/// Samples one pixel anywhere on the desktop, the way PhotoCraft's "Pick screen
-/// colour" does: every monitor is captured once, each snapshot is shown frozen
-/// in a borderless window over its own monitor, and a loupe follows the pointer.
+/// Samples one pixel anywhere on the desktop: every monitor is captured once,
+/// each snapshot is shown frozen in a borderless window over its own monitor,
+/// and a loupe follows the pointer.
 /// Click picks, Esc cancels, the wheel zooms the loupe.
 /// </summary>
 /// <remarks>
@@ -25,8 +25,8 @@ namespace ClypDat.App.Services;
 /// </remarks>
 public static class ScreenColorPicker
 {
-    // PhotoCraft's limits: enough for sixteen 4K displays' worth of pixels,
-    // not an unbounded allocation because a driver reported a silly mode.
+    // Enough for sixteen 4K displays' worth of pixels, and not an unbounded
+    // allocation because a driver reported a silly mode.
     private const long MaxPixels = 64L * 1024 * 1024;
     private const int MaxDisplays = 16;
 
@@ -203,7 +203,7 @@ public static class ScreenColorPicker
         private void DrawLoupe(DrawingContext context, Rect screen, Point pointer, (int X, int Y) pixel)
         {
             var zoom = _session.Zoom;
-            // Zoom counts physical pixels per sampled pixel, as PhotoCraft's does.
+            // Zoom counts physical pixels per sampled pixel.
             var cell = zoom / Math.Max(0.5, TopLevel.GetTopLevel(this)?.RenderScaling ?? 1);
             var family = TextElement.GetFontFamily(this);
             var textBrush = AppThemeService.Brush("TextStrongBrush", "#EDF4FB");
