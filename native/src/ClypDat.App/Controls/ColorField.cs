@@ -258,7 +258,11 @@ public sealed class ColorField : Control
             if (_bitmap is null || _bitmap.PixelSize != size)
             {
                 _bitmap?.Dispose();
-                _bitmap = new WriteableBitmap(size, new Vector(96 * scaling, 96 * scaling), PixelFormat.Bgra8888, AlphaFormat.Opaque);
+                // 96 DPI, so its Size is its pixel size. DrawImage(image, rect)
+                // passes Size as the source rect and Skia reads that rect in
+                // pixels: at the screen's DPI a 348px field at 150% said 232,
+                // and only its top-left two thirds were drawn, stretched.
+                _bitmap = new WriteableBitmap(size, new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
             }
             using (var locked = _bitmap.Lock())
             {
