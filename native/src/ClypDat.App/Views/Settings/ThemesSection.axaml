@@ -151,10 +151,10 @@
     <!-- Full width like every other card, so its edges line up with the ones
          above and below; the pickers are fixed width (each field is
          square), so they sit centred in it rather than hugging the left edge. -->
-    <!-- The field and hue strip are HsvColorField's, not ColorSpectrum and
+    <!-- The field and hue strip are ColorField's, not ColorSpectrum and
          ColorSlider: they compute the colour straight from the pointer, the
-         way PhotoCraft's picker does, where ColorSpectrum read it from a table
-         rebuilt in the background and drifted from what was under the cursor. -->
+         way PhotoCraft's picker does, and the field only shows colours the
+         theme paints exactly, so the swatch is the pixel under the thumb. -->
     <StackPanel Classes="settingsGroup" IsVisible="{Binding IsThemeEditorOpen}">
       <TextBlock Classes="settingsGroupLabel" Text="CUSTOM THEME EDITOR" />
       <Border Classes="settingsGroupCard">
@@ -182,19 +182,12 @@
                 <StackPanel Spacing="10">
                   <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
                   <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
-                    <!-- Bound on HsvColor, not Color. Dragging into pure black or
-                         pure white throws the hue away in RGB, so the hue slider
-                         would jump back to red the moment the spectrum hit an edge. -->
-                    <!-- Cropped to the band a base is painted in, so the whole square
-                         is usable rather than mostly colours that all paint the same.
-                         One field per mode with fixed ranges, swapped by visibility. -->
-                    <Panel>
-                      <controls:SaturationValueField HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Width="232" Height="232"
-                                                     MinValue="3" MaxValue="30" IsVisible="{Binding !ThemeEditorLightMode}" />
-                      <controls:SaturationValueField HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Width="232" Height="232"
-                                                     MinValue="86" MaxSaturation="30" IsVisible="{Binding ThemeEditorLightMode}" />
-                    </Panel>
-                    <controls:HueStrip Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Height="232" />
+                    <!-- The field is the band a base is painted in for the current
+                         mode (BasePicker.Model), so every point in it is a ground
+                         the theme can be, exactly as shown. -->
+                    <controls:ColorField Model="{Binding BasePicker.Model}" Hue="{Binding BasePicker.Hue}"
+                                         Position="{Binding BasePicker.Position, Mode=TwoWay}" Width="232" Height="232" />
+                    <controls:HueStrip Grid.Column="1" Hue="{Binding BasePicker.Hue, Mode=TwoWay}" Height="232" />
                   </Grid>
                   <!-- New over current, as in Photoshop's picker and PhotoCraft's after
                        it; current is the colour the editor opened on and a click
@@ -255,17 +248,11 @@
                 <StackPanel Spacing="10">
                   <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
                   <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
-                    <!-- The same, for the accent: bright enough to read on a dark
-                         ground, deep enough on a light one. Picks just outside are
-                         still lifted or deepened; the hex and RGB boxes give the
-                         accent as painted. -->
-                    <Panel>
-                      <controls:SaturationValueField HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Width="232" Height="232"
-                                                     MinValue="45" IsVisible="{Binding !ThemeEditorLightMode}" />
-                      <controls:SaturationValueField HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Width="232" Height="232"
-                                                     MinValue="10" MaxValue="75" IsVisible="{Binding ThemeEditorLightMode}" />
-                    </Panel>
-                    <controls:HueStrip Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Height="232" />
+                    <!-- The same, for the accent: only accents that read on the
+                         current ground, so it follows the base. -->
+                    <controls:ColorField Model="{Binding AccentPicker.Model}" Hue="{Binding AccentPicker.Hue}"
+                                         Position="{Binding AccentPicker.Position, Mode=TwoWay}" Width="232" Height="232" />
+                    <controls:HueStrip Grid.Column="1" Hue="{Binding AccentPicker.Hue, Mode=TwoWay}" Height="232" />
                   </Grid>
                   <Grid ColumnDefinitions="64,*" ColumnSpacing="12">
                     <StackPanel Spacing="4">

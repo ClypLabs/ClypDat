@@ -1,61 +1,213 @@
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace ClypDat.App.Controls;
 
 // The theme editor's colour field and hue strip, after PhotoCraft's picker:
 // the colour under the pointer is a function of where the pointer is and
-// nothing else. Avalonia's ColorSpectrum instead looks the colour up in a
-// table it rebuilds on a background thread whenever its size, range or hue
-// changes, and keeps Color and HsvColor in step by converting one into the
-// other; a drag could read a stale table or a rounded round trip, so the
-// value under the cursor and the value reported drifted apart.
+// nothing else. Avalonia's ColorSpectrum instead looked the colour up in a
+// table it rebuilt on a background thread, and drifted from the cursor.
 //
-// Both are drawn from two gradients rather than a bitmap. In HSV a colour at
-// a fixed hue is V * (1 - S * (1 - hue)), so a horizontal saturation gradient
-// with a vertical black overlay of opacity 1 - V paints the field exactly.
+// The field is also only ever colours the theme paints exactly. A plain HSV
+// square showed colours the theme then clamped into its band - a top edge of
+// #4D3A52 painted as #2E1E33 - so the swatch never matched the point picked.
+// Here every pixel is computed by the same function a pick is, with the
+// theme's own painting applied, so what is under the thumb is what is painted.
 
-/// <summary>Saturation across, value up, for the hue in <see cref="HsvColor"/>.</summary>
-public sealed class SaturationValueField : Control
+/// <summary>
+/// What a colour field shows at one hue: HSL saturation across, perceived
+/// lightness (CIE L*) up, each cropped to a range. Lightness rather than HSV
+/// value, because the theme's bands are bands of luminance: at one value a
+/// green is seven times brighter than a blue.
+/// </summary>
+public sealed class ColorFieldModel
 {
-    public static readonly StyledProperty<HsvColor> HsvColorProperty =
-        AvaloniaProperty.Register<SaturationValueField, HsvColor>(nameof(HsvColor), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+    // HSL lightness is searched on this grid, so a pick and the pixel drawn
+    // for it land on the same step.
+    private const int Steps = 1024;
+    private static readonly double[] LinearChannel = CreateLinearChannel();
+    private readonly Func<Color, Color>? _paint;
 
-    // Percentages, as ColorSpectrum took them, so the editor's crops carry over.
-    public static readonly StyledProperty<double> MinSaturationProperty =
-        AvaloniaProperty.Register<SaturationValueField, double>(nameof(MinSaturation), 0);
-    public static readonly StyledProperty<double> MaxSaturationProperty =
-        AvaloniaProperty.Register<SaturationValueField, double>(nameof(MaxSaturation), 100);
-    public static readonly StyledProperty<double> MinValueProperty =
-        AvaloniaProperty.Register<SaturationValueField, double>(nameof(MinValue), 0);
-    public static readonly StyledProperty<double> MaxValueProperty =
-        AvaloniaProperty.Register<SaturationValueField, double>(nameof(MaxValue), 100);
-    public static readonly StyledProperty<double> CornerRadiusProperty =
-        AvaloniaProperty.Register<SaturationValueField, double>(nameof(CornerRadius), 8);
-
-    static SaturationValueField()
+    /// <param name="minSaturation">HSL saturation at the left edge, 0-1.</param>
+    /// <param name="maxSaturation">HSL saturation at the right edge, 0-1.</param>
+    /// <param name="minLightness">CIE L* at the bottom edge, 0-100.</param>
+    /// <param name="maxLightness">CIE L* at the top edge, 0-100.</param>
+    /// <param name="paint">How the theme paints a pick; applied to every colour the field gives.</param>
+    public ColorFieldModel(double minSaturation, double maxSaturation, double minLightness, double maxLightness, Func<Color, Color>? paint = null)
     {
-        AffectsRender<SaturationValueField>(HsvColorProperty, MinSaturationProperty, MaxSaturationProperty, MinValueProperty, MaxValueProperty, CornerRadiusProperty);
+        MinSaturation = minSaturation;
+        MaxSaturation = maxSaturation;
+        MinLightness = minLightness;
+        MaxLightness = maxLightness;
+        _paint = paint;
     }
 
-    public SaturationValueField() => Cursor = new Cursor(StandardCursorType.Cross);
+    public double MinSaturation { get; }
+    public double MaxSaturation { get; }
+    public double MinLightness { get; }
+    public double MaxLightness { get; }
 
-    public HsvColor HsvColor { get => GetValue(HsvColorProperty); set => SetValue(HsvColorProperty, value); }
-    public double MinSaturation { get => GetValue(MinSaturationProperty); set => SetValue(MinSaturationProperty, value); }
-    public double MaxSaturation { get => GetValue(MaxSaturationProperty); set => SetValue(MaxSaturationProperty, value); }
-    public double MinValue { get => GetValue(MinValueProperty); set => SetValue(MinValueProperty, value); }
-    public double MaxValue { get => GetValue(MaxValueProperty); set => SetValue(MaxValueProperty, value); }
+    /// <summary>The colour at a point, x and y as fractions of the field, clamped to it.</summary>
+    public Color At(double hue, double x, double y)
+    {
+        var saturation = SaturationAt(x);
+        var target = LuminanceAt(y);
+        int low = 0, high = Steps - 1;
+        while (low < high)
+        {
+            var middle = (low + high) / 2;
+            if (Luminance(Step(hue, saturation, middle)) >= target) high = middle;
+            else low = middle + 1;
+        }
+        return Paint(Step(hue, saturation, low));
+    }
+
+    /// <summary>Where a colour sits in the field, clamped to it.</summary>
+    public Point Locate(Color color)
+    {
+        var max = Math.Max(color.R, Math.Max(color.G, color.B)) / 255d;
+        var min = Math.Min(color.R, Math.Min(color.G, color.B)) / 255d;
+        var hslLightness = (max + min) / 2;
+        var saturation = max - min < 1e-9 ? 0 : hslLightness > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min);
+        return new Point(
+            Fraction(saturation, MinSaturation, MaxSaturation),
+            1 - Fraction(Lightness(Luminance(color)), MinLightness, MaxLightness));
+    }
+
+    /// <summary>
+    /// Fills a width x height BGRA buffer with the field, sampling each pixel
+    /// at its centre. Exactly <see cref="At"/> for every pixel: the same
+    /// search, with each column's steps cached as the rows visit them.
+    /// </summary>
+    public void Fill(double hue, int width, int height, int[] pixels)
+    {
+        var luminances = new double[Steps];
+        var targets = new double[height];
+        for (var row = 0; row < height; row++) targets[row] = LuminanceAt((row + 0.5) / height);
+        var painted = new Dictionary<int, int>();
+        for (var column = 0; column < width; column++)
+        {
+            var saturation = SaturationAt((column + 0.5) / width);
+            Array.Fill(luminances, double.NaN);
+            for (var row = 0; row < height; row++)
+            {
+                int low = 0, high = Steps - 1;
+                while (low < high)
+                {
+                    var middle = (low + high) / 2;
+                    if (double.IsNaN(luminances[middle])) luminances[middle] = Luminance(Step(hue, saturation, middle));
+                    if (luminances[middle] >= targets[row]) high = middle;
+                    else low = middle + 1;
+                }
+                var raw = Step(hue, saturation, low);
+                var key = (raw.R << 16) | (raw.G << 8) | raw.B;
+                if (!painted.TryGetValue(key, out var pixel))
+                {
+                    var color = Paint(raw);
+                    pixel = unchecked((int)(0xFF000000u | ((uint)color.R << 16) | ((uint)color.G << 8) | color.B));
+                    painted[key] = pixel;
+                }
+                pixels[row * width + column] = pixel;
+            }
+        }
+    }
+
+    /// <summary>CIE L* of a relative luminance.</summary>
+    public static double Lightness(double luminance) =>
+        luminance > 216d / 24389 ? 116 * Math.Cbrt(luminance) - 16 : luminance * 24389d / 27;
+
+    /// <summary>The relative luminance of a CIE L*.</summary>
+    public static double LuminanceOf(double lightness) =>
+        lightness > 8 ? Math.Pow((lightness + 16) / 116, 3) : lightness * 27d / 24389;
+
+    private Color Paint(Color color) => _paint?.Invoke(color) ?? color;
+
+    private double SaturationAt(double x) => MinSaturation + Math.Clamp(x, 0, 1) * (MaxSaturation - MinSaturation);
+
+    private double LuminanceAt(double y) => LuminanceOf(MaxLightness - Math.Clamp(y, 0, 1) * (MaxLightness - MinLightness));
+
+    private static double Fraction(double value, double min, double max) => max > min ? Math.Clamp((value - min) / (max - min), 0, 1) : 0;
+
+    private static double Luminance(Color color) =>
+        .2126 * LinearChannel[color.R] + .7152 * LinearChannel[color.G] + .0722 * LinearChannel[color.B];
+
+    private static double[] CreateLinearChannel()
+    {
+        var table = new double[256];
+        for (var i = 0; i < 256; i++)
+        {
+            var value = i / 255d;
+            table[i] = value <= .04045 ? value / 12.92 : Math.Pow((value + .055) / 1.055, 2.4);
+        }
+        return table;
+    }
+
+    // Every channel rises with HSL lightness at a fixed hue and saturation, so
+    // luminance does too and the search over steps is a bisection.
+    private static Color Step(double hue, double saturation, int step)
+    {
+        var lightness = step / (double)(Steps - 1);
+        if (saturation <= 0)
+        {
+            var grey = (byte)Math.Round(lightness * 255);
+            return Color.FromRgb(grey, grey, grey);
+        }
+        var q = lightness < 0.5 ? lightness * (1 + saturation) : lightness + saturation - lightness * saturation;
+        var p = 2 * lightness - q;
+        var h = hue / 360;
+        return Color.FromRgb(Channel(p, q, h + 1d / 3), Channel(p, q, h), Channel(p, q, h - 1d / 3));
+    }
+
+    private static byte Channel(double p, double q, double t)
+    {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        var value = t < 1d / 6 ? p + (q - p) * 6 * t
+            : t < 0.5 ? q
+            : t < 2d / 3 ? p + (q - p) * (2d / 3 - t) * 6
+            : p;
+        return (byte)Math.Round(Math.Clamp(value, 0, 1) * 255);
+    }
+}
+
+/// <summary>A <see cref="ColorFieldModel"/> at <see cref="Hue"/>, with the thumb at <see cref="Position"/>.</summary>
+public sealed class ColorField : Control
+{
+    public static readonly StyledProperty<ColorFieldModel?> ModelProperty =
+        AvaloniaProperty.Register<ColorField, ColorFieldModel?>(nameof(Model));
+    public static readonly StyledProperty<double> HueProperty =
+        AvaloniaProperty.Register<ColorField, double>(nameof(Hue));
+    // Fractions of the field, 0-1 each way. The view model turns it into a
+    // colour with the model, so the field and the colour cannot disagree.
+    public static readonly StyledProperty<Point> PositionProperty =
+        AvaloniaProperty.Register<ColorField, Point>(nameof(Position), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+    public static readonly StyledProperty<double> CornerRadiusProperty =
+        AvaloniaProperty.Register<ColorField, double>(nameof(CornerRadius), 8);
+
+    private WriteableBitmap? _bitmap;
+    private (ColorFieldModel? Model, double Hue, PixelSize Size) _drawn;
+
+    static ColorField()
+    {
+        AffectsRender<ColorField>(ModelProperty, HueProperty, PositionProperty, CornerRadiusProperty);
+    }
+
+    public ColorField() => Cursor = new Cursor(StandardCursorType.Cross);
+
+    public ColorFieldModel? Model { get => GetValue(ModelProperty); set => SetValue(ModelProperty, value); }
+    public double Hue { get => GetValue(HueProperty); set => SetValue(HueProperty, value); }
+    public Point Position { get => GetValue(PositionProperty); set => SetValue(PositionProperty, value); }
     public double CornerRadius { get => GetValue(CornerRadiusProperty); set => SetValue(CornerRadiusProperty, value); }
 
-    /// <summary>The saturation and value at a point, clamped to the field.</summary>
-    public static (double S, double V) At(Point point, Size size, double minS, double maxS, double minV, double maxV)
-    {
-        var x = size.Width > 0 ? Math.Clamp(point.X / size.Width, 0, 1) : 0;
-        var y = size.Height > 0 ? Math.Clamp(point.Y / size.Height, 0, 1) : 0;
-        return ((minS + x * (maxS - minS)) / 100, (maxV - y * (maxV - minV)) / 100);
-    }
+    /// <summary>The position of a point, as fractions of the field, clamped to it.</summary>
+    public static Point At(Point point, Size size) => new(
+        size.Width > 0 ? Math.Clamp(point.X / size.Width, 0, 1) : 0,
+        size.Height > 0 ? Math.Clamp(point.Y / size.Height, 0, 1) : 0);
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
@@ -65,7 +217,7 @@ public sealed class SaturationValueField : Control
         // along its edge instead of stopping where the pointer crossed it.
         e.Pointer.Capture(this);
         e.Handled = true;
-        Pick(e.GetPosition(this));
+        SetCurrentValue(PositionProperty, At(e.GetPosition(this), Bounds.Size));
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -73,7 +225,7 @@ public sealed class SaturationValueField : Control
         base.OnPointerMoved(e);
         if (!ReferenceEquals(e.Pointer.Captured, this)) return;
         e.Handled = true;
-        Pick(e.GetPosition(this));
+        SetCurrentValue(PositionProperty, At(e.GetPosition(this), Bounds.Size));
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -82,50 +234,46 @@ public sealed class SaturationValueField : Control
         if (ReferenceEquals(e.Pointer.Captured, this)) e.Pointer.Capture(null);
     }
 
-    private void Pick(Point point)
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        var (s, v) = At(point, Bounds.Size, MinSaturation, MaxSaturation, MinValue, MaxValue);
-        var current = HsvColor;
-        SetCurrentValue(HsvColorProperty, new HsvColor(current.A, current.H, s, v));
+        base.OnDetachedFromVisualTree(e);
+        _bitmap?.Dispose();
+        _bitmap = null;
     }
 
     public override void Render(DrawingContext context)
     {
         var rect = new Rect(Bounds.Size);
-        if (rect.Width <= 0 || rect.Height <= 0) return;
-        var hue = HsvColor.H;
-        var saturation = new LinearGradientBrush
-        {
-            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-            EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
-            GradientStops =
-            {
-                new GradientStop(new HsvColor(1, hue, MinSaturation / 100, 1).ToRgb(), 0),
-                new GradientStop(new HsvColor(1, hue, MaxSaturation / 100, 1).ToRgb(), 1),
-            },
-        };
-        var value = new LinearGradientBrush
-        {
-            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-            GradientStops =
-            {
-                new GradientStop(Color.FromArgb(Alpha(1 - MaxValue / 100), 0, 0, 0), 0),
-                new GradientStop(Color.FromArgb(Alpha(1 - MinValue / 100), 0, 0, 0), 1),
-            },
-        };
-        context.DrawRectangle(saturation, null, rect, CornerRadius, CornerRadius);
-        context.DrawRectangle(value, null, rect, CornerRadius, CornerRadius);
+        var model = Model;
+        if (rect.Width <= 0 || rect.Height <= 0 || model is null) return;
 
-        var color = HsvColor;
-        var x = Fraction(color.S * 100, MinSaturation, MaxSaturation) * rect.Width;
-        var y = (1 - Fraction(color.V * 100, MinValue, MaxValue)) * rect.Height;
-        DrawThumb(context, new Point(x, y), null);
+        // One bitmap pixel per screen pixel, so nothing is interpolated between
+        // what was computed and what is shown.
+        var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        var size = new PixelSize(Math.Max(1, (int)Math.Round(rect.Width * scaling)), Math.Max(1, (int)Math.Round(rect.Height * scaling)));
+        if (_bitmap is null || _drawn != (model, Hue, size))
+        {
+            var pixels = new int[size.Width * size.Height];
+            model.Fill(Hue, size.Width, size.Height, pixels);
+            if (_bitmap is null || _bitmap.PixelSize != size)
+            {
+                _bitmap?.Dispose();
+                _bitmap = new WriteableBitmap(size, new Vector(96 * scaling, 96 * scaling), PixelFormat.Bgra8888, AlphaFormat.Opaque);
+            }
+            using (var locked = _bitmap.Lock())
+            {
+                for (var row = 0; row < size.Height; row++)
+                    Marshal.Copy(pixels, row * size.Width, locked.Address + row * locked.RowBytes, size.Width);
+            }
+            _drawn = (model, Hue, size);
+        }
+
+        using (context.PushClip(new RoundedRect(rect, CornerRadius)))
+            context.DrawImage(_bitmap, rect);
+
+        var position = Position;
+        DrawThumb(context, new Point(position.X * rect.Width, position.Y * rect.Height), null);
     }
-
-    private static byte Alpha(double opacity) => (byte)Math.Round(Math.Clamp(opacity, 0, 1) * 255);
-
-    private static double Fraction(double value, double min, double max) => max > min ? Math.Clamp((value - min) / (max - min), 0, 1) : 0;
 
     internal static void DrawThumb(DrawingContext context, Point centre, IBrush? fill)
     {
@@ -139,8 +287,8 @@ public sealed class SaturationValueField : Control
 /// <summary>Hue from 360° at the top to 0° at the bottom, as in Photoshop and PhotoCraft.</summary>
 public sealed class HueStrip : Control
 {
-    public static readonly StyledProperty<HsvColor> HsvColorProperty =
-        AvaloniaProperty.Register<HueStrip, HsvColor>(nameof(HsvColor), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+    public static readonly StyledProperty<double> HueProperty =
+        AvaloniaProperty.Register<HueStrip, double>(nameof(Hue), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
 
     private static readonly LinearGradientBrush Hues = CreateHues();
 
@@ -157,10 +305,10 @@ public sealed class HueStrip : Control
 
     static HueStrip()
     {
-        AffectsRender<HueStrip>(HsvColorProperty);
+        AffectsRender<HueStrip>(HueProperty);
     }
 
-    public HsvColor HsvColor { get => GetValue(HsvColorProperty); set => SetValue(HsvColorProperty, value); }
+    public double Hue { get => GetValue(HueProperty); set => SetValue(HueProperty, value); }
 
     /// <summary>The hue at a height, clamped to the strip. Never 360, which HSV wraps to red at the bottom.</summary>
     public static double At(double y, double height) => height > 0 ? Math.Min(359.99, (1 - Math.Clamp(y / height, 0, 1)) * 360) : 0;
@@ -171,7 +319,7 @@ public sealed class HueStrip : Control
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
         e.Pointer.Capture(this);
         e.Handled = true;
-        Pick(e.GetPosition(this).Y);
+        SetCurrentValue(HueProperty, At(e.GetPosition(this).Y, Bounds.Height));
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -179,7 +327,7 @@ public sealed class HueStrip : Control
         base.OnPointerMoved(e);
         if (!ReferenceEquals(e.Pointer.Captured, this)) return;
         e.Handled = true;
-        Pick(e.GetPosition(this).Y);
+        SetCurrentValue(HueProperty, At(e.GetPosition(this).Y, Bounds.Height));
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -188,20 +336,14 @@ public sealed class HueStrip : Control
         if (ReferenceEquals(e.Pointer.Captured, this)) e.Pointer.Capture(null);
     }
 
-    private void Pick(double y)
-    {
-        var current = HsvColor;
-        SetCurrentValue(HsvColorProperty, new HsvColor(current.A, At(y, Bounds.Height), current.S, current.V));
-    }
-
     public override void Render(DrawingContext context)
     {
         var rect = new Rect(Bounds.Size);
         if (rect.Width <= 0 || rect.Height <= 0) return;
         var radius = rect.Width / 2;
         context.DrawRectangle(Hues, null, rect, radius, radius);
-        var hue = HsvColor.H;
+        var hue = Hue;
         var centre = new Point(rect.Width / 2, (1 - hue / 360) * rect.Height);
-        SaturationValueField.DrawThumb(context, centre, new SolidColorBrush(new HsvColor(1, hue, 1, 1).ToRgb()));
+        ColorField.DrawThumb(context, centre, new SolidColorBrush(new HsvColor(1, hue, 1, 1).ToRgb()));
     }
 }

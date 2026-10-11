@@ -5,6 +5,7 @@ using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using ClypDat.App.Controls;
 using ClypDat.Core.Settings;
 
 namespace ClypDat.App.Services;
@@ -622,6 +623,39 @@ internal static class AppThemeService
     /// <summary>The colour a custom theme with this base and Light mode is painted in.</summary>
     public static Color CustomGround(Color picked, bool light) => SurfaceBase(picked, light).Ground;
 
+    /// <summary>
+    /// The theme editor's base field: the band SurfaceBase paints a pick
+    /// unchanged, so every colour the field shows is the colour the theme gets.
+    /// </summary>
+    public static ColorFieldModel CustomBaseField(bool light) => new(
+        0, CustomSurfaceMaxSaturation,
+        ColorFieldModel.Lightness(light ? CustomLightMinLuminance : CustomDarkMinLuminance),
+        ColorFieldModel.Lightness(light ? CustomLightMaxLuminance : CustomDarkMaxLuminance),
+        color => CustomGround(color, light));
+
+    // The far end of the accent field from the ground: near white over a dark
+    // ground, near black under a light one. Past these every hue is the same
+    // colour, and a row of white across the top of the field picks nothing.
+    private const double AccentFieldBrightestLightness = 92;
+    private const double AccentFieldDarkestLightness = 20;
+
+    /// <summary>
+    /// The theme editor's accent field on this ground: only accents that
+    /// already clear AccentPreferredContrast, which AdjustAccent paints as
+    /// picked. A brighter or darker ground moves the field's near edge.
+    /// </summary>
+    public static ColorFieldModel CustomAccentField(Color ground)
+    {
+        var luminance = RelativeLuminance(ground);
+        var up = Contrast(Colors.White, ground) >= Contrast(Colors.Black, ground);
+        // Half an L* inside the contrast edge, so a pick rounded to 8 bits
+        // does not land a step short of it.
+        var (min, max) = up
+            ? (ColorFieldModel.Lightness(AccentPreferredContrast * (luminance + .05) - .05) + .5, AccentFieldBrightestLightness)
+            : (AccentFieldDarkestLightness, ColorFieldModel.Lightness(Math.Max(0, (luminance + .05) / AccentPreferredContrast - .05)) - .5);
+        return new ColorFieldModel(0, 1, Math.Min(min, max), Math.Max(min, max), color => CustomAccent(color, ground));
+    }
+
     // Inside the band SurfaceBase produces: saturation at most the ceiling and
     // luminance inside the mode's range. The allowances absorb rounding the
     // ground to 8-bit channels, which can step just past either edge.
@@ -795,9 +829,10 @@ internal static class AppThemeService
 
     private static double Contrast(Color first, Color second)
     {
-        var high = Math.Max(RelativeLuminance(first), RelativeLuminance(second));
-        var low = Math.Min(RelativeLuminance(first), RelativeLuminance(second));
-        return (high + .05) / (low + .05);
+        // Each luminance once: the accent field runs this for every pixel.
+        var a = RelativeLuminance(first);
+        var b = RelativeLuminance(second);
+        return (Math.Max(a, b) + .05) / (Math.Min(a, b) + .05);
     }
 
     private static double RelativeLuminance(Color color)

@@ -1,11 +1,13 @@
+using Avalonia;
 using Avalonia.Media;
+using ClypDat.App.Controls;
 using ClypDat.Core.Settings;
 
 namespace ClypDat.App.ViewModels;
 
 /// <summary>
 /// One colour, and the four ways the theme editor lets you state it: the
-/// spectrum, the hue slider, a hex box and three RGB boxes. They all drive each
+/// field, the hue strip, a hex box and three RGB boxes. They all drive each
 /// other, so they live together behind one re-entrancy guard.
 ///
 /// There used to be a single instance of this state shared between Base and
@@ -20,7 +22,9 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
 {
     private readonly Action<string> _committed;
     private Color _color;
-    private HsvColor _hsvColor;
+    private double _hue;
+    private Point _position;
+    private ColorFieldModel? _model;
     private string _hexText;
     private string _redText;
     private string _greenText;
@@ -30,7 +34,7 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     private Color _shownColor;
     private Color _currentColor;
     private ThemeColor _currentPick;
-    private HsvColor _currentHsv;
+    private double _currentHue;
 
     /// <param name="committed">
     /// Called with the new #RRGGBB whenever the colour changes by a user action.
@@ -42,7 +46,7 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         _committed = committed;
         var seed = ThemeColor.TryParseHex(hex, out var parsed) ? parsed : new ThemeColor(13, 17, 22);
         _color = Color.FromRgb(seed.Red, seed.Green, seed.Blue);
-        _hsvColor = _color.ToHsv();
+        _hue = _color.ToHsv().H;
         _hexText = seed.Hex;
         _redText = seed.Red.ToString();
         _greenText = seed.Green.ToString();
@@ -51,23 +55,38 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         MarkCurrent();
     }
 
-    public Color Color { get => _color; set { if (_updating) return; Set(new ThemeColor(value.R, value.G, value.B)); } }
-
-    // The spectrum and hue slider bind here rather than to Color, and the value
-    // they send is kept verbatim instead of being recomputed from the RGB it
-    // converts to. Hue does not survive that round trip at the edges - every
-    // shade of pure black converts to RGB 0,0,0 and back to hue 0 - so dragging
-    // into the bottom of the spectrum would throw the hue away and snap the
-    // slider to red.
-    public HsvColor HsvColor
+    /// <summary>
+    /// What the field shows: the colours its theme paints exactly, which
+    /// differ by mode and, for the accent, by ground. Replacing it moves the
+    /// thumb onto the colour, rather than the colour under a thumb that stays.
+    /// </summary>
+    public ColorFieldModel? Model
     {
-        get => _hsvColor;
+        get => _model;
         set
         {
-            if (_updating) return;
-            var rgb = value.ToRgb();
-            Set(new ThemeColor(rgb.R, rgb.G, rgb.B), value);
+            if (!SetProperty(ref _model, value) || value is null) return;
+            _updating = true;
+            SetProperty(ref _position, value.Locate(_color), nameof(Position));
+            _updating = false;
         }
+    }
+
+    // The hue is kept rather than read back from the colour. A grey or
+    // near-black has no hue of its own - every shade of black converts to hue
+    // 0 - so dragging into the bottom of the field would snap the strip to red.
+    public double Hue
+    {
+        get => _hue;
+        set { if (_updating || !SetProperty(ref _hue, value)) return; PickFromField(); }
+    }
+
+    // Where the thumb is, as fractions of the field. The colour is the model's
+    // colour there and nothing else, so the swatch is the pixel under the thumb.
+    public Point Position
+    {
+        get => _position;
+        set { if (_updating || !SetProperty(ref _position, value)) return; PickFromField(); }
     }
 
     public string HexText
@@ -101,31 +120,29 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     public void MarkCurrent()
     {
         _currentPick = new ThemeColor(_color.R, _color.G, _color.B);
-        _currentHsv = _hsvColor;
+        _currentHue = _hue;
         CurrentColor = _shownColor;
     }
 
     /// <summary>Goes back to the colour the editor opened on.</summary>
-    public void RestoreCurrent() => Set(_currentPick, _currentHsv);
+    public void RestoreCurrent() => Set(_currentPick, _currentHue);
 
     /// <summary>Seeds the controls without reporting a change.</summary>
     /// <param name="hue">
     /// Kept instead of the hue the colour converts to. A grey or near-black has
-    /// no hue of its own, and the slider would otherwise jump to red.
+    /// no hue of its own, and the strip would otherwise jump to red.
     /// </param>
     public void Load(string hex, double? hue = null)
     {
         if (!ThemeColor.TryParseHex(hex, out var color)) return;
-        var hsv = Color.FromRgb(color.Red, color.Green, color.Blue).ToHsv();
-        Write(color, hue is { } h ? new HsvColor(1, h, hsv.S, hsv.V) : null);
+        Write(color, locate: true, hue);
     }
 
     /// <summary>
-    /// Puts a different colour in the hex and RGB boxes while the spectrum
-    /// keeps its position: the base picker uses this to name the colour the
-    /// theme is painted in, which is a clamped version of the point under the
-    /// cursor. Moving the cursor to that colour instead pinned it inside the
-    /// band and stopped it being dragged anywhere else.
+    /// Puts a different colour in the hex and RGB boxes while the thumb stays:
+    /// the accent picker uses this to name the accent as painted. A pick from
+    /// the field already is; an accent from before the ground last moved can
+    /// sit outside it now, and is lifted or deepened until it reads.
     /// </summary>
     public void ShowPainted(string hex)
     {
@@ -139,9 +156,19 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         _updating = false;
     }
 
-    public void Set(ThemeColor color, HsvColor? hsv = null)
+    /// <summary>A colour from outside the field - typed, recent, screen: the thumb moves onto it.</summary>
+    public void Set(ThemeColor color, double? hue = null)
     {
-        Write(color, hsv);
+        Write(color, locate: true, hue);
+        _committed(color.Hex);
+    }
+
+    private void PickFromField()
+    {
+        if (_model is null) return;
+        var picked = _model.At(_hue, _position.X, _position.Y);
+        var color = new ThemeColor(picked.R, picked.G, picked.B);
+        Write(color, locate: false);
         _committed(color.Hex);
     }
 
@@ -153,12 +180,17 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         Set(color);
     }
 
-    private void Write(ThemeColor color, HsvColor? hsv = null)
+    private void Write(ThemeColor color, bool locate, double? hue = null)
     {
         var value = Color.FromRgb(color.Red, color.Green, color.Blue);
         _updating = true;
-        SetProperty(ref _color, value, nameof(Color));
-        SetProperty(ref _hsvColor, hsv ?? value.ToHsv(), nameof(HsvColor));
+        _color = value;
+        if (locate)
+        {
+            var hsv = value.ToHsv();
+            SetProperty(ref _hue, hue ?? (hsv.S > 0 && hsv.V > 0 ? hsv.H : _hue), nameof(Hue));
+            if (_model is not null) SetProperty(ref _position, _model.Locate(value), nameof(Position));
+        }
         SetProperty(ref _hexText, color.Hex, nameof(HexText));
         SetProperty(ref _redText, color.Red.ToString(), nameof(RedText));
         SetProperty(ref _greenText, color.Green.ToString(), nameof(GreenText));
