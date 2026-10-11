@@ -4,7 +4,7 @@
              xmlns:conv="using:Avalonia.Data.Converters"
              xmlns:opconv="using:ClypDat.App.Converters"
              xmlns:services="using:ClypDat.App.Services"
-             xmlns:cp="clr-namespace:Avalonia.Controls.Primitives;assembly=Avalonia.Controls.ColorPicker"
+             xmlns:controls="using:ClypDat.App.Controls"
              x:Class="ClypDat.App.Views.Settings.ThemesSection"
              x:DataType="vm:MainWindowViewModel"
              Focusable="True">
@@ -149,8 +149,12 @@
          is no shared state left to disagree, and the settings column had the
          width for both all along. -->
     <!-- Full width like every other card, so its edges line up with the ones
-         above and below; the pickers are fixed width (ColorSpectrum is always
+         above and below; the pickers are fixed width (each field is
          square), so they sit centred in it rather than hugging the left edge. -->
+    <!-- The field and hue strip are HsvColorField's, not ColorSpectrum and
+         ColorSlider: they compute the colour straight from the pointer, the
+         way PhotoCraft's picker does, where ColorSpectrum read it from a table
+         rebuilt in the background and drifted from what was under the cursor. -->
     <StackPanel Classes="settingsGroup" IsVisible="{Binding IsThemeEditorOpen}">
       <TextBlock Classes="settingsGroupLabel" Text="CUSTOM THEME EDITOR" />
       <Border Classes="settingsGroupCard">
@@ -183,19 +187,14 @@
                          would jump back to red the moment the spectrum hit an edge. -->
                     <!-- Cropped to the band a base is painted in, so the whole square
                          is usable rather than mostly colours that all paint the same.
-                         One spectrum per mode with fixed ranges, swapped by
-                         visibility: ColorSpectrum rebuilds its bitmap asynchronously
-                         on every range change, so binding the ranges and flipping
-                         three of them at once raced, and whichever rebuild finished
-                         last could leave a square that drew one range and picked from
-                         another - a cursor that would not move past a line. -->
+                         One field per mode with fixed ranges, swapped by visibility. -->
                     <Panel>
-                      <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
-                                        MinValue="3" MaxValue="30" IsVisible="{Binding !ThemeEditorLightMode}" />
-                      <cp:ColorSpectrum HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
-                                        MinValue="86" MaxSaturation="30" IsVisible="{Binding ThemeEditorLightMode}" />
+                      <controls:SaturationValueField HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Width="232" Height="232"
+                                                     MinValue="3" MaxValue="30" IsVisible="{Binding !ThemeEditorLightMode}" />
+                      <controls:SaturationValueField HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Width="232" Height="232"
+                                                     MinValue="86" MaxSaturation="30" IsVisible="{Binding ThemeEditorLightMode}" />
                     </Panel>
-                    <cp:ColorSlider Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
+                    <controls:HueStrip Grid.Column="1" HsvColor="{Binding BasePicker.HsvColor, Mode=TwoWay}" Height="232" />
                   </Grid>
                   <!-- New over current, as in Photoshop's picker and PhotoCraft's after
                        it; current is the colour the editor opened on and a click
@@ -261,12 +260,12 @@
                          still lifted or deepened; the hex and RGB boxes give the
                          accent as painted. -->
                     <Panel>
-                      <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
-                                        MinValue="45" IsVisible="{Binding !ThemeEditorLightMode}" />
-                      <cp:ColorSpectrum HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Components="SaturationValue" Shape="Box" Width="232" Height="232" CornerRadius="8"
-                                        MinValue="10" MaxValue="75" IsVisible="{Binding ThemeEditorLightMode}" />
+                      <controls:SaturationValueField HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Width="232" Height="232"
+                                                     MinValue="45" IsVisible="{Binding !ThemeEditorLightMode}" />
+                      <controls:SaturationValueField HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Width="232" Height="232"
+                                                     MinValue="10" MaxValue="75" IsVisible="{Binding ThemeEditorLightMode}" />
                     </Panel>
-                    <cp:ColorSlider Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" ColorModel="Hsva" ColorComponent="Component1" Orientation="Vertical" Height="232" IsAlphaVisible="False" />
+                    <controls:HueStrip Grid.Column="1" HsvColor="{Binding AccentPicker.HsvColor, Mode=TwoWay}" Height="232" />
                   </Grid>
                   <Grid ColumnDefinitions="64,*" ColumnSpacing="12">
                     <StackPanel Spacing="4">
