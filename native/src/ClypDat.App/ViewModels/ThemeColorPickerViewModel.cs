@@ -105,6 +105,12 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     public string BlueText { get => _blueText; set => SetChannel(ref _blueText, value); }
     public string Error { get => _error; private set => SetProperty(ref _error, value); }
 
+    // Says so when the colour shown is not the one entered: a typed, recent or
+    // screen colour the theme had to move, which otherwise just changes under
+    // the user with no reason given.
+    private string _note = string.Empty;
+    public string Note { get => _note; set => SetProperty(ref _note, value); }
+
     // The "new" and "current" swatches. New is the colour the hex box names,
     // which is the colour painted and the pixel under the thumb.
     // Current is what the editor opened on, and clicking it goes back there.

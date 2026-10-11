@@ -834,6 +834,9 @@ internal static class AppThemeService
     private static Color BestForeground(Color background) =>
         Contrast(Colors.Black, background) >= Contrast(Colors.White, background) ? Colors.Black : Colors.White;
 
+    /// <summary>The WCAG contrast ratio between two colours, 1 to 21.</summary>
+    public static double ContrastRatio(Color first, Color second) => Contrast(first, second);
+
     private static double Contrast(Color first, Color second)
     {
         // Each luminance once: the accent field runs this for every pixel.

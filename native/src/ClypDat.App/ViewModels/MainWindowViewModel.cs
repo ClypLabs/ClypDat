@@ -574,7 +574,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (!Color.TryParse(hex, out var pick)) return hex;
         var ground = AppThemeService.CustomGround(pick, light);
         var groundHex = $"#{ground.R:X2}{ground.G:X2}{ground.B:X2}";
-        if (moveCursor || !string.Equals(groundHex, hex, StringComparison.OrdinalIgnoreCase)) BasePicker.Load(groundHex, BasePicker.Hue);
+        var adjusted = !string.Equals(groundHex, hex, StringComparison.OrdinalIgnoreCase);
+        if (moveCursor || adjusted) BasePicker.Load(groundHex, BasePicker.Hue);
+        // Not for opening a theme or switching mode: nothing was entered.
+        BasePicker.Note = adjusted && !moveCursor ? $"Adjusted from {hex.ToUpperInvariant()} to fit the theme." : string.Empty;
         return groundHex;
     }
 
@@ -602,11 +605,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (!string.Equals(AccentPicker.HexText, _themeEditorAccentPick, StringComparison.OrdinalIgnoreCase))
                 AccentPicker.Load(_themeEditorAccentPick, AccentPicker.Hue);
             ThemeEditorAccentColor = _themeEditorAccentPick;
-            return;
+            AccentPicker.Note = string.Empty;
         }
-        var fitted = AccentPicker.LoadAt(field.Locate(painted));
-        ThemeEditorAccentColor = $"#{fitted.R:X2}{fitted.G:X2}{fitted.B:X2}";
+        else
+        {
+            var fitted = AccentPicker.LoadAt(field.Locate(painted));
+            ThemeEditorAccentColor = $"#{fitted.R:X2}{fitted.G:X2}{fitted.B:X2}";
+            AccentPicker.Note = $"Adjusted from {_themeEditorAccentPick.ToUpperInvariant()} so it stands out on the base.";
+        }
+        var ground = AppThemeService.CustomGround(baseColor, ThemeEditorLightMode);
+        ThemeEditorAccentContrast = $"Contrast on the base: {AppThemeService.ContrastRatio(Color.Parse(ThemeEditorAccentColor), ground):0.0}:1";
     }
+
+    // The accent field only holds accents of at least 3:1 on the ground; the
+    // number says how far past that a pick is.
+    private string _themeEditorAccentContrast = string.Empty;
+    public string ThemeEditorAccentContrast { get => _themeEditorAccentContrast; private set => SetProperty(ref _themeEditorAccentContrast, value); }
 
     // The accent field is the accents that read on the ground, so it follows
     // the base, and so do the shades. Only when the ground moves: a new field

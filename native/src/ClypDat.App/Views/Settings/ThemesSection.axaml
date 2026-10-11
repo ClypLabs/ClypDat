@@ -230,6 +230,8 @@
                       <TextBox Classes="settingsInput" Text="{Binding BasePicker.BlueText, Mode=TwoWay}" />
                     </StackPanel>
                   </Grid>
+                  <TextBlock Classes="settingsRowDesc" Text="{Binding BasePicker.Note}" MaxWidth="264"
+                             IsVisible="{Binding BasePicker.Note, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                   <!-- What the base turns into: it is the window, and the panels and
                        cards on it are each a step away. The base swatch sits on a
                        card, so without these it reads as the wrong colour. -->
@@ -307,6 +309,9 @@
                       <TextBox Classes="settingsInput" Text="{Binding AccentPicker.BlueText, Mode=TwoWay}" />
                     </StackPanel>
                   </Grid>
+                  <TextBlock Classes="settingsRowDesc" Text="{Binding ThemeEditorAccentContrast}" MaxWidth="264" />
+                  <TextBlock Classes="settingsRowDesc" Text="{Binding AccentPicker.Note}" MaxWidth="264"
+                             IsVisible="{Binding AccentPicker.Note, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                   <TextBlock Classes="settingsRowError" Text="{Binding AccentPicker.Error}" MaxWidth="264"
                              IsVisible="{Binding AccentPicker.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                   <StackPanel Spacing="6" IsVisible="{Binding HasRecentThemeColors}">
