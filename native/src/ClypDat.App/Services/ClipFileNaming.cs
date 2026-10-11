@@ -170,9 +170,12 @@ public static class ClipFileNaming
             .Replace("{game}", string.Empty, StringComparison.OrdinalIgnoreCase);
         if (probe.Contains('{') || probe.Contains('}')) throw new FormatException("Use {title}, {game}, or {datetime:format} tokens only.");
 
-        result = result.Replace("{title}", title, StringComparison.OrdinalIgnoreCase);
-        result = result.Replace("{game}", string.IsNullOrWhiteSpace(gameDisplayName) ? title : gameDisplayName, StringComparison.OrdinalIgnoreCase);
-        return result;
+        // One pass, so a title that itself reads "{game}" stays as typed instead
+        // of being expanded by the {game} replacement that used to run after it.
+        var game = string.IsNullOrWhiteSpace(gameDisplayName) ? title : gameDisplayName;
+        return System.Text.RegularExpressions.Regex.Replace(result, @"\{(title|game)\}",
+            match => string.Equals(match.Groups[1].Value, "title", StringComparison.OrdinalIgnoreCase) ? title : game,
+            RegexOptions.IgnoreCase);
     }
 
     internal static string SanitizeStem(string value)

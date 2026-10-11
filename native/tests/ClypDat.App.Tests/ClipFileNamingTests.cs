@@ -25,4 +25,13 @@ public sealed class ClipFileNamingTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void CustomTemplate_LeavesTokensInsideTheTitleAsTyped()
+    {
+        var timestamp = new DateTime(2026, 9, 1, 15, 20, 33);
+        var fileName = ClipFileNaming.BuildFileName("my {game} moment", timestamp, "mp4", ClipFileNaming.CustomScheme, "{GAME} - {title}", "Halo");
+
+        Assert.Equal("Halo - my {game} moment.mp4", fileName);
+    }
 }

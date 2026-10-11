@@ -343,12 +343,19 @@ public partial class ShareDialog : Window
     private void CustomSizeBox_OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key != Key.Enter) return;
-        if (double.TryParse(ShareCustomSizeBox.Text, out var mb) && mb > 0)
+        // Finite and at most a terabyte: "Infinity" or "1e30" parse, and the
+        // bitrate maths (target bytes x 8, as a long) overflowed into a negative
+        // budget that quietly encoded at the lowest tier.
+        if (double.TryParse(ShareCustomSizeBox.Text, out var mb) && double.IsFinite(mb) && mb >= 0.1 && mb <= 1_000_000)
         {
             _linkAfterEncode = false;
             _lastTargetBytes = MegabytesToTargetBytes(mb);
             _hasEncodeSelection = true;
             _ = StartShareEncodeAsync(_lastTargetBytes);
+        }
+        else
+        {
+            ShareStatusText.Text = "Enter a size from 0.1 to 1,000,000 MB.";
         }
     }
 
