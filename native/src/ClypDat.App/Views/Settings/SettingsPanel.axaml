@@ -3,7 +3,6 @@
              xmlns:vm="using:ClypDat.App.ViewModels"
              xmlns:conv="using:Avalonia.Data.Converters"
              xmlns:opconv="using:ClypDat.App.Converters"
-             xmlns:settings="using:ClypDat.App.Views.Settings"
              x:Class="ClypDat.App.Views.Settings.SettingsPanel"
              x:DataType="vm:MainWindowViewModel">
   <Border Background="{StaticResource PanelBgBrush}">
@@ -103,26 +102,7 @@
       </Border>
 
       <ScrollViewer x:Name="SettingsScrollViewer" Grid.Column="1" Grid.Row="1" Classes="settingsScroll">
-        <StackPanel Classes="settingsPage" Margin="40,32,40,48" Spacing="28">
-
-          <settings:ReplayBufferSection />
-          <settings:VideoOverlaysSection />
-          <settings:OverlaysSection />
-          <settings:ThemesSection />
-          <settings:DiscordRichPresenceSection />
-          <settings:GeneralSection />
-          <settings:IntegrationsSection />
-          <settings:GameDetectionSection />
-          <settings:ImportClipsSection />
-          <settings:AutoClipSection />
-          <settings:GameStatsSection />
-          <settings:AudioSection />
-          <settings:AdvancedSection />
-          <settings:CustomGameSection />
-          <settings:GameAudioExclusionsSection />
-          <settings:AboutSection />
-
-        </StackPanel>
+        <StackPanel x:Name="SettingsSections" Classes="settingsPage" Margin="40,32,40,48" Spacing="28" />
       </ScrollViewer>
 
       <Border Grid.Column="2" Grid.RowSpan="2" Width="280" Background="{StaticResource AppBgBrush}" BorderBrush="{StaticResource EdgeBrush}" BorderThickness="1,0,0,0" IsVisible="{Binding IsStatusAreaVisible}">

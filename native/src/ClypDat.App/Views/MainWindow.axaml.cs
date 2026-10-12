@@ -324,7 +324,7 @@ public sealed partial class MainWindow : Window
     private const double ScrollToTopButtonThreshold = 320;
     private static readonly TimeSpan ScrollToTopDuration = TimeSpan.FromMilliseconds(380);
     private static readonly TimeSpan LibraryMotionSettle = TimeSpan.FromMilliseconds(120);
-    private readonly HashSet<LibraryGridRow> _realizedLibraryRows = [];
+    private readonly LibraryRowRealization _libraryRowRealization = new();
     private readonly HashSet<ClipCardViewModel> _activeLibraryClips = [];
     private readonly LibraryMotionGate _libraryMotionGate = new();
     private DispatcherTimer? _libraryMotionSettleTimer;
@@ -2325,7 +2325,7 @@ public sealed partial class MainWindow : Window
                 || _libraryReturnSource is null
                 || ViewModel?.IsLibraryVisible != true) return;
 
-            AppLog.Info($"Library return: source={_libraryReturnSource}, clips={ViewModel.AllClips.Count}, elapsed={_libraryReturnClock.ElapsedMilliseconds}ms.");
+            AppLog.Info($"Library return: source={_libraryReturnSource}, clips={ViewModel.AllClips.Count}, realizedRows={_libraryRowRealization.Rows.Count}, activeClips={_activeLibraryClips.Count}, elapsed={_libraryReturnClock.ElapsedMilliseconds}ms.");
             _libraryReturnSource = null;
             _libraryReturnFramePending = false;
         });
@@ -2364,8 +2364,7 @@ public sealed partial class MainWindow : Window
     private void LibraryItemsControl_OnContainerPrepared(object? sender, ContainerPreparedEventArgs e)
     {
         if (e.Container.DataContext is not LibraryGridRow row) return;
-        row.SetRealized(true);
-        _realizedLibraryRows.Add(row);
+        _libraryRowRealization.Prepared(e.Container, row);
         UpdateRealizedLibraryClips();
         if (_libraryResizeActive)
             Dispatcher.UIThread.Post(() => SetRealizedLibraryCardShadows(false), DispatcherPriority.Loaded);
@@ -2374,9 +2373,7 @@ public sealed partial class MainWindow : Window
 
     private void LibraryItemsControl_OnContainerClearing(object? sender, ContainerClearingEventArgs e)
     {
-        if (e.Container.DataContext is not LibraryGridRow row) return;
-        row.SetRealized(false);
-        _realizedLibraryRows.Remove(row);
+        if (!_libraryRowRealization.Cleared(e.Container)) return;
         UpdateRealizedLibraryClips();
     }
 
@@ -2440,7 +2437,7 @@ public sealed partial class MainWindow : Window
             }
             return;
         }
-        HashSet<ClipCardViewModel> next = _realizedLibraryRows
+        HashSet<ClipCardViewModel> next = _libraryRowRealization.Rows
             .Where(row => row.IsRealized && ViewModel.LibraryRows.Contains(row))
             .SelectMany(row => row.ProjectedClips).ToHashSet();
         foreach (var clip in _activeLibraryClips.Except(next).ToArray())
