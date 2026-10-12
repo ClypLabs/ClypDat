@@ -646,9 +646,9 @@
                 <TextBlock Text="Overlays" />
               </StackPanel>
             </Button>
-            <!-- CS2 clips only. Labelled, so no tooltip. -->
+            <!-- CS2 and Fortnite clips only. Labelled, so no tooltip. -->
             <Button Classes="editorRailButton" Classes.active="{Binding IsEditorStatsSidebarActive}" Click="EditorStatsSidebarButton_OnClick"
-                    IsVisible="{Binding IsSelectedClipCs2}">
+                    IsVisible="{Binding IsSelectedClipStatsGame}">
               <StackPanel Spacing="4">
                 <PathIcon Data="M3,22V8H7V22H3M10,22V2H14V22H10M17,22V14H21V22H17Z" Width="21" Height="21" />
                 <TextBlock Text="Stats" />

@@ -1049,7 +1049,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         new("DemoFile.Net", "https://github.com/saul/demofile-net", "MIT License", "https://opensource.org/license/mit"),
         new("Protocol Buffers (Google.Protobuf)", "https://github.com/protocolbuffers/protobuf", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause"),
         new("protobuf-net", "https://github.com/protobuf-net/protobuf-net", "Apache License 2.0", "https://www.apache.org/licenses/LICENSE-2.0"),
-        new("Snappier", "https://github.com/brantburnett/Snappier", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause")
+        new("Snappier", "https://github.com/brantburnett/Snappier", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause"),
+        // Fortnite match stats: local replay decoding. OozSharp's decoder is
+        // a port of powzix/ooz and carries its GPLv3 terms.
+        new("FortniteReplayReader", "https://github.com/Shiqan/FortniteReplayDecompressor", "MIT License", "https://opensource.org/license/mit"),
+        new("OozSharp (port of ooz)", "https://github.com/powzix/ooz", "GPLv3", "https://www.gnu.org/licenses/gpl-3.0.html")
     };
 
     public int ReplayCaptureX { get; set; }

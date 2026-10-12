@@ -14,6 +14,9 @@ namespace ClypDat.App.Services;
 // event title (e.g. "4K - Inferno").
 public sealed record ClipEventMarker(string EventId, string EventLabel, double OffsetSeconds);
 
+// A saved video can omit pauses or dropped frames between retained intervals.
+public sealed record ClipCaptureSegment(DateTime StartUtc, DateTime EndUtc, double MediaStartSeconds, double MediaEndSeconds);
+
 public static class ClipEventMarkerMapping
 {
     internal static IReadOnlyList<ClipEventMarker> FromSavedWindow(IEnumerable<AutoClipEvent> events,
@@ -23,7 +26,7 @@ public static class ClipEventMarkerMapping
         // The ring may contain less than its configured history after startup
         // or recovery. The saved source window records what was actually kept.
         return events.Select(item => new ClipEventMarker(item.Id, item.Label,
-                savedSource.MediaSeconds(MonotonicClock.ToSharedSeconds(item.OccurredUtc))))
+                savedSource.VideoMediaSeconds(MonotonicClock.ToSharedSeconds(item.OccurredUtc))))
             .Where(item => double.IsFinite(item.OffsetSeconds) && item.OffsetSeconds >= 0
                 && item.OffsetSeconds <= savedSource.DurationSeconds)
             .ToArray();
@@ -89,7 +92,109 @@ public sealed record ClipInfo(
     // The clip's most recent link from Get link (clypdat.xyz/c/<id>), so the
     // library tile copies it instead of uploading the clip again.
     string? SharedClipId = null,
-    string? SharedClipUrl = null);
+    string? SharedClipUrl = null,
+    // The clip's real span in wall-clock time, read from the recorder's own
+    // clock at save time and moved with every trim or export. Media seconds
+    // map onto it linearly, so a sped-up export still lines up. Lets match
+    // stats find the clip's exact window inside a game's own replay.
+    DateTime? CaptureStartUtc = null,
+    DateTime? CaptureEndUtc = null,
+    // The game recording the clip was saved during (Fortnite: the replay's
+    // file name) and when that recording started, noted at save time.
+    string? MatchSessionId = null,
+    DateTime? MatchSessionStartUtc = null,
+    IReadOnlyList<ClipCaptureSegment>? CaptureSegments = null,
+    double? CaptureMediaDurationSeconds = null,
+    bool CaptureTimingVerified = false);
+
+public static class ClipCaptureWindow
+{
+    internal static ClipInfo FromSource(ClipInfo info, SpotifySourceWindow source)
+    {
+        if (source.BootId != MonotonicClock.BootId || !double.IsFinite(source.DurationSeconds) || source.DurationSeconds <= 0) return info;
+        // The audio map deliberately retimes sound to fit the muxed video;
+        // it is not evidence of which game frames the video actually kept.
+        if (source.VideoMappings is not { Count: > 0 } mappings || mappings.Count > 100_000) return info;
+        var segments = new List<ClipCaptureSegment>();
+        double previousSource = double.NegativeInfinity;
+        try
+        {
+            foreach (var mapping in mappings.OrderBy(item => item.OutputStartSeconds))
+            {
+                if (!double.IsFinite(mapping.SourceStartSeconds) || !double.IsFinite(mapping.DurationSeconds) ||
+                    !double.IsFinite(mapping.OutputStartSeconds) || mapping.DurationSeconds <= 0 || mapping.OutputStartSeconds < 0) return info;
+                var mediaEnd = Math.Min(source.DurationSeconds, mapping.OutputStartSeconds + mapping.DurationSeconds);
+                if (mediaEnd <= mapping.OutputStartSeconds) continue;
+                var start = MonotonicClock.FromSharedSeconds(mapping.SourceStartSeconds);
+                var end = MonotonicClock.FromSharedSeconds(mapping.SourceStartSeconds + mediaEnd - mapping.OutputStartSeconds);
+                // Repeated/older source frames do not represent new game time.
+                if (mapping.SourceStartSeconds <= previousSource) continue;
+                previousSource = mapping.SourceStartSeconds;
+                if (segments.LastOrDefault() is { } previous)
+                {
+                    if (mapping.OutputStartSeconds < previous.MediaEndSeconds - 0.000001) return info;
+                    // Join cadence jitter only while every frame remains within
+                    // 25 ms of the run's original clock anchor. Drift cannot
+                    // accumulate merely because neighbours look contiguous.
+                    if (Math.Abs(mapping.OutputStartSeconds - previous.MediaEndSeconds) < 0.000001 &&
+                        Math.Abs((start - previous.StartUtc).TotalSeconds - (mapping.OutputStartSeconds - previous.MediaStartSeconds)) <= 0.025)
+                    {
+                        segments[^1] = previous with { EndUtc = previous.StartUtc.AddSeconds(mediaEnd - previous.MediaStartSeconds), MediaEndSeconds = mediaEnd };
+                        continue;
+                    }
+                    if (start < previous.EndUtc) segments[^1] = previous with { EndUtc = start };
+                }
+                segments.Add(new(start, end, mapping.OutputStartSeconds, mediaEnd));
+                if (segments.Count > 256) return info;
+            }
+        }
+        catch (ArgumentOutOfRangeException) { return info; }
+        return segments.Count == 0 ? info : info with
+        {
+            CaptureStartUtc = segments[0].StartUtc, CaptureEndUtc = segments[^1].EndUtc,
+            CaptureSegments = segments, CaptureMediaDurationSeconds = source.DurationSeconds, CaptureTimingVerified = true
+        };
+    }
+
+    /// <summary>
+    /// The capture window of a clip cut from <paramref name="info"/>'s clip:
+    /// media seconds <paramref name="fromSeconds"/>-<paramref name="toSeconds"/>
+    /// of a source <paramref name="sourceDurationSeconds"/> long. Unchanged
+    /// when the source has no window.
+    /// </summary>
+    public static ClipInfo Rebase(ClipInfo info, double fromSeconds, double toSeconds, double sourceDurationSeconds)
+    {
+        if (info.CaptureStartUtc is not { } start || info.CaptureEndUtc is not { } end || end <= start ||
+            !double.IsFinite(sourceDurationSeconds) || sourceDurationSeconds <= 0 ||
+            !double.IsFinite(fromSeconds) || !double.IsFinite(toSeconds) || toSeconds <= fromSeconds)
+            return info;
+        fromSeconds = Math.Clamp(fromSeconds, 0, sourceDurationSeconds);
+        toSeconds = Math.Clamp(toSeconds, fromSeconds, sourceDurationSeconds);
+        if (toSeconds <= fromSeconds) return info;
+        if (info.CaptureSegments is { Count: > 0 } segments && info.CaptureMediaDurationSeconds is > 0 and { } reference && double.IsFinite(reference))
+        {
+            var mediaScale = sourceDurationSeconds / reference;
+            var kept = new List<ClipCaptureSegment>();
+            foreach (var segment in segments)
+            {
+                var mediaStart = segment.MediaStartSeconds * mediaScale;
+                var mediaEnd = segment.MediaEndSeconds * mediaScale;
+                if (!double.IsFinite(mediaStart) || !double.IsFinite(mediaEnd) || mediaEnd <= mediaStart || segment.EndUtc <= segment.StartUtc) return info;
+                var cutStart = Math.Max(mediaStart, fromSeconds);
+                var cutEnd = Math.Min(mediaEnd, toSeconds);
+                if (cutEnd <= cutStart) continue;
+                var segmentRate = (segment.EndUtc - segment.StartUtc).TotalSeconds / (mediaEnd - mediaStart);
+                kept.Add(new(segment.StartUtc.AddSeconds((cutStart - mediaStart) * segmentRate),
+                    segment.StartUtc.AddSeconds((cutEnd - mediaStart) * segmentRate), cutStart - fromSeconds, cutEnd - fromSeconds));
+            }
+            return kept.Count == 0 ? info with { CaptureStartUtc = null, CaptureEndUtc = null, CaptureSegments = null, CaptureMediaDurationSeconds = null, CaptureTimingVerified = false }
+                : info with { CaptureStartUtc = kept[0].StartUtc, CaptureEndUtc = kept[^1].EndUtc, CaptureSegments = kept,
+                    CaptureMediaDurationSeconds = toSeconds - fromSeconds };
+        }
+        var rate = (end - start).TotalSeconds / sourceDurationSeconds;
+        return info with { CaptureStartUtc = start.AddSeconds(fromSeconds * rate), CaptureEndUtc = start.AddSeconds(toSeconds * rate) };
+    }
+}
 
 public static class ClipInfoSidecar
 {
@@ -128,7 +233,15 @@ public static class ClipInfoSidecar
             FileTitle = details.FileTitle,
             CapturedAt = existing.CapturedAt ?? details.CapturedAt,
             CaptureSource = details.CaptureSource,
-            AutoClipMarkers = details.AutoClipMarkers
+            AutoClipMarkers = details.AutoClipMarkers,
+            CaptureStartUtc = details.CaptureStartUtc ?? existing.CaptureStartUtc,
+            CaptureEndUtc = details.CaptureEndUtc ?? existing.CaptureEndUtc,
+            MatchSessionId = details.MatchSessionId ?? existing.MatchSessionId,
+            MatchSessionStartUtc = details.MatchSessionStartUtc ?? existing.MatchSessionStartUtc,
+            CaptureSegments = details.CaptureSegments ?? existing.CaptureSegments,
+            CaptureMediaDurationSeconds = details.CaptureMediaDurationSeconds ?? existing.CaptureMediaDurationSeconds,
+            CaptureTimingVerified = details.CaptureStartUtc is not null || details.CaptureSegments is not null
+                ? details.CaptureTimingVerified : existing.CaptureTimingVerified
         });
     }
 

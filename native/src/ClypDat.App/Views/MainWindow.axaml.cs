@@ -1123,10 +1123,18 @@ public sealed partial class MainWindow : Window
 
     private void Worker_FullSessionClosed(object? sender, string path)
     {
-        Dispatcher.UIThread.Post(() =>
+        Dispatcher.UIThread.Post(async () =>
         {
             if (!ReferenceEquals(_replayBuffer, sender)) return;
-            if (ViewModel is not null) _ = ViewModel.RecordingClosedAsync(path);
+            if (ViewModel is { } model)
+            {
+                try
+                {
+                    await KeepSavedMatchContextAsync(path);
+                    await model.RecordingClosedAsync(path);
+                }
+                catch (Exception error) { AppLog.Error("Closed session could not be added to the library", error); }
+            }
         });
     }
 
@@ -1212,6 +1220,9 @@ public sealed partial class MainWindow : Window
     private async Task ProcessSavedClipAsync(string path, string? saveId = null, bool retry = false)
     {
         if (ViewModel is not { } model) return;
+        // Worker-owned hotkey saves reach this same path. Add their replay
+        // identity before the library reads the finished clip's metadata.
+        await KeepSavedMatchContextAsync(path);
         var restoreEditor = false;
         var position = TimeSpan.Zero;
         var resume = false;
@@ -1240,6 +1251,33 @@ public sealed partial class MainWindow : Window
             model.CurrentTime = position;
             _spotifyPlaybackRestore = (path, position, resume);
             QueueEditorPlayback();
+        }
+    }
+
+    private async Task KeepSavedMatchContextAsync(string path)
+    {
+        if (ViewModel is not { } model || !model.FortniteMatchStatsEnabled || string.IsNullOrWhiteSpace(model.Settings.LibraryFolder)) return;
+        var libraryRoot = model.Settings.LibraryFolder;
+        try
+        {
+            var info = await Task.Run(() =>
+            {
+                var saved = ClipInfoSidecar.Load(libraryRoot, path);
+                if (saved is null || !FortniteMatchStats.IsFortnite(GameFilterResolver.Resolve(saved, Path.GetFileName(path)), saved.AutoClipGameId)) return null;
+                // Capture windows survive process/boot changes once stored.
+                // For a new save this boot, preserve any recorder pause gaps.
+                var source = SpotifySourceWindow.Load(libraryRoot, path);
+                return source is not null && !saved.IsTrimmed && !saved.IsExport ? ClipCaptureWindow.FromSource(saved, source) : saved;
+            });
+            if (info is null || info.MatchSessionId is not null || info.CaptureStartUtc is not { } start || info.CaptureEndUtc is not { } end) return;
+            var replay = await Task.Run(() => model.FortniteReplayAt(start, end));
+            if (replay is not null) info = info with { MatchSessionId = replay.FileName, MatchSessionStartUtc = replay.StartUtc };
+            await Task.Run(() => ClipInfoSidecar.SaveCaptureDetails(libraryRoot, path, info));
+        }
+        catch (Exception error)
+        {
+            // A stats problem cannot prevent a user-requested video save.
+            AppLog.Error("Saved recording match context could not be kept", error);
         }
     }
 
@@ -3488,9 +3526,11 @@ public sealed partial class MainWindow : Window
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
                 var libraryFolder = ViewModel.Settings.LibraryFolder;
-                var savedMarkerSource = clampToReplayHistory
-                    ? await Task.Run(() => SpotifySourceWindow.Load(libraryFolder, outputPath))
-                    : null;
+                // The recorder's own record of what it kept: the clip's exact
+                // span on this boot's clock, which match stats line up with
+                // the game's replay.
+                var savedSource = await Task.Run(() => SpotifySourceWindow.Load(libraryFolder, outputPath));
+                var savedMarkerSource = clampToReplayHistory ? savedSource : null;
                 var clipInfo = new ClipInfo(
                     effectiveGameName,
                     autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
@@ -3500,6 +3540,12 @@ public sealed partial class MainWindow : Window
                     AutoClipMarkers: clipWindow is { } window && autoClipEvents is not null
                         ? ClipEventMarkerMapping.FromSavedWindow(autoClipEvents, window.StartUtc, window.EndUtc, savedMarkerSource)
                         : null);
+                if (savedSource is not null) clipInfo = ClipCaptureWindow.FromSource(clipInfo, savedSource);
+                if (clipInfo.CaptureStartUtc is { } sessionStart && clipInfo.CaptureEndUtc is { } sessionEnd && FortniteMatchStats.IsFortnite(effectiveGameName, null))
+                {
+                    var matchSession = await Task.Run(() => ViewModel.FortniteReplayAt(sessionStart, sessionEnd));
+                    if (matchSession is not null) clipInfo = clipInfo with { MatchSessionId = matchSession.FileName, MatchSessionStartUtc = matchSession.StartUtc };
+                }
                 // Another plain file write with no UI affinity.
                 await Task.Run(() => ClipInfoSidecar.SaveCaptureDetails(libraryFolder, outputPath, clipInfo));
                 await ProcessSavedClipAsync(outputPath, saveId.ToString());
@@ -7740,6 +7786,9 @@ public sealed partial class MainWindow : Window
                 .Where(marker => marker.OffsetSeconds >= trimStartSeconds && marker.OffsetSeconds <= trimEndSeconds)
                 .Select(marker => marker with { OffsetSeconds = marker.OffsetSeconds - trimStartSeconds })
                 .ToArray();
+            // The capture window moves with the trim, so match stats still
+            // know exactly which part of the game this clip shows.
+            trimmedInfo = ClipCaptureWindow.Rebase(trimmedInfo, trimStartSeconds, trimEndSeconds, ViewModel.Duration.TotalSeconds);
             ClipInfoSidecar.Save(ViewModel.Settings.LibraryFolder, sourcePath, trimmedInfo with { IsTrimmed = true, AutoClipMarkers = rebasedMarkers });
 
             await ViewModel.FinalizeSavedTrimAsync(sourcePath);
@@ -7773,6 +7822,8 @@ public sealed partial class MainWindow : Window
         LibraryLayout.EnsureRoots(libraryRoot);
 
         var sourceInfo = ClipInfoSidecar.Load(libraryRoot, ViewModel.SelectedVideoPath);
+        var exportWindow = sourceInfo is null ? new ClipInfo(null, null)
+            : ClipCaptureWindow.Rebase(sourceInfo, ViewModel.TrimStart.TotalSeconds, ViewModel.TrimEnd.TotalSeconds, ViewModel.Duration.TotalSeconds);
         var game = ResolveExportGame(ViewModel.SelectedVideoPath, sourceInfo);
         var exportFolder = Path.Combine(LibraryLayout.ClipsRoot(libraryRoot), ClipFileNaming.BuildBaseName(game));
         Directory.CreateDirectory(exportFolder);
@@ -7907,7 +7958,12 @@ public sealed partial class MainWindow : Window
                     // them with it.
                     OverlayManifest = ClipOverlayManifest.Flatten(outputInfo.OverlayManifest,
                         overlayRender?.Camera is not null, overlayRender?.Keyboard is not null),
-                    SpotifyArtPath = SpotifyTimelineSidecar.Load(ViewModel.Settings.LibraryFolder, outputPath)?.Samples.FirstOrDefault(item => item.ArtPath is not null)?.ArtPath ?? SpotifyCoverArtStore.Existing(libraryRoot, outputPath) });
+                    SpotifyArtPath = SpotifyTimelineSidecar.Load(ViewModel.Settings.LibraryFolder, outputPath)?.Samples.FirstOrDefault(item => item.ArtPath is not null)?.ArtPath ?? SpotifyCoverArtStore.Existing(libraryRoot, outputPath),
+                    // The exported range's place in the game, for match stats.
+                    CaptureStartUtc = exportWindow.CaptureStartUtc, CaptureEndUtc = exportWindow.CaptureEndUtc,
+                    CaptureSegments = exportWindow.CaptureSegments, CaptureMediaDurationSeconds = exportWindow.CaptureMediaDurationSeconds,
+                    CaptureTimingVerified = exportWindow.CaptureTimingVerified,
+                    MatchSessionId = sourceInfo.MatchSessionId, MatchSessionStartUtc = sourceInfo.MatchSessionStartUtc });
                 if (IsPathWithinLibrary(outputPath, libraryRoot)) await ViewModel.AddOrUpdateLibraryClipAsync(outputPath);
                 ExplorerService.Open(outputPath, selectFile: true);
             }

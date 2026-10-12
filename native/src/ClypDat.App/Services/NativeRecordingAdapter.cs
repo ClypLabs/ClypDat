@@ -359,7 +359,18 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                 lock (_gate) { if (!_closedSessions.Add(sequence)) continue; }
                 if (closedPath.Length > 0 && Text(session, "error").Length == 0)
                 {
-                    try { FullSessionPublication.Complete(configuration, closedPath, (long)Number(session, "durationUs")); }
+                    try
+                    {
+                        IReadOnlyList<SpotifySourceMapping>? mappings = null;
+                        if (session.TryGetProperty("videoMappings", out var values) && values.ValueKind == JsonValueKind.Array && values.GetArrayLength() <= 256)
+                            mappings = values.EnumerateArray().Select(value => new SpotifySourceMapping(
+                                Number(value, "sourceStartUs") / 1_000_000d, Number(value, "durationUs") / 1_000_000d,
+                                Number(value, "outputStartUs") / 1_000_000d)).ToArray();
+                        FullSessionPublication.Complete(configuration, closedPath, (long)Number(session, "durationUs"), mappings,
+                            Bool(session, "videoMappingComplete"), Number(session, "sourceStartUs") / 1_000_000d,
+                            Number(session, "sourceEndUs") / 1_000_000d);
+                        AppLog.Debug($"Full Session capture timing: intervals={mappings?.Count ?? 0}, complete={Bool(session, "videoMappingComplete")}, maxAnchorErrorMs={Number(session, "videoMappingMaxErrorUs") / 1000:0.###}.");
+                    }
                     catch (Exception publicationError) { AppLog.Error("Full Session metadata completion failed.", publicationError); }
                     FullSessionClosed?.Invoke(this, closedPath);
                 }

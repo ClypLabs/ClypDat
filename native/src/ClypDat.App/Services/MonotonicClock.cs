@@ -24,6 +24,10 @@ internal static class MonotonicClock
     public static double ToSharedSeconds(DateTime utc) =>
         (double)_stopwatchBase / Stopwatch.Frequency + (utc - _utcBase).TotalSeconds;
 
+    // The inverse of ToSharedSeconds: valid for timestamps from this boot.
+    public static DateTime FromSharedSeconds(double sharedSeconds) =>
+        _utcBase.AddSeconds(sharedSeconds - (double)_stopwatchBase / Stopwatch.Frequency);
+
     public static double SharedSeconds => (double)Stopwatch.GetTimestamp() / Stopwatch.Frequency;
 
     public static string BootId { get; } = ReadBootId();

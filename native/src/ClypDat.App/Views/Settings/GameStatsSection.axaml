@@ -21,7 +21,7 @@
     <!-- CS2 match stats. The authentication code reads a player's whole match
          history, so it is masked while typed, never shown again once saved
          (last four characters at most), and only ever stored encrypted. -->
-    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=CS2 Match Stats History Steam}">
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=CS2 Match Stats History Steam Saved Demo Import}">
       <TextBlock Classes="settingsGroupLabel" Text="CS2 MATCH STATS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
       <Border Classes="settingsGroupCard">
         <StackPanel>
@@ -73,10 +73,10 @@
                   </controls:LinkTextBlock>
                 </StackPanel>
                 <StackPanel Spacing="4">
-                  <TextBlock Classes="settingsRowDescSm" Text="Match code to start from" />
+                  <TextBlock Classes="settingsRowDescSm" Text="Recent match code to start from" />
                   <TextBox Classes="settingsInput" Text="{Binding Cs2ShareCodeInput}" PlaceholderText="CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx" MaxLength="300" />
                   <TextBlock Classes="settingsRowError" Text="{Binding Cs2ShareCodeError}" IsVisible="{Binding HasCs2ShareCodeError}" />
-                  <TextBlock Classes="settingsRowDescSm" Text="Only needed once: after the first valid code, ClypDat fetches every later match automatically. In CS2, open Watch › Your Matches, select a match and copy its sharing code or link. The Steam page above also shows it as your most recently completed match token, once you&apos;ve finished a match after creating your code. An older match also fills in stats for clips you&apos;ve already saved (Valve keeps demos for a few weeks)." />
+                  <TextBlock Classes="settingsRowDescSm" Text="Use your most recent match code from this Steam account. ClypDat checks later matches automatically. In CS2, open Watch › Your Matches, select your newest match and copy its sharing code or link. The Steam page above also shows your most recently completed match token after you finish a match with your authentication code enabled. For older demos you already downloaded, use Import saved demo below." />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Button Classes="primaryButton" Content="Link" Click="Cs2MatchHistoryLink_OnClick" />
@@ -89,6 +89,43 @@
                 <Button Content="Try again" HorizontalAlignment="Left" IsVisible="{Binding CanRetryCs2MatchHistory}" Click="Cs2MatchHistoryRetry_OnClick" />
               </StackPanel>
             </StackPanel>
+          </Border>
+          <Border Classes="settingsRow">
+            <StackPanel Spacing="10">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Saved demos" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Import a CS2 .dem or .dem.bz2 file you already downloaded, including older matches. A Steam match history link is not required. Keep its .dem.info file beside it when available so ClypDat can match older clips." />
+              </StackPanel>
+              <Button Content="Import saved demo" HorizontalAlignment="Left" IsEnabled="{Binding !IsImportingCs2Demo}" Click="Cs2DemoImport_OnClick" />
+              <TextBlock Classes="settingsRowDescSm" Text="{Binding Cs2DemoImportStatus}" IsVisible="{Binding HasCs2DemoImportStatus}" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+    <!-- Fortnite match stats come from Fortnite's own replays, read on this PC
+         and never changed. Fortnite only writes them with Record Replays on. -->
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Fortnite Match Stats Replays}">
+      <TextBlock Classes="settingsGroupLabel" Text="FORTNITE MATCH STATS" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+      <Border Classes="settingsGroupCard">
+        <StackPanel>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Keep match stats" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Add replay stats to clips you save and full-session recordings you choose to record. Stats appear after the match ends. Everything stays on this PC." />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding FortniteMatchStatsEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Replays" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="{Binding FortniteReplayStatus}" />
+              </StackPanel>
+              <Button Grid.Column="1" Content="Open replay folder" IsEnabled="{Binding FortniteReplayFolderExists}" Click="FortniteReplayFolder_OnClick" />
+            </Grid>
           </Border>
         </StackPanel>
       </Border>

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <optional>
@@ -268,12 +269,71 @@ bool recover_recording(const std::filesystem::path& input,const std::filesystem:
 }
 
 struct FullSessionWriter::State {
-    struct Work {std::shared_ptr<const CaptureGeneration> generation;Packet packet;PcmBlock pcm;size_t bytes=0;};
+    struct Work {std::shared_ptr<const CaptureGeneration> generation;Packet packet;PcmBlock pcm;size_t bytes=0;int64_t acquired_us=0;bool fresh=true;};
     FullSessionConfig config;std::shared_ptr<const CaptureGeneration> generation;
     mutable std::mutex mutex;std::condition_variable ready,exited;std::deque<Work> queue;size_t queued=0;bool closed=false,done=false;FullSessionStatus status;
     Format format;AVStream* video_stream=nullptr;std::unique_ptr<AudioTrackEncoder> encoder;std::map<std::string,AVStream*> audio_streams;
     int64_t origin=AV_NOPTS_VALUE,video_end=0;HANDLE lease=INVALID_HANDLE_VALUE;
     std::deque<PcmBlock> early_audio;size_t early_bytes=0;
+    struct SourceFrame { int64_t source_us,output_us,duration_us;bool fresh; };
+    std::optional<SourceFrame> source_frame;
+    int64_t source_cadence_us=0,last_fresh_source_us=0;
+    // Runs absorb only sub-frame scheduling jitter. Their largest measured
+    // anchor error is exported; holds and pauses never become source ranges.
+    void lose_video_mapping(){status.video_mapping_complete=false;status.video_mappings.clear();source_frame.reset();}
+    void append_video_mapping(const SourceFrame& frame,int64_t duration){
+        if(!status.video_mapping_complete||!frame.fresh)return;
+        if(frame.source_us<=0||frame.output_us<0||duration<=0||duration>100000){lose_video_mapping();return;}
+        auto& maps=status.video_mappings;
+        if(!maps.empty()){
+            auto& previous=maps.back();
+            const auto expected=previous.source_start_us+frame.output_us-previous.output_start_us;
+            const auto error=std::llabs(frame.source_us-expected);
+            const auto tolerance=std::clamp(duration,int64_t(1000),int64_t(33334));
+            if(frame.output_us==previous.output_start_us+previous.duration_us&&error<=tolerance){
+                previous.duration_us+=duration;
+                status.video_mapping_max_error_us=(std::max)(status.video_mapping_max_error_us,error);
+                return;
+            }
+            // A jitter correction can overlap the preceding source range.
+            // Leave that ambiguous media tail unmapped instead of assigning
+            // the same replay instant to two locations in the video.
+            if(frame.source_us<previous.source_start_us+previous.duration_us){
+                if(frame.source_us<=previous.source_start_us){lose_video_mapping();return;}
+                previous.duration_us=frame.source_us-previous.source_start_us;
+            }
+        }
+        if(maps.size()>=256){lose_video_mapping();return;}
+        maps.push_back({frame.source_us,duration,frame.output_us});
+    }
+    void note_video_source(int64_t acquired,int64_t output,int64_t duration,bool fresh){
+        if(acquired>0&&output>=0){
+            if(status.source_start_us==0)status.source_start_us=acquired;
+            status.source_end_us=(std::max)(status.source_end_us,acquired+(duration>0&&duration<=100000?duration:source_cadence_us));
+        }
+        if(!status.video_mapping_complete)return;
+        if(acquired<=0||output<0||(fresh&&acquired<=last_fresh_source_us)){lose_video_mapping();return;}
+        if(source_frame){
+            const auto step=output-source_frame->output_us;
+            if(step<=0){lose_video_mapping();return;}
+            // Long VFR holds/pauses do not prove fresh footage throughout.
+            if(step<=100000)source_cadence_us=step;
+            const auto known=source_frame->duration_us>0?source_frame->duration_us:source_cadence_us;
+            if(known>0)append_video_mapping(*source_frame,(std::min)(step,known));
+            else if(source_frame->fresh){lose_video_mapping();return;}
+        }
+        if(!status.video_mapping_complete)return;
+        source_frame=SourceFrame{acquired,output,duration,fresh};
+        if(fresh)last_fresh_source_us=acquired;
+    }
+    void finish_video_source(){
+        if(source_frame&&status.video_mapping_complete){
+            const auto duration=source_frame->duration_us>0?source_frame->duration_us:source_cadence_us;
+            if(duration>0)append_video_mapping(*source_frame,duration);
+            else if(source_frame->fresh)lose_video_mapping();
+        }
+        source_frame.reset();
+    }
     ~State(){if(lease!=INVALID_HANDLE_VALUE)CloseHandle(lease);}
     void initialize(){
         lease=CreateFileW((config.output.wstring()+L".recording").c_str(),GENERIC_READ|GENERIC_WRITE,FILE_SHARE_DELETE,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(lease==INVALID_HANDLE_VALUE)throw std::runtime_error("Full-session recording lease unavailable");
@@ -289,13 +349,13 @@ struct FullSessionWriter::State {
         if(origin==AV_NOPTS_VALUE){auto bytes=pcm.samples.size()*4;if(early_bytes+bytes>16*1024*1024)throw std::runtime_error("Full-session early audio bound exceeded");early_bytes+=bytes;early_audio.push_back(std::move(pcm));return;}
         encoder->submit(pcm,audio_frames(pcm.start_us)-audio_frames(origin));converted();
     }
-    void video(Work& work){if(work.generation->id!=generation->id)throw std::runtime_error("Full-session encoder generation changed; rotate output");auto& packet=*work.packet;auto pts=av_rescale_q(packet.pts,generation->time_base,{1,1000000});if(origin==AV_NOPTS_VALUE){if(!(packet.flags&AV_PKT_FLAG_KEY))return;origin=pts;while(!early_audio.empty()){auto pending=std::move(early_audio.front());early_audio.pop_front();audio(pending);}early_bytes=0;}av_packet_rescale_ts(&packet,generation->time_base,video_stream->time_base);auto offset=av_rescale_q(origin,{1,1000000},video_stream->time_base);if(packet.pts!=AV_NOPTS_VALUE)packet.pts-=offset;if(packet.dts!=AV_NOPTS_VALUE)packet.dts-=offset;packet.stream_index=video_stream->index;video_end=pts-origin+av_rescale_q(packet.duration,video_stream->time_base,{1,1000000});check(av_interleaved_write_frame(format.value,&packet),"Write full-session video");encoder->encode_through((std::max)(int64_t(0),audio_frames(video_end)-48000));avio_flush(format.value->pb);check(format.value->pb->error,"Flush full-session file");std::lock_guard lock(mutex);status.duration_us=video_end;}
-    void run(){try{initialize();for(;;){Work work;{std::unique_lock lock(mutex);ready.wait(lock,[&]{return closed||!queue.empty();});if(queue.empty())break;work=std::move(queue.front());queue.pop_front();}if(work.packet)video(work);else audio(work.pcm);{std::lock_guard lock(mutex);queued-=work.bytes;}}encoder->finish(audio_frames(video_end));converted();check(av_write_trailer(format.value),"Finalize full session");avio_flush(format.value->pb);check(format.value->pb->error,"Flush finalized full-session file");if(format.value->pb)avio_closep(&format.value->pb);std::filesystem::remove(config.output.wstring()+L".interrupted");}catch(const std::exception& e){std::lock_guard lock(mutex);status.error=e.what();}if(format.value&&format.value->pb)avio_closep(&format.value->pb);if(lease!=INVALID_HANDLE_VALUE){DeleteFileW((config.output.wstring()+L".recording").c_str());CloseHandle(lease);lease=INVALID_HANDLE_VALUE;} {std::lock_guard lock(mutex);closed=true;done=true;status.running=false;status.finished=true;queue.clear();queued=0;}exited.notify_all();}
+    void video(Work& work){if(work.generation->id!=generation->id)throw std::runtime_error("Full-session encoder generation changed; rotate output");auto& packet=*work.packet;auto pts=av_rescale_q(packet.pts,generation->time_base,{1,1000000});const auto duration=av_rescale_q(packet.duration,generation->time_base,{1,1000000});if(origin==AV_NOPTS_VALUE){if(!(packet.flags&AV_PKT_FLAG_KEY))return;origin=pts;while(!early_audio.empty()){auto pending=std::move(early_audio.front());early_audio.pop_front();audio(pending);}early_bytes=0;}av_packet_rescale_ts(&packet,generation->time_base,video_stream->time_base);auto offset=av_rescale_q(origin,{1,1000000},video_stream->time_base);if(packet.pts!=AV_NOPTS_VALUE)packet.pts-=offset;if(packet.dts!=AV_NOPTS_VALUE)packet.dts-=offset;packet.stream_index=video_stream->index;video_end=pts-origin+av_rescale_q(packet.duration,video_stream->time_base,{1,1000000});check(av_interleaved_write_frame(format.value,&packet),"Write full-session video");encoder->encode_through((std::max)(int64_t(0),audio_frames(video_end)-48000));avio_flush(format.value->pb);check(format.value->pb->error,"Flush full-session file");std::lock_guard lock(mutex);status.duration_us=video_end;note_video_source(work.acquired_us,pts-origin,duration,work.fresh);}
+    void run(){try{initialize();for(;;){Work work;{std::unique_lock lock(mutex);ready.wait(lock,[&]{return closed||!queue.empty();});if(queue.empty())break;work=std::move(queue.front());queue.pop_front();}if(work.packet)video(work);else audio(work.pcm);{std::lock_guard lock(mutex);queued-=work.bytes;}}encoder->finish(audio_frames(video_end));converted();check(av_write_trailer(format.value),"Finalize full session");avio_flush(format.value->pb);check(format.value->pb->error,"Flush finalized full-session file");if(format.value->pb)avio_closep(&format.value->pb);std::filesystem::remove(config.output.wstring()+L".interrupted");}catch(const std::exception& e){std::lock_guard lock(mutex);status.error=e.what();}if(format.value&&format.value->pb)avio_closep(&format.value->pb);if(lease!=INVALID_HANDLE_VALUE){DeleteFileW((config.output.wstring()+L".recording").c_str());CloseHandle(lease);lease=INVALID_HANDLE_VALUE;} {std::lock_guard lock(mutex);finish_video_source();closed=true;done=true;status.running=false;status.finished=true;queue.clear();queued=0;}exited.notify_all();}
     bool admit(Work work){std::lock_guard lock(mutex);if(closed)return false;if(queue.size()>=config.queue_items||queued+work.bytes>config.queue_bytes){closed=true;status.error="Full-session 64 MiB/8192-item queue bound exceeded";ready.notify_one();return false;}queued+=work.bytes;queue.push_back(std::move(work));ready.notify_one();return true;}
 };
 FullSessionWriter::FullSessionWriter(FullSessionConfig config,std::shared_ptr<const CaptureGeneration> generation):state_(std::make_shared<State>()){if(!generation||!generation->codec)throw std::invalid_argument("Session requires encoder generation");state_->config=std::move(config);state_->generation=std::move(generation);std::thread([state=state_]{state->run();}).detach();}
 FullSessionWriter::~FullSessionWriter(){stop();}
-bool FullSessionWriter::video(std::shared_ptr<const CaptureGeneration> generation,const AVPacket& packet){Packet copy(av_packet_clone(&packet));if(!copy)return false;return state_->admit({std::move(generation),std::move(copy),{},size_t(packet.size)});}
+bool FullSessionWriter::video(std::shared_ptr<const CaptureGeneration> generation,const AVPacket& packet,int64_t acquired_us,bool fresh){Packet copy(av_packet_clone(&packet));if(!copy)return false;return state_->admit({std::move(generation),std::move(copy),{},size_t(packet.size),acquired_us,fresh});}
 bool FullSessionWriter::audio(PcmBlock block){auto size=block.samples.size()*4;return state_->admit({{}, {},std::move(block),size});}
 bool FullSessionWriter::stop(){auto s=state_;std::unique_lock lock(s->mutex);s->closed=true;s->ready.notify_one();if(!s->exited.wait_for(lock,std::chrono::seconds(10),[&]{return s->done;})){s->status.error="Full-session shutdown timed out; resource graph retained; worker restart required";return false;}return true;}
 FullSessionStatus FullSessionWriter::status()const{std::lock_guard lock(state_->mutex);return state_->status;}

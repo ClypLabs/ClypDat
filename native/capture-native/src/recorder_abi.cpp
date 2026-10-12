@@ -342,7 +342,11 @@ int32_t CD_CALL cd_recorder_health(cd_recorder* r, cd_session_health* health) { 
     for (const auto& closed : r->session->closed_sessions()) {
         if (!first) details << ','; first = false;
         details << "{\"sequence\":" << closed.sequence << ",\"path\":" << quoted(utf8(closed.path.native()))
-            << ",\"error\":" << quoted(closed.status.error) << ",\"durationUs\":" << closed.status.duration_us << '}';
+            << ",\"error\":" << quoted(closed.status.error) << ",\"durationUs\":" << closed.status.duration_us
+            << ",\"videoMappings\":" << mappings(closed.status.video_mappings)
+            << ",\"videoMappingComplete\":" << (closed.status.video_mapping_complete ? "true" : "false")
+            << ",\"videoMappingMaxErrorUs\":" << closed.status.video_mapping_max_error_us
+            << ",\"sourceStartUs\":" << closed.status.source_start_us << ",\"sourceEndUs\":" << closed.status.source_end_us << '}';
     }
     details << "]}";
     return output(health->details, details.str());

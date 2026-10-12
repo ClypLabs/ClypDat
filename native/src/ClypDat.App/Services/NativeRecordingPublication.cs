@@ -81,10 +81,20 @@ internal static class NativeRecordingPublication
             }
         }
         var manifest = new ClipOverlayManifest(ClipOverlayManifest.CurrentVersion, Camera(cameraSettings), Keyboard(keyboardSettings), changes.OrderBy(state => state.StartSeconds).ToArray());
-        ClipInfoSidecar.Save(root, output, new ClipInfo(game, null, title, File.GetCreationTimeUtc(output), CaptureSource: configuration.CaptureSource, OverlayManifest: manifest));
-        WriteJson(root, LibraryLayout.SidecarPath(root, output, ".source.json"), new SpotifySourceWindow(audioMap[0].SourceStartUs / 1_000_000d,
+        var source = new SpotifySourceWindow(audioMap[0].SourceStartUs / 1_000_000d,
             durationUs / 1_000_000d, MonotonicClock.BootId, audioMap.Select(map => new SpotifySourceMapping(map.SourceStartUs / 1_000_000d,
-                map.DurationUs / 1_000_000d, map.OutputStartUs / 1_000_000d)).ToArray()));
+                map.DurationUs / 1_000_000d, map.OutputStartUs / 1_000_000d)).ToArray(),
+            overlayMap.Select(map => new SpotifySourceMapping(map.SourceStartUs / 1_000_000d,
+                map.DurationUs / 1_000_000d, map.OutputStartUs / 1_000_000d)).ToArray());
+        var info = ClipCaptureWindow.FromSource(new ClipInfo(game, null, title, File.GetCreationTimeUtc(output),
+            CaptureSource: configuration.CaptureSource, OverlayManifest: manifest), source);
+        // Keep the source sidecar bounded as well; audio provenance remains
+        // independent for existing Spotify and CS2 timeline consumers.
+        source = source with { VideoTimingVerified = info.CaptureTimingVerified, VideoMappings = info.CaptureSegments?.Select(segment => new SpotifySourceMapping(
+            MonotonicClock.ToSharedSeconds(segment.StartUtc), segment.MediaEndSeconds - segment.MediaStartSeconds,
+            segment.MediaStartSeconds)).ToArray() };
+        ClipInfoSidecar.Save(root, output, info);
+        WriteJson(root, LibraryLayout.SidecarPath(root, output, ".source.json"), source);
     }
     internal static InputCaptureIndex RebaseInput(InputCaptureIndex input, long inputStartUs, IReadOnlyList<Mapping> mappings)
     {

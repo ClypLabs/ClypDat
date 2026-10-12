@@ -171,7 +171,7 @@ RecorderSession::RecorderSession(RecorderSessionConfig config, std::unique_ptr<R
                 p->composed_packets.pop_front();
             if (packet->pts - p->last_health_event >= 250000) { p->last_health_event = packet->pts; publish_health = true; }
         }
-        if (writer) writer->video(generation, *packet);
+        if (writer) writer->video(generation, *packet, acquired_us, fresh);
         p->video.append(std::move(generation), std::move(packet), acquired_us, fresh);
         if (publish_health) p->notify(1);
     };

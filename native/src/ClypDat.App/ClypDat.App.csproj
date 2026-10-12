@@ -126,6 +126,11 @@
          BSD-3-Clause) parses the result. See THIRD-PARTY-LICENSES.md. -->
     <PackageReference Include="SharpZipLib" Version="1.4.2" />
     <PackageReference Include="DemoFile.Game.Cs" Version="0.44.1" />
+    <!-- Fortnite match stats: FortniteReplayReader (MIT, with Unreal.Core and
+         Unreal.Encryption) decodes local .replay files; it pulls in OozSharp
+         (GPL-3.0-or-later, a port of powzix/ooz) for Oodle decompression.
+         See THIRD-PARTY-LICENSES.md. -->
+    <PackageReference Include="FortniteReplayReader" Version="3.1.0" />
     <!-- Pinned directly to the forked Avalonia version's required version.
          No direct usage. -->
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" />

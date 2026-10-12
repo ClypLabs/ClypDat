@@ -3,15 +3,22 @@ using ClypDat.App.Services;
 
 namespace ClypDat.App.ViewModels;
 
-// Match stats: the editor's Stats section and the CS2 match history link in
-// Settings › Game Stats.
+// Match stats: the editor's Stats section, the CS2 match history link and
+// Fortnite's replay folder in Settings › Game Stats.
 public sealed partial class MainWindowViewModel
 {
     private Cs2MatchHistoryService? _cs2MatchHistory;
+    private FortniteReplayService? _fortniteReplays;
     private MatchStatsViewModel? _selectedMatchStats;
-    private bool _isSelectedClipCs2;
+    private bool _isSelectedClipStatsGame;
     private int _matchStatsLoadGeneration;
+    private volatile bool _matchStatsDisposed;
+    private int _fortniteRefreshQueued;
+    private readonly CancellationTokenSource _cs2DemoImportLifetime = new();
+    private bool _isImportingCs2Demo;
+    private string _cs2DemoImportStatus = string.Empty;
     private string? _matchStatsLoadedPath;
+    private (MediaFileInfo Media, ClipInfo? Info)? _matchStatsLoadedClip;
     private IReadOnlyList<ClipEventMarker> _selectedClipOwnMarkers = Array.Empty<ClipEventMarker>();
     private string _cs2SteamIdInput = string.Empty;
     private string _cs2AuthCodeInput = string.Empty;
@@ -30,8 +37,15 @@ public sealed partial class MainWindowViewModel
             () => MatchStore,
             () => MemoryTrimmer.GameRunning,
             HasCs2MediaBetween);
-        _cs2MatchHistory.StatusChanged += (_, _) => Dispatcher.UIThread.Post(RaiseCs2MatchHistoryChanged);
+        _cs2MatchHistory.StatusChanged += Cs2MatchHistoryStatusChanged;
         _cs2MatchHistory.Start();
+        _fortniteReplays = new FortniteReplayService(() => MatchStore, () => MemoryTrimmer.GameRunning,
+            () => Settings.FortniteMatchStatsEnabled, HasFortniteMediaBetween);
+        // A replay appearing, growing or finishing can move the open clip from
+        // waiting to reading to ready; re-check it without reopening.
+        _fortniteReplays.Changed += FortniteReplaysChanged;
+        _fortniteReplays.MatchParsed += FortniteMatchParsed;
+        _fortniteReplays.Start();
         // Prefill the Steam ID from the last match GSI reported.
         var store = MatchStore;
         if (store is not null && !IsCs2MatchHistoryLinked)
@@ -49,7 +63,42 @@ public sealed partial class MainWindowViewModel
             });
     }
 
-    private void DisposeMatchStats() => _cs2MatchHistory?.Dispose();
+    private void DisposeMatchStats()
+    {
+        if (_matchStatsDisposed) return;
+        _matchStatsDisposed = true;
+        ++_matchStatsLoadGeneration;
+        _cs2DemoImportLifetime.Cancel();
+        _cs2DemoImportLifetime.Dispose();
+        if (_cs2MatchHistory is not null) _cs2MatchHistory.StatusChanged -= Cs2MatchHistoryStatusChanged;
+        if (_fortniteReplays is not null)
+        {
+            _fortniteReplays.Changed -= FortniteReplaysChanged;
+            _fortniteReplays.MatchParsed -= FortniteMatchParsed;
+        }
+        _cs2MatchHistory?.Dispose();
+        _fortniteReplays?.Dispose();
+    }
+
+    private void Cs2MatchHistoryStatusChanged(object? sender, EventArgs e) => Dispatcher.UIThread.Post(() =>
+    {
+        if (!_matchStatsDisposed) RaiseCs2MatchHistoryChanged();
+    });
+
+    private void FortniteReplaysChanged(object? sender, EventArgs e) => QueueFortniteStatsRefresh();
+    private void FortniteMatchParsed(object? sender, MatchStats e) => QueueFortniteStatsRefresh();
+
+    private void QueueFortniteStatsRefresh()
+    {
+        if (_matchStatsDisposed || Interlocked.Exchange(ref _fortniteRefreshQueued, 1) != 0) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            Interlocked.Exchange(ref _fortniteRefreshQueued, 0);
+            if (_matchStatsDisposed) return;
+            RaiseFortniteReplaysChanged();
+            ReloadFortniteMatchStats();
+        });
+    }
 
     // ---- Editor ----
 
@@ -59,12 +108,13 @@ public sealed partial class MainWindowViewModel
         private set => SetProperty(ref _selectedMatchStats, value);
     }
 
-    public bool IsSelectedClipCs2
+    // CS2 and Fortnite clips have a Stats section.
+    public bool IsSelectedClipStatsGame
     {
-        get => _isSelectedClipCs2;
+        get => _isSelectedClipStatsGame;
         private set
         {
-            if (!SetProperty(ref _isSelectedClipCs2, value)) return;
+            if (!SetProperty(ref _isSelectedClipStatsGame, value)) return;
             if (!value && ActiveEditorSidebarSection == EditorSidebarSection.Stats) OpenEditorSidebar(EditorSidebarSection.Info);
         }
     }
@@ -79,11 +129,20 @@ public sealed partial class MainWindowViewModel
     {
         var generation = ++_matchStatsLoadGeneration;
         _selectedClipOwnMarkers = clipInfo?.AutoClipMarkers ?? Array.Empty<ClipEventMarker>();
-        var isCs2 = MatchClipMapping.IsCs2(GameFilterResolver.Resolve(clipInfo, media.Name), clipInfo?.AutoClipGameId);
-        IsSelectedClipCs2 = isCs2;
+        var game = GameFilterResolver.Resolve(clipInfo, media.Name);
+        var isCs2 = MatchClipMapping.IsCs2(game, clipInfo?.AutoClipGameId);
+        var isFortnite = !isCs2 && FortniteMatchStats.IsFortnite(game, clipInfo?.AutoClipGameId);
+        IsSelectedClipStatsGame = isCs2 || isFortnite;
         // A rebuild of the same clip keeps its panel up while it reloads.
-        if (!string.Equals(_matchStatsLoadedPath, media.Path, StringComparison.OrdinalIgnoreCase)) SelectedMatchStats = null;
+        var sameClip = string.Equals(_matchStatsLoadedPath, media.Path, StringComparison.OrdinalIgnoreCase);
+        if (!sameClip) SelectedMatchStats = null;
         _matchStatsLoadedPath = media.Path;
+        _matchStatsLoadedClip = isCs2 || isFortnite ? (media, clipInfo) : null;
+        if (isFortnite)
+        {
+            LoadFortniteMatchStats(media, clipInfo, generation);
+            return;
+        }
         if (!isCs2 || MatchStore is not { } store) return;
 
         var libraryRoot = store.LibraryRoot;
@@ -115,6 +174,101 @@ public sealed partial class MainWindowViewModel
         });
     }
 
+    private void ReloadFortniteMatchStats()
+    {
+        if (_matchStatsDisposed || _matchStatsLoadedClip is not { } clip || !string.Equals(SelectedVideoPath, clip.Media.Path, StringComparison.OrdinalIgnoreCase)) return;
+        if (!FortniteMatchStats.IsFortnite(GameFilterResolver.Resolve(clip.Info, clip.Media.Name), clip.Info?.AutoClipGameId)) return;
+        LoadFortniteMatchStats(clip.Media, clip.Info, ++_matchStatsLoadGeneration);
+    }
+
+    // Fortnite: the clip's match comes from Fortnite's own replay. Until that
+    // replay is finished the panel says it is waiting; once it is, it is read
+    // (or its saved summary reused) and the panel fills in by itself.
+    private void LoadFortniteMatchStats(MediaFileInfo media, ClipInfo? clipInfo, int generation)
+    {
+        var store = MatchStore;
+        var service = _fortniteReplays;
+        var enabled = Settings.FortniteMatchStatsEnabled;
+        if (store is null || service is null)
+        {
+            SelectedMatchStats = MatchStatsViewModel.Empty("Match stats are unavailable until a library folder is selected.");
+            return;
+        }
+        var libraryRoot = store.LibraryRoot;
+        var isRecording = media.Duration.TotalSeconds > LibraryLayout.ClipMaximumDurationSeconds ||
+                          media.Path.StartsWith(LibraryLayout.VodsRoot(libraryRoot), StringComparison.OrdinalIgnoreCase);
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var timeline = MatchClipMapping.Describe(clipInfo, media.CreatedAt, media.Duration, isRecording, ReadSourceWindow(libraryRoot, media.Path));
+                var view = FortniteView(store, service, timeline, enabled, out var match);
+                var markers = match is null ? [] : MatchClipMapping.Markers(match, timeline);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_matchStatsDisposed || generation != _matchStatsLoadGeneration || !string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
+                    // Keep the Clip / Full Match choice across a refresh.
+                    if (SelectedMatchStats is { HasScopeToggle: true } previous && view.HasScopeToggle) view.SelectedScope = previous.SelectedScope;
+                    SelectedMatchStats = view;
+                    SelectedAutoClipMarkers = _selectedClipOwnMarkers.Concat(markers).OrderBy(marker => marker.OffsetSeconds).ToArray();
+                    OnPropertyChanged(nameof(SelectedAutoClipMarkers));
+                });
+            }
+            catch (Exception error)
+            {
+                AppLog.Error("Fortnite match stats could not be loaded for the clip", error);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (_matchStatsDisposed || generation != _matchStatsLoadGeneration || !string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
+                    SelectedMatchStats = MatchStatsViewModel.Empty("This clip's match stats couldn't be loaded. Reopen the clip to try again.");
+                    SelectedAutoClipMarkers = _selectedClipOwnMarkers;
+                    OnPropertyChanged(nameof(SelectedAutoClipMarkers));
+                });
+            }
+        });
+    }
+
+    private const string RecordReplaysHelp = "Turn on Record Replays in Fortnite: Settings › Game › Replays.";
+
+    internal static MatchStatsViewModel FortniteView(MatchStatsStore store, FortniteReplayService service, ClipTimeline timeline, bool enabled, out MatchStats? match)
+    {
+        match = null;
+        if (!enabled) return MatchStatsViewModel.Empty("Fortnite match stats are off. Turn on Keep match stats in Settings › Game Stats.");
+        var (state, header) = service.Resolve(timeline);
+        var all = store.LoadAll();
+        if (state != FortniteClipReplayState.Waiting)
+            match = header is not null
+                ? all.FirstOrDefault(item => item.Game == FortniteMatchStats.Game && string.Equals(item.SourceKey, header.CacheKey, StringComparison.OrdinalIgnoreCase))
+                : MatchClipMapping.FindMatch(all, timeline, FortniteMatchStats.Game);
+        if (match is not null)
+        {
+            var window = MatchClipMapping.ReplayWindow(match, timeline);
+            var note = window is not null ? string.Empty
+                : !timeline.Exact ? "This clip has no verified capture timing, so its place in the match isn't known exactly. Showing the whole match."
+                : "This clip is from outside the match itself, so only the whole match is shown.";
+            return MatchStatsViewModel.FromFortnite(match, window, note);
+        }
+        switch (state)
+        {
+            case FortniteClipReplayState.Waiting:
+                return MatchStatsViewModel.WaitingForMatch();
+            case FortniteClipReplayState.Incomplete:
+                return MatchStatsViewModel.Empty("Fortnite closed before this match's replay was finished, so there are no stats for it.");
+            case FortniteClipReplayState.Ready when header is not null && service.HasFailed(header):
+                return MatchStatsViewModel.Empty("This match's replay couldn't be read. It may be from a Fortnite update ClypDat can't decode yet.");
+            case FortniteClipReplayState.Ready when header is not null:
+                service.Request(header);
+                return MatchStatsViewModel.ProcessingMatchStats(service.IsParsingDeferred);
+        }
+        return service.ReplayCount == 0
+            ? MatchStatsViewModel.Empty($"No Fortnite replays found, so there are no match stats yet. {RecordReplaysHelp} Matches played after that get stats.")
+            : MatchStatsViewModel.Empty($"No Fortnite replay covers this clip. Fortnite keeps only its most recent replays, and records them only while Record Replays is on.");
+    }
+
+    /// <summary>The replay being recorded (or just finished) across a clip's span, for its save-time metadata.</summary>
+    internal FortniteReplayHeader? FortniteReplayAt(DateTime startUtc, DateTime endUtc) =>
+        Settings.FortniteMatchStatsEnabled ? _fortniteReplays?.ReplayAt(startUtc, endUtc) : null;
+
     // The recorder's own timeline for the clip, from any boot: the match
     // decides whether its clock still applies (SpotifySourceWindow.Load only
     // returns this boot's).
@@ -138,6 +292,22 @@ public sealed partial class MainWindowViewModel
         {
             spans = Dispatcher.UIThread.InvokeAsync(() => AllClips
                 .Where(card => MatchClipMapping.IsCs2(card.GameFilterKey, null))
+                .Select(card => (card.CreatedAt.UtcDateTime - card.Duration - TimeSpan.FromMinutes(1), card.CreatedAt.UtcDateTime + card.Duration + TimeSpan.FromMinutes(1)))
+                .ToArray()).GetTask().WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+        }
+        catch (Exception error) when (error is TimeoutException or TaskCanceledException) { return false; }
+        return spans.Any(span => span.Start < endUtc && span.End > startUtc);
+    }
+
+    // Whether anything in the library was recorded in Fortnite between two
+    // times; only those replays are read without being asked.
+    private bool HasFortniteMediaBetween(DateTime startUtc, DateTime endUtc)
+    {
+        IReadOnlyList<(DateTime Start, DateTime End)> spans;
+        try
+        {
+            spans = Dispatcher.UIThread.InvokeAsync(() => AllClips
+                .Where(card => FortniteMatchStats.IsFortnite(card.GameFilterKey, null))
                 .Select(card => (card.CreatedAt.UtcDateTime - card.Duration - TimeSpan.FromMinutes(1), card.CreatedAt.UtcDateTime + card.Duration + TimeSpan.FromMinutes(1)))
                 .ToArray()).GetTask().WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
         }
@@ -171,6 +341,94 @@ public sealed partial class MainWindowViewModel
     }
 
     public bool WantsCs2MatchStats => Settings.Cs2MatchStatsEnabled;
+
+    public bool IsImportingCs2Demo
+    {
+        get => _isImportingCs2Demo;
+        private set => SetProperty(ref _isImportingCs2Demo, value);
+    }
+
+    public string Cs2DemoImportStatus
+    {
+        get => _cs2DemoImportStatus;
+        private set
+        {
+            if (!SetProperty(ref _cs2DemoImportStatus, value)) return;
+            OnPropertyChanged(nameof(HasCs2DemoImportStatus));
+        }
+    }
+
+    public bool HasCs2DemoImportStatus => Cs2DemoImportStatus.Length > 0;
+
+    public async Task ImportCs2DemoAsync(string demoPath)
+    {
+        if (_matchStatsDisposed || IsImportingCs2Demo) return;
+        if (MatchStore is not { } store)
+        {
+            Cs2DemoImportStatus = "Choose a library folder before importing match stats.";
+            return;
+        }
+        IsImportingCs2Demo = true;
+        Cs2DemoImportStatus = MemoryTrimmer.GameRunning ? "Waiting for the game to close before reading this demo…" : "Reading saved demo…";
+        try
+        {
+            var steamId = _cs2MatchHistory?.Link?.SteamId ?? Cs2MatchHistoryFormats.NormaliseSteamId(Cs2SteamIdInput) ?? _detectedCs2SteamId;
+            var result = await Cs2LocalDemoImport.ImportAsync(demoPath, steamId, store, _cs2DemoImportLifetime.Token);
+            if (_matchStatsDisposed) return;
+            Cs2DemoImportStatus = result.Message;
+            if (_matchStatsLoadedClip is { } clip && string.Equals(SelectedVideoPath, clip.Media.Path, StringComparison.OrdinalIgnoreCase) &&
+                MatchClipMapping.IsCs2(GameFilterResolver.Resolve(clip.Info, clip.Media.Name), clip.Info?.AutoClipGameId))
+                LoadSelectedMatchStats(clip.Media, clip.Info);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_matchStatsDisposed) Cs2DemoImportStatus = "Demo import cancelled.";
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("CS2 saved demo import failed", error);
+            if (!_matchStatsDisposed) Cs2DemoImportStatus = error is InvalidDataException ? error.Message : "This demo couldn't be imported. Check that it is a complete CS2 .dem file.";
+        }
+        finally
+        {
+            if (!_matchStatsDisposed) IsImportingCs2Demo = false;
+        }
+    }
+
+    public bool FortniteMatchStatsEnabled
+    {
+        get => Settings.FortniteMatchStatsEnabled;
+        set
+        {
+            if (Settings.FortniteMatchStatsEnabled == value) return;
+            Settings.FortniteMatchStatsEnabled = value;
+            SaveSettings();
+            OnPropertyChanged();
+            if (value) _ = Task.Run(() => _fortniteReplays?.Backfill());
+            ReloadFortniteMatchStats();
+        }
+    }
+
+    public bool FortniteReplayFolderExists => _fortniteReplays?.FolderExists == true;
+
+    public string FortniteReplayStatus => _fortniteReplays is not { } service ? string.Empty
+        : service.ReplayCount == 0 ? $"No replays found. {RecordReplaysHelp}"
+        : service.ReplayCount == 1 ? "Found 1 replay."
+        : $"Found {service.ReplayCount} replays.";
+
+    public bool HasNoFortniteReplays => _fortniteReplays is { ReplayCount: 0 };
+
+    public void OpenFortniteReplayFolder()
+    {
+        if (_fortniteReplays is { FolderExists: true } service) ExplorerService.Open(service.Folder, selectFile: false);
+    }
+
+    private void RaiseFortniteReplaysChanged()
+    {
+        OnPropertyChanged(nameof(FortniteReplayFolderExists));
+        OnPropertyChanged(nameof(FortniteReplayStatus));
+        OnPropertyChanged(nameof(HasNoFortniteReplays));
+    }
 
     public string Cs2SteamIdInput
     {

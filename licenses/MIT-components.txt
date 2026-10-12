@@ -32,6 +32,11 @@ the copyright notice its package declares.
   https://github.com/saul/demofile-net
   Copyright (c) 2023 Saul Rennison
 
+- FortniteReplayReader (FortniteReplayReader, Unreal.Core, Unreal.Encryption)
+  https://github.com/Shiqan/FortniteReplayDecompressor
+  Copyright (c) 2020-2026 Shiqan
+  (Its OozSharp dependency is GPL-3.0-or-later; see THIRD-PARTY-LICENSES.md.)
+
 --------------------------------------------------------------------------------
 
 The MIT License (MIT)

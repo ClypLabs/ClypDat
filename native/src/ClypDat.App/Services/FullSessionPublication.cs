@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ClypDat.App.Services;
 
 internal static class FullSessionPublication
@@ -5,15 +7,56 @@ internal static class FullSessionPublication
     internal static void Publish(ReplayBufferConfig config, string path)
     {
         if (!File.Exists(path)) return;
-        ClipInfoSidecar.Save(config.LibraryFolder, path, new ClipInfo(config.GameDisplayName, null,
+        var existing = ClipInfoSidecar.Load(config.LibraryFolder, path);
+        ClipInfoSidecar.Save(config.LibraryFolder, path, existing ?? new ClipInfo(config.GameDisplayName, null,
             $"Session - {config.GameDisplayName}", File.GetCreationTimeUtc(path), CaptureSource: config.CaptureSource));
     }
 
-    internal static void Complete(ReplayBufferConfig config, string path, long durationUs)
+    internal static void Complete(ReplayBufferConfig config, string path, long durationUs,
+        IReadOnlyList<SpotifySourceMapping>? videoMappings = null, bool videoMappingComplete = false,
+        double? sourceStartSeconds = null, double? sourceEndSeconds = null)
     {
         Publish(config, path);
+        KeepCaptureSource(config, path, durationUs, videoMappings, videoMappingComplete, sourceStartSeconds, sourceEndSeconds);
         if (durationUs > 0) ClipStatsReporter.Record(ClipStatKind.FullSession, durationUs / 1_000_000d);
         EnforceQuota(config);
+    }
+
+    internal static void KeepCaptureSource(ReplayBufferConfig config, string path, long durationUs,
+        IReadOnlyList<SpotifySourceMapping>? videoMappings, bool videoMappingComplete,
+        double? sourceStartSeconds = null, double? sourceEndSeconds = null)
+    {
+        if (sourceStartSeconds is > 0 and { } start && sourceEndSeconds is { } end && double.IsFinite(start) && double.IsFinite(end) && end > start &&
+            ClipInfoSidecar.Load(config.LibraryFolder, path) is { } boundsInfo)
+        {
+            ClipInfoSidecar.Save(config.LibraryFolder, path, boundsInfo with
+            {
+                CaptureStartUtc = MonotonicClock.FromSharedSeconds(start), CaptureEndUtc = MonotonicClock.FromSharedSeconds(end),
+                CaptureTimingVerified = false, CaptureSegments = null, CaptureMediaDurationSeconds = null
+            });
+        }
+        if (durationUs > 0 && videoMappingComplete && videoMappings is { Count: > 0 and <= 256 })
+        {
+            var source = new SpotifySourceWindow(videoMappings[0].SourceStartSeconds, durationUs / 1_000_000d,
+                MonotonicClock.BootId, VideoMappings: videoMappings);
+            var info = ClipInfoSidecar.Load(config.LibraryFolder, path);
+            if (info is not null)
+            {
+                var captured = ClipCaptureWindow.FromSource(info, source);
+                ClipInfoSidecar.Save(config.LibraryFolder, path, captured);
+                source = source with { VideoTimingVerified = captured.CaptureTimingVerified };
+                var sourcePath = LibraryLayout.SidecarPath(config.LibraryFolder, path, ".source.json");
+                if (!LibraryPathGuard.IsWithin(config.LibraryFolder, sourcePath)) throw new InvalidDataException("Session source metadata crosses a filesystem link.");
+                Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
+                var temporary = sourcePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    File.WriteAllText(temporary, JsonSerializer.Serialize(source));
+                    File.Move(temporary, sourcePath, overwrite: true);
+                }
+                finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            }
+        }
     }
 
     internal static void EnforceQuota(ReplayBufferConfig config)

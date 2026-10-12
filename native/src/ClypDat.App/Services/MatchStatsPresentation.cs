@@ -3,7 +3,11 @@ using System.Globalization;
 namespace ClypDat.App.Services;
 
 public sealed record MatchStatTile(string Label, string Value);
-public sealed record MatchRadarAxis(string Label, double Value, string Display);
+public sealed record MatchRadarAxis(string Label, double Value, string Display, bool Available = true)
+{
+    // Drawn as a labelled spoke with no point: missing data is never a 0.
+    public static MatchRadarAxis Unavailable(string label) => new(label, double.NaN, "Not recorded", Available: false);
+}
 public sealed record MatchRoundCell(int Number, bool? Won, string Reason, bool StartsHalf);
 
 // Turns a MatchStats into what the Stats panel shows. Kept free of Avalonia

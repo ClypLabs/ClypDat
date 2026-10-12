@@ -137,6 +137,20 @@ protobuf-net / protobuf-net.Core (**Apache-2.0**).
 - MIT notices: `licenses/MIT-components.txt`. BSD-3-Clause notices and text:
   `licenses/BSD-3-Clause-components.txt`. Apache-2.0 text: `licenses/Apache-2.0.txt`.
 
+## Fortnite match stats: FortniteReplayReader and OozSharp
+
+Local Fortnite replays are decoded with FortniteReplayReader (`FortniteReplayReader`,
+`Unreal.Core`, `Unreal.Encryption`), **MIT**. It depends on OozSharp for Oodle
+decompression. OozSharp ships with the same project's MIT licence file, but its
+decoder is a C# port of powzix/ooz and its source states
+**GPL-3.0-or-later**; ClypDat treats it as GPL-3.0-or-later, which matches
+ClypDat's own GPLv3 distribution. The packages also pull in
+Microsoft.Extensions.Logging.Abstractions and
+Microsoft.Extensions.DependencyInjection.Abstractions (**MIT**, part of .NET).
+
+- Projects: https://github.com/Shiqan/FortniteReplayDecompressor, https://github.com/powzix/ooz
+- MIT notices: `licenses/MIT-components.txt`. The complete GPLv3 text is in ClypDat's `LICENSE`.
+
 ## Vortice.Windows (MIT)
 
 ClypDat's Direct3D11/DXGI/DirectComposition interop for its overlay windows,

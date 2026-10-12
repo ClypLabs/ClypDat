@@ -4,6 +4,7 @@
 #include "recording_save.h"
 #include "recording_process.h"
 #include <Windows.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -197,6 +198,44 @@ void audio_test(const std::filesystem::path& root){
     auto empty=quiet.snapshot(0,100000).get();require(!empty.tracks[0].packets.empty()&&!empty.tracks[0].audible,"Silent history produced no audio packets");quiet.stop();
     for(const auto& entry:std::filesystem::recursive_directory_iterator(root))require(entry.path().extension()!=L".wav","Audio history wrote PCM to disk");
 }
+void check_full_session_source(const std::filesystem::path& root,const VideoSnapshot& video){
+    auto generation=video.packets.front().generation;
+    FullSessionWriter session({root/L"source-session.mkv",{}},generation);
+    size_t index=0;
+    const int64_t source_offset=10000000,pause=3000000;
+    const auto origin=av_rescale_q(video.packets.front().packet->pts,generation->time_base,{1,1000000});
+    for(const auto& item:video.packets){
+        const auto pts=av_rescale_q(item.packet->pts,generation->time_base,{1,1000000});
+        require(session.video(generation,*item.packet,pts+source_offset+(index>=6?pause:0),index!=2),"Session rejected source-stamped packet");
+        ++index;
+    }
+    require(session.stop()&&session.status().error.empty(),"Source-stamped session failed");
+    const auto status=session.status();
+    require(status.video_mapping_complete&&!status.video_mappings.empty(),"Session lost valid source provenance");
+    require(status.video_mappings.size()<=256,"Session source provenance exceeded bound");
+    require(status.video_mappings.front().source_start_us==origin+source_offset,"Session guessed source from mux PTS");
+    require(status.video_mappings.front().output_start_us==0,"Session source did not start at media zero");
+    require(status.source_start_us==origin+source_offset&&status.source_end_us>status.source_start_us+pause,"Session lost independent capture bounds");
+    const auto held=av_rescale_q(video.packets[2].packet->pts,generation->time_base,{1,1000000})-origin;
+    require(std::none_of(status.video_mappings.begin(),status.video_mappings.end(),[&](const auto& map){return held>=map.output_start_us&&held<map.output_start_us+map.duration_us;}),"Held frame became fresh replay time");
+    const auto later=av_rescale_q(video.packets[6].packet->pts,generation->time_base,{1,1000000})+source_offset+pause;
+    require(std::any_of(status.video_mappings.begin(),status.video_mappings.end(),[&](const auto& map){return map.source_start_us==later;}),"Session collapsed a source pause");
+    FullSessionWriter unknown({root/L"unknown-source-session.mkv",{}},generation);
+    for(const auto& item:video.packets)require(unknown.video(generation,*item.packet),"Unstamped session packet rejected");
+    require(unknown.stop()&&unknown.status().error.empty(),"Unstamped session stopped recording");
+    require(!unknown.status().video_mapping_complete&&unknown.status().video_mappings.empty(),"Unstamped session invented source provenance");
+    FullSessionWriter bounded({root/L"bounded-source-session.mkv",{}},generation);
+    Packet key(av_packet_clone(video.packets.front().packet.get()));
+    require(bool(key),"Cannot clone source-bound fixture packet");
+    for(int i=0;i<260;++i){
+        key->pts=key->dts=av_rescale_q(int64_t(i)*100000,{1,1000000},generation->time_base);
+        key->duration=av_rescale_q(100000,{1,1000000},generation->time_base);
+        require(bounded.video(generation,*key,source_offset+int64_t(i)*200000),"Bounded source session rejected packet");
+    }
+    require(bounded.stop()&&bounded.status().error.empty(),"Source bound interrupted recording");
+    require(!bounded.status().video_mapping_complete&&bounded.status().video_mappings.empty(),"Source bound retained misleading partial intervals");
+    require(bounded.status().source_end_us>bounded.status().source_start_us,"Source bound discarded whole-match capture bounds");
+}
 void video_test(const std::filesystem::path& root){
     VideoEncoderConfig config;config.width=64;config.height=64;config.fps=30;config.name="libx264";
     VideoEncoder encoder(config);
@@ -212,6 +251,7 @@ void video_test(const std::filesystem::path& root){
     decode_and_seek(output,1);
     for(auto codec:{AudioCodec::Opus,AudioCodec::Aac,AudioCodec::Vorbis}){check_replay_audio(root,snapshot,codec);check_alignment(root,snapshot,codec);}
     check_timed_microphone_save(root,snapshot);
+    check_full_session_source(root,snapshot);
     for(auto codec:{AudioCodec::Opus,AudioCodec::Aac,AudioCodec::Vorbis})for(const wchar_t* extension:{L".mkv",L".mp4"}){
         if(codec==AudioCodec::Vorbis&&std::wstring(extension)==L".mp4")continue;
         FullSessionConfig config{root/(std::wstring(L"codec-session-")+std::to_wstring(int(codec))+extension),{{"game","Game Audio",2,1,false}}};config.codec=codec;

@@ -113,12 +113,27 @@ internal sealed class SpotifyPlaybackHistory
 
 internal sealed record SpotifySourceMapping(double SourceStartSeconds, double DurationSeconds, double OutputStartSeconds);
 internal sealed record SpotifySourceWindow(double StartSeconds, double DurationSeconds, string BootId,
-    IReadOnlyList<SpotifySourceMapping>? AudioMappings = null)
+    IReadOnlyList<SpotifySourceMapping>? AudioMappings = null,
+    IReadOnlyList<SpotifySourceMapping>? VideoMappings = null)
 {
+    // Null denotes legacy metadata; false explicitly withholds precise event
+    // placement when new capture provenance could not be retained safely.
+    public bool? VideoTimingVerified { get; init; }
+
     public double MediaSeconds(double sourceSeconds)
     {
         if (AudioMappings is not { Count: > 0 }) return sourceSeconds - StartSeconds;
         foreach (var mapping in AudioMappings)
+            if (sourceSeconds >= mapping.SourceStartSeconds && sourceSeconds <= mapping.SourceStartSeconds + mapping.DurationSeconds)
+                return mapping.OutputStartSeconds + sourceSeconds - mapping.SourceStartSeconds;
+        return double.NaN;
+    }
+
+    public double VideoMediaSeconds(double sourceSeconds)
+    {
+        if (VideoTimingVerified == false) return double.NaN;
+        if (VideoMappings is not { Count: > 0 }) return MediaSeconds(sourceSeconds);
+        foreach (var mapping in VideoMappings)
             if (sourceSeconds >= mapping.SourceStartSeconds && sourceSeconds <= mapping.SourceStartSeconds + mapping.DurationSeconds)
                 return mapping.OutputStartSeconds + sourceSeconds - mapping.SourceStartSeconds;
         return double.NaN;
@@ -133,7 +148,9 @@ internal sealed record SpotifySourceWindow(double StartSeconds, double DurationS
     {
         try
         {
-            var window = JsonSerializer.Deserialize<SpotifySourceWindow>(File.ReadAllText(LibraryLayout.SidecarPath(root, clip, ".source.json")));
+            var path = LibraryLayout.SidecarPath(root, clip, ".source.json");
+            if (!LibraryPathGuard.IsWithin(root, path) || !File.Exists(path) || new FileInfo(path).Length > 256 * 1024) return null;
+            var window = JsonSerializer.Deserialize<SpotifySourceWindow>(File.ReadAllText(path));
             return window?.BootId == MonotonicClock.BootId ? window : null;
         }
         catch { return null; }

@@ -109,12 +109,22 @@ struct FullSessionConfig {
     AudioCodec codec=AudioCodec::Opus;
     int audio_bitrate_kbps=0;
 };
-struct FullSessionStatus { bool running=false,finished=false; std::string error; int64_t duration_us=0; uint64_t converted_audio_frames=0; };
+struct FullSessionStatus {
+    bool running=false,finished=false;
+    std::string error;
+    int64_t duration_us=0;
+    uint64_t converted_audio_frames=0;
+    // Bounded source provenance; empty when it could not be retained safely.
+    std::vector<SourceMapping> video_mappings;
+    bool video_mapping_complete=true;
+    int64_t video_mapping_max_error_us=0;
+    int64_t source_start_us=0,source_end_us=0;
+};
 class FullSessionWriter {
 public:
     FullSessionWriter(FullSessionConfig config,std::shared_ptr<const CaptureGeneration> generation);
     ~FullSessionWriter();
-    bool video(std::shared_ptr<const CaptureGeneration> generation,const AVPacket& packet);
+    bool video(std::shared_ptr<const CaptureGeneration> generation,const AVPacket& packet,int64_t acquired_us=0,bool fresh=true);
     bool audio(PcmBlock block);
     bool stop();
     FullSessionStatus status() const;

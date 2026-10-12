@@ -123,6 +123,10 @@ public sealed class NativeRecordingBoundaryTests
             var source = SpotifySourceWindow.Load(root, output);
             Assert.Equal(20, source!.StartSeconds); Assert.Equal(1, source.MediaSeconds(21));
             Assert.True(double.IsNaN(source.MediaSeconds(11)));
+            Assert.Equal(1, source.VideoMediaSeconds(11));
+            Assert.True(double.IsNaN(source.VideoMediaSeconds(21)));
+            Assert.True(info.CaptureTimingVerified);
+            Assert.Equal(MonotonicClock.FromSharedSeconds(10), info.CaptureStartUtc);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

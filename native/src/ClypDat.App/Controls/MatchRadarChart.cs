@@ -7,9 +7,11 @@ using ClypDat.App.Services;
 namespace ClypDat.App.Controls;
 
 /// <summary>
-/// A five-axis radar for the Stats panel. Values arrive already normalised
-/// to 0-1 against fixed ranges (MatchStatsPresentation), so the shape means
-/// the same thing from one match to the next.
+/// A radar for the Stats panel: any number of axes from three up, the first
+/// at the top and the rest clockwise (five for CS2 and Fortnite build modes,
+/// a four-axis diamond for Zero Build). Values arrive already normalised to
+/// 0-1 against fixed ranges (MatchStatsPresentation), so the shape means the
+/// same thing from one match to the next.
 /// </summary>
 public sealed class MatchRadarChart : Control
 {
@@ -42,17 +44,22 @@ public sealed class MatchRadarChart : Control
 
         foreach (var ring in new[] { 0.25, 0.5, 0.75, 1.0 })
             context.DrawGeometry(null, gridPen, Polygon(Enumerable.Range(0, axes.Count).Select(i => At(i, ring))));
-        for (var i = 0; i < axes.Count; i++) context.DrawLine(gridPen, centre, At(i, 1));
+        // An axis with no data keeps its spoke, dashed, and gets no point:
+        // the shape joins the axes either side instead of dipping to a 0.
+        var missingPen = new Pen(gridPen.Brush, 1, new DashStyle([3, 3], 0));
+        for (var i = 0; i < axes.Count; i++) context.DrawLine(axes[i].Available ? gridPen : missingPen, centre, At(i, 1));
 
-        // A floor so a zero still draws a visible shape at the centre.
-        var shape = Polygon(axes.Select((axis, i) => At(i, Math.Max(0.04, Math.Clamp(axis.Value, 0, 1)))));
+        var points = axes.Select((axis, i) => (axis, i)).Where(item => item.axis.Available && double.IsFinite(item.axis.Value))
+            .Select(item => At(item.i, Math.Clamp(item.axis.Value, 0, 1))).ToList();
         var fill = accent is ISolidColorBrush solid ? new SolidColorBrush(solid.Color, 0.32) : accent;
-        context.DrawGeometry(fill, new Pen(accent, 2, lineJoin: PenLineJoin.Round), shape);
+        if (points.Count >= 3) context.DrawGeometry(fill, new Pen(accent, 2, lineJoin: PenLineJoin.Round), Polygon(points));
+        else if (points.Count == 2) context.DrawLine(new Pen(accent, 2), points[0], points[1]);
+        foreach (var point in points) context.DrawEllipse(accent, null, point, 2.5, 2.5);
 
         for (var i = 0; i < axes.Count; i++)
         {
             var anchor = At(i, 1 + LabelMargin / radius * 0.55);
-            var name = Text(axes[i].Label, 11, FontWeight.SemiBold, valueBrush);
+            var name = Text(axes[i].Label, 11, FontWeight.SemiBold, axes[i].Available ? valueBrush : labelBrush);
             var value = Text(axes[i].Display, 10, FontWeight.Normal, labelBrush);
             var width = Math.Max(name.Width, value.Width);
             var top = anchor.Y - (name.Height + value.Height) / 2;

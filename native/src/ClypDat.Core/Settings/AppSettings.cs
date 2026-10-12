@@ -330,6 +330,9 @@ public sealed class AppSettings
     // share codes) is deliberately not here: it is a credential and lives
     // DPAPI-encrypted beside the ClypDat sign-in (Cs2MatchHistoryLinkStore).
     public bool Cs2MatchStatsEnabled { get; set; } = true;
+    // Reads Fortnite's own local replays (when Fortnite's "Record Replays" is
+    // on) into a match summary per game. Read-only; nothing leaves the PC.
+    public bool FortniteMatchStatsEnabled { get; set; } = true;
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
     public bool SteelSeriesImportCopyNotMove { get; set; } = true;

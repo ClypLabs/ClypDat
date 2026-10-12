@@ -7,16 +7,27 @@
              x:DataType="vm:MatchStatsViewModel">
   <!-- The editor's Stats section: who, where and the result first, then the
        numbers, the radar (demo data only), the round strip and both teams.
-       The view model is immutable per clip; nothing here is editable. -->
+       Fortnite adds a Clip / Full Match switch: Clip counts only what
+       happens inside the clip; Full Match adds the radar, the placement
+       curve, the match timeline (clip rows shaded) and match totals.
+       Nothing here is editable. -->
   <StackPanel Spacing="14">
     <Border Classes="editorInspectorCard" IsVisible="{Binding !HasMatch}">
       <StackPanel Spacing="8">
-        <TextBlock Text="MATCH STATS" Classes="editorCardLabel" />
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+          <PathIcon Width="16" Height="16" VerticalAlignment="Center" Foreground="{StaticResource Semantic_9EC6F0}"
+                    IsVisible="{Binding IsWaitingForMatch}"
+                    Data="M12,2A10,10 0 1 0 12,22A10,10 0 1 0 12,2M12,4A8,8 0 1 1 12,20A8,8 0 1 1 12,4M11,6H13V11.5L16.5,13.5L15.5,15.2L11,12.6Z" />
+          <TextBlock Grid.Column="1" Text="{Binding EmptyTitle}" Classes="editorCardLabel" TextWrapping="Wrap" VerticalAlignment="Center" />
+        </Grid>
         <TextBlock Text="{Binding EmptyMessage}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
       </StackPanel>
     </Border>
 
     <StackPanel Spacing="14" IsVisible="{Binding HasMatch}">
+      <ListBox Classes="settingsSegmented" ItemsSource="{Binding Scopes}" SelectedItem="{Binding SelectedScope}"
+               IsVisible="{Binding HasScopeToggle}" />
+
       <Border Classes="editorInspectorCard">
         <StackPanel Spacing="14">
           <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
@@ -30,6 +41,7 @@
               <TextBlock Text="{Binding ScoreLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Right" />
             </StackPanel>
           </Grid>
+          <TextBlock Text="{Binding TilesLabel}" Classes="editorCardLabel" Margin="0,0,0,-8" IsVisible="{Binding IsFortnite}" />
           <ItemsControl ItemsSource="{Binding Tiles}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
@@ -51,10 +63,116 @@
         </StackPanel>
       </Border>
 
-      <Border Classes="editorInspectorCard" IsVisible="{Binding HasRadar}">
+      <!-- Clip: only what the replay shows happening inside the clip, timed
+           from the clip's start, with the match time beside it. -->
+      <Border Classes="editorInspectorCard" IsVisible="{Binding IsClipScope}">
+        <StackPanel Spacing="8">
+          <TextBlock Text="EVENTS IN THIS CLIP" Classes="editorCardLabel" />
+          <TextBlock Text="No eliminations, knocks or downs in this clip." IsVisible="{Binding HasNoClipEvents}"
+                     Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding ClipEvents}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MatchTimelineRowViewModel">
+                <Grid ColumnDefinitions="40,14,*,Auto" Margin="0,3">
+                  <TextBlock Text="{Binding ClipTime}" Foreground="{StaticResource Text_EDF4FB}" FontSize="12" FontFamily="Consolas" VerticalAlignment="Center" />
+                  <Ellipse Grid.Column="1" Width="7" Height="7" Fill="{Binding Dot}" VerticalAlignment="Center" HorizontalAlignment="Left" />
+                  <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Detail, StringFormat='— {0}'}" IsVisible="{Binding HasDetail}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="3" Text="{Binding Time, StringFormat='match {0}'}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <TextBlock Text="{Binding ClipNote}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="editorInspectorCard">
+        <Border.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="HasRadar" />
+            <Binding Path="IsFullScope" />
+          </MultiBinding>
+        </Border.IsVisible>
         <StackPanel Spacing="6">
           <TextBlock Text="PERFORMANCE" Classes="editorCardLabel" />
           <controls:MatchRadarChart Axes="{Binding RadarAxes}" Height="210" />
+          <TextBlock Text="{Binding RadarNote}" IsVisible="{Binding HasRadarNote}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+
+      <!-- Players left through the match, your eliminations as purple dots,
+           the clip's span shaded. -->
+      <Border Classes="editorInspectorCard">
+        <Border.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="HasPlacement" />
+            <Binding Path="IsFortniteFullScope" />
+          </MultiBinding>
+        </Border.IsVisible>
+        <StackPanel Spacing="8">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="PLACEMENT" Classes="editorCardLabel" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{Binding PlacementLabel}" Foreground="{StaticResource Text_EDF4FB}" FontSize="15" FontWeight="Bold" />
+          </Grid>
+          <TextBlock Text="{Binding PlacementSummary}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+          <controls:MatchPlacementChart Height="120" Steps="{Binding PlacementSteps}" Eliminations="{Binding PlacementEliminations}"
+                                        EndSeconds="{Binding PlacementEndSeconds}" ClipStartSeconds="{Binding ClipStartSeconds}"
+                                        ClipEndSeconds="{Binding ClipEndSeconds}" />
+        </StackPanel>
+      </Border>
+
+      <!-- Full Match: every event, timed from the replay's start; rows inside
+           the clip are shaded. -->
+      <Border Classes="editorInspectorCard">
+        <Border.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="HasTimeline" />
+            <Binding Path="IsFortniteFullScope" />
+          </MultiBinding>
+        </Border.IsVisible>
+        <StackPanel Spacing="6">
+          <TextBlock Text="YOUR MATCH" Classes="editorCardLabel" />
+          <ItemsControl ItemsSource="{Binding Timeline}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MatchTimelineRowViewModel">
+                <Border Background="{Binding Background}" CornerRadius="5" Padding="6,4" Margin="-6,0">
+                  <Grid ColumnDefinitions="44,14,*">
+                    <TextBlock Text="{Binding Time}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" FontFamily="Consolas" VerticalAlignment="Center" />
+                    <Ellipse Grid.Column="1" Width="7" Height="7" Fill="{Binding Dot}" VerticalAlignment="Center" HorizontalAlignment="Left" />
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="5" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Title}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding Detail, StringFormat='— {0}'}" IsVisible="{Binding HasDetail}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="editorInspectorCard">
+        <Border.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="HasMatchDetails" />
+            <Binding Path="IsFortniteFullScope" />
+          </MultiBinding>
+        </Border.IsVisible>
+        <StackPanel Spacing="6">
+          <TextBlock Text="MATCH" Classes="editorCardLabel" />
+          <ItemsControl ItemsSource="{Binding MatchDetails}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MatchDetailRowViewModel">
+                <Grid ColumnDefinitions="*,Auto" Margin="0,3">
+                  <TextBlock Text="{Binding Label}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" />
+                  <TextBlock Grid.Column="1" Text="{Binding Value}" Foreground="{StaticResource Text_EDF4FB}" FontSize="12" FontWeight="SemiBold" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
         </StackPanel>
       </Border>
 

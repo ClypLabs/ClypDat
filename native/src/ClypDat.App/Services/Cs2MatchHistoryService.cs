@@ -164,7 +164,7 @@ internal sealed class Cs2MatchHistoryService : IDisposable
     internal static string AttentionMessage(string? rejectedField) => rejectedField switch
     {
         "auth_code" => "Steam didn't accept the authentication code for this Steam ID. Check the Steam ID and code both come from the account you play CS2 on, then enter them again.",
-        "match_code" => "Steam says the match code isn't from this Steam ID's matches. Use a code from a match played on the same account as the Steam ID.",
+        "match_code" => "Steam didn't accept this match code. Use a match from within the last month, played on the same account as the Steam ID. Older saved demos can still be imported locally.",
         _ => AttentionStatus
     };
 

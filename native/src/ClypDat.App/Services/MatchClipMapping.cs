@@ -12,7 +12,13 @@ internal sealed record ClipTimeline(
     double DurationSeconds,
     SpotifySourceWindow? Source,
     bool TimestampReliable,
-    IReadOnlyList<ClipEventMarker> ExistingMarkers);
+    IReadOnlyList<ClipEventMarker> ExistingMarkers,
+    // The window came from the clip's recorded capture times (exact, and
+    // kept through trims and exports), not from its file's creation time.
+    bool Exact = false,
+    string? MatchSessionId = null,
+    IReadOnlyList<ClipCaptureSegment>? CaptureSegments = null,
+    double? CaptureMediaDurationSeconds = null);
 
 // Ties matches to clips. A match is found by overlap; its events are placed
 // on the clip's timeline only when that placement can be trusted: exactly,
@@ -32,6 +38,12 @@ internal static class MatchClipMapping
 
     public static ClipTimeline Describe(ClipInfo? info, DateTimeOffset fileCreated, TimeSpan duration, bool isRecording, SpotifySourceWindow? source)
     {
+        if (info is { IsTrimmed: false, IsExport: false } && source is not null && info.CaptureStartUtc is null)
+            info = ClipCaptureWindow.FromSource(info, source);
+        if (info is { CaptureStartUtc: { } captureStart, CaptureEndUtc: { } captureEnd } && captureEnd > captureStart)
+            return new ClipTimeline(captureStart, captureEnd, duration.TotalSeconds, source, true,
+                info.AutoClipMarkers ?? Array.Empty<ClipEventMarker>(), Exact: info.CaptureTimingVerified, info.MatchSessionId,
+                info.CaptureSegments, info.CaptureMediaDurationSeconds);
         var anchor = (info?.CapturedAt ?? fileCreated).UtcDateTime;
         // A recording's file is created when it starts; a clip's when it is
         // saved, which is where it ends.
@@ -44,15 +56,20 @@ internal static class MatchClipMapping
 
     // How far a match's own times can be off: GSI is this PC's clock; a
     // demo-only match is placed from Valve's match time, which is not.
-    private static TimeSpan Slack(MatchStats match) => match.HasLiveData ? TimeSpan.FromMinutes(2) : TimeSpan.FromMinutes(10);
+    // A Fortnite replay's header is this PC's clock too.
+    private static TimeSpan Slack(MatchStats match) =>
+        match.HasLiveData ? TimeSpan.FromMinutes(2) : match.Game == FortniteMatchStats.Game ? TimeSpan.FromSeconds(30) : TimeSpan.FromMinutes(10);
 
-    public static MatchStats? FindMatch(IEnumerable<MatchStats> matches, ClipTimeline clip)
+    public static MatchStats? FindMatch(IEnumerable<MatchStats> matches, ClipTimeline clip, string game = "cs2")
     {
+        if (game == FortniteMatchStats.Game && clip.MatchSessionId is { } session)
+            return matches.FirstOrDefault(match => match.Game == game && match.Id == FortniteMatchStats.IdFor(session));
         MatchStats? best = null;
         var bestOverlap = TimeSpan.Zero;
         foreach (var match in matches)
         {
-            if (match.StartedUtc == default || match.EndedUtc < match.StartedUtc || !string.Equals(match.Game, "cs2", StringComparison.OrdinalIgnoreCase)) continue;
+            if (match.StartedUtc == default || match.EndedUtc < match.StartedUtc || !string.Equals(match.Game, game, StringComparison.OrdinalIgnoreCase)) continue;
+            // The replay noted when the clip was saved wins outright.
             var slack = Slack(match);
             var overlap = Min(match.EndedUtc + slack, clip.EndUtc) - Max(match.StartedUtc - slack, clip.StartUtc);
             if (overlap <= TimeSpan.Zero || overlap <= bestOverlap) continue;
@@ -62,8 +79,39 @@ internal static class MatchClipMapping
         return best;
     }
 
+    /// <summary>
+    /// Where a clip sits in a replay-timed match (Fortnite): clip start minus
+    /// replay start, both this PC's clock. Null when the clip's time cannot be
+    /// trusted (a trimmed, exported or imported clip with no recorded capture
+    /// window) or it does not overlap the replay.
+    /// </summary>
+    public static MatchReplayWindow? ReplayWindow(MatchStats match, ClipTimeline clip)
+    {
+        if (!clip.Exact || match.StartedUtc == default || clip.DurationSeconds <= 0) return null;
+        var start = (clip.StartUtc - match.StartedUtc).TotalSeconds;
+        var end = (clip.EndUtc - match.StartedUtc).TotalSeconds;
+        var length = match.DemoDurationSeconds ?? (match.EndedUtc - match.StartedUtc).TotalSeconds;
+        if (end <= start || end <= 0 || start >= length) return null;
+        var window = new MatchReplayWindow(start, end, (end - start) / clip.DurationSeconds);
+        if (clip.CaptureSegments is not { Count: > 0 } segments) return window;
+        if (segments.Count > 256 || clip.CaptureMediaDurationSeconds is not > 0 ||
+            !double.IsFinite(clip.CaptureMediaDurationSeconds.Value)) return null;
+        var mediaScale = clip.DurationSeconds / clip.CaptureMediaDurationSeconds.Value;
+        var mapped = new List<MatchReplaySegment>();
+        foreach (var segment in segments)
+        {
+            if (segment.EndUtc <= segment.StartUtc || !double.IsFinite(segment.MediaStartSeconds) ||
+                !double.IsFinite(segment.MediaEndSeconds) || segment.MediaStartSeconds < 0 ||
+                segment.MediaEndSeconds <= segment.MediaStartSeconds || segment.MediaEndSeconds > clip.CaptureMediaDurationSeconds.Value + 0.001) return null;
+            mapped.Add(new((segment.StartUtc - match.StartedUtc).TotalSeconds, (segment.EndUtc - match.StartedUtc).TotalSeconds,
+                segment.MediaStartSeconds * mediaScale, segment.MediaEndSeconds * mediaScale));
+        }
+        return window with { Segments = mapped };
+    }
+
     public static IReadOnlyList<ClipEventMarker> Markers(MatchStats match, ClipTimeline clip)
     {
+        if (match.Game == FortniteMatchStats.Game) return FortniteMarkers(match, clip);
         var placed = PlaceExactly(match, clip) ?? PlaceByAnchors(match, clip);
         if (placed is null) return [];
         return placed
@@ -79,7 +127,7 @@ internal static class MatchClipMapping
     {
         if (clip.Source is not { } source || match.BootId is null || source.BootId != match.BootId) return null;
         var placed = match.Events.Where(e => e.SharedSeconds is not null)
-            .Select(e => (e, source.MediaSeconds(e.SharedSeconds!.Value))).ToList();
+            .Select(e => (e, source.VideoMediaSeconds(e.SharedSeconds!.Value))).ToList();
         return placed.Count > 0 ? placed : null;
     }
 
@@ -119,6 +167,28 @@ internal static class MatchClipMapping
         var chosen = shifts.Average();
         return timed.Select(item => (item.Event, item.Estimated + chosen)).ToList();
     }
+
+    private static IReadOnlyList<ClipEventMarker> FortniteMarkers(MatchStats match, ClipTimeline clip)
+    {
+        if (ReplayWindow(match, clip) is not { } window) return [];
+        return match.Events
+            .Where(e => e.DemoSeconds is { } seconds && window.Contains(seconds))
+            .Select(e => FortniteMarker(e, window.ToClipSeconds(e.DemoSeconds!.Value)))
+            .OfType<ClipEventMarker>()
+            .Where(marker => marker.OffsetSeconds >= 0 && marker.OffsetSeconds <= clip.DurationSeconds)
+            .OrderBy(marker => marker.OffsetSeconds)
+            .ToArray();
+    }
+
+    internal static ClipEventMarker? FortniteMarker(MatchEvent e, double offset) => e.Kind switch
+    {
+        "kill" => new("fortnite-elimination", "Elimination", offset),
+        "knock" => new("fortnite-knock", "Knock", offset),
+        "knocked" => new("fortnite-knocked", "Knocked down", offset),
+        "death" => new("death", "Eliminated", offset),
+        "victory" => new("victory", "Victory Royale", offset),
+        _ => null
+    };
 
     internal static DateTime? WallTime(MatchStats match, MatchEvent e) =>
         e.OccurredUtc ?? (e.DemoSeconds is { } seconds && match.StartedUtc != default ? match.StartedUtc.AddSeconds(seconds) : null);
