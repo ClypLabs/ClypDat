@@ -18,11 +18,13 @@ internal enum Cs2MatchHistoryFailure
 }
 
 // Messages here are for the app, not the log: they never carry the request.
-internal sealed class Cs2MatchHistoryException(Cs2MatchHistoryFailure failure, TimeSpan? retryAfter = null)
+internal sealed class Cs2MatchHistoryException(Cs2MatchHistoryFailure failure, TimeSpan? retryAfter = null, string? rejectedField = null)
     : Exception($"CS2 match history request failed: {failure}.")
 {
     public Cs2MatchHistoryFailure Failure { get; } = failure;
     public TimeSpan? RetryAfter { get; } = retryAfter;
+    // On SteamRejected: "auth_code" or "match_code", when the server could tell.
+    public string? RejectedField { get; } = rejectedField;
 }
 
 internal sealed record Cs2ShareCodePage(IReadOnlyList<string> Codes, bool Complete);
@@ -76,14 +78,19 @@ internal sealed class Cs2MatchHistoryClient
     {
         if (response.IsSuccessStatusCode) return;
         string? code = null;
+        string? reason = null;
         try
         {
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
-            if (json.RootElement.ValueKind == JsonValueKind.Object && json.RootElement.TryGetProperty("code", out var value) && value.ValueKind == JsonValueKind.String)
-                code = value.GetString();
+            if (json.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                if (json.RootElement.TryGetProperty("code", out var value) && value.ValueKind == JsonValueKind.String) code = value.GetString();
+                if (json.RootElement.TryGetProperty("reason", out var field) && field.ValueKind == JsonValueKind.String) reason = field.GetString();
+            }
         }
         catch (JsonException) { }
-        throw new Cs2MatchHistoryException(Classify(response.StatusCode, code), RetryAfter(response));
+        var rejectedField = reason is "auth_code" or "match_code" ? reason : null;
+        throw new Cs2MatchHistoryException(Classify(response.StatusCode, code), RetryAfter(response), rejectedField);
     }
 
     internal static Cs2MatchHistoryFailure Classify(HttpStatusCode status, string? code) => (status, code) switch

@@ -123,7 +123,7 @@ internal sealed class Cs2MatchHistoryService : IDisposable
             _lastRunUtc = DateTime.UtcNow;
             var link = Link;
             if (link is null) return;
-            if (link.NeedsAttention) { SetStatus(AttentionStatus); return; }
+            if (link.NeedsAttention) { SetStatus(AttentionMessage(link.RejectedField)); return; }
             if (link.RetryAfterUtc is { } retry && retry > DateTime.UtcNow)
             {
                 Schedule(retry - DateTime.UtcNow);
@@ -160,6 +160,14 @@ internal sealed class Cs2MatchHistoryService : IDisposable
 
     private const string AttentionStatus = "Steam didn't accept your authentication code or match code. Enter them again to keep getting match stats.";
 
+    /// <summary>What to tell the user when Steam refused the codes, naming the value when it's known.</summary>
+    internal static string AttentionMessage(string? rejectedField) => rejectedField switch
+    {
+        "auth_code" => "Steam didn't accept the authentication code for this Steam ID. Check the Steam ID and code both come from the account you play CS2 on, then enter them again.",
+        "match_code" => "Steam says the match code isn't from this Steam ID's matches. Use a code from a match played on the same account as the Steam ID.",
+        _ => AttentionStatus
+    };
+
     private void HandleFailure(Cs2MatchHistoryLink link, Cs2MatchHistoryException error)
     {
         AppLog.Info($"CS2 match history: {error.Failure}.");
@@ -169,8 +177,9 @@ internal sealed class Cs2MatchHistoryService : IDisposable
             case Cs2MatchHistoryFailure.InvalidInput:
                 // No automatic retries: the same codes would be refused again.
                 link.NeedsAttention = true;
+                link.RejectedField = error.RejectedField;
                 Save(link);
-                SetStatus(AttentionStatus);
+                SetStatus(AttentionMessage(link.RejectedField));
                 break;
             case Cs2MatchHistoryFailure.SignedOut:
                 SetStatus("Sign in to ClypDat to download full match stats.");

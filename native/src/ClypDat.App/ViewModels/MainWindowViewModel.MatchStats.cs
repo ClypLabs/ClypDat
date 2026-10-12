@@ -236,8 +236,8 @@ public sealed partial class MainWindowViewModel
         ? $"Linked to Steam ID {link.SteamId}, authentication code ending {link.AuthCodeHint}."
         : string.Empty;
 
-    public string Cs2MatchHistoryStatus => _cs2MatchHistory?.Link is { NeedsAttention: true }
-        ? "Steam didn't accept your authentication code or match code. Enter them again to keep getting match stats."
+    public string Cs2MatchHistoryStatus => _cs2MatchHistory?.Link is { NeedsAttention: true } rejected
+        ? Cs2MatchHistoryService.AttentionMessage(rejected.RejectedField)
         : !ClypDatAccountIsConnected && IsCs2MatchHistoryLinked ? "Sign in to ClypDat to download full match stats."
         : _cs2MatchHistory?.Status ?? string.Empty;
 

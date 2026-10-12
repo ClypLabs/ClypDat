@@ -79,6 +79,8 @@ internal sealed class Cs2MatchHistoryLink
     public string? StartCode { get; set; }
     // Steam refused the code pair; nothing is retried until it is re-entered.
     public bool NeedsAttention { get; set; }
+    // Which value Steam refused ("auth_code" / "match_code"), when known.
+    public string? RejectedField { get; set; }
     public DateTime? LastCheckedUtc { get; set; }
     public DateTime? RetryAfterUtc { get; set; }
 
