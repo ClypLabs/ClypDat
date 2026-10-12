@@ -39,6 +39,9 @@ internal sealed class Cs2MatchHistoryService : IDisposable
     /// <summary>Progress or trouble, worded for Settings. Empty when there is nothing to say.</summary>
     public string Status => _status;
 
+    /// <summary>Dismisses the current Settings message without changing the saved link or retry pause.</summary>
+    public void ClearStatus() => SetStatus(string.Empty);
+
     public Cs2MatchHistoryLink? Link => Cs2MatchHistoryLinkStore.Load();
 
     public void Start()
@@ -123,7 +126,7 @@ internal sealed class Cs2MatchHistoryService : IDisposable
             _lastRunUtc = DateTime.UtcNow;
             var link = Link;
             if (link is null) return;
-            if (link.NeedsAttention) { SetStatus(AttentionMessage(link.RejectedField)); return; }
+            if (link.NeedsAttention) return;
             if (link.RetryAfterUtc is { } retry && retry > DateTime.UtcNow)
             {
                 Schedule(retry - DateTime.UtcNow);

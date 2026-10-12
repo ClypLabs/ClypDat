@@ -26,7 +26,7 @@ internal sealed record FortniteReplayHeader(
     public string FileName => System.IO.Path.GetFileName(Path);
     public DateTime EndUtc => StartUtc.AddSeconds(LengthSeconds);
     // A parsed summary is reused while all three still match.
-    public string CacheKey => $"{FileName}|{SizeBytes}|{LastWriteUtc.Ticks}";
+    public string CacheKey => $"{FileName}|{SizeBytes}|{LastWriteUtc.Ticks}|parser-{FortniteReplayParser.CurrentVersion}";
     public bool IsReady => !IsLive && LengthSeconds > 0 && StartUtc != default &&
         (!IsEncrypted || EncryptionKeyBytes is 16 or 24 or 32);
 }

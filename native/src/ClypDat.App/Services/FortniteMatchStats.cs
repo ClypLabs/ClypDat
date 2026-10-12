@@ -96,6 +96,7 @@ internal static class FortniteMatchStats
             DemoStatus = "parsed",
             DemoDurationSeconds = header.LengthSeconds,
             LocalPlayerName = player.Name,
+            OutfitId = data.OutfitId,
             LocalTeamId = "local",
             Players = [player],
             Events = events,

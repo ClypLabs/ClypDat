@@ -119,6 +119,44 @@ public sealed class FortniteReplayParserSafetyTests
         Assert.Throws<ArgumentException>(() => FortniteReplayFile.LocalToUtc(new(2026, 10, 4, 2, 30, 0), sydney));
     }
 
+    [Fact]
+    public void ModernOutfitReferenceReadsTheExactObservedNetGuid()
+    {
+        // Recorder PlayerState 626 in the 17:44:56 replay references NetGUID
+        // 1393, whose exported asset path is character_slumpafter (Noelle).
+        var field = new NetBitReader(new byte[] { 0xE3, 0x14 });
+        Assert.Equal(1393u, FortniteReplayParser.ReadOutfitReference(field, 16));
+        Assert.True(field.AtEnd());
+    }
+
+    [Theory]
+    [InlineData("character_slumpafter", true)]
+    [InlineData("Character_MajorSpeech", true)]
+    [InlineData("CID_883_Athena_Commando_M_ChOneJonesy", true)]
+    [InlineData("HID_001_Athena_Commando_F", false)]
+    [InlineData("../character_slumpafter", false)]
+    [InlineData("https://example.com/character_slumpafter", false)]
+    [InlineData(null, false)]
+    public void OnlyVerifiedOutfitAssetIdFamiliesAreAccepted(string? id, bool expected)
+        => Assert.Equal(expected, FortniteReplayParser.IsOutfitId(id));
+
+    [Fact]
+    public void EmptyOrTruncatedReferencesDoNotProduceAnOutfit()
+    {
+        Assert.Null(FortniteReplayParser.ReadOutfitReference(new NetBitReader(new byte[] { 0 }), 8));
+        Assert.Null(FortniteReplayParser.ReadOutfitReference(new NetBitReader(new byte[] { 0xE3 }), 8));
+        Assert.Null(FortniteReplayParser.ReadOutfitReference(new NetBitReader(new byte[] { 0xE3 }), 16));
+    }
+
+    [Fact]
+    public void ParsedOutfitSurvivesProjectionAndInvalidatesTheOlderReplayCache()
+    {
+        var data = Data() with { OutfitId = "character_slumpafter" };
+        Assert.Equal(data.OutfitId, FortniteMatchStats.Build(data, null, null).OutfitId);
+        Assert.EndsWith($"|parser-{FortniteReplayParser.CurrentVersion}", data.Header.CacheKey);
+        Assert.NotEqual($"{data.Header.FileName}|{data.Header.SizeBytes}|{data.Header.LastWriteUtc.Ticks}", data.Header.CacheKey);
+    }
+
     private static FortniteReplayData Data() => new(
         new("match.replay", 100, Start, Start, 300, false, false, 0),
         new(2, 1, 0.38, 900, 300, 400, 0, 0, 452100, 0, 210), 12, 100, [], "Playlist_NoBuildBR_Solo", 0);

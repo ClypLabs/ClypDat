@@ -31,11 +31,14 @@
       <Border Classes="editorInspectorCard">
         <StackPanel Spacing="14">
           <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-            <StackPanel Spacing="3">
-              <TextBlock Text="{Binding PlayerName}" Foreground="{StaticResource Text_EDF4FB}" FontSize="16" FontWeight="Bold"
-                         TextTrimming="CharacterEllipsis" />
-              <TextBlock Text="{Binding MatchLabel}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
+            <Grid ColumnDefinitions="Auto,*">
+              <controls:FortniteOutfitPortrait OutfitId="{Binding OutfitId}" Width="44" Height="44" Margin="0,0,10,0" VerticalAlignment="Center" ToolTip.Tip="Outfit" />
+              <StackPanel Grid.Column="1" Spacing="3">
+                <TextBlock Text="{Binding PlayerName}" Foreground="{StaticResource Text_EDF4FB}" FontSize="16" FontWeight="Bold"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding MatchLabel}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </Grid>
             <StackPanel Grid.Column="1" Spacing="2" HorizontalAlignment="Right">
               <TextBlock Text="{Binding ResultLabel}" Foreground="{Binding ResultBrush}" FontSize="13" FontWeight="Bold" HorizontalAlignment="Right" />
               <TextBlock Text="{Binding ScoreLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Right" />

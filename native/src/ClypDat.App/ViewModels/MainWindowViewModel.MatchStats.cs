@@ -10,6 +10,7 @@ public sealed partial class MainWindowViewModel
     private Cs2MatchHistoryService? _cs2MatchHistory;
     private FortniteReplayService? _fortniteReplays;
     private MatchStatsViewModel? _selectedMatchStats;
+    private readonly EditorStatsSidebarPreference _editorStatsSidebarPreference = new();
     private bool _isSelectedClipStatsGame;
     private int _matchStatsLoadGeneration;
     private volatile bool _matchStatsDisposed;
@@ -105,7 +106,17 @@ public sealed partial class MainWindowViewModel
     public MatchStatsViewModel? SelectedMatchStats
     {
         get => _selectedMatchStats;
-        private set => SetProperty(ref _selectedMatchStats, value);
+        private set
+        {
+            if (!SetProperty(ref _selectedMatchStats, value)) return;
+            ApplyEditorStatsDefault();
+        }
+    }
+
+    private void ApplyEditorStatsDefault()
+    {
+        if (_editorStatsSidebarPreference.TryActivate(SelectedVideoPath, IsEditorVisible, SelectedMatchStats?.HasMatch == true))
+            ActiveEditorSidebarSection = EditorSidebarSection.Stats;
     }
 
     // CS2 and Fortnite clips have a Stats section.
@@ -115,7 +126,7 @@ public sealed partial class MainWindowViewModel
         private set
         {
             if (!SetProperty(ref _isSelectedClipStatsGame, value)) return;
-            if (!value && ActiveEditorSidebarSection == EditorSidebarSection.Stats) OpenEditorSidebar(EditorSidebarSection.Info);
+            if (!value && ActiveEditorSidebarSection == EditorSidebarSection.Stats) ActiveEditorSidebarSection = EditorSidebarSection.Info;
         }
     }
 
@@ -494,9 +505,7 @@ public sealed partial class MainWindowViewModel
         ? $"Linked to Steam ID {link.SteamId}, authentication code ending {link.AuthCodeHint}."
         : string.Empty;
 
-    public string Cs2MatchHistoryStatus => _cs2MatchHistory?.Link is { NeedsAttention: true } rejected
-        ? Cs2MatchHistoryService.AttentionMessage(rejected.RejectedField)
-        : !ClypDatAccountIsConnected && IsCs2MatchHistoryLinked ? "Sign in to ClypDat to download full match stats."
+    public string Cs2MatchHistoryStatus => !ClypDatAccountIsConnected && IsCs2MatchHistoryLinked ? "Sign in to ClypDat to download full match stats."
         : _cs2MatchHistory?.Status ?? string.Empty;
 
     public bool HasCs2MatchHistoryStatus => Cs2MatchHistoryStatus.Length > 0;
@@ -568,5 +577,30 @@ public sealed partial class MainWindowViewModel
         OnPropertyChanged(nameof(Cs2MatchHistoryStatus));
         OnPropertyChanged(nameof(HasCs2MatchHistoryStatus));
         OnPropertyChanged(nameof(CanRetryCs2MatchHistory));
+    }
+}
+
+// Late match data gets the first inspector slot once per editor visit. A
+// user's explicit selection always wins, including selecting Info again.
+internal sealed class EditorStatsSidebarPreference
+{
+    private string? _path;
+    private bool _pending;
+
+    internal void Begin(string path, bool newVisit)
+    {
+        if (!newVisit && string.Equals(_path, path, StringComparison.OrdinalIgnoreCase)) return;
+        _path = path;
+        _pending = true;
+    }
+
+    internal void UserSelected() => _pending = false;
+    internal void Close() { _path = null; _pending = false; }
+
+    internal bool TryActivate(string path, bool editorVisible, bool hasStats)
+    {
+        if (!_pending || !editorVisible || !hasStats || !string.Equals(_path, path, StringComparison.OrdinalIgnoreCase)) return false;
+        _pending = false;
+        return true;
     }
 }

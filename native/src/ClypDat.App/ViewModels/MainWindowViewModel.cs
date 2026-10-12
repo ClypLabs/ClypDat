@@ -1712,6 +1712,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(HasSelectedCaptureBackend));
             OnPropertyChanged(nameof(EditorSidebarWidth));
             ApplyPendingLibraryLayout();
+            if (value) ApplyEditorStatsDefault();
         }
     }
 
@@ -1721,6 +1722,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         private set
         {
             if (!SetProperty(ref _isSettingsVisible, value)) return;
+            // Messages belong to this Settings visit. Opening also dismisses
+            // an HTTP response that arrived after the previous visit closed.
+            _cs2MatchHistory?.ClearStatus();
+            RaiseCs2MatchHistoryChanged();
             // Leaving Settings drops the editor's unapplied preview at once, the
             // same as moving to another section does, so the app is never left
             // painted in colours nobody saved.
@@ -1815,7 +1820,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsEditorOverlaysSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Overlays;
     public bool IsEditorExportSidebarActive => ActiveEditorSidebarSection == EditorSidebarSection.Export;
 
-    public void OpenEditorSidebar(EditorSidebarSection section) => ActiveEditorSidebarSection = section;
+    public void OpenEditorSidebar(EditorSidebarSection section)
+    {
+        _editorStatsSidebarPreference.UserSelected();
+        ActiveEditorSidebarSection = section;
+    }
 
     private bool _isVideoFullscreen;
 
@@ -7308,9 +7317,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         CancelWaveformLoad();
         IsPlaying = false;
         IsEditorVisible = false;
-        // Back to Info for the next clip: whichever section the last clip was
-        // left on, opening a new one starts at its details.
-        OpenEditorSidebar(EditorSidebarSection.Info);
+        _editorStatsSidebarPreference.Close();
+        ActiveEditorSidebarSection = EditorSidebarSection.Info;
         IsVideoFullscreen = false;
         SelectedCaptureBackend = string.Empty;
 
@@ -9801,6 +9809,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // are already painted - so a waveform that had finished drawing visibly
         // blanked and refilled for no reason the user could see.
         var isSameClipRebuild = string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase);
+        var newEditorVisit = showEditor && (!IsEditorVisible || !isSameClipRebuild);
+        if (showEditor) _editorStatsSidebarPreference.Begin(media.Path, newEditorVisit);
+        else _editorStatsSidebarPreference.Close();
         // Same path is not the same FILE. Save Trim (and the corruption repair)
         // rewrite a clip in place, so a rebuild for the same path can be handed
         // bytes that have nothing to do with the peaks currently on screen.
@@ -9959,8 +9970,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RefreshCapturedOverlayLayerState();
         RefreshSpotifyOverlayLayerState();
         RaiseSpotifyOverlayPreviewChanged();
+        if (newEditorVisit) ActiveEditorSidebarSection = EditorSidebarSection.Info;
         IsEditorVisible = showEditor;
-        if (showEditor) OpenEditorSidebar(EditorSidebarSection.Info);
+        if (showEditor) ApplyEditorStatsDefault();
         StartFilmstripLoad(media);
         // Checked against the LANES, not against media.Tracks: the pre-mix
         // skip above means the lane set can be a strict subset of the

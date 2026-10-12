@@ -36,6 +36,8 @@ public sealed class MatchStatsViewModel : ViewModelBase
     public bool IsWaitingForMatch { get; private init; }
     public bool IsProcessingMatchStats { get; private init; }
     public string PlayerName { get; private init; } = string.Empty;
+    public string? OutfitId { get; private init; }
+    public bool HasOutfit => OutfitId is not null;
     public string MatchLabel { get; private init; } = string.Empty;
     public string ResultLabel { get; private init; } = string.Empty;
     public string ScoreLabel { get; private init; } = string.Empty;
@@ -145,6 +147,7 @@ public sealed class MatchStatsViewModel : ViewModelBase
             // Clip first whenever the clip lies inside the match.
             _selectedScope = window is not null ? ClipScope : FullScope,
             PlayerName = match.LocalPlayerName ?? "You",
+            OutfitId = FortniteOutfitPortraitCache.NormaliseId(match.OutfitId),
             MatchLabel = match.Mode ?? "Fortnite",
             ResultLabel = match.Won ? "Victory Royale" : string.Empty,
             ResultBrush = gold,

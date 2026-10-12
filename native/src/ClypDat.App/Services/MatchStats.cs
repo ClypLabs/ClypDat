@@ -30,6 +30,9 @@ public sealed record MatchStats
     public string? MatchId { get; init; }
     public double? DemoDurationSeconds { get; init; }
     public string? LocalPlayerName { get; init; }
+    // Fortnite outfit worn by the recording player, from the replay's
+    // recorder PlayerState. The asset ID is independent of their display name.
+    public string? OutfitId { get; init; }
     public string? LocalSteamId { get; init; }
     public string? LocalTeamId { get; init; }
     // Rounds before the first side swap; 0 when unknown.

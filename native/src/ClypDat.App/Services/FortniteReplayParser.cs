@@ -30,6 +30,7 @@ internal sealed record FortniteReplayData(
     public IReadOnlyList<MatchCountStep> PlayersLeft { get; init; } = [];
     public bool PlayersLeftComplete { get; init; }
     public bool ReplayDetailsIncomplete { get; init; }
+    public string? OutfitId { get; init; }
 }
 
 // Decodes a Fortnite replay with FortniteReplayReader, as cheaply as it can.
@@ -38,14 +39,16 @@ internal sealed record FortniteReplayData(
 //  1. Events only: the replay's stats, team placement and every elimination.
 //     About 10 ms and 2 MB for a 20 MB replay, and it decodes on every
 //     current-season replay tested.
-//  2. GameState only: playlist and the recorded human/bot counters, timed
-//     with each demo frame's replay clock. Unrelated actor data is skipped.
+//  2. GameState: playlist and recorded human/bot counters, timed with each
+//     demo frame's clock; the recorder PlayerState's outfit reference only.
+//     Unrelated actor data is skipped.
 //     Payload bounds are checked before the library copies them: malformed
 //     actor blocks in real replays otherwise allocated nearly 2 GB at once.
 // Landing positions, weapon identities and pickups require additional actor
 // fields that this bounded GameState pass does not decode.
 internal static class FortniteReplayParser
 {
+    internal const int CurrentVersion = 2;
     internal static readonly TimeSpan PlaylistBudget = TimeSpan.FromSeconds(2);
     private const long PlaylistAllocationBudget = 128L * 1024 * 1024;
 
@@ -63,6 +66,7 @@ internal static class FortniteReplayParser
         }
 
         string? playlist = null;
+        string? outfitId = null;
         IReadOnlyList<MatchCountStep> playersLeft = [];
         var playersLeftComplete = false;
         var detailsIncomplete = skipped > 0;
@@ -74,6 +78,7 @@ internal static class FortniteReplayParser
                 var probe = new GameStateReader(PlaylistBudget, PlaylistAllocationBudget, header.LengthSeconds);
                 playersLeftComplete = probe.Read(network) && !truncated;
                 playlist = probe.Playlist;
+                outfitId = probe.OutfitId;
                 playersLeft = playersLeftComplete ? TrimJoiningPlayers(probe.PlayersLeft) : [];
                 detailsIncomplete |= probe.Incomplete || !playersLeftComplete;
             }
@@ -111,9 +116,27 @@ internal static class FortniteReplayParser
         {
             PlayersLeft = playersLeft,
             PlayersLeftComplete = playersLeftComplete,
-            ReplayDetailsIncomplete = detailsIncomplete
+            ReplayDetailsIncomplete = detailsIncomplete,
+            OutfitId = outfitId
         };
     }
+
+    internal static uint? ReadOutfitReference(FBitArchive archive, int bitCount)
+    {
+        if (bitCount is < 8 or > 40 || bitCount % 8 != 0 || bitCount > archive.GetBitsLeft())
+        {
+            if (bitCount >= 0 && bitCount <= archive.GetBitsLeft()) archive.SkipBits((uint)bitCount);
+            return null;
+        }
+        var reference = new NetBitReader();
+        reference.FillBitsFrom(archive, bitCount);
+        var guid = reference.ReadIntPacked();
+        return guid > 0 && !reference.IsError && reference.AtEnd() ? guid : null;
+    }
+
+    internal static bool IsOutfitId(string? value) => value is { Length: > 4 and <= 128 } &&
+        (value.StartsWith("CID_", StringComparison.OrdinalIgnoreCase) || value.StartsWith("Character_", StringComparison.OrdinalIgnoreCase)) &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character == '_');
 
     // The first few seconds contain players joining the bus. Begin at the
     // recorded peak, without inventing a count at replay second zero.
@@ -155,7 +178,12 @@ internal static class FortniteReplayParser
         private bool _stopped;
         private double _seconds;
         private int? _humans, _bots;
+        private uint? _recorderActor;
+        private readonly Dictionary<uint, uint> _channelActors = new();
+        private readonly Dictionary<uint, uint> _outfitReferences = new();
+        private readonly FortPlayerState _ignoredPlayerState = new();
         public string? Playlist { get; private set; }
+        public string? OutfitId { get; private set; }
         public bool Incomplete { get; private set; }
         public List<MatchCountStep> PlayersLeft { get; } = [];
 
@@ -182,6 +210,8 @@ internal static class FortniteReplayParser
                 Playlist ??= playlist.Name;
             }
             if (exportGroup is not GameState state) return;
+            _recorderActor = state.RecorderPlayerState?.Value ?? _recorderActor;
+            ResolveOutfit();
             _humans = state.PlayersLeft ?? _humans;
             _bots = state.PlayerBotsLeft ?? _bots;
             // Current BR replay fields count humans and bots separately.
@@ -195,14 +225,62 @@ internal static class FortniteReplayParser
 
         protected override void OnExternalDataRead(uint channelIndex, IExternalData? externalData) { }
         protected override void OnNetDeltaRead(uint channelIndex, NetDeltaUpdate update) { }
-        protected override void OnChannelOpened(uint channelIndex, NetworkGUID? actor) { }
-        protected override void OnChannelClosed(uint channelIndex, NetworkGUID? actor) { }
+        protected override void OnChannelOpened(uint channelIndex, NetworkGUID? actor)
+        {
+            if (actor is { Value: > 0 }) _channelActors[channelIndex] = actor.Value;
+        }
+        protected override void OnChannelClosed(uint channelIndex, NetworkGUID? actor) => _channelActors.Remove(channelIndex);
+
+        private void ResolveOutfit()
+        {
+            if (_recorderActor is { } actor && _outfitReferences.TryGetValue(actor, out var reference) &&
+                _netGuidCache.TryGetPathName(reference, out var name) && IsOutfitId(name)) OutfitId = name;
+        }
+
+        protected override void Cleanup() { ResolveOutfit(); base.Cleanup(); }
+
+        public override bool ReceiveProperties(FBitArchive archive, NetFieldExportGroup group, uint channelIndex,
+            [NotNullWhen(true)] out INetFieldExportGroup? exportGroup, bool enablePropertyChecksum = true, bool netDeltaUpdate = false)
+        {
+            if (!string.Equals(group.PathName, "/Script/FortniteGame.FortPlayerStateAthena", StringComparison.Ordinal))
+                return base.ReceiveProperties(archive, group, channelIndex, out exportGroup, enablePropertyChecksum, netDeltaUpdate);
+            Guard();
+            exportGroup = null;
+            if (enablePropertyChecksum) archive.ReadBit();
+            while (!archive.AtEnd() && !archive.IsError)
+            {
+                Guard();
+                var handle = archive.ReadIntPacked();
+                if (handle == 0) { exportGroup = _ignoredPlayerState; return true; }
+                handle--;
+                var bits = archive.ReadIntPacked();
+                if (!group.IsValidIndex(handle) || bits > archive.GetBitsLeft())
+                {
+                    Incomplete = true;
+                    archive.SetError();
+                    return false;
+                }
+                if (group.NetFieldExports[handle]?.Name == "CachedLoadoutCharacterUngated")
+                {
+                    var reference = ReadOutfitReference(archive, (int)bits);
+                    if (reference is { } guid && _channelActors.TryGetValue(channelIndex, out var actor) &&
+                        (actor == _recorderActor || _outfitReferences.Count < 512 || _outfitReferences.ContainsKey(actor)))
+                    {
+                        _outfitReferences[actor] = guid;
+                        ResolveOutfit();
+                    }
+                }
+                else archive.SkipBits(bits);
+            }
+            return false;
+        }
 
         public override bool ReceivedReplicatorBunch(DataBunch bunch, FBitArchive archive, uint? repObject, bool bHasRepLayout)
         {
             Guard();
             var group = _netGuidCache.GetNetFieldExportGroup(repObject);
-            return group?.PathName.Contains("Athena_GameState", StringComparison.Ordinal) == true &&
+            return (group?.PathName.Contains("Athena_GameState", StringComparison.Ordinal) == true ||
+                string.Equals(group?.PathName, "/Script/FortniteGame.FortPlayerStateAthena", StringComparison.Ordinal)) &&
                 base.ReceivedReplicatorBunch(bunch, archive, repObject, bHasRepLayout);
         }
 
