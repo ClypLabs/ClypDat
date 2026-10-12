@@ -364,6 +364,7 @@ public sealed class Cs2MatchStatsTests
         Assert.Equal(Cs2MatchHistoryFailure.RateLimited, limited.Failure);
         Assert.Equal(TimeSpan.FromSeconds(120), limited.RetryAfter);
         Assert.Equal(Cs2MatchHistoryFailure.Unavailable, (await Fail(HttpStatusCode.ServiceUnavailable, """{"code":"steam_unavailable"}""")).Failure);
+        Assert.Equal(Cs2MatchHistoryFailure.NotConfigured, (await Fail(HttpStatusCode.ServiceUnavailable, """{"code":"not_configured"}""")).Failure);
         Assert.Equal(Cs2MatchHistoryFailure.SignedOut, (await Fail(HttpStatusCode.Unauthorized, "")).Failure);
         Assert.DoesNotContain("ABCD", (await Fail((HttpStatusCode)422, """{"code":"steam_rejected"}""")).Message);
     }

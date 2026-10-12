@@ -11,6 +11,7 @@ internal enum Cs2MatchHistoryFailure
     SignedOut,
     SteamRejected,
     RateLimited,
+    NotConfigured,
     Unavailable,
     MatchNotFound,
     Unexpected
@@ -92,6 +93,8 @@ internal sealed class Cs2MatchHistoryClient
         (HttpStatusCode.UnprocessableEntity, _) => Cs2MatchHistoryFailure.SteamRejected,
         (HttpStatusCode.TooManyRequests, _) => Cs2MatchHistoryFailure.RateLimited,
         (HttpStatusCode.NotFound, "match_not_found") => Cs2MatchHistoryFailure.MatchNotFound,
+        // The site hasn't been given its Steam keys yet; not a passing outage.
+        (HttpStatusCode.ServiceUnavailable, "not_configured") => Cs2MatchHistoryFailure.NotConfigured,
         (HttpStatusCode.ServiceUnavailable or HttpStatusCode.BadGateway or HttpStatusCode.GatewayTimeout or HttpStatusCode.InternalServerError, _) => Cs2MatchHistoryFailure.Unavailable,
         // A 404 without the code is the site not offering this yet.
         (HttpStatusCode.NotFound, _) => Cs2MatchHistoryFailure.Unavailable,

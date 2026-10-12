@@ -165,10 +165,20 @@ internal sealed class Cs2MatchHistoryService : IDisposable
             default:
                 var wait = error.RetryAfter is { } after
                     ? TimeSpan.FromSeconds(Math.Clamp(after.TotalSeconds, 60, 6 * 3600))
-                    : error.Failure == Cs2MatchHistoryFailure.RateLimited ? TimeSpan.FromMinutes(15) : TimeSpan.FromMinutes(30);
+                    : error.Failure switch
+                    {
+                        Cs2MatchHistoryFailure.RateLimited => TimeSpan.FromMinutes(15),
+                        Cs2MatchHistoryFailure.NotConfigured => TimeSpan.FromHours(6),
+                        _ => TimeSpan.FromMinutes(30)
+                    };
                 link.RetryAfterUtc = DateTime.UtcNow + wait;
                 Save(link);
-                SetStatus("Steam's match history is busy. ClypDat will try again later.");
+                SetStatus(error.Failure switch
+                {
+                    Cs2MatchHistoryFailure.NotConfigured => "Full match stats aren't available from ClypDat's server yet. Your codes are saved, and ClypDat will check again in a few hours.",
+                    Cs2MatchHistoryFailure.RateLimited => "Too many match history requests right now. ClypDat will try again in a few minutes.",
+                    _ => "Couldn't reach Steam's match history. ClypDat will try again in about half an hour."
+                });
                 Schedule(wait);
                 break;
         }
