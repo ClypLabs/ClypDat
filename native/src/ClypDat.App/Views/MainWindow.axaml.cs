@@ -495,7 +495,9 @@ public sealed partial class MainWindow : Window
                     }
                     if (e.PropertyName is nameof(MainWindowViewModel.AutoClippingEnabled)
                         or nameof(MainWindowViewModel.DiscordRichPresenceEnabled)
-                        or nameof(MainWindowViewModel.DiscordRichPresenceShowMatchDetails)) UpdateAutoClipStates();
+                        or nameof(MainWindowViewModel.DiscordRichPresenceShowMatchDetails)
+                        or nameof(MainWindowViewModel.WantsCs2MatchStats)) UpdateAutoClipStates();
+                    if (e.PropertyName == nameof(MainWindowViewModel.SelectedAutoClipMarkers)) TimelineMarkers.Markers = ViewModel.SelectedAutoClipMarkers;
                     if (e.PropertyName == nameof(MainWindowViewModel.SelectedFullSessionFormat) && _replayBuffer is IReplayCaptureWorkerControl formatWorker)
                         _ = formatWorker.UpdateFullSessionContainerAsync(ViewModel.Settings.FullSessionContainer);
                     if (e.PropertyName == nameof(MainWindowViewModel.FullSessionRecordingEnabled) && !_applyingWorkerSessionToggle) ScheduleReplayRestart();
@@ -6447,7 +6449,7 @@ public sealed partial class MainWindow : Window
         if (game is null) return;
 
         var clipping = ViewModel.AutoClippingEnabled && game.IsEnabled;
-        if ((!clipping && !ViewModel.WantsGameMatchPresence) || !IsActiveAutoClipGame("cs2"))
+        if ((!clipping && !ViewModel.WantsGameMatchPresence && !ViewModel.WantsCs2MatchStats) || !IsActiveAutoClipGame("cs2"))
         {
             if (_cs2GsiListener is not null)
             {
@@ -6464,6 +6466,7 @@ public sealed partial class MainWindow : Window
         {
             _cs2GsiListener = new Cs2GsiListener(() => GetAutoClipSettingsSnapshot("cs2"));
             _cs2GsiListener.MatchPresence.Changed += MatchPresence_OnChanged;
+            _cs2GsiListener.MatchCompleted += Cs2GsiListener_OnMatchCompleted;
         }
         _cs2GsiListener.ReportMatchPresence = ViewModel.WantsGameMatchPresence;
         if (_cs2GsiListener.IsListening)

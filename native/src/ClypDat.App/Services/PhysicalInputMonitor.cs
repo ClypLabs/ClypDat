@@ -90,6 +90,7 @@ internal sealed class PhysicalInputMonitor : IDisposable
         }
         finally
         {
+            if (_keyboardHook != IntPtr.Zero || _mouseHook != IntPtr.Zero) MemoryTrimmer.LowLevelInputHookReleased();
             if (_keyboardHook != IntPtr.Zero) UnhookWindowsHookEx(_keyboardHook);
             if (_mouseHook != IntPtr.Zero) UnhookWindowsHookEx(_mouseHook);
             if (_hwnd != IntPtr.Zero) DestroyWindow(_hwnd);
@@ -154,6 +155,7 @@ internal sealed class PhysicalInputMonitor : IDisposable
         var module = GetModuleHandle(null);
         _keyboardHook = SetWindowsHookEx(WhKeyboardLl, _keyboardProc, module, 0);
         _mouseHook = SetWindowsHookEx(WhMouseLl, _mouseProc, module, 0);
+        if (_keyboardHook != IntPtr.Zero || _mouseHook != IntPtr.Zero) MemoryTrimmer.LowLevelInputHookInstalled();
     }
 
     private IntPtr KeyboardHook(int code, IntPtr message, IntPtr data)

@@ -32,6 +32,15 @@ public static class MemoryTrimmer
     // can see.
     public static volatile bool GameRunning;
 
+    // A low-level input hook (PhysicalInputMonitor's fallback when raw input
+    // is unavailable) runs on a managed thread, and Windows holds every key
+    // and mouse event on the machine until the callback returns. A blocking
+    // collection there is input lag in the game, so it keeps the gentle path.
+    private static int _lowLevelInputHooks;
+    public static void LowLevelInputHookInstalled() => Interlocked.Increment(ref _lowLevelInputHooks);
+    public static void LowLevelInputHookReleased() => Interlocked.Decrement(ref _lowLevelInputHooks);
+    private static bool LowLevelInputHookActive => Volatile.Read(ref _lowLevelInputHooks) > 0;
+
     private static int _recording;
     // A compacting gen2 collection suspends managed threads. A transition out
     // of recording is the first safe point to request one, after the replay
@@ -180,22 +189,24 @@ public static class MemoryTrimmer
             // longer than the 120ms WASAPI buffer, so it was audible as a
             // dropout in whatever clip was playing.
             var editorOpen = EditorOpen;
-            var (clearCaches, deferred) = ResolveTrimMode(editorOpen, Recording, GameRunning);
+            var gameRunning = Recording && GameRunning;
+            var (clearCaches, deferred) = ResolveTrimMode(editorOpen, gameRunning, LowLevelInputHookActive);
 
             if (clearCaches)
             {
                 AudioChunkCache.Clear();
                 BitmapCache.Clear();
+                // Visible cards hold their own reference, so this only drops
+                // the scrolled-away ones; a hidden Library re-decodes on return.
+                CardThumbnailCache.Clear();
             }
 
             if (deferred)
             {
                 // No blocking, no compaction: a compacting gen2 suspends every
-                // managed thread, and the capture and encode loops are managed
-                // threads - a few hundred milliseconds there is dropped frames
-                // in someone's game. This queues the work for the background
-                // GC instead, which is what keeps the heap from growing without
-                // bound across an all-day recording session.
+                // managed thread in this process. This queues the work for the
+                // background GC instead, which still keeps the heap from
+                // growing without bound.
                 GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: false);
             }
             else
@@ -213,7 +224,7 @@ public static class MemoryTrimmer
             // run yet at this point - a before/after heap size there prints the
             // same number twice and reads as "the trim reclaimed nothing".
             var managed = deferred
-                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - {(editorOpen ? "editor open, caches kept" : "game running")})"
+                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - {(editorOpen ? "editor open, caches kept" : "input hook active")})"
                 : $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}";
             AppLog.Info(
                 $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, {managed}, mode={(deferred ? "background" : "compacting")}, gen2Delta={GC.CollectionCount(2) - beforeGen2}, coalesced={coalesced}, elapsedMs={stopwatch.ElapsedMilliseconds}.");
@@ -227,8 +238,14 @@ public static class MemoryTrimmer
     // The caches are the open clip's working set while the editor is up -
     // clearing them made the next seek or re-open extract its audio all over
     // again - and a blocking collection there is an audible dropout.
-    internal static (bool ClearCaches, bool Deferred) ResolveTrimMode(bool editorOpen, bool recording, bool gameRunning) =>
-        (!editorOpen, editorOpen || (recording && gameRunning));
+    //
+    // A game alone no longer buys the gentle path. Capture and encode run in
+    // the recorder process, so a pause here costs the game nothing, and
+    // deferring made every trim during play reclaim 0MB - the UI sat on
+    // ~800MB private for whole sessions. Only a low-level input hook, which
+    // would stall the game's input for the length of the pause, still does.
+    internal static (bool ClearCaches, bool Deferred) ResolveTrimMode(bool editorOpen, bool gameRunning, bool lowLevelInputHook) =>
+        (!editorOpen, editorOpen || (gameRunning && lowLevelInputHook));
 
     // Closing the editor is often followed straight away by opening the next
     // clip. Trimming at once cost that open its audio chunks, its thumbnail and

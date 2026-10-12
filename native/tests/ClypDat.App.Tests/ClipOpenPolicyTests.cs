@@ -63,13 +63,15 @@ public sealed class ClipOpenPolicyTests
     }
 
     [Theory]
-    [InlineData(false, false, true, false)]
-    [InlineData(false, true, true, true)]
-    [InlineData(true, false, false, true)]
-    [InlineData(true, true, false, true)]
-    public void OpenEditorKeepsCachesAndNeverBlocks(bool editorOpen, bool gameRecording, bool clearsCaches, bool deferred)
+    [InlineData(false, false, false, true, false)]
+    [InlineData(false, true, false, true, false)]
+    [InlineData(false, true, true, true, true)]
+    [InlineData(false, false, true, true, false)]
+    [InlineData(true, false, false, false, true)]
+    [InlineData(true, true, false, false, true)]
+    public void OpenEditorKeepsCachesAndNeverBlocks(bool editorOpen, bool gameRunning, bool inputHook, bool clearsCaches, bool deferred)
     {
-        var mode = MemoryTrimmer.ResolveTrimMode(editorOpen, recording: gameRecording, gameRunning: gameRecording);
+        var mode = MemoryTrimmer.ResolveTrimMode(editorOpen, gameRunning, inputHook);
 
         Assert.Equal(clearsCaches, mode.ClearCaches);
         Assert.Equal(deferred, mode.Deferred);

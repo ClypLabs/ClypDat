@@ -14,6 +14,7 @@ public sealed class EditorSidebarSectionTitleConverter : IValueConverter
         EditorSidebarSection.Overlays => "Overlays",
         EditorSidebarSection.Effects => "Effects",
         EditorSidebarSection.Export => "Export",
+        EditorSidebarSection.Stats => "Stats",
         _ => string.Empty
     };
 

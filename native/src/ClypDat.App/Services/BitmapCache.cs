@@ -6,21 +6,25 @@ namespace ClypDat.App.Services;
 
 // Thumbnail/filmstrip bitmaps are re-decoded from disk on every clip open with
 // no cache at all - reopening the same clip seconds later paid a full disk
-// read + JPEG decode again. Same shape as AudioChunkCache (ChunkedAudioReader.cs)
-// but capped by entry count, not bytes - these images are small and few enough
-// that a fixed cap is simpler to reason about than tracking their pixel size.
+// read + JPEG decode again. Same shape as AudioChunkCache (ChunkedAudioReader.cs).
+//
+// Capped by decoded bytes, not entry count. The editor poster decodes at full
+// 960x540 (~2MB BGRA), so the old 200-entry cap allowed ~400MB of pixels for
+// what is really "the last few clips opened".
 internal static class BitmapCache
 {
-    private const int Capacity = 200;
+    private const long ByteBudget = 48L * 1024 * 1024;
 
-    private sealed class Entry(Bitmap? bitmap, long lastUsedTicks)
+    private sealed class Entry(Bitmap? bitmap, long bytes, long lastUsedTicks)
     {
         public readonly Bitmap? Bitmap = bitmap;
+        public readonly long Bytes = bytes;
         public long LastUsedTicks = lastUsedTicks;
     }
 
     private static readonly ConcurrentDictionary<string, Entry> Entries = new();
     private static readonly object EvictionLock = new();
+    private static long _residentBytes;
 
     public static bool TryGet(string path, out Bitmap? bitmap)
     {
@@ -37,14 +41,15 @@ internal static class BitmapCache
 
     public static void Store(string path, Bitmap? bitmap)
     {
-        Entries.AddOrUpdate(
-            path,
-            _ => new Entry(bitmap, Stopwatch.GetTimestamp()),
-            (_, previous) =>
-            {
-                Retire(previous);
-                return new Entry(bitmap, Stopwatch.GetTimestamp());
-            });
+        var entry = new Entry(bitmap, EstimateBytes(bitmap), Stopwatch.GetTimestamp());
+        // AddOrUpdate's delegates can run more than once under contention, so
+        // the byte accounting happens on the swap result instead.
+        lock (EvictionLock)
+        {
+            if (Entries.TryGetValue(path, out var previous)) Retire(previous);
+            Entries[path] = entry;
+            Interlocked.Add(ref _residentBytes, entry.Bytes);
+        }
         EvictIfNeeded();
     }
 
@@ -63,7 +68,10 @@ internal static class BitmapCache
     // bitmap's own finalizer releases the unmanaged buffer.
     public static void Invalidate(string path)
     {
-        if (Entries.TryRemove(path, out var entry)) Retire(entry);
+        lock (EvictionLock)
+        {
+            if (Entries.TryRemove(path, out var entry)) Retire(entry);
+        }
     }
 
     // Drops every cached bitmap. Same deliberate non-disposal as Invalidate:
@@ -73,20 +81,25 @@ internal static class BitmapCache
     // once nothing is drawing it.
     public static void Clear()
     {
-        foreach (var pair in Entries)
+        lock (EvictionLock)
         {
-            if (Entries.TryRemove(pair.Key, out var entry)) Retire(entry);
+            foreach (var pair in Entries)
+            {
+                if (Entries.TryRemove(pair.Key, out var entry)) Retire(entry);
+            }
         }
     }
 
-    // Linear scan for the least-recently-used entry - the capacity cap keeps
-    // this cheap, and it only runs when a new entry actually pushes the
-    // resident set over the cap.
+    // Linear scan for the least-recently-used entry - the budget keeps the set
+    // small, and it only runs when a new entry actually pushes the resident
+    // set over it.
     private static void EvictIfNeeded()
     {
         lock (EvictionLock)
         {
-            while (Entries.Count > Capacity)
+            // One entry is always kept: the clip that was just opened needs its
+            // poster even if it alone is over budget.
+            while (Interlocked.Read(ref _residentBytes) > ByteBudget && Entries.Count > 1)
             {
                 string? oldestKey = null;
                 var oldestTicks = long.MaxValue;
@@ -108,6 +121,21 @@ internal static class BitmapCache
 
     private static void Retire(Entry entry)
     {
+        Interlocked.Add(ref _residentBytes, -entry.Bytes);
         DeferredBitmapDisposal.ReleaseReferenceAfterRender(entry.Bitmap);
+    }
+
+    private static long EstimateBytes(Bitmap? bitmap)
+    {
+        if (bitmap is null) return 0;
+        try
+        {
+            var size = bitmap.PixelSize;
+            return Math.Max(1, (long)size.Width * size.Height * 4);
+        }
+        catch
+        {
+            return 1;
+        }
     }
 }

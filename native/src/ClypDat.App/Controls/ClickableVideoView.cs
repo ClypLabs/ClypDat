@@ -219,6 +219,7 @@ internal sealed class ClickableVideoView : VideoView
             return;
         }
 
+        MemoryTrimmer.LowLevelInputHookInstalled();
         try
         {
             // WH_MOUSE_LL callbacks arrive as messages, so this pump is what
@@ -234,6 +235,7 @@ internal sealed class ClickableVideoView : VideoView
         {
             UnhookWindowsHookEx(_hookHandle);
             _hookHandle = IntPtr.Zero;
+            MemoryTrimmer.LowLevelInputHookReleased();
         }
     }
 

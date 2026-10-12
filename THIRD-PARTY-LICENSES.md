@@ -124,6 +124,19 @@ ClypDat distributes one coherent FFmpeg 8.1.2 shared package for the native reco
 - x264, x265, libaom, dav1d, zlib, AMD AMF and NVIDIA codec header notices, the LLVM compiler notice, IJG acknowledgement and Microsoft runtime provenance are in `licenses/ffmpeg/`. See `eng/ffmpeg/LICENSE-REVIEW.md` for the exact enabled libraries and obligations. LLVM clang-cl is a pinned build tool for libaom only; no LLVM runtime library is bundled.
 - The complete GPLv3 text is in ClypDat's `LICENSE`. Original FFmpeg/codec sources and patches, the pinned build recipe and matching license material are in the source ZIP. See https://ffmpeg.org/legal.html for upstream component licensing.
 
+## CS2 match stats: SharpZipLib, DemoFile.Net and their dependencies
+
+Match demos are decompressed with SharpZipLib and parsed with DemoFile.Net
+(`DemoFile`, `DemoFile.Game.Cs`), both **MIT**. DemoFile.Net depends on
+Google.Protobuf (**BSD-3-Clause**), Snappier (**BSD-3-Clause**) and
+protobuf-net / protobuf-net.Core (**Apache-2.0**).
+
+- Projects: https://github.com/icsharpcode/SharpZipLib, https://github.com/saul/demofile-net,
+  https://github.com/protocolbuffers/protobuf, https://github.com/brantburnett/Snappier,
+  https://github.com/protobuf-net/protobuf-net
+- MIT notices: `licenses/MIT-components.txt`. BSD-3-Clause notices and text:
+  `licenses/BSD-3-Clause-components.txt`. Apache-2.0 text: `licenses/Apache-2.0.txt`.
+
 ## Vortice.Windows (MIT)
 
 ClypDat's Direct3D11/DXGI/DirectComposition interop for its overlay windows,

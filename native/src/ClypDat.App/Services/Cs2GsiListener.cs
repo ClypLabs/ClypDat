@@ -84,6 +84,12 @@ public sealed class Cs2GsiListener : IDisposable
 
     public event EventHandler<string>? AutoClipPending;
     public event EventHandler<Cs2AutoClipRequest>? AutoClipReady;
+    // Raised off the UI thread when a match ends (game over, map change, CS2
+    // closed). Independent of the auto-clip settings: stats are kept whether
+    // or not anything is being clipped.
+    public event EventHandler<MatchStats>? MatchCompleted;
+    private readonly Cs2MatchTracker _matchTracker = new();
+    public string? LastProviderSteamId => _matchTracker.ProviderSteamId;
     public GameMatchPresencePublisher MatchPresence { get; } = new();
     public volatile bool ReportMatchPresence;
     private DateTime? _matchStartedUtc;
@@ -181,6 +187,9 @@ public sealed class Cs2GsiListener : IDisposable
             ClearRoundLocked();
             SetHealthStageLocked("Stopped");
         }
+        MatchStats? finished;
+        lock (_matchTracker) finished = _matchTracker.Finish();
+        if (finished is not null) RaiseMatchCompleted(finished);
         MatchPresence.Publish(null);
         PersistHealthSnapshot(force: true);
     }
@@ -289,6 +298,12 @@ public sealed class Cs2GsiListener : IDisposable
             }
             return;
         }
+
+        // Before the player checks: a spectated teammate's snapshot (dead, or
+        // between rounds) still carries the map and the round history.
+        MatchStats? finishedMatch;
+        lock (_matchTracker) finishedMatch = _matchTracker.Observe(root, DateTime.UtcNow, MonotonicClock.SharedSeconds);
+        if (finishedMatch is not null) RaiseMatchCompleted(finishedMatch);
 
         if (!TryGetObjectProperty(root, "player", out var player))
         {
@@ -457,6 +472,13 @@ public sealed class Cs2GsiListener : IDisposable
             SyncCounters(roundKills, roundKillHs, deaths, assists);
             if (roundOver) FinalizePendingLocked();
         }
+    }
+
+    private void RaiseMatchCompleted(MatchStats match)
+    {
+        AppLog.Info($"CS2 match finished: {match.Rounds.Count} rounds recorded.");
+        try { MatchCompleted?.Invoke(this, match); }
+        catch (Exception error) { AppLog.Error("CS2 match stats handler failed", error); }
     }
 
     private void SyncCounters(int? roundKills, int? roundKillHs, int? deaths, int? assists)

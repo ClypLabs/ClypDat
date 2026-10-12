@@ -646,6 +646,14 @@
                 <TextBlock Text="Overlays" />
               </StackPanel>
             </Button>
+            <!-- CS2 clips only. Labelled, so no tooltip. -->
+            <Button Classes="editorRailButton" Classes.active="{Binding IsEditorStatsSidebarActive}" Click="EditorStatsSidebarButton_OnClick"
+                    IsVisible="{Binding IsSelectedClipCs2}">
+              <StackPanel Spacing="4">
+                <PathIcon Data="M3,22V8H7V22H3M10,22V2H14V22H10M17,22V14H21V22H17Z" Width="21" Height="21" />
+                <TextBlock Text="Stats" />
+              </StackPanel>
+            </Button>
             <Button Classes="editorRailButton" Classes.active="{Binding IsEditorExportSidebarActive}" Click="EditorExportSidebarButton_OnClick" ToolTip.Tip="Export">
               <StackPanel Spacing="4">
                 <PathIcon Data="M5,20H19V18H5V20M19,9H15V3H9V9H5L12,16L19,9Z" Width="21" Height="21" />
@@ -1982,6 +1990,12 @@
                 <Button Content="Reset effects" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                         Height="34" IsEnabled="{Binding HasClipEffects}" Click="ResetClipEffectsButton_OnClick" />
               </StackPanel>
+
+              <Panel IsVisible="{Binding IsEditorStatsSidebarActive}">
+                <Panel IsVisible="{Binding SelectedMatchStats, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
+                  <controls:MatchStatsPanel DataContext="{Binding SelectedMatchStats}" />
+                </Panel>
+              </Panel>
 
               <StackPanel Spacing="14" IsVisible="{Binding IsEditorExportSidebarActive}">
                 <Border Classes="editorInspectorCard">

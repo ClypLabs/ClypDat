@@ -23,7 +23,8 @@ public enum EditorSidebarSection
     Info,
     Effects,
     Overlays,
-    Export
+    Export,
+    Stats
 }
 
 
@@ -296,6 +297,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             catch (OperationCanceledException) { }
         });
         CaptureBackgroundWorkGate.StateChanged += CaptureBackgroundWorkGate_OnStateChanged;
+        InitializeMatchStats();
         MedalImportRows.CollectionChanged += MedalImportRows_OnCollectionChanged;
         SteelSeriesImportRows.CollectionChanged += SteelSeriesImportRows_OnCollectionChanged;
         MigrateLegacyMedalImportHistory();
@@ -1041,7 +1043,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // stating the models are not copyrightable. That is the author's
         // claim, not a licence, and this list links licences. The model's
         // provenance is set out in full in THIRD-PARTY-LICENSES.md instead.
-        new("RNNoise", "https://github.com/xiph/rnnoise", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause")
+        new("RNNoise", "https://github.com/xiph/rnnoise", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause"),
+        // CS2 match stats: demo decompression and parsing.
+        new("SharpZipLib", "https://github.com/icsharpcode/SharpZipLib", "MIT License", "https://opensource.org/license/mit"),
+        new("DemoFile.Net", "https://github.com/saul/demofile-net", "MIT License", "https://opensource.org/license/mit"),
+        new("Protocol Buffers (Google.Protobuf)", "https://github.com/protocolbuffers/protobuf", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause"),
+        new("protobuf-net", "https://github.com/protobuf-net/protobuf-net", "Apache License 2.0", "https://www.apache.org/licenses/LICENSE-2.0"),
+        new("Snappier", "https://github.com/brantburnett/Snappier", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause")
     };
 
     public int ReplayCaptureX { get; set; }
@@ -1794,6 +1802,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsEditorEffectsSidebarActive));
             OnPropertyChanged(nameof(IsEditorOverlaysSidebarActive));
             OnPropertyChanged(nameof(IsEditorExportSidebarActive));
+            OnPropertyChanged(nameof(IsEditorStatsSidebarActive));
         }
     }
 
@@ -6747,6 +6756,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _spotifyProgressTimer = null;
         _clypDatAccount.Changed -= ClypDatAccountChanged;
         _clypDatAccount.Dispose();
+        DisposeMatchStats();
         CaptureBackgroundWorkGate.StateChanged -= CaptureBackgroundWorkGate_OnStateChanged;
         _micLevelMonitor.LevelChanged -= MicLevelMonitor_OnLevelChanged;
         _micLevelMonitor.Dispose();
@@ -8320,6 +8330,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public void SignOutClypDatAccount()
     {
         var serverSignOut = _clypDatAccount.SignOutAsync();
+        // The match history link rides on this sign-in; it goes with it.
+        UnlinkCs2MatchHistory();
         OnPropertyChanged(nameof(ClypDatAccountStatus));
         OnPropertyChanged(nameof(ClypDatAccountCanLink));
         UpdateDiscordPresence();
@@ -9825,6 +9837,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedSourceSizeBytes = media.SizeBytes;
         SelectedAutoClipMarkers = clipInfo?.AutoClipMarkers ?? Array.Empty<ClipEventMarker>();
         OnPropertyChanged(nameof(SelectedAutoClipMarkers));
+        LoadSelectedMatchStats(media, clipInfo);
         _selectedSpotifyTrack = clipInfo?.SpotifyTrack;
         _selectedSpotifyArtist = clipInfo?.SpotifyArtist;
         _selectedSpotifyAlbum = clipInfo?.SpotifyAlbum;

@@ -62,7 +62,10 @@ public static class Cs2GsiDeployer
         }
     }
 
-    private static string BuildConfig(int port, string authToken) => $$"""
+    // Any change here reaches existing installs by itself: TryDeploy rewrites
+    // the file whenever its content differs. map_round_wins feeds match stats
+    // (each round's winner and how it was won).
+    internal static string BuildConfig(int port, string authToken) => $$"""
         "ClypDat GSI"
         {
          "uri"          "http://127.0.0.1:{{port}}/"
@@ -78,6 +81,7 @@ public static class Cs2GsiDeployer
          {
           "provider"            "1"
           "map"                 "1"
+          "map_round_wins"      "1"
           "round"               "1"
           "player_id"           "1"
           "player_state"        "1"

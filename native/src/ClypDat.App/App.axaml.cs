@@ -129,7 +129,10 @@ public sealed partial class App : Application
             var classicLogo = viewModel.Settings.UseClassicLogo;
             _ = Task.Run(() => ShortcutIconService.Apply(classicLogo));
             if (useSplash) StartWithSplash(_mainWindow, launchPresentation);
-            else if (!UiPreviewMode.Enabled) _ = _mainWindow.PreparePlaybackAsync();
+            // A tray launch (Windows autostart) may never open a clip, and
+            // LibVLC plus its video output is tens of MB held all session for
+            // nothing. The first editor or hover preview creates it on demand.
+            else if (!UiPreviewMode.Enabled && !minimized) _ = _mainWindow.PreparePlaybackAsync();
             if (minimized)
             {
                 void HideOnFirstOpen(object? _, EventArgs __)

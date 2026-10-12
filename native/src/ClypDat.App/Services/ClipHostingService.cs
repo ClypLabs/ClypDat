@@ -43,9 +43,11 @@ internal sealed class ClipHostingException(string message, string? code = null, 
 /// </summary>
 internal static class ClipHostingService
 {
+    // Shared with the other desktop API clients (Cs2MatchHistoryClient).
+    internal static readonly Uri ApiBaseAddress = new("https://www.clypdat.xyz/");
     private static readonly HttpClient Api = new(new HttpClientHandler { AllowAutoRedirect = false })
     {
-        BaseAddress = new Uri("https://www.clypdat.xyz/"), Timeout = TimeSpan.FromSeconds(30),
+        BaseAddress = ApiBaseAddress, Timeout = TimeSpan.FromSeconds(30),
         MaxResponseContentBufferSize = 4 * 1024 * 1024
     };
     // Uploads run as long as they need to; the caller's token cancels them.
@@ -227,7 +229,7 @@ internal static class ClipHostingService
         }
     }
 
-    private static HttpRequestMessage Authorized(HttpMethod method, string path, string token)
+    internal static HttpRequestMessage Authorized(HttpMethod method, string path, string token)
     {
         var request = new HttpRequestMessage(method, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

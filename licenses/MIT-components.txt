@@ -24,6 +24,14 @@ the copyright notice its package declares.
   https://github.com/tmds/Tmds.DBus
   Copyright (c) Tom Deseyn
 
+- SharpZipLib
+  https://github.com/icsharpcode/SharpZipLib
+  Copyright © 2000-2018 SharpZipLib Contributors
+
+- DemoFile.Net (DemoFile, DemoFile.Game.Cs)
+  https://github.com/saul/demofile-net
+  Copyright (c) 2023 Saul Rennison
+
 --------------------------------------------------------------------------------
 
 The MIT License (MIT)

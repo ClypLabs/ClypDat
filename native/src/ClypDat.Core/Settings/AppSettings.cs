@@ -325,6 +325,11 @@ public sealed class AppSettings
     // settings files without losing a user's existing selections.
     public AutoClippingSettings AutoClipping { get; set; } = new();
     public Cs2AutoClipSettings Cs2AutoClip { get; set; } = new();
+    // Keeps CS2's GSI feed running to record a scoreboard per match, even with
+    // auto-clipping off. Linked match history (Steam ID, authentication code,
+    // share codes) is deliberately not here: it is a credential and lives
+    // DPAPI-encrypted beside the ClypDat sign-in (Cs2MatchHistoryLinkStore).
+    public bool Cs2MatchStatsEnabled { get; set; } = true;
     public bool MedalImportStripEmoji { get; set; } = false;
     public bool MedalImportCopyNotMove { get; set; } = true;
     public bool SteelSeriesImportCopyNotMove { get; set; } = true;

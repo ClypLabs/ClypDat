@@ -1,0 +1,124 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ClypDat.App.ViewModels"
+             xmlns:services="using:ClypDat.App.Services"
+             xmlns:controls="using:ClypDat.App.Controls"
+             x:Class="ClypDat.App.Controls.MatchStatsPanel"
+             x:DataType="vm:MatchStatsViewModel">
+  <!-- The editor's Stats section: who, where and the result first, then the
+       numbers, the radar (demo data only), the round strip and both teams.
+       The view model is immutable per clip; nothing here is editable. -->
+  <StackPanel Spacing="14">
+    <Border Classes="editorInspectorCard" IsVisible="{Binding !HasMatch}">
+      <StackPanel Spacing="8">
+        <TextBlock Text="MATCH STATS" Classes="editorCardLabel" />
+        <TextBlock Text="{Binding EmptyMessage}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
+    <StackPanel Spacing="14" IsVisible="{Binding HasMatch}">
+      <Border Classes="editorInspectorCard">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+            <StackPanel Spacing="3">
+              <TextBlock Text="{Binding PlayerName}" Foreground="{StaticResource Text_EDF4FB}" FontSize="16" FontWeight="Bold"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock Text="{Binding MatchLabel}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="2" HorizontalAlignment="Right">
+              <TextBlock Text="{Binding ResultLabel}" Foreground="{Binding ResultBrush}" FontSize="13" FontWeight="Bold" HorizontalAlignment="Right" />
+              <TextBlock Text="{Binding ScoreLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Right" />
+            </StackPanel>
+          </Grid>
+          <ItemsControl ItemsSource="{Binding Tiles}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <UniformGrid Columns="4" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="services:MatchStatTile">
+                <Border Background="{StaticResource Surface_0D151C}" CornerRadius="6" Padding="4,7" Margin="2,0">
+                  <StackPanel Spacing="2" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding Value}" Foreground="{StaticResource Text_EDF4FB}" FontSize="14" FontWeight="Bold"
+                               HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Label}" Foreground="{StaticResource Text_8EA1B6}" FontSize="10" HorizontalAlignment="Center" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="editorInspectorCard" IsVisible="{Binding HasRadar}">
+        <StackPanel Spacing="6">
+          <TextBlock Text="PERFORMANCE" Classes="editorCardLabel" />
+          <controls:MatchRadarChart Axes="{Binding RadarAxes}" Height="210" />
+        </StackPanel>
+      </Border>
+
+      <Border Classes="editorInspectorCard" IsVisible="{Binding HasRounds}">
+        <StackPanel Spacing="9">
+          <TextBlock Text="ROUNDS" Classes="editorCardLabel" />
+          <ItemsControl ItemsSource="{Binding Rounds}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MatchRoundCellViewModel">
+                <!-- The cell carries no text, so its round, result and how it
+                     was won live in the tooltip. -->
+                <Border Width="8" Height="20" CornerRadius="2" Background="{Binding Fill}" Margin="{Binding Margin}"
+                        ToolTip.Tip="{Binding Tip}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <ItemsControl ItemsSource="{Binding Teams}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="14" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:MatchTeamBoardViewModel">
+            <Border Classes="editorInspectorCard">
+              <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="{Binding Title}" Foreground="{Binding Accent}" FontSize="13" FontWeight="Bold" />
+                  <TextBlock Grid.Column="1" Text="{Binding Score}" Foreground="{StaticResource Text_EDF4FB}" FontSize="13" FontWeight="Bold" />
+                </Grid>
+                <ItemsControl ItemsSource="{Binding Players}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MatchPlayerRowViewModel">
+                      <Grid ColumnDefinitions="*,Auto,72" ColumnSpacing="8" Margin="0,3">
+                        <TextBlock Text="{Binding Name}" FontWeight="{Binding Weight}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12"
+                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="{Binding Kda}" FontWeight="{Binding Weight}" Foreground="{StaticResource Text_D6E2F0}"
+                                   FontSize="12" FontFamily="Consolas" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                          <Border Height="4" CornerRadius="2" Background="{StaticResource Surface_263743}" HorizontalAlignment="Stretch">
+                            <Border Height="4" CornerRadius="2" Background="{StaticResource Semantic_9EC6F0}" Width="{Binding BarWidth}"
+                                    HorizontalAlignment="Left" />
+                          </Border>
+                          <TextBlock Text="{Binding Detail}" Foreground="{StaticResource Text_6B7C8C}" FontSize="10" />
+                        </StackPanel>
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <TextBlock Text="{Binding Footnote}" IsVisible="{Binding HasFootnote}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
+    </StackPanel>
+  </StackPanel>
+</UserControl>
