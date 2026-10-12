@@ -5,6 +5,7 @@ namespace ClypDat.App.Services;
 public sealed record MatchStatTile(string Label, string Value);
 public sealed record MatchRadarAxis(string Label, double Value, string Display, bool Available = true)
 {
+    public string Explanation { get; init; } = string.Empty;
     // Drawn as a labelled spoke with no point: missing data is never a 0.
     public static MatchRadarAxis Unavailable(string label) => new(label, double.NaN, "Not recorded", Available: false);
 }

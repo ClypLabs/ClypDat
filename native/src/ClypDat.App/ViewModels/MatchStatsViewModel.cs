@@ -20,7 +20,7 @@ public sealed record MatchTimelineRowViewModel(string Time, string Title, string
 public sealed record MatchDetailRowViewModel(string Label, string Value);
 
 // What the editor's Stats panel binds to. Built once per opened clip, off
-// the match it overlaps; only the Clip / Full Match choice changes after.
+// the match it overlaps; scope and the selected radar explanation can change.
 public sealed class MatchStatsViewModel : ViewModelBase
 {
     private const double BarMaxWidth = 64;
@@ -47,6 +47,22 @@ public sealed class MatchStatsViewModel : ViewModelBase
     private IReadOnlyList<MatchStatTile> ClipTiles { get; init; } = [];
     public IReadOnlyList<MatchRadarAxis> RadarAxes { get; private init; } = [];
     public bool HasRadar => RadarAxes.Count > 0;
+    private MatchRadarAxis? _selectedRadarAxis;
+    public MatchRadarAxis? SelectedRadarAxis
+    {
+        get => _selectedRadarAxis;
+        set
+        {
+            if (!SetProperty(ref _selectedRadarAxis, value)) return;
+            OnPropertyChanged(nameof(HasRadarExplanation));
+            OnPropertyChanged(nameof(RadarExplanationTitle));
+            OnPropertyChanged(nameof(RadarExplanation));
+        }
+    }
+    public bool HasRadarExplanation => SelectedRadarAxis?.Explanation.Length > 0;
+    public string RadarExplanationTitle => SelectedRadarAxis is { } axis
+        ? $"{axis.Label} · {axis.Display}{(axis.Available ? "/100" : string.Empty)}" : string.Empty;
+    public string RadarExplanation => SelectedRadarAxis?.Explanation ?? string.Empty;
     public IReadOnlyList<MatchRoundCellViewModel> Rounds { get; private init; } = [];
     public bool HasRounds => Rounds.Count > 0;
     public IReadOnlyList<MatchTeamBoardViewModel> Teams { get; private init; } = [];

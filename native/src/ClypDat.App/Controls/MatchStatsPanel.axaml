@@ -105,7 +105,13 @@
         </Border.IsVisible>
         <StackPanel Spacing="6">
           <TextBlock Text="PERFORMANCE" Classes="editorCardLabel" />
-          <controls:MatchRadarChart Axes="{Binding RadarAxes}" Height="210" />
+          <controls:MatchRadarChart Axes="{Binding RadarAxes}" SelectedAxis="{Binding SelectedRadarAxis, Mode=TwoWay}" Height="210" />
+          <Border IsVisible="{Binding HasRadarExplanation}" Background="{StaticResource Surface_0D151C}" CornerRadius="6" Padding="10">
+            <StackPanel Spacing="5">
+              <TextBlock Text="{Binding RadarExplanationTitle}" Foreground="{StaticResource Text_EDF4FB}" FontSize="12" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding RadarExplanation}" Foreground="{StaticResource Text_8EA1B6}" FontSize="11" TextWrapping="Wrap" />
+            </StackPanel>
+          </Border>
           <TextBlock Text="{Binding RadarNote}" IsVisible="{Binding HasRadarNote}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
         </StackPanel>
       </Border>

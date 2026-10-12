@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.LogicalTree;
 using ClypDat.App.Controls;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
@@ -10,6 +11,60 @@ namespace ClypDat.App.Tests;
 
 public sealed class MatchStatsRenderingTests
 {
+    [Theory]
+    [InlineData(true, 400)]
+    [InlineData(false, 400)]
+    [InlineData(true, 240)]
+    [InlineData(false, 240)]
+    public void FortniteRadarLabelsFitAndClicksShowTheirScoreInputs(bool zeroBuild, int width)
+    {
+        var match = new MatchStats
+        {
+            Game = "fortnite", ZeroBuild = zeroBuild, HasDemoData = true, HasMatchSummary = true,
+            Placement = 12, PlayerCount = 100, LocalEndSeconds = 210,
+            Players = [new() { IsLocal = true, Kills = 2, Damage = 900, AccuracyPercent = 38, LootingPickups = 24, LootingPartial = true }]
+        };
+        var model = MatchStatsViewModel.FromFortnite(match, null, string.Empty);
+        AvaloniaTestThread.Run(() =>
+        {
+            var panel = new MatchStatsPanel { DataContext = model, Width = width };
+            // Exercise the real XAML binding without opening a native window.
+            var chart = Assert.Single(panel.GetLogicalDescendants().OfType<MatchRadarChart>());
+            chart.Measure(new Size(width, 210));
+            chart.Arrange(new Rect(0, 0, width, 210));
+            using var target = new RenderTargetBitmap(new PixelSize(width, 210), new Vector(96, 96));
+            target.Render(chart);
+            Assert.Equal(zeroBuild ? 4 : 5, chart.LabelBounds.Count);
+            Assert.All(chart.LabelBounds, bounds => Assert.True(new Rect(chart.Bounds.Size).Inflate(0.01).Contains(bounds)));
+            Assert.False(chart.SelectAxisAt(new Point(-20, -20)));
+            for (var i = 0; i < model.RadarAxes.Count; i++)
+            {
+                var axis = model.RadarAxes[i];
+                Assert.True(chart.SelectAxisAt(chart.LabelBounds[i].Center));
+                Assert.Same(axis, model.SelectedRadarAxis);
+                Assert.True(model.HasRadarExplanation);
+                Assert.Contains(axis.Label, model.RadarExplanationTitle);
+                var expected = axis.Label switch
+                {
+                    "Combat" => "2 eliminations contributed 10/50",
+                    "Aim" => "38% accuracy",
+                    "Survival" => "3:30 in the match contributed 7/40",
+                    "Looting" => "24 confirmed pickups",
+                    "Building" => "No verified building activity",
+                    _ => throw new InvalidOperationException(axis.Label)
+                };
+                Assert.Contains(expected, model.RadarExplanation);
+                if (axis.Label == "Looting")
+                {
+                    Assert.Contains("≥24/100", model.RadarExplanationTitle);
+                    Assert.Contains("confirmed minimum", model.RadarExplanation);
+                }
+            }
+            Assert.True(chart.SelectAxisAt(chart.LabelBounds[^1].Center));
+            Assert.False(model.HasRadarExplanation);
+        }, TimeSpan.FromSeconds(20), "Radar labels or score explanations did not render.");
+    }
+
     [Fact]
     public void WorkerReadsTheCurrentThemeWithoutAccessingItsMutableResources()
     {

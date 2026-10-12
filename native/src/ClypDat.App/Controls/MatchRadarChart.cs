@@ -1,6 +1,7 @@
 using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Media;
 using ClypDat.App.Services;
 
@@ -18,23 +19,53 @@ public sealed class MatchRadarChart : Control
     public static readonly StyledProperty<IReadOnlyList<MatchRadarAxis>?> AxesProperty =
         AvaloniaProperty.Register<MatchRadarChart, IReadOnlyList<MatchRadarAxis>?>(nameof(Axes));
 
-    static MatchRadarChart() => AffectsRender<MatchRadarChart>(AxesProperty);
+    public static readonly StyledProperty<MatchRadarAxis?> SelectedAxisProperty =
+        AvaloniaProperty.Register<MatchRadarChart, MatchRadarAxis?>(nameof(SelectedAxis));
+
+    static MatchRadarChart() => AffectsRender<MatchRadarChart>(AxesProperty, SelectedAxisProperty);
+
+    public MatchRadarChart() { Focusable = true; }
 
     public IReadOnlyList<MatchRadarAxis>? Axes { get => GetValue(AxesProperty); set => SetValue(AxesProperty, value); }
+    public MatchRadarAxis? SelectedAxis { get => GetValue(SelectedAxisProperty); set => SetValue(SelectedAxisProperty, value); }
+    private static readonly Cursor LabelCursor = new(StandardCursorType.Hand);
+    private Rect[] _labelBounds = [];
+    internal IReadOnlyList<Rect> LabelBounds => _labelBounds;
 
-    // Room around the web for the axis names and values.
-    private const double LabelMargin = 34;
+    // Measure clearance from the text edge, not its centre.
+    private const double LabelGap = 10;
 
     public override void Render(DrawingContext context)
     {
         base.Render(context);
+        _labelBounds = [];
         if (Axes is not { Count: >= 3 } axes) return;
         var centre = new Point(Bounds.Width / 2, Bounds.Height / 2 + 4);
-        var radius = Math.Max(10, Math.Min(Bounds.Width / 2 - LabelMargin - 12, Bounds.Height / 2 - LabelMargin + 6));
         var accent = AppThemeService.Brush("AccentBrush", "#5864E8");
         var gridPen = new Pen(AppThemeService.Brush("Surface_263743", "#263743"), 1);
         var labelBrush = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6");
         var valueBrush = AppThemeService.Brush("Text_D6E2F0", "#D6E2F0");
+        var labels = axes.Select(axis =>
+        {
+            var name = Text(axis.Label, 11, FontWeight.SemiBold, axis == SelectedAxis ? accent : axis.Available ? valueBrush : labelBrush);
+            var value = Text(axis.Display, 10, FontWeight.Normal, labelBrush);
+            return (Name: name, Value: value, Width: Math.Max(name.Width, value.Width), Height: name.Height + value.Height);
+        }).ToArray();
+        Point Direction(int index)
+        {
+            var angle = -Math.PI / 2 + index * 2 * Math.PI / axes.Count;
+            return new Point(Math.Cos(angle), Math.Sin(angle));
+        }
+        var radius = Math.Min(Bounds.Width / 2, Bounds.Height / 2);
+        for (var i = 0; i < axes.Count; i++)
+        {
+            var direction = Direction(i);
+            if (Math.Abs(direction.X) > 0.001)
+                radius = Math.Min(radius, (Bounds.Width / 2 - labels[i].Width) / Math.Abs(direction.X) - LabelGap);
+            if (Math.Abs(direction.Y) > 0.001)
+                radius = Math.Min(radius, ((direction.Y < 0 ? centre.Y : Bounds.Height - centre.Y) - labels[i].Height) / Math.Abs(direction.Y) - LabelGap);
+        }
+        radius = Math.Max(10, radius);
 
         Point At(int index, double fraction)
         {
@@ -56,17 +87,80 @@ public sealed class MatchRadarChart : Control
         else if (points.Count == 2) context.DrawLine(new Pen(accent, 2), points[0], points[1]);
         foreach (var point in points) context.DrawEllipse(accent, null, point, 2.5, 2.5);
 
+        _labelBounds = new Rect[axes.Count];
         for (var i = 0; i < axes.Count; i++)
         {
-            var anchor = At(i, 1 + LabelMargin / radius * 0.55);
-            var name = Text(axes[i].Label, 11, FontWeight.SemiBold, axes[i].Available ? valueBrush : labelBrush);
-            var value = Text(axes[i].Display, 10, FontWeight.Normal, labelBrush);
-            var width = Math.Max(name.Width, value.Width);
-            var top = anchor.Y - (name.Height + value.Height) / 2;
-            var left = Math.Clamp(anchor.X - width / 2, 0, Math.Max(0, Bounds.Width - width));
+            var direction = Direction(i);
+            var anchor = At(i, 1 + LabelGap / radius);
+            var (name, value, width, height) = labels[i];
+            var left = anchor.X - (direction.X < -0.001 ? width : direction.X > 0.001 ? 0 : width / 2);
+            var top = anchor.Y - (direction.Y < -0.001 ? height : direction.Y > 0.001 ? 0 : height / 2);
+            _labelBounds[i] = new Rect(left, top, width, height);
             context.DrawText(name, new Point(left + (width - name.Width) / 2, top));
             context.DrawText(value, new Point(left + (width - value.Width) / 2, top + name.Height));
         }
+    }
+
+    internal bool SelectAxisAt(Point point)
+    {
+        if (Axes is not { } axes) return false;
+        for (var i = 0; i < Math.Min(axes.Count, _labelBounds.Length); i++)
+        {
+            if (axes[i].Explanation.Length == 0 || !_labelBounds[i].Inflate(4).Contains(point)) continue;
+            SetCurrentValue(SelectedAxisProperty, SelectedAxis == axes[i] ? null : axes[i]);
+            return true;
+        }
+        return false;
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || !SelectAxisAt(e.GetPosition(this))) return;
+        Focus();
+        e.Handled = true;
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        var point = e.GetPosition(this);
+        Cursor = Axes is { } axes && Enumerable.Range(0, Math.Min(axes.Count, _labelBounds.Length))
+            .Any(i => axes[i].Explanation.Length > 0 && _labelBounds[i].Inflate(4).Contains(point)) ? LabelCursor : null;
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        Cursor = null;
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        var axes = Axes?.Where(axis => axis.Explanation.Length > 0).ToList();
+        if (axes is not { Count: > 0 }) return;
+        var current = SelectedAxis is { } selected ? axes.IndexOf(selected) : -1;
+        switch (e.Key)
+        {
+            case Key.Left:
+            case Key.Up:
+                SetCurrentValue(SelectedAxisProperty, axes[current < 0 ? axes.Count - 1 : (current + axes.Count - 1) % axes.Count]);
+                break;
+            case Key.Right:
+            case Key.Down:
+                SetCurrentValue(SelectedAxisProperty, axes[(current + 1) % axes.Count]);
+                break;
+            case Key.Enter:
+            case Key.Space:
+                SetCurrentValue(SelectedAxisProperty, current < 0 ? axes[0] : null);
+                break;
+            case Key.Escape:
+                SetCurrentValue(SelectedAxisProperty, null);
+                break;
+            default: return;
+        }
+        e.Handled = true;
     }
 
     private static StreamGeometry Polygon(IEnumerable<Point> points)

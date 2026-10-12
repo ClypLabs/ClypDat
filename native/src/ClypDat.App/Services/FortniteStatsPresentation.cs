@@ -62,18 +62,28 @@ public static class FortniteStatsPresentation
     public static IReadOnlyList<MatchRadarAxis> RadarAxes(MatchStats match)
     {
         if (match.LocalPlayer is not { } player) return [];
-        static MatchRadarAxis Axis(string label, double? score) => score is { } value
+        static MatchRadarAxis Axis(string label, double? score, string explanation) => (score is { } value
             ? new MatchRadarAxis(label, value / 100, value.ToString("0", CultureInfo.CurrentCulture))
-            : MatchRadarAxis.Unavailable(label);
-        var combat = Axis("Combat", CombatScore(player));
-        var aim = Axis("Aim", AimScore(player));
-        var survival = Axis("Survival", SurvivalScore(match));
-        var looting = Axis("Looting", LootingScore(player));
+            : MatchRadarAxis.Unavailable(label)) with { Explanation = explanation };
+        var combat = Axis("Combat", CombatScore(player), player.Damage is { } damage
+            ? $"{player.Kills} eliminations contributed {50 * MatchStatsPresentation.Normalise(player.Kills, EliminationsRange):0.#}/50 points.\n{damage:N0} damage to players contributed {50 * MatchStatsPresentation.Normalise(damage, DamageRange):0.#}/50 points.\nFull points at 10 eliminations and 3,000 damage."
+            : "Player damage wasn't recorded for this match, so no Combat score can be calculated.");
+        var aim = Axis("Aim", AimScore(player), player.AccuracyPercent is { } accuracy
+            ? $"{accuracy:0.#}% accuracy.\nAccuracy of 15% or less scores 0; 55% or more scores 100."
+            : "Accuracy wasn't recorded for this match, so no Aim score can be calculated.");
+        var survival = Axis("Survival", SurvivalScore(match), SurvivalScore(match) is not null
+            ? $"Placement #{match.Placement} contributed {60 * Math.Clamp((100 - match.Placement!.Value) / 99.0, 0, 1):0.#}/60 points.\n{Clock(match.LocalEndSeconds!.Value)} in the match contributed {40 * Math.Clamp(match.LocalEndSeconds.Value / 1200, 0, 1):0.#}/40 points.\nFull points at 1st place and 20 minutes."
+            : "Survival needs a battle royale placement and your recorded time in the match. Those stats aren't available here.");
+        var looting = Axis("Looting", LootingScore(player), player.LootingPickups is >= 0 and var pickups
+            ? $"{pickups} confirmed pickups.\nEach collected item stack adds 1 point, up to 100. Picking up your own dropped items adds no points."
+                + (player.LootingPartial ? "\nSome pickups couldn't be attributed to you; this score is a confirmed minimum." : string.Empty)
+            : "Your collected pickups couldn't be confirmed for this match, so no Looting score can be calculated.");
         if (player.LootingPartial && LootingScore(player) is { } recorded)
-            looting = new MatchRadarAxis("Looting", recorded / 100, $"≥{recorded:0}");
+            looting = looting with { Display = $"≥{recorded:0}" };
         return match.ZeroBuild == true
             ? [combat, aim, survival, looting]
-            : [combat, aim, survival, MatchRadarAxis.Unavailable("Building"), looting];
+            : [combat, aim, survival, MatchRadarAxis.Unavailable("Building") with
+                { Explanation = "No verified building activity for this match. Material totals aren't used to calculate a Building score." }, looting];
     }
 
     /// <summary>Why each unavailable axis is empty, one sentence each.</summary>
