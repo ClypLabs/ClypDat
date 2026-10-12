@@ -38,7 +38,9 @@
             <StackPanel Spacing="12">
               <StackPanel Classes="settingsRowText">
                 <TextBlock Classes="settingsRowTitle" Text="Link match history" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                <TextBlock Classes="settingsRowDesc" Text="Adds every player's stats, ADR and the radar by reading each match's demo after the game closes. Needs your ClypDat sign-in." />
+                <TextBlock Classes="settingsRowDesc">
+                  <Run Text="Adds every player's stats, ADR and the radar by reading each match's demo after the game closes. Needs your ClypDat sign-in. New to this? Follow the " /><InlineUIContainer BaselineAlignment="TextBottom"><Button Classes="linkButton webLink inlineLink" Content="setup guide" Click="Cs2MatchHistoryGuide_OnClick" /></InlineUIContainer><Run Text="." />
+                </TextBlock>
               </StackPanel>
 
               <StackPanel Spacing="8" IsVisible="{Binding IsCs2MatchHistorySummaryVisible}">
@@ -50,12 +52,13 @@
               </StackPanel>
 
               <StackPanel Spacing="10" IsVisible="{Binding IsCs2MatchHistoryFormVisible}" MaxWidth="520" HorizontalAlignment="Left">
-                <Button Classes="linkButton webLink" Content="Step-by-step setup guide" Padding="0" HorizontalAlignment="Left" Click="Cs2MatchHistoryGuide_OnClick" />
                 <StackPanel Spacing="4">
                   <TextBlock Classes="settingsRowDescSm" Text="Steam ID (17 digits)" />
                   <TextBox Classes="settingsInput" Text="{Binding Cs2SteamIdInput}" PlaceholderText="7656119xxxxxxxxxx" MaxLength="120" />
                   <TextBlock Classes="settingsRowError" Text="{Binding Cs2SteamIdError}" IsVisible="{Binding HasCs2SteamIdError}" />
-                  <TextBlock Classes="settingsRowDescSm" Text="Filled in for you after you play CS2 with ClypDat open. Otherwise paste your Steam profile link or the ID from your Steam account page." />
+                  <TextBlock Classes="settingsRowDescSm">
+                    <Run Text="Filled in for you after you play CS2 with ClypDat open. Otherwise paste your Steam profile link or the ID from your " /><InlineUIContainer BaselineAlignment="TextBottom"><Button Classes="linkButton webLink inlineLink" Content="Steam account page" Click="SteamAccountPage_OnClick" /></InlineUIContainer><Run Text="." />
+                  </TextBlock>
                 </StackPanel>
                 <StackPanel Spacing="4">
                   <TextBlock Classes="settingsRowDescSm" Text="Game authentication code" />
@@ -65,7 +68,9 @@
                     <ToggleButton Grid.Column="1" Content="{Binding Cs2AuthCodeRevealLabel}" IsChecked="{Binding IsCs2AuthCodeRevealed}" />
                   </Grid>
                   <TextBlock Classes="settingsRowError" Text="{Binding Cs2AuthCodeError}" IsVisible="{Binding HasCs2AuthCodeError}" />
-                  <Button Classes="linkButton webLink" Content="Create your code on Steam" Padding="0" HorizontalAlignment="Left" Click="Cs2AuthCodeHelp_OnClick" />
+                  <TextBlock Classes="settingsRowDescSm">
+                    <Run Text="Create one on " /><InlineUIContainer BaselineAlignment="TextBottom"><Button Classes="linkButton webLink inlineLink" Content="Steam's CS2 match history page" Click="Cs2AuthCodeHelp_OnClick" /></InlineUIContainer><Run Text="." />
+                  </TextBlock>
                 </StackPanel>
                 <StackPanel Spacing="4">
                   <TextBlock Classes="settingsRowDescSm" Text="Match code to start from" />

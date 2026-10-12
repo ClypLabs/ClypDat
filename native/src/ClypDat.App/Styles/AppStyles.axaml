@@ -630,6 +630,21 @@
   <Style Selector="Button.linkButton.webLink">
     <Setter Property="Foreground" Value="#38BDF8" />
   </Style>
+  <!-- Inside a paragraph: sized and spaced like the words around it. -->
+  <Style Selector="Button.linkButton.inlineLink">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <!-- Fluent's Button theme sets its own size, so match each paragraph style. -->
+  <Style Selector="TextBlock.settingsRowDesc Button.inlineLink">
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="TextBlock.settingsRowDescSm Button.inlineLink">
+    <Setter Property="FontSize" Value="11" />
+  </Style>
   <Style Selector="Button.linkButton.webLink:pointerover">
     <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
     <Setter Property="Foreground" Value="#7DD3FC" />
