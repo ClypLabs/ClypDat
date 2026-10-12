@@ -21,9 +21,49 @@ internal sealed class FortniteOutfitPortraitCache
 
     internal FortniteOutfitPortraitCache(string ownerRoot, HttpClient? http = null)
     {
-        _ownerRoot = Path.GetFullPath(ownerRoot);
+        _ownerRoot = ResolveOwnedRoot(ownerRoot);
         CacheRoot = Path.Combine(_ownerRoot, "cosmetics");
         _http = http ?? Http;
+    }
+
+    // The product's configured AppData location is trusted and may itself
+    // have been moved with a junction, including one in an ancestor folder.
+    // Canonicalise that location once; links planted beneath it remain
+    // untrusted and are still rejected by the ordinary cache path guard.
+    private static string ResolveOwnedRoot(string ownerRoot)
+    {
+        var original = Path.GetFullPath(ownerRoot);
+        var resolved = original;
+        try
+        {
+            for (var attempt = 0; attempt < 64; ++attempt)
+            {
+                var drive = Path.GetPathRoot(resolved)!;
+                var components = resolved[drive.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+                var current = drive;
+                var followed = false;
+                foreach (var component in components)
+                {
+                    current = Path.Combine(current, component);
+                    FileAttributes attributes;
+                    try { attributes = File.GetAttributes(current); }
+                    catch (FileNotFoundException) { continue; }
+                    catch (DirectoryNotFoundException) { continue; }
+                    if ((attributes & FileAttributes.ReparsePoint) == 0) continue;
+                    var target = new DirectoryInfo(current).ResolveLinkTarget(returnFinalTarget: true);
+                    if (target is null) return original;
+                    var remainder = Path.GetRelativePath(current, resolved);
+                    resolved = Path.GetFullPath(remainder == "." ? target.FullName : Path.Combine(target.FullName, remainder));
+                    followed = true;
+                    break;
+                }
+                if (!followed) return resolved;
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
+        // An unresolved or cyclic root remains subject to the strict guard,
+        // which refuses the request without affecting the rest of Stats.
+        return original;
     }
 
     internal static string? NormaliseId(string? outfitId)

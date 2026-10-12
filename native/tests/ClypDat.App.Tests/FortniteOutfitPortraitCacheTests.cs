@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Net;
 using ClypDat.App.Services;
 using Xunit;
@@ -106,6 +107,77 @@ public sealed class FortniteOutfitPortraitCacheTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => old);
         Assert.Equal(Png, await cache.GetBytesAsync("Character_New", default));
         Assert.Equal("character_new.png", Path.GetFileName(Assert.Single(Directory.EnumerateFiles(cache.CacheRoot))));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TrustedAppDataJunctionsWorkButNestedCacheRedirectsRemainBlocked(bool ancestorJunction)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var folder = new CacheFixture();
+        var realProfile = Path.Combine(folder.Root, "real-profile");
+        var realOwner = Path.Combine(realProfile, "ClypDat");
+        Directory.CreateDirectory(realOwner);
+        var ownerLink = Path.Combine(folder.Root, "trusted-owner-link");
+        var nestedLink = Path.Combine(realOwner, "cosmetics");
+        var outside = Path.Combine(folder.Root, "outside-cache");
+        Directory.CreateDirectory(outside);
+        var sentinel = Path.Combine(outside, "character_slumpafter.png");
+        await File.WriteAllBytesAsync(sentinel, Png);
+        try
+        {
+            await CreateJunctionAsync(ownerLink, ancestorJunction ? realProfile : realOwner);
+            var owner = ancestorJunction ? Path.Combine(ownerLink, "ClypDat") : ownerLink;
+            var calls = 0;
+            using var http = new HttpClient(new Handler((_, _) =>
+            {
+                ++calls;
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Png) });
+            }));
+            var cache = new FortniteOutfitPortraitCache(owner, http);
+            Assert.Equal(Path.Combine(realOwner, "cosmetics"), cache.CacheRoot, ignoreCase: true);
+            Assert.Equal(Png, await cache.GetBytesAsync("Character_SlumpAfter", default));
+            Assert.Equal(Png, await cache.GetBytesAsync("Character_SlumpAfter", default));
+            Assert.Equal(1, calls);
+            Assert.Equal(Png, await File.ReadAllBytesAsync(Path.Combine(realOwner, "cosmetics", "character_slumpafter.png")));
+
+            File.Delete(Path.Combine(cache.CacheRoot, "character_slumpafter.png"));
+            Directory.Delete(cache.CacheRoot);
+            await CreateJunctionAsync(nestedLink, outside);
+            var redirected = new FortniteOutfitPortraitCache(owner, http);
+            Assert.Null(await redirected.GetBytesAsync("Character_SlumpAfter", default));
+            Assert.Null(await redirected.GetBytesAsync("Character_New", default));
+            Assert.Equal(1, calls);
+            Assert.Equal(Png, await File.ReadAllBytesAsync(sentinel));
+            Assert.Equal(sentinel, Assert.Single(Directory.EnumerateFiles(outside)));
+        }
+        finally
+        {
+            // Unlink the fixtures themselves before recursive fixture cleanup.
+            // Their targets and the outside sentinel must remain untouched.
+            if (Directory.Exists(nestedLink) && (File.GetAttributes(nestedLink) & FileAttributes.ReparsePoint) != 0) Directory.Delete(nestedLink);
+            if (Directory.Exists(ownerLink)) Directory.Delete(ownerLink);
+        }
+    }
+
+    private static async Task CreateJunctionAsync(string link, string target)
+    {
+        var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe")
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        start.ArgumentList.Add("/c");
+        start.ArgumentList.Add("mklink");
+        start.ArgumentList.Add("/J");
+        start.ArgumentList.Add(link);
+        start.ArgumentList.Add(target);
+        using var process = Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, $"Junction fixture failed: {await output} {await error}");
+        Assert.True((File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0);
     }
 
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
