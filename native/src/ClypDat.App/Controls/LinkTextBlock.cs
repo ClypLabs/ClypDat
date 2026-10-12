@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using ClypDat.App.Services;
@@ -27,7 +28,15 @@ public sealed class LinkTextBlock : TextBlock
 
     // Without a background only the glyphs are hit-testable, and the gaps
     // between letters would drop the hover.
-    public LinkTextBlock() => Background = Brushes.Transparent;
+    //
+    // Clicks are taken on press, from the tunnel and with handled events too:
+    // a parent that handles the press (the settings scroller, a card) left
+    // this control without the press/release pair it waited for.
+    public LinkTextBlock()
+    {
+        Background = Brushes.Transparent;
+        AddHandler(PointerPressedEvent, OnLinkPressed, RoutingStrategies.Tunnel | RoutingStrategies.Bubble, handledEventsToo: true);
+    }
 
     // Keeps TextBlock.settingsRowDesc and friends applying to this control.
     protected override Type StyleKeyOverride => typeof(TextBlock);
@@ -50,10 +59,10 @@ public sealed class LinkTextBlock : TextBlock
         SetHovered(null);
     }
 
-    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    private void OnLinkPressed(object? sender, PointerPressedEventArgs e)
     {
-        base.OnPointerReleased(e);
-        if (e.InitialPressMouseButton != MouseButton.Left) return;
+        if (e.Handled && e.Route == RoutingStrategies.Bubble) return;
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
         if (RunAt(e.GetPosition(this)) is not { } run || GetUrl(run) is not { Length: > 0 } url) return;
         e.Handled = true;
         try
@@ -88,7 +97,7 @@ public sealed class LinkTextBlock : TextBlock
 
     // Maps a point to the link Run under it. The layout is built from the
     // Runs in order, so a character index walks the Runs' text lengths.
-    private Run? RunAt(Point point)
+    internal Run? RunAt(Point point)
     {
         if (Inlines is null || Inlines.Count == 0) return null;
         var local = new Point(point.X - Padding.Left, point.Y - Padding.Top);
