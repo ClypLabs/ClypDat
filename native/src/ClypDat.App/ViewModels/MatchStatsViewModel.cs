@@ -60,8 +60,15 @@ public sealed class MatchStatsViewModel : ViewModelBase
         }
     }
     public bool HasRadarExplanation => SelectedRadarAxis?.Explanation.Length > 0;
-    public string RadarExplanationTitle => SelectedRadarAxis is { } axis
-        ? $"{axis.Label} · {axis.Display}{(axis.Available ? "/100" : string.Empty)}" : string.Empty;
+    public string RadarExplanationTitle
+    {
+        get
+        {
+            if (SelectedRadarAxis is not { } axis) return string.Empty;
+            var score = IsFortnite ? axis.Display : $"{Math.Clamp(axis.Value, 0, 1) * 100:0}";
+            return $"{axis.Label} · {(axis.Available ? score + "/100" : axis.Display)}";
+        }
+    }
     public string RadarExplanation => SelectedRadarAxis?.Explanation ?? string.Empty;
     public IReadOnlyList<MatchRoundCellViewModel> Rounds { get; private init; } = [];
     public bool HasRounds => Rounds.Count > 0;

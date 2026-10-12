@@ -11,6 +11,32 @@ namespace ClypDat.App.Tests;
 
 public sealed class MatchStatsRenderingTests
 {
+    [Fact]
+    public void Cs2UsesTheSharedClickableRadarLabelsAndOutsideClickDismissal()
+    {
+        var model = MatchStatsViewModel.From(new MatchStats
+        {
+            Game = "cs2", HasDemoData = true,
+            Players = [new() { IsLocal = true, Kills = 12, HeadshotKills = 6, Deaths = 8, RoundsPlayed = 20, Damage = 1600 }]
+        });
+        AvaloniaTestThread.Run(() =>
+        {
+            var panel = new MatchStatsPanel { DataContext = model };
+            var chart = Assert.Single(panel.GetLogicalDescendants().OfType<MatchRadarChart>());
+            chart.Measure(new Size(300, chart.Height));
+            chart.Arrange(new Rect(0, 0, 300, chart.Height));
+            using var target = new RenderTargetBitmap(new PixelSize(300, (int)chart.Height), new Vector(96, 96));
+            target.Render(chart);
+            Assert.Equal(5, chart.LabelBounds.Count);
+            Assert.All(model.RadarAxes, axis => Assert.NotEmpty(axis.Explanation));
+            Assert.True(chart.SelectAxisAt(chart.LabelBounds[0].Center));
+            Assert.Equal("Aim · 73/100", model.RadarExplanationTitle);
+            Assert.Contains("50% HS", model.RadarExplanation);
+            panel.DismissRadarSelectionAt(new Point(-20, -20));
+            Assert.False(model.HasRadarExplanation);
+        }, TimeSpan.FromSeconds(20), "Shared CS2 radar labels did not render.");
+    }
+
     [Theory]
     [InlineData(true, 400)]
     [InlineData(false, 400)]
@@ -30,9 +56,9 @@ public sealed class MatchStatsRenderingTests
             var panel = new MatchStatsPanel { DataContext = model, Width = width };
             // Exercise the real XAML binding without opening a native window.
             var chart = Assert.Single(panel.GetLogicalDescendants().OfType<MatchRadarChart>());
-            chart.Measure(new Size(width, 210));
-            chart.Arrange(new Rect(0, 0, width, 210));
-            using var target = new RenderTargetBitmap(new PixelSize(width, 210), new Vector(96, 96));
+            chart.Measure(new Size(width, chart.Height));
+            chart.Arrange(new Rect(0, 0, width, chart.Height));
+            using var target = new RenderTargetBitmap(new PixelSize(width, (int)chart.Height), new Vector(96, 96));
             target.Render(chart);
             Assert.Equal(zeroBuild ? 4 : 5, chart.LabelBounds.Count);
             Assert.All(chart.LabelBounds, bounds => Assert.True(new Rect(chart.Bounds.Size).Inflate(0.01).Contains(bounds)));
@@ -60,6 +86,11 @@ public sealed class MatchStatsRenderingTests
                     Assert.Contains("confirmed minimum", model.RadarExplanation);
                 }
             }
+            panel.DismissRadarSelectionAt(chart.LabelBounds[^1].Center);
+            Assert.True(model.HasRadarExplanation);
+            panel.DismissRadarSelectionAt(new Point(-20, -20));
+            Assert.False(model.HasRadarExplanation);
+            Assert.True(chart.SelectAxisAt(chart.LabelBounds[^1].Center));
             Assert.True(chart.SelectAxisAt(chart.LabelBounds[^1].Center));
             Assert.False(model.HasRadarExplanation);
         }, TimeSpan.FromSeconds(20), "Radar labels or score explanations did not render.");

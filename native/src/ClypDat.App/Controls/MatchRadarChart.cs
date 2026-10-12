@@ -24,7 +24,7 @@ public sealed class MatchRadarChart : Control
 
     static MatchRadarChart() => AffectsRender<MatchRadarChart>(AxesProperty, SelectedAxisProperty);
 
-    public MatchRadarChart() { Focusable = true; }
+    public MatchRadarChart() { Focusable = true; Height = 240; }
 
     public IReadOnlyList<MatchRadarAxis>? Axes { get => GetValue(AxesProperty); set => SetValue(AxesProperty, value); }
     public MatchRadarAxis? SelectedAxis { get => GetValue(SelectedAxisProperty); set => SetValue(SelectedAxisProperty, value); }
@@ -34,9 +34,9 @@ public sealed class MatchRadarChart : Control
     internal IReadOnlyList<Rect> LabelBounds => _labelBounds;
 
     // Measure clearance from the label box edge, not its centre.
-    private const double LabelGap = 10;
-    private const double LabelPaddingX = 8;
-    private const double LabelPaddingY = 5;
+    private const double LabelGap = 8;
+    private const double LabelPaddingX = 6;
+    private const double LabelPaddingY = 4;
 
     public override void Render(DrawingContext context)
     {
@@ -57,10 +57,9 @@ public sealed class MatchRadarChart : Control
             var value = Text(axis.Display, 10, FontWeight.Normal, labelBrush);
             return (Name: name, Value: value, Width: Math.Max(name.Width, value.Width), Height: name.Height + value.Height);
         }).ToArray();
-        var buttonWidth = Math.Max(72, labels.Max(label => label.Width) + 2 * LabelPaddingX);
+        var buttonWidth = Math.Max(60, labels.Max(label => label.Width) + 2 * LabelPaddingX);
         for (var i = 0; i < axes.Count; i++)
-            if (axes[i].Explanation.Length > 0)
-                labels[i] = (labels[i].Name, labels[i].Value, buttonWidth, labels[i].Height + 2 * LabelPaddingY);
+            labels[i] = (labels[i].Name, labels[i].Value, buttonWidth, labels[i].Height + 2 * LabelPaddingY);
         Point Direction(int index)
         {
             var angle = -Math.PI / 2 + index * 2 * Math.PI / axes.Count;
@@ -106,13 +105,10 @@ public sealed class MatchRadarChart : Control
             var left = anchor.X - (direction.X < -0.001 ? width : direction.X > 0.001 ? 0 : width / 2);
             var top = anchor.Y - (direction.Y < -0.001 ? height : direction.Y > 0.001 ? 0 : height / 2);
             _labelBounds[i] = new Rect(left, top, width, height);
-            if (axes[i].Explanation.Length > 0)
-            {
-                var selected = axes[i] == SelectedAxis;
-                context.DrawRectangle(selected ? selectedBackground : labelBackground,
-                    new Pen(selected || i == _hoveredAxis ? accent : labelBorder, 1.5), _labelBounds[i], 8, 8);
-                top += LabelPaddingY;
-            }
+            var selected = axes[i] == SelectedAxis;
+            context.DrawRectangle(selected ? selectedBackground : labelBackground,
+                new Pen(selected || i == _hoveredAxis ? accent : labelBorder, 1.5), _labelBounds[i], 8, 8);
+            top += LabelPaddingY;
             context.DrawText(name, new Point(left + (width - name.Width) / 2, top));
             context.DrawText(value, new Point(left + (width - value.Width) / 2, top + name.Height));
         }
