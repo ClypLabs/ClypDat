@@ -625,30 +625,6 @@
   <Style Selector="Button.linkButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="{StaticResource Text_D2DEEC}" />
   </Style>
-  <!-- A link that leaves the app for a web page: blue text, no hover pill,
-       same blue as the website's outbound links. -->
-  <Style Selector="Button.linkButton.webLink">
-    <Setter Property="Foreground" Value="#38BDF8" />
-  </Style>
-  <!-- Inside a paragraph: sized and spaced like the words around it. -->
-  <Style Selector="Button.linkButton.inlineLink">
-    <Setter Property="Padding" Value="0" />
-    <Setter Property="Margin" Value="0" />
-    <Setter Property="MinHeight" Value="0" />
-    <Setter Property="CornerRadius" Value="0" />
-    <Setter Property="Cursor" Value="Hand" />
-  </Style>
-  <!-- Fluent's Button theme sets its own size, so match each paragraph style. -->
-  <Style Selector="TextBlock.settingsRowDesc Button.inlineLink">
-    <Setter Property="FontSize" Value="12" />
-  </Style>
-  <Style Selector="TextBlock.settingsRowDescSm Button.inlineLink">
-    <Setter Property="FontSize" Value="11" />
-  </Style>
-  <Style Selector="Button.linkButton.webLink:pointerover">
-    <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
-    <Setter Property="Foreground" Value="#7DD3FC" />
-  </Style>
   <!-- The editor hover bar stays readable on its fixed black scrim. -->
   <Style Selector="Window.hoverPlayback Button.linkButton">
     <Setter Property="Background" Value="#00FFFFFF" />
