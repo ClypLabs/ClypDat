@@ -76,7 +76,7 @@
                   <TextBlock Classes="settingsRowDescSm" Text="Match code to start from" />
                   <TextBox Classes="settingsInput" Text="{Binding Cs2ShareCodeInput}" PlaceholderText="CSGO-xxxxx-xxxxx-xxxxx-xxxxx-xxxxx" MaxLength="300" />
                   <TextBlock Classes="settingsRowError" Text="{Binding Cs2ShareCodeError}" IsVisible="{Binding HasCs2ShareCodeError}" />
-                  <TextBlock Classes="settingsRowDescSm" Text="The Steam page that creates your authentication code also shows your most recent match code; that starts from now. To fill in stats for clips you've already saved, paste an older code from CS2 › Watch › Your Matches instead (Valve keeps demos for a few weeks)." />
+                  <TextBlock Classes="settingsRowDescSm" Text="In CS2, open Watch › Your Matches, select your most recent match and copy its share code or link. To fill in stats for clips you&apos;ve already saved, copy an older match instead (Valve keeps demos for a few weeks)." />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Button Classes="primaryButton" Content="Link" Click="Cs2MatchHistoryLink_OnClick" />
