@@ -276,6 +276,8 @@ public sealed class Cs2MatchStatsTests
     [InlineData(" 76561198000000001 ", true)]
     [InlineData("7656119800000000", false)]
     [InlineData("12345678901234567", false)]
+    [InlineData("https://steamcommunity.com/profiles/76561198000000001/", true)]
+    [InlineData("https://example.com/76561198000000001", false)]
     public void SteamIdFormat(string value, bool valid) => Assert.Equal(valid, Cs2MatchHistoryFormats.NormaliseSteamId(value) is not null);
 
     [Theory]
@@ -290,7 +292,13 @@ public sealed class Cs2MatchStatsTests
     [InlineData("CSGO-ABCDE-FGHJK-LMNOP-QRSTU-VWXY0", false)]
     [InlineData("CSGO-ABCDE-FGHIK-LMNOP-QRSTU-VWXYZ", false)]
     [InlineData("csgo-ABCDE-FGHJK-LMNOP-QRSTU-VWXYZ", false)]
+    [InlineData("steam://rungame/730/76561202255233023/+csgo_download_match%20CSGO-ABCDE-FGHJK-LMNOP-QRSTU-VWXYZ", true)]
+    [InlineData("CSGO-ABCDE-FGHJK-LMNOP-QRSTU-VWXYZZ", false)]
     public void ShareCodeFormat(string value, bool valid) => Assert.Equal(valid, Cs2MatchHistoryFormats.NormaliseShareCode(value) is not null);
+
+    [Fact]
+    public void ShareCodeIsTakenOutOfAPastedLink() => Assert.Equal("CSGO-ABCDE-FGHJK-LMNOP-QRSTU-VWXYZ",
+        Cs2MatchHistoryFormats.NormaliseShareCode("steam://rungame/730/76561202255233023/+csgo_download_match%20CSGO-ABCDE-FGHJK-LMNOP-QRSTU-VWXYZ"));
 
     [Fact]
     public void LinkIsEncryptedAtRestAndNeverPrinted()

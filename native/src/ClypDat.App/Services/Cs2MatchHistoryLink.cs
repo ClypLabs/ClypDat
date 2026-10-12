@@ -19,8 +19,19 @@ internal static partial class Cs2MatchHistoryFormats
     [GeneratedRegex(@"^[A-Z0-9]{4}-[A-Z0-9]{5}-[A-Z0-9]{4}$", RegexOptions.CultureInvariant)]
     private static partial Regex AuthCodePattern();
 
-    public static string? NormaliseSteamId(string? value) =>
-        value?.Trim() is { } trimmed && SteamIdPattern().IsMatch(trimmed) ? trimmed : null;
+    // A pasted profile link (steamcommunity.com/profiles/7656119...) works too.
+    [GeneratedRegex(@"(?<!\d)7656119\d{10}(?!\d)", RegexOptions.CultureInvariant)]
+    private static partial Regex SteamIdInText();
+
+    public static string? NormaliseSteamId(string? value)
+    {
+        var trimmed = value?.Trim();
+        if (trimmed is null) return null;
+        if (SteamIdPattern().IsMatch(trimmed)) return trimmed;
+        return trimmed.Contains("/profiles/", StringComparison.OrdinalIgnoreCase) && SteamIdInText().Match(trimmed) is { Success: true } match
+            ? match.Value
+            : null;
+    }
 
     public static string? NormaliseAuthCode(string? value) =>
         value?.Trim().ToUpperInvariant() is { } trimmed && AuthCodePattern().IsMatch(trimmed) ? trimmed : null;
@@ -28,7 +39,13 @@ internal static partial class Cs2MatchHistoryFormats
     public static string? NormaliseShareCode(string? value)
     {
         var trimmed = value?.Trim();
-        if (trimmed is null || trimmed.Length != 34 || !trimmed.StartsWith("CSGO-", StringComparison.Ordinal)) return null;
+        // CS2 and Steam hand out the code inside a link
+        // (steam://rungame/730/.../+csgo_download_match%20CSGO-...), so take
+        // the code out of whatever was pasted.
+        var start = trimmed?.IndexOf("CSGO-", StringComparison.Ordinal) ?? -1;
+        if (trimmed is null || start < 0 || trimmed.Length < start + 34) return null;
+        if (trimmed.Length > start + 34 && char.IsLetterOrDigit(trimmed[start + 34])) return null;
+        trimmed = trimmed.Substring(start, 34);
         var groups = trimmed[5..].Split('-');
         return groups.Length == 5 && groups.All(group => group.Length == 5 && group.All(ShareCodeAlphabet.Contains)) ? trimmed : null;
     }

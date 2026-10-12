@@ -11210,7 +11210,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private static readonly string[] SettingsSectionNames =
     {
         "General", "Game Detection", "Import Clips",
-        "Replay Buffer", "Custom Game Settings", "Auto-Clip", "Audio", "Game Audio Exclusions", "Advanced",
+        "Replay Buffer", "Custom Game Settings", "Auto-Clip", "Game Stats", "Audio", "Game Audio Exclusions", "Advanced",
         "Appearance", "Overlays and Notifications", "Discord Rich Presence",
         "About"
     };

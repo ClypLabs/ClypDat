@@ -76,7 +76,7 @@ public sealed class MatchStatsViewModel
         var footnote = match.HasDemoData ? string.Empty
             : match.DemoStatus == "expired" ? "Valve no longer keeps this match's demo, so only your own stats are shown."
             : match.DemoStatus == "failed" ? "This match's demo couldn't be read, so only your own stats are shown."
-            : "The full scoreboard, ADR and radar appear once ClypDat reads this match's demo. Link your CS2 match history in Settings › Auto-Clipping.";
+            : "The full scoreboard, ADR and radar appear once ClypDat reads this match's demo. Link your CS2 match history in Settings › Game Stats.";
 
         return new MatchStatsViewModel
         {

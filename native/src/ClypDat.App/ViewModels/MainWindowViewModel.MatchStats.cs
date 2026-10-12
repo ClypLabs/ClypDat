@@ -4,7 +4,7 @@ using ClypDat.App.Services;
 namespace ClypDat.App.ViewModels;
 
 // Match stats: the editor's Stats section and the CS2 match history link in
-// Settings › Auto-Clipping.
+// Settings › Game Stats.
 public sealed partial class MainWindowViewModel
 {
     private Cs2MatchHistoryService? _cs2MatchHistory;
@@ -97,7 +97,7 @@ public sealed partial class MainWindowViewModel
                 var match = MatchClipMapping.FindMatch(store.LoadAll(), timeline);
                 var markers = match is null ? [] : MatchClipMapping.Markers(match, timeline);
                 var view = match is null
-                    ? MatchStatsViewModel.Empty("No match stats for this clip yet. ClypDat keeps a scoreboard for each CS2 match while it runs, and can fill in older matches from your linked match history in Settings › Auto-Clipping.")
+                    ? MatchStatsViewModel.Empty("No match stats for this clip yet. ClypDat keeps a scoreboard for each CS2 match while it runs, and can fill in older matches from your linked match history in Settings › Game Stats.")
                     : MatchStatsViewModel.From(match);
                 Dispatcher.UIThread.Post(() =>
                 {

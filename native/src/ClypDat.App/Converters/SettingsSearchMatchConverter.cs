@@ -79,6 +79,7 @@ public sealed class SettingsSearchMatchConverter : IValueConverter
         // in the section's own static keyword list, since the catalog is
         // the actual source of truth for what games exist.
         ["Auto-Clip"] = new[] { "Auto Capture", "Auto Capture Events", "Competitive", "Deathmatch Clipping", "Deathmatch" }.Concat(AutoClipGameNames).ToArray(),
+        ["Game Stats"] = new[] { "CS2", "Counter-Strike 2", "Match stats", "Match history", "Scoreboard", "Steam", "Authentication code", "Match code", "Share code", "Demo" },
         ["Audio"] = new[]
         {
             "Audio sources", "Audio tracks", "Full System Audio", "All System Audio", "Chat Audio App", "Multiple apps", "Microphone", "Multiple mics",
