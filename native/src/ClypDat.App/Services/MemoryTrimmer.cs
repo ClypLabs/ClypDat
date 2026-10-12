@@ -75,6 +75,7 @@ public static class MemoryTrimmer
     private static readonly AutoResetEvent TrimRequested = new(false);
     private static readonly object RequestGate = new();
     private static DateTime _lastTrimUtc = DateTime.MinValue;
+    private static DateTime _lastCompactingTrimUtc = DateTime.MinValue;
     private static string? _pendingReason;
     private static int _coalescedRequests;
 
@@ -120,7 +121,7 @@ public static class MemoryTrimmer
                 var wakeAt = nextPeriodicCheckUtc;
                 if (HasPendingRequest())
                 {
-                    var nextTrimUtc = _lastTrimUtc + MinimumInterval;
+                    var nextTrimUtc = GetNextEligibleTrimUtc();
                     if (nextTrimUtc < wakeAt) wakeAt = nextTrimUtc;
                 }
                 var wait = wakeAt - DateTime.UtcNow;
@@ -153,7 +154,7 @@ public static class MemoryTrimmer
     {
         reason = string.Empty;
         coalesced = 0;
-        if (now - _lastTrimUtc < MinimumInterval) return false;
+        if (now < GetNextEligibleTrimUtc()) return false;
 
         lock (RequestGate)
         {
@@ -170,6 +171,18 @@ public static class MemoryTrimmer
     {
         lock (RequestGate) return _pendingReason is not null;
     }
+
+    private static DateTime GetNextEligibleTrimUtc()
+    {
+        var (_, deferred) = ResolveTrimMode(EditorOpen, Recording && GameRunning, LowLevelInputHookActive);
+        return GetNextEligibleTrimUtc(deferred, _lastTrimUtc, _lastCompactingTrimUtc);
+    }
+
+    // An optimized background request can collect nothing. It still needs
+    // throttling during playback, but must not postpone a settled editor-close
+    // cleanup. Only a completed compacting collection starts that cooldown.
+    internal static DateTime GetNextEligibleTrimUtc(bool deferred, DateTime lastTrimUtc, DateTime lastCompactingTrimUtc) =>
+        (deferred ? lastTrimUtc : lastCompactingTrimUtc) + MinimumInterval;
 
     private static void RunTrim(string reason, int coalesced)
     {
@@ -232,6 +245,7 @@ public static class MemoryTrimmer
                 // the process keeps reserved from the OS.
                 GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
                 GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+                _lastCompactingTrimUtc = DateTime.UtcNow;
             }
 
             using var settled = Process.GetCurrentProcess();

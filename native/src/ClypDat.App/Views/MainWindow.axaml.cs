@@ -2394,6 +2394,9 @@ public sealed partial class MainWindow : Window
                 _hiddenLibraryThumbnailReleaseTimer?.Stop();
                 if (!_libraryThumbnailsSuspended || ViewModel?.IsLibraryVisible != false) return;
                 foreach (var clip in _activeLibraryClips) clip.ReleaseInactivePreviewImage();
+                // Editor trims retain audio and overlay caches. Library pixels
+                // have their own idle lifetime once this navigation has settled.
+                CardThumbnailCache.Clear();
                 MemoryTrimmer.RequestTrim("hidden library thumbnails released");
             };
         }

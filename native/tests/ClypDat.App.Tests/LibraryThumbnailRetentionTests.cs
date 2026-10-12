@@ -1,5 +1,7 @@
+using System.Runtime.CompilerServices;
 using Avalonia;
 using Avalonia.Media.Imaging;
+using Avalonia.Threading;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
 using Xunit;
@@ -8,6 +10,54 @@ namespace ClypDat.App.Tests;
 
 public sealed class LibraryThumbnailRetentionTests
 {
+    [Fact]
+    public void SettledHiddenLibraryCacheClearPreservesEditorPosters()
+    {
+        AvaloniaTestThread.Run(() =>
+        {
+            var path = $"editor-retention-{Guid.NewGuid()}.jpg";
+            ClipCardViewModel.SetPreviewDecodeWidth(256, 1);
+            using var cardImage = new WriteableBitmap(new PixelSize(256, 144), new Vector(96, 96));
+            using var editorPoster = new WriteableBitmap(new PixelSize(960, 540), new Vector(96, 96));
+            var media = new MediaFileInfo("clip", "C:\\test\\clip.mp4", DateTimeOffset.UtcNow,
+                TimeSpan.FromSeconds(5), 1, path, [], 640, 360, 60);
+            var card = new ClipCardViewModel(media, "C:\\test");
+            var editor = (MainWindowViewModel)RuntimeHelpers.GetUninitializedObject(typeof(MainWindowViewModel));
+            var fallbackEditor = (MainWindowViewModel)RuntimeHelpers.GetUninitializedObject(typeof(MainWindowViewModel));
+            try
+            {
+                CardThumbnailCache.Store(path, 256, cardImage);
+                BitmapCache.Store(path, editorPoster);
+                card.SetPreviewLifecycle(true, true);
+                editor.SelectMediaThumbnail(media.Path, path, card.PreviewImage);
+                fallbackEditor.SelectMediaThumbnail(media.Path, string.Empty, card.PreviewImage);
+                editor.IsEditorVideoLoading = fallbackEditor.IsEditorVideoLoading = true;
+                card.SetPreviewLifecycle(true, false);
+                Assert.Same(cardImage, card.PreviewImage); // grace period stays warm
+
+                card.ReleaseInactivePreviewImage();
+                CardThumbnailCache.Clear();
+                Dispatcher.UIThread.RunJobs(); // execute the render fence
+
+                Assert.Null(card.PreviewImage);
+                Assert.Null(CardThumbnailCache.Get(path, 256));
+                Assert.Same(editorPoster, editor.SelectedThumbnail);
+                Assert.True(BitmapCache.TryGet(path, out var cachedPoster));
+                Assert.Same(editorPoster, cachedPoster);
+                Assert.Same(cardImage, fallbackEditor.SelectedThumbnail);
+                using var fullSizePixels = editorPoster.Lock();
+                using var fallbackPixels = cardImage.Lock();
+                Assert.NotEqual(IntPtr.Zero, fullSizePixels.Address);
+                Assert.NotEqual(IntPtr.Zero, fallbackPixels.Address);
+            }
+            finally
+            {
+                CardThumbnailCache.Invalidate(path);
+                BitmapCache.Invalidate(path);
+            }
+        }, TimeSpan.FromSeconds(10), "Hidden library cache release timed out.");
+    }
+
     [Fact]
     public void SettledHiddenViewport_ReleasesCardReferenceAndResumesFromCache()
     {
