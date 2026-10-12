@@ -508,6 +508,43 @@ public sealed class FortniteMatchStatsTests
         finally { service.Dispose(); }
     }
 
+    [Theory]
+    [InlineData("|parser-1")]
+    [InlineData("|parser-2")]
+    [InlineData("")]
+    public void ParserUpgradeKeepsExistingStatsVisibleWhileGameDefersRefresh(string parserSuffix)
+    {
+        using var library = new TempFolder();
+        using var demos = new TempFolder();
+        var store = new MatchStatsStore(library.Path);
+        using var service = new FortniteReplayService(() => store, () => true, () => true, (_, _) => true, demos.Path, demos.Path);
+        var localStart = DateTime.Now.AddMinutes(-5);
+        var path = System.IO.Path.Combine(demos.Path, "UnsavedReplay-test.replay");
+        File.WriteAllBytes(path, Replay(false, localStart, 300_000, Match));
+        service.Rescan();
+        var header = Assert.Single(service.Headers());
+        var cached = FortniteMatchStats.Build(Data(), Me, null) with
+        {
+            StartedUtc = header.StartUtc,
+            EndedUtc = header.EndUtc,
+            SourceKey = $"{header.FileName}|{header.SizeBytes}|{header.LastWriteUtc.Ticks}{parserSuffix}"
+        };
+        store.Save(cached);
+        var clip = new ClipTimeline(header.StartUtc.AddMinutes(2), header.StartUtc.AddMinutes(2.5), 30, null, true, []);
+        var view = MainWindowViewModel.FortniteView(store, service, clip, enabled: true, out var match);
+        Assert.True(view.HasMatch);
+        Assert.False(view.IsProcessingMatchStats);
+        Assert.Equal(cached.SourceKey, match!.SourceKey);
+        // The parser cache stays strict so the queued worker still refreshes.
+        Assert.Null(service.Cached(header));
+
+        File.SetLastWriteTimeUtc(path, header.LastWriteUtc.AddSeconds(1));
+        service.Rescan();
+        var changed = MainWindowViewModel.FortniteView(store, service, clip, enabled: true, out var changedMatch);
+        Assert.Null(changedMatch);
+        Assert.True(changed.IsProcessingMatchStats);
+    }
+
     [Fact]
     public void NoReplaysTellsYouToTurnOnRecordReplays()
     {

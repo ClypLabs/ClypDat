@@ -250,9 +250,11 @@ public sealed partial class MainWindowViewModel
         if (state != FortniteClipReplayState.Waiting)
             match = header is not null
                 ? all.FirstOrDefault(item => item.Game == FortniteMatchStats.Game && string.Equals(item.SourceKey, header.CacheKey, StringComparison.OrdinalIgnoreCase))
+                    ?? all.FirstOrDefault(item => item.Game == FortniteMatchStats.Game && header.MatchesFile(item.SourceKey))
                 : MatchClipMapping.FindMatch(all, timeline, FortniteMatchStats.Game);
         if (match is not null)
         {
+            if (header is not null && !string.Equals(match.SourceKey, header.CacheKey, StringComparison.OrdinalIgnoreCase)) service.Request(header);
             var window = MatchClipMapping.ReplayWindow(match, timeline);
             var note = window is not null ? string.Empty
                 : !timeline.Exact ? "This clip has no verified capture timing, so its place in the match isn't known exactly. Showing the whole match."
