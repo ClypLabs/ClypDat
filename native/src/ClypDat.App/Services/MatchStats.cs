@@ -102,6 +102,10 @@ public sealed record MatchPlayer
     public int? StructureDamage { get; init; }
     public int? MaterialsGathered { get; init; }
     public int? MaterialsUsed { get; init; }
+    // Unique collected pickup actors attributed to the replay recorder;
+    // excludes recollecting their own drops. Null when unreadable/incomplete.
+    public int? LootingPickups { get; init; }
+    public bool LootingPartial { get; init; }
     public double? DistanceMetres { get; init; }
     public int? Revives { get; init; }
 

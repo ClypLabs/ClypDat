@@ -79,6 +79,8 @@ internal static class FortniteMatchStats
             StructureDamage = stats?.DamageToStructures,
             MaterialsGathered = stats?.MaterialsGathered,
             MaterialsUsed = stats?.MaterialsUsed,
+            LootingPickups = data.LootingPickups,
+            LootingPartial = data.LootingPartial,
             DistanceMetres = stats is null ? null : stats.TravelledCentimetres / 100,
             Revives = stats?.Revives
         };

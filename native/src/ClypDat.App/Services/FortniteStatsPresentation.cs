@@ -21,8 +21,8 @@ public sealed record MatchTimelineRow(double MatchSeconds, string Time, string T
 //  Building = unavailable: material totals are decoded, but a build-activity
 //             score has not been verified across the current playlist and
 //             replay formats. Left off entirely in Zero Build.
-//  Looting  = unavailable: pickups are only in the network stream ClypDat
-//             does not decode, and materials gathered alone is not looting.
+//  Looting  = collected pickups (0-100), excluding your own dropped items.
+//             Counts each item stack once, rather than ammunition quantity.
 public static class FortniteStatsPresentation
 {
     internal static readonly (double Low, double High) EliminationsRange = (0, 10);
@@ -30,7 +30,8 @@ public static class FortniteStatsPresentation
     internal static readonly (double Low, double High) AccuracyRange = (15, 55);
 
     public const string BuildingUnavailable = "Building: ClypDat hasn't verified build activity for this replay format.";
-    public const string LootingUnavailable = "Looting: Fortnite replays don't hold pickups in a form ClypDat can read.";
+    public const string LootingUnavailable = "Looting: this replay's pickups couldn't be fully read or attributed to you.";
+    public const string LootingPartial = "Looting counts confirmed pickups; some collection events have no player identity.";
     public const string BuildModeUnknown = "Couldn't confirm whether this match used building.";
 
     public static double? CombatScore(MatchPlayer player) =>
@@ -40,6 +41,9 @@ public static class FortniteStatsPresentation
 
     public static double? AimScore(MatchPlayer player) =>
         player.AccuracyPercent is { } accuracy ? 100 * MatchStatsPresentation.Normalise(accuracy, AccuracyRange) : null;
+
+    public static double? LootingScore(MatchPlayer player) =>
+        player.LootingPickups is >= 0 and var pickups ? Math.Clamp(pickups, 0, 100) : null;
 
     public static double? SurvivalScore(MatchStats match)
     {
@@ -64,7 +68,9 @@ public static class FortniteStatsPresentation
         var combat = Axis("Combat", CombatScore(player));
         var aim = Axis("Aim", AimScore(player));
         var survival = Axis("Survival", SurvivalScore(match));
-        var looting = MatchRadarAxis.Unavailable("Looting");
+        var looting = Axis("Looting", LootingScore(player));
+        if (player.LootingPartial && LootingScore(player) is { } recorded)
+            looting = new MatchRadarAxis("Looting", recorded / 100, $"≥{recorded:0}");
         return match.ZeroBuild == true
             ? [combat, aim, survival, looting]
             : [combat, aim, survival, MatchRadarAxis.Unavailable("Building"), looting];
@@ -75,7 +81,8 @@ public static class FortniteStatsPresentation
     {
         var notes = new List<string>();
         if (match.ZeroBuild != true) notes.Add(BuildingUnavailable);
-        notes.Add(LootingUnavailable);
+        if (match.LocalPlayer is not { } local || LootingScore(local) is null) notes.Add(LootingUnavailable);
+        else if (local.LootingPartial) notes.Add(LootingPartial);
         if (match.ZeroBuild is null) notes.Add(BuildModeUnknown);
         if (!match.LocalEventsAvailable) notes.Add("Your event totals are unavailable: the replay's player identity or some events couldn't be read.");
         if (match.ReplayDetailsIncomplete) notes.Add("Some replay data couldn't be read; recorded match history may be incomplete.");
@@ -158,6 +165,7 @@ public static class FortniteStatsPresentation
         if (player.DamageTaken is { } taken) rows.Add(("Damage taken", taken.ToString("N0", CultureInfo.CurrentCulture)));
         if (player.StructureDamage is { } structures) rows.Add(("Damage to structures", structures.ToString("N0", CultureInfo.CurrentCulture)));
         if (player.Revives is { } revives) rows.Add(("Revives", revives.ToString(CultureInfo.CurrentCulture)));
+        if (player.LootingPickups is >= 0 and var pickups) rows.Add(("Items picked up", (player.LootingPartial ? "≥" : string.Empty) + pickups.ToString(CultureInfo.CurrentCulture)));
         if (player.DistanceMetres is { } metres)
             rows.Add(("Distance travelled", metres >= 1000 ? $"{metres / 1000:0.0} km" : $"{metres:0} m"));
         return rows;

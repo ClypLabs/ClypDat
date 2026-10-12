@@ -301,6 +301,17 @@ public sealed class FortniteMatchStatsTests
     // ---- Radar ----
 
     [Fact]
+    public void ReplayPickupCountsReachTheSavedLocalPlayerAndRadar()
+    {
+        var match = FortniteMatchStats.Build(Data() with { LootingPickups = 24 }, Me, null);
+        Assert.Equal(24, match.LocalPlayer!.LootingPickups);
+        var looting = Assert.Single(FortniteStatsPresentation.RadarAxes(match), axis => axis.Label == "Looting");
+        Assert.True(looting.Available);
+        Assert.Equal(0.24, looting.Value, 3);
+        Assert.DoesNotContain(FortniteStatsPresentation.LootingUnavailable, FortniteStatsPresentation.RadarNotes(match));
+    }
+
+    [Fact]
     public void ZeroBuildRadarIsADiamondWithoutBuilding()
     {
         var axes = FortniteStatsPresentation.RadarAxes(FortniteMatchStats.Build(Data(), Me, null));

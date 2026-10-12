@@ -31,6 +31,8 @@ internal sealed record FortniteReplayData(
     public bool PlayersLeftComplete { get; init; }
     public bool ReplayDetailsIncomplete { get; init; }
     public string? OutfitId { get; init; }
+    public int? LootingPickups { get; init; }
+    public bool LootingPartial { get; init; }
 }
 
 // Decodes a Fortnite replay with FortniteReplayReader, as cheaply as it can.
@@ -40,15 +42,15 @@ internal sealed record FortniteReplayData(
 //     About 10 ms and 2 MB for a 20 MB replay, and it decodes on every
 //     current-season replay tested.
 //  2. GameState: playlist and recorded human/bot counters, timed with each
-//     demo frame's clock; the recorder PlayerState's outfit reference only.
+//     demo frame's clock; the recorder's outfit and attributed item pickups.
 //     Unrelated actor data is skipped.
 //     Payload bounds are checked before the library copies them: malformed
 //     actor blocks in real replays otherwise allocated nearly 2 GB at once.
-// Landing positions, weapon identities and pickups require additional actor
-// fields that this bounded GameState pass does not decode.
+// Pawn/pickup properties are read selectively; movement, item payloads and
+// unrelated actor fields are skipped without decoding or retaining them.
 internal static class FortniteReplayParser
 {
-    internal const int CurrentVersion = 2;
+    internal const int CurrentVersion = 3;
     internal static readonly TimeSpan PlaylistBudget = TimeSpan.FromSeconds(2);
     private const long PlaylistAllocationBudget = 128L * 1024 * 1024;
 
@@ -67,6 +69,8 @@ internal static class FortniteReplayParser
 
         string? playlist = null;
         string? outfitId = null;
+        int? lootingPickups = null;
+        var lootingPartial = false;
         IReadOnlyList<MatchCountStep> playersLeft = [];
         var playersLeftComplete = false;
         var detailsIncomplete = skipped > 0;
@@ -79,6 +83,8 @@ internal static class FortniteReplayParser
                 playersLeftComplete = probe.Read(network) && !truncated;
                 playlist = probe.Playlist;
                 outfitId = probe.OutfitId;
+                lootingPickups = probe.Looting.Count(playersLeftComplete);
+                lootingPartial = lootingPickups is not null && probe.Looting.HasUnattributedCollections;
                 playersLeft = playersLeftComplete ? TrimJoiningPlayers(probe.PlayersLeft) : [];
                 detailsIncomplete |= probe.Incomplete || !playersLeftComplete;
             }
@@ -117,11 +123,16 @@ internal static class FortniteReplayParser
             PlayersLeft = playersLeft,
             PlayersLeftComplete = playersLeftComplete,
             ReplayDetailsIncomplete = detailsIncomplete,
-            OutfitId = outfitId
+            OutfitId = outfitId,
+            LootingPickups = lootingPickups,
+            LootingPartial = lootingPartial
         };
     }
 
     internal static uint? ReadOutfitReference(FBitArchive archive, int bitCount)
+        => ReadActorReference(archive, bitCount) is > 0 and var guid ? guid : null;
+
+    internal static uint? ReadActorReference(FBitArchive archive, int bitCount)
     {
         if (bitCount is < 8 or > 40 || bitCount % 8 != 0 || bitCount > archive.GetBitsLeft())
         {
@@ -131,7 +142,7 @@ internal static class FortniteReplayParser
         var reference = new NetBitReader();
         reference.FillBitsFrom(archive, bitCount);
         var guid = reference.ReadIntPacked();
-        return guid > 0 && !reference.IsError && reference.AtEnd() ? guid : null;
+        return !reference.IsError && reference.AtEnd() ? guid : null;
     }
 
     internal static bool IsOutfitId(string? value) => value is { Length: > 4 and <= 128 } &&
@@ -182,6 +193,7 @@ internal static class FortniteReplayParser
         private readonly Dictionary<uint, uint> _channelActors = new();
         private readonly Dictionary<uint, uint> _outfitReferences = new();
         private readonly FortPlayerState _ignoredPlayerState = new();
+        public FortniteLootingTracker Looting { get; } = new();
         public string? Playlist { get; private set; }
         public string? OutfitId { get; private set; }
         public bool Incomplete { get; private set; }
@@ -211,6 +223,7 @@ internal static class FortniteReplayParser
             }
             if (exportGroup is not GameState state) return;
             _recorderActor = state.RecorderPlayerState?.Value ?? _recorderActor;
+            Looting.SetRecorder(_recorderActor);
             ResolveOutfit();
             _humans = state.PlayersLeft ?? _humans;
             _bots = state.PlayerBotsLeft ?? _bots;
@@ -242,7 +255,9 @@ internal static class FortniteReplayParser
         public override bool ReceiveProperties(FBitArchive archive, NetFieldExportGroup group, uint channelIndex,
             [NotNullWhen(true)] out INetFieldExportGroup? exportGroup, bool enablePropertyChecksum = true, bool netDeltaUpdate = false)
         {
-            if (!string.Equals(group.PathName, "/Script/FortniteGame.FortPlayerStateAthena", StringComparison.Ordinal))
+            var pickup = string.Equals(group.PathName, "/Script/FortniteGame.FortPickupAthena", StringComparison.Ordinal);
+            var pawn = group.PathName.Contains("PlayerPawn_Athena", StringComparison.Ordinal);
+            if (!pickup && !pawn && !string.Equals(group.PathName, "/Script/FortniteGame.FortPlayerStateAthena", StringComparison.Ordinal))
                 return base.ReceiveProperties(archive, group, channelIndex, out exportGroup, enablePropertyChecksum, netDeltaUpdate);
             Guard();
             exportGroup = null;
@@ -257,10 +272,30 @@ internal static class FortniteReplayParser
                 if (!group.IsValidIndex(handle) || bits > archive.GetBitsLeft())
                 {
                     Incomplete = true;
+                    if (pickup || pawn) Looting.MarkIncomplete();
                     archive.SetError();
                     return false;
                 }
-                if (group.NetFieldExports[handle]?.Name == "CachedLoadoutCharacterUngated")
+                var field = group.NetFieldExports[handle]?.Name;
+                if (pickup && field == "bPickedUp")
+                {
+                    if (bits != 1 || !_channelActors.TryGetValue(channelIndex, out var actor))
+                    {
+                        Looting.MarkIncomplete();
+                        archive.SkipBits(bits);
+                    }
+                    else Looting.UpdatePickup(actor, collected: archive.ReadBit());
+                }
+                else if ((pickup && field is "PickupTarget" or "PawnWhoDroppedPickup") || (pawn && field == "PlayerState"))
+                {
+                    var reference = ReadActorReference(archive, (int)bits);
+                    if (reference is not { } guid || !_channelActors.TryGetValue(channelIndex, out var actor)) Looting.MarkIncomplete();
+                    else if (guid == 0) { } // A null object reference is a valid empty/default update.
+                    else if (pawn) Looting.RegisterPawn(actor, guid);
+                    else if (field == "PickupTarget") Looting.UpdatePickup(actor, target: guid);
+                    else Looting.UpdatePickup(actor, droppedBy: guid);
+                }
+                else if (field == "CachedLoadoutCharacterUngated")
                 {
                     var reference = ReadOutfitReference(archive, (int)bits);
                     if (reference is { } guid && _channelActors.TryGetValue(channelIndex, out var actor) &&
@@ -280,6 +315,8 @@ internal static class FortniteReplayParser
             Guard();
             var group = _netGuidCache.GetNetFieldExportGroup(repObject);
             return (group?.PathName.Contains("Athena_GameState", StringComparison.Ordinal) == true ||
+                group?.PathName.Contains("PlayerPawn_Athena", StringComparison.Ordinal) == true ||
+                string.Equals(group?.PathName, "/Script/FortniteGame.FortPickupAthena", StringComparison.Ordinal) ||
                 string.Equals(group?.PathName, "/Script/FortniteGame.FortPlayerStateAthena", StringComparison.Ordinal)) &&
                 base.ReceivedReplicatorBunch(bunch, archive, repObject, bHasRepLayout);
         }
