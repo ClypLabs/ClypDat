@@ -56,8 +56,8 @@ public static class FortniteStatsPresentation
 
     /// <summary>
     /// Five axes (Combat, Aim, Survival, Building, Looting), or four in a
-    /// diamond for Zero Build: Combat top, Aim right, Survival bottom,
-    /// Looting left. Only the playlist decides Zero Build.
+    /// diamond for Zero Build: Survival top, Combat right, Looting bottom,
+    /// Aim left. Building takes a lower spoke when present.
     /// </summary>
     public static IReadOnlyList<MatchRadarAxis> RadarAxes(MatchStats match)
     {
@@ -80,10 +80,14 @@ public static class FortniteStatsPresentation
             : "Your collected pickups couldn't be confirmed for this match, so no Looting score can be calculated.");
         if (player.LootingPartial && LootingScore(player) is { } recorded)
             looting = looting with { Display = $"≥{recorded:0}" };
+        survival = survival with { AngleDegrees = -90 };
+        combat = combat with { AngleDegrees = 0 };
+        looting = looting with { AngleDegrees = 90 };
+        aim = aim with { AngleDegrees = 180 };
         return match.ZeroBuild == true
-            ? [combat, aim, survival, looting]
-            : [combat, aim, survival, MatchRadarAxis.Unavailable("Building") with
-                { Explanation = "No verified building activity for this match. Material totals aren't used to calculate a Building score." }, looting];
+            ? [survival, combat, looting, aim]
+            : [survival, combat, MatchRadarAxis.Unavailable("Building") with
+                { AngleDegrees = 45, Explanation = "No verified building activity for this match. Material totals aren't used to calculate a Building score." }, looting, aim];
     }
 
     /// <summary>Why each unavailable axis is empty, one sentence each.</summary>

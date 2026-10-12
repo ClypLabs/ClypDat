@@ -326,10 +326,11 @@ public sealed class FortniteMatchStatsTests
     public void ZeroBuildRadarIsADiamondWithoutBuilding()
     {
         var axes = FortniteStatsPresentation.RadarAxes(FortniteMatchStats.Build(Data(), Me, null));
-        Assert.Equal(["Combat", "Aim", "Survival", "Looting"], axes.Select(axis => axis.Label));
-        Assert.False(axes[3].Available);
-        Assert.True(double.IsNaN(axes[3].Value));
-        Assert.Equal("Not recorded", axes[3].Display);
+        Assert.Equal(["Survival", "Combat", "Looting", "Aim"], axes.Select(axis => axis.Label));
+        var looting = Assert.Single(axes, axis => axis.Label == "Looting");
+        Assert.False(looting.Available);
+        Assert.True(double.IsNaN(looting.Value));
+        Assert.Equal("Not recorded", looting.Display);
     }
 
     [Fact]
@@ -337,8 +338,8 @@ public sealed class FortniteMatchStatsTests
     {
         var match = FortniteMatchStats.Build(Data(playlist: "Playlist_DefaultSquad"), Me, null);
         var axes = FortniteStatsPresentation.RadarAxes(match);
-        Assert.Equal(["Combat", "Aim", "Survival", "Building", "Looting"], axes.Select(axis => axis.Label));
-        Assert.Equal([true, true, true, false, false], axes.Select(axis => axis.Available));
+        Assert.Equal(["Survival", "Combat", "Building", "Looting", "Aim"], axes.Select(axis => axis.Label));
+        Assert.Equal([true, true, false, false, true], axes.Select(axis => axis.Available));
         Assert.Contains(FortniteStatsPresentation.BuildingUnavailable, FortniteStatsPresentation.RadarNotes(match));
     }
 

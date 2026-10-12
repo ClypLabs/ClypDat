@@ -28,7 +28,7 @@ internal static class LaunchPresentationPolicy
         if (HasArgument(arguments, PublishRestartArgument))
             return foregroundGameDetected || foregroundGameDetectionFailed
                 ? LaunchPresentation.Minimized
-                : LaunchPresentation.Normal;
+                : LaunchPresentation.Restart;
         if (HasArgument(arguments, RestartArgument))
             return LaunchPresentation.Restart;
         return LaunchPresentation.Normal;

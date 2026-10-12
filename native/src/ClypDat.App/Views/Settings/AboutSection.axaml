@@ -242,38 +242,15 @@
     <StackPanel Classes="settingsGroup">
       <TextBlock Classes="settingsGroupLabel" Text="LICENCES" />
       <Border Classes="settingsGroupCard">
-        <StackPanel>
-          <Border Classes="settingsRow static">
-            <ItemsControl ItemsSource="{Binding ThirdPartyLicenseEntries}">
-              <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <StackPanel Spacing="10" />
-                </ItemsPanelTemplate>
-              </ItemsControl.ItemsPanel>
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <WrapPanel>
-                    <TextBlock Classes="licenceText" Text="This software uses libraries from the " />
-                    <TextBlock Classes="licenceLink" Text="{Binding ProjectName}" Tag="{Binding ProjectUrl}" PointerPressed="LicenseLinkText_OnPointerPressed" />
-                    <TextBlock Classes="licenceText" Text=" project under the " />
-                    <TextBlock Classes="licenceLink" Text="{Binding LicenseName}" Tag="{Binding LicenseUrl}" PointerPressed="LicenseLinkText_OnPointerPressed" />
-                    <TextBlock Classes="licenceText" Text="." />
-                  </WrapPanel>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </Border>
-          <Border Classes="settingsRowDivider" />
-          <Border Classes="settingsRow">
-            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
-              <StackPanel Classes="settingsRowText">
-                <TextBlock Classes="settingsRowTitle" Text="Full licence text" />
-                <TextBlock Classes="settingsRowDesc" Text="Complete notices and source links for every bundled component." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-              </StackPanel>
-              <Button Grid.Column="1" Content="View licences" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
-            </Grid>
-          </Border>
-        </StackPanel>
+        <Border Classes="settingsRow">
+          <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+            <StackPanel Classes="settingsRowText">
+              <TextBlock Classes="settingsRowTitle" Text="Open-source licences" />
+              <TextBlock Classes="settingsRowDesc" Text="Licence notices and source links for bundled components." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="View licences" Click="OpenLicensesButton_OnClick" VerticalAlignment="Center" />
+          </Grid>
+        </Border>
       </Border>
     </StackPanel>
   </StackPanel>

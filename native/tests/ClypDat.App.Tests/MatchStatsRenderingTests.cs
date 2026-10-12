@@ -158,6 +158,15 @@ public sealed class MatchStatsRenderingTests
             target.Render(chart);
             Assert.Equal(zeroBuild ? 4 : 5, chart.LabelBounds.Count);
             Assert.All(chart.LabelBounds, bounds => Assert.True(new Rect(chart.Bounds.Size).Inflate(0.01).Contains(bounds)));
+            Point LabelCentre(string label) => chart.LabelBounds[model.RadarAxes.ToList().FindIndex(axis => axis.Label == label)].Center;
+            Assert.Equal(chart.Bounds.Width / 2, LabelCentre("Survival").X, 3);
+            Assert.Equal(chart.Bounds.Width / 2, LabelCentre("Looting").X, 3);
+            Assert.True(LabelCentre("Survival").Y < chart.Bounds.Height / 2);
+            Assert.True(LabelCentre("Looting").Y > chart.Bounds.Height / 2);
+            Assert.Equal(chart.Bounds.Height / 2 + 4, LabelCentre("Combat").Y, 3);
+            Assert.Equal(chart.Bounds.Height / 2 + 4, LabelCentre("Aim").Y, 3);
+            Assert.True(LabelCentre("Combat").X > chart.Bounds.Width / 2);
+            Assert.True(LabelCentre("Aim").X < chart.Bounds.Width / 2);
             Assert.False(chart.SelectAxisAt(new Point(-20, -20)));
             for (var i = 0; i < model.RadarAxes.Count; i++)
             {

@@ -1358,6 +1358,15 @@ public sealed partial class PlaybackSession : IDisposable
         var mediaBytesPerSecond = (int)Math.Round(48_000 * 2 * sizeof(float) / _playbackRate);
         var audible = EditorAvClockPolicy.ToMediaTime(_audioAnchorMediaTime, _audioAnchorDevicePosition, devicePosition, mediaBytesPerSecond);
         var elapsed = Stopwatch.GetElapsedTime(_audioAnchorTimestamp);
+        // Keep resume diagnostics even when the coarse VLC clock stays inside
+        // the correction tolerance. Its timestamp alone is not a presented frame.
+        if (elapsed <= TimeSpan.FromSeconds(1.5))
+        {
+            var reader = _audioSources.Values.FirstOrDefault()?.Reader.CurrentTime;
+            AppLog.Debug($"Editor A/V timing: elapsedMs={elapsed.TotalMilliseconds:0}, audio={audible.TotalSeconds:0.###}s, " +
+                $"vlc={videoTime.TotalSeconds:0.###}s, vlcAheadMs={(videoTime - audible).TotalMilliseconds:0}, " +
+                $"reader={reader?.TotalSeconds:0.###}s, rate={_playbackRate:0.###}x, generation={generation}.");
+        }
         if (!_audioClockPolicy.TryGetCorrection(generation, elapsed, audible, videoTime, out var correction)) return;
 
         AppLog.Debug($"Editor A/V drift: audio={audible.TotalSeconds:0.###}s, video={videoTime.TotalSeconds:0.###}s, correction={correction.TotalSeconds:0.###}s, generation={generation}.");
