@@ -164,7 +164,7 @@ public sealed class MatchStatsViewModel : ViewModelBase
             _selectedScope = window is not null ? ClipScope : FullScope,
             PlayerName = match.LocalPlayerName ?? "You",
             OutfitId = FortniteOutfitPortraitCache.NormaliseId(match.OutfitId),
-            MatchLabel = match.Mode ?? "Fortnite",
+            MatchLabel = string.IsNullOrWhiteSpace(match.Playlist) ? match.Mode ?? "Fortnite" : FortniteMatchStats.ModeLabel(match.Playlist),
             ResultLabel = match.Won ? "Victory Royale" : string.Empty,
             ResultBrush = gold,
             ScoreLabel = match.Placement is { } place ? $"#{place}" : string.Empty,

@@ -133,20 +133,25 @@ internal static class FortniteMatchStats
     {
         if (string.IsNullOrWhiteSpace(playlist)) return null;
         if (playlist.Contains("NoBuild", StringComparison.OrdinalIgnoreCase) || playlist.Contains("ZeroBuild", StringComparison.OrdinalIgnoreCase)) return true;
-        return playlist.StartsWith("Playlist_Default", StringComparison.OrdinalIgnoreCase) ? false : null;
+        return playlist.StartsWith("Playlist_Default", StringComparison.OrdinalIgnoreCase) ||
+            new[] { "Figment", "PiperBoot", "RopeSmile", "BlastBerry" }.Any(token => playlist.Contains(token, StringComparison.OrdinalIgnoreCase))
+            ? false : null;
     }
 
-    /// <summary>"Zero Build · Trios", "Battle Royale · Squads"; "Fortnite" when the playlist says nothing usable.</summary>
+    /// <summary>Game mode, build rules, then team size; omit facts absent from the playlist.</summary>
     public static string ModeLabel(string? playlist)
     {
         if (string.IsNullOrWhiteSpace(playlist)) return "Fortnite";
         string? Has(string token, string label) => playlist.Contains(token, StringComparison.OrdinalIgnoreCase) ? label : null;
-        var team = Has("Solo", "Solo") ?? Has("Duo", "Duos") ?? Has("Trio", "Trios") ?? Has("Squad", "Squads");
-        var family = IsZeroBuild(playlist) == true ? "Zero Build"
-            : playlist.Contains("BR", StringComparison.Ordinal) || playlist.Contains("Default", StringComparison.OrdinalIgnoreCase) ? "Battle Royale"
-            : null;
-        var parts = new[] { family, team }.OfType<string>().ToArray();
-        return parts.Length == 0 ? "Fortnite" : string.Join(" · ", parts);
+        // Epic playlist asset families, verified against Fortnite API's playlist catalog.
+        var family = Has("ForbiddenFruit", "Blitz Royale") ?? Has("Figment", "Fortnite OG")
+            ?? Has("PiperBoot", "Reload") ?? Has("RopeSmile", "Reload") ?? Has("BlastBerry", "Reload")
+            ?? Has("Reload", "Reload") ?? Has("Mash", "Horde Rush")
+            ?? Has("Default", "Battle Royale") ?? Has("BR", "Battle Royale") ?? "Fortnite";
+        var build = IsZeroBuild(playlist) switch { true => "Zero Builds", false => "Builds", _ => null };
+        var team = Has("BRStack", "Six Stack") ?? Has("SixStack", "Six Stack") ?? Has("Solo", "Solo") ?? Has("Duo", "Duos")
+            ?? Has("Trio", "Trios") ?? Has("Squad", "Squads");
+        return string.Join(" · ", new[] { family, build, team }.OfType<string>());
     }
 
     private static bool Same(string? a, string? b) => a is not null && b is not null && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);

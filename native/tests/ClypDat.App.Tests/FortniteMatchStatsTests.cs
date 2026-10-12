@@ -255,7 +255,7 @@ public sealed class FortniteMatchStatsTests
 
         Assert.Equal("fortnite-UnsavedReplay-2026.10.10-19.16.03", match.Id);
         Assert.Equal("fortnite", match.Game);
-        Assert.Equal("Zero Build · Solo", match.Mode);
+        Assert.Equal("Battle Royale · Zero Builds · Solo", match.Mode);
         Assert.True(match.ZeroBuild);
         Assert.Equal(12, match.Placement);
         Assert.False(match.Won);
@@ -287,15 +287,26 @@ public sealed class FortniteMatchStatsTests
     }
 
     [Theory]
-    [InlineData("Playlist_NoBuildBR_Trio", true, "Zero Build · Trios")]
-    [InlineData("Playlist_FigmentNoBuildSquad", true, "Zero Build · Squads")]
-    [InlineData("Playlist_DefaultDuo", false, "Battle Royale · Duos")]
-    [InlineData("Playlist_Mash_Squads_Legacy", null, "Squads")]
+    [InlineData("Playlist_NoBuildBR_Trio", true, "Battle Royale · Zero Builds · Trios")]
+    [InlineData("Playlist_FigmentNoBuildSquad", true, "Fortnite OG · Zero Builds · Squads")]
+    [InlineData("Playlist_DefaultDuo", false, "Battle Royale · Builds · Duos")]
+    [InlineData("Playlist_Mash_Squads_Legacy", null, "Horde Rush · Squads")]
+    [InlineData("Playlist_PiperBootNoBuildSquad", true, "Reload · Zero Builds · Squads")]
+    [InlineData("Playlist_RopeSmileDuo", false, "Reload · Builds · Duos")]
+    [InlineData("Playlist_ForbiddenFruitOldNoBuildBRStack", true, "Blitz Royale · Zero Builds · Six Stack")]
     [InlineData(null, null, "Fortnite")]
     public void ZeroBuildAndModeComeFromThePlaylistOnly(string? playlist, bool? zeroBuild, string label)
     {
         Assert.Equal(zeroBuild, FortniteMatchStats.IsZeroBuild(playlist));
         Assert.Equal(label, FortniteMatchStats.ModeLabel(playlist));
+    }
+
+    [Fact]
+    public void ExistingSavedModeLabelsUseTheRecordedPlaylistWithoutReparsing()
+    {
+        var match = FortniteMatchStats.Build(Data(playlist: "Playlist_NoBuildBR_Squad"), Me, null)
+            with { Mode = "Zero Build · Squads" };
+        Assert.Equal("Battle Royale · Zero Builds · Squads", MatchStatsViewModel.FromFortnite(match, null, string.Empty).MatchLabel);
     }
 
     // ---- Radar ----

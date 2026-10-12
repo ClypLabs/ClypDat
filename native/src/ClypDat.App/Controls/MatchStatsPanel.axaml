@@ -37,10 +37,11 @@
                       VerticalAlignment="Center" IsVisible="{Binding #MatchOutfitPortrait.IsVisible}">
                 <controls:FortniteOutfitPortrait x:Name="MatchOutfitPortrait" OutfitId="{Binding OutfitId}" Width="44" Height="44" />
               </Border>
-              <StackPanel Grid.Column="1" Spacing="3">
+              <StackPanel Grid.Column="1" Spacing="3" VerticalAlignment="Center">
                 <TextBlock Text="{Binding PlayerName}" Foreground="{StaticResource Text_EDF4FB}" FontSize="16" FontWeight="Bold"
                            TextTrimming="CharacterEllipsis" />
-                <TextBlock Text="{Binding MatchLabel}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding MatchLabel}" IsVisible="{Binding !IsFortnite}" Foreground="{StaticResource Text_8EA1B6}"
+                           FontSize="12" TextTrimming="CharacterEllipsis" />
               </StackPanel>
             </Grid>
             <StackPanel Grid.Column="1" Spacing="2" HorizontalAlignment="Right">
@@ -48,6 +49,8 @@
               <TextBlock Text="{Binding ScoreLabel}" Foreground="{StaticResource Text_D6E2F0}" FontSize="15" FontWeight="SemiBold" HorizontalAlignment="Right" />
             </StackPanel>
           </Grid>
+          <TextBlock Text="{Binding MatchLabel}" IsVisible="{Binding IsFortnite}" Foreground="{StaticResource Text_8EA1B6}"
+                     FontSize="12" TextWrapping="Wrap" Margin="0,-8,0,0" />
           <TextBlock Text="{Binding TilesLabel}" Classes="editorCardLabel" Margin="0,0,0,-8" IsVisible="{Binding IsFortnite}" />
           <ItemsControl ItemsSource="{Binding Tiles}">
             <ItemsControl.ItemsPanel>

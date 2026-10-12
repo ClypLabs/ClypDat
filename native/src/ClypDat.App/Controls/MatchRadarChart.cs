@@ -30,10 +30,13 @@ public sealed class MatchRadarChart : Control
     public MatchRadarAxis? SelectedAxis { get => GetValue(SelectedAxisProperty); set => SetValue(SelectedAxisProperty, value); }
     private static readonly Cursor LabelCursor = new(StandardCursorType.Hand);
     private Rect[] _labelBounds = [];
+    private int _hoveredAxis = -1;
     internal IReadOnlyList<Rect> LabelBounds => _labelBounds;
 
-    // Measure clearance from the text edge, not its centre.
+    // Measure clearance from the label box edge, not its centre.
     private const double LabelGap = 10;
+    private const double LabelPaddingX = 8;
+    private const double LabelPaddingY = 5;
 
     public override void Render(DrawingContext context)
     {
@@ -45,12 +48,19 @@ public sealed class MatchRadarChart : Control
         var gridPen = new Pen(AppThemeService.Brush("Surface_263743", "#263743"), 1);
         var labelBrush = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6");
         var valueBrush = AppThemeService.Brush("Text_D6E2F0", "#D6E2F0");
+        var labelBackground = AppThemeService.Brush("Surface_0D151C", "#0D151C");
+        var labelBorder = AppThemeService.Brush("Surface_345066", "#345066");
+        var selectedBackground = AppThemeService.Brush("AccentSelectedBrush", "#202747");
         var labels = axes.Select(axis =>
         {
             var name = Text(axis.Label, 11, FontWeight.SemiBold, axis == SelectedAxis ? accent : axis.Available ? valueBrush : labelBrush);
             var value = Text(axis.Display, 10, FontWeight.Normal, labelBrush);
             return (Name: name, Value: value, Width: Math.Max(name.Width, value.Width), Height: name.Height + value.Height);
         }).ToArray();
+        var buttonWidth = Math.Max(72, labels.Max(label => label.Width) + 2 * LabelPaddingX);
+        for (var i = 0; i < axes.Count; i++)
+            if (axes[i].Explanation.Length > 0)
+                labels[i] = (labels[i].Name, labels[i].Value, buttonWidth, labels[i].Height + 2 * LabelPaddingY);
         Point Direction(int index)
         {
             var angle = -Math.PI / 2 + index * 2 * Math.PI / axes.Count;
@@ -96,6 +106,13 @@ public sealed class MatchRadarChart : Control
             var left = anchor.X - (direction.X < -0.001 ? width : direction.X > 0.001 ? 0 : width / 2);
             var top = anchor.Y - (direction.Y < -0.001 ? height : direction.Y > 0.001 ? 0 : height / 2);
             _labelBounds[i] = new Rect(left, top, width, height);
+            if (axes[i].Explanation.Length > 0)
+            {
+                var selected = axes[i] == SelectedAxis;
+                context.DrawRectangle(selected ? selectedBackground : labelBackground,
+                    new Pen(selected || i == _hoveredAxis ? accent : labelBorder, 1.5), _labelBounds[i], 8, 8);
+                top += LabelPaddingY;
+            }
             context.DrawText(name, new Point(left + (width - name.Width) / 2, top));
             context.DrawText(value, new Point(left + (width - value.Width) / 2, top + name.Height));
         }
@@ -106,7 +123,7 @@ public sealed class MatchRadarChart : Control
         if (Axes is not { } axes) return false;
         for (var i = 0; i < Math.Min(axes.Count, _labelBounds.Length); i++)
         {
-            if (axes[i].Explanation.Length == 0 || !_labelBounds[i].Inflate(4).Contains(point)) continue;
+            if (axes[i].Explanation.Length == 0 || !_labelBounds[i].Contains(point)) continue;
             SetCurrentValue(SelectedAxisProperty, SelectedAxis == axes[i] ? null : axes[i]);
             return true;
         }
@@ -125,14 +142,20 @@ public sealed class MatchRadarChart : Control
     {
         base.OnPointerMoved(e);
         var point = e.GetPosition(this);
-        Cursor = Axes is { } axes && Enumerable.Range(0, Math.Min(axes.Count, _labelBounds.Length))
-            .Any(i => axes[i].Explanation.Length > 0 && _labelBounds[i].Inflate(4).Contains(point)) ? LabelCursor : null;
+        var hovered = Axes is { } axes ? Enumerable.Range(0, Math.Min(axes.Count, _labelBounds.Length))
+            .FirstOrDefault(i => axes[i].Explanation.Length > 0 && _labelBounds[i].Contains(point), -1) : -1;
+        Cursor = hovered >= 0 ? LabelCursor : null;
+        if (_hoveredAxis == hovered) return;
+        _hoveredAxis = hovered;
+        InvalidateVisual();
     }
 
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
         Cursor = null;
+        _hoveredAxis = -1;
+        InvalidateVisual();
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
