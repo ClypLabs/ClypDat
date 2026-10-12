@@ -242,6 +242,9 @@ public sealed partial class MainWindowViewModel
         : _cs2MatchHistory?.Status ?? string.Empty;
 
     public bool HasCs2MatchHistoryStatus => Cs2MatchHistoryStatus.Length > 0;
+    public bool CanRetryCs2MatchHistory => ClypDatAccountIsConnected && _cs2MatchHistory?.CanRetry == true;
+
+    public void RetryCs2MatchHistory() => _cs2MatchHistory?.RetryNow();
 
     public void BeginEditCs2MatchHistory()
     {
@@ -306,5 +309,6 @@ public sealed partial class MainWindowViewModel
         OnPropertyChanged(nameof(Cs2MatchHistorySummary));
         OnPropertyChanged(nameof(Cs2MatchHistoryStatus));
         OnPropertyChanged(nameof(HasCs2MatchHistoryStatus));
+        OnPropertyChanged(nameof(CanRetryCs2MatchHistory));
     }
 }

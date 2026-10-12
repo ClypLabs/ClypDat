@@ -59,6 +59,19 @@ internal sealed class Cs2MatchHistoryService : IDisposable
         Schedule(TimeSpan.FromSeconds(2), force: true);
     }
 
+    /// <summary>The user asked to check now: drop any back-off and run straight away.</summary>
+    public void RetryNow()
+    {
+        if (Link is not { NeedsAttention: false } link) return;
+        link.RetryAfterUtc = null;
+        Save(link);
+        SetStatus("Looking for your matches…");
+        Schedule(TimeSpan.Zero, force: true);
+    }
+
+    /// <summary>Waiting out a back-off, so a manual retry makes sense.</summary>
+    public bool CanRetry => Link is { NeedsAttention: false, RetryAfterUtc: not null };
+
     public void Unlink()
     {
         CancelScheduled();

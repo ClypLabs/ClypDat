@@ -84,7 +84,10 @@
                 </StackPanel>
               </StackPanel>
 
-              <TextBlock Classes="settingsRowWarning" Text="{Binding Cs2MatchHistoryStatus}" IsVisible="{Binding HasCs2MatchHistoryStatus}" />
+              <StackPanel Spacing="8" IsVisible="{Binding HasCs2MatchHistoryStatus}">
+                <TextBlock Classes="settingsRowWarning" Text="{Binding Cs2MatchHistoryStatus}" />
+                <Button Content="Try again" HorizontalAlignment="Left" IsVisible="{Binding CanRetryCs2MatchHistory}" Click="Cs2MatchHistoryRetry_OnClick" />
+              </StackPanel>
             </StackPanel>
           </Border>
         </StackPanel>
