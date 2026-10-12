@@ -123,7 +123,8 @@ public sealed class NativeRecordingBoundaryTests
             var source = SpotifySourceWindow.Load(root, output);
             Assert.Equal(20, source!.StartSeconds); Assert.Equal(1, source.MediaSeconds(21));
             Assert.True(double.IsNaN(source.MediaSeconds(11)));
-            Assert.Equal(1, source.VideoMediaSeconds(11));
+            // Capture UTC round-trips through DateTime's 100 ns ticks.
+            Assert.Equal(1, source.VideoMediaSeconds(11), precision: 6);
             Assert.True(double.IsNaN(source.VideoMediaSeconds(21)));
             Assert.True(info.CaptureTimingVerified);
             Assert.Equal(MonotonicClock.FromSharedSeconds(10), info.CaptureStartUtc);

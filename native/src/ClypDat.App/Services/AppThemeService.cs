@@ -3,8 +3,10 @@ using Avalonia.Controls;
 using Avalonia.Styling;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
+using Avalonia.Media.Immutable;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using ClypDat.App.Controls;
 using ClypDat.Core.Settings;
 
@@ -26,6 +28,9 @@ public sealed record ThemeOption(
 /// <summary>Owns ClypDat's mutable dark-theme resource palette.</summary>
 internal static class AppThemeService
 {
+    private sealed record BackgroundPalette(Application Application, IReadOnlyDictionary<string, Color> Colors);
+    private static BackgroundPalette? _backgroundPalette;
+
     // Every themed colour in the app - the named tokens in Tokens.axaml and the
     // ~210 shades in ThemeRamp.axaml alike - is ClypDat's authored System palette
     // run through one transform. Nothing is hand-picked per theme except the
@@ -294,6 +299,7 @@ internal static class AppThemeService
 
         ApplyFluentAccent(application, accent, appBackground);
         SetBrush(application, "AccentForegroundBrush", BestForeground(accent));
+        CaptureBackgroundPalette(application);
         ApplyLogo(application, isCustom ? customLight : transform.IsLight);
     }
 
@@ -492,10 +498,10 @@ internal static class AppThemeService
         var text = NamedTokens.First(token => token.Key == "TextBrush");
         return new ThemeOption(
             id, id,
-            new SolidColorBrush(Recolor(NamedTokens[0].Source, ColorRole.Surface, transform)),
-            new SolidColorBrush(Recolor(NamedTokens[2].Source, ColorRole.Surface, transform)),
-            new SolidColorBrush(PresetAccent(id)),
-            new SolidColorBrush(Recolor(text.Source, ColorRole.Text, transform)));
+            new ImmutableSolidColorBrush(Recolor(NamedTokens[0].Source, ColorRole.Surface, transform)),
+            new ImmutableSolidColorBrush(Recolor(NamedTokens[2].Source, ColorRole.Surface, transform)),
+            new ImmutableSolidColorBrush(PresetAccent(id)),
+            new ImmutableSolidColorBrush(Recolor(text.Source, ColorRole.Text, transform)));
     }
 
     /// <summary>
@@ -505,7 +511,7 @@ internal static class AppThemeService
     /// prefer <see cref="Brush"/> where a brush will do.
     /// </summary>
     public static Color ThemeColor(string key, string fallbackHex) =>
-        Brush(key, fallbackHex) is SolidColorBrush brush
+        Brush(key, fallbackHex) is ISolidColorBrush brush
             ? brush.Color
             : Color.Parse(fallbackHex);
 
@@ -517,8 +523,30 @@ internal static class AppThemeService
     public static IBrush Brush(string key, string fallbackHex)
     {
         var application = Application.Current;
+        if (!Dispatcher.UIThread.CheckAccess())
+        {
+            // XAML resource lookup can lazily instantiate a mutable brush on
+            // the caller's thread. Workers use only the palette captured by UI.
+            var snapshot = Volatile.Read(ref _backgroundPalette);
+            var color = snapshot is not null && ReferenceEquals(snapshot.Application, application) && snapshot.Colors.TryGetValue(key, out var saved)
+                ? saved : Color.Parse(fallbackHex);
+            return new ImmutableSolidColorBrush(color);
+        }
         if (application is not null && TryFindBrush(application.Resources, key, out var brush)) return brush;
-        return new SolidColorBrush(Color.Parse(fallbackHex));
+        // Background-built view models can reach the compositor later. A
+        // missing resource must not give them a brush owned by their worker.
+        return new ImmutableSolidColorBrush(Color.Parse(fallbackHex));
+    }
+
+    private static void CaptureBackgroundPalette(Application application)
+    {
+        var colors = new Dictionary<string, Color>(StringComparer.Ordinal);
+        var keys = NamedTokens.Select(token => token.Key).Concat(RampKeys(application)).Concat(
+            ["AccentBrush", "AccentBrushHover", "AccentSelectedBrush", "AccentSelectedHoverBrush", "AccentSelectedIconBrush",
+             "AccentGameHoverBrush", "AccentFolderBrush", "AccentHoverBrush", "AccentForegroundBrush"]);
+        foreach (var key in keys.Distinct(StringComparer.Ordinal))
+            if (TryFindBrush(application.Resources, key, out var brush)) colors[key] = brush.Color;
+        Volatile.Write(ref _backgroundPalette, new BackgroundPalette(application, colors));
     }
 
     // Application.Resources' indexer does not read through merged dictionaries, so
