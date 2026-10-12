@@ -14,10 +14,11 @@ public sealed record MatchTimelineRow(double MatchSeconds, string Time, string T
 //  Combat   = 50% eliminations (0-10) + 50% damage to players (0-3000).
 //  Aim      = accuracy, 15% (poor) to 55% (excellent). Replays carry no
 //             headshot data, so it is accuracy alone.
-//  Survival = 60% placement (1st = 100, 100th or worse = 0) + 40% recorded
-//             time in match (0-20 minutes). These fixed references do not
-//             pretend team placement is a count of players outlasted, or
-//             treat the recording's end as the whole match's duration.
+//  Survival = 100 for a recorded win. Otherwise the fraction of other
+//             players outlasted: (starting players - players remaining at
+//             your finish) / (starting players - 1), multiplied by 100.
+//             Remaining players includes you. Counts must be recorded and
+//             consistent; match duration and team placement are not proxies.
 //  Building = unavailable: material totals are decoded, but a build-activity
 //             score has not been verified across the current playlist and
 //             replay formats. Left off entirely in Zero Build.
@@ -33,6 +34,7 @@ public static class FortniteStatsPresentation
     public const string LootingUnavailable = "Looting: this replay's pickups couldn't be fully read or attributed to you.";
     public const string LootingPartial = "Looting counts confirmed pickups; some collection events have no player identity.";
     public const string BuildModeUnknown = "Couldn't confirm whether this match used building.";
+    public const string SurvivalUnavailable = "Survival: a recorded win or valid starting and remaining player counts are needed.";
 
     public static double? CombatScore(MatchPlayer player) =>
         player.Damage is { } damage
@@ -47,12 +49,17 @@ public static class FortniteStatsPresentation
 
     public static double? SurvivalScore(MatchStats match)
     {
-        if (match.PlayerCount is not > 2 || match.Placement is not > 0 ||
-            match.LocalEndSeconds is not { } end || !double.IsFinite(end) || end <= 0) return null;
-        var placement = Math.Clamp((100 - match.Placement.Value) / 99.0, 0, 1);
-        var lived = Math.Clamp(end / 1200, 0, 1);
-        return 100 * (0.6 * placement + 0.4 * lived);
+        if (match.Won) return 100;
+        if (match.PlayerCount is not { } starting || starting <= 1 ||
+            match.PlayersLeftAtEnd is not { } remaining || remaining < 1 || remaining > starting) return null;
+        return 100d * (starting - remaining) / (starting - 1);
     }
+
+    private static string SurvivalExplanation(MatchStats match) => match.Won
+        ? "Won the match. A victory earns full Survival points, regardless of match length."
+        : SurvivalScore(match) is { } score
+            ? $"Recorded lobby: {match.PlayerCount} players.\n{match.PlayersLeftAtEnd} players remained at your finish, including you.\nYou outlasted {match.PlayerCount - match.PlayersLeftAtEnd} of {match.PlayerCount - 1} other players: {score:0.#}/100."
+            : "Starting or remaining player counts are missing or inconsistent, so Survival is unavailable.";
 
     /// <summary>
     /// Five axes (Combat, Aim, Survival, Building, Looting), or four in a
@@ -71,9 +78,7 @@ public static class FortniteStatsPresentation
         var aim = Axis("Aim", AimScore(player), player.AccuracyPercent is { } accuracy
             ? $"{accuracy:0.#}% accuracy.\nAccuracy of 15% or less scores 0; 55% or more scores 100."
             : "Accuracy wasn't recorded for this match, so no Aim score can be calculated.");
-        var survival = Axis("Survival", SurvivalScore(match), SurvivalScore(match) is not null
-            ? $"Placement #{match.Placement} contributed {60 * Math.Clamp((100 - match.Placement!.Value) / 99.0, 0, 1):0.#}/60 points.\n{Clock(match.LocalEndSeconds!.Value)} in the match contributed {40 * Math.Clamp(match.LocalEndSeconds.Value / 1200, 0, 1):0.#}/40 points.\nFull points at 1st place and 20 minutes."
-            : "Survival needs a battle royale placement and your recorded time in the match. Those stats aren't available here.");
+        var survival = Axis("Survival", SurvivalScore(match), SurvivalExplanation(match));
         var looting = Axis("Looting", LootingScore(player), player.LootingPickups is >= 0 and var pickups
             ? $"{pickups} confirmed pickups.\nEach collected item stack adds 1 point, up to 100. Picking up your own dropped items adds no points."
                 + (player.LootingPartial ? "\nSome pickups couldn't be attributed to you; this score is a confirmed minimum." : string.Empty)
@@ -105,7 +110,7 @@ public static class FortniteStatsPresentation
             if (CombatScore(player) is null) notes.Add("Combat: this replay has no end-of-match stats.");
             if (AimScore(player) is null) notes.Add("Aim: this replay has no accuracy.");
         }
-        if (SurvivalScore(match) is null) notes.Add("Survival: placement needs a battle royale match with a recorded finish.");
+        if (SurvivalScore(match) is null) notes.Add(SurvivalUnavailable);
         return notes;
     }
 

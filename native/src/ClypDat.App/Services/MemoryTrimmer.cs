@@ -69,6 +69,7 @@ public static class MemoryTrimmer
     // collection that runs while the ring is still rooted reclaims nothing.
     private static readonly TimeSpan StopSettleDelay = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan EditorClosedSettleDelay = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan BitmapReleaseFenceTimeout = TimeSpan.FromSeconds(1);
 
     private static int _started;
     private static readonly AutoResetEvent TrimRequested = new(false);
@@ -199,7 +200,21 @@ public static class MemoryTrimmer
                 // Visible cards hold their own reference, so this only drops
                 // the scrolled-away ones; a hidden Library re-decodes on return.
                 CardThumbnailCache.Clear();
+                // Cache eviction deliberately keeps a bitmap alive until the
+                // compositor no longer uses the previous frame. Wait on this
+                // worker, never the UI thread, before asking GC to reclaim it.
+                if (!DeferredBitmapDisposal.WaitForReferenceReleaseAsync(BitmapReleaseFenceTimeout).GetAwaiter().GetResult())
+                {
+                    AppLog.Info($"Memory cleanup ({reason}) deferred: bitmap render fence not ready.");
+                    return;
+                }
             }
+
+            // The editor or an input hook can become active while the render
+            // fence runs. Use the current policy before any blocking GC.
+            editorOpen = EditorOpen;
+            gameRunning = Recording && GameRunning;
+            (_, deferred) = ResolveTrimMode(editorOpen, gameRunning, LowLevelInputHookActive);
 
             if (deferred)
             {
@@ -224,7 +239,7 @@ public static class MemoryTrimmer
             // run yet at this point - a before/after heap size there prints the
             // same number twice and reads as "the trim reclaimed nothing".
             var managed = deferred
-                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - {(editorOpen ? "editor open, caches kept" : "input hook active")})"
+                ? $"managedMb {beforeManaged / (1024 * 1024)} (collection deferred to the background GC - {(editorOpen ? "editor open" : "input hook active")})"
                 : $"managedMb {beforeManaged / (1024 * 1024)} -> {GC.GetTotalMemory(false) / (1024 * 1024)}";
             AppLog.Info(
                 $"Memory cleanup ({reason}): privateMb {beforePrivate / (1024 * 1024)} -> {settled.PrivateMemorySize64 / (1024 * 1024)}, {managed}, mode={(deferred ? "background" : "compacting")}, gen2Delta={GC.CollectionCount(2) - beforeGen2}, coalesced={coalesced}, elapsedMs={stopwatch.ElapsedMilliseconds}.");

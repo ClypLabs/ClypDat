@@ -554,6 +554,17 @@ public sealed class ClipCardViewModel : ViewModelBase
         }
     }
 
+    // A short navigation keeps the previous viewport warm. Once it settles,
+    // its images belong only to the bounded cache; keeping a bitmap on every
+    // hidden card would bypass cache eviction indefinitely.
+    internal void ReleaseInactivePreviewImage()
+    {
+        if (_isPreviewVisible) return;
+        DeferredBitmapDisposal.ReleaseReferenceAfterRender(PreviewImage);
+        PreviewImage = null;
+        _loadedPreviewWidth = 0;
+    }
+
     // Called after the thumbnail file at PreviewImagePath has been
     // regenerated IN PLACE (same path, new bytes - e.g. moving TrimStart in
     // the editor) - PreviewImagePath's own setter no-ops when the string

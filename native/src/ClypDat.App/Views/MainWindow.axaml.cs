@@ -687,6 +687,7 @@ public sealed partial class MainWindow : Window
             CancelEditorHoverWarmup(_claimedEditorHoverWarmup);
             CancelEditorHoverWarmup(_adoptingEditorHoverWarmup);
             _libraryResizeAnchorSettleTimer?.Stop();
+            _hiddenLibraryThumbnailReleaseTimer?.Stop();
             _cs2GsiListener?.Dispose();
             _dotaGsiListener?.Dispose();
             _leagueAutoClipListener?.Dispose();
@@ -2381,6 +2382,26 @@ public sealed partial class MainWindow : Window
 
     private bool _libraryThumbnailsSuspended;
     private bool _libraryThumbnailResumePending;
+    private DispatcherTimer? _hiddenLibraryThumbnailReleaseTimer;
+
+    private void ScheduleHiddenLibraryThumbnailRelease()
+    {
+        if (_hiddenLibraryThumbnailReleaseTimer is null)
+        {
+            _hiddenLibraryThumbnailReleaseTimer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromSeconds(20)
+            };
+            _hiddenLibraryThumbnailReleaseTimer.Tick += (_, _) =>
+            {
+                _hiddenLibraryThumbnailReleaseTimer?.Stop();
+                if (!_libraryThumbnailsSuspended || ViewModel?.IsLibraryVisible != false) return;
+                foreach (var clip in _activeLibraryClips) clip.ReleaseInactivePreviewImage();
+                MemoryTrimmer.RequestTrim("hidden library thumbnails released");
+            };
+        }
+        _hiddenLibraryThumbnailReleaseTimer.Start();
+    }
 
     private void UpdateRealizedLibraryClips()
     {
@@ -2395,8 +2416,12 @@ public sealed partial class MainWindow : Window
                 CancelEditorHoverWarmup(clip.Path);
                 if (!retained) _activeLibraryClips.Remove(clip);
             }
+            // Keep immediate navigation warm, then let the bounded cache own
+            // these pixels. The card set still preserves the return viewport.
+            if (_activeLibraryClips.Count > 0) ScheduleHiddenLibraryThumbnailRelease();
             return;
         }
+        _hiddenLibraryThumbnailReleaseTimer?.Stop();
         if (_libraryThumbnailsSuspended)
         {
             // Keep the previous viewport until return layout restores its scroll

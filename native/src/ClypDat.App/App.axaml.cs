@@ -180,7 +180,7 @@ public sealed partial class App : Application
             var game = detector.Detect();
             AppLog.Info(game.IsForeground
                 ? $"Publish restart: foreground game detected ({game.DisplayName}); starting in tray."
-                : "Publish restart: no foreground game detected; showing startup loader.");
+                : "Publish restart: no foreground game detected; showing window without activation.");
             return LaunchPresentationPolicy.Resolve(arguments, foregroundGameDetected: game.IsForeground);
         }
         catch (Exception error)

@@ -60,4 +60,23 @@ internal static class DeferredBitmapDisposal
                 DispatcherPriority.Background),
             DispatcherPriority.Background);
     }
+
+    // Queued after cache eviction, these barriers follow the same two hops
+    // as the release callbacks. Collecting before them would keep every
+    // evicted bitmap rooted in FinalizerReferences for that collection.
+    // Cancellation also covers a stopped or shutting-down dispatcher.
+    internal static async Task<bool> WaitForReferenceReleaseAsync(TimeSpan timeout)
+    {
+        if (FinalizerReferences.IsEmpty) return true;
+        using var deadline = new CancellationTokenSource(timeout);
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background, deadline.Token)
+                .GetTask().ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Background, deadline.Token)
+                .GetTask().ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) { return false; }
+    }
 }

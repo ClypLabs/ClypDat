@@ -57,7 +57,7 @@ public sealed class MatchStatsRenderingTests
     {
         var match = new MatchStats
         {
-            Game = "fortnite", ZeroBuild = true, HasDemoData = true, Placement = 12, PlayerCount = 100, LocalEndSeconds = 210,
+            Game = "fortnite", ZeroBuild = true, HasDemoData = true, Placement = 12, PlayerCount = 100, PlayersLeftAtEnd = 12, LocalEndSeconds = 210,
             Players = [new() { IsLocal = true, Kills = 2, Damage = 900, AccuracyPercent = 38, LootingPickups = 24 }]
         };
         var previous = MatchStatsViewModel.FromFortnite(match, new(120, 150, 1), string.Empty);
@@ -89,7 +89,7 @@ public sealed class MatchStatsRenderingTests
     {
         var match = new MatchStats
         {
-            Game = "fortnite", ZeroBuild = true, HasDemoData = true, Placement = 12, PlayerCount = 100, LocalEndSeconds = 210,
+            Game = "fortnite", ZeroBuild = true, HasDemoData = true, Placement = 12, PlayerCount = 100, PlayersLeftAtEnd = 12, LocalEndSeconds = 210,
             ReplayDetailsIncomplete = incompleteReplay, LocalEventsAvailable = !missingEvents,
             Players = [new() { IsLocal = true, Kills = 2, Damage = 900, AccuracyPercent = 38, LootingPickups = 24, LootingPartial = partialLooting }]
         };
@@ -143,7 +143,7 @@ public sealed class MatchStatsRenderingTests
         var match = new MatchStats
         {
             Game = "fortnite", ZeroBuild = zeroBuild, HasDemoData = true, HasMatchSummary = true,
-            Placement = 12, PlayerCount = 100, LocalEndSeconds = 210,
+            Placement = 12, PlayerCount = 100, PlayersLeftAtEnd = 12, LocalEndSeconds = 210,
             Players = [new() { IsLocal = true, Kills = 2, Damage = 900, AccuracyPercent = 38, LootingPickups = 24, LootingPartial = true }]
         };
         var model = MatchStatsViewModel.FromFortnite(match, null, string.Empty);
@@ -179,12 +179,18 @@ public sealed class MatchStatsRenderingTests
                 {
                     "Combat" => "2 eliminations contributed 10/50",
                     "Aim" => "38% accuracy",
-                    "Survival" => "3:30 in the match contributed 7/40",
+                    "Survival" => "You outlasted 88 of 99 other players",
                     "Looting" => "24 confirmed pickups",
                     "Building" => "No verified building activity",
                     _ => throw new InvalidOperationException(axis.Label)
                 };
                 Assert.Contains(expected, model.RadarExplanation);
+                if (axis.Label == "Survival")
+                {
+                    Assert.Contains("89/100", model.RadarExplanationTitle);
+                    Assert.Contains("12 players remained", model.RadarExplanation);
+                    Assert.Contains("including you", model.RadarExplanation);
+                }
                 if (axis.Label == "Looting")
                 {
                     Assert.Contains("≥24/100", model.RadarExplanationTitle);

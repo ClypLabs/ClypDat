@@ -360,14 +360,85 @@ public sealed class FortniteMatchStatsTests
         Assert.Equal(25, FortniteStatsPresentation.CombatScore(player)!.Value, 3);
         // Aim: (38 - 15) / (55 - 15) = 57.5.
         Assert.Equal(57.5, FortniteStatsPresentation.AimScore(player)!.Value, 3);
-        // Survival uses fixed placement and time ranges, not recording length.
-        Assert.Equal(100 * (0.6 * 88 / 99.0 + 0.4 * 210 / 1200), FortniteStatsPresentation.SurvivalScore(match)!.Value, 3);
+        // Five of the nine other players were outlasted; placement #12 is a
+        // team/mode outcome, not a population estimate.
+        Assert.Equal(55.5555555556, FortniteStatsPresentation.SurvivalScore(match)!.Value, 3);
         // Missing data is unavailable, never 0.
         var bare = FortniteMatchStats.Build(Data(place: null, players: null, stats: false), Me, null);
         Assert.Null(FortniteStatsPresentation.CombatScore(bare.LocalPlayer!));
         Assert.Null(FortniteStatsPresentation.AimScore(bare.LocalPlayer!));
         Assert.Null(FortniteStatsPresentation.SurvivalScore(bare));
         Assert.All(FortniteStatsPresentation.RadarAxes(bare), axis => Assert.False(axis.Available));
+    }
+
+    [Theory]
+    [InlineData(1105d)] // Actual regression: Victory Royale at 18:25.
+    [InlineData(60d)]
+    [InlineData(2400d)]
+    [InlineData(null)]
+    public void RecordedWinsEarnFullSurvivalWithoutARequiredMatchLength(double? seconds)
+    {
+        var match = FortniteMatchStats.Build(Data(place: 1), Me, null) with
+            { LocalEndSeconds = seconds, PlayerCount = null, PlayersLeftAtEnd = null };
+        Assert.True(match.Won);
+        Assert.Equal(100d, FortniteStatsPresentation.SurvivalScore(match)!.Value);
+        var axis = Assert.Single(FortniteStatsPresentation.RadarAxes(match), item => item.Label == "Survival");
+        Assert.Equal(1, axis.Value);
+        Assert.Equal("100", axis.Display);
+        Assert.Contains("Won the match", axis.Explanation);
+        Assert.DoesNotContain("20 minutes", axis.Explanation);
+    }
+
+    [Theory]
+    [InlineData(20)]
+    [InlineData(30)]
+    public void RecordedWinsInSmallLobbiesEarnFullSurvival(int starting)
+    {
+        var match = FortniteMatchStats.Build(Data(place: 1, players: starting), Me, null);
+        Assert.Equal(starting, match.PlayerCount);
+        Assert.True(match.Won);
+        Assert.Equal(100d, FortniteStatsPresentation.SurvivalScore(match)!.Value);
+        Assert.Equal("100", Assert.Single(FortniteStatsPresentation.RadarAxes(match), item => item.Label == "Survival").Display);
+    }
+
+    [Theory]
+    [InlineData(100, 100, 0d)]
+    [InlineData(100, 12, 88.8888888889)]
+    [InlineData(10, 5, 55.5555555556)]
+    [InlineData(20, 20, 0d)]
+    [InlineData(20, 5, 78.9473684211)]
+    [InlineData(30, 30, 0d)]
+    [InlineData(30, 5, 86.2068965517)]
+    [InlineData(32, 4, 90.3225806452)]
+    [InlineData(int.MaxValue, 1, 100d)]
+    public void NonWinsMeasureRecordedOtherPlayersOutlasted(int starting, int remaining, double expected)
+    {
+        var match = FortniteMatchStats.Build(Data(), Me, null) with { PlayerCount = starting, PlayersLeftAtEnd = remaining };
+        Assert.Equal(expected, FortniteStatsPresentation.SurvivalScore(match)!.Value, 6);
+        Assert.Equal(expected, FortniteStatsPresentation.SurvivalScore(match with { Placement = 2, LocalEndSeconds = 30 })!.Value, 6);
+        Assert.Equal(expected, FortniteStatsPresentation.SurvivalScore(match with { Placement = 50, LocalEndSeconds = 3600 })!.Value, 6);
+        var explanation = Assert.Single(FortniteStatsPresentation.RadarAxes(match), item => item.Label == "Survival").Explanation;
+        Assert.Contains("including you", explanation);
+        Assert.Contains($"{starting - remaining} of {starting - 1} other players", explanation);
+    }
+
+    [Theory]
+    [InlineData(null, 12)]
+    [InlineData(100, null)]
+    [InlineData(1, 1)]
+    [InlineData(0, 1)]
+    [InlineData(100, 0)]
+    [InlineData(100, 101)]
+    [InlineData(100, -1)]
+    public void MissingOrInconsistentCountsDoNotBecomeSurvivalScores(int? starting, int? remaining)
+    {
+        var match = FortniteMatchStats.Build(Data(), Me, null) with
+            { PlayerCount = starting, PlayersLeftAtEnd = remaining, Placement = 2, LocalEndSeconds = 2400 };
+        Assert.Null(FortniteStatsPresentation.SurvivalScore(match));
+        var axis = Assert.Single(FortniteStatsPresentation.RadarAxes(match), item => item.Label == "Survival");
+        Assert.False(axis.Available);
+        Assert.Contains("missing or inconsistent", axis.Explanation);
+        Assert.Contains(FortniteStatsPresentation.SurvivalUnavailable, FortniteStatsPresentation.RadarNotes(match));
     }
 
     // ---- Lining the clip up with the replay ----

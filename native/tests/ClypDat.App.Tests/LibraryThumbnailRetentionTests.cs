@@ -9,6 +9,65 @@ namespace ClypDat.App.Tests;
 public sealed class LibraryThumbnailRetentionTests
 {
     [Fact]
+    public void SettledHiddenViewport_ReleasesCardReferenceAndResumesFromCache()
+    {
+        AvaloniaTestThread.Run(() =>
+        {
+            var path = $"settled-retention-{Guid.NewGuid()}.jpg";
+            ClipCardViewModel.SetPreviewDecodeWidth(256, 1);
+            using var image = new WriteableBitmap(new PixelSize(256, 144), new Vector(96, 96));
+            var media = new MediaFileInfo("clip", "C:\\test\\clip.mp4", DateTimeOffset.UtcNow,
+                TimeSpan.FromSeconds(5), 1, path, [], 640, 360, 60);
+            var card = new ClipCardViewModel(media, "C:\\test");
+            try
+            {
+                CardThumbnailCache.Store(path, 256, image);
+                card.SetPreviewLifecycle(true, true);
+                card.SetPreviewLifecycle(true, false);
+                Assert.Same(image, card.PreviewImage); // quick navigation stays warm
+
+                card.ReleaseInactivePreviewImage();
+                Assert.Null(card.PreviewImage);
+                Assert.Same(image, CardThumbnailCache.Get(path, 256));
+                card.SetPreviewLifecycle(true, true);
+                Assert.Same(image, card.PreviewImage); // no file exists; resume must be synchronous
+
+                card.ReleaseInactivePreviewImage();
+                Assert.Same(image, card.PreviewImage); // a settle callback cannot blank an active card
+            }
+            finally { CardThumbnailCache.Invalidate(path); }
+        }, TimeSpan.FromSeconds(10), "Settled thumbnail cache resume timed out.");
+    }
+
+    [Fact]
+    public void SettledHiddenViewport_DropsImageAfterCacheEviction()
+    {
+        AvaloniaTestThread.Run(() =>
+        {
+            var path = $"evicted-retention-{Guid.NewGuid()}.jpg";
+            ClipCardViewModel.SetPreviewDecodeWidth(256, 1);
+            using var image = new WriteableBitmap(new PixelSize(256, 144), new Vector(96, 96));
+            var media = new MediaFileInfo("clip", "C:\\test\\clip.mp4", DateTimeOffset.UtcNow,
+                TimeSpan.FromSeconds(5), 1, path, [], 640, 360, 60);
+            var card = new ClipCardViewModel(media, "C:\\test");
+            try
+            {
+                CardThumbnailCache.Store(path, 256, image);
+                card.SetPreviewLifecycle(true, true);
+                card.SetPreviewLifecycle(true, false);
+                CardThumbnailCache.Clear();
+                Assert.Same(image, card.PreviewImage); // eviction cannot disrupt a brief navigation
+
+                card.ReleaseInactivePreviewImage();
+                Assert.Null(card.PreviewImage);
+                Assert.Null(CardThumbnailCache.Get(path, 256));
+                Assert.Equal(new PixelSize(256, 144), image.PixelSize); // borrowers retain ownership safely
+            }
+            finally { CardThumbnailCache.Invalidate(path); }
+        }, TimeSpan.FromSeconds(10), "Settled thumbnail eviction timed out.");
+    }
+
+    [Fact]
     public void HiddenViewport_SurvivesEvictionAndRefreshesAtomically()
     {
         AvaloniaTestThread.Run(() =>
