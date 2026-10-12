@@ -70,6 +70,15 @@ public sealed class MatchStatsViewModel : ViewModelBase
         }
     }
     public string RadarExplanation => SelectedRadarAxis?.Explanation ?? string.Empty;
+
+    internal void RestoreSelectionFrom(MatchStatsViewModel? previous)
+    {
+        if (previous is null || previous.IsFortnite != IsFortnite) return;
+        if (previous.HasScopeToggle && HasScopeToggle) SelectedScope = previous.SelectedScope;
+        SelectedRadarAxis = previous.SelectedRadarAxis is { } selected
+            ? RadarAxes.FirstOrDefault(axis => string.Equals(axis.Label, selected.Label, StringComparison.Ordinal))
+            : null;
+    }
     public IReadOnlyList<MatchRoundCellViewModel> Rounds { get; private init; } = [];
     public bool HasRounds => Rounds.Count > 0;
     public IReadOnlyList<MatchTeamBoardViewModel> Teams { get; private init; } = [];
@@ -161,7 +170,7 @@ public sealed class MatchStatsViewModel : ViewModelBase
             new(row.Time, row.Title, row.Detail, Dot(row.Kind), shade && row.InClip ? highlight : Brushes.Transparent, row.ClipTime ?? string.Empty);
         var end = match.LocalEndSeconds ?? match.DemoDurationSeconds ?? 0;
         var radar = FortniteStatsPresentation.RadarAxes(match);
-        var notes = radar.Any(axis => !axis.Available) ? FortniteStatsPresentation.RadarNotes(match) : [];
+        var notes = FortniteStatsPresentation.RadarNotes(match);
         return new MatchStatsViewModel
         {
             HasMatch = true,

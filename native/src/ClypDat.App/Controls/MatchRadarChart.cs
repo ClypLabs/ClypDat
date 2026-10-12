@@ -157,10 +157,24 @@ public sealed class MatchRadarChart : Control
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        TryHandleNavigation(e);
+    }
+
+    // The window calls this before its editor shortcuts on the tunnel route.
+    // Marking the event handled also prevents a second change on the bubble route.
+    internal static bool TryHandleNavigation(KeyEventArgs e)
+    {
+        if (e.Handled || e.Source is not MatchRadarChart chart || !chart.Navigate(e.Key)) return false;
+        e.Handled = true;
+        return true;
+    }
+
+    private bool Navigate(Key key)
+    {
         var axes = Axes?.Where(axis => axis.Explanation.Length > 0).ToList();
-        if (axes is not { Count: > 0 }) return;
+        if (axes is not { Count: > 0 }) return false;
         var current = SelectedAxis is { } selected ? axes.IndexOf(selected) : -1;
-        switch (e.Key)
+        switch (key)
         {
             case Key.Left:
             case Key.Up:
@@ -175,11 +189,12 @@ public sealed class MatchRadarChart : Control
                 SetCurrentValue(SelectedAxisProperty, current < 0 ? axes[0] : null);
                 break;
             case Key.Escape:
+                if (SelectedAxis is null) return false;
                 SetCurrentValue(SelectedAxisProperty, null);
                 break;
-            default: return;
+            default: return false;
         }
-        e.Handled = true;
+        return true;
     }
 
     private static StreamGeometry Polygon(IEnumerable<Point> points)

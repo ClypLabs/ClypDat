@@ -172,6 +172,7 @@ public sealed partial class MainWindowViewModel
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (generation != _matchStatsLoadGeneration || !string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
+                    view.RestoreSelectionFrom(SelectedMatchStats);
                     SelectedMatchStats = view;
                     if (markers.Count == 0) return;
                     SelectedAutoClipMarkers = _selectedClipOwnMarkers.Concat(markers).OrderBy(marker => marker.OffsetSeconds).ToArray();
@@ -218,8 +219,7 @@ public sealed partial class MainWindowViewModel
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (_matchStatsDisposed || generation != _matchStatsLoadGeneration || !string.Equals(SelectedVideoPath, media.Path, StringComparison.OrdinalIgnoreCase)) return;
-                    // Keep the Clip / Full Match choice across a refresh.
-                    if (SelectedMatchStats is { HasScopeToggle: true } previous && view.HasScopeToggle) view.SelectedScope = previous.SelectedScope;
+                    view.RestoreSelectionFrom(SelectedMatchStats);
                     SelectedMatchStats = view;
                     SelectedAutoClipMarkers = _selectedClipOwnMarkers.Concat(markers).OrderBy(marker => marker.OffsetSeconds).ToArray();
                     OnPropertyChanged(nameof(SelectedAutoClipMarkers));

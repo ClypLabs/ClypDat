@@ -1,4 +1,7 @@
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.LogicalTree;
@@ -11,6 +14,99 @@ namespace ClypDat.App.Tests;
 
 public sealed class MatchStatsRenderingTests
 {
+    [Theory]
+    [InlineData(Key.Right)]
+    [InlineData(Key.Left)]
+    [InlineData(Key.Up)]
+    [InlineData(Key.Down)]
+    [InlineData(Key.Enter)]
+    [InlineData(Key.Space)]
+    [InlineData(Key.Escape)]
+    public void FocusedRadarNavigationRunsBeforeEditorShortcuts(Key key)
+    {
+        AvaloniaTestThread.Run(() =>
+        {
+            MatchRadarAxis[] axes = [new("Combat", 0.25, "25"), new("Aim", 0.5, "50"), new("Survival", 0.75, "75")];
+            var chart = new MatchRadarChart { Axes = axes, SelectedAxis = axes[0] };
+            var root = new Panel();
+            root.Children.Add(chart);
+            var editorKeys = new List<Key>();
+            root.AddHandler(InputElement.KeyDownEvent, (_, e) =>
+            {
+                if (MatchRadarChart.TryHandleNavigation(e)) return;
+                editorKeys.Add(e.Key);
+                e.Handled = true;
+            }, RoutingStrategies.Tunnel);
+            var input = new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = key };
+            chart.RaiseEvent(input);
+            Assert.Empty(editorKeys);
+            Assert.True(input.Handled);
+            if (key is Key.Right or Key.Down) Assert.Same(axes[1], chart.SelectedAxis);
+            else if (key is Key.Left or Key.Up) Assert.Same(axes[2], chart.SelectedAxis);
+            else Assert.Null(chart.SelectedAxis);
+            if (key == Key.Escape)
+            {
+                chart.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
+                Assert.Equal([Key.Escape], editorKeys);
+            }
+        }, TimeSpan.FromSeconds(15), "Graph keyboard routing did not finish.");
+    }
+
+    [Fact]
+    public void RefreshKeepsSelectionUsingTheNewAxisAndUpdatedExplanation()
+    {
+        var match = new MatchStats
+        {
+            Game = "fortnite", ZeroBuild = true, HasDemoData = true, Placement = 12, PlayerCount = 100, LocalEndSeconds = 210,
+            Players = [new() { IsLocal = true, Kills = 2, Damage = 900, AccuracyPercent = 38, LootingPickups = 24 }]
+        };
+        var previous = MatchStatsViewModel.FromFortnite(match, new(120, 150, 1), string.Empty);
+        previous.SelectedScope = MatchStatsViewModel.FullScope;
+        previous.SelectedRadarAxis = Assert.Single(previous.RadarAxes, axis => axis.Label == "Combat");
+        var updated = match with { Players = [match.LocalPlayer! with { Kills = 4 }] };
+        var refreshed = MatchStatsViewModel.FromFortnite(updated, new(120, 150, 1), string.Empty);
+        refreshed.RestoreSelectionFrom(previous);
+        Assert.Equal(MatchStatsViewModel.FullScope, refreshed.SelectedScope);
+        Assert.Same(Assert.Single(refreshed.RadarAxes, axis => axis.Label == "Combat"), refreshed.SelectedRadarAxis);
+        Assert.NotSame(previous.SelectedRadarAxis, refreshed.SelectedRadarAxis);
+        Assert.Contains("4 eliminations", refreshed.RadarExplanation);
+        previous.SelectedRadarAxis = null;
+        var afterDismissal = MatchStatsViewModel.FromFortnite(updated, new(120, 150, 1), string.Empty);
+        afterDismissal.RestoreSelectionFrom(previous);
+        Assert.False(afterDismissal.HasRadarExplanation);
+        var builds = MatchStatsViewModel.FromFortnite(match with { ZeroBuild = false }, null, string.Empty);
+        builds.SelectedRadarAxis = Assert.Single(builds.RadarAxes, axis => axis.Label == "Building");
+        var zeroBuild = MatchStatsViewModel.FromFortnite(match, null, string.Empty);
+        zeroBuild.RestoreSelectionFrom(builds);
+        Assert.Null(zeroBuild.SelectedRadarAxis);
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public void CompleteRadarScoresKeepWarningsAboutIncompleteReplayData(bool partialLooting, bool incompleteReplay, bool missingEvents)
+    {
+        var match = new MatchStats
+        {
+            Game = "fortnite", ZeroBuild = true, HasDemoData = true, Placement = 12, PlayerCount = 100, LocalEndSeconds = 210,
+            ReplayDetailsIncomplete = incompleteReplay, LocalEventsAvailable = !missingEvents,
+            Players = [new() { IsLocal = true, Kills = 2, Damage = 900, AccuracyPercent = 38, LootingPickups = 24, LootingPartial = partialLooting }]
+        };
+        var model = MatchStatsViewModel.FromFortnite(match, null, string.Empty);
+        Assert.All(model.RadarAxes, axis => Assert.True(axis.Available));
+        Assert.True(model.HasRadarNote);
+        var expected = partialLooting ? FortniteStatsPresentation.LootingPartial
+            : incompleteReplay ? "Some replay data couldn't be read" : "Your event totals are unavailable";
+        Assert.Contains(expected, model.RadarNote);
+        var complete = MatchStatsViewModel.FromFortnite(match with
+        {
+            ReplayDetailsIncomplete = false, LocalEventsAvailable = true,
+            Players = [match.LocalPlayer! with { LootingPartial = false }]
+        }, null, string.Empty);
+        Assert.False(complete.HasRadarNote);
+    }
+
     [Fact]
     public void Cs2UsesTheSharedClickableRadarLabelsAndOutsideClickDismissal()
     {

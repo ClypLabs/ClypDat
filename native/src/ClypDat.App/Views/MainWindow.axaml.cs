@@ -7026,6 +7026,8 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (MatchRadarChart.TryHandleNavigation(e)) return;
+
         if (e.Key == Key.Escape && ViewModel is not null && !IsTypingInTextInput(e.Source))
         {
             if (ViewModel.IsVideoFullscreen)
