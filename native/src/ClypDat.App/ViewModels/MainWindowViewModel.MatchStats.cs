@@ -175,7 +175,12 @@ public sealed partial class MainWindowViewModel
     public string Cs2SteamIdInput
     {
         get => _cs2SteamIdInput;
-        set { if (SetProperty(ref _cs2SteamIdInput, value ?? string.Empty) && Cs2SteamIdError is not null) ValidateCs2MatchHistoryInputs(); }
+        set
+        {
+            if (!SetProperty(ref _cs2SteamIdInput, value ?? string.Empty)) return;
+            ShowExtractedCode(_cs2SteamIdInput, Cs2MatchHistoryFormats.NormaliseSteamId, extracted => Cs2SteamIdInput = extracted);
+            if (Cs2SteamIdError is not null) ValidateCs2MatchHistoryInputs();
+        }
     }
 
     public string Cs2AuthCodeInput
@@ -187,7 +192,23 @@ public sealed partial class MainWindowViewModel
     public string Cs2ShareCodeInput
     {
         get => _cs2ShareCodeInput;
-        set { if (SetProperty(ref _cs2ShareCodeInput, value ?? string.Empty) && Cs2ShareCodeError is not null) ValidateCs2MatchHistoryInputs(); }
+        set
+        {
+            if (!SetProperty(ref _cs2ShareCodeInput, value ?? string.Empty)) return;
+            ShowExtractedCode(_cs2ShareCodeInput, Cs2MatchHistoryFormats.NormaliseShareCode, extracted => Cs2ShareCodeInput = extracted);
+            if (Cs2ShareCodeError is not null) ValidateCs2MatchHistoryInputs();
+        }
+    }
+
+    // CS2 copies a share code as a whole steam:// link, and Steam profiles
+    // as URLs. Replace a pasted link with just the code it carries, so the
+    // box shows what will be saved. Posted, because rewriting the text in
+    // the middle of the TextBox's own update can be dropped.
+    private static void ShowExtractedCode(string input, Func<string?, string?> normalise, Action<string> apply)
+    {
+        var extracted = normalise(input);
+        if (extracted is null || string.Equals(extracted, input, StringComparison.Ordinal)) return;
+        Dispatcher.UIThread.Post(() => apply(extracted));
     }
 
     public string? Cs2SteamIdError { get => _cs2SteamIdError; private set { SetProperty(ref _cs2SteamIdError, value); OnPropertyChanged(nameof(HasCs2SteamIdError)); } }
