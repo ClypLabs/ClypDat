@@ -32,7 +32,11 @@
         <StackPanel Spacing="14">
           <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
             <Grid ColumnDefinitions="Auto,*">
-              <controls:FortniteOutfitPortrait OutfitId="{Binding OutfitId}" Width="44" Height="44" Margin="0,0,10,0" VerticalAlignment="Center" ToolTip.Tip="Outfit" />
+              <Border Width="48" Height="48" Margin="0,0,10,0" Padding="1" CornerRadius="8"
+                      Background="{StaticResource Surface_0D151C}" BorderBrush="{StaticResource Surface_263743}" BorderThickness="1"
+                      VerticalAlignment="Center" IsVisible="{Binding #MatchOutfitPortrait.IsVisible}">
+                <controls:FortniteOutfitPortrait x:Name="MatchOutfitPortrait" OutfitId="{Binding OutfitId}" Width="44" Height="44" />
+              </Border>
               <StackPanel Grid.Column="1" Spacing="3">
                 <TextBlock Text="{Binding PlayerName}" Foreground="{StaticResource Text_EDF4FB}" FontSize="16" FontWeight="Bold"
                            TextTrimming="CharacterEllipsis" />
