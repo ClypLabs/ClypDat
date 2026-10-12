@@ -50,7 +50,7 @@
               </StackPanel>
 
               <StackPanel Spacing="10" IsVisible="{Binding IsCs2MatchHistoryFormVisible}" MaxWidth="520" HorizontalAlignment="Left">
-                <Button Classes="linkButton" Content="Step-by-step setup guide" Padding="0" HorizontalAlignment="Left" Click="Cs2MatchHistoryGuide_OnClick" />
+                <Button Classes="linkButton webLink" Content="Step-by-step setup guide" Padding="0" HorizontalAlignment="Left" Click="Cs2MatchHistoryGuide_OnClick" />
                 <StackPanel Spacing="4">
                   <TextBlock Classes="settingsRowDescSm" Text="Steam ID (17 digits)" />
                   <TextBox Classes="settingsInput" Text="{Binding Cs2SteamIdInput}" PlaceholderText="7656119xxxxxxxxxx" MaxLength="120" />
@@ -65,7 +65,7 @@
                     <ToggleButton Grid.Column="1" Content="{Binding Cs2AuthCodeRevealLabel}" IsChecked="{Binding IsCs2AuthCodeRevealed}" />
                   </Grid>
                   <TextBlock Classes="settingsRowError" Text="{Binding Cs2AuthCodeError}" IsVisible="{Binding HasCs2AuthCodeError}" />
-                  <Button Classes="linkButton" Content="Create your code on Steam" Padding="0" HorizontalAlignment="Left" Click="Cs2AuthCodeHelp_OnClick" />
+                  <Button Classes="linkButton webLink" Content="Create your code on Steam" Padding="0" HorizontalAlignment="Left" Click="Cs2AuthCodeHelp_OnClick" />
                 </StackPanel>
                 <StackPanel Spacing="4">
                   <TextBlock Classes="settingsRowDescSm" Text="Match code to start from" />

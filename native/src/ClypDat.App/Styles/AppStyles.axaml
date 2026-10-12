@@ -625,6 +625,15 @@
   <Style Selector="Button.linkButton:pointerover PathIcon">
     <Setter Property="Foreground" Value="{StaticResource Text_D2DEEC}" />
   </Style>
+  <!-- A link that leaves the app for a web page: blue text, no hover pill,
+       same blue as the website's outbound links. -->
+  <Style Selector="Button.linkButton.webLink">
+    <Setter Property="Foreground" Value="#38BDF8" />
+  </Style>
+  <Style Selector="Button.linkButton.webLink:pointerover">
+    <Setter Property="Background" Value="{StaticResource Surface_001D2A36}" />
+    <Setter Property="Foreground" Value="#7DD3FC" />
+  </Style>
   <!-- The editor hover bar stays readable on its fixed black scrim. -->
   <Style Selector="Window.hoverPlayback Button.linkButton">
     <Setter Property="Background" Value="#00FFFFFF" />
