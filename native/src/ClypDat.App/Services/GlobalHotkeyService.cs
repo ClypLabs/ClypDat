@@ -10,6 +10,12 @@ namespace ClypDat.App.Services;
 // standard Win32 "global hotkey" API (used by things like Discord's
 // push-to-talk) and is delivered via the OS hotkey table rather than a raw
 // input hook, so it isn't caught by that kind of filtering.
+//
+// RegisterHotKey has its own blind spot: a game that registers its keyboard
+// for raw input with RIDEV_NOHOTKEYS (For Honor does) switches off every
+// application hotkey while it has focus, so WM_HOTKEY never arrives. The same
+// window therefore also listens to the keyboard as a raw-input sink and fires
+// on whichever of the two paths sees the press first.
 public sealed class GlobalHotkeyService : IDisposable
 {
     private const int FirstHotkeyId = 1;
@@ -22,6 +28,18 @@ public sealed class GlobalHotkeyService : IDisposable
     private const int WmHotkey = 0x0312;
     private const int WmQuit = 0x0012;
     private const int WmApplyHotkey = 0x8000; // WM_APP
+    private const int WmRawHotkey = 0x8001;
+    private const int WmClaimRawInput = 0x8002;
+    private const int WmInput = 0x00FF;
+    private const uint RidevRemove = 0x00000001;
+    private const uint RidevInputSink = 0x00000100;
+    private const uint RidInput = 0x10000003;
+    private const uint RimTypeKeyboard = 1;
+    private const ushort RiKeyBreak = 0x01;
+    private const uint VkShift = 0x10, VkControl = 0x11, VkMenu = 0x12, VkLWin = 0x5B, VkRWin = 0x5C;
+    // WM_HOTKEY and the raw-input sink both report the same physical press;
+    // anything inside this window of the last fire is that second report.
+    private static readonly TimeSpan DuplicateWindow = TimeSpan.FromMilliseconds(500);
     private static readonly IntPtr HwndMessage = new(-3);
 
     private Thread? _thread;
@@ -30,6 +48,17 @@ public sealed class GlobalHotkeyService : IDisposable
     private uint _vk;
     private readonly ManualResetEventSlim _ready = new(false);
     private uint _threadId;
+    private long _lastFiredTimestamp;
+
+    // A process gets one raw-input target per device type: registering a second
+    // window moves keyboard input to it. The capture worker runs two of these
+    // services (clip and full-session), so one instance owns the sink and posts
+    // matching presses to whichever instances' combos they complete.
+    private static readonly object RawGate = new();
+    private static readonly List<GlobalHotkeyService> Live = [];
+    private static GlobalHotkeyService? _rawOwner;
+    // Touched only on the current raw owner's thread.
+    private static readonly HashSet<uint> RawKeysDown = [];
 
     public event EventHandler<ReplayHotkeyPressedEventArgs>? Pressed;
 
@@ -84,7 +113,12 @@ public sealed class GlobalHotkeyService : IDisposable
     {
         _hwnd = CreateWindowExW(0, "STATIC", "ClypDat Global Hotkey", 0, 0, 0, 0, 0, HwndMessage, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
         _threadId = GetCurrentThreadId();
-        if (_hwnd != IntPtr.Zero) ApplyRegistration();
+        if (_hwnd != IntPtr.Zero)
+        {
+            ApplyRegistration();
+            lock (RawGate) Live.Add(this);
+            TryClaimRawInput();
+        }
         _ready.Set();
 
         while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
@@ -92,7 +126,19 @@ public sealed class GlobalHotkeyService : IDisposable
             if (msg.Message == WmHotkey
                 && msg.WParam.ToInt32() is >= FirstHotkeyId and < FirstHotkeyId + MaxHotkeyRegistrations)
             {
-                Pressed?.Invoke(this, new ReplayHotkeyPressedEventArgs(MonotonicClock.UtcNow));
+                Fire("hotkey");
+            }
+            else if (msg.Message == WmRawHotkey)
+            {
+                Fire("raw-input");
+            }
+            else if (msg.Message == WmInput)
+            {
+                HandleRawInput(msg.LParam);
+            }
+            else if (msg.Message == WmClaimRawInput)
+            {
+                TryClaimRawInput();
             }
             else if (msg.Message == WmApplyHotkey)
             {
@@ -106,9 +152,98 @@ public sealed class GlobalHotkeyService : IDisposable
         // Unregister on the owning thread, immediately before destroying its window.
         if (_hwnd != IntPtr.Zero)
         {
+            ReleaseRawInput();
             UnregisterHotkeys();
             DestroyWindow(_hwnd);
         }
+    }
+
+    private void TryClaimRawInput()
+    {
+        lock (RawGate)
+        {
+            if (_rawOwner is not null) return;
+            var keyboard = new[] { new RawInputDevice { UsagePage = 0x01, Usage = 0x06, Flags = RidevInputSink, Target = _hwnd } };
+            if (!RegisterRawInputDevices(keyboard, 1, Marshal.SizeOf<RawInputDevice>()))
+            {
+                AppLog.Error($"Global hotkey raw-input fallback registration failed: error={Marshal.GetLastWin32Error()}.");
+                return;
+            }
+
+            _rawOwner = this;
+            RawKeysDown.Clear();
+        }
+    }
+
+    private void ReleaseRawInput()
+    {
+        lock (RawGate)
+        {
+            Live.Remove(this);
+            if (_rawOwner != this) return;
+            _rawOwner = null;
+            var keyboard = new[] { new RawInputDevice { UsagePage = 0x01, Usage = 0x06, Flags = RidevRemove, Target = IntPtr.Zero } };
+            RegisterRawInputDevices(keyboard, 1, Marshal.SizeOf<RawInputDevice>());
+            if (Live.Count > 0) PostThreadMessage(Live[0]._threadId, WmClaimRawInput, IntPtr.Zero, IntPtr.Zero);
+        }
+    }
+
+    private void Fire(string source)
+    {
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_lastFiredTimestamp != 0 && System.Diagnostics.Stopwatch.GetElapsedTime(_lastFiredTimestamp, now) < DuplicateWindow) return;
+        _lastFiredTimestamp = now;
+        AppLog.Info($"Global hotkey pressed: source={source}.");
+        Pressed?.Invoke(this, new ReplayHotkeyPressedEventArgs(MonotonicClock.UtcNow));
+    }
+
+    private void HandleRawInput(IntPtr handle)
+    {
+        var headerSize = Marshal.SizeOf<RawInputHeader>();
+        var size = 0;
+        if (GetRawInputData(handle, RidInput, IntPtr.Zero, ref size, headerSize) != 0 || size < headerSize + Marshal.SizeOf<RawKeyboard>()) return;
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            if (GetRawInputData(handle, RidInput, buffer, ref size, headerSize) != size) return;
+            if (Marshal.PtrToStructure<RawInputHeader>(buffer).Type != RimTypeKeyboard) return;
+            var keyboard = Marshal.PtrToStructure<RawKeyboard>(buffer + headerSize);
+            uint vk = keyboard.VKey;
+            if ((keyboard.Flags & RiKeyBreak) != 0)
+            {
+                RawKeysDown.Remove(vk);
+                return;
+            }
+
+            // Held keys auto-repeat make events; only the first one is a press,
+            // matching MOD_NOREPEAT on the RegisterHotKey path.
+            if (!RawKeysDown.Add(vk)) return;
+            lock (RawGate)
+            {
+                foreach (var service in Live)
+                {
+                    if (service._vk != 0 && service._vk == vk && service.RawModifiersMatch())
+                    {
+                        PostThreadMessage(service._threadId, WmRawHotkey, IntPtr.Zero, IntPtr.Zero);
+                    }
+                }
+            }
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    // Same rule as the RegisterHotKey variants: every configured modifier held,
+    // Ctrl/Shift may be held extra, Alt/Win only when configured.
+    private bool RawModifiersMatch()
+    {
+        var ctrl = RawKeysDown.Contains(VkControl);
+        var shift = RawKeysDown.Contains(VkShift);
+        var alt = RawKeysDown.Contains(VkMenu);
+        var win = RawKeysDown.Contains(VkLWin) || RawKeysDown.Contains(VkRWin);
+        if ((_modifiers & ModControl) != 0 && !ctrl) return false;
+        if ((_modifiers & ModShift) != 0 && !shift) return false;
+        if (((_modifiers & ModAlt) != 0) != alt) return false;
+        return ((_modifiers & ModWin) != 0) == win;
     }
 
     private void ApplyRegistration()
@@ -223,6 +358,21 @@ public sealed class GlobalHotkeyService : IDisposable
         public int PtX;
         public int PtY;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RawInputDevice { public ushort UsagePage; public ushort Usage; public uint Flags; public IntPtr Target; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RawInputHeader { public uint Type; public uint Size; public IntPtr Device; public IntPtr WParam; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RawKeyboard { public ushort MakeCode; public ushort Flags; public ushort Reserved; public ushort VKey; public uint Message; public uint ExtraInformation; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool RegisterRawInputDevices([In] RawInputDevice[] devices, int count, int size);
+
+    [DllImport("user32.dll")]
+    private static extern int GetRawInputData(IntPtr rawInput, uint command, IntPtr data, ref int size, int headerSize);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateWindowExW(
