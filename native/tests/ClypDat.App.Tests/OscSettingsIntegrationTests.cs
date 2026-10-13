@@ -15,7 +15,7 @@ namespace ClypDat.App.Tests;
 public sealed class OscSettingsIntegrationTests
 {
     [Fact]
-    public void UpdatesGlobalAndEffectiveActiveOverrideRefreshesBothViewsAndPersistsOnce() => Isolated(() =>
+    public void UpdatesOnlyEffectiveActiveOverrideRefreshesItsViewAndPersistsOnce() => Isolated(() =>
     {
         var settings = Settings();
         var profile = new CustomGameProfile { ReplayDurationSeconds = 120, Groups = ["Replay"] };
@@ -36,18 +36,17 @@ public sealed class OscSettingsIntegrationTests
 
         Assert.True(vm.ApplyOscReplayDuration(30));
         Assert.Equal(1, saves);
-        Assert.Equal(30, settings.ReplayDurationSeconds);
+        Assert.Equal(60, settings.ReplayDurationSeconds);
         Assert.Equal(30, profile.ReplayDurationSeconds);
         Assert.Equal(300, other.ReplayDurationSeconds);
         Assert.Equal(["Replay"], profile.Groups);
-        Assert.Equal(30, vm.SelectedReplayDurationPreset!.Seconds);
         Assert.Equal(30, tab.SelectedDurationPreset!.Seconds);
-        Assert.Contains(nameof(MainWindowViewModel.SelectedReplayDurationPreset), globalChanges);
+        Assert.DoesNotContain(nameof(MainWindowViewModel.SelectedReplayDurationPreset), globalChanges);
         Assert.Contains(nameof(MainWindowViewModel.ReplayDurationSummary), globalChanges);
         Assert.Contains(nameof(CustomGameTabViewModel.SelectedDurationPreset), gameChanges);
         Assert.Contains(nameof(CustomGameTabViewModel.ReplayDurationSeconds), gameChanges);
         var persisted = AppSettingsStore.Load();
-        Assert.Equal(30, persisted.ReplayDurationSeconds);
+        Assert.Equal(60, persisted.ReplayDurationSeconds);
         Assert.Equal(30, persisted.CustomGameSettings["fixture.exe"].ReplayDurationSeconds);
         Assert.True(NeedsRestart(initial, vm.CreateReplayConfig()));
 
@@ -73,7 +72,7 @@ public sealed class OscSettingsIntegrationTests
         settings.CustomGameSettings["fixture.exe"] = profile;
         var vm = ViewModel(settings);
         Assert.True(vm.ApplyOscReplayDuration(30));
-        Assert.Equal(30, settings.ReplayDurationSeconds);
+        Assert.Equal(changesGame ? 60 : 30, settings.ReplayDurationSeconds);
         Assert.Equal(changesGame ? 30 : 120, profile.ReplayDurationSeconds);
         Assert.Equal(replayGroup ? ["Replay"] : ["Quality"], profile.Groups);
         Assert.Single(settings.CustomGameSettings);
@@ -109,17 +108,16 @@ public sealed class OscSettingsIntegrationTests
     });
 
     [Fact]
-    public void GlobalChangeWithAlreadyMatchingOverrideSavesWithoutRestart() => Isolated(() =>
+    public void AlreadyMatchingActiveOverrideLeavesGlobalAndSavesNothing() => Isolated(() =>
     {
         var settings = Settings();
         settings.CustomGameSettings["fixture.exe"] = new() { ReplayDurationSeconds = 30, Groups = ["Replay"] };
         var vm = ViewModel(settings);
-        var initial = vm.CreateReplayConfig();
-        var restarts = 0;
-        vm.RecordingSettingsSaved += () => { if (NeedsRestart(initial, vm.CreateReplayConfig())) restarts++; };
-        Assert.True(vm.ApplyOscReplayDuration(30));
-        Assert.Equal(0, restarts);
-        Assert.Equal(30, AppSettingsStore.Load().ReplayDurationSeconds);
+        var saves = 0;
+        vm.RecordingSettingsSaved += () => saves++;
+        Assert.False(vm.ApplyOscReplayDuration(30));
+        Assert.Equal(0, saves);
+        Assert.Equal(60, settings.ReplayDurationSeconds);
     });
 
     [Fact]

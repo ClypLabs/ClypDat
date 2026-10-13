@@ -51,6 +51,29 @@ public sealed class OscUdpListenerTests
     }
 
     [Fact]
+    public void FailedPortIsNotRetriedUntilOscIsToggledOrPortChanges()
+    {
+        var statuses = new List<string>();
+        using var blocker = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetworkV6,
+            System.Net.Sockets.SocketType.Dgram, System.Net.Sockets.ProtocolType.Udp) { DualMode = true, ExclusiveAddressUse = true };
+        blocker.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.IPv6Any, 0));
+        var taken = ((System.Net.IPEndPoint)blocker.LocalEndPoint!).Port;
+        using var listener = new OscUdpListener(action => action(), _ => { }, statuses.Add);
+
+        listener.Configure(true, taken);
+        Assert.False(listener.IsListening);
+        var failures = statuses.Count;
+        listener.Configure(true, taken);
+        listener.Configure(true, taken);
+        Assert.Equal(failures, statuses.Count);
+
+        listener.Configure(false, taken);
+        blocker.Dispose();
+        listener.Configure(true, taken);
+        Assert.True(listener.IsListening);
+    }
+
+    [Fact]
     public async Task DisableRebindAndShutdownInvalidateStaleCallbacksAndReleaseSockets()
     {
         var dispatcher = new ConcurrentQueue<Action>();

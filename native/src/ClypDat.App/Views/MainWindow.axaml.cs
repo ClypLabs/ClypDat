@@ -9571,7 +9571,7 @@ public sealed partial class MainWindow : Window
                     var canAdopt = !warmup.Failed && await warmup.Readiness.CanAdoptAsync(warmup.VideoLoaded.Task,
                         () => warmup.PlayerAttached && !warmup.Cancellation.IsCancellationRequested,
                         () => session.VideoPlayer.VoutCount > 0 && session.Composition?.HasPresentedPicture == true,
-                        adoptionCancellation.Token, RemainingEditorOpenTime(openClock),
+                        adoptionCancellation.Token, Min(EditorHoverAdoptionTimeout, RemainingEditorOpenTime(openClock)),
                         reason => adoptionFailure = reason);
                     AppLog.Debug($"[DEBUG-editor-open-latency] warm-up adoption: {Path.GetFileName(warmup.Path)} result={canAdopt}, clickWaitMs={openClock.ElapsedMilliseconds}, readinessWaitMs={adoptionClock.ElapsedMilliseconds}, warmupMs={warmup.Clock.ElapsedMilliseconds}, reason={adoptionFailure ?? "ready"}.");
                     if (canAdopt)
@@ -9625,6 +9625,13 @@ public sealed partial class MainWindow : Window
             },
             DispatcherPriority.Default);
     }
+
+    // An attaching warm-up is worth waiting for (logged adoptions: p95 ~0.4s,
+    // slowest 2s), but a stuck one must not hold the click for the whole open
+    // budget and leave the cold fallback with no time of its own.
+    private static readonly TimeSpan EditorHoverAdoptionTimeout = TimeSpan.FromSeconds(2.5);
+
+    private static TimeSpan Min(TimeSpan left, TimeSpan right) => left < right ? left : right;
 
     private static TimeSpan RemainingEditorOpenTime(System.Diagnostics.Stopwatch clock)
     {
@@ -10993,17 +11000,25 @@ public sealed partial class MainWindow : Window
         return barContent;
     }
 
-    private Border BuildPlaybackControlsBackdrop(bool fullscreen, TranslateTransform translate) => new()
+    private Border BuildPlaybackControlsBackdrop(bool fullscreen, TranslateTransform translate)
     {
-        Background = HoverControlsBackdropBrush(fullscreen),
-        Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0),
-        CornerRadius = new CornerRadius(fullscreen ? 12 : 0),
-        BorderBrush = HoverControlsBorderBrush(fullscreen),
-        BorderThickness = fullscreen ? new Thickness(1) : new Thickness(0, HoverControlsRailInset, 0, 0),
-        BackgroundSizing = fullscreen ? BackgroundSizing.CenterBorder : BackgroundSizing.InnerBorderEdge,
-        Child = BuildPlaybackBarLayout(fullscreen),
-        RenderTransform = translate,
-    };
+        var backdrop = new Border { RenderTransform = translate };
+        ApplyPlaybackControlsBackdrop(backdrop, fullscreen);
+        return backdrop;
+    }
+
+    // One place for the bar's fullscreen/hoverbar styling: creating the window
+    // and switching an existing one between modes both go through here.
+    private void ApplyPlaybackControlsBackdrop(Border backdrop, bool fullscreen)
+    {
+        backdrop.Background = HoverControlsBackdropBrush(fullscreen);
+        backdrop.Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0);
+        backdrop.CornerRadius = new CornerRadius(fullscreen ? 12 : 0);
+        backdrop.BorderBrush = HoverControlsBorderBrush(fullscreen);
+        backdrop.BorderThickness = fullscreen ? new Thickness(1) : new Thickness(0, HoverControlsRailInset, 0, 0);
+        backdrop.BackgroundSizing = fullscreen ? BackgroundSizing.CenterBorder : BackgroundSizing.InnerBorderEdge;
+        backdrop.Child = BuildPlaybackBarLayout(fullscreen);
+    }
 
     private Window EnsureEditorHoverControlsWindow()
     {
@@ -11017,15 +11032,9 @@ public sealed partial class MainWindow : Window
                 _editorHoverControlsWindow.RequestedThemeVariant = fullscreen ? ThemeVariant.Default : ThemeVariant.Dark;
                 _editorHoverControlsWindow.Classes.Set("hoverPlayback", !fullscreen);
                 _editorHoverControlsWindow.Classes.Set("fullscreenPlayback", fullscreen);
-                existing.Child = BuildPlaybackBarLayout(fullscreen);
-                existing.Margin = new Thickness(0, fullscreen ? 0 : HoverControlsTopInset, 0, 0);
-                existing.CornerRadius = new CornerRadius(fullscreen ? 12 : 0);
-                existing.BorderThickness = fullscreen ? new Thickness(1) : new Thickness(0, HoverControlsRailInset, 0, 0);
-                existing.BackgroundSizing = fullscreen ? BackgroundSizing.CenterBorder : BackgroundSizing.InnerBorderEdge;
+                ApplyPlaybackControlsBackdrop(existing, fullscreen);
                 existing.Height = double.NaN;
                 existing.VerticalAlignment = VerticalAlignment.Stretch;
-                existing.Background = HoverControlsBackdropBrush(fullscreen);
-                existing.BorderBrush = HoverControlsBorderBrush(fullscreen);
                 SetHoverControlsOffset(HoverControlsHiddenOffset);
             }
             return _editorHoverControlsWindow;

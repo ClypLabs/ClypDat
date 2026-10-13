@@ -85,17 +85,23 @@ public sealed partial class MainWindowViewModel
         var key = IsEffectiveDesktopCapture || !ActiveGameDetection.IsDetected ? null :
             string.IsNullOrWhiteSpace(ActiveGameDetection.DetectionKey) ? ActiveGameDetection.ExeName : ActiveGameDetection.DetectionKey;
         var profile = CustomGameSettingsResolver.FindActive(Settings, key, CustomGameSettingsResolver.ReplayGroup);
-        if (Settings.ReplayDurationSeconds == seconds && (profile is null || profile.ReplayDurationSeconds == seconds)) return false;
-
-        Settings.ReplayDurationSeconds = seconds;
-        _selectedReplayDurationPreset = preset;
+        // Change only the length the recorder is using now: the active game's
+        // override when it has one, otherwise the global default. Writing both
+        // left every other game on the length meant for this one.
         if (profile is not null)
         {
+            if (profile.ReplayDurationSeconds == seconds) return false;
             profile.ReplayDurationSeconds = seconds;
             foreach (var tab in CustomGameTabs)
                 if (ReferenceEquals(tab.Profile, profile)) tab.RefreshReplayDuration();
         }
-        OnPropertyChanged(nameof(SelectedReplayDurationPreset));
+        else
+        {
+            if (Settings.ReplayDurationSeconds == seconds) return false;
+            Settings.ReplayDurationSeconds = seconds;
+            _selectedReplayDurationPreset = preset;
+            OnPropertyChanged(nameof(SelectedReplayDurationPreset));
+        }
         OnPropertyChanged(nameof(ReplayDurationSummary));
         SaveSettings();
         return true;

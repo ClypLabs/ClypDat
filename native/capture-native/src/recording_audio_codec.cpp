@@ -50,7 +50,12 @@ CodecContext open_audio_encoder(AudioCodec codec, int channels, int bitrate_kbps
     context->sample_rate = 48000; context->time_base = {1, 48000};
     av_channel_layout_default(&context->ch_layout, channels);
     const int default_bitrate = codec == AudioCodec::Opus ? 128 : 192;
-    context->bit_rate = int64_t(bitrate_kbps > 0 ? std::clamp(bitrate_kbps, 32, 320) : default_bitrate) * 1000;
+    // The bitrate setting is per track, but mono tracks share it. libopus
+    // refuses more than 256 kb/s per channel and libvorbis more than 240 kb/s
+    // for mono at 48 kHz (measured), so cap there instead of failing to open.
+    const int per_channel_ceiling = codec == AudioCodec::Opus ? 256 : codec == AudioCodec::Vorbis ? 240 : 320;
+    const int ceiling = (std::min)(320, per_channel_ceiling * (std::max)(1, channels));
+    context->bit_rate = int64_t((std::min)(bitrate_kbps > 0 ? std::clamp(bitrate_kbps, 32, 320) : default_bitrate, ceiling)) * 1000;
     context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     check(avcodec_open2(context.get(), encoder, nullptr), "Open audio encoder");
     if (context->frame_size <= 0) throw std::runtime_error("Audio encoder has no fixed frame size");

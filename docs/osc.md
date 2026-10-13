@@ -18,7 +18,7 @@ Addresses are fixed and case-sensitive. Use [OSC binary encoding](https://openso
 | `/clypdat/clip` | OSC boolean `false` (`F`), zero, or a negative int32/float32 | Ignore the button release. |
 | `/clypdat/replay-duration` | One int32 or integral float32 equal to `30`, `60`, `120`, `180`, `240` or `300` | Change the saved replay length in seconds. |
 
-Numeric clip arguments are button presses, not clip lengths. Duration commands change the global setting and the active game's existing effective Replay override. Other games stay unchanged. They do not create profiles or enable overrides; Desktop Capture changes only the global length. Repeating an identical setting does not save or restart capture.
+Numeric clip arguments are button presses, not clip lengths. Duration commands change the length the recorder is using now: the active game's existing effective Replay override when it has one, otherwise the global setting. The global default and other games stay unchanged while an override is active. They do not create profiles or enable overrides; Desktop Capture changes only the global length. Repeating an identical setting does not save or restart capture.
 
 A changed effective length uses the existing capture restart: replay history clears and starts accumulating again. An active Full Session continues in another file. Wait for capture to become ready and collect enough history before requesting a clip. A duration change immediately followed by clipping, including within a bundle, rejects that clip while capture restarts.
 

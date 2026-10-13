@@ -33,6 +33,12 @@ internal sealed class OscUdpListener : IDisposable
     private long _generation;
     private bool _drainScheduled, _disposed;
     private int _port;
+    // A port that failed stays failed until OSC is switched off or the port
+    // changes. Every unrelated settings save calls Configure, and retrying the
+    // bind there only repeated the failure in the log.
+    private int _failedPort;
+
+    public bool IsListening => _socket is not null;
 
     public OscUdpListener(Action<Action> dispatch, Action<OscReceivedPacket> receive,
         Action<string> statusChanged, Func<object?>? receiptContext = null)
@@ -52,7 +58,9 @@ internal sealed class OscUdpListener : IDisposable
     {
         if (_disposed) return;
         if (enabled && _socket is not null && _port == port) return;
+        if (enabled && _socket is null && _failedPort == port) return;
         Stop();
+        _failedPort = 0;
         if (!enabled) { SetStatus("OSC disabled."); return; }
         if (port is < 1 or > 65535) { SetStatus("OSC port must be between 1 and 65535."); return; }
         Socket? socket = null;
@@ -69,8 +77,9 @@ internal sealed class OscUdpListener : IDisposable
         catch (SocketException error)
         {
             socket?.Dispose();
+            _failedPort = port;
             SetStatus(error.SocketErrorCode == SocketError.AddressAlreadyInUse
-                ? $"Cannot listen on UDP {port}: port is already in use. Choose another port or close the other listener."
+                ? $"Cannot listen on UDP {port}: port is already in use. Choose another port, or close the other listener, then disable and enable OSC to retry."
                 : $"Cannot listen on UDP {port}: {error.Message} Choose another port or close conflicting listeners; check network permissions, then disable and enable OSC to retry.");
             AppLog.Info($"OSC listener failed: {Status}");
         }
@@ -143,7 +152,9 @@ internal sealed class OscUdpListener : IDisposable
             _dispatch(() =>
             {
                 if (generation != _generation) return;
+                var port = _port;
                 Stop();
+                _failedPort = port;
                 SetStatus($"OSC listener stopped: {error.Message} Disable and enable OSC to retry.");
                 AppLog.Error("OSC listener stopped", error);
             });

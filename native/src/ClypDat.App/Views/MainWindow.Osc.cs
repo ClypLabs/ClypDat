@@ -25,6 +25,7 @@ public sealed partial class MainWindow
     {
         if (ViewModel is not { } vm || IsQuitting || AllowRealClose) return;
         _oscListener?.Configure(vm.OscEnabled, vm.OscPort);
+        RefreshOscCaptureSnapshot();
     }
 
     private void StopOscControls()
@@ -58,7 +59,10 @@ public sealed partial class MainWindow
             vm.EffectiveClipGameName(config.GameDisplayName, config.CaptureSource), refusal);
     }
 
-    private void RefreshOscCaptureSnapshot() => Volatile.Write(ref _oscCaptureSnapshot, CreateOscCaptureSnapshot());
+    // Called on every capture health tick and save; with OSC off nothing reads
+    // the snapshot, so skip building and diffing a full replay config for it.
+    private void RefreshOscCaptureSnapshot() => Volatile.Write(ref _oscCaptureSnapshot,
+        _oscListener is { IsListening: true } ? CreateOscCaptureSnapshot() : null);
 
     private void InvalidateOscCapture()
     {

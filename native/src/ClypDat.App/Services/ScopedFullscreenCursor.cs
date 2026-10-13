@@ -24,7 +24,9 @@ internal sealed class ScopedFullscreenCursor : IDisposable
         var wasHidden = Volatile.Read(ref _state).Hidden;
         var now = Environment.TickCount64;
         var hit = WindowFromPoint(new NativePoint(pointer));
-        if (now >= _nextRefresh || !_hooks.ContainsKey(hit))
+        // An unhooked window of ours (a child just created) forces a re-scan;
+        // a pointer over another app or monitor waits for the normal interval.
+        if (now >= _nextRefresh || !_hooks.ContainsKey(hit) && IsOwnProcessWindow(hit))
         {
             _nextRefresh = now + 250;
             foreach (var root in roots)
@@ -59,9 +61,12 @@ internal sealed class ScopedFullscreenCursor : IDisposable
 
     public void Dispose() => Restore();
 
-    private bool IsScopedWindow(nint window)
+    private bool IsScopedWindow(nint window) =>
+        _hooks.TryGetValue(window, out var hook) && !hook.Destroyed && IsOwnProcessWindow(window);
+
+    private static bool IsOwnProcessWindow(nint window)
     {
-        if (!_hooks.TryGetValue(window, out var hook) || hook.Destroyed) return false;
+        if (window == 0) return false;
         GetWindowThreadProcessId(window, out var process);
         return process == (uint)Environment.ProcessId;
     }

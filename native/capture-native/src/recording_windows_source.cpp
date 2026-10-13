@@ -252,7 +252,15 @@ class WgcSource final : public RecordingFrameSource {
         std::mutex mutex;
         RecordingSourceHealth diagnostics;
         WindowCropSelector crops; // Guarded by mutex.
+        // Window bounds cost a DWM round trip and a dozen user32 calls; at
+        // 240 fps that was every frame. Reused until the content size changes,
+        // a crop misses, or the refresh interval passes. Guarded by mutex.
+        std::optional<WindowCaptureBounds> bounds;
+        int bounds_width = 0, bounds_height = 0;
+        std::chrono::steady_clock::time_point bounds_at{};
+        bool bounds_valid = false;
     };
+    static constexpr auto window_bounds_refresh = std::chrono::milliseconds(100);
     RecordingCaptureConfig config_;
     std::shared_ptr<Shared> shared_;
     // WGC frame-pool buffers: three when every frame is copied in its
@@ -322,8 +330,23 @@ public:
                     }
                     std::optional<CaptureRect> region;
                     if (window) {
-                        const auto bounds = capture_window_bounds(window);
-                        { std::lock_guard lock(shared->mutex); region = shared->crops.select(bounds, {0, 0, content.Width, content.Height}); }
+                        std::optional<WindowCaptureBounds> bounds;
+                        bool cached = false;
+                        const auto now = std::chrono::steady_clock::now();
+                        {
+                            std::lock_guard lock(shared->mutex);
+                            if (shared->bounds_valid && shared->bounds_width == content.Width && shared->bounds_height == content.Height &&
+                                now - shared->bounds_at < window_bounds_refresh) { bounds = shared->bounds; cached = true; }
+                        }
+                        if (!cached) bounds = capture_window_bounds(window);
+                        {
+                            std::lock_guard lock(shared->mutex);
+                            region = shared->crops.select(bounds, {0, 0, content.Width, content.Height});
+                            // A miss re-queries on the next frame instead of
+                            // trusting bounds that may predate a resize.
+                            shared->bounds_valid = region.has_value();
+                            if (!cached && region) { shared->bounds = bounds; shared->bounds_width = content.Width; shared->bounds_height = content.Height; shared->bounds_at = now; }
+                        }
                         // A resize can race the callback: skip the frame, never
                         // copy it whole with decorations. A mismatch that
                         // persists is not a race and is mapped by scale.

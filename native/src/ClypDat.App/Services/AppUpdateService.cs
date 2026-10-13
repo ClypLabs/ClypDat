@@ -740,15 +740,15 @@ public static class AppUpdateService
         // extends to whoever controls the site and the bucket. Apex is accepted
         // alongside www because the snapshot is only ever generated with one of
         // them and a DNS change should not silently break updates.
-        var isMirrorHost = string.Equals(uri.Host, MirrorHost, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(uri.Host, MirrorApexHost, StringComparison.OrdinalIgnoreCase);
-
-        return isMirrorHost && uri.AbsolutePath.StartsWith("/download/", StringComparison.OrdinalIgnoreCase);
+        return IsMirrorAssetUri(uri);
     }
 
     private static bool IsMirrorReleaseAssetUrl(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
         uri.Scheme == Uri.UriSchemeHttps &&
+        IsMirrorAssetUri(uri);
+
+    private static bool IsMirrorAssetUri(Uri uri) =>
         (string.Equals(uri.Host, MirrorHost, StringComparison.OrdinalIgnoreCase) ||
          string.Equals(uri.Host, MirrorApexHost, StringComparison.OrdinalIgnoreCase)) &&
         uri.AbsolutePath.StartsWith("/download/", StringComparison.OrdinalIgnoreCase);
