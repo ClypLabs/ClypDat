@@ -9,6 +9,14 @@ using Xunit.Abstractions;
 
 namespace ClypDat.App.Tests;
 
+// These drive real topmost windows, DirectComposition and on-screen checks
+// against wall-clock waits. Alongside ~1400 parallel tests the CPU is
+// saturated and a presentation can outlast those waits without anything
+// having failed, so the class runs on its own after the parallel tests.
+[CollectionDefinition(nameof(NativeClipOverlaySurfaceTests), DisableParallelization = true)]
+public sealed class NativeClipOverlaySurfaceCollection;
+
+[Collection(nameof(NativeClipOverlaySurfaceTests))]
 public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
 {
     [Fact]
@@ -480,6 +488,10 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
     // The real pipeline, 100 times over: coordinator, native thread,
     // DirectComposition and on-screen verification, above a topmost game,
     // through Saving and then Saved of the same workflow each time.
+    // The coordinator gives a presentation 5s before calling it timed out;
+    // failing the test sooner reported slow-but-successful presentations.
+    private const int PresentationWaitMs = 6000;
+
     [Fact]
     public void HundredSavingToSavedWorkflowsAllPresent()
     {
@@ -498,9 +510,9 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
             var workflow = Guid.NewGuid();
             var now = DateTime.UtcNow;
             coordinator.Publish(Event(workflow, 0, ClipOverlayKind.Saving, now, target));
-            Assert.True(SpinWait.SpinUntil(() => counters.Presented == index * 2 + 1, 3000), $"Saving {index}: {counters.Summary}");
+            Assert.True(SpinWait.SpinUntil(() => counters.Presented == index * 2 + 1, PresentationWaitMs), $"Saving {index}: {counters.Summary}");
             coordinator.Publish(Event(workflow, 1, ClipOverlayKind.Saved, now, target));
-            Assert.True(SpinWait.SpinUntil(() => counters.Presented == index * 2 + 2, 3000), $"Saved {index}: {counters.Summary}");
+            Assert.True(SpinWait.SpinUntil(() => counters.Presented == index * 2 + 2, PresentationWaitMs), $"Saved {index}: {counters.Summary}");
             visibleThroughout &= IsWindowVisible(surface.Inner.WindowHandle);
             scheduler.FireDwell();
         }
