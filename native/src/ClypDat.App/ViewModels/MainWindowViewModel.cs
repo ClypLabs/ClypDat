@@ -1028,31 +1028,18 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<ProcessPriorityOption> ProcessPriorityOptions { get; }
     public ObservableCollection<FileNameSchemeOption> ClipFileNameSchemes { get; }
 
+    // Only the copyleft components are named here: their licences carry source
+    // obligations worth surfacing. Permissive (MIT/BSD/Apache) notices are met
+    // by THIRD-PARTY-LICENSES.md, which ships with every build and opens from
+    // "Full licence text" - it covers everything, including these three.
     public ObservableCollection<ThirdPartyLicenseEntry> ThirdPartyLicenseEntries { get; } = new()
     {
         new("VideoLAN", "https://code.videolan.org/videolan/vlc", "LGPLv2.1", "https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html"),
         // The bundled FFmpeg build enables GPL and version 3 components (x264,
         // x265), so the combined binaries are GPLv3 - see THIRD-PARTY-LICENSES.md.
         new("FFmpeg", "https://ffmpeg.org", "GPLv3", "https://www.gnu.org/licenses/gpl-3.0.html"),
-        new("Avalonia", "https://github.com/AvaloniaUI/Avalonia", "MIT License", "https://opensource.org/license/mit"),
-        new("NAudio", "https://github.com/naudio/NAudio", "MIT License", "https://opensource.org/license/mit"),
-        new("Vortice.Windows", "https://github.com/amerkoleci/Vortice.Windows", "MIT License", "https://opensource.org/license/mit"),
-        // Microphone noise suppression. One row, not two: the weights in
-        // rnnoise/lq.rnnn come from GregorR/rnnoise-models, which declares no
-        // licence at all - no LICENSE file, no licence field, only a README
-        // stating the models are not copyrightable. That is the author's
-        // claim, not a licence, and this list links licences. The model's
-        // provenance is set out in full in THIRD-PARTY-LICENSES.md instead.
-        new("RNNoise", "https://github.com/xiph/rnnoise", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause"),
-        // CS2 match stats: demo decompression and parsing.
-        new("SharpZipLib", "https://github.com/icsharpcode/SharpZipLib", "MIT License", "https://opensource.org/license/mit"),
-        new("DemoFile.Net", "https://github.com/saul/demofile-net", "MIT License", "https://opensource.org/license/mit"),
-        new("Protocol Buffers (Google.Protobuf)", "https://github.com/protocolbuffers/protobuf", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause"),
-        new("protobuf-net", "https://github.com/protobuf-net/protobuf-net", "Apache License 2.0", "https://www.apache.org/licenses/LICENSE-2.0"),
-        new("Snappier", "https://github.com/brantburnett/Snappier", "BSD 3-Clause", "https://opensource.org/license/bsd-3-clause"),
-        // Fortnite match stats: local replay decoding. OozSharp's decoder is
-        // a port of powzix/ooz and carries its GPLv3 terms.
-        new("FortniteReplayReader", "https://github.com/Shiqan/FortniteReplayDecompressor", "MIT License", "https://opensource.org/license/mit"),
+        // Fortnite match stats: OozSharp's replay decoder is a port of
+        // powzix/ooz and carries its GPLv3 terms.
         new("OozSharp (port of ooz)", "https://github.com/powzix/ooz", "GPLv3", "https://www.gnu.org/licenses/gpl-3.0.html")
     };
 
