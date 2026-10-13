@@ -131,8 +131,9 @@ internal sealed record SpotifySourceWindow(double StartSeconds, double DurationS
 
     public double VideoMediaSeconds(double sourceSeconds)
     {
-        if (VideoTimingVerified == false) return double.NaN;
-        if (VideoMappings is not { Count: > 0 }) return MediaSeconds(sourceSeconds);
+        // Unverified video timing falls back to the audio mapping, which is what
+        // every marker used before video mappings existed. NaN here dropped them all.
+        if (VideoTimingVerified == false || VideoMappings is not { Count: > 0 }) return MediaSeconds(sourceSeconds);
         foreach (var mapping in VideoMappings)
             if (sourceSeconds >= mapping.SourceStartSeconds && sourceSeconds <= mapping.SourceStartSeconds + mapping.DurationSeconds)
                 return mapping.OutputStartSeconds + sourceSeconds - mapping.SourceStartSeconds;

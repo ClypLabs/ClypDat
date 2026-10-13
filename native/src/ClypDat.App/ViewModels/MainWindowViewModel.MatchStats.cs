@@ -298,33 +298,40 @@ public sealed partial class MainWindowViewModel
 
     // Whether anything in the library was recorded in CS2 between two times;
     // demos are only downloaded for matches that have something to show.
-    private bool HasCs2MediaBetween(DateTime startUtc, DateTime endUtc)
-    {
-        IReadOnlyList<(DateTime Start, DateTime End)> spans;
-        try
-        {
-            spans = Dispatcher.UIThread.InvokeAsync(() => AllClips
-                .Where(card => MatchClipMapping.IsCs2(card.GameFilterKey, null))
-                .Select(card => (card.CreatedAt.UtcDateTime - card.Duration - TimeSpan.FromMinutes(1), card.CreatedAt.UtcDateTime + card.Duration + TimeSpan.FromMinutes(1)))
-                .ToArray()).GetTask().WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
-        }
-        catch (Exception error) when (error is TimeoutException or TaskCanceledException) { return false; }
-        return spans.Any(span => span.Start < endUtc && span.End > startUtc);
-    }
+    private bool HasCs2MediaBetween(DateTime startUtc, DateTime endUtc) =>
+        HasMediaBetween("cs2", card => MatchClipMapping.IsCs2(card.GameFilterKey, null), startUtc, endUtc);
 
     // Whether anything in the library was recorded in Fortnite between two
     // times; only those replays are read without being asked.
-    private bool HasFortniteMediaBetween(DateTime startUtc, DateTime endUtc)
+    private bool HasFortniteMediaBetween(DateTime startUtc, DateTime endUtc) =>
+        HasMediaBetween("fortnite", card => FortniteMatchStats.IsFortnite(card.GameFilterKey, null), startUtc, endUtc);
+
+    // A backfill asks once per replay or demo. Reuse one UI-thread snapshot of
+    // the library for the whole pass instead of a blocking trip per question.
+    private static readonly TimeSpan MediaSpanSnapshotLifetime = TimeSpan.FromSeconds(10);
+    private readonly object _mediaSpanGate = new();
+    private readonly Dictionary<string, (DateTime TakenUtc, (DateTime Start, DateTime End)[] Spans)> _mediaSpanSnapshots = [];
+
+    private bool HasMediaBetween(string game, Func<ClipCardViewModel, bool> matches, DateTime startUtc, DateTime endUtc)
     {
-        IReadOnlyList<(DateTime Start, DateTime End)> spans;
-        try
+        (DateTime Start, DateTime End)[]? spans = null;
+        lock (_mediaSpanGate)
         {
-            spans = Dispatcher.UIThread.InvokeAsync(() => AllClips
-                .Where(card => FortniteMatchStats.IsFortnite(card.GameFilterKey, null))
-                .Select(card => (card.CreatedAt.UtcDateTime - card.Duration - TimeSpan.FromMinutes(1), card.CreatedAt.UtcDateTime + card.Duration + TimeSpan.FromMinutes(1)))
-                .ToArray()).GetTask().WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+            if (_mediaSpanSnapshots.TryGetValue(game, out var snapshot) && DateTime.UtcNow - snapshot.TakenUtc < MediaSpanSnapshotLifetime)
+                spans = snapshot.Spans;
         }
-        catch (Exception error) when (error is TimeoutException or TaskCanceledException) { return false; }
+        if (spans is null)
+        {
+            try
+            {
+                spans = Dispatcher.UIThread.InvokeAsync(() => AllClips
+                    .Where(matches)
+                    .Select(card => (card.CreatedAt.UtcDateTime - card.Duration - TimeSpan.FromMinutes(1), card.CreatedAt.UtcDateTime + card.Duration + TimeSpan.FromMinutes(1)))
+                    .ToArray()).GetTask().WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+            }
+            catch (Exception error) when (error is TimeoutException or TaskCanceledException) { return false; }
+            lock (_mediaSpanGate) _mediaSpanSnapshots[game] = (DateTime.UtcNow, spans);
+        }
         return spans.Any(span => span.Start < endUtc && span.End > startUtc);
     }
 

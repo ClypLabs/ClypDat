@@ -58,7 +58,8 @@ public sealed class FortniteOutfitPortrait : Control
         _request = null;
         request?.Cancel();
         request?.Dispose();
-        _bitmap?.Dispose();
+        // The compositor may still be drawing the last frame that used it.
+        DeferredBitmapDisposal.Release(_bitmap);
         _bitmap = null;
         IsVisible = false;
         InvalidateVisual();

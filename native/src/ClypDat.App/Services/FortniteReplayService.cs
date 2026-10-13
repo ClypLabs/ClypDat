@@ -52,6 +52,7 @@ internal sealed class FortniteReplayService : IDisposable
     private int _scanning;
     private long _lastBackfillAt;
     private int _filesFound;
+    private int _abandonedFound;
     private int _disposed;
     private readonly long _startedAt = Environment.TickCount64;
 
@@ -184,7 +185,12 @@ internal sealed class FortniteReplayService : IDisposable
             _wasGameRunning = gameRunning;
             // A stopped writer can become abandoned without any file change.
             if (!gameRunning) WakeWorker();
-            if (changed || gameChanged || Headers().Any(header => !header.IsReady)) Changed?.Invoke(this, EventArgs.Empty);
+            // Only the moment one crosses into abandoned matters, not every poll
+            // while a crashed match's live replay sits in the folder forever.
+            var now = DateTime.UtcNow;
+            var abandoned = gameRunning ? 0 : Headers().Count(header => !header.IsReady && now - header.LastWriteUtc > AbandonedAfter);
+            var abandonedChanged = Interlocked.Exchange(ref _abandonedFound, abandoned) != abandoned;
+            if (changed || gameChanged || abandonedChanged) Changed?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {

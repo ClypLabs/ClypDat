@@ -50,7 +50,7 @@ internal sealed record FortniteReplayData(
 // unrelated actor fields are skipped without decoding or retaining them.
 internal static class FortniteReplayParser
 {
-    internal const int CurrentVersion = 3;
+    internal const int CurrentVersion = 4;
     internal static readonly TimeSpan PlaylistBudget = TimeSpan.FromSeconds(2);
     private const long PlaylistAllocationBudget = 128L * 1024 * 1024;
 
@@ -78,7 +78,8 @@ internal static class FortniteReplayParser
         {
             try
             {
-                using var network = FortniteReplayFile.ReadForParsing(stream, dataChunks: int.MaxValue, includeEvents: false, out var truncated);
+                using var network = FortniteReplayFile.ReadForParsing(stream, dataChunks: int.MaxValue, includeEvents: false,
+                    FortniteReplayFile.MaximumNetworkPassBytes, out var truncated);
                 var probe = new GameStateReader(PlaylistBudget, PlaylistAllocationBudget, header.LengthSeconds);
                 playersLeftComplete = probe.Read(network) && !truncated;
                 playlist = probe.Playlist;

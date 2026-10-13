@@ -76,6 +76,8 @@ public static class MemoryTrimmer
     private static readonly object RequestGate = new();
     private static DateTime _lastTrimUtc = DateTime.MinValue;
     private static DateTime _lastCompactingTrimUtc = DateTime.MinValue;
+    private static readonly TimeSpan FenceRetryDelay = TimeSpan.FromSeconds(5);
+    private static DateTime _fenceRetryNotBeforeUtc = DateTime.MinValue;
     private static string? _pendingReason;
     private static int _coalescedRequests;
 
@@ -175,7 +177,8 @@ public static class MemoryTrimmer
     private static DateTime GetNextEligibleTrimUtc()
     {
         var (_, deferred) = ResolveTrimMode(EditorOpen, Recording && GameRunning, LowLevelInputHookActive);
-        return GetNextEligibleTrimUtc(deferred, _lastTrimUtc, _lastCompactingTrimUtc);
+        var eligible = GetNextEligibleTrimUtc(deferred, _lastTrimUtc, _lastCompactingTrimUtc);
+        return eligible > _fenceRetryNotBeforeUtc ? eligible : _fenceRetryNotBeforeUtc;
     }
 
     // An optimized background request can collect nothing. It still needs
@@ -218,7 +221,15 @@ public static class MemoryTrimmer
                 // worker, never the UI thread, before asking GC to reclaim it.
                 if (!DeferredBitmapDisposal.WaitForReferenceReleaseAsync(BitmapReleaseFenceTimeout).GetAwaiter().GetResult())
                 {
-                    AppLog.Info($"Memory cleanup ({reason}) deferred: bitmap render fence not ready.");
+                    // The request was already taken; put it back so the GC still
+                    // runs once the UI thread has rendered again.
+                    lock (RequestGate)
+                    {
+                        if (_pendingReason is null) _pendingReason = reason;
+                        else _coalescedRequests++;
+                        _fenceRetryNotBeforeUtc = DateTime.UtcNow + FenceRetryDelay;
+                    }
+                    AppLog.Info($"Memory cleanup ({reason}) deferred: bitmap render fence not ready; retrying in {FenceRetryDelay.TotalSeconds:0}s.");
                     return;
                 }
             }

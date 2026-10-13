@@ -278,6 +278,21 @@ struct FullSessionWriter::State {
     struct SourceFrame { int64_t source_us,output_us,duration_us;bool fresh; };
     std::optional<SourceFrame> source_frame;
     int64_t source_cadence_us=0,last_fresh_source_us=0;
+    // Packets arrive in decode order. With B-frames (AMF plans can set bf>0)
+    // presentation pts steps backwards, which the mapping below treats as a
+    // break. Hold a few packets and feed them in pts order instead; deeper
+    // reordering than any encoder's B-frame run still loses the mapping.
+    static constexpr size_t video_reorder_depth=16;
+    std::map<int64_t,SourceFrame> reorder_video;
+    void queue_video_source(int64_t acquired,int64_t output,int64_t duration,bool fresh){
+        if(!reorder_video.emplace(output,SourceFrame{acquired,output,duration,fresh}).second){lose_video_mapping();return;}
+        while(reorder_video.size()>video_reorder_depth)drain_one_video_source();
+    }
+    void drain_one_video_source(){
+        auto next=reorder_video.extract(reorder_video.begin());
+        const auto& frame=next.mapped();
+        note_video_source(frame.source_us,frame.output_us,frame.duration_us,frame.fresh);
+    }
     // Runs absorb only sub-frame scheduling jitter. Their largest measured
     // anchor error is exported; holds and pauses never become source ranges.
     void lose_video_mapping(){status.video_mapping_complete=false;status.video_mappings.clear();source_frame.reset();}
@@ -327,6 +342,7 @@ struct FullSessionWriter::State {
         if(fresh)last_fresh_source_us=acquired;
     }
     void finish_video_source(){
+        while(!reorder_video.empty())drain_one_video_source();
         if(source_frame&&status.video_mapping_complete){
             const auto duration=source_frame->duration_us>0?source_frame->duration_us:source_cadence_us;
             if(duration>0)append_video_mapping(*source_frame,duration);
@@ -349,7 +365,7 @@ struct FullSessionWriter::State {
         if(origin==AV_NOPTS_VALUE){auto bytes=pcm.samples.size()*4;if(early_bytes+bytes>16*1024*1024)throw std::runtime_error("Full-session early audio bound exceeded");early_bytes+=bytes;early_audio.push_back(std::move(pcm));return;}
         encoder->submit(pcm,audio_frames(pcm.start_us)-audio_frames(origin));converted();
     }
-    void video(Work& work){if(work.generation->id!=generation->id)throw std::runtime_error("Full-session encoder generation changed; rotate output");auto& packet=*work.packet;auto pts=av_rescale_q(packet.pts,generation->time_base,{1,1000000});const auto duration=av_rescale_q(packet.duration,generation->time_base,{1,1000000});if(origin==AV_NOPTS_VALUE){if(!(packet.flags&AV_PKT_FLAG_KEY))return;origin=pts;while(!early_audio.empty()){auto pending=std::move(early_audio.front());early_audio.pop_front();audio(pending);}early_bytes=0;}av_packet_rescale_ts(&packet,generation->time_base,video_stream->time_base);auto offset=av_rescale_q(origin,{1,1000000},video_stream->time_base);if(packet.pts!=AV_NOPTS_VALUE)packet.pts-=offset;if(packet.dts!=AV_NOPTS_VALUE)packet.dts-=offset;packet.stream_index=video_stream->index;video_end=pts-origin+av_rescale_q(packet.duration,video_stream->time_base,{1,1000000});check(av_interleaved_write_frame(format.value,&packet),"Write full-session video");encoder->encode_through((std::max)(int64_t(0),audio_frames(video_end)-48000));avio_flush(format.value->pb);check(format.value->pb->error,"Flush full-session file");std::lock_guard lock(mutex);status.duration_us=video_end;note_video_source(work.acquired_us,pts-origin,duration,work.fresh);}
+    void video(Work& work){if(work.generation->id!=generation->id)throw std::runtime_error("Full-session encoder generation changed; rotate output");auto& packet=*work.packet;auto pts=av_rescale_q(packet.pts,generation->time_base,{1,1000000});const auto duration=av_rescale_q(packet.duration,generation->time_base,{1,1000000});if(origin==AV_NOPTS_VALUE){if(!(packet.flags&AV_PKT_FLAG_KEY))return;origin=pts;while(!early_audio.empty()){auto pending=std::move(early_audio.front());early_audio.pop_front();audio(pending);}early_bytes=0;}av_packet_rescale_ts(&packet,generation->time_base,video_stream->time_base);auto offset=av_rescale_q(origin,{1,1000000},video_stream->time_base);if(packet.pts!=AV_NOPTS_VALUE)packet.pts-=offset;if(packet.dts!=AV_NOPTS_VALUE)packet.dts-=offset;packet.stream_index=video_stream->index;video_end=pts-origin+av_rescale_q(packet.duration,video_stream->time_base,{1,1000000});check(av_interleaved_write_frame(format.value,&packet),"Write full-session video");encoder->encode_through((std::max)(int64_t(0),audio_frames(video_end)-48000));avio_flush(format.value->pb);check(format.value->pb->error,"Flush full-session file");std::lock_guard lock(mutex);status.duration_us=video_end;queue_video_source(work.acquired_us,pts-origin,duration,work.fresh);}
     void run(){try{initialize();for(;;){Work work;{std::unique_lock lock(mutex);ready.wait(lock,[&]{return closed||!queue.empty();});if(queue.empty())break;work=std::move(queue.front());queue.pop_front();}if(work.packet)video(work);else audio(work.pcm);{std::lock_guard lock(mutex);queued-=work.bytes;}}encoder->finish(audio_frames(video_end));converted();check(av_write_trailer(format.value),"Finalize full session");avio_flush(format.value->pb);check(format.value->pb->error,"Flush finalized full-session file");if(format.value->pb)avio_closep(&format.value->pb);std::filesystem::remove(config.output.wstring()+L".interrupted");}catch(const std::exception& e){std::lock_guard lock(mutex);status.error=e.what();}if(format.value&&format.value->pb)avio_closep(&format.value->pb);if(lease!=INVALID_HANDLE_VALUE){DeleteFileW((config.output.wstring()+L".recording").c_str());CloseHandle(lease);lease=INVALID_HANDLE_VALUE;} {std::lock_guard lock(mutex);finish_video_source();closed=true;done=true;status.running=false;status.finished=true;queue.clear();queued=0;}exited.notify_all();}
     bool admit(Work work){std::lock_guard lock(mutex);if(closed)return false;if(queue.size()>=config.queue_items||queued+work.bytes>config.queue_bytes){closed=true;status.error="Full-session 64 MiB/8192-item queue bound exceeded";ready.notify_one();return false;}queued+=work.bytes;queue.push_back(std::move(work));ready.notify_one();return true;}
 };

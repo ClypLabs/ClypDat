@@ -39,13 +39,17 @@ internal sealed record FortniteReplayHeader(
 // Reads Fortnite replays without ever writing to them. Every open allows
 // Fortnite to keep writing (and deleting: it prunes old replays itself), and
 // only the parts needed are read: the header, then the small event chunks
-// (tens of KB in a 20 MB replay) and, for the playlist, one network chunk.
+// (tens of KB in a 20 MB replay) and, for match details, the network chunks.
 internal static class FortniteReplayFile
 {
     private const uint FileMagic = 0x1CA2E27F;
     private const uint ChunkHeader = 0, ChunkReplayData = 1, ChunkEvent = 3;
     private const int MaximumChunkBytes = 64 * 1024 * 1024;
     private const int MaximumKeptBytes = 16 * 1024 * 1024;
+    // The GameState pass keeps every network chunk, and an ordinary finished
+    // match is already 15-20 MB on disk. Long matches still stop here and are
+    // reported as truncated rather than held in memory without bound.
+    public const int MaximumNetworkPassBytes = 96 * 1024 * 1024;
 
     public static string DefaultFolder => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FortniteGame", "Saved", "Demos");
@@ -93,6 +97,9 @@ internal static class FortniteReplayFile
         => ReadForParsing(stream, dataChunks, includeEvents, out _);
 
     public static MemoryStream ReadForParsing(Stream stream, int dataChunks, bool includeEvents, out bool truncated)
+        => ReadForParsing(stream, dataChunks, includeEvents, MaximumKeptBytes, out truncated);
+
+    public static MemoryStream ReadForParsing(Stream stream, int dataChunks, bool includeEvents, int maximumKeptBytes, out bool truncated)
     {
         truncated = false;
         using var reader = new BinaryReader(stream, Encoding.ASCII, leaveOpen: true);
@@ -110,7 +117,7 @@ internal static class FortniteReplayFile
             if (size <= 0 || size > MaximumChunkBytes || stream.Position + size > stream.Length)
                 throw new InvalidDataException("Incomplete or invalid replay chunk.");
             var keep = type == ChunkHeader || includeEvents && type == ChunkEvent || type == ChunkReplayData && keptData++ < dataChunks;
-            if (!keep || output.Length + size > MaximumKeptBytes)
+            if (!keep || output.Length + size > maximumKeptBytes)
             {
                 if (keep) truncated = true;
                 stream.Seek(size, SeekOrigin.Current);
