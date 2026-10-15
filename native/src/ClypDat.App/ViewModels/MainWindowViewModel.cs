@@ -5474,11 +5474,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             var clock = System.Diagnostics.Stopwatch.StartNew();
             // SQLite read, filesystem normalization and model construction all
             // stay off the UI thread. Cached constructors do not decode images.
-            var cached = (await Task.Run(() => _libraryCache.Load(root)))
-                .OrderByDescending(state => state.Media.CreatedAt)
-                .ThenBy(state => state.Media.Path, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            AppLog.Info($"Library cache: read {cached.Length} entries in {clock.ElapsedMilliseconds}ms.");
+            // One background hop for read and construction. This starts on the
+            // UI thread while the window is still being built, so each await
+            // used to queue behind that work before the next step could begin:
+            // a 200 ms read logged as 2-3 s on a busy laptop, and construction
+            // only started once the dispatcher came free.
+            var (cached, models, readMs, builtMs) = await Task.Run(() =>
+            {
+                var states = _libraryCache.Load(root)
+                    .OrderByDescending(state => state.Media.CreatedAt)
+                    .ThenBy(state => state.Media.Path, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var read = clock.ElapsedMilliseconds;
+                var built = states.Length == 0
+                    ? Array.Empty<ClipCardViewModel>()
+                    : NormalizeCachedStates(states).Select(state => new ClipCardViewModel(state, root)).ToArray();
+                return (states, built, read, clock.ElapsedMilliseconds);
+            });
+            AppLog.Info($"Library cache: read {cached.Length} entries in {readMs}ms.");
             if (!string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase))
             {
                 // Library folder changed again while this load was in flight.
@@ -5490,9 +5503,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            var models = await Task.Run(() => NormalizeCachedStates(cached)
-                .Select(state => new ClipCardViewModel(state, root)).ToArray());
-            AppLog.Info($"Library cache: constructed {models.Length} models in {clock.ElapsedMilliseconds}ms.");
+            AppLog.Info($"Library cache: constructed {models.Length} models in {builtMs}ms; dispatcher reached at {clock.ElapsedMilliseconds}ms.");
 
             // One dispatcher transaction: no staged cards, placeholder extent,
             // per-batch filtering, or intentional frame delays. Run it at

@@ -919,7 +919,7 @@ public sealed class MediaProbeService
                 var frame = Path.Combine(folder, $"{i}.jpg");
                 var seek = ((i + 0.5) / frameCount * duration.TotalSeconds).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
                 var result = await RunProcessAsync("ffmpeg", ["-y", "-v", "error", "-ss", seek, "-i", filePath,
-                    "-frames:v", "1", "-vf", $"scale=-2:{FilmstripFrameHeight}", "-an", "-q:v", "2", frame]).ConfigureAwait(false);
+                    "-frames:v", "1", "-vf", $"scale=-2:{FilmstripFrameHeight}", "-an", "-q:v", "2", "-strict", "unofficial", frame]).ConfigureAwait(false);
                 if (result.ExitCode == 0 && File.Exists(frame) && new FileInfo(frame).Length > 0) frames[i] = frame;
             }
 
@@ -940,7 +940,7 @@ public sealed class MediaProbeService
             var arguments = new List<string> { "-y", "-v", "error" };
             foreach (var frame in frames) { arguments.Add("-i"); arguments.Add(frame!); }
             var filter = string.Concat(Enumerable.Range(0, frameCount).Select(i => $"[{i}:v]")) + $"hstack=inputs={frameCount}[strip]";
-            arguments.AddRange(["-filter_complex", filter, "-map", "[strip]", "-frames:v", "1", "-update", "1", "-q:v", "2", output]);
+            arguments.AddRange(["-filter_complex", filter, "-map", "[strip]", "-frames:v", "1", "-update", "1", "-q:v", "2", "-strict", "unofficial", output]);
             var combined = await RunProcessAsync("ffmpeg", arguments.ToArray()).ConfigureAwait(false);
             return combined.ExitCode == 0 && File.Exists(output) ? decoded : null;
         }
@@ -993,6 +993,10 @@ public sealed class MediaProbeService
                 "-update", "1",
                 "-an",
                 "-q:v", "2",
+                // A source the JPEG encoder sees as limited-range made it refuse
+                // to open ("Non full-range YUV is non-standard"), failing the
+                // strip on every pass. Allowing it costs nothing for the rest.
+                "-strict", "unofficial",
                 output
             });
 

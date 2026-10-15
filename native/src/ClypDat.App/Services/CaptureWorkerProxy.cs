@@ -343,7 +343,14 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             if (ReferenceEquals(_pipe, pipe)) { Disconnect(false); BeginRecovery(Volatile.Read(ref _generation), $"{type} timed out", ExitCode(), _gpuRecovering); }
             throw new IOException($"Capture worker {type} timed out.", error);
         }
-        finally { lock (_pending) _pending.Remove(id); }
+        finally
+        {
+            lock (_pending) _pending.Remove(id);
+            // A write that fails on a dropped pipe leaves here while the read
+            // loop's FailPending faults this same completion. Nothing awaits it
+            // after that, so the finalizer reported it as an unobserved error.
+            if (completion.Task.IsFaulted) _ = completion.Task.Exception;
+        }
     }
 
     private async Task SendBestEffortAsync(string type, object payload)

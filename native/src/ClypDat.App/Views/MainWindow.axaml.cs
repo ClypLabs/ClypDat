@@ -10367,7 +10367,10 @@ public sealed partial class MainWindow : Window
 
         if (!GetCursorPos(out var cursor))
         {
-            LogHoverFailure($"GetCursorPos failed: error={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}");
+            // ERROR_ACCESS_DENIED: the input desktop is the lock screen, UAC or
+            // sign-out. Expected there, and nothing to hover anyway.
+            var error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+            if (error != 5) LogHoverFailure($"GetCursorPos failed: error={error}");
             return;
         }
 

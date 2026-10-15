@@ -213,7 +213,8 @@ internal sealed class SpotifyLocalSource : IDisposable
     // RPC_S_SERVER_UNAVAILABLE and RPC_E_DISCONNECTED: the app behind a media
     // session has exited, so the session object is dead.
     internal static bool IsSessionGone(Exception error) =>
-        error is System.Runtime.InteropServices.COMException { HResult: unchecked((int)0x800706BA) or unchecked((int)0x80010108) };
+        // 0x800706BE (RPC call failed) is the same exit seen mid-call.
+        error is System.Runtime.InteropServices.COMException { HResult: unchecked((int)0x800706BA) or unchecked((int)0x800706BE) or unchecked((int)0x80010108) };
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

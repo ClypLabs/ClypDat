@@ -110,7 +110,8 @@ VideoEncoder::VideoEncoder(const VideoEncoderConfig& config, CodecCalls calls) :
         required_idr("forced_idr");
     } else if (name.ends_with("_qsv")) {
         option("preset", "veryfast");
-        option("rc_mode", "cbr");
+        // qsvenc has no rate-control option: it picks CBR itself because
+        // rc_max_rate equals bit_rate above. "rc_mode" was only ever rejected.
         required_idr("forced_idr");
         if (config.low_power) option("low_power", "1");
     } else {
