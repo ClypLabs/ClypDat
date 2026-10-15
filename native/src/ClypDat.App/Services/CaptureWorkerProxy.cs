@@ -39,6 +39,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
     private bool _isRecording, _suspended, _desiredRecording, _paused;
     private int? _frameRate;
     private int _fatalHealthRecoveryUsed;
+    private bool _lowThroughputAccepted;
     private string _hotkey = string.Empty;
     private string _fullSessionHotkey = string.Empty;
     private string? _clipGameName;
@@ -78,6 +79,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         _fullSessionEnabled = null; _fullSessionContainer = null;
         _fatalHealthPolicy.Reset();
         Interlocked.Exchange(ref _fatalHealthRecoveryUsed, 0);
+        _lowThroughputAccepted = false;
         _desiredRecording = true;
         try {
         await EnsureAttachedAsync(cancellationToken);
@@ -530,6 +532,20 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
             return;
         }
 
+        // Slow but moving (a GPU-heavy game starving an integrated encoder) is
+        // still a usable replay; stopping it lost every clip until the user
+        // noticed. Only a pipeline that has all but stopped is worth ending.
+        if (!CaptureHealthRecoveryPolicy.IsStalled(health))
+        {
+            _fatalHealthPolicy.Reset();
+            if (!_lowThroughputAccepted)
+            {
+                _lowThroughputAccepted = true;
+                AppLog.Info($"Capture throughput still low after worker restart; keeping replay running at outputFps={health.OutputFrameRate:F1}/{health.TargetFrameRate}.");
+            }
+            return;
+        }
+
         _desiredRecording = false;
         RecoveryHealth(1, _health.RecentWorkerFailureCount, _health.LastWorkerExitCode, null, true, ReplayRecoveryStopReason.CapturePipelineStall,
             string.IsNullOrWhiteSpace(health.LastFailure)
@@ -548,10 +564,23 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         RecoveryHealth(0, count, exitCode, DateTime.UtcNow, false, ReplayRecoveryStopReason.None, $"Capture worker lost: {reason}");
         try
         {
-            using var reconnect = CancellationTokenSource.CreateLinkedTokenSource(token); reconnect.CancelAfter(TimeSpan.FromSeconds(2));
-            try { await EnsureAttachedAsync(reconnect.Token, false); await RestoreAsync(token); AppLog.Info("Capture worker IPC reconnect succeeded."); return; }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
-            catch (Exception error) { AppLog.Info($"Capture worker IPC reconnect failed: {error.Message}"); }
+            // Reconnecting only helps when the pipe is what was lost. A worker
+            // still connected (unhealthy throughput, hung native thread) made
+            // EnsureAttachedAsync return at once, so "reconnect succeeded"
+            // without restarting anything and the same stall carried on.
+            if (_pipe?.IsConnected != true)
+            {
+                using var reconnect = CancellationTokenSource.CreateLinkedTokenSource(token); reconnect.CancelAfter(TimeSpan.FromSeconds(2));
+                try
+                {
+                    await EnsureAttachedAsync(reconnect.Token, false); await RestoreAsync(token);
+                    // Same process, same generation: let its next loss recover too.
+                    lock (_gate) if (_lostGeneration == lostGeneration) _lostGeneration = -1;
+                    AppLog.Info("Capture worker IPC reconnect succeeded."); return;
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+                catch (Exception error) { AppLog.Info($"Capture worker IPC reconnect failed: {error.Message}"); }
+            }
             await TerminateWorkerAsync(token);
             for (var attempt = 0; attempt < RetryDelays.Length; attempt++)
             {

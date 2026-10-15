@@ -1183,13 +1183,17 @@ public sealed partial class MainWindow : Window
         {
             ShutdownGuard.EndKeyed(guardKey);
             ViewModel?.ReleaseSpotifySave(completed.SaveId);
-            ShowClipNotification("save-failed", "Clip Failed", playSound: false, saveCompletion: true, saveId: completed.SaveId, requestedUtc: completed.RequestedUtc);
-            // A press refused because a save is already running needs no
-            // dialog: that save carries on, and the card says this one was
-            // refused. A burst of presses used to stack one modal per press.
+            // A press refused because a save is already running needs neither
+            // card nor dialog: that save carries on under its own card. A burst
+            // of presses used to stack a modal each, then a "Clip Failed" card
+            // each, outranking the "Clip Saved" of the clip that did save.
             if (CaptureWorkerSaveErrors.IsBusy(completed.Error))
-                AppLog.Info($"Clip save refused while another save runs: id={completed.SaveId}; no dialog.");
-            else Dispatcher.UIThread.Post(async () => await ShowMessageAsync("Clip Failed", completed.Error));
+            {
+                AppLog.Info($"Clip save refused while another save runs: id={completed.SaveId}; no card.");
+                return;
+            }
+            ShowClipNotification("save-failed", "Clip Failed", playSound: false, saveCompletion: true, saveId: completed.SaveId, requestedUtc: completed.RequestedUtc);
+            Dispatcher.UIThread.Post(async () => await ShowMessageAsync("Clip Failed", completed.Error));
             return;
         }
         if (string.IsNullOrWhiteSpace(completed.Path))
@@ -1351,7 +1355,7 @@ public sealed partial class MainWindow : Window
             if (!_workerCrashMessageShown)
             {
                 _workerCrashMessageShown = true;
-                _ = ShowMessageAsync("Replay stopped", "Capture worker crashed repeatedly and automatic recovery was stopped. Turn Replay Buffer off and on to retry.");
+                ShowReplayStoppedNotice("Capture worker crashed repeatedly and automatic recovery was stopped. Turn Replay Buffer off and on to retry.");
             }
             return;
         }
@@ -1363,7 +1367,7 @@ public sealed partial class MainWindow : Window
             if (!_workerCrashMessageShown)
             {
                 _workerCrashMessageShown = true;
-                _ = ShowMessageAsync("Replay stopped", "Capture pipeline stalled after recovery. Turn Replay Buffer off and on to retry.");
+                ShowReplayStoppedNotice("Capture pipeline stalled after recovery. Turn Replay Buffer off and on to retry.");
             }
             return;
         }
@@ -3422,11 +3426,6 @@ public sealed partial class MainWindow : Window
         var saveId = Guid.NewGuid();
         ViewModel?.PinSpotifySave(saveId);
         var requestedUtc = oscRequest?.ReceivedUtc ?? DateTime.UtcNow;
-        if (!isAutoClip)
-        {
-            RememberUiOwnedSave(saveId);
-            ShowClipNotification("ui-save", "Clip Saving…", playSound: false, saveStart: true, saveId: saveId, requestedUtc: requestedUtc);
-        }
         // A replay save (segment hydrate/mux) can take 20-30+ seconds. Manual clip
         // presses reject outright while one's already running (spam-clicking
         // shouldn't queue a pile of saves), but auto-clip triggers queue instead -
@@ -3440,9 +3439,16 @@ public sealed partial class MainWindow : Window
         }
         else if (!await _clipSaveLock.WaitAsync(0))
         {
+            // The running save's own card already covers this press; a
+            // "Clip Failed" here read as that save failing.
             ViewModel?.ReleaseSpotifySave(saveId);
-            ShowClipNotification("ui-save", "Clip Failed", playSound: false, saveCompletion: true, saveId: saveId, requestedUtc: requestedUtc);
+            AppLog.Info($"Clip save refused while another save runs: id={saveId}; no card.");
             return false;
+        }
+        if (!isAutoClip)
+        {
+            RememberUiOwnedSave(saveId);
+            ShowClipNotification("ui-save", "Clip Saving…", playSound: false, saveStart: true, saveId: saveId, requestedUtc: requestedUtc);
         }
 
         using var shutdownGuard = ShutdownGuard.Begin("Saving clip");
@@ -3628,6 +3634,15 @@ public sealed partial class MainWindow : Window
     // identity without holding a card alive.
     private readonly List<string> _sessionNewClipPaths = new();
     private bool _sessionCollectingClips;
+
+    // Replay ending on its own happens mid-game, with ClypDat in the tray where
+    // the dialog is skipped. Without a card nothing said so: every press after
+    // that saved nothing until the user opened ClypDat and found replay off.
+    private void ShowReplayStoppedNotice(string message)
+    {
+        if (!IsVisible) ShowClipNotification("replay-stopped", "Replay Stopped", playSound: false);
+        _ = ShowMessageAsync("Replay stopped", message);
+    }
 
     private void ShowClipSavedNotification(string trigger, Guid? saveId = null, DateTime? requestedUtc = null)
     {
@@ -4414,7 +4429,7 @@ public sealed partial class MainWindow : Window
         var now = DateTime.UtcNow;
         var workflowId = saveId.GetValueOrDefault();
         if (workflowId == Guid.Empty) workflowId = Guid.NewGuid();
-        var kind = text.Contains("Failed", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.Failure
+        var kind = text.Contains("Failed", StringComparison.OrdinalIgnoreCase) || trigger == "replay-stopped" ? ClipOverlayKind.Failure
             : saveStart ? ClipOverlayKind.Saving
             : saveCompletion || playSound && text.Contains("Saved", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.Saved
             : trigger.Contains("auto-clip", StringComparison.OrdinalIgnoreCase) ? ClipOverlayKind.AutoClip

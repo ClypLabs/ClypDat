@@ -314,7 +314,13 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
         _lastWindowCropScaled = cropScaled;
         var diagnosticNow = Stopwatch.GetTimestamp();
         var previousDiagnostic = Volatile.Read(ref _lastNativeDiagnosticLogTicks);
-        if (diagnosticNow - previousDiagnostic >= Stopwatch.Frequency &&
+        // Once a second this block is ~2 KB of text: 60-80 MB of debug log a
+        // day, written while the user games. A healthy pipeline gets one line
+        // every ten seconds; anything off target goes back to every second.
+        var steady = health.State == ReplayCaptureState.Healthy &&
+                     health.QueueDepth * 2 < Math.Max(1, health.EncodeQueueCapacity) &&
+                     health.OutputFrameRate >= health.TargetFrameRate * 0.9;
+        if (diagnosticNow - previousDiagnostic >= Stopwatch.Frequency * (steady ? 10 : 1) &&
             Interlocked.CompareExchange(ref _lastNativeDiagnosticLogTicks, diagnosticNow, previousDiagnostic) == previousDiagnostic)
         {
             AppLog.Debug($"Native capture: source={captureSource}; input={health.InputFrameRate:F1} fresh={health.UniqueFrameRate:F1} output={health.OutputFrameRate:F1}fps; queue={health.QueueDepth}/{health.EncodeQueueCapacity}; dropped={health.TotalDroppedFrames} windowCropSkips={cropSkips} windowCropScaled={cropScaled}; processingMax={health.ProcessingMaxMs:F2}ms path={health.ProcessingPath}; readback={health.TextureReadbackMs:F2}ms sourceCursorComposition={Number(details, "sourceCursorCompositionMs"):F2}ms videoProcessor={health.VideoProcessorMs:F2}ms softwareConvert={health.SoftwareConvertMs:F2}ms upload={health.HardwareUploadMs:F2}ms overlay={health.OverlayComposeMs:F2}ms; GPU fallbacks={health.GpuConversionFallbacks} error='{health.GpuConversionFallbackError}' processGpuPriority={health.ProcessGpuPriority?.ToString() ?? "unavailable"}; " +

@@ -580,7 +580,9 @@ internal static class CaptureWorkerHost
         var saveId = request.SaveId.GetValueOrDefault();
         if (saveId == Guid.Empty) saveId = Guid.NewGuid();
         var requestedUtc = request.RequestedUtc ?? DateTime.UtcNow;
-        await SendEventAsync("save-started", new ReplaySaveStarted(saveId, requestedUtc));
+        // A press refused because another save is running never started one.
+        // Announcing it first put a "Clip Saving…" card up for every extra press,
+        // each then flipped to "Clip Failed" over the save that was succeeding.
         if (!await SaveGate.WaitAsync(0, cancellationToken))
         {
             var busy = new CaptureWorkerSaveResult(string.Empty, request.TitleOverride, DateTime.UtcNow, CaptureWorkerSaveErrors.Busy, saveId, requestedUtc);
@@ -589,6 +591,7 @@ internal static class CaptureWorkerHost
         }
         try
         {
+            await SendEventAsync("save-started", new ReplaySaveStarted(saveId, requestedUtc));
             await EnsureBufferAsync();
             var duration = request.ClipWindow is { } window ? window.EndUtc - window.StartUtc : TimeSpan.FromSeconds(_config?.DurationSeconds ?? 60);
             if (!Storage.CanSave(new[] { request.OutputFolder, WorkingStoragePath, Path.GetTempPath() }, _config?.BitrateMbps ?? 15, duration, out var storageReason))

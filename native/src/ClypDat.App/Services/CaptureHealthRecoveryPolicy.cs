@@ -47,6 +47,14 @@ internal sealed class CaptureHealthRecoveryPolicy
         return _consecutiveFatalSamples >= RequiredSamples;
     }
 
+    // After the one worker restart, recording ends only when output has all
+    // but stopped. Below a quarter of target a clip is a slideshow; above it
+    // the replay is degraded but still worth keeping.
+    internal static bool IsStalled(ReplayCaptureHealth health) =>
+        health.State is ReplayCaptureState.Failed ||
+        health.TargetFrameRate <= 0 ||
+        health.OutputFrameRate < health.TargetFrameRate * 0.25;
+
     internal void Reset()
     {
         _consecutiveFatalSamples = 0;

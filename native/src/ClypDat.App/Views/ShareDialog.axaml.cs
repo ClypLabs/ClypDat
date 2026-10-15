@@ -365,6 +365,22 @@ public partial class ShareDialog : Window
     // makes the file unsendable, which is the entire point of the preset.
     private static long MegabytesToTargetBytes(double megabytes) => (long)(megabytes * 1_000_000);
 
+    // Start the ladder at the vendor the startup probe already proved works.
+    // Starting at NVENC cost an Intel or AMD machine two or three failed ffmpeg
+    // launches per share before it reached its own encoder. Until the probe
+    // has finished, or when it found nothing, walk from the top as before.
+    private static MainWindowViewModel.ShareEncoderTier FirstShareTier(bool av1)
+    {
+        var probed = av1 ? ExportEncoderProbe.Av1ProbeCompleted : ExportEncoderProbe.HardwareProbeCompleted;
+        var family = !probed ? null : av1 ? ExportEncoderProbe.Av1Family : ExportEncoderProbe.Family;
+        return family switch
+        {
+            "amf" => MainWindowViewModel.ShareEncoderTier.Amf,
+            "qsv" => MainWindowViewModel.ShareEncoderTier.Qsv,
+            _ => MainWindowViewModel.ShareEncoderTier.Nvenc
+        };
+    }
+
     private long _lastTargetBytes;
     // Trimmed encodes at a zero target, so _lastTargetBytes alone can no
     // longer tell "nothing selected yet" from "selected, no size cap".
@@ -493,7 +509,7 @@ public partial class ShareDialog : Window
             });
 
             var useAv1 = ShareAv1Toggle.IsChecked == true;
-            var tier = MainWindowViewModel.ShareEncoderTier.Nvenc;
+            var tier = FirstShareTier(useAv1);
             var useAdvancedNvenc = true;
             var bitrateScale = 1.0;
             long actualBytes = 0;
@@ -574,7 +590,7 @@ public partial class ShareDialog : Window
                 {
                     AppLog.Info("Share: AV1 unavailable on every encoder tried, falling back to H.264.");
                     useAv1 = false;
-                    tier = MainWindowViewModel.ShareEncoderTier.Nvenc;
+                    tier = FirstShareTier(useAv1);
                     useAdvancedNvenc = true;
                     result = await WalkEncoderLadderAsync();
                 }

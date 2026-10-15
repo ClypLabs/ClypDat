@@ -125,4 +125,21 @@ public sealed class CaptureHealthRecoveryPolicyTests
 
         Assert.True(new CaptureHealthRecoveryPolicy().Observe(health));
     }
+
+    [Theory]
+    // Iris Xe under a GPU-heavy game: slow, but every clip still plays.
+    [InlineData(ReplayCaptureState.Healthy, 24.9, 60, false)]
+    [InlineData(ReplayCaptureState.Degraded, 15.0, 60, false)]
+    [InlineData(ReplayCaptureState.Healthy, 14.9, 60, true)]
+    [InlineData(ReplayCaptureState.Healthy, 0.0, 60, true)]
+    [InlineData(ReplayCaptureState.Failed, 60.0, 60, true)]
+    public void IsStalled_OnlyForOutputThatHasAllButStopped(ReplayCaptureState state, double outputFps, int targetFps, bool stalled)
+    {
+        var health = ReplayCaptureHealth.Unknown("Worker") with
+        {
+            State = state, OutputFrameRate = outputFps, TargetFrameRate = targetFps
+        };
+
+        Assert.Equal(stalled, CaptureHealthRecoveryPolicy.IsStalled(health));
+    }
 }
