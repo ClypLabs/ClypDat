@@ -999,6 +999,23 @@ public sealed class MediaProbeService
     {
         using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
         if (processingRead is null) return string.Empty;
+        // In-process first: one open, mostly one keyframe decode per frame,
+        // one decode thread. The ffmpeg.exe pass below seeks a full GOP for
+        // every frame across a thread per core.
+        if (NativeClipThumbnail.FilmstripAvailable)
+        {
+            var background = MemoryTrimmer.GameRunning;
+            var clock = Stopwatch.StartNew();
+            var (decoded, failure) = await Task.Run(() => NativeClipThumbnail.WriteFilmstrip(filePath, output, duration, frameCount, FilmstripFrameHeight, 2, background)).ConfigureAwait(false);
+            if (failure is null && File.Exists(output))
+            {
+                AppLog.Debug($"Filmstrip (native) in {clock.ElapsedMilliseconds}ms, {decoded}/{frameCount} frames, background={background}: {filePath}");
+                if (decoded < frameCount) AppLog.Info($"Filmstrip built with stand-ins for {filePath}: {decoded} of {frameCount} seek points decoded.");
+                return output;
+            }
+            AppLog.Info($"Native filmstrip failed for {filePath}: {failure}");
+            if (background) return string.Empty;
+        }
         try
         {
             var arguments = new List<string> { "-y", "-v", "error" };

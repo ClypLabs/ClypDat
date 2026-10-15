@@ -54,3 +54,27 @@ int32_t CD_CALL cd_clip_thumbnail_write(const cd_clip_thumbnail_config* config,
     catch (const std::exception& error) { return report(error.what(), error_utf8, error_capacity, error_required, CD_E_INTERNAL); }
     catch (...) { return report("Unknown thumbnail failure", error_utf8, error_capacity, error_required, CD_E_INTERNAL); }
 }
+
+int32_t CD_CALL cd_clip_filmstrip_write(cd_clip_filmstrip_config* config,
+    uint8_t* error_utf8, uint32_t error_capacity, uint32_t* error_required) {
+    if (error_required) *error_required = 0;
+    if (!config || config->size != sizeof(*config) || config->abi != CD_ABI_VERSION) return CD_E_UNSUPPORTED_ABI;
+    if (!config->path || !config->path_length || config->path_length > 32767) return CD_E_INVALID_ARGUMENT;
+    if (!config->output || !config->output_length || config->output_length > 32767) return CD_E_INVALID_ARGUMENT;
+    if (!clypdat::runtime_versions_match()) return CD_E_RUNTIME_MISMATCH;
+    config->decoded = 0;
+    BackgroundMode background(config->background != 0);
+    try {
+        clypdat::ClipFilmstripConfig native;
+        native.path = text(config->path, config->path_length);
+        native.output = text(config->output, config->output_length);
+        native.duration_us = config->duration_us;
+        native.frame_count = int(std::clamp<uint32_t>(config->frame_count, 1, 80));
+        native.frame_height = int(std::clamp<uint32_t>(config->frame_height, 16, 1080));
+        native.quality = int(std::clamp<uint32_t>(config->quality, 2, 31));
+        config->decoded = uint32_t(clypdat::write_clip_filmstrip(native));
+        return CD_OK;
+    } catch (const std::invalid_argument& error) { return report(error.what(), error_utf8, error_capacity, error_required, CD_E_INVALID_ARGUMENT); }
+    catch (const std::exception& error) { return report(error.what(), error_utf8, error_capacity, error_required, CD_E_INTERNAL); }
+    catch (...) { return report("Unknown filmstrip failure", error_utf8, error_capacity, error_required, CD_E_INTERNAL); }
+}
