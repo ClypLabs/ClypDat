@@ -62,8 +62,7 @@ public sealed class MatchRadarChart : Control
             labels[i] = (labels[i].Name, labels[i].Value, buttonWidth, labels[i].Height + 2 * LabelPaddingY);
         Point Direction(int index)
         {
-            var angle = axes[index].AngleDegrees is { } degrees && double.IsFinite(degrees)
-                ? degrees * Math.PI / 180 : -Math.PI / 2 + index * 2 * Math.PI / axes.Count;
+            var angle = -Math.PI / 2 + index * 2 * Math.PI / axes.Count;
             return new Point(Math.Cos(angle), Math.Sin(angle));
         }
         var radius = Math.Min(Bounds.Width / 2, Bounds.Height / 2);

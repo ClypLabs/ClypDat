@@ -159,14 +159,30 @@ public sealed class MatchStatsRenderingTests
             Assert.Equal(zeroBuild ? 4 : 5, chart.LabelBounds.Count);
             Assert.All(chart.LabelBounds, bounds => Assert.True(new Rect(chart.Bounds.Size).Inflate(0.01).Contains(bounds)));
             Point LabelCentre(string label) => chart.LabelBounds[model.RadarAxes.ToList().FindIndex(axis => axis.Label == label)].Center;
-            Assert.Equal(chart.Bounds.Width / 2, LabelCentre("Survival").X, 3);
-            Assert.Equal(chart.Bounds.Width / 2, LabelCentre("Looting").X, 3);
-            Assert.True(LabelCentre("Survival").Y < chart.Bounds.Height / 2);
-            Assert.True(LabelCentre("Looting").Y > chart.Bounds.Height / 2);
-            Assert.Equal(chart.Bounds.Height / 2 + 4, LabelCentre("Combat").Y, 3);
-            Assert.Equal(chart.Bounds.Height / 2 + 4, LabelCentre("Aim").Y, 3);
-            Assert.True(LabelCentre("Combat").X > chart.Bounds.Width / 2);
-            Assert.True(LabelCentre("Aim").X < chart.Bounds.Width / 2);
+            var middle = new Point(chart.Bounds.Width / 2, chart.Bounds.Height / 2 + 4);
+            Assert.Equal(middle.X, LabelCentre("Survival").X, 3);
+            Assert.True(LabelCentre("Survival").Y < middle.Y);
+            Assert.True(LabelCentre("Combat").X > middle.X);
+            Assert.True(LabelCentre("Looting").Y > middle.Y);
+            Assert.True(LabelCentre("Aim").X < middle.X);
+            if (zeroBuild)
+            {
+                // Diamond: Survival top, Combat right, Looting bottom, Aim left.
+                Assert.Equal(middle.X, LabelCentre("Looting").X, 3);
+                Assert.Equal(middle.Y, LabelCentre("Combat").Y, 3);
+                Assert.Equal(middle.Y, LabelCentre("Aim").Y, 3);
+            }
+            else
+            {
+                // Even pentagon: Combat and Aim mirror each other above the
+                // centre, Building and Looting below it.
+                Assert.True(LabelCentre("Combat").Y < middle.Y);
+                Assert.True(LabelCentre("Aim").Y < middle.Y);
+                Assert.Equal(LabelCentre("Combat").Y, LabelCentre("Aim").Y, 3);
+                Assert.True(LabelCentre("Building").X > middle.X && LabelCentre("Building").Y > middle.Y);
+                Assert.True(LabelCentre("Looting").X < middle.X);
+                Assert.Equal(LabelCentre("Building").Y, LabelCentre("Looting").Y, 3);
+            }
             Assert.False(chart.SelectAxisAt(new Point(-20, -20)));
             for (var i = 0; i < model.RadarAxes.Count; i++)
             {

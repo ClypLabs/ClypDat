@@ -5,7 +5,6 @@ namespace ClypDat.App.Services;
 public sealed record MatchStatTile(string Label, string Value);
 public sealed record MatchRadarAxis(string Label, double Value, string Display, bool Available = true)
 {
-    public double? AngleDegrees { get; init; }
     // Every game gets a useful clickable label; providers can add the full
     // score calculation without changing the shared chart.
     public string Explanation { get; init; } = Available && double.IsFinite(Value)

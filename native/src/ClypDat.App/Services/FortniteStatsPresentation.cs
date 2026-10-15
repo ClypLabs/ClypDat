@@ -62,9 +62,9 @@ public static class FortniteStatsPresentation
             : "Starting or remaining player counts are missing or inconsistent, so Survival is unavailable.";
 
     /// <summary>
-    /// Five axes (Combat, Aim, Survival, Building, Looting), or four in a
-    /// diamond for Zero Build: Survival top, Combat right, Looting bottom,
-    /// Aim left. Building takes a lower spoke when present.
+    /// Five axes in an even pentagon, clockwise from Survival at the top:
+    /// Combat, Building, Looting, Aim. Zero Build drops Building, leaving a
+    /// diamond: Survival top, Combat right, Looting bottom, Aim left.
     /// </summary>
     public static IReadOnlyList<MatchRadarAxis> RadarAxes(MatchStats match)
     {
@@ -85,14 +85,10 @@ public static class FortniteStatsPresentation
             : "Your collected pickups couldn't be confirmed for this match, so no Looting score can be calculated.");
         if (player.LootingPartial && LootingScore(player) is { } recorded)
             looting = looting with { Display = $"≥{recorded:0}" };
-        survival = survival with { AngleDegrees = -90 };
-        combat = combat with { AngleDegrees = 0 };
-        looting = looting with { AngleDegrees = 90 };
-        aim = aim with { AngleDegrees = 180 };
         return match.ZeroBuild == true
             ? [survival, combat, looting, aim]
             : [survival, combat, MatchRadarAxis.Unavailable("Building") with
-                { AngleDegrees = 45, Explanation = "No verified building activity for this match. Material totals aren't used to calculate a Building score." }, looting, aim];
+                { Explanation = "No verified building activity for this match. Material totals aren't used to calculate a Building score." }, looting, aim];
     }
 
     /// <summary>Why each unavailable axis is empty, one sentence each.</summary>
