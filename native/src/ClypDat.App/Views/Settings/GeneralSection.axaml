@@ -40,7 +40,7 @@
             <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
               <StackPanel Classes="settingsRowText">
                 <TextBlock Classes="settingsRowTitle" Text="Automatically focus ClypDat" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
-                <TextBlock Classes="settingsRowDesc" Text="Brings ClypDat to the front when you exit your game." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Brings ClypDat to the front when you exit your game, if you saved new clips." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
               </StackPanel>
               <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutomaticallyFocusOnGameExit}" OnContent="{x:Null}" OffContent="{x:Null}" />
             </Grid>
