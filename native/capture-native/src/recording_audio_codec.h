@@ -55,7 +55,10 @@ private:
 class AudioTrackEncoder {
 public:
     using Sink = std::function<void(const std::string& key, Packet packet, bool audible)>;
+    // Receives each encoded block's waveform peaks, taken from the same PCM.
+    using PeakSink = std::function<void(const std::string& key, AudioPeakBlock peaks)>;
     AudioTrackEncoder(AudioCodec codec, int bitrate_kbps, std::vector<AudioLaneConfig> lanes, bool mix, int64_t bound, Sink sink);
+    void set_peak_sink(PeakSink sink);
     ~AudioTrackEncoder();
     AudioTrackEncoder(const AudioTrackEncoder&) = delete;
     AudioTrackEncoder& operator=(const AudioTrackEncoder&) = delete;

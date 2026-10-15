@@ -179,9 +179,28 @@ struct VideoRebase {
 };
 // One saved audio stream and the snapshot packets it still has to write.
 struct AudioOutput {const AudioTrack* track;AVStream* stream;std::vector<std::shared_ptr<const AVPacket>> packets;size_t next=0;int64_t origin=0;};
-void write_replay(const ReplaySaveRequest& request,const AudioSnapshot* audio,const std::filesystem::path& output,const std::atomic_bool& cancel){
+// Waveform peaks of every saved audio stream on the clip's own time axis, as
+// "CDPK" v1: version, slice frames, sample rate, stream count, then per
+// stream its container index, slice count and one byte per slice. Read by
+// ClipPeaksSidecar; little-endian like everything else ClypDat writes.
+std::string peaks_blob(const std::vector<std::pair<const AudioTrack*,int>>& streams,int64_t origin,int64_t end){
+    std::string blob("CDPK");
+    auto u32=[&](uint32_t value){blob.append(reinterpret_cast<const char*>(&value),sizeof(value));};
+    u32(1);u32(uint32_t(kAudioPeakSliceFrames));u32(48000);u32(uint32_t(streams.size()));
+    const auto count=size_t((std::max<int64_t>)(0,(end+kAudioPeakSliceFrames-1)/kAudioPeakSliceFrames));
+    for(const auto& [track,index]:streams){
+        std::vector<uint8_t> row(count,0);
+        for(const auto& block:track->peaks)for(size_t j=0;j<block.slices.size();++j){
+            const auto at=block.pts+int64_t(j)*kAudioPeakSliceFrames-origin;if(at<0||at>=end)continue;
+            auto& slot=row[size_t(at/kAudioPeakSliceFrames)];slot=(std::max)(slot,block.slices[j]);
+        }
+        u32(uint32_t(index));u32(uint32_t(row.size()));blob.append(reinterpret_cast<const char*>(row.data()),row.size());
+    }
+    return blob;
+}
+std::string write_replay(const ReplaySaveRequest& request,const AudioSnapshot* audio,const std::filesystem::path& output,const std::atomic_bool& cancel){
     Format format;open_output(format,output);auto* video_stream=add_video(format.value,request.video);
-    std::vector<AudioOutput> outputs;
+    std::vector<AudioOutput> outputs;std::string peaks;
     if(audio){
         // Lanes in configured order; silent optional lanes are left out. A mix
         // leads only when it combines more than one saved lane.
@@ -205,6 +224,9 @@ void write_replay(const ReplaySaveRequest& request,const AudioSnapshot* audio,co
             for(const auto& packet:track->packets){const auto at=packet->pts-origin;if(at>=end||(!negative&&at<0))continue;result.packets.push_back(packet);}
             outputs.push_back(std::move(result));
         }
+        std::vector<std::pair<const AudioTrack*,int>> streams;
+        for(const auto& o:outputs)if(!o.track->peaks.empty())streams.emplace_back(o.track,o.stream->index);
+        if(!streams.empty())peaks=peaks_blob(streams,origin,end);
     }
     header(format.value,false);
     VideoRebase video(request.video,video_stream);size_t next_video=0;
@@ -220,6 +242,7 @@ void write_replay(const ReplaySaveRequest& request,const AudioSnapshot* audio,co
         av_packet_rescale_ts(packet.get(),{1,48000},o.stream->time_base);check(av_interleaved_write_frame(format.value,packet.get()),"Write replay audio");
     }
     check(av_write_trailer(format.value),"Finalize replay");
+    return peaks;
 }
 }
 void remux_video(const VideoSnapshot& video,const std::filesystem::path& output,const std::atomic_bool& cancel,bool fragmented){
@@ -246,10 +269,13 @@ std::shared_future<ReplaySaveResult> SaveCoordinator::begin(ReplaySaveRequest re
                 while(request.audio.wait_for(std::chrono::milliseconds(25))!=std::future_status::ready){if(cancel->load())throw std::runtime_error("Replay save cancelled");}
                 audio=request.audio.get();
             }
-            write_replay(request,audio?&*audio:nullptr,partial,*cancel);
+            const auto peaks=write_replay(request,audio?&*audio:nullptr,partial,*cancel);
             if(cancel->load())throw std::runtime_error("Replay save cancelled");
             if(request.publish_overlays)request.publish_overlays(partial,result.overlay_mappings,*cancel);
             std::filesystem::rename(partial,request.output);published=true;
+            // Beside the clip until the worker files it with the clip's other
+            // sidecars. Losing it costs one waveform decode, never the save.
+            if(!peaks.empty())try{auto path=request.output;path+=L".peaks";std::ofstream file(path,std::ios::binary|std::ios::trunc);file.write(peaks.data(),std::streamsize(peaks.size()));}catch(...){}
         }catch(const std::exception& e){result.error=e.what();result.cancelled=cancel->load();}
         std::error_code ignored;if(!published)std::filesystem::remove(partial,ignored);
         if(request.completed){try{request.completed();}catch(...){}}

@@ -38,7 +38,7 @@ void hr(HRESULT result, const char* operation) { if (FAILED(result)) throw std::
 struct AudioHistory::State {
     using Clock = std::chrono::steady_clock;
     struct Entry { std::shared_ptr<const AVPacket> packet; bool audible = false; };
-    struct Ring { std::shared_ptr<const AVCodecParameters> parameters; std::deque<Entry> packets; int64_t end = INT64_MIN; };
+    struct Ring { std::shared_ptr<const AVCodecParameters> parameters; std::deque<Entry> packets; std::deque<AudioPeakBlock> peaks; int64_t end = INT64_MIN; };
     struct Work { PcmBlock block; std::shared_ptr<std::promise<AudioSnapshot>> barrier; std::optional<std::vector<AudioLaneConfig>> lanes; int64_t start = 0, end = 0; };
     struct Pending { std::shared_ptr<std::promise<AudioSnapshot>> promise; int64_t start = 0, end = 0; Clock::time_point deadline; };
     AudioHistoryOptions options;
@@ -77,7 +77,9 @@ struct AudioHistory::State {
         ring.packets.push_back({std::move(owned), audible});
         const auto cutoff = ring.end - kept();
         while (!ring.packets.empty() && ring.packets.front().packet->pts + ring.packets.front().packet->duration < cutoff) ring.packets.pop_front();
+        while (!ring.peaks.empty() && ring.peaks.front().pts + int64_t(ring.peaks.front().slices.size()) * kAudioPeakSliceFrames < cutoff) ring.peaks.pop_front();
     }
+    void peaks(const std::string& key, AudioPeakBlock value) { rings[key].peaks.push_back(std::move(value)); }
     void write(const PcmBlock& block) {
         if (options.before_write) options.before_write();
         const auto position = audio_frames(block.start_us);
@@ -112,6 +114,10 @@ struct AudioHistory::State {
                 if (stop <= lead || pts >= last) continue;
                 track.packets.push_back(entry.packet);
                 track.audible |= entry.audible && stop > first;
+            }
+            for (const auto& block : found->second.peaks) {
+                const auto stop = block.pts + int64_t(block.slices.size()) * kAudioPeakSliceFrames;
+                if (stop > first && block.pts < last) track.peaks.push_back(block);
             }
             result.tracks.push_back(std::move(track));
         };
@@ -180,6 +186,7 @@ AudioHistory::AudioHistory(std::vector<AudioLaneConfig> lanes, int64_t retention
     State* raw = s.get();
     s->encoder = std::make_unique<AudioTrackEncoder>(s->options.codec, s->options.bitrate_kbps, std::move(lanes), true, int64_t(48000) * 120,
         [raw](const std::string& key, Packet packet, bool audible) { raw->packet(key, std::move(packet), audible); });
+    s->encoder->set_peak_sink([raw](const std::string& key, AudioPeakBlock peaks) { raw->peaks(key, std::move(peaks)); });
     s->sync_rings();
     std::thread([s] { s->run(); }).detach();
 }

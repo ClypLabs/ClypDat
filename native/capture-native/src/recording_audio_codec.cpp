@@ -194,7 +194,7 @@ struct AudioTrackEncoder::State {
         // Audible flag of each frame still inside the encoder.
         std::deque<std::pair<int64_t, bool>> frames;
     };
-    AudioCodec codec = AudioCodec::Opus; int bitrate_kbps = 0; bool mix = false; Sink sink;
+    AudioCodec codec = AudioCodec::Opus; int bitrate_kbps = 0; bool mix = false; Sink sink; PeakSink peak_sink;
     std::unique_ptr<AudioLaneMixer> mixer;
     std::map<std::string, Track> tracks;
     int block = 0, preroll = 0; bool finished = false;
@@ -231,6 +231,17 @@ struct AudioTrackEncoder::State {
                 for (int i = 0; i < block; ++i) plane[i] = samples[size_t(i) * track.channels + ch];
             }
         } else std::copy(samples, samples + size_t(block) * track.channels, reinterpret_cast<float*>(raw->data[0]));
+        if (peak_sink) {
+            AudioPeakBlock peaks; peaks.pts = pts;
+            peaks.slices.resize(size_t((block + kAudioPeakSliceFrames - 1) / kAudioPeakSliceFrames));
+            for (size_t slice = 0; slice < peaks.slices.size(); ++slice) {
+                const size_t first = slice * kAudioPeakSliceFrames, last = (std::min)(size_t(block), first + kAudioPeakSliceFrames);
+                float peak = 0;
+                for (size_t i = first * track.channels; i < last * track.channels; ++i) peak = (std::max)(peak, std::abs(samples[i]));
+                peaks.slices[slice] = uint8_t(std::lround((std::min)(peak, 1.f) * 255.f));
+            }
+            peak_sink(track.key, std::move(peaks));
+        }
         track.frames.emplace_back(pts, audible);
         int code = avcodec_send_frame(track.codec.get(), raw);
         if (code == AVERROR(EAGAIN)) { receive(track); code = avcodec_send_frame(track.codec.get(), raw); }
@@ -273,6 +284,7 @@ AudioTrackEncoder::AudioTrackEncoder(AudioCodec codec, int bitrate_kbps, std::ve
     s.sync_tracks();
 }
 AudioTrackEncoder::~AudioTrackEncoder() = default;
+void AudioTrackEncoder::set_peak_sink(PeakSink sink) { state_->peak_sink = std::move(sink); }
 void AudioTrackEncoder::configure(std::vector<AudioLaneConfig> lanes) { state_->mixer->configure(std::move(lanes)); state_->sync_tracks(); }
 const std::vector<AudioLaneConfig>& AudioTrackEncoder::lanes() const { return state_->mixer->lanes(); }
 void AudioTrackEncoder::anchor(int64_t position) { state_->mixer->anchor(position); }

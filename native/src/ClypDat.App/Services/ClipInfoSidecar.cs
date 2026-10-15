@@ -277,6 +277,7 @@ public static class ClipInfoSidecar
         RecordingFileOwnership.ThrowIfActive(clipPath);
         try { File.Delete(FullSessionRecovery.Marker(clipPath)); } catch (IOException) { }
         SpotifyTimelineSidecar.Delete(libraryRoot, clipPath);
+        ClipPeaksSidecar.Delete(libraryRoot, clipPath);
         try
         {
             // Overlay captures are owned by this clip, unlike Spotify artwork

@@ -516,6 +516,22 @@ public sealed class MediaProbeService
             return cached;
         }
 
+        // Peaks the recorder took while encoding this clip: no audio decode at
+        // all. Absent for imports, exports and older saves, which carry on below.
+        if (LibraryRoot?.Invoke() is { Length: > 0 } libraryRoot)
+        {
+            var recorded = await Task.Run(() => ClipPeaksSidecar.TryLoad(libraryRoot, media.Path,
+                audioTracks.Select(track => track.Index).ToArray(), media.Duration, RecordedPeaksBucketCount), cancellationToken).ConfigureAwait(false);
+            if (recorded is not null)
+            {
+                AppLog.Debug($"Waveform from recorded peaks: tracks={recorded.Count}, path={media.Path}");
+                foreach (var (index, peaks) in recorded) onPartial?.Invoke(index, peaks);
+                await TryWriteWaveformCacheAsync(cachePath, recorded, media.SizeBytes, media.LastWriteTimeUtc, cancellationToken).ConfigureAwait(false);
+                if (populateMemoryCache) WaveformPeakCache.Store(media.Path, media.SizeBytes, media.LastWriteTimeUtc, recorded);
+                return recorded;
+            }
+        }
+
         // On a network drive, waveform decoding competes with LibVLC's video
         // stream and the audio chunk extractor for the same remote file the
         // moment a clip opens - SMB seek thrash from three concurrent readers
@@ -1189,6 +1205,11 @@ public sealed class MediaProbeService
     }
 
     private const int WaveformSampleRate = 4000;
+    // Same grid as the decoded waveform's BucketCount in LoadWaveformsAsync.
+    private const int RecordedPeaksBucketCount = 8000;
+
+    /// <summary>The library folder, for clip sidecars such as recorded waveform peaks.</summary>
+    public Func<string?>? LibraryRoot { get; set; }
 
     // One ffmpeg, one pass over the container, every audio track at once.
     //

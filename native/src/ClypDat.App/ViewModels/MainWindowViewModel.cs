@@ -499,6 +499,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         };
         _clipMetadata = new ClipMetadataHydrator((path, foreground, bypassCache) => _mediaProbe.ProbeMetadataDetailedAsync(path, foreground, bypassCache));
         _clipOpenFlow = new ClipOpenFlow(_clipMetadata);
+        _mediaProbe.LibraryRoot = () => Settings.LibraryFolder;
         _clipNotReadyMessageTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
         _clipNotReadyMessageTimer.Tick += (_, _) =>
         {

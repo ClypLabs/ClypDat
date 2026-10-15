@@ -127,6 +127,23 @@ void check_timed_microphone_save(const std::filesystem::path& root, const VideoS
     require(session.stop() && session.status().error.empty(), "Timed microphone session failed to finalize");
     auto snapshot = history.snapshot(video.start_us, video.end_us).get(); history.stop();
     const auto saved = save_replay(root, "timed-mic-replay", AudioCodec::Opus, video, snapshot, {{"mic", "Microphone", 1, 1, false}});
+    {
+        // Waveform peaks beside the clip: one stream (the mic, container
+        // index 1), one byte per 2.5 ms slice of the clip, and the 0.3 sine's
+        // amplitude in the steady middle.
+        auto peaks_path = saved; peaks_path += L".peaks";
+        std::ifstream file(peaks_path, std::ios::binary);
+        require(file.good(), "Replay save wrote no waveform peaks");
+        std::string blob((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        auto u32 = [&](size_t at) { uint32_t value = 0; std::memcpy(&value, blob.data() + at, 4); return value; };
+        require(blob.size() > 28 && blob.compare(0, 4, "CDPK") == 0 && u32(4) == 1 && u32(8) == 120 && u32(16) == 1, "Waveform peaks header invalid");
+        require(u32(20) == 1, "Waveform peaks name the wrong stream");
+        const auto slices = u32(24);
+        const auto expected = uint32_t((audio_frames(video.end_us - video.start_us, 48000) + 119) / 120);
+        require(slices + 2 >= expected && slices <= expected + 2 && blob.size() == 28 + size_t(slices), "Waveform peaks do not cover the clip");
+        const auto middle = uint8_t(blob[28 + slices / 2]);
+        if (std::abs(int(middle) - 77) > 8) throw std::runtime_error("Waveform peaks do not match the recorded level: " + std::to_string(middle));
+    }
     for (const auto& path : {saved, root / L"timed-mic-session.mkv"}) {
         auto samples = decoded(path, 0, 1);
         require(samples.size() > 9600, "Saved microphone audio too short");

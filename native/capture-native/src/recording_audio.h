@@ -28,6 +28,15 @@ struct AudioLaneConfig {
     bool omit_if_silent = false;
 };
 enum class AudioCodec { Opus, Aac, Vorbis };
+// Waveform peaks taken from the exact PCM each encoder frame was made from:
+// one byte (|sample| max over channels, 0-255) per kAudioPeakSliceFrames.
+// A save writes them beside the clip so the editor never decodes audio to
+// draw a waveform.
+inline constexpr int kAudioPeakSliceFrames = 120; // 2.5 ms at 48 kHz.
+struct AudioPeakBlock {
+    int64_t pts = 0; // 48 kHz frame of the first slice on the session timeline.
+    std::vector<uint8_t> slices;
+};
 // Encoded packets of one track inside a snapshot window, with a lead-in for
 // decoder convergence. Timestamps are 48 kHz frames on the session timeline.
 struct AudioTrack {
@@ -36,6 +45,7 @@ struct AudioTrack {
     bool mix = false, audible = false;
     std::shared_ptr<const AVCodecParameters> parameters;
     std::vector<std::shared_ptr<const AVPacket>> packets;
+    std::vector<AudioPeakBlock> peaks;
 };
 struct AudioSnapshot {
     int64_t start_us = 0, end_us = 0;

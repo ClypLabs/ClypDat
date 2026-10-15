@@ -98,7 +98,7 @@ public static class LibraryLayout
             throw new InvalidDataException("Destination metadata crosses a filesystem link.");
         if (File.Exists(destinationTimeline)) File.Delete(destinationTimeline);
         var moves = new List<(string Source, string Destination)>();
-        foreach (var suffix in new[] { ".info.json", ".json", ".paused.json", ".cover.jpg", ".source.json" })
+        foreach (var suffix in new[] { ".info.json", ".json", ".paused.json", ".cover.jpg", ".source.json", ClipPeaksSidecar.Suffix })
         {
             var newPath = SidecarPath(libraryRoot, newVideoPath, suffix);
             if (!LibraryPathGuard.IsWithin(libraryRoot, newPath))

@@ -11,6 +11,7 @@ internal static class NativeRecordingPublication
         JsonElement result, long durationUs, long requestedStartUs)
     {
         var root = configuration.LibraryFolder;
+        ClipPeaksSidecar.FileWithClip(root, output);
         var overlayMap = Mappings(result, "overlayMappings");
         var audioMap = Mappings(result, "audioMappings");
         if (durationUs <= 0 || overlayMap.Count == 0 || audioMap.Count == 0)
