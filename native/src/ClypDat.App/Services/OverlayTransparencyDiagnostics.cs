@@ -22,8 +22,17 @@ internal static class OverlayTransparencyDiagnostics
         }
 
         var exStyle = (long)GetWindowLongPtr(handle, GwlExStyle);
-        AppLog.Info(
-            $"Overlay[{name}]: actual={window.ActualTransparencyLevel}; exStyle=0x{exStyle:X8}; " +
-            $"noRedirectionBitmap={(exStyle & WsExNoRedirectionBitmap) != 0}; layered={(exStyle & WsExLayered) != 0}.");
+        var line = $"Overlay[{name}]: actual={window.ActualTransparencyLevel}; exStyle=0x{exStyle:X8}; " +
+            $"noRedirectionBitmap={(exStyle & WsExNoRedirectionBitmap) != 0}; layered={(exStyle & WsExLayered) != 0}.";
+        // The hover bar reports on every show: 1,300+ identical lines in a day
+        // of editing. Only a change in what a window reports is news.
+        lock (LastLogged)
+        {
+            if (LastLogged.TryGetValue(name, out var previous) && previous == line) return;
+            LastLogged[name] = line;
+        }
+        AppLog.Info(line);
     }
+
+    private static readonly Dictionary<string, string> LastLogged = new(StringComparer.Ordinal);
 }

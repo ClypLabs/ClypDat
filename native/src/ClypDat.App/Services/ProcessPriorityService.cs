@@ -6,6 +6,8 @@ public sealed record ProcessPriorityOption(string Label, string Value);
 
 public static class ProcessPriorityService
 {
+    private static string? _lastLogged;
+
     public static readonly IReadOnlyList<ProcessPriorityOption> Options =
     [
         new("Idle", "Idle"),
@@ -37,7 +39,9 @@ public static class ProcessPriorityService
         {
             using var process = Process.GetCurrentProcess();
             process.PriorityClass = priority;
-            AppLog.Info($"Process priority set to {normalized}.");
+            // Re-applied on every capture config; say so only when it changes.
+            if (Interlocked.Exchange(ref _lastLogged, normalized) != normalized)
+                AppLog.Info($"Process priority set to {normalized}.");
         }
         catch (Exception error)
         {

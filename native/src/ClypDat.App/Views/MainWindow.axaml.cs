@@ -3557,29 +3557,43 @@ public sealed partial class MainWindow : Window
                 }
                 // Emoji display title and stable plain event type are carried
                 // separately, so tile icons/counts never parse presentation text.
-                var libraryFolder = ViewModel.Settings.LibraryFolder;
-                // The recorder's own record of what it kept: the clip's exact
-                // span on this boot's clock, which match stats line up with
-                // the game's replay.
-                var savedSource = await Task.Run(() => SpotifySourceWindow.Load(libraryFolder, outputPath));
-                var savedMarkerSource = clampToReplayHistory ? savedSource : null;
-                var clipInfo = new ClipInfo(
-                    effectiveGameName,
-                    autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
-                    autoClipLabel ?? effectiveGameName,
-                    File.GetCreationTimeUtc(outputPath),
-                    CaptureSource: replayConfig.CaptureSource,
-                    AutoClipMarkers: clipWindow is { } window && autoClipEvents is not null
-                        ? ClipEventMarkerMapping.FromSavedWindow(autoClipEvents, window.StartUtc, window.EndUtc, savedMarkerSource)
-                        : null);
-                if (savedSource is not null) clipInfo = ClipCaptureWindow.FromSource(clipInfo, savedSource);
-                if (clipInfo.CaptureStartUtc is { } sessionStart && clipInfo.CaptureEndUtc is { } sessionEnd && FortniteMatchStats.IsFortnite(effectiveGameName, null))
+                var viewModel = ViewModel;
+                var libraryFolder = viewModel.Settings.LibraryFolder;
+                // The clip is on disk and the user has been told so. Details
+                // written from here on are extras: one failing must not turn
+                // that "Clip Saved" into "Clip Failed" for a clip that exists.
+                try
                 {
-                    var matchSession = await Task.Run(() => ViewModel.FortniteReplayAt(sessionStart, sessionEnd));
-                    if (matchSession is not null) clipInfo = clipInfo with { MatchSessionId = matchSession.FileName, MatchSessionStartUtc = matchSession.StartUtc };
+                    // The recorder's own record of what it kept: the clip's exact
+                    // span on this boot's clock, which match stats line up with
+                    // the game's replay.
+                    var savedSource = await Task.Run(() => SpotifySourceWindow.Load(libraryFolder, outputPath));
+                    var savedMarkerSource = clampToReplayHistory ? savedSource : null;
+                    var clipInfo = new ClipInfo(
+                        effectiveGameName,
+                        autoClipEventType ?? autoClipLabel?.Split(" - ", 2)[0],
+                        autoClipLabel ?? effectiveGameName,
+                        File.GetCreationTimeUtc(outputPath),
+                        CaptureSource: replayConfig.CaptureSource,
+                        AutoClipMarkers: clipWindow is { } window && autoClipEvents is not null
+                            ? ClipEventMarkerMapping.FromSavedWindow(autoClipEvents, window.StartUtc, window.EndUtc, savedMarkerSource)
+                            : null);
+                    if (savedSource is not null) clipInfo = ClipCaptureWindow.FromSource(clipInfo, savedSource);
+                    if (clipInfo.CaptureStartUtc is { } sessionStart && clipInfo.CaptureEndUtc is { } sessionEnd && FortniteMatchStats.IsFortnite(effectiveGameName, null))
+                    {
+                        // Captured above: ViewModel reads DataContext, which
+                        // throws off the UI thread. Fortnite clips hit that and
+                        // reported "Clip Failed" after saving.
+                        var matchSession = await Task.Run(() => viewModel.FortniteReplayAt(sessionStart, sessionEnd));
+                        if (matchSession is not null) clipInfo = clipInfo with { MatchSessionId = matchSession.FileName, MatchSessionStartUtc = matchSession.StartUtc };
+                    }
+                    // Another plain file write with no UI affinity.
+                    await Task.Run(() => ClipInfoSidecar.SaveCaptureDetails(libraryFolder, outputPath, clipInfo));
                 }
-                // Another plain file write with no UI affinity.
-                await Task.Run(() => ClipInfoSidecar.SaveCaptureDetails(libraryFolder, outputPath, clipInfo));
+                catch (Exception error)
+                {
+                    AppLog.Error($"Clip details after save failed; the clip itself is saved: {outputPath}", error);
+                }
                 await ProcessSavedClipAsync(outputPath, saveId.ToString());
                 // Saving a clip muxes the whole window and decodes a thumbnail
                 // for it - a burst with a definite end, so hand the memory back

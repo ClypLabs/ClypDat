@@ -103,6 +103,7 @@ public static class AppLog
     // startup, not per-write, so this is a cheap one-time sweep, not a cost
     // paid on every log line.
     private const int LogRetentionDays = 7;
+    private const int DiagnosticBundleRetentionDays = 30;
 
     private static void PruneOldLogs()
     {
@@ -112,6 +113,17 @@ public static class AppLog
             foreach (var file in Directory.EnumerateFiles(LogFolder, "clypdat-*.log"))
             {
                 if (File.GetLastWriteTime(file).Date < cutoff)
+                {
+                    try { File.Delete(file); } catch { /* best effort */ }
+                }
+            }
+            // Capture diagnostic bundles (up to ~22 MB each) were never matched
+            // above and sat here forever. They are made to be sent somewhere,
+            // so they get longer than the logs before they go.
+            var bundleCutoff = DateTime.Now.Date.AddDays(-DiagnosticBundleRetentionDays);
+            foreach (var file in Directory.EnumerateFiles(LogFolder, "clypdat-capture-diagnostics-*.zip"))
+            {
+                if (File.GetLastWriteTime(file).Date < bundleCutoff)
                 {
                     try { File.Delete(file); } catch { /* best effort */ }
                 }
