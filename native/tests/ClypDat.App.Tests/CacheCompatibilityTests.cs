@@ -37,7 +37,7 @@ public sealed class CacheCompatibilityTests
         public async Task<string> ClipAsync(string name)
         {
             var path = Path.Combine(Library, name);
-            await SpotifyOverlayBurnerTests.Run("-f", "lavfi", "-i", "color=black:s=160x90:r=30:d=1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+            await TestFfmpeg.Run("-f", "lavfi", "-i", "color=black:s=160x90:r=30:d=1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
                 "-t", "1", "-c:v", "libx264", "-c:a", "aac", path);
             return path;
         }

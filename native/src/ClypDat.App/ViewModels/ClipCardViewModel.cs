@@ -38,18 +38,24 @@ public sealed class ClipCardViewModel : ViewModelBase
     }
 
     internal ClipCardViewModel(CachedClipState state, string libraryRoot)
-        : this(state.Media, libraryRoot, state.ClipInfo, state.ClipEdit, true)
+        : this(state.Media, libraryRoot, state.ClipInfo, state.ClipEdit, true, state.TotalSizeBytes)
     {
     }
 
-    private ClipCardViewModel(MediaFileInfo media, string libraryRoot, ClipInfo? clipInfo, ClipEditSettings? clipEdit, bool hasCachedSidecars)
+    private ClipCardViewModel(MediaFileInfo media, string libraryRoot, ClipInfo? clipInfo, ClipEditSettings? clipEdit, bool hasCachedSidecars,
+        long cachedTotalSizeBytes = 0)
     {
         _media = media;
         _libraryRoot = libraryRoot;
         _previewImagePath = media.ThumbnailPath;
         _clipInfo = hasCachedSidecars ? clipInfo : ClipInfoSidecar.Load(_libraryRoot, media.Path);
         _clipEdit = hasCachedSidecars ? clipEdit : ClipEditSidecar.Load(_libraryRoot, media.Path);
-        _totalSizeBytes = ClipStorageCalculator.Calculate(_libraryRoot, media.Path, _clipInfo);
+        // A cached row carries its total, and no overlay manifest to recount
+        // it from (LibraryCacheStore). Statting every clip and overlay file
+        // here cost seconds on a cold disk; reconciliation updates changed clips.
+        _totalSizeBytes = hasCachedSidecars && cachedTotalSizeBytes > 0
+            ? cachedTotalSizeBytes
+            : ClipStorageCalculator.Calculate(_libraryRoot, media.Path, _clipInfo);
         _isVod = ComputeIsVod(media, libraryRoot);
         // Thumbnail Bitmap is NOT decoded here - a library can have hundreds
         // of cards and only a screenful are ever actually on screen at once.
@@ -689,14 +695,22 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     public void UpdateMedia(MediaFileInfo media, bool reloadSidecars = true)
     {
+        var previous = _media;
         _media = media;
         if (reloadSidecars)
         {
             _clipInfo = ClipInfoSidecar.Load(_libraryRoot, media.Path);
             _clipEdit = ClipEditSidecar.Load(_libraryRoot, media.Path);
+            _totalSizeBytes = ClipStorageCalculator.Calculate(_libraryRoot, media.Path, _clipInfo);
+        }
+        else if (previous.SizeBytes > 0 && media.SizeBytes > 0)
+        {
+            // Same clip and sidecars (a new thumbnail, filmstrip or probe), so
+            // only the video can have changed size. A cached card's ClipInfo has
+            // no overlay manifest to recount its assets from.
+            _totalSizeBytes = Math.Max(0, _totalSizeBytes - previous.SizeBytes + media.SizeBytes);
         }
         _isVod = ComputeIsVod(media, _libraryRoot);
-        _totalSizeBytes = ClipStorageCalculator.Calculate(_libraryRoot, media.Path, _clipInfo);
         PreviewImagePath = media.ThumbnailPath;
         OnPropertyChanged(nameof(Media));
         // Path and GameFilterKey both move when a clip is renamed into another

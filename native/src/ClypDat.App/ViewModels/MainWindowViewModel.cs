@@ -5510,8 +5510,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // per-batch filtering, or intentional frame delays. Run it at
             // Background priority so the splash gets its first render frame
             // before this deliberately bounded observable commit.
-            await Dispatcher.UIThread.InvokeAsync(() =>
+            var (queuedMs, addMs, filterMs, chromeMs, workMs) = await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                var queued = clock.ElapsedMilliseconds;
+                var work = System.Diagnostics.Stopwatch.StartNew();
                 _restoredClipPaths.Clear();
                 foreach (var clip in models)
                 {
@@ -5519,15 +5521,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                     AttachClip(clip);
                     AllClips.Add(clip);
                 }
-                PopulateGameFilterOptionsFromCache(cached);
-                PopulateClipTypeFilterOptionsFromCache(cached);
-                ApplyGameFilters();
-                ApplyClipTypeFilters();
-                ApplySearchFilter();
-                NotifyLibraryChrome();
+                var added = work.ElapsedMilliseconds;
+                ApplyLibraryFilters();
+                var filtered = work.ElapsedMilliseconds;
+                // Also rebuilds both filter option lists from the cards.
+                NotifyLibraryChrome(projectionCurrent: true);
+                var chrome = work.ElapsedMilliseconds;
                 IsInitialLibraryLoadComplete = true;
+                return (queued, added, filtered - added, chrome - filtered, work.ElapsedMilliseconds);
             }, DispatcherPriority.Background);
-            AppLog.Info($"Library cache: committed {AllClips.Count} models in one UI transaction at {clock.ElapsedMilliseconds}ms.");
+            AppLog.Info($"Library cache: committed {AllClips.Count} models in one UI transaction at {clock.ElapsedMilliseconds}ms " +
+                $"(queued until {queuedMs}ms; UI work {workMs}ms: add {addMs}, filters {filterMs}, chrome {chromeMs}).");
             _ = ReconcileLibraryAfterCacheAsync(root);
         }
         finally
@@ -5636,9 +5640,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     if (cancellationToken.IsCancellationRequested || !string.Equals(root, Settings.LibraryFolder, StringComparison.OrdinalIgnoreCase)) return;
-                    ApplyGameFilters();
-                    ApplyClipTypeFilters();
-                    ApplySearchFilter();
+                    ApplyLibraryFilters();
                 }, DispatcherPriority.Background);
             }
 
@@ -6230,11 +6232,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // RecomputeGameFilterBadges (via NotifyLibraryChrome below) only
             // reapplies a filter when rebuilding its option list happens to
             // invalidate one.
-            ApplyGameFilters();
-            ApplyClipTypeFilters();
-            ApplySearchFilter();
-
-            NotifyLibraryChrome();
+            ApplyLibraryFilters();
+            NotifyLibraryChrome(projectionCurrent: true);
 
             // Full snapshot, not just diff.Added/Changed: HydrateLibraryClipsAsync
             // cancels and restarts on every call, so passing only the delta
@@ -9372,7 +9371,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// offering handles for pixels that are now part of the picture.</summary>
     private static void AppendOverlayBurnMarkers(List<string> args, ClipOverlayRender? overlays)
     {
-        if (overlays?.Spotify is not null) args.AddRange(["-metadata", SpotifyOverlayBurner.BurnMarker + "=1"]);
+        if (overlays?.Spotify is not null) args.AddRange(["-metadata", SpotifyOverlayMarker.Tag + "=1"]);
         if (overlays?.Camera is not null) args.AddRange(["-metadata", ClipOverlayBurn.CameraMarker + "=1"]);
         if (overlays?.Keyboard is not null) args.AddRange(["-metadata", ClipOverlayBurn.PeripheralMarker + "=1"]);
     }
@@ -10106,7 +10105,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void NotifyLibraryChrome()
+    // projectionCurrent: the caller just ran ApplyLibraryFilters, so date
+    // headers and the grid projection already match the library.
+    private void NotifyLibraryChrome(bool projectionCurrent = false)
     {
         OnPropertyChanged(nameof(LibraryHeaderDate));
         OnPropertyChanged(nameof(LibraryHeaderGame));
@@ -10135,6 +10136,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // began arriving. Rebuilding this for each trickled-in card would
         // replace that complete sidebar with a partial one until restore ends.
         if (!_isRestoringCachedLibrary) RecomputeGameFilterBadges();
+        if (projectionCurrent) return;
         UpdateFirstOfDateFlags();
         RebuildLibraryProjection();
     }
@@ -10610,46 +10612,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsClipTypeFilterActive));
             OnPropertyChanged(nameof(IsAllClipsActive));
             OnPropertyChanged(nameof(LibraryTitle));
-        }
-    }
-
-    private void PopulateGameFilterOptionsFromCache(IReadOnlyList<CachedClipState> cached)
-    {
-        var countsByGame = cached
-            .GroupBy(CachedStateGameFilterKey, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
-        SetGameFilterOptions(countsByGame, removeMissingActiveFilter: false);
-    }
-
-    private void PopulateClipTypeFilterOptionsFromCache(IReadOnlyList<CachedClipState> cached)
-    {
-        var manualCount = 0;
-        var autoClipCount = 0;
-        var vodCount = 0;
-        var importedCount = 0;
-        foreach (var state in cached)
-        {
-            var isMedalImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.MedalImportKey);
-            var isSteelSeriesImport = !string.IsNullOrWhiteSpace(state.ClipInfo?.SteelSeriesImportKey);
-            var isAutoClip = !string.IsNullOrWhiteSpace(state.ClipInfo?.AutoClipEventType);
-            if (isMedalImport || isSteelSeriesImport) importedCount++;
-            if (isAutoClip) autoClipCount++;
-            if (!isMedalImport && !isSteelSeriesImport && !isAutoClip)
-            {
-                if (IsCachedStateVod(state)) vodCount++;
-                else manualCount++;
-            }
-        }
-
-        var hasImports = importedCount > 0;
-        if (!hasImports) _activeClipTypeFilters.Remove(ClipTypeImported);
-        ClipTypeFilterOptions.Clear();
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeManual, $"Manual Clips ({manualCount})", _activeClipTypeFilters.Contains(ClipTypeManual), OnClipTypeFilterOptionChanged));
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeAutoClip, $"Auto-Clips ({autoClipCount})", _activeClipTypeFilters.Contains(ClipTypeAutoClip), OnClipTypeFilterOptionChanged));
-        ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeVod, $"Full Session / VODs ({vodCount})", _activeClipTypeFilters.Contains(ClipTypeVod), OnClipTypeFilterOptionChanged));
-        if (hasImports)
-        {
-            ClipTypeFilterOptions.Add(new FilterOptionViewModel(ClipTypeImported, $"Imported ({importedCount})", _activeClipTypeFilters.Contains(ClipTypeImported), OnClipTypeFilterOptionChanged));
         }
     }
 
@@ -11191,6 +11153,26 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static string? NormalizeClipTypeKey(string? key) =>
         key is "MedalImport" or "SteelSeriesImport" ? ClipTypeImported : key;
+
+    // All three filters in one pass over the library. Calling the three below
+    // in a row walked every clip, re-flagged date headers and rebuilt the grid
+    // projection three times over, all on the UI thread.
+    private void ApplyLibraryFilters()
+    {
+        var query = _librarySearchText.Trim();
+        foreach (var clip in AllClips)
+        {
+            clip.IsMatchedByGameFilter = _activeGameFilters.Count == 0 || _activeGameFilters.Contains(clip.GameFilterKey);
+            clip.IsMatchedByClipTypeFilter = _activeClipTypeFilters.Count == 0 || MatchesClipTypeFilter(clip);
+            clip.IsMatchedBySearch = query.Length == 0 || MatchesSearch(clip, query);
+        }
+        UpdateFirstOfDateFlags();
+        UpdateDaySelectionStates();
+        if (HasStartupLibraryIndex) RefreshStartupLibraryIndex();
+        OnPropertyChanged(nameof(IsLibraryHeaderSelected));
+        OnPropertyChanged(nameof(LibraryReservedContentHeight));
+        RebuildLibraryProjection();
+    }
 
     private void ApplyGameFilters()
     {

@@ -304,22 +304,13 @@ internal static class SpotifyFrameChecks
         try
         {
             var clip = Path.Combine(folder, "clip.mp4");
-            Pump(SpotifyOverlayBurnerTests.Run("-f", "lavfi", "-i", "color=green:s=640x360:r=30:d=1", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
-                "-map", "0:v", "-map", "1:a", "-map", "1:a", "-map", "1:a", "-map", "1:a", "-t", "1", "-metadata", "title=Test Unicode 音",
-                "-movflags", "+use_metadata_tags", "-c:v", "libx264", "-c:a", "aac", clip).ContinueWith(task => { task.GetAwaiter().GetResult(); return true; }));
-            var movedClip = Path.Combine(folder, "moved.mp4");
-            File.Copy(clip, movedClip);
-            // Invalid hardware encoder deliberately exercises reuse on CPU fallback.
-            Assert.Equal(SpotifyOverlayOutcome.Completed, SpotifyOverlayBurner.BurnAsync(clip, animation.Path, spec.Position,
-                preferredCodec: new[] { "-c:v", "nonexistent_encoder" }).GetAwaiter().GetResult());
-            var inspection = SpotifyOverlayBurner.InspectAsync(clip).GetAwaiter().GetResult();
-            Assert.Equal(4, inspection.Audio.Length); Assert.True(inspection.Burned); Assert.InRange(inspection.Duration, .95, 1.05);
-            var pixels = ReadPixels(clip, "-f", "rawvideo", "-pix_fmt", "rgb24");
+            Pump(TestFfmpeg.Run("-f", "lavfi", "-i", "color=green:s=640x360:r=30:d=1", "-t", "1", "-c:v", "libx264", clip)
+                .ContinueWith(task => { task.GetAwaiter().GetResult(); return true; }));
+            var pixels = ReadPixels(Compose(clip, animation, spec.Position, Path.Combine(folder, "composed.mp4")), "-f", "rawvideo", "-pix_fmt", "rgb24");
             var firstOffset = (25 * 640 + 612) * 3;
             var lastOffset = 29 * 640 * 360 * 3 + firstOffset;
             Assert.True(Math.Abs(pixels[firstOffset] - pixels[firstOffset + 1]) < 12); // inset gray artwork on the right
             Assert.True(pixels[lastOffset + 1] > pixels[lastOffset] + 60); // unavailable clears to green video
-            Assert.Equal(SpotifyOverlayOutcome.Skipped, SpotifyOverlayBurner.BurnAsync(clip, animation.Path, spec.Position).GetAwaiter().GetResult());
 
             // A freely placed card has its own raster size and explicit output
             // coordinates. Neither its old corner nor the base video controls it.
@@ -328,8 +319,7 @@ internal static class SpotifyFrameChecks
             Assert.Equal(new SpotifyOverlayBounds(80, 180, 320, 111), movedAnimation.Bounds);
             var movedRaw = ReadPixels(movedAnimation.Path, "-f", "rawvideo", "-pix_fmt", "bgra");
             Assert.Equal(320 * 111 * 4 * 30, movedRaw.Length);
-            Assert.Equal(SpotifyOverlayOutcome.Completed, SpotifyOverlayBurner.BurnAsync(movedClip, movedAnimation).GetAwaiter().GetResult());
-            var movedPixels = ReadPixels(movedClip, "-f", "rawvideo", "-pix_fmt", "rgb24");
+            var movedPixels = ReadPixels(Compose(clip, movedAnimation, spec.Position, Path.Combine(folder, "moved.mp4")), "-f", "rawvideo", "-pix_fmt", "rgb24");
             // The card's centre (x=240) is left of the frame's middle, so its artwork
             // sits on the left - the outer edge (SpotifyOverlayLayout.IsRight). This
             // used to probe the right-hand side, from before placed cards chose a side
@@ -348,7 +338,7 @@ internal static class SpotifyFrameChecks
                 ClipRenderFilters.BuildVideoFilter(new(160, 20, 320, 320), 2, "scale=320:180"),
                 spec.Position, "[0:v:0]", "[video]", scaledAnimation.Bounds);
             var scaledClip = Path.Combine(folder, "scaled.mp4");
-            Pump(SpotifyOverlayBurnerTests.Run("-f", "lavfi", "-i", "color=green:s=640x360:r=30:d=1",
+            Pump(TestFfmpeg.Run("-f", "lavfi", "-i", "color=green:s=640x360:r=30:d=1",
                 "-i", scaledAnimation.Path, "-filter_complex", graph, "-map", "[video]", "-an", "-t", "0.5",
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", scaledClip).ContinueWith(task => { task.GetAwaiter().GetResult(); return true; }));
             var scaledPixels = ReadPixels(scaledClip, "-f", "rawvideo", "-pix_fmt", "rgb24");
@@ -365,6 +355,15 @@ internal static class SpotifyFrameChecks
         var task = SpotifyOverlayAnimation.PrepareAsync(spec with { Duration = 60 }, cancellation.Token);
         cancellation.Cancel();
         Assert.ThrowsAny<OperationCanceledException>(() => Pump(task));
+    }
+
+    // The card over a clip through the same filter graph exports use.
+    private static string Compose(string clip, SpotifyOverlayAnimation animation, string position, string output)
+    {
+        var graph = ClipRenderFilters.ComposeWithAnimation(null, position, "[0:v:0]", "[video]", animation.Bounds);
+        Pump(TestFfmpeg.Run("-i", clip, "-i", animation.Path, "-filter_complex", graph, "-map", "[video]", "-an",
+            "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", output).ContinueWith(task => { task.GetAwaiter().GetResult(); return true; }));
+        return output;
     }
 
     private static T Pump<T>(Task<T> task)

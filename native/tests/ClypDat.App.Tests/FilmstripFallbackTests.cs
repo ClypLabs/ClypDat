@@ -20,7 +20,7 @@ public sealed class FilmstripFallbackTests
         var clip = Path.Combine(folder, "clip.mp4");
         try
         {
-            await SpotifyOverlayBurnerTests.Run("-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=2",
+            await TestFfmpeg.Run("-f", "lavfi", "-i", "testsrc2=s=320x180:r=30:d=2",
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", clip);
             await media.ProbeMetadataAsync(clip);
 

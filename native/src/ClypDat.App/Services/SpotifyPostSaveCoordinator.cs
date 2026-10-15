@@ -1,5 +1,7 @@
 namespace ClypDat.App.Services;
 
+internal enum SpotifyOverlayOutcome { Skipped, Completed, Failed, Cancelled }
+
 // One process-wide path registry. Reservations precede hydration; readers already
 // in flight drain before the writer can encode or invalidate their caches.
 internal static class SpotifyProcessingPaths

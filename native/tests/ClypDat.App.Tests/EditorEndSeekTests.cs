@@ -24,7 +24,7 @@ public sealed class EditorEndSeekTests(ITestOutputHelper output)
             // 120fps with a keyframe each second and a half-second final GOP,
             // like a ClypDat recording: nothing to recover from before the end.
             var clip = Path.Combine(directory, "clip.mp4");
-            await SpotifyOverlayBurnerTests.Run("-f", "lavfi", "-i", "testsrc2=s=1280x720:r=120:d=2.5",
+            await TestFfmpeg.Run("-f", "lavfi", "-i", "testsrc2=s=1280x720:r=120:d=2.5",
                 "-c:v", "libx264", "-g", "120", "-bf", "0", "-pix_fmt", "yuv420p", clip);
 
             using var window = new HostWindow();

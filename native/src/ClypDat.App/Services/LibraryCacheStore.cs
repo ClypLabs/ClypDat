@@ -117,7 +117,7 @@ internal sealed class LibraryCacheStore
                     rootParameter.Value = root;
                     pathParameter.Value = entry.Media.Path;
                     createdParameter.Value = entry.Media.CreatedAt.UtcTicks;
-                    payloadParameter.Value = JsonSerializer.Serialize(entry, JsonOptions);
+                    payloadParameter.Value = JsonSerializer.Serialize(WithoutOverlayManifest(entry), JsonOptions);
                     insert.ExecuteNonQuery();
                 }
             }
@@ -142,6 +142,12 @@ internal sealed class LibraryCacheStore
             AppLog.Error("Library cache write failed; existing snapshot was kept.", error);
         }
     }
+
+    // A recorded clip's overlay manifest was about 45% of every startup read,
+    // and no card uses it: the editor and exports load it from the clip's
+    // sidecar, and the card's storage total is cached alongside.
+    internal static CachedClipState WithoutOverlayManifest(CachedClipState entry) =>
+        entry.ClipInfo is { OverlayManifest: not null } info ? entry with { ClipInfo = info with { OverlayManifest = null } } : entry;
 
     private SqliteConnection Open()
     {

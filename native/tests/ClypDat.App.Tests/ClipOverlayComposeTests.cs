@@ -51,8 +51,8 @@ public sealed class ClipOverlayComposeTests
     [Fact]
     public void TheSpotifyGraphIsUnchangedSoLegacyBurnsStillWork()
     {
-        // SpotifyOverlayBurner drives corner placement with symbolic
-        // expressions and no scale at all; that branch must stay untouched.
+        // Corner placement without a transform uses symbolic expressions and
+        // no scale at all; that branch must stay untouched.
         var graph = ClipRenderFilters.ComposeWithAnimation(null, "Top Right", "[0:v:0]", "[vout]");
 
         Assert.Contains("overlay=main_w-overlay_w:", graph);

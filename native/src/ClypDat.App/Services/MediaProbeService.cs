@@ -287,7 +287,7 @@ public sealed class MediaProbeService
                     steelSeriesAudioTracks = ReadSteelSeriesAudioTracks(format);
                     if (format.TryGetProperty("tags", out var provenanceTags))
                         spotifyOverlayBurned = provenanceTags.EnumerateObject().Any(tag =>
-                            tag.Name.Equals(SpotifyOverlayBurner.BurnMarker, StringComparison.OrdinalIgnoreCase) && tag.Value.GetString() == "1");
+                            tag.Name.Equals(SpotifyOverlayMarker.Tag, StringComparison.OrdinalIgnoreCase) && tag.Value.GetString() == "1");
                     if (format.TryGetProperty("tags", out var formatTags))
                     {
                         var comment = GetString(formatTags, "comment");
