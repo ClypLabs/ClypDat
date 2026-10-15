@@ -908,7 +908,7 @@ public sealed partial class MainWindow : Window
         var gameEnded = previousDetection.IsDetected && !detection.IsDetected;
         if (gameEnded)
         {
-            if (ViewModel.AutomaticallyFocusOnGameExit)
+            if (ViewModel.AutomaticallyFocusOnGameExit && HasUnseenSessionClips())
                 (Application.Current as App)?.FocusMainWindow();
             // The session ends here, regardless of whether capture stops or
             // automatically switches back to Desktop Capture afterwards.
@@ -3663,6 +3663,15 @@ public sealed partial class MainWindow : Window
     // identity without holding a card alive.
     private readonly List<string> _sessionNewClipPaths = new();
     private bool _sessionCollectingClips;
+
+    // Same test the popup applies: a session clip still in the library that the
+    // user hasn't dismissed. Game-exit focus keys off this so a session that
+    // saved nothing leaves ClypDat alone - Activate() from the background only
+    // flashes the taskbar button orange when Windows refuses the foreground.
+    private bool HasUnseenSessionClips()
+        => ViewModel is not null && _sessionNewClipPaths.Any(path =>
+            !_dismissedNewClipPaths.Contains(path)
+            && ViewModel.AllClips.Any(clip => string.Equals(clip.Path, path, StringComparison.OrdinalIgnoreCase)));
 
     // Replay ending on its own happens mid-game, with ClypDat in the tray where
     // the dialog is skipped. Without a card nothing said so: every press after
