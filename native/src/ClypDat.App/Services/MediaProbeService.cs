@@ -744,6 +744,19 @@ public sealed class MediaProbeService
         // Cards must begin on the same frame as hover preview. Do not seek
         // past black frames: even a black opening is part of that continuity.
         // Trim edits replace this with their explicit TrimStart frame below.
+        //
+        // In-process first: one decode thread for one picture, and at
+        // background priority while a game runs, so a clip saved mid-match
+        // gets its card image without the ffmpeg.exe burst that stuttered it.
+        var gameRunning = MemoryTrimmer.GameRunning;
+        if (NativeClipThumbnail.Available)
+        {
+            if (await TryNativeThumbnailAsync(filePath, output, gameRunning).ConfigureAwait(false)) return output;
+            // The fallback is the very burst native exists to avoid; the
+            // library sweep retries this card once the game has closed.
+            if (gameRunning) return string.Empty;
+        }
+
         var result = await RunProcessAsync("ffmpeg", new[]
         {
             "-y",
@@ -763,6 +776,33 @@ public sealed class MediaProbeService
             return string.Empty;
         }
         return output;
+    }
+
+    /// <summary>
+    /// Card image for a clip while a game runs: native decode only, at
+    /// background priority, and without waiting on a probe - the clips that
+    /// reach this have usually not been probed either.
+    /// </summary>
+    public async Task<string> EnsureThumbnailInBackgroundAsync(string filePath)
+    {
+        using var processingRead = SpotifyProcessingPaths.TryRead(filePath);
+        if (processingRead is null || !NativeClipThumbnail.Available) return string.Empty;
+        var output = GetThumbnailPath(filePath);
+        if (File.Exists(output)) return output;
+        return await TryNativeThumbnailAsync(filePath, output, background: true).ConfigureAwait(false) ? output : string.Empty;
+    }
+
+    private static async Task<bool> TryNativeThumbnailAsync(string filePath, string output, bool background)
+    {
+        var clock = Stopwatch.StartNew();
+        var failure = await Task.Run(() => NativeClipThumbnail.Write(filePath, output, TimeSpan.Zero, 960, 4, background)).ConfigureAwait(false);
+        if (failure is null && File.Exists(output))
+        {
+            AppLog.Debug($"Thumbnail (native) in {clock.ElapsedMilliseconds}ms, background={background}: {filePath}");
+            return true;
+        }
+        AppLog.Info($"Native thumbnail failed for {filePath}: {failure}");
+        return false;
     }
 
     public bool DeleteLegacyThumbnailCache()

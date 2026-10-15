@@ -11954,6 +11954,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // expensive filmstrips (up to 11 ffmpeg processes per clip) last. A
     // single clip's full pipeline no longer blocks every other clip behind
     // it in the list from getting at least its basic info quickly.
+    // The one piece of hydration a game may still pay for: a blank card is
+    // what the user notices on opening ClypDat mid-session. Native decode at
+    // background priority, newest clips first, one at a time and capped, so
+    // a library-wide gap still waits for the game to close.
+    private const int MaxThumbnailsDuringGame = 12;
+
+    private async Task HydrateMissingThumbnailsDuringGameAsync(IReadOnlyList<ClipCardViewModel> clips, CancellationToken cancellationToken)
+    {
+        var missing = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath))
+            .OrderByDescending(clip => clip.CreatedAt)
+            .Take(MaxThumbnailsDuringGame)
+            .ToArray();
+        if (missing.Length == 0) return;
+        var made = 0;
+        try
+        {
+            foreach (var clip in missing)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!_gameIsActive) break;
+                var path = await _mediaProbe.EnsureThumbnailInBackgroundAsync(clip.Path);
+                if (string.IsNullOrEmpty(path)) continue;
+                await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }, reloadSidecars: false));
+                made++;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception error) { AppLog.Error("In-game thumbnail pass failed", error); }
+        AppLog.Info($"In-game thumbnails: {made} of {missing.Length} missing card image(s) made.");
+    }
+
     private async Task HydrateLibraryClipsAsync(IReadOnlyList<ClipCardViewModel> clips, CancellationToken cancellationToken)
     {
         // Not while a game is running. Only the filmstrip sweep used to wait;
@@ -11974,6 +12005,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             _libraryHydrationDeferredForGame = true;
             AppLog.Info($"Library hydration deferred: a game is running ({clips.Count} clip(s) waiting).");
+            await HydrateMissingThumbnailsDuringGameAsync(clips, cancellationToken);
             return;
         }
 
