@@ -65,14 +65,25 @@ public sealed class MatchRadarChart : Control
             var angle = -Math.PI / 2 + index * 2 * Math.PI / axes.Count;
             return new Point(Math.Cos(angle), Math.Sin(angle));
         }
+        // Each label's centre sits on its spoke, pushed out until the box
+        // clears the spoke tip by LabelGap: this far past the gap.
+        double Reach(int index)
+        {
+            var direction = Direction(index);
+            var reach = double.MaxValue;
+            if (Math.Abs(direction.X) > 0.001) reach = Math.Min(reach, labels[index].Width / 2 / Math.Abs(direction.X));
+            if (Math.Abs(direction.Y) > 0.001) reach = Math.Min(reach, labels[index].Height / 2 / Math.Abs(direction.Y));
+            return reach;
+        }
         var radius = Math.Min(Bounds.Width / 2, Bounds.Height / 2);
         for (var i = 0; i < axes.Count; i++)
         {
             var direction = Direction(i);
+            var beyond = LabelGap + Reach(i);
             if (Math.Abs(direction.X) > 0.001)
-                radius = Math.Min(radius, (Bounds.Width / 2 - labels[i].Width) / Math.Abs(direction.X) - LabelGap);
+                radius = Math.Min(radius, (Bounds.Width / 2 - labels[i].Width / 2) / Math.Abs(direction.X) - beyond);
             if (Math.Abs(direction.Y) > 0.001)
-                radius = Math.Min(radius, ((direction.Y < 0 ? centre.Y : Bounds.Height - centre.Y) - labels[i].Height) / Math.Abs(direction.Y) - LabelGap);
+                radius = Math.Min(radius, ((direction.Y < 0 ? centre.Y : Bounds.Height - centre.Y) - labels[i].Height / 2) / Math.Abs(direction.Y) - beyond);
         }
         radius = Math.Max(10, radius);
 
@@ -99,11 +110,10 @@ public sealed class MatchRadarChart : Control
         _labelBounds = new Rect[axes.Count];
         for (var i = 0; i < axes.Count; i++)
         {
-            var direction = Direction(i);
-            var anchor = At(i, 1 + LabelGap / radius);
+            var middle = At(i, 1 + (LabelGap + Reach(i)) / radius);
             var (name, value, width, height) = labels[i];
-            var left = anchor.X - (direction.X < -0.001 ? width : direction.X > 0.001 ? 0 : width / 2);
-            var top = anchor.Y - (direction.Y < -0.001 ? height : direction.Y > 0.001 ? 0 : height / 2);
+            var left = middle.X - width / 2;
+            var top = middle.Y - height / 2;
             _labelBounds[i] = new Rect(left, top, width, height);
             var selected = axes[i] == SelectedAxis;
             context.DrawRectangle(selected ? selectedBackground : labelBackground,

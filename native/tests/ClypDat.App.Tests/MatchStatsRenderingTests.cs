@@ -165,6 +165,14 @@ public sealed class MatchStatsRenderingTests
             Assert.True(LabelCentre("Combat").X > middle.X);
             Assert.True(LabelCentre("Looting").Y > middle.Y);
             Assert.True(LabelCentre("Aim").X < middle.X);
+            // Each spoke points at the centre of its label.
+            for (var i = 0; i < chart.LabelBounds.Count; i++)
+            {
+                var offset = chart.LabelBounds[i].Center - middle;
+                var spoke = -Math.PI / 2 + i * 2 * Math.PI / chart.LabelBounds.Count;
+                Assert.Equal(0, offset.X * Math.Sin(spoke) - offset.Y * Math.Cos(spoke), 3);
+                Assert.True(offset.X * Math.Cos(spoke) + offset.Y * Math.Sin(spoke) > 0);
+            }
             if (zeroBuild)
             {
                 // Diamond: Survival top, Combat right, Looting bottom, Aim left.
