@@ -905,10 +905,16 @@ public sealed partial class MainWindow : Window
             UpdateAutoClipStates();
         }
 
+        // A new game owns whatever it saves; a clip still landing from the last
+        // one must not pull ClypDat over it.
+        if (detection.IsDetected && _awaitingLateSessionClip) ArmLateSessionClip(false);
         var gameEnded = previousDetection.IsDetected && !detection.IsDetected;
         if (gameEnded)
         {
-            if (ViewModel.AutomaticallyFocusOnGameExit && HasUnseenSessionClips())
+            var hasSessionClips = HasUnseenSessionClips();
+            _lastGameExitUtc = DateTime.UtcNow;
+            ArmLateSessionClip(!hasSessionClips);
+            if (ViewModel.AutomaticallyFocusOnGameExit && hasSessionClips)
                 (Application.Current as App)?.FocusMainWindow();
             // The session ends here, regardless of whether capture stops or
             // automatically switches back to Desktop Capture afterwards.
@@ -1209,6 +1215,7 @@ public sealed partial class MainWindow : Window
             try
             {
                 RememberSessionClip(completed.Path);
+                NoteLateSessionClip(completed.Path, completed.RequestedUtc);
                 // Saves reaching this path are the worker's own hotkey saves: every
                 // UI-started save, auto-clips included, is UI-owned and returned
                 // above, and is counted where SaveReplayClipAsync finishes instead.
@@ -3542,6 +3549,7 @@ public sealed partial class MainWindow : Window
                 SpotifyProcessingPaths.Reserve(outputPath);
                 AppLog.Info($"Replay clip saved: {outputPath}");
                 RememberSessionClip(outputPath);
+                NoteLateSessionClip(outputPath, requestedUtc);
                 ViewModel.RecordDiscordClipSaved();
                 _ = ClipStatsReporter.RecordFileAsync(isAutoClip ? ClipStatKind.AutoClip : ClipStatKind.Clip, outputPath, ViewModel.MediaProbe);
                 // The save itself succeeded, but if the capture source had
@@ -3672,6 +3680,45 @@ public sealed partial class MainWindow : Window
         => ViewModel is not null && _sessionNewClipPaths.Any(path =>
             !_dismissedNewClipPaths.Contains(path)
             && ViewModel.AllClips.Any(clip => string.Equals(clip.Path, path, StringComparison.OrdinalIgnoreCase)));
+
+    // Set when a game exits before anything from its session reached the
+    // library: a hotkey save pressed just before closing is still writing, or
+    // the Full Session VOD is still muxing. The first such clip to land gets the
+    // game-exit treatment late - focus (when nothing else has the foreground)
+    // and the New Clips popup. Only those clips qualify: a Desktop Capture save
+    // made after the game closed is not news about that game.
+    private bool _awaitingLateSessionClip;
+    private DateTime _lastGameExitUtc;
+    private readonly HashSet<string> _lateSessionClipPaths = new(StringComparer.OrdinalIgnoreCase);
+
+    private void ArmLateSessionClip(bool armed)
+    {
+        _awaitingLateSessionClip = armed;
+        _lateSessionClipPaths.Clear();
+    }
+
+    private void NoteLateSessionClip(string path, DateTime? requestedUtc)
+    {
+        if (!_awaitingLateSessionClip || string.IsNullOrWhiteSpace(path)) return;
+        if (requestedUtc is { } requested && requested > _lastGameExitUtc) return;
+        _lateSessionClipPaths.Add(path);
+        TryPresentLateSessionClip();
+    }
+
+    // Called from both ends of a save's arrival - the path being noted and the
+    // card reaching the library - since either can happen second.
+    private bool TryPresentLateSessionClip()
+    {
+        if (!_awaitingLateSessionClip || ViewModel is null) return false;
+        if (!_lateSessionClipPaths.Any(path => !_dismissedNewClipPaths.Contains(path)
+                && ViewModel.AllClips.Any(clip => string.Equals(clip.Path, path, StringComparison.OrdinalIgnoreCase))))
+            return false;
+        ArmLateSessionClip(false);
+        if (ViewModel.AutomaticallyFocusOnGameExit && QuietForegroundPolicy.AllowsCurrent())
+            (Application.Current as App)?.FocusMainWindow();
+        ShowNewClipsDialog();
+        return true;
+    }
 
     // Replay ending on its own happens mid-game, with ClypDat in the tray where
     // the dialog is skipped. Without a card nothing said so: every press after
@@ -4364,8 +4411,13 @@ public sealed partial class MainWindow : Window
     private void ViewModel_OnClipAdded(object? sender, ClipCardViewModel clip)
     {
         if (!_sessionCollectingClips || ViewModel is null) return;
-        if (!clip.IsVod) return;
-        RememberSessionClip(clip.Path);
+        if (clip.IsVod)
+        {
+            RememberSessionClip(clip.Path);
+            // The session VOD always belongs to the game that just closed.
+            if (_awaitingLateSessionClip) _lateSessionClipPaths.Add(clip.Path);
+        }
+        if (TryPresentLateSessionClip() || !clip.IsVod) return;
         if (NewClipsOverlay.IsVisible) ShowNewClipsDialog();
         else if (!ViewModel.IsReplayRecording) ShowNewClipsDialog();
     }
