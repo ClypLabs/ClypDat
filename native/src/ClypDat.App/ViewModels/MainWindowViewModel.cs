@@ -8294,6 +8294,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Xbox-backed desktop clip fall back to the generic source label.
         var source = captureSource ?? Settings.ReplayCaptureSource;
         if (!string.Equals(source, "Desktop", StringComparison.OrdinalIgnoreCase)) return fallback;
+        // A game detected on this PC names a desktop clip too: it is what the
+        // user is playing, and Discord presence already says so. Clips of a
+        // Hades II session used to land under "Desktop Capture" regardless.
+        // Same order as presence: the PC game, then Xbox activity.
+        if (ActiveGameDetection.IsDetected && !string.IsNullOrWhiteSpace(ActiveGameDetection.DisplayName))
+            return ActiveGameDetection.DisplayName;
         return XboxActivityForDesktop && !string.IsNullOrWhiteSpace(EffectiveXboxSnapshot.CurrentTitle)
             ? EffectiveXboxSnapshot.CurrentTitle!
             : fallback;

@@ -514,7 +514,8 @@ public sealed partial class MainWindow : Window
                         ) ScheduleReplayRestart();
                     if (e.PropertyName is nameof(MainWindowViewModel.XboxCurrentTitle)
                         or nameof(MainWindowViewModel.XboxActivityForDesktop)
-                        or nameof(MainWindowViewModel.SelectedReplayCaptureSource))
+                        or nameof(MainWindowViewModel.SelectedReplayCaptureSource)
+                        or nameof(MainWindowViewModel.ActiveGameDetection))
                         QueueWorkerClipGameNameUpdate();
                     if (e.PropertyName is nameof(MainWindowViewModel.MasterVolumePercent) or nameof(MainWindowViewModel.IsMasterMuted)) _playback?.SetMasterVolume(ViewModel.EffectiveMasterVolumePercent);
                     if (e.PropertyName is nameof(MainWindowViewModel.VideoZoom) or nameof(MainWindowViewModel.VideoPanY)) UpdateVideoTransform();
@@ -3615,17 +3616,31 @@ public sealed partial class MainWindow : Window
         else Dispatcher.UIThread.Post(() => _ = UpdateWorkerClipGameNameAsync());
     }
 
+    private string? _sentWorkerClipGameName;
+
     private async Task UpdateWorkerClipGameNameAsync(ReplayBufferConfig? config = null)
     {
         try
         {
             var viewModel = ViewModel;
             if (viewModel is null || _replayBuffer is not IReplayCaptureWorkerControl worker) return;
-            config ??= viewModel.CreateReplayConfig();
+            // Replay start passes its config and always sends. Live changes
+            // (game detection fires on every focus switch) only matter to a
+            // running buffer, and must not wake a worker for replay that is off.
+            var starting = config is not null;
+            if (!starting && _replayBuffer?.IsRecording != true) return;
+            config ??= _activeReplayConfigSnapshot ?? viewModel.CreateReplayConfig();
             var gameDisplayName = viewModel.EffectiveClipGameName(config.GameDisplayName, config.CaptureSource);
+            if (!starting && gameDisplayName == _sentWorkerClipGameName) return;
+            _sentWorkerClipGameName = gameDisplayName;
             await worker.UpdateClipGameNameAsync(gameDisplayName);
+            if (!starting) AppLog.Info($"Clip game name for replay saves: '{gameDisplayName}'.");
         }
-        catch (Exception error) { AppLog.Info($"Capture worker clip name update failed: {error.Message}"); }
+        catch (Exception error)
+        {
+            _sentWorkerClipGameName = null;
+            AppLog.Info($"Capture worker clip name update failed: {error.Message}");
+        }
     }
 
     // Everything the current (or most recent) session put in the library, in
