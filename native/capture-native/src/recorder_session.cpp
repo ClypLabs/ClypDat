@@ -19,6 +19,9 @@ struct RecorderSession::State {
     int64_t last_health_event = 0;
     bool started = false, stopped = false;
     std::atomic_bool restart_required = false;
+    // Which parts of the last stop() missed their bounded join, for the
+    // control error. A bare "native status -3" named none of them.
+    std::string stop_failure;
     std::atomic_bool retained_after_failure = false;
     std::atomic_bool burned = false;
     std::unique_ptr<RecordingCapture> capture;
@@ -236,6 +239,7 @@ bool RecorderSession::stop() {
     if (s->stopped) return !s->restart_required;
     // Never tear down a graph whose acquisition/encoding owner still uses it.
     if (!s->capture->stop()) {
+        { std::lock_guard lock(s->mutex); s->stop_failure = "video capture"; }
         s->restart_required = true;
         // Keep the entire graph through process exit after failed bounded joins.
         State::retain(s);
@@ -262,10 +266,20 @@ bool RecorderSession::stop() {
     for (auto& future : s->closing_sessions) session_stopped = future.get() && session_stopped;
     s->closing_sessions.clear();
     s->stopped = true;
+    {
+        std::string failed;
+        const auto add = [&](bool ok, const char* part) { if (!ok) failed += failed.empty() ? part : std::string(", ") + part; };
+        add(input_stopped, "input capture"); add(camera_stopped, "camera"); add(session_stopped, "full session"); add(audio_stopped, "audio");
+        std::lock_guard lock(s->mutex); s->stop_failure = failed;
+    }
     s->restart_required = s->restart_required || !input_stopped || !camera_stopped || !session_stopped || !audio_stopped;
     if (s->restart_required) State::retain(s);
     s->notify(1 | 16);
     return !s->restart_required;
+}
+std::string RecorderSession::stop_failure() const {
+    auto s = state_; if (!s) return {};
+    std::lock_guard lock(s->mutex); return s->stop_failure;
 }
 void RecorderSession::pause(bool value) { state_->capture->pause(value); }
 void RecorderSession::frame_rate(int value) { state_->capture->request_frame_rate(value); }

@@ -39,6 +39,8 @@ public:
     RecorderSession& operator=(const RecorderSession&) = delete;
     void start();
     bool stop();
+    // Parts that failed the last stop(), comma separated; empty when it succeeded.
+    std::string stop_failure() const;
     void pause(bool value);
     void frame_rate(int value);
     RecordingCaptureHealth health() const;

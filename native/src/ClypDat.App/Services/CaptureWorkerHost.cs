@@ -55,6 +55,7 @@ internal static class CaptureWorkerHost
         using var mutex = new Mutex(true, CaptureWorkerProtocol.MutexName, out var created);
         if (!created) return 0;
 
+        CaptureWorkerLog.RotateIfLarge();
         var revision = typeof(CaptureWorkerHost).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         CaptureWorkerLog.Info($"Worker revision: {revision}.");
         ApplyWorkerPriority();
@@ -140,6 +141,15 @@ internal static class CaptureWorkerHost
                 // Off the loop: a pipe hiccup reconnects within the grace, and
                 // waiting here for the app to exit would eat into it.
                 if (app is not null) _ = Task.Run(() => LogClientExit(app));
+            }
+            // A failed native stop surfaces here as the client loop failing.
+            // Accepting the app's reconnect would carry the wedged graph into
+            // the next session (Fortnite's settings switch did this). Exit
+            // instead: the app's recovery finds no pipe and starts a clean worker.
+            if (NativeRecordingAdapter.WorkerRestartRequired)
+            {
+                CaptureWorkerLog.Info("Native recorder teardown left this worker unusable; exiting so ClypDat starts a fresh one.");
+                return;
             }
         }
     }
@@ -788,6 +798,25 @@ internal static class CaptureWorkerLog
 {
     private static readonly object Sync = new();
     private static string Path => System.IO.Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "capture-worker.log");
+    private const long RotateBytes = 2 * 1024 * 1024;
+
+    // Append-only since the first worker ran: months of history (3.7 MB on one
+    // machine, mostly August stack traces) ahead of anything current. Checked
+    // once per worker start; one previous file is kept for context.
+    public static void RotateIfLarge()
+    {
+        try
+        {
+            lock (Sync)
+            {
+                var file = new FileInfo(Path);
+                if (!file.Exists || file.Length < RotateBytes) return;
+                File.Move(file.FullName, System.IO.Path.ChangeExtension(file.FullName, ".old.log"), overwrite: true);
+            }
+        }
+        catch { }
+    }
+
     public static void Info(string message)
     {
         try

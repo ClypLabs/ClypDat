@@ -106,12 +106,23 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                 catch (Exception error) { AppLog.Info($"Native startup failure health unavailable: {error.Message}"); }
                 lock (_gate) { if (ReferenceEquals(_session, session)) { _session = null; _recording = false; } }
                 try { await Task.Run(session.Stop, CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception error) { AppLog.Error("Native recording startup cleanup requires a worker restart.", error); }
+                catch (Exception error)
+                {
+                    Volatile.Write(ref _workerRestartRequired, true);
+                    AppLog.Error("Native recording startup cleanup requires a worker restart.", error);
+                }
                 artwork.Dispose(); session.Dispose(); throw;
             }
         }
         finally { _lifecycle.Release(); }
     }
+    // A native stop that misses its bounded joins keeps the old capture graph
+    // alive inside this process for good. Later sessions still start, so the
+    // worker used to carry on with that graph's threads and GPU resources
+    // pinned. Process-wide because the leak outlives this adapter.
+    private static bool _workerRestartRequired;
+    internal static bool WorkerRestartRequired => Volatile.Read(ref _workerRestartRequired);
+
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         var stop = StopCoreAsync(cancellationToken); lock (_gate) _lastStop = stop; return stop;
@@ -133,6 +144,11 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             {
                 await Task.Run(session.Stop, CancellationToken.None).ConfigureAwait(false);
                 var state = session.ReadHealth(); PublishHealth(_active!, state.Value, state.Details);
+            }
+            catch (InvalidOperationException)
+            {
+                Volatile.Write(ref _workerRestartRequired, true);
+                throw;
             }
             finally { session.Dispose(); RecordingStopped?.Invoke(this, EventArgs.Empty); }
         }

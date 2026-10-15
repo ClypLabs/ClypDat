@@ -196,7 +196,16 @@ int32_t CD_CALL cd_recorder_create(const cd_session_config* config, cd_recorder*
 } catch (const std::invalid_argument&) { return CD_E_INVALID_ARGUMENT; }
 catch (...) { return CD_E_INTERNAL; }
 int32_t CD_CALL cd_recorder_start(cd_recorder* r) { return invoke(r, [&] { r->session->start(); return CD_OK; }); }
-int32_t CD_CALL cd_recorder_stop(cd_recorder* r) { return invoke(r, [&] { return r->session->stop() ? CD_OK : CD_E_INVALID_STATE; }); }
+int32_t CD_CALL cd_recorder_stop(cd_recorder* r) {
+    return invoke(r, [&] {
+        if (r->session->stop()) return CD_OK;
+        // Becomes the managed exception's controlError: name what did not stop.
+        const auto failed = r->session->stop_failure();
+        std::lock_guard lock(r->mutex);
+        r->last_error = "teardown timed out" + (failed.empty() ? std::string() : " (" + failed + ")") + "; worker restart required";
+        return CD_E_INVALID_STATE;
+    });
+}
 void CD_CALL cd_recorder_destroy(cd_recorder* r) { if (!r) return; if (cd_recorder_stop(r) != CD_OK) return; delete r; }
 int32_t CD_CALL cd_recorder_pause(cd_recorder* r, uint32_t paused) { return invoke(r, [&] { if (paused > 1) return CD_E_INVALID_ARGUMENT; r->session->pause(paused != 0); return CD_OK; }); }
 int32_t CD_CALL cd_recorder_frame_rate(cd_recorder* r, uint32_t fps) { return invoke(r, [&] { if (fps < 30 || fps > 120) return CD_E_INVALID_ARGUMENT; r->session->frame_rate(fps); return CD_OK; }); }
