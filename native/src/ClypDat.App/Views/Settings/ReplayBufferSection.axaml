@@ -211,7 +211,7 @@
             <Border Classes="settingsRow">
               <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
                 <StackPanel Classes="settingsRowText">
-                  <TextBlock Classes="settingsRowTitle" Text="Frame-rate protection" />
+                  <TextBlock Classes="settingsRowTitle" Text="Adaptive frame rate" />
                   <TextBlock Classes="settingsRowDesc" Text="Lowers capture FPS under encoder pressure, then restores your selected FPS after a sustained recovery." />
                 </StackPanel>
                 <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReplayAdaptiveFrameRateEnabled}" OnContent="{x:Null}" OffContent="{x:Null}" />
