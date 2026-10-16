@@ -554,13 +554,35 @@ internal static class AppThemeService
 
     /// <summary>
     /// The ground a custom theme is painted in, and whether it is a light one.
-    /// The ground is the colour picked, exactly: the editor's field offers every
-    /// colour, and the app follows the thumb wherever it goes rather than
-    /// snapping into a dark or a light band. Light is whichever of black and
-    /// white text reads better on it, so dragging from black to white crosses
-    /// over once, where both read about equally, instead of at a switch.
+    /// The ground follows the thumb wherever it goes rather than snapping into
+    /// a dark or a light band: same hue, same lightness, so white is white and
+    /// black is black. Only its saturation is softened (see Soften), because a
+    /// vivid colour across every panel is hard on the eyes. Light is whichever
+    /// of black and white text reads better on it, so dragging from black to
+    /// white crosses over once, where both read about equally, instead of at a
+    /// switch.
     /// </summary>
-    private static (Color Ground, bool Light) SurfaceBase(Color picked) => (picked, CustomLight(picked));
+    private static (Color Ground, bool Light) SurfaceBase(Color picked)
+    {
+        var ground = Soften(picked);
+        return (ground, CustomLight(ground));
+    }
+
+    // Saturation up to the knee is kept, so muted picks - and ClypDat's own
+    // #0D1116, which a custom theme built on it must still render as - come
+    // back unchanged. Past it, saturation rises at a fifth of the rate, so a
+    // pure hue lands near 40%: washed out, still clearly that hue, and
+    // continuous, so dragging never jumps.
+    private static Color Soften(Color picked)
+    {
+        var (hue, saturation, lightness) = ToHsl(picked);
+        if (saturation <= GroundSaturationKnee) return picked;
+        var softened = GroundSaturationKnee + (saturation - GroundSaturationKnee) * GroundSaturationSlope;
+        return FromHsl(hue, softened, lightness, picked.A);
+    }
+
+    private const double GroundSaturationKnee = 0.25;
+    private const double GroundSaturationSlope = 0.2;
 
     /// <summary>The accent a custom theme paints, lifted or deepened until it reads on its ground.</summary>
     public static Color CustomAccent(Color accent, Color ground) => AdjustAccent(accent, ground);

@@ -135,15 +135,26 @@ public sealed class ColorFieldTests
         Assert.Equal(0, picker.Position.X, 6);
     }
 
-    // The app is painted in exactly the colour picked, and turns light where
-    // black text starts to read better on it than white - once, part way
-    // between black and white, not at a switch.
+    // The app is painted in the colour picked with its saturation softened:
+    // same hue and lightness, muted picks untouched, vivid ones washed out.
+    // It turns light where black text starts to read better than white - once,
+    // part way between black and white, not at a switch.
     [Fact]
-    public void ThePickIsTheGroundAndLightFollowsIt()
+    public void TheGroundIsTheSoftenedPickAndLightFollowsIt()
     {
-        foreach (var hex in new[] { "#FDEFFF", "#C02CF0", "#0D1116", "#1C5C48" })
+        foreach (var hex in new[] { "#0D1116", "#2E1E33", "#FFFFFF", "#000000", "#808080" })
             Assert.Equal(Color.Parse(hex), AppThemeService.CustomGround(Color.Parse(hex)));
-        Assert.True(AppThemeService.CustomLight(Color.Parse("#FDEFFF")));
+        foreach (var hex in new[] { "#FF00FF", "#C02CF0", "#00D08A", "#5E1066" })
+        {
+            var pick = Color.Parse(hex);
+            var softened = AppThemeService.CustomGround(pick);
+            Assert.True(softened.ToHsl().S < pick.ToHsl().S - 0.1, hex);
+            Assert.True(softened.ToHsl().S <= 0.42, hex);
+            // Rounding back to 8-bit channels nudges the hue of a muted colour.
+            Assert.InRange(Math.Abs(pick.ToHsl().H - softened.ToHsl().H), 0, 3);
+            Assert.Equal(pick.ToHsl().L, softened.ToHsl().L, 1);
+        }
+        Assert.True(AppThemeService.CustomLight(AppThemeService.CustomGround(Color.Parse("#FDEFFF"))));
         Assert.True(AppThemeService.CustomLight(Colors.White));
         Assert.False(AppThemeService.CustomLight(Color.Parse("#0D1116")));
         Assert.False(AppThemeService.CustomLight(Colors.Black));

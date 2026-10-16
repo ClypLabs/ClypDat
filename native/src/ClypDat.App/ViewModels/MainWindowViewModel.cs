@@ -543,12 +543,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeEditorBaseColor { get => _themeEditorBaseColor; private set => SetProperty(ref _themeEditorBaseColor, value); }
     public string ThemeEditorAccentColor { get => _themeEditorAccentColor; private set => SetProperty(ref _themeEditorAccentColor, value); }
     public string ThemeEditorError { get => _themeEditorError; private set => SetProperty(ref _themeEditorError, value); }
-    // The base colour as picked, which is what a theme saves and what it is
-    // painted in.
+    // The base colour as picked, which is what a theme saves; the theme paints
+    // a softened version of it (AppThemeService.CustomGround).
     private string _themeEditorBasePick = "#0D1116";
-    // Whether the theme is a light one. Not a switch: it follows the base, and
-    // is light when black text reads better on it than white.
-    public bool ThemeEditorLightMode => Color.TryParse(_themeEditorBasePick, out var pick) && AppThemeService.CustomLight(pick);
+    // Whether the theme is a light one. Not a switch: it follows the ground,
+    // and is light when black text reads better on it than white.
+    public bool ThemeEditorLightMode => Color.TryParse(_themeEditorBasePick, out var pick) && AppThemeService.CustomLight(AppThemeService.CustomGround(pick));
 
     // The accent as picked, which is what a theme saves. Moving the base can
     // change how it is painted; moving it back finds the pick again rather
