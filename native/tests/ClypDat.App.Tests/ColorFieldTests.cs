@@ -135,28 +135,35 @@ public sealed class ColorFieldTests
         Assert.Equal(0, picker.Position.X, 6);
     }
 
-    // The app is painted in the colour picked with its saturation softened:
-    // same hue and lightness, muted picks untouched, vivid ones washed out.
-    // It turns light where black text starts to read better than white - once,
-    // part way between black and white, not at a switch.
+    // A vivid pick paints a deep ground in its hue, never a neon or mid-tone
+    // one; pale picks up to white paint a light ground; and between them the
+    // ground changes in small steps, never a jump.
     [Fact]
-    public void TheGroundIsTheSoftenedPickAndLightFollowsIt()
+    public void GroundIsDarkForVividPicksLightForPaleOnesAndChangesSmoothly()
     {
-        foreach (var hex in new[] { "#0D1116", "#2E1E33", "#FFFFFF", "#000000", "#808080" })
-            Assert.Equal(Color.Parse(hex), AppThemeService.CustomGround(Color.Parse(hex)));
-        foreach (var hex in new[] { "#FF00FF", "#C02CF0", "#00D08A", "#5E1066" })
+        Assert.Equal(Color.Parse("#0D1116"), AppThemeService.CustomGround(Color.Parse("#0D1116")));
+        foreach (var hex in new[] { "#F315F0", "#FF00FF", "#00D08A", "#C02CF0", "#808080" })
         {
-            var pick = Color.Parse(hex);
-            var softened = AppThemeService.CustomGround(pick);
-            Assert.True(softened.ToHsl().S < pick.ToHsl().S - 0.1, hex);
-            Assert.True(softened.ToHsl().S <= 0.42, hex);
-            // Rounding back to 8-bit channels nudges the hue of a muted colour.
-            Assert.InRange(Math.Abs(pick.ToHsl().H - softened.ToHsl().H), 0, 3);
-            Assert.Equal(pick.ToHsl().L, softened.ToHsl().L, 1);
+            var painted = AppThemeService.CustomGround(Color.Parse(hex));
+            Assert.False(AppThemeService.CustomLight(painted), hex);
+            Assert.True(Luminance(painted) <= 0.031, hex);
         }
-        Assert.True(AppThemeService.CustomLight(AppThemeService.CustomGround(Color.Parse("#FDEFFF"))));
+        foreach (var hex in new[] { "#FFFFFF", "#FDEFFF", "#F0F0F0" })
+        {
+            var painted = AppThemeService.CustomGround(Color.Parse(hex));
+            Assert.True(AppThemeService.CustomLight(painted), hex);
+            Assert.True(Luminance(painted) >= 0.61, hex);
+        }
+        // Down the left half of the field from a pure hue to white.
+        var previous = AppThemeService.CustomGround(new HsvColor(1, 300, 1, 1).ToRgb());
+        for (var step = 1; step <= 100; step++)
+        {
+            var pick = new HsvColor(1, 300, 1 - step / 100.0, 1).ToRgb();
+            var painted = AppThemeService.CustomGround(pick);
+            Assert.True(Math.Abs(Luminance(painted) - Luminance(previous)) < 0.1, $"{pick} -> {painted}");
+            previous = painted;
+        }
         Assert.True(AppThemeService.CustomLight(Colors.White));
-        Assert.False(AppThemeService.CustomLight(Color.Parse("#0D1116")));
         Assert.False(AppThemeService.CustomLight(Colors.Black));
 
         // An accent that would vanish on the ground is lifted until it reads.
