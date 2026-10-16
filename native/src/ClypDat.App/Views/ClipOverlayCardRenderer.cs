@@ -115,7 +115,7 @@ internal static class ClipOverlayCardRenderer
                     using (context.PushTransform(Matrix.Identity))
                     using (context.PushClip(card))
                         context.DrawRectangle(accent, null, new Rect(railX, 0, RailWidth, height));
-                    context.DrawRectangle(null, new Pen(edge, 1), new RoundedRect(new Rect(0.5, 0.5, width - 1, height - 1), corners));
+                    context.DrawGeometry(null, new Pen(edge, 1), OpenBorder(width, height, left));
                 }
 
                 using var contentBitmap = new RenderTargetBitmap(size, dpi);
@@ -177,6 +177,44 @@ internal static class ClipOverlayCardRenderer
                 result[index + channel] = (byte)Math.Min(255, top[index + channel] + (bottom[index + channel] * remaining + 127) / 255);
         }
         return result;
+    }
+
+    // The card's outline on every side except the one flush against the
+    // screen edge. A stroke down that side reads as a seam between the card
+    // and the bezel; open there, the card looks like it comes out of the edge.
+    // Inset half a pixel so the 1px stroke lands on whole pixels, and run to
+    // the very edge so the top and bottom lines meet it.
+    private static StreamGeometry OpenBorder(double width, double height, bool flushLeft)
+    {
+        const double inset = 0.5;
+        var radius = CardRadius - inset;
+        var top = inset;
+        var bottom = height - inset;
+        var corner = new Size(radius, radius);
+        var geometry = new StreamGeometry();
+        using var context = geometry.Open();
+        if (flushLeft)
+        {
+            var right = width - inset;
+            context.BeginFigure(new Point(0, top), false);
+            context.LineTo(new Point(right - radius, top));
+            context.ArcTo(new Point(right, top + radius), corner, 0, false, SweepDirection.Clockwise);
+            context.LineTo(new Point(right, bottom - radius));
+            context.ArcTo(new Point(right - radius, bottom), corner, 0, false, SweepDirection.Clockwise);
+            context.LineTo(new Point(0, bottom));
+        }
+        else
+        {
+            var left = inset;
+            context.BeginFigure(new Point(width, top), false);
+            context.LineTo(new Point(left + radius, top));
+            context.ArcTo(new Point(left, top + radius), corner, 0, false, SweepDirection.CounterClockwise);
+            context.LineTo(new Point(left, bottom - radius));
+            context.ArcTo(new Point(left + radius, bottom), corner, 0, false, SweepDirection.CounterClockwise);
+            context.LineTo(new Point(width, bottom));
+        }
+        context.EndFigure(false);
+        return geometry;
     }
 
     // "Ctrl+Shift+F9" -> [Ctrl] + [Shift] + [F9] as keycap chips, followed by
