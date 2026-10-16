@@ -24,7 +24,7 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     private Color _color;
     private double _hue;
     private Point _position;
-    private ColorFieldModel? _model;
+    private ColorFieldModel? _model = ColorFieldModel.Hsv;
     private string _hexText;
     private string _redText;
     private string _greenText;
@@ -52,13 +52,13 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
         _greenText = seed.Green.ToString();
         _blueText = seed.Blue.ToString();
         _shownColor = _color;
+        _position = ColorFieldModel.Hsv.Locate(_color);
         MarkCurrent();
     }
 
     /// <summary>
-    /// What the field shows: the colours its theme paints exactly, which
-    /// differ by mode and, for the accent, by ground. Replacing it moves the
-    /// thumb onto the colour, rather than the colour under a thumb that stays.
+    /// What the field shows. Replacing it moves the thumb onto the colour,
+    /// rather than the colour under a thumb that stays.
     /// </summary>
     public ColorFieldModel? Model
     {
@@ -105,14 +105,15 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     public string BlueText { get => _blueText; set => SetChannel(ref _blueText, value); }
     public string Error { get => _error; private set => SetProperty(ref _error, value); }
 
-    // Says so when the colour shown is not the one entered: a typed, recent or
-    // screen colour the theme had to move, which otherwise just changes under
-    // the user with no reason given.
+    // Says so when the theme paints the colour picked as a different one - a
+    // ground kept dark or light enough for text, an accent lifted until it
+    // stands out - which otherwise just changes under the user with no reason
+    // given.
     private string _note = string.Empty;
     public string Note { get => _note; set => SetProperty(ref _note, value); }
 
     // The "new" and "current" swatches. New is the colour the hex box names,
-    // which is the colour painted and the pixel under the thumb.
+    // which is the pixel under the thumb.
     // Current is what the editor opened on, and clicking it goes back there.
     public Color ShownColor { get => _shownColor; private set => SetProperty(ref _shownColor, value); }
     public Color CurrentColor { get => _currentColor; private set => SetProperty(ref _currentColor, value); }
@@ -141,23 +142,6 @@ public sealed class ThemeColorPickerViewModel : ViewModelBase
     {
         if (!ThemeColor.TryParseHex(hex, out var color)) return;
         Write(color, locate: true, hue);
-    }
-
-    /// <summary>
-    /// Puts the thumb at a point and shows the field's colour there, without
-    /// reporting a change. The accent picker uses this when a new ground leaves
-    /// its accent outside the field: the accent becomes the nearest colour the
-    /// field holds, so the swatch is still the pixel under the thumb.
-    /// </summary>
-    public Color LoadAt(Point position)
-    {
-        if (_model is null) return _color;
-        var picked = _model.At(_hue, position.X, position.Y);
-        _updating = true;
-        SetProperty(ref _position, position, nameof(Position));
-        _updating = false;
-        Write(new ThemeColor(picked.R, picked.G, picked.B), locate: false);
-        return picked;
     }
 
     /// <summary>A colour from outside the field - typed, recent, screen: the thumb moves onto it.</summary>

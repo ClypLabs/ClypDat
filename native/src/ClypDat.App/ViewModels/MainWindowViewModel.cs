@@ -264,9 +264,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         Settings.RecentThemeColors ??= new();
         // Each picker owns one of the editor's two colours and writes straight
         // into it. Nothing sits between the spectrum and the value Apply saves.
-        BasePicker = new ThemeColorPickerViewModel(_themeEditorBaseColor, hex => { _themeEditorBasePick = hex; ThemeEditorBaseColor = PaintBase(hex, ThemeEditorLightMode, moveCursor: false); FitAccent(); PreviewThemeEditor(); });
+        BasePicker = new ThemeColorPickerViewModel(_themeEditorBaseColor, hex => { _themeEditorBasePick = hex; ThemeEditorBaseColor = PaintBase(hex, ThemeEditorLightMode); FitAccent(); PreviewThemeEditor(); });
         AccentPicker = new ThemeColorPickerViewModel(_themeEditorAccentColor, hex => { _themeEditorAccentPick = hex; FitAccent(); PreviewThemeEditor(); });
-        BasePicker.Model = AppThemeService.CustomBaseField(_themeEditorLightMode);
         UpdateGround();
         Settings.ThemePreset = ResolveThemeSelection(Settings.ThemePreset);
         Settings.ProcessPriority = ProcessPriorityService.Normalize(Settings.ProcessPriority);
@@ -545,9 +544,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string ThemeEditorAccentColor { get => _themeEditorAccentColor; private set => SetProperty(ref _themeEditorAccentColor, value); }
     public string ThemeEditorError { get => _themeEditorError; private set => SetProperty(ref _themeEditorError, value); }
     private bool _themeEditorLightMode;
-    // The base colour as last picked, before snapping. Switching Light mode
-    // re-derives the ground from this rather than from the other mode's ground,
-    // so flipping it on and off lands back where it started.
+    // The base colour as picked, which is what a theme saves; the painted
+    // ground is derived from it. Switching Light mode re-derives the ground
+    // from this rather than from the other mode's ground, so flipping it on
+    // and off lands back where it started.
     private string _themeEditorBasePick = "#0D1116";
     // The user's choice, previewed live like the colours. Nothing else turns a
     // custom theme light.
@@ -557,8 +557,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         set
         {
             if (!SetProperty(ref _themeEditorLightMode, value)) return;
-            BasePicker.Model = AppThemeService.CustomBaseField(value);
-            ThemeEditorBaseColor = PaintBase(_themeEditorBasePick, value, moveCursor: true);
+            ThemeEditorBaseColor = PaintBase(_themeEditorBasePick, value);
             FitAccent();
             PreviewThemeEditor();
         }
@@ -566,69 +565,47 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// The colour a custom theme with this base is actually painted in. The
-    /// base field only holds colours painted exactly as picked
-    /// (AppThemeService.CustomBaseField), so a pick from it comes back
-    /// unchanged and the thumb stays under the pointer. Anything else - a typed
-    /// or recent colour, the other mode's ground, or moveCursor for opening a
-    /// theme - puts the picker on the colour it is painted as.
+    /// picker keeps the colour picked - the field offers every colour, and
+    /// pulling the thumb onto the painted ground would yank it off the pointer -
+    /// and says so when the theme paints a different one.
     /// </summary>
-    private string PaintBase(string hex, bool light, bool moveCursor)
+    private string PaintBase(string hex, bool light)
     {
         if (!Color.TryParse(hex, out var pick)) return hex;
         var ground = AppThemeService.CustomGround(pick, light);
         var groundHex = $"#{ground.R:X2}{ground.G:X2}{ground.B:X2}";
-        var adjusted = !string.Equals(groundHex, hex, StringComparison.OrdinalIgnoreCase);
-        if (moveCursor || adjusted) BasePicker.Load(groundHex, BasePicker.Hue);
-        // Not for opening a theme or switching mode: nothing was entered.
-        BasePicker.Note = adjusted && !moveCursor ? $"Adjusted from {hex.ToUpperInvariant()} to fit the theme." : string.Empty;
+        BasePicker.Note = string.Equals(groundHex, hex, StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : $"Painted as {groundHex} so text stays readable on it.";
         return groundHex;
     }
 
-    // The accent as last picked, before fitting to the ground. Moving the base
-    // can leave it outside the accent field; moving it back finds the pick
-    // again rather than the colour it was fitted to on the way.
+    // The accent as picked, which is what a theme saves. Moving the base can
+    // change how it is painted; moving it back finds the pick again rather
+    // than the colour it was fitted to on the way.
     private string _themeEditorAccentPick = "#5864E8";
 
     /// <summary>
-    /// Fits the accent to the ground. A pick that reads on it is the accent
-    /// as picked. One that does not becomes the field's colour where the
-    /// painter would have taken it - lifted or deepened - so what the editor
-    /// shows, saves and paints is one colour, and the pixel under the thumb.
+    /// The accent a custom theme paints on its ground: the pick when it reads
+    /// on it, otherwise lifted or deepened until it does. The picker keeps the
+    /// pick and says when the painted accent differs.
     /// </summary>
     private void FitAccent()
     {
         UpdateGround();
-        if (!Color.TryParse(ThemeEditorBaseColor, out var baseColor) || !Color.TryParse(_themeEditorAccentPick, out var pick) ||
-            AccentPicker.Model is not { } field) return;
-        var painted = AppThemeService.CustomAccent(pick, AppThemeService.CustomGround(baseColor, ThemeEditorLightMode));
-        if (painted == pick)
-        {
-            // Back from a fit: put the picker on the pick again. Not mid-drag,
-            // where it already is and moving the thumb would pull it off the pointer.
-            if (!string.Equals(AccentPicker.HexText, _themeEditorAccentPick, StringComparison.OrdinalIgnoreCase))
-                AccentPicker.Load(_themeEditorAccentPick, AccentPicker.Hue);
-            ThemeEditorAccentColor = _themeEditorAccentPick;
-            AccentPicker.Note = string.Empty;
-        }
-        else
-        {
-            var fitted = AccentPicker.LoadAt(field.Locate(painted));
-            ThemeEditorAccentColor = $"#{fitted.R:X2}{fitted.G:X2}{fitted.B:X2}";
-            AccentPicker.Note = $"Adjusted from {_themeEditorAccentPick.ToUpperInvariant()} so it stands out on the base.";
-        }
+        if (!Color.TryParse(ThemeEditorBaseColor, out var baseColor) || !Color.TryParse(_themeEditorAccentPick, out var pick)) return;
         var ground = AppThemeService.CustomGround(baseColor, ThemeEditorLightMode);
-        ThemeEditorAccentContrast = $"Contrast on the base: {AppThemeService.ContrastRatio(Color.Parse(ThemeEditorAccentColor), ground):0.0}:1";
+        var painted = AppThemeService.CustomAccent(pick, ground);
+        ThemeEditorAccentColor = $"#{painted.R:X2}{painted.G:X2}{painted.B:X2}";
+        AccentPicker.Note = painted == pick ? string.Empty : $"Painted as {ThemeEditorAccentColor} so it stands out on the base.";
+        ThemeEditorAccentContrast = $"Contrast on the base: {AppThemeService.ContrastRatio(painted, ground):0.0}:1";
     }
 
-    // The accent field only holds accents of at least 3:1 on the ground; the
-    // number says how far past that a pick is.
+    // How well the painted accent reads on the ground.
     private string _themeEditorAccentContrast = string.Empty;
     public string ThemeEditorAccentContrast { get => _themeEditorAccentContrast; private set => SetProperty(ref _themeEditorAccentContrast, value); }
 
-    // The accent field is the accents that read on the ground, so it follows
-    // the base, and so do the shades. Only when the ground moves: a new field
-    // also moves the thumb onto the accent, which mid-drag would pull it off
-    // the pointer.
+    // The shades follow the ground, recomputed only when it moves.
     private (Color Ground, bool Light)? _editorGround;
     private void UpdateGround()
     {
@@ -636,7 +613,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var key = (AppThemeService.CustomGround(baseColor, ThemeEditorLightMode), ThemeEditorLightMode);
         if (_editorGround == key) return;
         _editorGround = key;
-        AccentPicker.Model = AppThemeService.CustomAccentField(key.Item1);
         var surfaces = AppThemeService.CustomSurfaces(key.Item1, key.Item2);
         ThemeEditorShades = ShadeNames.Select((name, i) => new ThemeShade(name, surfaces[i])).ToArray();
     }
@@ -771,9 +747,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (_editingTheme is null) return false;
         if (!CustomThemeLibrary.TryNormalizeName(ThemeEditorName, Settings.CustomThemes, _editingTheme.Id, out var name, out var error) ||
-            !CustomThemeLibrary.IsColor(ThemeEditorBaseColor) || !CustomThemeLibrary.IsColor(ThemeEditorAccentColor))
+            !CustomThemeLibrary.IsColor(_themeEditorBasePick) || !CustomThemeLibrary.IsColor(_themeEditorAccentPick))
         { ThemeEditorError = error ?? "Colours must use #RRGGBB."; return false; }
-        _editingTheme.Name = name; _editingTheme.BaseColor = ThemeEditorBaseColor.ToUpperInvariant(); _editingTheme.AccentColor = ThemeEditorAccentColor.ToUpperInvariant(); _editingTheme.LightMode = ThemeEditorLightMode;
+        _editingTheme.Name = name; _editingTheme.BaseColor = _themeEditorBasePick.ToUpperInvariant(); _editingTheme.AccentColor = _themeEditorAccentPick.ToUpperInvariant(); _editingTheme.LightMode = ThemeEditorLightMode;
         if (!Settings.CustomThemes.Contains(_editingTheme)) Settings.CustomThemes.Add(_editingTheme);
         Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
         CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
@@ -797,15 +773,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // The field, not the property: loading is not a change and must not preview.
         SetProperty(ref _themeEditorLightMode, theme.LightMode, nameof(ThemeEditorLightMode));
         ThemeEditorError = string.Empty;
-        BasePicker.Model = AppThemeService.CustomBaseField(theme.LightMode);
         // Load, not Set: seeding the controls with a theme's saved colours is not
         // the user changing one, and must not repaint the app on the way in.
         BasePicker.Load(theme.BaseColor);
         _themeEditorBasePick = theme.BaseColor;
-        // Themes saved before this hold the raw pick; open them on the colour
-        // they are painted in. Painting that colour again gives the same
-        // result, so this changes nothing on screen.
-        ThemeEditorBaseColor = PaintBase(theme.BaseColor, theme.LightMode, moveCursor: true);
+        // Themes hold the colour picked; the theme paints from it, so the
+        // editor works out the painted ground the same way.
+        ThemeEditorBaseColor = PaintBase(theme.BaseColor, theme.LightMode);
         AccentPicker.Load(theme.AccentColor);
         _themeEditorAccentPick = theme.AccentColor;
         FitAccent();
@@ -825,7 +799,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (_editingTheme is null) return;
         (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), false,
-            new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = ThemeEditorBaseColor, AccentColor = ThemeEditorAccentColor, LightMode = ThemeEditorLightMode });
+            new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = _themeEditorBasePick, AccentColor = _themeEditorAccentPick, LightMode = ThemeEditorLightMode });
     }
 
 

@@ -35,20 +35,4 @@ public sealed class ThemeColorPickerViewModelTests
         picker.MarkCurrent();
         Assert.Equal(Color.Parse("#445566"), picker.CurrentColor);
     }
-
-    [Fact]
-    public void LoadAtShowsTheFieldColourThereWithoutReporting()
-    {
-        var committed = new List<string>();
-        var picker = new ThemeColorPickerViewModel("#112233", committed.Add) { Model = AppThemeService.CustomBaseField(light: false) };
-
-        var shown = picker.LoadAt(new Point(0.5, 0.5));
-        Assert.Equal(picker.Model!.At(picker.Hue, 0.5, 0.5), shown);
-        Assert.Equal(shown, picker.ShownColor);
-        Assert.Equal(new Point(0.5, 0.5), picker.Position);
-        Assert.Empty(committed);
-
-        picker.MarkCurrent();
-        Assert.Equal(shown, picker.CurrentColor);
-    }
 }

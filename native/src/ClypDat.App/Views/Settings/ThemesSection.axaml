@@ -151,10 +151,10 @@
     <!-- Full width like every other card, so its edges line up with the ones
          above and below; the pickers are fixed width (each field is
          square), so they sit centred in it rather than hugging the left edge. -->
-    <!-- The field and hue strip are ColorField's, not ColorSpectrum and
-         ColorSlider: they compute the colour straight from the pointer, and
-         the field only shows colours the theme paints exactly, so the swatch
-         is the pixel under the thumb. -->
+    <!-- The field and hue bar are ColorField's, not ColorSpectrum and
+         ColorSlider: they compute the colour straight from the pointer, so the
+         swatch is the pixel under the thumb. The field is a plain HSV square
+         with the hue bar under it, as Discord lays its picker out. -->
     <StackPanel Classes="settingsGroup" IsVisible="{Binding IsThemeEditorOpen}">
       <TextBlock Classes="settingsGroupLabel" Text="CUSTOM THEME EDITOR" />
       <Border Classes="settingsGroupCard">
@@ -181,14 +181,14 @@
               <Border Grid.Column="0" Classes="providerSetting" Padding="14">
                 <StackPanel Spacing="10">
                   <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
-                  <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
-                    <!-- The field is the band a base is painted in for the current
-                         mode (BasePicker.Model), so every point in it is a ground
-                         the theme can be, exactly as shown. -->
+                  <!-- Every colour, at full brightness. The theme turns the pick
+                       into a ground dark or light enough for text and says so
+                       under the swatches (BasePicker.Note). -->
+                  <StackPanel Spacing="12" Width="264">
                     <controls:ColorField Model="{Binding BasePicker.Model}" Hue="{Binding BasePicker.Hue}"
-                                         Position="{Binding BasePicker.Position, Mode=TwoWay}" Width="232" Height="232" />
-                    <controls:HueStrip Grid.Column="1" Hue="{Binding BasePicker.Hue, Mode=TwoWay}" Height="232" />
-                  </Grid>
+                                         Position="{Binding BasePicker.Position, Mode=TwoWay}" Height="190" />
+                    <controls:HueStrip Hue="{Binding BasePicker.Hue, Mode=TwoWay}" Height="14" />
+                  </StackPanel>
                   <!-- New over current: current is the colour the editor opened
                        on and a click on it goes back there. Pick screen colour samples any pixel
                        on any monitor (ScreenColorPicker). -->
@@ -267,13 +267,13 @@
               <Border Grid.Column="1" Classes="providerSetting" Padding="14">
                 <StackPanel Spacing="10">
                   <TextBlock Classes="settingsCardLabel" Text="ACCENT COLOUR" />
-                  <Grid ColumnDefinitions="232,20" ColumnSpacing="12">
-                    <!-- The same, for the accent: only accents that read on the
-                         current ground, so it follows the base. -->
+                  <!-- The same for the accent; one that would not stand out on the
+                       ground is lifted or deepened, and AccentPicker.Note says so. -->
+                  <StackPanel Spacing="12" Width="264">
                     <controls:ColorField Model="{Binding AccentPicker.Model}" Hue="{Binding AccentPicker.Hue}"
-                                         Position="{Binding AccentPicker.Position, Mode=TwoWay}" Width="232" Height="232" />
-                    <controls:HueStrip Grid.Column="1" Hue="{Binding AccentPicker.Hue, Mode=TwoWay}" Height="232" />
-                  </Grid>
+                                         Position="{Binding AccentPicker.Position, Mode=TwoWay}" Height="190" />
+                    <controls:HueStrip Hue="{Binding AccentPicker.Hue, Mode=TwoWay}" Height="14" />
+                  </StackPanel>
                   <Grid ColumnDefinitions="64,*" ColumnSpacing="12">
                     <StackPanel Spacing="4">
                       <TextBlock Classes="settingsPickerLabel" Text="NEW" HorizontalAlignment="Center" />

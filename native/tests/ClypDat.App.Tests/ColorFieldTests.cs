@@ -10,6 +10,7 @@ namespace ClypDat.App.Tests;
 public sealed class ColorFieldTests
 {
     private static readonly Size Field = new(232, 232);
+    private static readonly ColorFieldModel Model = ColorFieldModel.Hsv;
 
     [Fact]
     public void PointerPositionIsClampedToTheField()
@@ -21,78 +22,51 @@ public sealed class ColorFieldTests
     }
 
     [Fact]
-    public void HueRunsFromTopToBottomWithoutWrapping()
+    public void HueRunsLeftToRightBetweenTheRoundedEndsWithoutWrapping()
     {
-        Assert.True(HueStrip.At(0, 232) is > 359 and < 360);
-        Assert.Equal(180, HueStrip.At(116, 232), 6);
-        Assert.Equal(0, HueStrip.At(232, 232));
-        Assert.Equal(0, HueStrip.At(500, 232));
+        // A 264px bar 14px tall: the thumb centre travels from 7 to 257.
+        Assert.Equal(0, HueStrip.At(0, 264, 7));
+        Assert.Equal(0, HueStrip.At(7, 264, 7));
+        Assert.Equal(180, HueStrip.At(132, 264, 7), 6);
+        Assert.True(HueStrip.At(257, 264, 7) is > 359 and < 360);
+        Assert.True(HueStrip.At(500, 264, 7) is > 359 and < 360);
     }
 
+    // Discord's square: white at the top left, the pure hue at the top right,
+    // black along the bottom. Nothing is held back or dimmed.
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void EveryBaseInTheFieldIsPaintedAsShown(bool light)
+    [InlineData(0)]
+    [InlineData(120)]
+    [InlineData(285)]
+    public void FieldIsTheFullHsvSquare(double hue)
     {
-        // The recording that prompted this: the top of the old field showed
-        // #4D3A52 and the theme painted #2E1E33. Every point must now paint as
-        // the colour the field gives for it.
-        var model = AppThemeService.CustomBaseField(light);
-        var wrong = new List<string>();
-        for (var hue = 0; hue < 360; hue += 5)
-        for (var x = 0.0; x <= 1.0001; x += 0.05)
+        Assert.Equal(Colors.White, Model.At(hue, 0, 0));
+        Assert.Equal(new HsvColor(1, hue, 1, 1).ToRgb(), Model.At(hue, 1, 0));
+        Assert.Equal(Colors.Black, Model.At(hue, 0, 1));
+        Assert.Equal(Colors.Black, Model.At(hue, 1, 1));
+        // Value falls steadily down any column.
+        var previous = double.MaxValue;
         for (var y = 0.0; y <= 1.0001; y += 0.05)
         {
-            var color = model.At(hue, x, y);
-            var painted = AppThemeService.CustomGround(color, light);
-            if (painted != color) wrong.Add($"h{hue} x{x:0.00} y{y:0.00}: {color} painted {painted}");
+            var luminance = Luminance(Model.At(hue, 0.7, y));
+            Assert.True(luminance <= previous);
+            previous = luminance;
         }
-        Assert.True(wrong.Count == 0, string.Join("\n", wrong.Take(20)));
     }
 
     [Theory]
-    [InlineData("#0D1116", false)]
-    [InlineData("#2E1E33", false)]
-    [InlineData("#050505", false)]
-    [InlineData("#F4F1EC", true)]
-    [InlineData("#9E9EA0", true)]
-    public void EveryAccentInTheFieldIsPaintedAsShown(string groundHex, bool light)
+    [InlineData("#150F19")]
+    [InlineData("#C02CF0")]
+    [InlineData("#5864E8")]
+    [InlineData("#FFFFFF")]
+    public void LocatingAColourPutsTheThumbOnIt(string hex)
     {
-        var ground = AppThemeService.CustomGround(Color.Parse(groundHex), light);
-        var model = AppThemeService.CustomAccentField(ground);
-        var wrong = new List<string>();
-        for (var hue = 0; hue < 360; hue += 5)
-        for (var x = 0.0; x <= 1.0001; x += 0.05)
-        for (var y = 0.0; y <= 1.0001; y += 0.05)
-        {
-            var color = model.At(hue, x, y);
-            var painted = AppThemeService.CustomAccent(color, ground);
-            if (painted != color) wrong.Add($"h{hue} x{x:0.00} y{y:0.00}: {color} painted {painted}");
-        }
-        Assert.True(wrong.Count == 0, string.Join("\n", wrong.Take(20)));
-    }
-
-    [Theory]
-    [InlineData("#2E1E33", "#3030C0", false)]
-    [InlineData("#0D1116", "#5A1A8C", false)]
-    [InlineData("#F4F1EC", "#E8E060", true)]
-    public void AnAccentThatDoesNotReadIsFittedToTheFieldUnderTheThumb(string baseHex, string accentHex, bool light)
-    {
-        // What the editor does when the ground leaves an accent outside the
-        // field: the accent becomes the field's colour where the painter would
-        // have taken it, so the swatch is the pixel under the thumb and the
-        // theme paints it unchanged.
-        var ground = AppThemeService.CustomGround(Color.Parse(baseHex), light);
-        var pick = Color.Parse(accentHex);
-        var painted = AppThemeService.CustomAccent(pick, ground);
-        Assert.NotEqual(pick, painted);
-
-        var picker = new ThemeColorPickerViewModel(accentHex, _ => { }) { Model = AppThemeService.CustomAccentField(ground) };
-        var fitted = picker.LoadAt(picker.Model!.Locate(painted));
-
-        Assert.Equal(picker.Model.At(picker.Hue, picker.Position.X, picker.Position.Y), fitted);
-        Assert.Equal(fitted, AppThemeService.CustomAccent(fitted, ground));
-        Assert.Equal(fitted, picker.ShownColor);
+        var color = Color.Parse(hex);
+        var point = Model.Locate(color);
+        var back = Model.At(color.ToHsv().H, point.X, point.Y);
+        Assert.InRange(Math.Abs(back.R - color.R), 0, 1);
+        Assert.InRange(Math.Abs(back.G - color.G), 0, 1);
+        Assert.InRange(Math.Abs(back.B - color.B), 0, 1);
     }
 
     [Fact]
@@ -107,49 +81,33 @@ public sealed class ColorFieldTests
     }
 
     [Theory]
-    [InlineData(false, 285)]
-    [InlineData(true, 40)]
-    public void DrawnPixelsAreThePickedColours(bool light, double hue)
+    [InlineData(285)]
+    [InlineData(40)]
+    public void DrawnPixelsAreThePickedColours(double hue)
     {
         // The field is drawn by the same function a pick runs, so the pixel
         // under the thumb is the colour the swatch shows.
-        var model = AppThemeService.CustomBaseField(light);
         const int width = 37, height = 41;
         var pixels = new int[width * height];
-        model.Fill(hue, width, height, pixels);
+        Model.Fill(hue, width, height, pixels);
         for (var row = 0; row < height; row++)
         for (var column = 0; column < width; column++)
         {
-            var color = model.At(hue, (column + 0.5) / width, (row + 0.5) / height);
+            var color = Model.At(hue, (column + 0.5) / width, (row + 0.5) / height);
             var expected = unchecked((int)(0xFF000000u | ((uint)color.R << 16) | ((uint)color.G << 8) | color.B));
             Assert.Equal(expected, pixels[row * width + column]);
         }
     }
 
     [Fact]
-    public void FieldBrightensUpAndSaturatesAcross()
-    {
-        var model = AppThemeService.CustomBaseField(light: false);
-        var previous = -1.0;
-        for (var y = 1.0; y >= -0.0001; y -= 0.01)
-        {
-            var lightness = ColorFieldModel.Lightness(Luminance(model.At(285, 0.5, y)));
-            Assert.True(lightness >= previous);
-            previous = lightness;
-        }
-        Assert.Equal(model.At(285, 0, 0.5).R, model.At(285, 0, 0.5).G);
-        Assert.NotEqual(model.At(285, 1, 0.5).R, model.At(285, 1, 0.5).G);
-    }
-
-    [Fact]
     public void PickingFromTheFieldCommitsTheColourUnderTheThumb()
     {
         var committed = new List<string>();
-        var picker = new ThemeColorPickerViewModel("#0D1116", committed.Add) { Model = AppThemeService.CustomBaseField(light: false) };
+        var picker = new ThemeColorPickerViewModel("#0D1116", committed.Add);
         picker.Hue = 285;
         picker.Position = new Point(0.4, 0);
 
-        var expected = picker.Model!.At(285, 0.4, 0);
+        var expected = Model.At(285, 0.4, 0);
         Assert.Equal(expected, picker.ShownColor);
         Assert.Equal($"#{expected.R:X2}{expected.G:X2}{expected.B:X2}", committed[^1]);
         // Picking does not move the thumb or the hue off where they were put.
@@ -160,21 +118,33 @@ public sealed class ColorFieldTests
     [Fact]
     public void ChangingHueRepicksAtTheSamePoint()
     {
-        var picker = new ThemeColorPickerViewModel("#0D1116", _ => { }) { Model = AppThemeService.CustomBaseField(light: false) };
+        var picker = new ThemeColorPickerViewModel("#0D1116", _ => { });
         picker.Position = new Point(0.8, 0.2);
         picker.Hue = 120;
-        Assert.Equal(picker.Model!.At(120, 0.8, 0.2), picker.ShownColor);
+        Assert.Equal(Model.At(120, 0.8, 0.2), picker.ShownColor);
         Assert.Equal(new Point(0.8, 0.2), picker.Position);
     }
 
     [Fact]
     public void TypedGreyKeepsTheHue()
     {
-        var picker = new ThemeColorPickerViewModel("#0D1116", _ => { }) { Model = AppThemeService.CustomBaseField(light: false) };
+        var picker = new ThemeColorPickerViewModel("#0D1116", _ => { });
         picker.Hue = 200;
         picker.HexText = "#101010";
         Assert.Equal(200, picker.Hue);
         Assert.Equal(0, picker.Position.X, 6);
+    }
+
+    // A bright pick is not a background: the theme paints a ground from it,
+    // and paints an accent that reads on that ground.
+    [Fact]
+    public void BrightPicksArePaintedIntoAUsableTheme()
+    {
+        var pick = Color.Parse("#C02CF0");
+        var ground = AppThemeService.CustomGround(pick, light: false);
+        Assert.True(Luminance(ground) < Luminance(pick));
+        var accent = AppThemeService.CustomAccent(Color.Parse("#2A1040"), ground);
+        Assert.True(AppThemeService.ContrastRatio(accent, ground) >= 3);
     }
 
     private static double Luminance(Color color)
