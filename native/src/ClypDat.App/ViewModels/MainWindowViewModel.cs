@@ -7193,6 +7193,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public async Task FinalizeSavedTrimAsync(string path)
     {
         _mediaProbe.DeleteCacheFor(path);
+        // Recorded peaks describe the audio as captured. Baked volume, a short
+        // trim or re-ordered streams can keep the duration check passing, so
+        // the editor would draw the old waveform; decode the new file instead.
+        ClipPeaksSidecar.Delete(Settings.LibraryFolder, path);
         ClipEditSidecar.ResetAfterSavedTrim(Settings.LibraryFolder, path);
         // Same reasoning as the trim above, and the same hazard: the file on disk
         // is now already cropped and already re-timed, so leaving the effects set
