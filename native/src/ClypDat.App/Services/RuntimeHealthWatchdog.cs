@@ -22,6 +22,14 @@ public static class RuntimeHealthWatchdog
     // orders of magnitude under this.
     private static readonly TimeSpan StallThreshold = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ResourceSampleInterval = TimeSpan.FromMinutes(5);
+    // A stall this long is a wedge, not slow work, and the log alone cannot say
+    // where (a freeze just after a hover preview left nothing but "stalled"
+    // before the user killed the app). A minidump holds every thread's stack, managed and
+    // native, at a few MB. Capped per session so a bad day cannot fill the disk.
+    private static readonly TimeSpan HangDumpThreshold = TimeSpan.FromSeconds(15);
+    private const int MaxHangDumpsPerSession = 2;
+    private const int HangDumpsKept = 4;
+    private static int _hangDumpsWritten;
 
     private static int _started;
     // Written by the UI thread, read by the watchdog thread - a plain captured
@@ -44,6 +52,7 @@ public static class RuntimeHealthWatchdog
     {
         var pingSentAt = Stopwatch.GetTimestamp();
         var stallReported = false;
+        var stallDumped = false;
         var lastResourceSample = DateTime.UtcNow;
 
         while (true)
@@ -56,6 +65,7 @@ public static class RuntimeHealthWatchdog
                 {
                     Volatile.Write(ref _pongReceived, 0);
                     stallReported = false;
+                    stallDumped = false;
                     pingSentAt = Stopwatch.GetTimestamp();
                     var sentAt = pingSentAt;
                     // Background priority on purpose: it queues behind the
@@ -84,6 +94,11 @@ public static class RuntimeHealthWatchdog
                         // recovery line, not a wall of duplicates.
                         AppLog.Info($"UI thread stalled: no response for {waited.TotalSeconds:0.#}s. {DescribeResources()}");
                     }
+                    if (waited >= HangDumpThreshold && !stallDumped)
+                    {
+                        stallDumped = true;
+                        WriteHangDump(waited);
+                    }
                 }
 
                 if (DateTime.UtcNow - lastResourceSample >= ResourceSampleInterval)
@@ -97,6 +112,51 @@ public static class RuntimeHealthWatchdog
                 // A watchdog that can take the app down with it is worse than
                 // no watchdog.
             }
+        }
+    }
+
+    // createdump ships beside the self-contained runtime. Run from this thread:
+    // the UI is already frozen, and the dump suspends the process for a moment.
+    private static void WriteHangDump(TimeSpan waited)
+    {
+        if (!OperatingSystem.IsWindows() || Interlocked.Increment(ref _hangDumpsWritten) > MaxHangDumpsPerSession) return;
+        try
+        {
+            var tool = Path.Combine(AppContext.BaseDirectory, "createdump.exe");
+            if (!File.Exists(tool)) { AppLog.Info("UI hang dump skipped: createdump.exe is not beside ClypDat."); return; }
+            var folder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "hang-dumps");
+            Directory.CreateDirectory(folder);
+            foreach (var old in new DirectoryInfo(folder).GetFiles("*.dmp").OrderByDescending(file => file.LastWriteTimeUtc).Skip(HangDumpsKept - 1))
+            {
+                try { old.Delete(); } catch { }
+            }
+            var path = Path.Combine(folder, $"ui-hang-{DateTime.Now:yyyyMMdd-HHmmss}.dmp");
+            var clock = Stopwatch.StartNew();
+            using var dump = Process.Start(new ProcessStartInfo(tool)
+            {
+                ArgumentList = { "--normal", "-f", path, Environment.ProcessId.ToString() },
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            });
+            if (dump is null) { AppLog.Info("UI hang dump failed: createdump did not start."); return; }
+            var output = dump.StandardError.ReadToEndAsync();
+            _ = dump.StandardOutput.ReadToEndAsync();
+            if (!dump.WaitForExit(60_000))
+            {
+                try { dump.Kill(); } catch { }
+                AppLog.Info("UI hang dump abandoned: createdump ran past 60s.");
+                return;
+            }
+            var size = File.Exists(path) ? new FileInfo(path).Length / (1024 * 1024) : 0;
+            AppLog.Info(dump.ExitCode == 0 && File.Exists(path)
+                ? $"UI hang dump written after {waited.TotalSeconds:0}s stalled: {path} ({size} MB, {clock.ElapsedMilliseconds}ms)."
+                : $"UI hang dump failed (exit {dump.ExitCode}): {output.Result.Trim()}");
+        }
+        catch (Exception error)
+        {
+            AppLog.Info($"UI hang dump failed: {error.Message}");
         }
     }
 

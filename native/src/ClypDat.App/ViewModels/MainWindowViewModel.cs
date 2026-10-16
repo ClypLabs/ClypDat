@@ -11946,10 +11946,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     // background priority, newest clips first, one at a time and capped, so
     // a library-wide gap still waits for the game to close.
     private const int MaxThumbnailsDuringGame = 12;
+    // Clips the in-game pass could not picture. Without this, a dozen broken
+    // newest clips took the whole cap on every pass and older cards never got
+    // a turn until the game closed; the normal sweep still retries them then.
+    private readonly HashSet<string> _inGameThumbnailFailures = new(StringComparer.OrdinalIgnoreCase);
 
     private async Task HydrateMissingThumbnailsDuringGameAsync(IReadOnlyList<ClipCardViewModel> clips, CancellationToken cancellationToken)
     {
-        var missing = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath))
+        string[] failed;
+        lock (_inGameThumbnailFailures) failed = _inGameThumbnailFailures.ToArray();
+        var skipped = new HashSet<string>(failed, StringComparer.OrdinalIgnoreCase);
+        var missing = clips.Where(clip => string.IsNullOrEmpty(clip.Media.ThumbnailPath) && !skipped.Contains(clip.Path))
             .OrderByDescending(clip => clip.CreatedAt)
             .Take(MaxThumbnailsDuringGame)
             .ToArray();
@@ -11962,7 +11969,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!_gameIsActive) break;
                 var path = await _mediaProbe.EnsureThumbnailInBackgroundAsync(clip.Path);
-                if (string.IsNullOrEmpty(path)) continue;
+                if (string.IsNullOrEmpty(path))
+                {
+                    lock (_inGameThumbnailFailures) _inGameThumbnailFailures.Add(clip.Path);
+                    continue;
+                }
                 await Dispatcher.UIThread.InvokeAsync(() => clip.UpdateMedia(clip.Media with { ThumbnailPath = path }, reloadSidecars: false));
                 made++;
             }

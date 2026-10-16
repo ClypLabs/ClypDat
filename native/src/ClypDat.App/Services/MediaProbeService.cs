@@ -805,6 +805,9 @@ public sealed class MediaProbeService
         if (processingRead is null || !NativeClipThumbnail.Available) return string.Empty;
         var output = GetThumbnailPath(filePath);
         if (File.Exists(output)) return output;
+        // Same gate as EnsureThumbnailAsync: an audio-only file has no picture
+        // to decode, and would fail (and be retried) on every in-game pass.
+        if (!HasCachedVideoStream(filePath)) return string.Empty;
         return await TryNativeThumbnailAsync(filePath, output, background: true).ConfigureAwait(false) ? output : string.Empty;
     }
 

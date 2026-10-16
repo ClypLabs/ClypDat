@@ -213,9 +213,12 @@ std::string encode_jpeg(AVFrame& picture, int quality) {
 
 // Cards and the timeline load the cache path as soon as it exists; a
 // half-written file would decode as a broken image and be cached that way.
+// The staging name is per thread: a card and the in-game pass can write the
+// same clip at once, and a shared ".partial" let one rename the other's file
+// away, failing a thumbnail that had in fact been written.
 void write_atomically(const std::filesystem::path& output, const std::string& bytes) {
     auto staging = output;
-    staging += L".partial";
+    staging += L"." + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetCurrentThreadId()) + L".partial";
     {
         std::ofstream file(staging, std::ios::binary | std::ios::trunc);
         if (!file) throw std::runtime_error("Could not create the image file");
