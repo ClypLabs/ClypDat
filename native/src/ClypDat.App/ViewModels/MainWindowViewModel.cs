@@ -548,7 +548,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private string _themeEditorBasePick = "#0D1116";
     // Whether the theme is a light one. Not a switch: it follows the ground,
     // and is light when black text reads better on it than white.
-    public bool ThemeEditorLightMode => Color.TryParse(_themeEditorBasePick, out var pick) && AppThemeService.CustomLight(AppThemeService.CustomGround(pick));
+    public bool ThemeEditorLightMode => Color.TryParse(_themeEditorBasePick, out var pick) && AppThemeService.CustomLight(AppThemeService.CustomGround(pick, _themeEditorBaseSaturation / 100.0));
+
+    // The saturation slider, as a whole percentage. Previewed live like the
+    // colours, and saved with the theme.
+    private double _themeEditorBaseSaturation = 100;
+    public double ThemeEditorBaseSaturation
+    {
+        get => _themeEditorBaseSaturation;
+        set
+        {
+            var clamped = double.IsFinite(value) ? Math.Clamp(Math.Round(value), 0, 100) : 100;
+            if (!SetProperty(ref _themeEditorBaseSaturation, clamped)) return;
+            OnPropertyChanged(nameof(ThemeEditorBaseSaturationText));
+            FitAccent();
+            PreviewThemeEditor();
+        }
+    }
+    public string ThemeEditorBaseSaturationText => $"{_themeEditorBaseSaturation:0}%";
 
     // The accent as picked, which is what a theme saves. Moving the base can
     // change how it is painted; moving it back finds the pick again rather
@@ -564,7 +581,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         UpdateGround();
         if (!Color.TryParse(ThemeEditorBaseColor, out var baseColor) || !Color.TryParse(_themeEditorAccentPick, out var pick)) return;
-        var ground = AppThemeService.CustomGround(baseColor);
+        var ground = AppThemeService.CustomGround(baseColor, _themeEditorBaseSaturation / 100.0);
         var painted = AppThemeService.CustomAccent(pick, ground);
         ThemeEditorAccentColor = $"#{painted.R:X2}{painted.G:X2}{painted.B:X2}";
         AccentPicker.Note = painted == pick ? string.Empty : $"Painted as {ThemeEditorAccentColor} so it stands out on the base.";
@@ -580,7 +597,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private void UpdateGround()
     {
         if (!Color.TryParse(ThemeEditorBaseColor, out var baseColor)) return;
-        var ground = AppThemeService.CustomGround(baseColor);
+        var ground = AppThemeService.CustomGround(baseColor, _themeEditorBaseSaturation / 100.0);
         var key = (ground, AppThemeService.CustomLight(ground));
         if (_editorGround == key) return;
         _editorGround = key;
@@ -682,7 +699,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var baseColor = selected?.BaseColor ?? CurrentThemeColor("AppBgBrush", "#0D1116");
         var accent = selected?.AccentColor ?? CurrentThemeColor("AccentBrush", AppThemeService.PresetAccent(Settings.ThemePreset).ToString());
         _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName("Custom theme", Settings.CustomThemes), BaseColor = baseColor, AccentColor = accent,
-            LightMode = selected?.LightMode ?? false };
+            LightMode = selected?.LightMode ?? false, BaseSaturation = selected?.BaseSaturation ?? 1 };
         LoadThemeEditor(_editingTheme);
     }
 
@@ -698,7 +715,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public void EditCustomTheme(CustomThemeSettings theme) { _editingTheme = theme; LoadThemeEditor(theme); }
     public void DuplicateCustomTheme(CustomThemeSettings theme)
     {
-        _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName(theme.Name, Settings.CustomThemes), BaseColor = theme.BaseColor, AccentColor = theme.AccentColor, LightMode = theme.LightMode };
+        _editingTheme = new CustomThemeSettings { Name = CustomThemeLibrary.UniqueName(theme.Name, Settings.CustomThemes), BaseColor = theme.BaseColor, AccentColor = theme.AccentColor, LightMode = theme.LightMode, BaseSaturation = theme.BaseSaturation };
         LoadThemeEditor(_editingTheme);
     }
     public bool DeleteCustomTheme(CustomThemeSettings theme)
@@ -720,7 +737,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (!CustomThemeLibrary.TryNormalizeName(ThemeEditorName, Settings.CustomThemes, _editingTheme.Id, out var name, out var error) ||
             !CustomThemeLibrary.IsColor(_themeEditorBasePick) || !CustomThemeLibrary.IsColor(_themeEditorAccentPick))
         { ThemeEditorError = error ?? "Colours must use #RRGGBB."; return false; }
-        _editingTheme.Name = name; _editingTheme.BaseColor = _themeEditorBasePick.ToUpperInvariant(); _editingTheme.AccentColor = _themeEditorAccentPick.ToUpperInvariant(); _editingTheme.LightMode = ThemeEditorLightMode;
+        _editingTheme.Name = name; _editingTheme.BaseColor = _themeEditorBasePick.ToUpperInvariant(); _editingTheme.AccentColor = _themeEditorAccentPick.ToUpperInvariant(); _editingTheme.LightMode = ThemeEditorLightMode; _editingTheme.BaseSaturation = _themeEditorBaseSaturation / 100.0;
         if (!Settings.CustomThemes.Contains(_editingTheme)) Settings.CustomThemes.Add(_editingTheme);
         Settings.ThemePreset = CustomThemeLibrary.Selection(_editingTheme); Settings.UseSystemAccent = false;
         CustomThemeLibrary.AddRecent(Settings, _editingTheme.BaseColor, _editingTheme.AccentColor);
@@ -748,6 +765,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         BasePicker.Load(theme.BaseColor);
         _themeEditorBasePick = theme.BaseColor;
         ThemeEditorBaseColor = theme.BaseColor;
+        // The field, not the property: loading is not a change and must not preview.
+        SetProperty(ref _themeEditorBaseSaturation, Math.Clamp(Math.Round(theme.BaseSaturation * 100), 0, 100), nameof(ThemeEditorBaseSaturation));
+        OnPropertyChanged(nameof(ThemeEditorBaseSaturationText));
         AccentPicker.Load(theme.AccentColor);
         _themeEditorAccentPick = theme.AccentColor;
         FitAccent();
@@ -767,7 +787,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         if (_editingTheme is null) return;
         (Application.Current as ClypDat.App.App)?.ApplyTheme(CustomThemeLibrary.Selection(_editingTheme), false,
-            new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = _themeEditorBasePick, AccentColor = _themeEditorAccentPick, LightMode = ThemeEditorLightMode });
+            new CustomThemeSettings { Id = _editingTheme.Id, Name = ThemeEditorName, BaseColor = _themeEditorBasePick, AccentColor = _themeEditorAccentPick, LightMode = ThemeEditorLightMode, BaseSaturation = _themeEditorBaseSaturation / 100.0 });
     }
 
 

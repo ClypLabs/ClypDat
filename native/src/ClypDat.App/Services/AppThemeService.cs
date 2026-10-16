@@ -261,7 +261,7 @@ internal static class AppThemeService
         // Everything downstream reads the ground SurfaceBase returns: the colour
         // the theme is painted in and the colour the accent has to stay legible
         // against are the same colour, and it is this one.
-        var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor)) : (default, false);
+        var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor), customTheme.BaseSaturation) : (default, false);
         var accent = isCustom ? AdjustAccent(Color.Parse(customTheme!.AccentColor), customBase) : useSystemAccent ? systemAccent : PresetAccent(preset);
         var appBackground = isCustom ? customBase : Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
 
@@ -620,8 +620,12 @@ internal static class AppThemeService
     /// ground is mixed from both over a short stretch of pick lightness, so
     /// dragging towards white turns the app light smoothly instead of with a
     /// jump, and mid-tone grounds exist only inside that stretch.
+    ///
+    /// `saturation` is the theme's saturation slider: the share of the
+    /// ground's colour kept, applied last so it washes out whatever the pick
+    /// painted without moving its brightness.
     /// </summary>
-    private static (Color Ground, bool Light) SurfaceBase(Color picked)
+    private static (Color Ground, bool Light) SurfaceBase(Color picked, double saturation = 1)
     {
         var (_, _, lightness) = ToHsl(picked);
         var t = Math.Clamp((lightness - LightGroundFrom) / (LightGroundTo - LightGroundFrom), 0, 1);
@@ -629,7 +633,19 @@ internal static class AppThemeService
         var ground = t <= 0 ? DarkGround(picked)
             : t >= 1 ? LightGround(picked)
             : Blend(DarkGround(picked), LightGround(picked), t);
+        ground = Desaturate(ground, saturation);
         return (ground, CustomLight(ground));
+    }
+
+    // Scales HSL saturation and refits lightness so luminance - how bright the
+    // page reads - stays where it was.
+    private static Color Desaturate(Color ground, double amount)
+    {
+        amount = double.IsFinite(amount) ? Math.Clamp(amount, 0, 1) : 1;
+        if (amount >= 1) return ground;
+        var (hue, saturation, lightness) = ToHsl(ground);
+        var luminance = RelativeLuminance(ground);
+        return FitLuminance(hue, saturation * amount, lightness, ground.A, luminance, luminance);
     }
 
     // HSL lightness of the pick across which the ground crosses from the dark
@@ -691,7 +707,7 @@ internal static class AppThemeService
     public static Color CustomAccent(Color accent, Color ground) => AdjustAccent(accent, ground);
 
     /// <summary>The colour a custom theme with this base is painted in.</summary>
-    public static Color CustomGround(Color picked) => SurfaceBase(picked).Ground;
+    public static Color CustomGround(Color picked, double saturation = 1) => SurfaceBase(picked, saturation).Ground;
 
     /// <summary>True when black text reads better than white on this ground.</summary>
     public static bool CustomLight(Color ground) => Contrast(Colors.Black, ground) > Contrast(Colors.White, ground);

@@ -9,12 +9,15 @@ public sealed class CustomThemeSettings
     public string Name { get; set; } = "Custom theme";
     public string BaseColor { get; set; } = "#0D1116";
     public string AccentColor { get; set; } = "#5864E8";
-    // Off unless the user turns it on: a custom theme is dark however pale its
-    // base colour is.
+    // Derived from the base colour when the theme is applied; kept so theme
+    // files from older builds still read.
     public bool LightMode { get; set; }
+    // How much of the painted ground's colour to keep, 0-1: lower washes the
+    // app out towards grey without changing how bright it is.
+    public double BaseSaturation { get; set; } = 1;
 }
 
-public sealed record ThemeFile(int SchemaVersion, string Name, string BaseColor, string AccentColor, bool LightMode = false);
+public sealed record ThemeFile(int SchemaVersion, string Name, string BaseColor, string AccentColor, bool LightMode = false, double BaseSaturation = 1);
 
 public static class CustomThemeLibrary
 {
@@ -66,7 +69,7 @@ public static class CustomThemeLibrary
     }
 
     public static string Export(CustomThemeSettings theme) => JsonSerializer.Serialize(
-        new ThemeFile(ThemeFileSchemaVersion, theme.Name, theme.BaseColor, theme.AccentColor, theme.LightMode),
+        new ThemeFile(ThemeFileSchemaVersion, theme.Name, theme.BaseColor, theme.AccentColor, theme.LightMode, theme.BaseSaturation),
         new JsonSerializerOptions { WriteIndented = true });
 
     public static bool TryImport(string json, IEnumerable<CustomThemeSettings> existing,
@@ -79,7 +82,7 @@ public static class CustomThemeLibrary
             if (file is null || file.SchemaVersion != ThemeFileSchemaVersion) { error = "Unsupported theme schema."; return false; }
             if (!TryNormalizeName(file.Name, existing, null, out var name, out error) && error != "Theme name already exists.") return false;
             if (!IsColor(file.BaseColor) || !IsColor(file.AccentColor)) { error = "Theme colours must use #RRGGBB."; return false; }
-            theme = new CustomThemeSettings { Name = UniqueName(name, existing), BaseColor = file.BaseColor.ToUpperInvariant(), AccentColor = file.AccentColor.ToUpperInvariant(), LightMode = file.LightMode };
+            theme = new CustomThemeSettings { Name = UniqueName(name, existing), BaseColor = file.BaseColor.ToUpperInvariant(), AccentColor = file.AccentColor.ToUpperInvariant(), LightMode = file.LightMode, BaseSaturation = Math.Clamp(file.BaseSaturation, 0, 1) };
             error = null;
             return true;
         }

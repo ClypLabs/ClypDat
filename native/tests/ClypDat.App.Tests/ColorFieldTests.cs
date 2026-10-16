@@ -3,6 +3,7 @@ using Avalonia.Media;
 using ClypDat.App.Controls;
 using ClypDat.App.Services;
 using ClypDat.App.ViewModels;
+using ClypDat.Core.Settings;
 using Xunit;
 
 namespace ClypDat.App.Tests;
@@ -199,6 +200,29 @@ public sealed class ColorFieldTests
     [InlineData("#000000", "#FFFFFF")]
     public void AccentTextIsWhiteUnlessTheAccentIsPale(string accent, string text)
         => Assert.Equal(Color.Parse(text), AppThemeService.AccentForeground(Color.Parse(accent)));
+
+    // The saturation slider washes the painted page towards grey without
+    // making it brighter or darker, and travels with the theme file.
+    [Fact]
+    public void SaturationSliderWashesTheGroundOutAtTheSameBrightness()
+    {
+        var pick = Color.Parse("#F315F0");
+        var full = AppThemeService.CustomGround(pick);
+        var half = AppThemeService.CustomGround(pick, 0.5);
+        var none = AppThemeService.CustomGround(pick, 0);
+        Assert.Equal(full, AppThemeService.CustomGround(pick, 1));
+        Assert.InRange(half.ToHsl().S, full.ToHsl().S * 0.4, full.ToHsl().S * 0.6);
+        Assert.True(none.R == none.G && none.G == none.B, none.ToString());
+        foreach (var washed in new[] { half, none })
+            Assert.InRange(Luminance(washed), Luminance(full) * 0.85, Luminance(full) * 1.15);
+
+        var theme = new CustomThemeSettings { Name = "Washed", BaseColor = "#F315F0", AccentColor = "#00F5A0", BaseSaturation = 0.35 };
+        Assert.True(CustomThemeLibrary.TryImport(CustomThemeLibrary.Export(theme), [], out var imported, out var error), error);
+        Assert.Equal(0.35, imported!.BaseSaturation, 6);
+        // Files from before the slider existed keep their full colour.
+        Assert.True(CustomThemeLibrary.TryImport("""{"SchemaVersion":1,"Name":"Old","BaseColor":"#123456","AccentColor":"#5864E8"}""", [], out var old, out error), error);
+        Assert.Equal(1, old!.BaseSaturation);
+    }
 
     private static double Luminance(Color color)
     {

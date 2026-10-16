@@ -220,6 +220,16 @@
                       <TextBox Classes="settingsInput" Text="{Binding BasePicker.BlueText, Mode=TwoWay}" />
                     </StackPanel>
                   </Grid>
+                  <!-- Washes the painted background out towards grey without
+                       changing how bright it is; the pick itself is untouched. -->
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="settingsPickerLabel" Text="SATURATION" />
+                      <TextBlock Grid.Column="1" Classes="settingsPickerLabel" Text="{Binding ThemeEditorBaseSaturationText}" />
+                    </Grid>
+                    <Slider Classes="volumeSlider" Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1"
+                            IsSnapToTickEnabled="True" Value="{Binding ThemeEditorBaseSaturation, Mode=TwoWay}" />
+                  </StackPanel>
                   <!-- What the base turns into: it is the window, and the panels and
                        cards on it are each a step away. The base swatch sits on a
                        card, so without these it reads as the wrong colour. -->
