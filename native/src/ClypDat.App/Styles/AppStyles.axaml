@@ -204,7 +204,7 @@
   </Style>
   <Style Selector="RadioButton.sizePill:checked">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}" />
   </Style>
   <Style Selector="RadioButton.sizePill:pointerover:not(:checked)">
     <Setter Property="Background" Value="{StaticResource Surface_26333F}" />
@@ -381,7 +381,7 @@
   </Style>
   <Style Selector="Button.primaryButton">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}" />
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="CornerRadius" Value="7" />
     <Setter Property="FontWeight" Value="Bold" />
@@ -1722,7 +1722,7 @@
   </Style>
   <Style Selector="ComboBox.settingsInput ComboBoxItem:selected">
     <Setter Property="Background" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}" />
   </Style>
   <Style Selector="ComboBox.recordingCodecPicker ComboBoxItem" x:DataType="vm:ReplayVideoCodecOption">
     <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
@@ -1777,7 +1777,7 @@
   <Style Selector="ListBox.pillGroup ListBoxItem:selected, ListBox.pillGroup ListBoxItem:selected:pointerover">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}" />
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}" />
   </Style>
   <Style Selector="ListBox.pillGroup ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter, ListBox.pillGroup ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.pillGroup ListBoxItem:selected:pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
@@ -2452,10 +2452,10 @@
     <Setter Property="Background" Value="{StaticResource Surface_26323D}" />
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge TextBlock">
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}" />
   </Style>
   <Style Selector="Button.railIconButton.active Border.gameInitialBadge PathIcon">
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}" />
   </Style>
   <!-- The editor keeps the library's 64px rail, so its footer controls use
        the same centred offset as every other rail button. -->
@@ -3236,7 +3236,7 @@
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
   </Style>
   <Style Selector="ListBox.settingsSegmented ListBoxItem:selected">
-    <Setter Property="Foreground" Value="#FFFFFF" />
+    <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}" />
   </Style>
   <Style Selector="ListBox.settingsSegmented ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{StaticResource SurfaceHoverBrush}" />

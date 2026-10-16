@@ -72,7 +72,7 @@ public sealed class ColorFieldTests
     [Fact]
     public void ShadesStartAtTheBaseAndStepAwayFromIt()
     {
-        var ground = AppThemeService.CustomGround(Color.Parse("#580B50"), light: false);
+        var ground = AppThemeService.CustomGround(Color.Parse("#580B50"));
         var surfaces = AppThemeService.CustomSurfaces(ground, light: false);
         Assert.Equal(4, surfaces.Count);
         for (var i = 1; i < surfaces.Count; i++)
@@ -135,16 +135,23 @@ public sealed class ColorFieldTests
         Assert.Equal(0, picker.Position.X, 6);
     }
 
-    // A bright pick is not a background: the theme paints a ground from it,
-    // and paints an accent that reads on that ground.
+    // The app is painted in exactly the colour picked, and turns light where
+    // black text starts to read better on it than white - once, part way
+    // between black and white, not at a switch.
     [Fact]
-    public void BrightPicksArePaintedIntoAUsableTheme()
+    public void ThePickIsTheGroundAndLightFollowsIt()
     {
-        var pick = Color.Parse("#C02CF0");
-        var ground = AppThemeService.CustomGround(pick, light: false);
-        Assert.True(Luminance(ground) < Luminance(pick));
-        var accent = AppThemeService.CustomAccent(Color.Parse("#2A1040"), ground);
-        Assert.True(AppThemeService.ContrastRatio(accent, ground) >= 3);
+        foreach (var hex in new[] { "#FDEFFF", "#C02CF0", "#0D1116", "#1C5C48" })
+            Assert.Equal(Color.Parse(hex), AppThemeService.CustomGround(Color.Parse(hex)));
+        Assert.True(AppThemeService.CustomLight(Color.Parse("#FDEFFF")));
+        Assert.True(AppThemeService.CustomLight(Colors.White));
+        Assert.False(AppThemeService.CustomLight(Color.Parse("#0D1116")));
+        Assert.False(AppThemeService.CustomLight(Colors.Black));
+
+        // An accent that would vanish on the ground is lifted until it reads.
+        var ground = Color.Parse("#0D1116");
+        var accent = AppThemeService.CustomAccent(Color.Parse("#1A1030"), ground);
+        Assert.True(AppThemeService.ContrastRatio(accent, ground) >= 2);
     }
 
     private static double Luminance(Color color)

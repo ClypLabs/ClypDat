@@ -15,6 +15,9 @@
            below are the startup fallback for the System preset. -->
       <SolidColorBrush x:Key="AccentBrush" Color="#5864E8" />
       <SolidColorBrush x:Key="AccentBrushHover" Color="#6D77F0" />
+      <!-- Text and icons drawn on an accent fill: black or white, whichever
+           reads better on the accent, so a pale accent gets dark text. -->
+      <SolidColorBrush x:Key="AccentForegroundBrush" Color="#FFFFFF" />
       <!-- Sidebar selection tints, derived from the accent above. -->
       <SolidColorBrush x:Key="AccentSelectedBrush" Color="#2A3350" />
       <SolidColorBrush x:Key="AccentSelectedHoverBrush" Color="#222A43" />

@@ -1357,7 +1357,7 @@
                     </Transitions>
                   </Border.Transitions>
                   <TextBlock x:Name="DateScrubberBubbleText"
-                             Foreground="#FFFFFF"
+                             Foreground="{StaticResource AccentForegroundBrush}"
                              FontSize="12"
                              FontWeight="Bold" />
                 </Border>

@@ -166,24 +166,14 @@
             </StackPanel>
           </Border>
           <Border Classes="settingsRowDivider" />
-          <Border Classes="settingsRow">
-            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
-              <StackPanel Classes="settingsRowText">
-                <TextBlock Classes="settingsRowTitle" Text="Light mode" />
-                <TextBlock Classes="settingsRowDesc" Text="Paint this theme on a light background. Off keeps it dark, however pale the base colour." />
-              </StackPanel>
-              <ToggleSwitch Grid.Column="1" IsChecked="{Binding ThemeEditorLightMode, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" />
-            </Grid>
-          </Border>
-          <Border Classes="settingsRowDivider" />
           <Border Classes="settingsRow static">
             <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="16" HorizontalAlignment="Center">
               <Border Grid.Column="0" Classes="providerSetting" Padding="14">
                 <StackPanel Spacing="10">
                   <TextBlock Classes="settingsCardLabel" Text="BASE COLOUR" />
-                  <!-- Every colour, at full brightness. The theme turns the pick
-                       into a ground dark or light enough for text and says so
-                       under the swatches (BasePicker.Note). -->
+                  <!-- Every colour, at full brightness, and the app is painted
+                       in exactly the one under the thumb. Text follows it to
+                       black or white so it stays readable. -->
                   <StackPanel Spacing="12" Width="264">
                     <controls:ColorField Model="{Binding BasePicker.Model}" Hue="{Binding BasePicker.Hue}"
                                          Position="{Binding BasePicker.Position, Mode=TwoWay}" Height="190" />
@@ -230,8 +220,6 @@
                       <TextBox Classes="settingsInput" Text="{Binding BasePicker.BlueText, Mode=TwoWay}" />
                     </StackPanel>
                   </Grid>
-                  <TextBlock Classes="settingsRowDesc" Text="{Binding BasePicker.Note}" MaxWidth="264"
-                             IsVisible="{Binding BasePicker.Note, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                   <!-- What the base turns into: it is the window, and the panels and
                        cards on it are each a step away. The base swatch sits on a
                        card, so without these it reads as the wrong colour. -->

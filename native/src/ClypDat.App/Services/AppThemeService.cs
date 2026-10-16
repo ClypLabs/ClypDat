@@ -82,70 +82,6 @@ internal static class AppThemeService
     private const double LightTextLightnessScale = 0.75;
     private const double LightSemanticLightnessScale = 0.85;
 
-    // A custom theme's base used to be painted as picked. A UI ground is not a
-    // colour you choose off a spectrum, though - ClypDat's own is #0D1116, and
-    // the authored dark family around it sits at S 0.24-0.29 with the page at
-    // L 0.069 (#141D24 0.286/0.110, #22303D 0.284/0.186, #2C3B48 0.241/0.227).
-    // A mid green off the spectrum is S 0.592 at L 0.404: twice the chroma and
-    // six times the lightness of the thing it replaces, painted across every
-    // panel in the app.
-    //
-    // So the pick supplies the hue, and its chroma and lightness are damped
-    // towards the band the shipped palette already occupies. A pick inside the
-    // band comes back untouched, which is what keeps a custom theme built on
-    // #0D1116 rendering byte-for-byte as System. The colour the user chose is
-    // still what the swatch and the saved theme show - this is a render step,
-    // not an edit of their choice.
-    //
-    // Damped, not clamped. A hard clamp is what made the picker feel dead: the
-    // band covers S <= 0.30 and L <= 0.13, so ~87% of the spectrum's travel and
-    // 70% of the saturation axis all landed on one single ground per hue, and
-    // the only visible event in the whole picker was the dark/light flip. Above
-    // the knee the pick is compressed into the headroom below the ceiling on a
-    // square-root curve, so movement anywhere on the spectrum moves the app -
-    // fastest just past the knee, where most picks sit, and flattening out at
-    // the vivid end where the ground would otherwise stop being a ground.
-    private const double CustomSurfaceSaturationKnee = 0.30;
-    // Chroma is what makes a ground read as the colour that was picked - far
-    // more than lightness does, and lightness is the axis that cannot move
-    // (a page bright enough to match a pick is a page nothing can be read on).
-    // So the saturation ceiling is set high and the page stays dark: the pick's
-    // hue arrives at close to full strength on a ground the app can still use.
-    private const double CustomSurfaceMaxSaturation = 0.80;
-    private const double CustomDarkMinLightness = 0.05;
-    private const double CustomDarkMaxLightness = 0.13;
-    // Ceilings, reached only by a fully saturated / fully bright pick. 0.20 is
-    // still at the authored family's brightest panel (#2C3B48, L 0.227), so the
-    // derived surfaces above the page stay inside the range the ramp was fitted
-    // against and the authored text (L 0.69-0.93) keeps AA on all of it.
-    private const double CustomDarkCeilingLightness = 0.22;
-    private const double CustomDarkFloorLightness = 0.03;
-
-    // Light mode is the same band inverted: 1 - 0.069 = 0.931 is where the light
-    // presets' page lands, and RecolorCustom negates its delta there, so the
-    // ramp reproduces stock light from an anchor in this range.
-    private const double CustomLightMinLightness = 0.90;
-    private const double CustomLightMaxLightness = 0.97;
-    private const double CustomLightCeilingLightness = 0.985;
-    private const double CustomLightFloorLightness = 0.86;
-
-    // HSL lightness is not brightness. Green carries 71% of relative luminance
-    // and blue 7%, so a ground at L 0.19 S 0.80 is luminance 0.086 in green and
-    // 0.012 in blue - the same numbers, a page seven times brighter. Left there
-    // the picker's hue ring doubles as an unmarked brightness control, and a
-    // green page is bright enough that no accent in the blue-violet half can
-    // clear a contrast floor against it.
-    //
-    // So the damped ground is finally fitted by luminance: hue and saturation
-    // stay exactly where the pick put them, lightness is searched until the
-    // ground lands in the band the shipped pages occupy. #0D1116 is luminance
-    // 0.0054 and the light presets' page 0.85, and both sit inside their band,
-    // so this is inert for a pick that already reproduces a preset.
-    private const double CustomDarkMinLuminance = 0.0025;
-    private const double CustomDarkMaxLuminance = 0.030;
-    private const double CustomLightMinLuminance = 0.62;
-    private const double CustomLightMaxLuminance = 0.92;
-
     private static readonly IReadOnlyDictionary<string, ThemeTransform> Transforms =
         new Dictionary<string, ThemeTransform>(StringComparer.OrdinalIgnoreCase)
         {
@@ -266,10 +202,10 @@ internal static class AppThemeService
         preset = Normalize(preset);
         var transform = Transforms.TryGetValue(preset, out var t) ? t : ThemeTransform.Identity;
         var isCustom = customTheme is not null;
-        // Everything downstream reads the damped ground, never the raw pick: the
-        // colour the theme is painted in and the colour the accent has to stay
-        // legible against are the same colour, and it is this one.
-        var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor), customTheme.LightMode) : (default, false);
+        // Everything downstream reads the ground SurfaceBase returns: the colour
+        // the theme is painted in and the colour the accent has to stay legible
+        // against are the same colour, and it is this one.
+        var (customBase, customLight) = isCustom ? SurfaceBase(Color.Parse(customTheme!.BaseColor)) : (default, false);
         var accent = isCustom ? AdjustAccent(Color.Parse(customTheme!.AccentColor), customBase) : useSystemAccent ? systemAccent : PresetAccent(preset);
         var appBackground = isCustom ? customBase : Recolor(NamedTokens[0].Source, ColorRole.Surface, transform);
 
@@ -288,14 +224,20 @@ internal static class AppThemeService
         SetBrush(application, "AccentBrushHover", (isCustom ? customLight : transform.IsLight)
             ? Blend(accent, appBackground, 0.22)
             : BlendWithWhite(accent, 0.18));
-        SetBrush(application, "AccentSelectedBrush", Blend(accent, appBackground, 0.78));
-        SetBrush(application, "AccentSelectedHoverBrush", Blend(accent, appBackground, 0.84));
+        // A custom ground can be any hue, and mixing an accent into a ground of
+        // a different hue mixes towards grey - teal into purple came out a
+        // muddy slate that read as neither. Custom tints keep the accent's hue
+        // and take only their depth from the ground. The presets' grounds are
+        // already in their accent's family, where the plain mix is right.
+        Color Tint(double amount) => isCustom ? AccentTint(accent, appBackground, amount) : Blend(accent, appBackground, amount);
+        SetBrush(application, "AccentSelectedBrush", Tint(0.78));
+        SetBrush(application, "AccentSelectedHoverBrush", Tint(0.84));
         SetBrush(application, "AccentSelectedIconBrush", (isCustom ? customLight : transform.IsLight)
             ? Blend(accent, Colors.Black, 0.25)
             : BlendWithWhite(accent, 0.55));
-        SetBrush(application, "AccentGameHoverBrush", Blend(accent, appBackground, 0.84));
-        SetBrush(application, "AccentFolderBrush", Blend(accent, appBackground, 0.55));
-        SetBrush(application, "AccentHoverBrush", Blend(accent, appBackground, 0.84));
+        SetBrush(application, "AccentGameHoverBrush", Tint(0.84));
+        SetBrush(application, "AccentFolderBrush", Tint(0.55));
+        SetBrush(application, "AccentHoverBrush", Tint(0.84));
 
         ApplyFluentAccent(application, accent, appBackground);
         SetBrush(application, "AccentForegroundBrush", BestForeground(accent));
@@ -610,46 +552,24 @@ internal static class AppThemeService
         return FromHsl(transform.Hue, themedSaturation, themedLightness, source.A);
     }
 
-    // Custom themes retain ClypDat's authored surface hierarchy. Only its
-    // hue/lightness anchor changes; text is chosen from true contrast rather
-    // than assuming every custom base is dark.
     /// <summary>
-    /// The ground a custom theme is actually painted in. The pick contributes its
-    /// hue; its chroma and lightness are clamped into the band ClypDat's own
-    /// palette occupies, because a colour chosen off a spectrum is a colour, not
-    /// a UI background. Which band - dark or light - is the theme's Light mode
-    /// switch, never the pick: guessing it from how pale the pick was turned the
-    /// whole app white whenever the spectrum's cursor strayed toward its top-left
-    /// corner. Math.Clamp rather than the file's own Clamp, which is a 0..1 clamp
-    /// and would read confusingly here.
+    /// The ground a custom theme is painted in, and whether it is a light one.
+    /// The ground is the colour picked, exactly: the editor's field offers every
+    /// colour, and the app follows the thumb wherever it goes rather than
+    /// snapping into a dark or a light band. Light is whichever of black and
+    /// white text reads better on it, so dragging from black to white crosses
+    /// over once, where both read about equally, instead of at a switch.
     /// </summary>
-    private static (Color Ground, bool Light) SurfaceBase(Color picked, bool light)
-    {
-        var (hue, saturation, lightness) = ToHsl(picked);
-        // A colour that is already a usable ground is painted exactly as picked.
-        // The theme editor snaps its base picker to the ground it paints, so the
-        // colour it shows and saves is this one; damping it a second time would
-        // drift it away from what the picker says.
-        if (IsGround(picked, saturation, light)) return (picked, light);
-        var ground = FitLuminance(
-            hue,
-            Damp(saturation, 0, CustomSurfaceSaturationKnee, 0, CustomSurfaceMaxSaturation),
-            light
-                ? Damp(lightness, CustomLightMinLightness, CustomLightMaxLightness,
-                    CustomLightFloorLightness, CustomLightCeilingLightness)
-                : Damp(lightness, CustomDarkMinLightness, CustomDarkMaxLightness,
-                    CustomDarkFloorLightness, CustomDarkCeilingLightness),
-            picked.A,
-            light ? CustomLightMinLuminance : CustomDarkMinLuminance,
-            light ? CustomLightMaxLuminance : CustomDarkMaxLuminance);
-        return (ground, light);
-    }
+    private static (Color Ground, bool Light) SurfaceBase(Color picked) => (picked, CustomLight(picked));
 
     /// <summary>The accent a custom theme paints, lifted or deepened until it reads on its ground.</summary>
     public static Color CustomAccent(Color accent, Color ground) => AdjustAccent(accent, ground);
 
-    /// <summary>The colour a custom theme with this base and Light mode is painted in.</summary>
-    public static Color CustomGround(Color picked, bool light) => SurfaceBase(picked, light).Ground;
+    /// <summary>The colour a custom theme with this base is painted in.</summary>
+    public static Color CustomGround(Color picked) => SurfaceBase(picked).Ground;
+
+    /// <summary>True when black text reads better than white on this ground.</summary>
+    public static bool CustomLight(Color ground) => Contrast(Colors.Black, ground) > Contrast(Colors.White, ground);
 
     /// <summary>
     /// The window, panel, card and raised surfaces a custom theme on this ground
@@ -657,58 +577,6 @@ internal static class AppThemeService
     /// </summary>
     public static IReadOnlyList<Color> CustomSurfaces(Color ground, bool light) =>
         NamedTokens.Take(4).Select(token => RecolorCustom(token.Source, token.Role, ground, light)).ToArray();
-
-    // Inside the band SurfaceBase produces: saturation at most the ceiling and
-    // luminance inside the mode's range. The allowances absorb rounding the
-    // ground to 8-bit channels, which can step just past either edge.
-    private static bool IsGround(Color color, double saturation, bool light)
-    {
-        var luminance = RelativeLuminance(color);
-        // Sized by brute force over a 0..255 grid of picks in steps of 15, both
-        // modes: with these, every ground SurfaceBase returns paints back to
-        // itself. Near white a one-step rounding moves HSL saturation a lot,
-        // hence the wider saturation allowance in light mode.
-        var (minimum, maximum, tolerance, saturationAllowance) = light
-            ? (CustomLightMinLuminance, CustomLightMaxLuminance, 0.01, 0.10)
-            : (CustomDarkMinLuminance, CustomDarkMaxLuminance, 0.0015, 0.05);
-        return saturation <= CustomSurfaceMaxSaturation + saturationAllowance
-            && luminance >= minimum - tolerance && luminance <= maximum + tolerance;
-    }
-
-    // Luminance rises monotonically with lightness at a fixed hue and
-    // saturation, so a bisection on lightness lands on the band edge without
-    // touching the two channels that carry the pick's identity.
-    private static Color FitLuminance(double hue, double saturation, double lightness, byte alpha,
-        double minimum, double maximum)
-    {
-        var ground = FromHsl(hue, saturation, lightness, alpha);
-        var luminance = RelativeLuminance(ground);
-        if (luminance >= minimum && luminance <= maximum) return ground;
-
-        var target = luminance > maximum ? maximum : minimum;
-        var (low, high) = luminance > maximum ? (0d, lightness) : (lightness, 1d);
-        for (var step = 0; step < 24; step++)
-        {
-            var middle = (low + high) / 2;
-            if (RelativeLuminance(FromHsl(hue, saturation, middle, alpha)) > target) high = middle;
-            else low = middle;
-        }
-        return FromHsl(hue, saturation, (low + high) / 2, alpha);
-    }
-
-    // Identity inside [kneeLow, kneeHigh]; outside it the remaining travel is
-    // folded into [floor, kneeLow] and [kneeHigh, ceiling]. Monotonic and
-    // continuous at both knees, so dragging the spectrum never stalls and never
-    // jumps. The square root is what puts the response where the picks are: a
-    // linear fold spends the same output range on the last 40% of the axis as
-    // on the first 10% past the knee, and reads as no response at all.
-    private static double Damp(double value, double kneeLow, double kneeHigh, double floor, double ceiling)
-    {
-        if (value <= kneeLow)
-            return kneeLow <= 0 ? kneeLow : floor + Math.Sqrt(Math.Max(value, 0) / kneeLow) * (kneeLow - floor);
-        if (value <= kneeHigh) return value;
-        return kneeHigh >= 1 ? kneeHigh : kneeHigh + Math.Sqrt((Math.Min(value, 1) - kneeHigh) / (1 - kneeHigh)) * (ceiling - kneeHigh);
-    }
 
     private static Color RecolorCustom(Color source, ColorRole role, Color baseColor, bool light)
     {
@@ -726,17 +594,23 @@ internal static class AppThemeService
         // to sit close to the page, so forcing it to 3:1 against the page raised
         // its luminance fourfold and turned it pink.
         //
-        // No contrast floor replaces the one this drops. SurfaceBase clamps a
-        // custom ground to lightness <= 0.13 or >= 0.90 and the authored text
-        // sits between 0.69 and 0.93, so the authored colours clear AA on any
-        // ground the damping can produce. That clamp did not exist when the
-        // floor was written.
+        // A custom ground is the pick itself, so it can sit anywhere between
+        // black and white, and on a mid-tone ground the authored text no longer
+        // reads. Text alone - not fills - gets a contrast floor: as much as it
+        // had on the stock page, capped at AA, reached by moving it towards
+        // white or black and no further than needed.
         if (role != ColorRole.Surface)
         {
-            if (!light) return source;
-            var (textHue, textSaturation, textLightness) = ToHsl(source);
-            var scale = role == ColorRole.Text ? LightTextLightnessScale : LightSemanticLightnessScale;
-            return FromHsl(textHue, textSaturation, (1 - textLightness) * scale, source.A);
+            var themed = source;
+            if (light)
+            {
+                var (textHue, textSaturation, textLightness) = ToHsl(source);
+                var scale = role == ColorRole.Text ? LightTextLightnessScale : LightSemanticLightnessScale;
+                themed = FromHsl(textHue, textSaturation, (1 - textLightness) * scale, source.A);
+            }
+            return role == ColorRole.Text
+                ? EnsureTextContrast(themed, baseColor, Math.Min(TextContrastFloor, Contrast(source, NamedTokens[0].Source)), light)
+                : themed;
         }
 
         var (hue, saturation, baseLightness) = ToHsl(baseColor);
@@ -755,6 +629,24 @@ internal static class AppThemeService
     }
 
     private const double SurfaceSaturationFalloff = 2.5;
+    private const double TextContrastFloor = 4.5;
+
+    // Moves text along its own lightness, towards black on a light ground and
+    // white on a dark one, only as far as `required` asks.
+    private static Color EnsureTextContrast(Color text, Color ground, double required, bool light)
+    {
+        if (Contrast(text, ground) >= required) return text;
+        var (hue, saturation, lightness) = ToHsl(text);
+        double near = lightness, far = light ? 0 : 1;
+        if (Contrast(FromHsl(hue, saturation, far, text.A), ground) < required) return FromHsl(hue, saturation, far, text.A);
+        for (var step = 0; step < 20; step++)
+        {
+            var middle = (near + far) / 2;
+            if (Contrast(FromHsl(hue, saturation, middle, text.A), ground) >= required) far = middle;
+            else near = middle;
+        }
+        return FromHsl(hue, saturation, far, text.A);
+    }
 
     // Preferred floor, and the floor that is actually enforced. A fill wants 3:1
     // against the page, but some hues cannot reach it and stay themselves:
@@ -825,6 +717,17 @@ internal static class AppThemeService
             : (value - lightness) / Math.Min(lightness, 1 - lightness);
         return FromHsl(hue, hslSaturation, lightness, alpha);
     }
+
+    // The accent's hue and most of its chroma, at the lightness the plain mix
+    // `amount` of the way from the accent to the ground would have.
+    private static Color AccentTint(Color accent, Color ground, double amount)
+    {
+        var (hue, saturation, _) = ToHsl(accent);
+        var (_, _, lightness) = ToHsl(Blend(accent, ground, amount));
+        return FromHsl(hue, saturation * AccentTintSaturation, lightness, accent.A);
+    }
+
+    private const double AccentTintSaturation = 0.65;
 
     private static Color BestForeground(Color background) =>
         Contrast(Colors.Black, background) >= Contrast(Colors.White, background) ? Colors.Black : Colors.White;
