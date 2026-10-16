@@ -729,8 +729,18 @@ internal static class AppThemeService
 
     private const double AccentTintSaturation = 0.65;
 
+    // White unless the fill is pale. The WCAG ratio alone flips to black far
+    // too early: it puts the crossover at luminance 0.18, so a saturated green
+    // like #00D08A - nowhere near white - got black text. Buttons keep white
+    // text the way Discord's do, and only an accent light enough to read as
+    // pastel or white gets black.
     private static Color BestForeground(Color background) =>
-        Contrast(Colors.Black, background) >= Contrast(Colors.White, background) ? Colors.Black : Colors.White;
+        RelativeLuminance(background) > AccentForegroundBlackAbove ? Colors.Black : Colors.White;
+
+    private const double AccentForegroundBlackAbove = 0.6;
+
+    /// <summary>The text colour drawn on an accent fill.</summary>
+    public static Color AccentForeground(Color accent) => BestForeground(accent);
 
     /// <summary>The WCAG contrast ratio between two colours, 1 to 21.</summary>
     public static double ContrastRatio(Color first, Color second) => Contrast(first, second);

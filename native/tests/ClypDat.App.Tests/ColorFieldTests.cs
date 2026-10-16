@@ -154,6 +154,18 @@ public sealed class ColorFieldTests
         Assert.True(AppThemeService.ContrastRatio(accent, ground) >= 2);
     }
 
+    // Text on an accent stays white until the accent is pale enough to read
+    // as pastel or white.
+    [Theory]
+    [InlineData("#00D08A", "#FFFFFF")]
+    [InlineData("#5864E8", "#FFFFFF")]
+    [InlineData("#D85E61", "#FFFFFF")]
+    [InlineData("#FFFFFF", "#000000")]
+    [InlineData("#FFF59D", "#000000")]
+    [InlineData("#000000", "#FFFFFF")]
+    public void AccentTextIsWhiteUnlessTheAccentIsPale(string accent, string text)
+        => Assert.Equal(Color.Parse(text), AppThemeService.AccentForeground(Color.Parse(accent)));
+
     private static double Luminance(Color color)
     {
         static double Linear(byte channel)
