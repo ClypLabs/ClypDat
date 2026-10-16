@@ -12,20 +12,59 @@ using DxgiFormat = Vortice.DXGI.Format;
 
 namespace ClypDat.App.Views;
 
+// One animated value: where it starts, where it ends, how long it takes and
+// how it gets there. A still value is a zero-length track.
+internal readonly record struct ClipOverlayTrack(double From, double To, double DurationSeconds, ClipOverlayEasing Easing)
+{
+    public static ClipOverlayTrack Still(double value) => new(value, value, 0, ClipOverlayEasing.Out);
+
+    public double Sample(double seconds)
+        => ClipOverlayAnimationCurve.Build(From, To, DurationSeconds, Easing).Sample(Math.Clamp(seconds, 0, DurationSeconds));
+
+    // The same motion re-expressed through origin + scale * value. Affine, so
+    // the easing - and therefore the timing - is untouched.
+    public ClipOverlayTrack Map(double origin, double scale) => this with { From = origin + scale * From, To = origin + scale * To };
+}
+
+internal enum ClipOverlayEasing { Out, In, Smooth }
+
 // What one motion asks the presenter for: where the window sits for the whole
-// notification, how big the card inside it is, and the opacity/offset pair the
-// card travels between. Offset is affine in opacity, so both curves share one
-// easing and cannot drift apart.
+// notification, how big the card inside it is, and the tracks it animates.
+// The card slides between off-the-edge (progress 0) and at rest (progress 1);
+// the text on it fades and trails on its own, so it can arrive after the card
+// and leave before it.
 internal readonly record struct ClipOverlayMotionPlan(
     int WindowX, int WindowY, int WindowWidth, int WindowHeight,
     int CardWidth, int CardHeight,
-    double DurationSeconds, bool EaseOut,
-    double FromOpacity, double ToOpacity,
-    double FromOffsetX, double ToOffsetX);
+    ClipOverlayTrack Progress, ClipOverlayTrack CardOffsetX,
+    ClipOverlayTrack ContentOpacity, ClipOverlayTrack ContentOffsetX);
+
+// The timing of the slide. Entry decelerates onto the screen and exit
+// accelerates off it, as the badge always did. The text fades in over the
+// whole entry when the card is arriving from off the edge, and over a short
+// beat when only the text changes on a card already at rest; it fades out in
+// the first half of the exit so the card leaves empty.
+internal static class ClipOverlayMotion
+{
+    public const double EnterMs = 340, ExitMs = 260;
+    private const double ContentRefreshMs = 200, ContentExitMs = 130;
+
+    public static ClipOverlayTrack Progress(bool entering, double from)
+        => entering
+            ? new ClipOverlayTrack(from, 1, EnterMs / 1000, ClipOverlayEasing.Out)
+            : new ClipOverlayTrack(from, 0, ExitMs / 1000, ClipOverlayEasing.In);
+
+    public static ClipOverlayTrack Content(bool entering, double fromProgress, double from)
+    {
+        if (!entering) return new ClipOverlayTrack(from, 0, ContentExitMs / 1000, ClipOverlayEasing.Out);
+        var travel = Math.Clamp(1 - fromProgress, 0, 1);
+        return new ClipOverlayTrack(from, 1, (ContentRefreshMs + (EnterMs - ContentRefreshMs) * travel) / 1000, ClipOverlayEasing.Smooth);
+    }
+}
 
 // DirectComposition animates a value by evaluating a polynomial in seconds
-// since the animation started. These are the two easings the overlay has always
-// used, expressed as those coefficients.
+// since the animation started. These are the easings the overlay uses,
+// expressed as those coefficients.
 //
 // A sign error here does not throw - it leaves the badge invisible or parked
 // off its resting position, with nothing in the log. Hence the pure helper and
@@ -38,16 +77,20 @@ internal static class ClipOverlayAnimationCurve
             => Constant + Linear * seconds + Quadratic * seconds * seconds + Cubed * seconds * seconds * seconds;
     }
 
-    // easeOut: from + delta * (3u - 3u^2 + u^3)  -- matches 1 - (1-u)^3
-    // easeIn:  from + delta * u^3
-    public static Cubic Build(double from, double to, double durationSeconds, bool easeOut)
+    // Out:    from + delta * (3u - 3u^2 + u^3)  -- matches 1 - (1-u)^3
+    // In:     from + delta * u^3
+    // Smooth: from + delta * (3u^2 - 2u^3)      -- smoothstep: slow start and end
+    public static Cubic Build(double from, double to, double durationSeconds, ClipOverlayEasing easing)
     {
         if (durationSeconds <= 0) return new Cubic((float)to, 0, 0, 0);
         var delta = to - from;
         var d = durationSeconds;
-        return easeOut
-            ? new Cubic((float)from, (float)(3 * delta / d), (float)(-3 * delta / (d * d)), (float)(delta / (d * d * d)))
-            : new Cubic((float)from, 0, 0, (float)(delta / (d * d * d)));
+        return easing switch
+        {
+            ClipOverlayEasing.Out => new Cubic((float)from, (float)(3 * delta / d), (float)(-3 * delta / (d * d)), (float)(delta / (d * d * d))),
+            ClipOverlayEasing.Smooth => new Cubic((float)from, 0, (float)(3 * delta / (d * d)), (float)(-2 * delta / (d * d * d))),
+            _ => new Cubic((float)from, 0, 0, (float)(delta / (d * d * d)))
+        };
     }
 }
 
@@ -148,7 +191,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private const uint WmAppPublish = 0x8001, WmAppDismiss = 0x8002, WmAppLoseWindow = 0x8003, WmClose = 0x0010, WmDestroy = 0x0002, WmTimer = 0x0113;
     private const int WsExTopmost = 0x00000008, WsExLayered = 0x00080000, WsExTransparent = 0x20, WsExToolWindow = 0x80, WsExNoActivate = 0x08000000, WsExNoRedirectionBitmap = 0x00200000, GwlExStyle = -20;
     private const uint WsPopup = 0x80000000, WdaExcludeFromCapture = 0x11, SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010, SwpShowWindow = 0x0040, SwpFrameChanged = 0x0020;
-    private const double EnterMs = 220, ExitMs = 180;
+    private const double EnterMs = ClipOverlayMotion.EnterMs, ExitMs = ClipOverlayMotion.ExitMs;
     // 15ms only for the layered fallback, which has to draw every frame itself.
     // The compositor path needs a tick solely to stay above a fullscreen game.
     private const uint TickMs = 15, ReassertMs = 250;
@@ -182,7 +225,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     private int _width, _height, _publishCount, _renderCount, _verifyStep;
     private Avalonia.PixelRect _expectedWindow;
     private Motion _motion;
-    private double _motionStartOpacity;
+    private double _motionStartProgress, _motionStartContent;
     private Action<ClipOverlayPresentationResult>? _presentationCompletion;
     private MmcssScope _mmcss;
     private nint _reorderHook;
@@ -357,7 +400,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
             _motion = Motion.Still;
             SetAffinity();
             ArmTick();
-            if (!Present(1, true)) { CompletePresentation(false, "present-failed-after-window-recreate"); Hide(); }
+            if (!Present(1, 1, true)) { CompletePresentation(false, "present-failed-after-window-recreate"); Hide(); }
             else if (_presentationCompletion is not null) { _verifying = false; KillTimer(_window, VerifyTimerId); BeginVerification(); }
         }
         bool pending; lock (_gate) pending = _pending is not null;
@@ -443,7 +486,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         if (_presentationCompletion is not null && _current is { } replaced)
             CompletePresentation(false, sameWorkflow ? "superseded-by-stage" : "superseded-before-verification");
         // Read before any of the motion state below is overwritten.
-        var carried = sameWorkflow ? CurrentOpacity() : 0;
+        var carried = sameWorkflow ? CurrentProgress() : 0;
         if (!string.IsNullOrEmpty(_lastMonitor) && !string.Equals(_lastMonitor, update.Presentation.Event.Target.DeviceName, StringComparison.OrdinalIgnoreCase))
             _counters.Retargeted();
         _current = update.Presentation;
@@ -472,36 +515,38 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         bool presented;
         if (Animating)
         {
-            // A frame swap does not disturb a running animation, so a repeat of
-            // the workflow already fading in just changes what is being faded.
-            var restart = !sameWorkflow || _motion == Motion.Exiting;
-            if (restart)
-            {
-                _motionStartOpacity = carried;
-                _motion = Motion.Entering;
-                _motionStarted = Stopwatch.GetTimestamp();
-                KillTimer(_window, HideTimerId);
-            }
-            presented = Animate(restart, frameChanged: true);
+            // Every new card restarts the entry from wherever the card is: a
+            // different clip slides on from the edge, a stage of the same one
+            // keeps its position (or turns back from leaving) while the new
+            // text fades in on it. The text is never swapped in place at full
+            // opacity, and upload plus motion land in one commit.
+            _motionStartProgress = carried;
+            _motionStartContent = 0;
+            _motion = Motion.Entering;
+            _motionStarted = Stopwatch.GetTimestamp();
+            KillTimer(_window, HideTimerId);
+            presented = Animate(PlanForMotion(), applyAnimation: true, frameChanged: true);
             if (presented) BeginVerification();
         }
         else if (!sameWorkflow)
         {
             _motion = Motion.Entering;
-            _motionStartOpacity = 0;
+            _motionStartProgress = 0;
+            _motionStartContent = 0;
             _motionStarted = Stopwatch.GetTimestamp();
-            presented = Present(0, true);
+            presented = Present(0, 0, true);
         }
         else
         {
             if (_motion == Motion.Exiting)
             {
                 _motion = Motion.Entering;
-                _motionStartOpacity = carried;
+                _motionStartProgress = carried;
+                _motionStartContent = 0;
                 _motionStarted = Stopwatch.GetTimestamp();
                 KillTimer(_window, HideTimerId);
             }
-            presented = Present(carried, true);
+            presented = Present(carried, CurrentContent(), true);
             if (presented && carried > 0) BeginVerification();
         }
         Interlocked.Increment(ref _publishCount);
@@ -534,11 +579,12 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         if (_presentationCompletion is not null) CompletePresentation(false, "dismissed-before-verification");
         KillTimer(_window, VerifyTimerId);
         _verifying = false;
-        _motionStartOpacity = CurrentOpacity();
+        _motionStartProgress = CurrentProgress();
+        _motionStartContent = CurrentContent();
         _motion = Motion.Exiting;
         _motionStarted = Stopwatch.GetTimestamp();
         if (!Animating) return;
-        Animate(applyAnimation: true, frameChanged: false);
+        Animate(PlanForMotion(), applyAnimation: true, frameChanged: false);
         // One wake to tear the window down once the compositor has finished.
         SetTimer(_window, HideTimerId, (uint)ExitMs + 40, 0);
     }
@@ -582,32 +628,31 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         var elapsed = Stopwatch.GetElapsedTime(_motionStarted).TotalMilliseconds;
         if (_motion == Motion.Entering)
         {
-            var progress = _motionStartOpacity + (1 - _motionStartOpacity) * EaseOut(Math.Min(1, elapsed / EnterMs));
-            if (Present(progress, false) && progress > 0) BeginVerification();
-            if (elapsed >= EnterMs) { _motion = Motion.Still; if (Present(1, false)) BeginVerification(); }
+            var progress = CurrentProgress();
+            if (Present(progress, CurrentContent(), false) && progress > 0) BeginVerification();
+            if (elapsed >= EnterMs) { _motion = Motion.Still; if (Present(1, 1, false)) BeginVerification(); }
         }
         else if (_motion == Motion.Exiting)
         {
-            Present(_motionStartOpacity * (1 - EaseIn(Math.Min(1, elapsed / ExitMs))), false);
+            Present(CurrentProgress(), CurrentContent(), false);
             if (elapsed >= ExitMs) Hide();
         }
-        else if (Present(1, false)) BeginVerification(); // Reassert topmost during full dwell.
+        else if (Present(1, 1, false)) BeginVerification(); // Reassert topmost during full dwell.
     }
 
-    // The compositor owns the opacity once an animation is committed, so it is
-    // computed rather than observed. Only the republish path needs it, to pick
-    // up a fade wherever it had got to.
-    private double CurrentOpacity()
+    // The tracks of the motion in progress, from when and where it started.
+    private (ClipOverlayTrack Progress, ClipOverlayTrack Content) Tracks() => _motion switch
     {
-        if (!_visible) return 0;
-        var elapsed = Stopwatch.GetElapsedTime(_motionStarted).TotalMilliseconds;
-        return _motion switch
-        {
-            Motion.Entering => _motionStartOpacity + (1 - _motionStartOpacity) * EaseOut(Math.Min(1, elapsed / EnterMs)),
-            Motion.Exiting => _motionStartOpacity * (1 - EaseIn(Math.Min(1, elapsed / ExitMs))),
-            _ => 1
-        };
-    }
+        Motion.Entering => (ClipOverlayMotion.Progress(true, _motionStartProgress), ClipOverlayMotion.Content(true, _motionStartProgress, _motionStartContent)),
+        Motion.Exiting => (ClipOverlayMotion.Progress(false, _motionStartProgress), ClipOverlayMotion.Content(false, _motionStartProgress, _motionStartContent)),
+        _ => (ClipOverlayTrack.Still(1), ClipOverlayTrack.Still(1))
+    };
+
+    // The compositor owns the motion once an animation is committed, so where
+    // the card and its text are is computed rather than observed. A republish
+    // or dismissal needs it to pick the motion up wherever it had got to.
+    private double CurrentProgress() => _visible ? Tracks().Progress.Sample(Stopwatch.GetElapsedTime(_motionStarted).TotalSeconds) : 0;
+    private double CurrentContent() => _visible ? Tracks().Content.Sample(Stopwatch.GetElapsedTime(_motionStarted).TotalSeconds) : 0;
 
     private void Hide()
     {
@@ -620,7 +665,8 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         _visible = false;
         _verifying = false;
         _motion = Motion.Still;
-        _motionStartOpacity = 0;
+        _motionStartProgress = 0;
+        _motionStartContent = 0;
         _current = null;
         _frame = null;
     }
@@ -690,24 +736,24 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         {
             _recovery.Add("reassert");
             ReassertTopmost();
-            presented = Present(1, true);
+            presented = Present(1, 1, true);
         }
         else if (step == 1 && _presenter is { IsLayered: false })
         {
             _recovery.Add("rebuild");
-            presented = RebuildPresenter() && Present(1, true);
+            presented = RebuildPresenter() && Present(1, 1, true);
         }
         else if (_presenter is { IsLayered: false })
         {
             _recovery.Add("layered");
             UseLayeredPresenter();
-            presented = Present(1, true);
+            presented = Present(1, 1, true);
         }
         else
         {
             _recovery.Add("reassert");
             ReassertTopmost();
-            presented = Present(1, true);
+            presented = Present(1, 1, true);
         }
         _motion = Motion.Still;
         if (presented) SetTimer(_window, VerifyTimerId, _verifyDelayMs, 0);
@@ -722,7 +768,7 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         var rebuilt = !_gpuRecoveryAttempted && RebuildPresenter();
         _gpuRecoveryAttempted = true;
         if (!rebuilt) UseLayeredPresenter();
-        if (!Present(1, true))
+        if (!Present(1, 1, true))
         {
             AppLog.Info($"Clip overlay could not re-present after {reason}: id={_current?.Event.WorkflowId}.");
             if (_presentationCompletion is not null) CompletePresentation(false, $"{reason}-unrecoverable");
@@ -765,26 +811,37 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         completion(new ClipOverlayPresentationResult(_current.Generation, presented, reason, report));
     }
 
-    private ClipOverlayMotionPlan BuildPlan()
+    private ClipOverlayMotionPlan PlanForMotion()
     {
-        var target = _current!.Event.Target;
-        var layout = ClipOverlayLayout.Frame(target, _current.Event.Placement, _width, _height);
-        var exiting = _motion == Motion.Exiting;
-        var from = _motionStartOpacity;
-        var to = exiting ? 0d : 1d;
-        var duration = (exiting ? ExitMs : EnterMs) / 1000.0;
-        // Offset is affine in opacity: hidden at 0, flush against the edge at 1.
-        double Offset(double opacity) => layout.HiddenOffsetX + (layout.RestOffsetX - layout.HiddenOffsetX) * opacity;
-        return new ClipOverlayMotionPlan(
-            layout.Window.X, layout.Window.Y, layout.Window.Width, layout.Window.Height,
-            _width, _height, duration, !exiting, from, to, Offset(from), Offset(to));
+        var (progress, content) = Tracks();
+        return Plan(progress, content);
     }
 
-    private bool Animate(bool applyAnimation, bool frameChanged)
+    // Offsets are affine in the tracks they follow: the card is one card width
+    // past the edge at progress 0 and flush against it at 1; the text trails
+    // by the parallax at opacity 0 and sits in place at 1.
+    private ClipOverlayMotionPlan Plan(ClipOverlayTrack progress, ClipOverlayTrack content)
+    {
+        var layout = ClipOverlayLayout.Frame(_current!.Event.Target, _current.Event.Placement, _width, _height);
+        return new ClipOverlayMotionPlan(
+            layout.Window.X, layout.Window.Y, layout.Window.Width, layout.Window.Height, _width, _height,
+            progress, progress.Map(layout.HiddenOffsetX, layout.RestOffsetX - layout.HiddenOffsetX),
+            content, content.Map(layout.ParallaxX, -layout.ParallaxX));
+    }
+
+    // A compositor presenter keeps the window on the card's resting rectangle
+    // and clips the card to it; the layered one shrinks the window itself to
+    // the part of the card that is on screen.
+    private Avalonia.PixelRect ExpectedWindow(in ClipOverlayMotionPlan plan)
+    {
+        var window = new Avalonia.PixelRect(plan.WindowX, plan.WindowY, plan.WindowWidth, plan.WindowHeight);
+        return Animating ? window : ClipOverlayLayout.VisibleSlice(window, plan.CardOffsetX.To).Window;
+    }
+
+    private bool Animate(ClipOverlayMotionPlan plan, bool applyAnimation, bool frameChanged)
     {
         if (_current is null || _frame is not { } frame || _presenter is null) return false;
-        var plan = BuildPlan();
-        _expectedWindow = new Avalonia.PixelRect(plan.WindowX, plan.WindowY, plan.WindowWidth, plan.WindowHeight);
+        _expectedWindow = ExpectedWindow(plan);
         try
         {
             _presenter.Animate(frame, in plan, applyAnimation, frameChanged);
@@ -792,26 +849,13 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         }
         catch (Exception error)
         {
-            return RecoverPresenter(error, () => _presenter!.Animate(frame, in plan, true, true));
+            return RecoverPresenter(error, () => { _expectedWindow = ExpectedWindow(plan); _presenter!.Animate(frame, in plan, true, true); });
         }
     }
 
-    private bool Present(double progress, bool frameChanged)
-    {
-        if (_current is null || _frame is not { } frame || _presenter is null) return false;
-        var position = ClipOverlayLayout.AnimatedPosition(_current.Event.Target, _current.Event.Placement, _width, _height, progress);
-        var destination = new PointNative(position.X, position.Y);
-        _expectedWindow = new Avalonia.PixelRect(position.X, position.Y, _width, _height);
-        try
-        {
-            _presenter.Present(frame, destination, _width, _height, progress, frameChanged);
-            return true;
-        }
-        catch (Exception error)
-        {
-            return RecoverPresenter(error, () => _presenter!.Present(frame, destination, _width, _height, progress, true));
-        }
-    }
+    // The card held still at one point of the slide.
+    private bool Present(double progress, double content, bool frameChanged)
+        => _current is not null && Animate(Plan(ClipOverlayTrack.Still(progress), ClipOverlayTrack.Still(content)), applyAnimation: true, frameChanged);
 
     private delegate void Retry();
 
@@ -842,10 +886,9 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
                 // the tick loop that ArmTick just restored.
                 try
                 {
-                    var opacity = CurrentOpacity();
-                    var position = ClipOverlayLayout.AnimatedPosition(_current!.Event.Target, _current.Event.Placement, _width, _height, opacity);
-                    _expectedWindow = new Avalonia.PixelRect(position.X, position.Y, _width, _height);
-                    _presenter!.Present(_frame!, ToPoint(position), _width, _height, opacity, true);
+                    var plan = Plan(ClipOverlayTrack.Still(CurrentProgress()), ClipOverlayTrack.Still(CurrentContent()));
+                    _expectedWindow = ExpectedWindow(plan);
+                    _presenter!.Animate(_frame!, in plan, true, true);
                     return true;
                 }
                 catch (Exception layeredError) { error = layeredError; }
@@ -856,13 +899,9 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         return false;
     }
 
-    private static PointNative ToPoint(Avalonia.PixelPoint point) => new(point.X, point.Y);
-
     private static double Elapsed(long fromTicks, long toTicks)
         => fromTicks <= 0 || toTicks <= fromTicks ? 0 : (toTicks - fromTicks) * 1000.0 / Stopwatch.Frequency;
 
-    private static double EaseOut(double value) => 1 - Math.Pow(1 - value, 3);
-    private static double EaseIn(double value) => value * value * value;
     private static string ClassName => "ClypDat.NativeClipOverlay";
     private static void RegisterWindowClass()
     {
@@ -916,13 +955,13 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
     {
         string Name { get; }
         // True when the presenter can be handed a whole motion and run it
-        // without the caller waking up per frame.
+        // without the caller waking up per frame. A presenter that cannot is
+        // handed still plans, one per tick, and shows each plan's end values.
         bool AnimatesItself { get; }
         // The last-resort presenter, which has nothing to fall back to.
         bool IsLayered => false;
         // False once the presenter's device has been lost.
         bool Healthy => true;
-        void Present(ClipOverlayFrame frame, PointNative destination, int width, int height, double opacity, bool frameChanged);
         void Animate(ClipOverlayFrame frame, in ClipOverlayMotionPlan plan, bool applyAnimation, bool frameChanged);
         void ReassertTopmost();
         void Hide();
@@ -930,8 +969,19 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         string? Verify(in ClipOverlayVerification check);
     }
 
+    // The card is two visuals: the body (fill, accent rail, border) and, as its
+    // child, the content (mark, text, hotkey chips). The body carries the
+    // slide; the content carries its own fade and trailing offset on top of
+    // it. The window is the card's resting rectangle and DirectComposition
+    // draws nothing outside it, so the body sliding past the window's flush
+    // edge reads as the card going off the side of the screen - without the
+    // window ever reaching onto a neighbouring monitor.
     private sealed class DirectCompositionClipOverlayPresenter : INativeClipOverlayPresenter
     {
+        // Where the card is parked while the window is hidden: far enough
+        // outside any window that whatever it held is never shown again when
+        // the window next appears, before the new card's commit lands.
+        private const float ParkedOffsetX = 100_000f;
         private readonly nint _window;
         private readonly ID3D11Device _device;
         private readonly ID3D11DeviceContext _context;
@@ -939,10 +989,10 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         private readonly IDXGIFactory2 _factory;
         private readonly IDCompositionDevice _composition;
         private readonly IDCompositionTarget _target;
-        private readonly IDCompositionVisual _visual;
-        private readonly IDCompositionEffectGroup _effect;
-        private IDXGISwapChain1? _swapChain;
-        private IDXGISwapChain3? _swapChain3;
+        private readonly IDCompositionVisual _visual, _contentVisual;
+        private readonly IDCompositionEffectGroup _contentEffect;
+        private SwapChainLayer? _body, _content;
+        private byte[]? _blank;
         private int _width, _height, _windowX, _windowY, _windowWidth, _windowHeight;
         private long _committedTicks;
         private bool _uploaded;
@@ -961,10 +1011,13 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
             _composition = DComp.DCompositionCreateDevice<IDCompositionDevice>(_dxgiDevice);
             _composition.CreateTargetForHwnd(window, true, out _target).CheckError();
             _composition.CreateVisual(out _visual).CheckError();
+            _composition.CreateVisual(out _contentVisual).CheckError();
             // Opacity lives on an effect group, not on the visual itself.
-            _composition.CreateEffectGroup(out _effect).CheckError();
-            _effect.SetOpacity(0f).CheckError();
-            _visual.SetEffect(_effect).CheckError();
+            _composition.CreateEffectGroup(out _contentEffect).CheckError();
+            _contentEffect.SetOpacity(0f).CheckError();
+            _contentVisual.SetEffect(_contentEffect).CheckError();
+            _visual.AddVisual(_contentVisual, true, null).CheckError();
+            _visual.SetOffsetX(ParkedOffsetX).CheckError();
             _target.SetRoot(_visual).CheckError();
             _composition.Commit().CheckError();
         }
@@ -979,21 +1032,17 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
             }
         }
 
-        public void Present(ClipOverlayFrame frame, PointNative destination, int width, int height, double opacity, bool frameChanged)
-            => Animate(frame, new ClipOverlayMotionPlan(destination.X, destination.Y, width, height, width, height,
-                0, false, opacity, opacity, 0, 0), applyAnimation: true, frameChanged);
-
-        public unsafe void Animate(ClipOverlayFrame frame, in ClipOverlayMotionPlan plan, bool applyAnimation, bool frameChanged)
+        public void Animate(ClipOverlayFrame frame, in ClipOverlayMotionPlan plan, bool applyAnimation, bool frameChanged)
         {
             MoveWindow(plan);
-            EnsureSwapChain(plan.CardWidth, plan.CardHeight);
+            EnsureSwapChains(plan.CardWidth, plan.CardHeight);
             if (frameChanged || !_uploaded)
             {
-                using var texture = _swapChain!.GetBuffer<ID3D11Texture2D>(_swapChain3!.CurrentBackBufferIndex);
-                // Uploaded once, unfaded. The fade is the compositor's job now,
-                // so the per-tick CPU pass over every pixel is gone.
-                fixed (byte* source = frame.Pixels) _context.UpdateSubresource(texture, 0, null, (nint)source, (uint)(plan.CardWidth * 4), 0);
-                _swapChain.Present(0, PresentFlags.None).CheckError();
+                // Uploaded once per card. Motion and fade are the compositor's
+                // job, so nothing here runs per frame.
+                var stride = plan.CardWidth * 4;
+                _body!.Upload(_context, frame.Layers?.Body ?? frame.Pixels, stride);
+                _content!.Upload(_context, frame.Layers?.Content ?? Blank(frame.Pixels.Length), stride);
                 _uploaded = true;
             }
             if (applyAnimation) ApplyMotion(plan);
@@ -1011,6 +1060,12 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         {
             ShowWindow(_window, 0);
             _uploaded = false;
+            try
+            {
+                _visual.SetOffsetX(ParkedOffsetX).CheckError();
+                _composition.Commit().CheckError();
+            }
+            catch (SharpGen.Runtime.SharpGenException error) { AppLog.Debug($"Clip overlay could not park the hidden card: {error.Message}"); }
         }
 
         // On screen as Win32 sees it, and DWM has composed a frame since the
@@ -1038,50 +1093,72 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
 
         private void ApplyMotion(in ClipOverlayMotionPlan plan)
         {
-            if (plan.DurationSeconds <= 0)
-            {
-                _effect.SetOpacity((float)plan.ToOpacity).CheckError();
-                _visual.SetOffsetX((float)plan.ToOffsetX).CheckError();
-                return;
-            }
-            Apply(plan.FromOpacity, plan.ToOpacity, plan, animation => _effect.SetOpacity(animation).CheckError(),
-                value => _effect.SetOpacity((float)value).CheckError());
-            Apply(plan.FromOffsetX, plan.ToOffsetX, plan, animation => _visual.SetOffsetX(animation).CheckError(),
-                value => _visual.SetOffsetX((float)value).CheckError());
+            Apply(plan.CardOffsetX, animation => _visual.SetOffsetX(animation).CheckError(), value => _visual.SetOffsetX(value).CheckError());
+            Apply(plan.ContentOpacity, animation => _contentEffect.SetOpacity(animation).CheckError(), value => _contentEffect.SetOpacity(value).CheckError());
+            Apply(plan.ContentOffsetX, animation => _contentVisual.SetOffsetX(animation).CheckError(), value => _contentVisual.SetOffsetX(value).CheckError());
         }
 
-        private void Apply(double from, double to, in ClipOverlayMotionPlan plan, Action<IDCompositionAnimation> animate, Action<double> set)
+        private void Apply(in ClipOverlayTrack track, Action<IDCompositionAnimation> animate, Action<float> set)
         {
-            if (Math.Abs(to - from) < 0.0005) { set(to); return; }
+            if (track.DurationSeconds <= 0 || Math.Abs(track.To - track.From) < 0.0005) { set((float)track.To); return; }
             _composition.CreateAnimation(out var animation).CheckError();
             using (animation)
             {
-                var curve = ClipOverlayAnimationCurve.Build(from, to, plan.DurationSeconds, plan.EaseOut);
+                var curve = ClipOverlayAnimationCurve.Build(track.From, track.To, track.DurationSeconds, track.Easing);
                 animation.AddCubic(0, curve.Constant, curve.Linear, curve.Quadratic, curve.Cubed).CheckError();
-                animation.End(plan.DurationSeconds, (float)to).CheckError();
+                animation.End(track.DurationSeconds, (float)track.To).CheckError();
                 animate(animation);
             }
         }
 
-        private void EnsureSwapChain(int width, int height)
+        private byte[] Blank(int length) => _blank is { } blank && blank.Length == length ? blank : _blank = new byte[length];
+
+        private void EnsureSwapChains(int width, int height)
         {
-            if (_swapChain is not null && _width == width && _height == height) return;
+            if (_body is not null && _width == width && _height == height) return;
             _visual.SetContent(null).CheckError();
-            _swapChain3?.Dispose();
-            _swapChain3 = null;
-            _swapChain?.Dispose();
-            var description = new SwapChainDescription1((uint)width, (uint)height, DxgiFormat.B8G8R8A8_UNorm, false, Usage.RenderTargetOutput, 2, Scaling.Stretch, SwapEffect.FlipSequential, AlphaMode.Premultiplied, SwapChainFlags.None);
-            _swapChain = _factory.CreateSwapChainForComposition(_device, description);
-            _swapChain3 = _swapChain.QueryInterface<IDXGISwapChain3>();
-            _visual.SetContent(_swapChain).CheckError();
+            _contentVisual.SetContent(null).CheckError();
+            _body?.Dispose();
+            _content?.Dispose();
+            _body = new SwapChainLayer(_factory, _device, width, height);
+            _content = new SwapChainLayer(_factory, _device, width, height);
+            _visual.SetContent(_body.Chain).CheckError();
+            _contentVisual.SetContent(_content.Chain).CheckError();
             _width = width; _height = height;
             _uploaded = false;
         }
         public void Dispose()
         {
-            _visual.SetContent(null); _swapChain3?.Dispose(); _swapChain?.Dispose(); _effect.Dispose(); _visual.Dispose(); _target.Dispose(); _composition.Dispose(); _factory.Dispose(); _dxgiDevice.Dispose(); _context.Dispose(); _device.Dispose();
+            _visual.SetContent(null); _contentVisual.SetContent(null); _body?.Dispose(); _content?.Dispose();
+            _contentEffect.Dispose(); _contentVisual.Dispose(); _visual.Dispose(); _target.Dispose(); _composition.Dispose(); _factory.Dispose(); _dxgiDevice.Dispose(); _context.Dispose(); _device.Dispose();
+        }
+
+        private sealed unsafe class SwapChainLayer : IDisposable
+        {
+            private readonly IDXGISwapChain3 _chain3;
+            public SwapChainLayer(IDXGIFactory2 factory, ID3D11Device device, int width, int height)
+            {
+                var description = new SwapChainDescription1((uint)width, (uint)height, DxgiFormat.B8G8R8A8_UNorm, false, Usage.RenderTargetOutput, 2, Scaling.Stretch, SwapEffect.FlipSequential, AlphaMode.Premultiplied, SwapChainFlags.None);
+                Chain = factory.CreateSwapChainForComposition(device, description);
+                _chain3 = Chain.QueryInterface<IDXGISwapChain3>();
+            }
+            public IDXGISwapChain1 Chain { get; }
+            public void Upload(ID3D11DeviceContext context, byte[] pixels, int stride)
+            {
+                using var texture = Chain.GetBuffer<ID3D11Texture2D>(_chain3.CurrentBackBufferIndex);
+                fixed (byte* source = pixels) context.UpdateSubresource(texture, 0, null, (nint)source, (uint)stride, 0);
+                Chain.Present(0, PresentFlags.None).CheckError();
+            }
+            public void Dispose() { _chain3.Dispose(); Chain.Dispose(); }
         }
     }
+
+    // UpdateLayeredWindow can only move and size a whole window, so this
+    // presenter shows the slide by shrinking the window to the part of the
+    // card that is on screen and blitting that part from the card. The window
+    // never leaves the card's resting rectangle, so it never reaches another
+    // monitor either. There is no separate text fade here; the card arrives
+    // and leaves whole.
     private sealed class LayeredClipOverlayPresenter : INativeClipOverlayPresenter
     {
         private const uint UlwAlpha = 2;
@@ -1091,21 +1168,21 @@ internal sealed unsafe class NativeClipOverlaySurface : IClipOverlaySurface
         public LayeredClipOverlayPresenter(nint window) => _window = window;
         public string Name => "layered";
         public bool IsLayered => true;
-        // UpdateLayeredWindow has to be called for every frame of a fade, so
+        // UpdateLayeredWindow has to be called for every frame of a slide, so
         // this presenter stays on the tick loop.
         public bool AnimatesItself => false;
-        public void Present(ClipOverlayFrame frame, PointNative destination, int width, int height, double opacity, bool frameChanged)
+        public void Animate(ClipOverlayFrame frame, in ClipOverlayMotionPlan plan, bool applyAnimation, bool frameChanged)
         {
-            if (frameChanged || width != _width || height != _height) CreateBitmap(frame);
-            var source = new PointNative(0, 0); var size = new SizeNative(width, height);
-            var blend = new BlendFunction(0, 0, (byte)Math.Clamp((int)Math.Round(255 * opacity), 0, 255), 1);
+            if (frameChanged || frame.Width != _width || frame.Height != _height) CreateBitmap(frame);
+            var slice = ClipOverlayLayout.VisibleSlice(new Avalonia.PixelRect(plan.WindowX, plan.WindowY, plan.WindowWidth, plan.WindowHeight), plan.CardOffsetX.To);
+            var destination = new PointNative(slice.Window.X, slice.Window.Y);
+            var source = new PointNative(slice.SourceX, 0);
+            var size = new SizeNative(slice.Window.Width, slice.Window.Height);
+            var blend = new BlendFunction(0, 0, (byte)(slice.Empty ? 0 : 255), 1);
             if (!UpdateLayeredWindow(_window, 0, ref destination, ref size, _memoryDc, ref source, 0, ref blend, UlwAlpha)) throw new InvalidOperationException($"UpdateLayeredWindow failed ({Marshal.GetLastWin32Error()}).");
-            if (!SetWindowPos(_window, HwndTopmost, destination.X, destination.Y, width, height, SwpNoActivate | SwpShowWindow))
+            if (!SetWindowPos(_window, HwndTopmost, destination.X, destination.Y, size.Width, size.Height, SwpNoActivate | SwpShowWindow))
                 throw new InvalidOperationException($"SetWindowPos for the layered clip overlay failed ({Marshal.GetLastWin32Error()}).");
         }
-        public void Animate(ClipOverlayFrame frame, in ClipOverlayMotionPlan plan, bool applyAnimation, bool frameChanged)
-            => Present(frame, new PointNative(plan.WindowX + (int)Math.Round(plan.ToOffsetX), plan.WindowY),
-                plan.CardWidth, plan.CardHeight, plan.ToOpacity, frameChanged);
         public void ReassertTopmost()
             => SetWindowPos(_window, HwndTopmost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);
         public void Hide() => ShowWindow(_window, 0);

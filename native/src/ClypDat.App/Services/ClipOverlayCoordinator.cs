@@ -543,13 +543,13 @@ internal static class ClipOverlayLayout
     // Flush horizontal placement makes the overlay read as a screen-edge
     // notification instead of a floating dialog. Keep vertical breathing room.
     private const double VerticalInsetDips = 32;
+    private const double ContentParallaxDips = 14;
 
     public static PixelPoint Position(ClipOverlayTarget target, ClipOverlayPlacement placement, int width, int height)
     {
         var verticalInset = (int)Math.Round(VerticalInsetDips * target.Scaling);
         var area = target.WorkArea;
-        var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
-        var x = left ? area.X : area.Right - width;
+        var x = IsLeft(placement) ? area.X : area.Right - width;
         var y = placement switch
         {
             ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.CenterRight => area.Y + (area.Height - height) / 2,
@@ -559,44 +559,46 @@ internal static class ClipOverlayLayout
         return new PixelPoint(x, y);
     }
 
-    public static PixelPoint AnimatedPosition(ClipOverlayTarget target, ClipOverlayPlacement placement, int width, int height, double progress)
-    {
-        var final = Position(target, placement, width, height);
-        var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
-        var travel = (int)Math.Round(Travel(target, width) * (1 - Math.Clamp(progress, 0, 1)));
-        var x = final.X + travel * (left ? 1 : -1);
-        return new PixelPoint(x, final.Y);
-    }
-
-    // The compositor path cannot move the window per frame - DirectComposition
-    // animates content inside a window that has to stay where it is for the
-    // whole notification. So the window is made `travel` wider than the card
-    // and the card slides within it, ending flush against the screen edge.
-    // The extra width is taken from the inward side, so the window still fits
-    // inside the work area exactly as the moving one did.
+    // The card slides on from beyond the screen edge and back off it. The
+    // window cannot follow it there: past the edge is the neighbouring monitor,
+    // which is where the badge used to turn up. So the window stays put on the
+    // card's resting rectangle, flush against the edge, and the card slides
+    // inside it from one card width outward. Whatever lies outside the window
+    // is simply not drawn, so the window's flush edge does the monitor's job of
+    // hiding the part of the card that has not arrived yet.
     public static ClipOverlayFrameLayout Frame(ClipOverlayTarget target, ClipOverlayPlacement placement, int width, int height)
     {
-        var final = Position(target, placement, width, height);
-        var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
-        var travel = (int)Math.Round(Travel(target, width));
-        var window = new PixelRect(left ? final.X : final.X - travel, final.Y, width + travel, height);
-        return left
-            ? new ClipOverlayFrameLayout(window, 0, travel)
-            : new ClipOverlayFrameLayout(window, travel, 0);
+        var rest = Position(target, placement, width, height);
+        var left = IsLeft(placement);
+        var parallax = (int)Math.Round(ContentParallaxDips * target.Scaling);
+        return new ClipOverlayFrameLayout(new PixelRect(rest.X, rest.Y, width, height), 0,
+            left ? -width : width, left ? -parallax : parallax);
     }
 
-    // The card slides inward and settles against the edge, and it never leaves
-    // the monitor: on a work area too narrow to hold both the card and the
-    // travel, the travel is what gives way.
-    private static double Travel(ClipOverlayTarget target, int width)
+    // The part of the window the card covers at `offsetX`. The layered
+    // fallback has no compositor to clip for it, so this is the window it
+    // actually shows, and where in the card that window starts. Never empty
+    // and never outside the window: a card fully off the edge is a one-pixel
+    // slice drawn fully transparent.
+    public static ClipOverlaySlice VisibleSlice(PixelRect window, double offsetX)
     {
-        var area = target.WorkArea;
-        var room = Math.Max(0, Math.Max(area.X, area.Right - width) - area.X);
-        return Math.Min(24 * target.Scaling, room);
+        var offset = (int)Math.Round(offsetX);
+        var start = Math.Clamp(offset, 0, window.Width);
+        var end = Math.Clamp(offset + window.Width, 0, window.Width);
+        if (end <= start)
+            return new ClipOverlaySlice(new PixelRect(window.X + Math.Min(start, window.Width - 1), window.Y, 1, window.Height), 0, true);
+        return new ClipOverlaySlice(new PixelRect(window.X + start, window.Y, end - start, window.Height), start - offset, false);
     }
+
+    private static bool IsLeft(ClipOverlayPlacement placement)
+        => placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
 }
 
-// Where the overlay window sits for the life of one notification, plus the two
-// horizontal offsets the card animates between inside it: `Rest` is flush
-// against the screen edge, `Hidden` is one travel inward.
-internal readonly record struct ClipOverlayFrameLayout(PixelRect Window, int RestOffsetX, int HiddenOffsetX);
+// Where the overlay window sits for the life of one notification - the card's
+// resting rectangle - plus the horizontal offsets the card animates between
+// inside it: `Rest` is flush against the screen edge, `Hidden` is one card
+// width beyond it. `ParallaxX` is how far the text trails the card while it
+// fades, pointing the same way as `Hidden`.
+internal readonly record struct ClipOverlayFrameLayout(PixelRect Window, int RestOffsetX, int HiddenOffsetX, int ParallaxX);
+
+internal readonly record struct ClipOverlaySlice(PixelRect Window, int SourceX, bool Empty);

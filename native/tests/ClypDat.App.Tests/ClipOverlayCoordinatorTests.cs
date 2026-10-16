@@ -324,21 +324,37 @@ public sealed class ClipOverlayCoordinatorTests
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
-    public void AnimationMovesInwardAndStaysInsideWorkArea(int placementValue)
+    public void SlideComesFromPastTheEdgeButTheWindowStaysOnTheMonitor(int placementValue)
     {
         var placement = (ClipOverlayPlacement)placementValue;
         var target = new ClipOverlayTarget("DISPLAY1", new PixelRect(-1920, -200, 1920, 1080), new PixelRect(-1900, -180, 1880, 1040), 2, ClipOverlayTargetReason.Primary);
         var final = ClipOverlayLayout.Position(target, placement, 400, 160);
         var left = placement is ClipOverlayPlacement.TopLeft or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
-        var start = ClipOverlayLayout.AnimatedPosition(target, placement, 400, 160, 0);
-        var middle = ClipOverlayLayout.AnimatedPosition(target, placement, 400, 160, 0.5);
+        var layout = ClipOverlayLayout.Frame(target, placement, 400, 160);
 
-        Assert.Equal(final.X + (left ? 48 : -48), start.X);
-        Assert.Equal(final.X + (left ? 24 : -24), middle.X);
-        Assert.Equal(final, ClipOverlayLayout.AnimatedPosition(target, placement, 400, 160, 1));
-        AssertContained(start, target.WorkArea, 400, 160);
-        AssertContained(middle, target.WorkArea, 400, 160);
+        // The window is the resting card, inside the work area; the card
+        // starts one full width past the edge it rests against.
+        Assert.Equal(new PixelRect(final.X, final.Y, 400, 160), layout.Window);
+        Assert.Equal(0, layout.RestOffsetX);
+        Assert.Equal(left ? -400 : 400, layout.HiddenOffsetX);
+        Assert.Equal(left ? -28 : 28, layout.ParallaxX);
         AssertContained(final, target.WorkArea, 400, 160);
+
+        // What the layered fallback shows: nothing at all off the edge, the
+        // half of the card nearest the screen centre halfway, all of it at rest.
+        var hidden = ClipOverlayLayout.VisibleSlice(layout.Window, layout.HiddenOffsetX);
+        Assert.True(hidden.Empty);
+        Assert.Equal(1, hidden.Window.Width);
+        var half = ClipOverlayLayout.VisibleSlice(layout.Window, layout.HiddenOffsetX / 2.0);
+        Assert.False(half.Empty);
+        Assert.Equal(200, half.Window.Width);
+        Assert.Equal(left ? final.X : final.X + 200, half.Window.X);
+        Assert.Equal(left ? 200 : 0, half.SourceX);
+        var rest = ClipOverlayLayout.VisibleSlice(layout.Window, layout.RestOffsetX);
+        Assert.Equal(layout.Window, rest.Window);
+        Assert.Equal(0, rest.SourceX);
+        foreach (var slice in new[] { hidden, half, rest })
+            AssertContained(slice.Window.Position, target.WorkArea, slice.Window.Width, slice.Window.Height);
     }
 
     [Fact]

@@ -54,8 +54,8 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         Assert.Equal("excluded", first.Report.Affinity);
         Assert.Equal("none", first.Report.Recovery);
         Assert.Equal(target.DeviceName, first.Report.Monitor);
-        // The window carries the slide travel as well as the card, so it
-        // starts one travel inward of where the card comes to rest.
+        // The window is the card's resting rectangle, flush against the
+        // edge; the card slides inside it rather than the window moving.
         var layout = ClipOverlayLayout.Frame(target, ClipOverlayPlacement.TopRight, 300, 66);
         Assert.True(GetWindowRect(handle, out var rect) && rect.Left == layout.Window.X && rect.Top == layout.Window.Y);
         Assert.Equal(layout.Window.Width, rect.Right - rect.Left);
@@ -100,13 +100,16 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         var final = ClipOverlayLayout.Position(target, ClipOverlayPlacement.TopRight, 390, 87);
 
         surface.Publish(Presentation(1, true, target: target), _ => { });
-        Assert.True(SpinWait.SpinUntil(() => presenter.Frames.Any(frame => frame.Opacity >= 0.999), 1000));
+        Assert.True(SpinWait.SpinUntil(() => presenter.Frames.Any(frame => frame.Progress >= 0.999), 1000));
         surface.Dismiss(1);
         Assert.True(SpinWait.SpinUntil(() => presenter.HideCount == 1, 1000));
 
+        // The layered path shows the slide as a slice of the card growing
+        // from the screen edge, so a partly arrived card starts right of its
+        // resting X and is narrower than the card.
         var frames = presenter.Frames;
-        Assert.Contains(frames, frame => frame.Destination.X < final.X);
-        Assert.Contains(frames, frame => frame.Destination.X == final.X && frame.Opacity >= 0.999);
+        Assert.Contains(frames, frame => frame.Destination.X > final.X && frame.Width < 390);
+        Assert.Contains(frames, frame => frame.Destination.X == final.X && frame.Width == 390 && frame.Progress >= 0.999);
         Assert.All(frames, frame =>
         {
             Assert.InRange(frame.Destination.X, target.WorkArea.X, target.WorkArea.Right - frame.Width);
@@ -121,12 +124,21 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
     public void CubicCoefficientsReproduceTheEasingsTheyReplace()
     {
         const double duration = 0.22;
-        foreach (var (from, to, easeOut) in new[] { (0d, 1d, true), (0.4, 1d, true), (1d, 0d, false), (0.6, 0d, false) })
+        foreach (var (from, to, easing) in new[]
         {
-            var curve = ClipOverlayAnimationCurve.Build(from, to, duration, easeOut);
+            (0d, 1d, ClipOverlayEasing.Out), (0.4, 1d, ClipOverlayEasing.Out), (1d, 0d, ClipOverlayEasing.In),
+            (0.6, 0d, ClipOverlayEasing.In), (0d, 1d, ClipOverlayEasing.Smooth), (0.3, 0d, ClipOverlayEasing.Smooth)
+        })
+        {
+            var curve = ClipOverlayAnimationCurve.Build(from, to, duration, easing);
             foreach (var fraction in new[] { 0d, 0.25, 0.5, 0.75, 1d })
             {
-                var eased = easeOut ? 1 - Math.Pow(1 - fraction, 3) : fraction * fraction * fraction;
+                var eased = easing switch
+                {
+                    ClipOverlayEasing.Out => 1 - Math.Pow(1 - fraction, 3),
+                    ClipOverlayEasing.Smooth => fraction * fraction * (3 - 2 * fraction),
+                    _ => fraction * fraction * fraction
+                };
                 // The coefficients are float, so compare with a tolerance
                 // rather than by rounding to decimal places.
                 Assert.Equal(from + (to - from) * eased, curve.Sample(duration * fraction), 1e-5);
@@ -134,7 +146,7 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         }
 
         // A zero-length motion is a straight set to the destination value.
-        var instant = ClipOverlayAnimationCurve.Build(0, 1, 0, true);
+        var instant = ClipOverlayAnimationCurve.Build(0, 1, 0, ClipOverlayEasing.Out);
         Assert.Equal(1, instant.Sample(0), 1e-5);
         Assert.Equal(1, instant.Sample(10), 1e-5);
     }
@@ -158,11 +170,18 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         var enter = presenter.Motions[0];
         Assert.Equal(layout.Window.X, enter.WindowX);
         Assert.Equal(layout.Window.Width, enter.WindowWidth);
-        Assert.Equal(0, enter.FromOpacity);
-        Assert.Equal(1, enter.ToOpacity);
-        Assert.Equal(layout.HiddenOffsetX, enter.FromOffsetX);
-        Assert.Equal(layout.RestOffsetX, enter.ToOffsetX);
-        Assert.True(enter.EaseOut);
+        Assert.Equal(0, enter.Progress.From);
+        Assert.Equal(1, enter.Progress.To);
+        // Entry starts one card width past the screen edge and ends flush.
+        Assert.Equal(300, layout.HiddenOffsetX);
+        Assert.Equal(layout.HiddenOffsetX, enter.CardOffsetX.From);
+        Assert.Equal(layout.RestOffsetX, enter.CardOffsetX.To);
+        Assert.Equal(ClipOverlayEasing.Out, enter.CardOffsetX.Easing);
+        // The text arrives with the card, faded and trailing toward the edge.
+        Assert.Equal(0, enter.ContentOpacity.From);
+        Assert.Equal(1, enter.ContentOpacity.To);
+        Assert.Equal(layout.ParallaxX, enter.ContentOffsetX.From);
+        Assert.Equal(0, enter.ContentOffsetX.To);
         Assert.Equal(1, presenter.Uploads);
         Assert.True(results.Wait(1).Presented);
 
@@ -175,10 +194,13 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         surface.Dismiss(1);
         Assert.True(SpinWait.SpinUntil(() => presenter.Motions.Count == 2, 1000));
         var exit = presenter.Motions[1];
-        Assert.Equal(1, exit.FromOpacity, 1e-3);
-        Assert.Equal(0, exit.ToOpacity);
-        Assert.Equal(layout.HiddenOffsetX, exit.ToOffsetX);
-        Assert.False(exit.EaseOut);
+        Assert.Equal(1, exit.Progress.From, 1e-3);
+        Assert.Equal(0, exit.Progress.To);
+        Assert.Equal(layout.HiddenOffsetX, exit.CardOffsetX.To);
+        Assert.Equal(ClipOverlayEasing.In, exit.CardOffsetX.Easing);
+        // The text is gone before the card is.
+        Assert.Equal(0, exit.ContentOpacity.To);
+        Assert.True(exit.ContentOpacity.DurationSeconds < exit.CardOffsetX.DurationSeconds);
         Assert.True(SpinWait.SpinUntil(() => presenter.HideCount == 1, 1000));
         // Hidden: the reassert timer stops with it.
         Assert.True(SpinWait.SpinUntil(() => !surface.TimerArmed, 1000));
@@ -200,14 +222,14 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
 
         surface.Publish(Presentation(1, true, workflow, 0), results.Add);
         Assert.True(results.Wait(1).Presented);
-        Assert.True(SpinWait.SpinUntil(() => presenter.Frames.Any(frame => frame.Opacity >= .999), 1000));
+        Assert.True(SpinWait.SpinUntil(() => presenter.Frames.Any(frame => frame.Progress >= .999), 1000));
         var before = presenter.Frames.Count;
 
         surface.Publish(Presentation(2, true, workflow, 1), results.Add);
         Assert.True(results.Wait(2).Presented);
         var updateFrames = presenter.Frames.Skip(before).ToArray();
-        Assert.Contains(updateFrames, frame => frame.FrameMarker == 1 && frame.FrameChanged && frame.Opacity >= .999);
-        Assert.DoesNotContain(updateFrames, frame => frame.Opacity <= 0.001);
+        Assert.Contains(updateFrames, frame => frame.FrameMarker == 1 && frame.FrameChanged && frame.Progress >= .999);
+        Assert.DoesNotContain(updateFrames, frame => frame.Progress <= 0.001);
         Assert.Equal(0, presenter.HideCount);
     }
 
@@ -310,7 +332,7 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         Assert.Equal("recording", result.Report!.Backend);
         Assert.Equal(1, counters.LayeredFallbacks);
         Assert.Equal("recording", surface.PresenterName);
-        Assert.True(SpinWait.SpinUntil(() => layered.Frames.Any(frame => frame.Opacity >= .999), 1000));
+        Assert.True(SpinWait.SpinUntil(() => layered.Frames.Any(frame => frame.Progress >= .999), 1000));
     }
 
     [Fact]
@@ -329,7 +351,7 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         first.Healthy = false;
         Assert.True(SpinWait.SpinUntil(() => { lock (presenters) return presenters.Count == 2; }, 2000));
         AnimatingPresenter second; lock (presenters) second = presenters[1];
-        Assert.True(SpinWait.SpinUntil(() => second.Motions.Any(motion => motion.ToOpacity >= .999), 1000));
+        Assert.True(SpinWait.SpinUntil(() => second.Motions.Any(motion => motion.Progress.To >= .999), 1000));
         Assert.Equal(1, counters.DirectCompositionRebuilds);
     }
 
@@ -812,14 +834,14 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         public IReadOnlyList<PresentedFrame> Frames { get { lock (_gate) return _frames.ToArray(); } }
         public int HideCount => Volatile.Read(ref _hideCount);
 
-        public void Present(ClipOverlayFrame frame, NativeClipOverlaySurface.PointNative destination, int width, int height, double opacity, bool frameChanged)
-        {
-            lock (_gate) _frames.Add(new PresentedFrame(destination, width, height, opacity, frameChanged, frame.Pixels[0]));
-        }
-
+        // Records what the layered presenter would put on screen: the slice
+        // of the card past the edge, at the plan's end values.
         public void Animate(ClipOverlayFrame frame, in ClipOverlayMotionPlan plan, bool applyAnimation, bool frameChanged)
-            => Present(frame, new NativeClipOverlaySurface.PointNative(plan.WindowX + (int)Math.Round(plan.ToOffsetX), plan.WindowY),
-                plan.CardWidth, plan.CardHeight, plan.ToOpacity, frameChanged);
+        {
+            var slice = ClipOverlayLayout.VisibleSlice(new PixelRect(plan.WindowX, plan.WindowY, plan.WindowWidth, plan.WindowHeight), plan.CardOffsetX.To);
+            var destination = new NativeClipOverlaySurface.PointNative(slice.Window.X, slice.Window.Y);
+            lock (_gate) _frames.Add(new PresentedFrame(destination, slice.Window.Width, slice.Window.Height, plan.Progress.To, frameChanged, frame.Pixels[0]));
+        }
 
         public void ReassertTopmost() { }
         public void Hide() => Interlocked.Increment(ref _hideCount);
@@ -847,9 +869,6 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         public int Reasserts => Volatile.Read(ref _reasserts);
         public int HideCount => Volatile.Read(ref _hideCount);
 
-        public void Present(ClipOverlayFrame frame, NativeClipOverlaySurface.PointNative destination, int width, int height, double opacity, bool frameChanged)
-            => Animate(frame, new ClipOverlayMotionPlan(destination.X, destination.Y, width, height, width, height, 0, false, opacity, opacity, 0, 0), true, frameChanged);
-
         public void Animate(ClipOverlayFrame frame, in ClipOverlayMotionPlan plan, bool applyAnimation, bool frameChanged)
         {
             if (ThrowOnAnimate) throw new InvalidOperationException("DXGI_ERROR_DEVICE_REMOVED");
@@ -864,7 +883,7 @@ public sealed class NativeClipOverlaySurfaceTests(ITestOutputHelper output)
         public void Dispose() { }
     }
 
-    private readonly record struct PresentedFrame(NativeClipOverlaySurface.PointNative Destination, int Width, int Height, double Opacity, bool FrameChanged, byte FrameMarker);
+    private readonly record struct PresentedFrame(NativeClipOverlaySurface.PointNative Destination, int Width, int Height, double Progress, bool FrameChanged, byte FrameMarker);
 
     private struct Rect { public int Left, Top, Right, Bottom; }
 }

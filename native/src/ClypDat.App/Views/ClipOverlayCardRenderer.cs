@@ -8,7 +8,12 @@ using ClypDat.App.Services;
 
 namespace ClypDat.App.Views;
 
-internal sealed record ClipOverlayFrame(int Width, int Height, byte[] Pixels);
+// Pixels is the whole card. Layers, when present, is the same card split in
+// two - the body, and the content drawn over it - so the compositor can fade
+// and move the text on its own; Pixels is exactly Content over Body.
+internal sealed record ClipOverlayFrame(int Width, int Height, byte[] Pixels, ClipOverlayLayers? Layers = null);
+
+internal sealed record ClipOverlayLayers(byte[] Body, byte[] Content);
 
 // Rasterize once, synchronously, using the same fonts and theme as the app.
 // Only premultiplied pixels cross to the native animation thread.
@@ -86,11 +91,11 @@ internal static class ClipOverlayCardRenderer
 
                 var size = new PixelSize((int)Math.Ceiling(width * scale), (int)Math.Ceiling(height * scale));
                 var dpi = new Vector(96 * scale, 96 * scale);
-                using var bitmap = new RenderTargetBitmap(size, dpi);
-                using (var context = bitmap.CreateDrawingContext())
+                var left = presentation.Event.Placement is ClipOverlayPlacement.TopLeft
+                    or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
+                using var bodyBitmap = new RenderTargetBitmap(size, dpi);
+                using (var context = bodyBitmap.CreateDrawingContext())
                 {
-                    var left = presentation.Event.Placement is ClipOverlayPlacement.TopLeft
-                        or ClipOverlayPlacement.CenterLeft or ClipOverlayPlacement.BottomLeft;
                     // Square at the screen edge, rounded on the exposed side - a
                     // fully rounded badge sitting flush reads as a gap, because
                     // the curve pulls the fill away from the edge at the corners.
@@ -106,12 +111,16 @@ internal static class ClipOverlayCardRenderer
                     // squaring off the silhouette.
                     // PushClip clears Skia's cached DPI transform when it is
                     // disposed. Restore the identity transform afterward so
-                    // TextLayout's per-run translations are scaled once.
+                    // the border drawn after it is scaled once.
                     using (context.PushTransform(Matrix.Identity))
                     using (context.PushClip(card))
                         context.DrawRectangle(accent, null, new Rect(railX, 0, RailWidth, height));
                     context.DrawRectangle(null, new Pen(edge, 1), new RoundedRect(new Rect(0.5, 0.5, width - 1, height - 1), corners));
+                }
 
+                using var contentBitmap = new RenderTargetBitmap(size, dpi);
+                using (var context = contentBitmap.CreateDrawingContext())
+                {
                     var contentTop = (height - content) / 2;
                     var logoX = (left ? 0 : RailWidth) + PadLeft;
                     context.DrawImage(AppThemeService.CurrentLogo(large: true),
@@ -131,14 +140,9 @@ internal static class ClipOverlayCardRenderer
                     if (hint.HasContent) hint.Draw(context, textX, y + RowGap, chipFill, edge);
                 }
 
-                var pixels = new byte[checked(size.Width * size.Height * 4)];
-                fixed (byte* pointer = pixels)
-                {
-                    using var buffer = new LockedFramebuffer((nint)pointer, size, size.Width * 4, dpi,
-                        PixelFormat.Bgra8888, AlphaFormat.Premul, null);
-                    bitmap.CopyPixels(buffer);
-                }
-                return new ClipOverlayFrame(size.Width, size.Height, pixels);
+                var bodyPixels = Pixels(bodyBitmap, size, dpi);
+                var contentPixels = Pixels(contentBitmap, size, dpi);
+                return new ClipOverlayFrame(size.Width, size.Height, Over(contentPixels, bodyPixels), new ClipOverlayLayers(bodyPixels, contentPixels));
             }
             finally
             {
@@ -147,6 +151,32 @@ internal static class ClipOverlayCardRenderer
             }
         }
         finally { hint.Dispose(); }
+    }
+
+    private static unsafe byte[] Pixels(RenderTargetBitmap bitmap, PixelSize size, Vector dpi)
+    {
+        var pixels = new byte[checked(size.Width * size.Height * 4)];
+        fixed (byte* pointer = pixels)
+        {
+            using var buffer = new LockedFramebuffer((nint)pointer, size, size.Width * 4, dpi,
+                PixelFormat.Bgra8888, AlphaFormat.Premul, null);
+            bitmap.CopyPixels(buffer);
+        }
+        return pixels;
+    }
+
+    // Premultiplied source-over, which is what the compositor does with the
+    // two layers; the layered fallback gets the result as one image.
+    internal static byte[] Over(byte[] top, byte[] bottom)
+    {
+        var result = new byte[top.Length];
+        for (var index = 0; index < top.Length; index += 4)
+        {
+            var remaining = 255 - top[index + 3];
+            for (var channel = 0; channel < 4; channel++)
+                result[index + channel] = (byte)Math.Min(255, top[index + channel] + (bottom[index + channel] * remaining + 127) / 255);
+        }
+        return result;
     }
 
     // "Ctrl+Shift+F9" -> [Ctrl] + [Shift] + [F9] as keycap chips, followed by
