@@ -146,7 +146,7 @@ public sealed class ColorFieldTests
         {
             var painted = AppThemeService.CustomGround(Color.Parse(hex));
             Assert.False(AppThemeService.CustomLight(painted), hex);
-            Assert.True(Luminance(painted) <= 0.031, hex);
+            Assert.True(Luminance(painted) <= 0.042, hex);
         }
         foreach (var hex in new[] { "#FFFFFF", "#FDEFFF", "#F0F0F0" })
         {
@@ -166,16 +166,32 @@ public sealed class ColorFieldTests
         Assert.True(AppThemeService.CustomLight(Colors.White));
         Assert.False(AppThemeService.CustomLight(Colors.Black));
 
+        // Across the field's top edge, which used to land on one ground: more
+        // saturated picks paint a more saturated page.
+        var lastSaturation = -1.0;
+        for (var x = 0.0; x <= 1.0001; x += 0.05)
+        {
+            var painted = AppThemeService.CustomGround(new HsvColor(1, 300, x, 1).ToRgb());
+            if (AppThemeService.CustomLight(painted)) continue;
+            var saturationNow = painted.ToHsl().S;
+            Assert.True(saturationNow > lastSaturation + 0.01, $"x {x:0.00}: {painted}");
+            lastSaturation = saturationNow;
+        }
+
         // An accent that would vanish on the ground is lifted until it reads.
         var ground = Color.Parse("#0D1116");
         var accent = AppThemeService.CustomAccent(Color.Parse("#1A1030"), ground);
         Assert.True(AppThemeService.ContrastRatio(accent, ground) >= 2);
     }
 
-    // Text on an accent stays white until the accent is pale enough to read
-    // as pastel or white.
+    // Text on an accent stays white, however bright the accent, until it is
+    // close to white: a pastel or an off-white.
     [Theory]
     [InlineData("#00D08A", "#FFFFFF")]
+    [InlineData("#00F5A0", "#FFFFFF")]
+    [InlineData("#FFFF00", "#FFFFFF")]
+    [InlineData("#FFC0CB", "#000000")]
+    [InlineData("#F0F0F0", "#000000")]
     [InlineData("#5864E8", "#FFFFFF")]
     [InlineData("#D85E61", "#FFFFFF")]
     [InlineData("#FFFFFF", "#000000")]

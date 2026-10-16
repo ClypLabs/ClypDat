@@ -97,10 +97,12 @@ internal static class AppThemeService
     // still what the swatch and the saved theme show - this is a render step,
     // not an edit of their choice.
     //
-    // Damped, not clamped. A hard clamp is what made the picker feel dead: the
-    // band covers S <= 0.30 and L <= 0.13, so ~87% of the spectrum's travel and
-    // 70% of the saturation axis all landed on one single ground per hue, and
-    // the only visible event in the whole picker was the dark/light flip. Above
+    // Damped, not clamped (the light page; the dark one follows the field's
+    // own axes, see DarkGround). A hard clamp is what made the picker feel
+    // dead: the dark band covered S <= 0.30 and L <= 0.13, so ~87% of the
+    // spectrum's travel and 70% of the saturation axis all landed on one single
+    // ground per hue, and the only visible event in the whole picker was the
+    // dark/light flip. Above
     // the knee the pick is compressed into the headroom below the ceiling on a
     // square-root curve, so movement anywhere on the spectrum moves the app -
     // fastest just past the knee, where most picks sit, and flattening out at
@@ -112,16 +114,8 @@ internal static class AppThemeService
     // So the saturation ceiling is set high and the page stays dark: the pick's
     // hue arrives at close to full strength on a ground the app can still use.
     private const double CustomSurfaceMaxSaturation = 0.80;
-    private const double CustomDarkMinLightness = 0.05;
-    private const double CustomDarkMaxLightness = 0.13;
-    // Ceilings, reached only by a fully saturated / fully bright pick. 0.20 is
-    // still at the authored family's brightest panel (#2C3B48, L 0.227), so the
-    // derived surfaces above the page stay inside the range the ramp was fitted
-    // against and the authored text (L 0.69-0.93) keeps AA on all of it.
-    private const double CustomDarkCeilingLightness = 0.22;
-    private const double CustomDarkFloorLightness = 0.03;
 
-    // Light mode is the same band inverted: 1 - 0.069 = 0.931 is where the light
+    // The light page: 1 - 0.069 = 0.931 is where the light
     // presets' page lands, and RecolorCustom negates its delta there, so the
     // ramp reproduces stock light from an anchor in this range.
     private const double CustomLightMinLightness = 0.90;
@@ -141,8 +135,6 @@ internal static class AppThemeService
     // ground lands in the band the shipped pages occupy. #0D1116 is luminance
     // 0.0054 and the light presets' page 0.85, and both sit inside their band,
     // so this is inert for a pick that already reproduces a preset.
-    private const double CustomDarkMinLuminance = 0.0025;
-    private const double CustomDarkMaxLuminance = 0.030;
     private const double CustomLightMinLuminance = 0.62;
     private const double CustomLightMaxLuminance = 0.92;
 
@@ -619,9 +611,9 @@ internal static class AppThemeService
     /// <summary>
     /// The ground a custom theme is painted in, and whether it is a light one.
     /// A colour off the field is a colour, not a UI background, so the pick
-    /// supplies the hue and its chroma and lightness are damped into the band
-    /// ClypDat's own palette occupies (BandGround): a vivid magenta becomes a
-    /// deep plum page, not a neon one and not a mid-tone one.
+    /// supplies the hue and its chroma and lightness are compressed into the band
+    /// ClypDat's own palette occupies (DarkGround, LightGround): a vivid magenta
+    /// becomes a deep plum page, not a neon one and not a mid-tone one.
     ///
     /// Dark or light follows the pick, not a switch: pale picks - the field's
     /// top-left corner, up to white - paint the light band. Between the two the
@@ -634,9 +626,9 @@ internal static class AppThemeService
         var (_, _, lightness) = ToHsl(picked);
         var t = Math.Clamp((lightness - LightGroundFrom) / (LightGroundTo - LightGroundFrom), 0, 1);
         t = t * t * (3 - 2 * t);
-        var ground = t <= 0 ? BandGround(picked, light: false)
-            : t >= 1 ? BandGround(picked, light: true)
-            : Blend(BandGround(picked, light: false), BandGround(picked, light: true), t);
+        var ground = t <= 0 ? DarkGround(picked)
+            : t >= 1 ? LightGround(picked)
+            : Blend(DarkGround(picked), LightGround(picked), t);
         return (ground, CustomLight(ground));
     }
 
@@ -644,21 +636,56 @@ internal static class AppThemeService
     // band to the light one. A pure hue is 0.5, so every vivid pick stays dark.
     private const double LightGroundFrom = 0.74, LightGroundTo = 0.88;
 
-    private static Color BandGround(Color picked, bool light)
+    // The dark page. Both of its axes follow the field's, so every move of the
+    // thumb moves the app. Damping HSL saturation and clamping luminance did
+    // not: along the field's top edge every colour is HSL saturation 1 and far
+    // brighter than a page may be, so the whole bright half landed on one
+    // ground per hue and dragging across it changed nothing.
+    //
+    // Chroma comes from how far across the field the pick is (HSV saturation),
+    // scaled to the ceiling, and never more than the pick's own: muted picks,
+    // and ClypDat's own #0D1116, keep theirs. Brightness is the pick's
+    // perceived lightness, kept as is up to the knee and compressed above it
+    // into the headroom below the ceiling - linearly, so it keeps moving all
+    // the way to the top of the field rather than flattening out.
+    private static Color DarkGround(Color picked)
+    {
+        var (hue, saturation, lightness) = ToHsl(picked);
+        var (_, fieldSaturation, _) = ToHsv(picked);
+        var groundSaturation = Math.Min(saturation, fieldSaturation * CustomSurfaceMaxSaturation);
+        var pickLightness = CieLightness(RelativeLuminance(picked));
+        if (pickLightness <= DarkGroundKneeLightness && groundSaturation >= saturation) return picked;
+        var groundLightness = pickLightness <= DarkGroundKneeLightness
+            ? pickLightness
+            : DarkGroundKneeLightness + (DarkGroundMaxLightness - DarkGroundKneeLightness)
+                * (pickLightness - DarkGroundKneeLightness) / (100 - DarkGroundKneeLightness);
+        var target = CieLuminance(groundLightness);
+        return FitLuminance(hue, groundSaturation, lightness, picked.A, target, target);
+    }
+
+    // CIE L*: up to 10 (#0D1116 is 4.9) a pick is already a page; 24 is the
+    // brightest a page gets, around the authored family's brightest panel, so
+    // the derived surfaces stay inside the range the ramp was fitted against.
+    private const double DarkGroundKneeLightness = 10, DarkGroundMaxLightness = 24;
+
+    private static Color LightGround(Color picked)
     {
         var (hue, saturation, lightness) = ToHsl(picked);
         return FitLuminance(
             hue,
             Damp(saturation, 0, CustomSurfaceSaturationKnee, 0, CustomSurfaceMaxSaturation),
-            light
-                ? Damp(lightness, CustomLightMinLightness, CustomLightMaxLightness,
-                    CustomLightFloorLightness, CustomLightCeilingLightness)
-                : Damp(lightness, CustomDarkMinLightness, CustomDarkMaxLightness,
-                    CustomDarkFloorLightness, CustomDarkCeilingLightness),
+            Damp(lightness, CustomLightMinLightness, CustomLightMaxLightness,
+                CustomLightFloorLightness, CustomLightCeilingLightness),
             picked.A,
-            light ? CustomLightMinLuminance : CustomDarkMinLuminance,
-            light ? CustomLightMaxLuminance : CustomDarkMaxLuminance);
+            CustomLightMinLuminance,
+            CustomLightMaxLuminance);
     }
+
+    private static double CieLightness(double luminance) =>
+        luminance > 216d / 24389 ? 116 * Math.Cbrt(luminance) - 16 : luminance * 24389d / 27;
+
+    private static double CieLuminance(double lightness) =>
+        lightness > 8 ? Math.Pow((lightness + 16) / 116, 3) : lightness * 27d / 24389;
 
     /// <summary>The accent a custom theme paints, lifted or deepened until it reads on its ground.</summary>
     public static Color CustomAccent(Color accent, Color ground) => AdjustAccent(accent, ground);
@@ -862,15 +889,20 @@ internal static class AppThemeService
 
     private const double AccentTintSaturation = 0.65;
 
-    // White unless the fill is pale. The WCAG ratio alone flips to black far
-    // too early: it puts the crossover at luminance 0.18, so a saturated green
-    // like #00D08A - nowhere near white - got black text. Buttons keep white
-    // text the way Discord's do, and only an accent light enough to read as
-    // pastel or white gets black.
-    private static Color BestForeground(Color background) =>
-        RelativeLuminance(background) > AccentForegroundBlackAbove ? Colors.Black : Colors.White;
+    // White unless the fill is close to white. Neither contrast nor brightness
+    // says that: the WCAG ratio flips to black at luminance 0.18, and a bright
+    // mint like #00F5A0 is luminance 0.68 while being nowhere near white.
+    // Whiteness is - the share of white mixed into the colour, its smallest
+    // channel (HWB). A vivid colour has none, however bright; a pastel or
+    // off-white is mostly white, and only those get black text, the way
+    // Discord's buttons stay white on every vivid accent.
+    private static Color BestForeground(Color background)
+    {
+        var whiteness = Math.Min(background.R, Math.Min(background.G, background.B)) / 255d;
+        return whiteness >= AccentForegroundBlackWhiteness && RelativeLuminance(background) > 0.5 ? Colors.Black : Colors.White;
+    }
 
-    private const double AccentForegroundBlackAbove = 0.6;
+    private const double AccentForegroundBlackWhiteness = 0.6;
 
     /// <summary>The text colour drawn on an accent fill.</summary>
     public static Color AccentForeground(Color accent) => BestForeground(accent);
