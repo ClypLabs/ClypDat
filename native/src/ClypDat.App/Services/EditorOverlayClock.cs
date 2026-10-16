@@ -19,6 +19,9 @@ internal sealed class EditorOverlayClock
     private bool _hasAnchor;
     private bool _running;
 
+    // `duration` is read while the clock holds its lock, from libvlc event
+    // callbacks among others, so it must not call into libvlc: a cached value
+    // only (see PlaybackSession._knownLengthMs).
     internal EditorOverlayClock(Func<TimeSpan> duration, Func<long>? timestamp = null)
     {
         _duration = duration;

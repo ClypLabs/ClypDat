@@ -24,11 +24,13 @@ public static class RuntimeHealthWatchdog
     private static readonly TimeSpan ResourceSampleInterval = TimeSpan.FromMinutes(5);
     // A stall this long is a wedge, not slow work, and the log alone cannot say
     // where (a freeze just after a hover preview left nothing but "stalled"
-    // before the user killed the app). A minidump holds every thread's stack, managed and
-    // native, at a few MB. Capped per session so a bad day cannot fill the disk.
+    // before the user killed the app). The dump holds every thread's stack,
+    // managed and native. It carries the private heap - managed stacks cannot
+    // be walked without it - so it runs to the process's private size; capped
+    // per session and on disk so a bad day cannot fill the drive.
     private static readonly TimeSpan HangDumpThreshold = TimeSpan.FromSeconds(15);
-    private const int MaxHangDumpsPerSession = 2;
-    private const int HangDumpsKept = 4;
+    private const int MaxHangDumpsPerSession = 1;
+    private const int HangDumpsKept = 2;
     private static int _hangDumpsWritten;
 
     private static int _started;
@@ -115,15 +117,15 @@ public static class RuntimeHealthWatchdog
         }
     }
 
-    // createdump ships beside the self-contained runtime. Run from this thread:
-    // the UI is already frozen, and the dump suspends the process for a moment.
+    // Written in-process with dbghelp from this thread: the UI is already
+    // frozen. createdump used to do this, but from .NET 10 it no longer takes
+    // a pid ("The pid argument is no longer supported"), so every hang dump
+    // failed and the one freeze it existed for left nothing behind.
     private static void WriteHangDump(TimeSpan waited)
     {
         if (!OperatingSystem.IsWindows() || Interlocked.Increment(ref _hangDumpsWritten) > MaxHangDumpsPerSession) return;
         try
         {
-            var tool = Path.Combine(AppContext.BaseDirectory, "createdump.exe");
-            if (!File.Exists(tool)) { AppLog.Info("UI hang dump skipped: createdump.exe is not beside ClypDat."); return; }
             var folder = Path.Combine(ClypDat.Core.Settings.AppDataPaths.Root, "hang-dumps");
             Directory.CreateDirectory(folder);
             foreach (var old in new DirectoryInfo(folder).GetFiles("*.dmp").OrderByDescending(file => file.LastWriteTimeUtc).Skip(HangDumpsKept - 1))
@@ -132,33 +134,44 @@ public static class RuntimeHealthWatchdog
             }
             var path = Path.Combine(folder, $"ui-hang-{DateTime.Now:yyyyMMdd-HHmmss}.dmp");
             var clock = Stopwatch.StartNew();
-            using var dump = Process.Start(new ProcessStartInfo(tool)
+            bool written;
+            int error;
+            using (var file = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
+            using (var process = Process.GetCurrentProcess())
             {
-                ArgumentList = { "--normal", "-f", path, Environment.ProcessId.ToString() },
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            });
-            if (dump is null) { AppLog.Info("UI hang dump failed: createdump did not start."); return; }
-            var output = dump.StandardError.ReadToEndAsync();
-            _ = dump.StandardOutput.ReadToEndAsync();
-            if (!dump.WaitForExit(60_000))
+                written = MiniDumpWriteDump(process.Handle, (uint)Environment.ProcessId, file.SafeFileHandle,
+                    HangDumpType, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                error = written ? 0 : Marshal.GetLastWin32Error();
+            }
+            if (!written)
             {
-                try { dump.Kill(); } catch { }
-                AppLog.Info("UI hang dump abandoned: createdump ran past 60s.");
+                try { File.Delete(path); } catch { }
+                AppLog.Info($"UI hang dump failed: MiniDumpWriteDump error={error}.");
                 return;
             }
-            var size = File.Exists(path) ? new FileInfo(path).Length / (1024 * 1024) : 0;
-            AppLog.Info(dump.ExitCode == 0 && File.Exists(path)
-                ? $"UI hang dump written after {waited.TotalSeconds:0}s stalled: {path} ({size} MB, {clock.ElapsedMilliseconds}ms)."
-                : $"UI hang dump failed (exit {dump.ExitCode}): {output.Result.Trim()}");
+            var size = new FileInfo(path).Length / (1024 * 1024);
+            AppLog.Info($"UI hang dump written after {waited.TotalSeconds:0}s stalled: {path} ({size} MB, {clock.ElapsedMilliseconds}ms).");
         }
         catch (Exception error)
         {
             AppLog.Info($"UI hang dump failed: {error.Message}");
         }
     }
+
+    // What createdump's default "withheap" dump holds: enough for dotnet-dump
+    // or WinDbg's SOS to walk managed stacks and see which lock each waits on.
+    private const uint HangDumpType =
+        0x00000001 | // MiniDumpWithDataSegs
+        0x00000004 | // MiniDumpWithHandleData
+        0x00000020 | // MiniDumpWithUnloadedModules
+        0x00000200 | // MiniDumpWithPrivateReadWriteMemory
+        0x00000800 | // MiniDumpWithFullMemoryInfo
+        0x00001000 | // MiniDumpWithThreadInfo
+        0x00040000;  // MiniDumpWithTokenInformation
+
+    [DllImport("dbghelp.dll", SetLastError = true)]
+    private static extern bool MiniDumpWriteDump(IntPtr process, uint processId, Microsoft.Win32.SafeHandles.SafeFileHandle file,
+        uint dumpType, IntPtr exceptionParam, IntPtr userStreamParam, IntPtr callbackParam);
 
     private static string DescribeResources()
     {

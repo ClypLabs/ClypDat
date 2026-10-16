@@ -98,6 +98,14 @@ public sealed partial class PlaybackSession : IDisposable
     private readonly EditorOverlayClock _overlayClock;
     private EventHandler<MediaPlayerTimeChangedEventArgs>? _overlayClockHandler;
     private long _overlayClockGeneration;
+    // The clip's length as libvlc last reported it through LengthChanged, 0
+    // while unknown. The overlay clock clamps against this, never against
+    // VideoPlayer.Length: the clock runs inside libvlc event callbacks under
+    // its own lock, and Length is a call back into libvlc that waits on the
+    // player's input lock. Stop() holds that lock while it waits for the
+    // event thread, so a TimeChanged landing during a stop wedged both
+    // threads, and the UI thread then blocked on the clock's lock for good.
+    private long _knownLengthMs;
     private Task? _previewWorker;
     private bool _previewAudioPaused;
     // The currency predicate is the caller's own - a drag preview and a final
@@ -173,7 +181,8 @@ public sealed partial class PlaybackSession : IDisposable
         _libVlc = new LibVLC(LibVlcPluginCache.Options(LibVlcOptions, out var pluginCacheFingerprint));
         if (pluginCacheFingerprint is not null) LibVlcPluginCache.Commit(pluginCacheFingerprint);
         VideoPlayer = new MediaPlayer(_libVlc);
-        _overlayClock = new EditorOverlayClock(() => Duration);
+        _overlayClock = new EditorOverlayClock(() => TimeSpan.FromMilliseconds(Volatile.Read(ref _knownLengthMs)));
+        VideoPlayer.LengthChanged += (_, args) => Volatile.Write(ref _knownLengthMs, Math.Max(0, args.Length));
         VideoPlayer.EnableKeyInput = false;
         VideoPlayer.EnableMouseInput = false;
         VideoPlayer.EndReached += (_, _) => { _ended = true; _overlayClock.FreezeAtCurrent(_overlayClockGeneration, Stopwatch.GetTimestamp()); };
@@ -374,6 +383,7 @@ public sealed partial class PlaybackSession : IDisposable
         var teardownMs = loadClock.ElapsedMilliseconds;
         _ended = false;
         _lastRequestedPosition = TimeSpan.Zero;
+        Volatile.Write(ref _knownLengthMs, 0);
         ResetOverlayClock(TimeSpan.Zero);
         LoadedPath = path;
         _videoOptions.Clear();
