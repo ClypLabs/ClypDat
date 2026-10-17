@@ -62,20 +62,18 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             }
             NativeRecorderSession.RequireCompleteEngine();
             var configuration = _configuration();
-            var root = Path.Combine(AppDataPaths.Root, "native-replay-buffer", "session-" + Guid.NewGuid().ToString("N"));
             var fullSessionPath = FullSessionPath(configuration);
-            var session = NativeRecorderSession.Create(configuration, root, fullSessionPath);
+            var session = CreateSession(configuration, fullSessionPath);
             var artwork = new RecordingKeyboardArtworkService();
             try
             {
                 OverlayCaptureSettings settings;
                 lock (_gate) { _active = configuration; settings = _overlays; _fullSessionPath = fullSessionPath; _closedSessions.Clear(); _publishedSessions.Clear(); }
-                session.UpdateOverlay(settings, ++_overlayRevision, NowUs());
                 var initialArtwork = artwork.Update(settings, [], 0, Math.Max(2, configuration.CaptureWidth), Math.Max(2, configuration.CaptureHeight), NowUs());
-                if (initialArtwork is not null) session.UpdateArtwork(initialArtwork);
-                session.Start();
+                StartSession(session, settings, initialArtwork);
                 GpuScheduling.TryRaiseProcessGpuPriority();
                 var startup = Stopwatch.StartNew();
+                var reopened = false;
                 while (true)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -85,6 +83,22 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                     if (state.Value.RestartRequired != 0 || error.Length > 0) throw new InvalidOperationException(error.Length > 0 ? error : "Native recorder requires a worker restart.");
                     if (state.Value.Encoded > 0) break;
                     if (startup.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException("Native recorder did not deliver an encoded frame within 30 seconds.");
+                    // A capture source opened while the display stack is being
+                    // reset (a driver install, a GPU or monitor change) can stay
+                    // silent for good, while a fresh one opened moments later
+                    // works. Reopen once rather than leave the replay buffer
+                    // dead for the whole 30-second budget.
+                    if (!reopened && state.Value.Acquired == 0 && startup.Elapsed > SilentSourceReopenDelay)
+                    {
+                        reopened = true;
+                        AppLog.Info($"Native recorder: capture source delivered no frames in {SilentSourceReopenDelay.TotalSeconds:0} s; reopening it.");
+                        // A failed stop leaves the silent session in place, so the
+                        // cleanup below handles it like any failed start.
+                        await Task.Run(session.Stop, CancellationToken.None).ConfigureAwait(false);
+                        session.Dispose();
+                        session = CreateSession(configuration, fullSessionPath);
+                        StartSession(session, settings, initialArtwork);
+                    }
                     await Task.Delay(25, cancellationToken).ConfigureAwait(false);
                 }
                 lock (_gate)
@@ -115,6 +129,15 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
             }
         }
         finally { _lifecycle.Release(); }
+    }
+    internal static readonly TimeSpan SilentSourceReopenDelay = TimeSpan.FromSeconds(5);
+    private static NativeRecorderSession CreateSession(ReplayBufferConfig configuration, string fullSessionPath) =>
+        NativeRecorderSession.Create(configuration, Path.Combine(AppDataPaths.Root, "native-replay-buffer", "session-" + Guid.NewGuid().ToString("N")), fullSessionPath);
+    private void StartSession(NativeRecorderSession session, OverlayCaptureSettings settings, RecordingKeyboardArtwork? artwork)
+    {
+        session.UpdateOverlay(settings, ++_overlayRevision, NowUs());
+        if (artwork is not null) session.UpdateArtwork(artwork);
+        session.Start();
     }
     // A native stop that misses its bounded joins keeps the old capture graph
     // alive inside this process for good. Later sessions still start, so the

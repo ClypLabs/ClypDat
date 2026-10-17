@@ -25,6 +25,9 @@ internal sealed class SpotifyPlaybackHistory
             _entries.AddRange(journal.Entries);
             foreach (var pin in journal.Pins) _pins[pin.Key] = pin.Value;
         }
+        // A crash before an older build flushed the journal leaves it zero-filled.
+        // Nothing in it can be recovered; start with an empty history.
+        catch (JsonException error) { AppLog.Info($"Spotify history unreadable, starting empty: {error.Message}"); }
         catch (Exception error) { AppLog.Error("Spotify history recovery failed.", error); }
     }
     public void Sample(object? sender, SpotifyNowPlaying state) => Add(MonotonicClock.SharedSeconds, state);
@@ -54,7 +57,13 @@ internal sealed class SpotifyPlaybackHistory
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path + ".tmp", JsonSerializer.Serialize(new Journal(_boot, _entries.ToArray(), new(_pins))));
+            // Flushed to disk before the rename: otherwise a crash can commit the
+            // rename while the data is still cached, leaving a zero-filled file.
+            using (var stream = new FileStream(_path + ".tmp", FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(stream, new Journal(_boot, _entries.ToArray(), new(_pins)));
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(_path + ".tmp", _path, true);
         }
         catch (Exception error) { AppLog.Error("Spotify history persistence failed.", error); }

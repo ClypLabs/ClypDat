@@ -87,6 +87,21 @@ public sealed class SpotifyTimelineTests
     }
 
     [Fact]
+    public void ZeroFilledJournalLeftByCrashStartsEmptyAndIsRewritten()
+    {
+        WithHistory((_, path) =>
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllBytes(path, new byte[4096]);
+            var history = new SpotifyPlaybackHistory(path);
+            var now = MonotonicClock.SharedSeconds;
+            Assert.Null(SpotifyTimelineSidecar.At(history.Materialize(now, 1), 0));
+            history.Add(now, State());
+            Assert.Equal("one", SpotifyTimelineSidecar.At(new SpotifyPlaybackHistory(path).Materialize(now, 1), 0)!.TrackId);
+        });
+    }
+
+    [Fact]
     public void MovingAndTrimmingCopiesArtworkBeforeDeletingOriginal()
     {
         var root = Path.Combine(Path.GetTempPath(), "spotify-files-" + Guid.NewGuid());
