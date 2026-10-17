@@ -462,7 +462,7 @@ public sealed class FortniteMatchStatsTests
         Assert.Equal("2:43", row.Time);
         Assert.Equal("0:13", row.ClipTime);
         Assert.True(row.InClip);
-        Assert.Equal(["1", "0", "—", "—"], FortniteStatsPresentation.ClipTiles(match, window).Select(tile => tile.Value));
+        Assert.Equal(["1", "0"], FortniteStatsPresentation.ClipTiles(match, window).Select(tile => tile.Value));
     }
 
     [Fact]
@@ -495,7 +495,8 @@ public sealed class FortniteMatchStatsTests
         var view = MatchStatsViewModel.FromFortnite(match, MatchClipMapping.ReplayWindow(match, ClipAt(110, 140, 30)), string.Empty);
         Assert.True(view.IsClipScope);
         Assert.Equal("IN THIS CLIP", view.TilesLabel);
-        Assert.Equal(["1", "1", "—", "—"], view.Tiles.Select(tile => tile.Value));
+        Assert.Equal(["Elims", "Knocks"], view.Tiles.Select(tile => tile.Label));
+        Assert.Equal(["1", "1"], view.Tiles.Select(tile => tile.Value));
         Assert.Equal(2, view.ClipEvents.Count);
         view.SelectedScope = MatchStatsViewModel.FullScope;
         Assert.True(view.IsFortniteFullScope);

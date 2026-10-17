@@ -124,7 +124,9 @@ public static class FortniteStatsPresentation
 
     /// <summary>
     /// The clip's own tiles: what can be counted from events inside it.
-    /// Damage and accuracy only exist as match totals, so they read "—".
+    /// Damage and accuracy are left out: the replay holds them only as match
+    /// totals. Its damage cues repeat stale values and don't add up to the
+    /// total, and no shots-fired count exists to split accuracy by.
     /// </summary>
     public static IReadOnlyList<MatchStatTile> ClipTiles(MatchStats match, MatchReplayWindow window)
     {
@@ -132,9 +134,7 @@ public static class FortniteStatsPresentation
         return
         [
             new("Elims", match.LocalEventsAvailable ? inside.Count(e => e.Kind == "kill").ToString(CultureInfo.CurrentCulture) : Dash),
-            new("Knocks", match.LocalEventsAvailable ? inside.Count(e => e.Kind == "knock").ToString(CultureInfo.CurrentCulture) : Dash),
-            new("Damage", Dash),
-            new("Accuracy", Dash)
+            new("Knocks", match.LocalEventsAvailable ? inside.Count(e => e.Kind == "knock").ToString(CultureInfo.CurrentCulture) : Dash)
         ];
     }
 

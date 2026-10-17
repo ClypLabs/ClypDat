@@ -98,7 +98,7 @@ public sealed class FortniteReplayParserSafetyTests
         Assert.True(match.HasMatchSummary);
         Assert.False(match.LocalEventsAvailable);
         Assert.Equal("2", FortniteStatsPresentation.Tiles(match)[1].Value);
-        Assert.Equal(["—", "—", "—", "—"], FortniteStatsPresentation.ClipTiles(match, new(0, 300, 1)).Select(tile => tile.Value));
+        Assert.Equal(["—", "—"], FortniteStatsPresentation.ClipTiles(match, new(0, 300, 1)).Select(tile => tile.Value));
         Assert.Empty(match.Events);
     }
 

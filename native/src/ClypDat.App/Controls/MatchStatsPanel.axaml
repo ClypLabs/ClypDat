@@ -55,7 +55,7 @@
           <ItemsControl ItemsSource="{Binding Tiles}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
-                <UniformGrid Columns="4" />
+                <UniformGrid Rows="1" />
               </ItemsPanelTemplate>
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
@@ -95,7 +95,6 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-          <TextBlock Text="{Binding ClipNote}" Foreground="{StaticResource Text_6B7C8C}" FontSize="11" TextWrapping="Wrap" />
         </StackPanel>
       </Border>
 

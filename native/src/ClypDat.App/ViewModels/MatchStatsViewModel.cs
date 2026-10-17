@@ -109,7 +109,6 @@ public sealed class MatchStatsViewModel : ViewModelBase
     public bool IsFullScope => !IsClipScope;
     public bool IsFortniteFullScope => IsFortnite && IsFullScope;
     public string TilesLabel => IsClipScope ? "IN THIS CLIP" : "WHOLE MATCH";
-    public string ClipNote { get; private init; } = string.Empty;
     public IReadOnlyList<MatchTimelineRowViewModel> ClipEvents { get; private init; } = [];
     public bool HasClipEvents => ClipEvents.Count > 0;
     public bool HasNoClipEvents => ClipEvents.Count == 0;
@@ -186,7 +185,6 @@ public sealed class MatchStatsViewModel : ViewModelBase
             ScoreLabel = match.Placement is { } place ? $"#{place}" : string.Empty,
             FullTiles = FortniteStatsPresentation.Tiles(match),
             ClipTiles = window is null ? [] : FortniteStatsPresentation.ClipTiles(match, window),
-            ClipNote = window is null ? string.Empty : "Damage and accuracy are only recorded for the whole match.",
             ClipEvents = rows.Where(row => row.InClip).Select(row => Row(row, false)).ToArray(),
             Timeline = rows.Select(row => Row(row, true)).ToArray(),
             // Keep unavailable axes visible instead of dropping the radar:
