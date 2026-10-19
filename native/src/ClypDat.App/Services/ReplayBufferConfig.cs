@@ -54,5 +54,8 @@ public sealed record ReplayBufferConfig(
     bool SystemAudioEnabled = false,
     int SystemAudioVolumePercent = 100,
     string AudioCodec = ClypDat.Core.Settings.RecordingAudioCodec.Aac,
-    int AudioBitrateKbps = 0);
+    int AudioBitrateKbps = 0,
+    // Event candidates can outlive the manual replay window while waiting for
+    // a round result. Retain their video, audio and overlays together.
+    int AutoClipRetentionSeconds = 0);
 

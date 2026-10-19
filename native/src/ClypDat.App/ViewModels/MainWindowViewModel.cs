@@ -9144,6 +9144,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             ? SelectedMicrophones.FirstOrDefault()?.Name ?? string.Empty
             : SelectedMicrophoneDevice?.Name ?? string.Empty;
 
+        // Keep a bounded round of history for CS2's deferred tier selection.
+        // DurationSeconds still controls manual saves and the visible preset.
+        var cs2RoundHistory = !desktopCapture && Settings.AutoClipping.Enabled
+            && AutoClipCatalog.MatchGame(detectionKey, ActiveGameDetection.ExeName, ActiveGameDetection.DisplayName) == "cs2"
+            && Settings.AutoClipping.Games.TryGetValue("cs2", out var cs2) && cs2.Enabled
+            && cs2.Events.Any(item => item.Value && item.Key.ToLowerInvariant() is "kill" or "2k" or "3k" or "4k" or "ace");
+
         return new ReplayBufferConfig(
             effective.ReplayDurationSeconds,
             effective.ReplayMaxHeight,
@@ -9193,7 +9200,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             SystemAudioEnabled: Settings.SystemAudioEnabled,
             SystemAudioVolumePercent: Settings.SystemAudioVolumePercent,
             AudioCodec: RecordingAudioCodec.Normalize(Settings.ReplayAudioCodec),
-            AudioBitrateKbps: Settings.ReplayAudioBitrateKbps);
+            AudioBitrateKbps: Settings.ReplayAudioBitrateKbps,
+            AutoClipRetentionSeconds: cs2RoundHistory ? 300 : 0);
     }
 
     public void SetDuration(TimeSpan duration)

@@ -583,7 +583,11 @@ public sealed partial class MainWindow : Window
                     {
                         if (e.PropertyName == nameof(AutoClipGameViewModel.IsEnabled)) UpdateAutoClipStates();
                     };
-                    autoClipGame.SettingsChanged += (_, _) => UpdateAutoClipSettingsSnapshot(autoClipGame.Id);
+                    autoClipGame.SettingsChanged += (_, _) =>
+                    {
+                        UpdateAutoClipSettingsSnapshot(autoClipGame.Id);
+                        ApplySavedRecordingSettings();
+                    };
                 }
                 // TryDeploy for CS2/Dota does registry reads, Steam library
                 // enumeration and file IO synchronously - fine on demand, but
@@ -3263,7 +3267,8 @@ public sealed partial class MainWindow : Window
     }
 
     private static bool RuntimeSettingsDiffer(ReplayBufferConfig active, ReplayBufferConfig desired) =>
-        active.DurationSeconds != desired.DurationSeconds || active.MaxHeight != desired.MaxHeight || active.FrameRate != desired.FrameRate ||
+        active.DurationSeconds != desired.DurationSeconds || active.AutoClipRetentionSeconds != desired.AutoClipRetentionSeconds ||
+        active.MaxHeight != desired.MaxHeight || active.FrameRate != desired.FrameRate ||
         active.BitrateMbps != desired.BitrateMbps || !string.Equals(active.VideoCodec, desired.VideoCodec, StringComparison.Ordinal) ||
         !string.Equals(active.EncoderMode, desired.EncoderMode, StringComparison.Ordinal) || !string.Equals(active.FrameRateMode, desired.FrameRateMode, StringComparison.Ordinal) ||
         active.FullSessionRecordingEnabled != desired.FullSessionRecordingEnabled ||
@@ -3513,7 +3518,7 @@ public sealed partial class MainWindow : Window
 
                 AppLog.Info(isAutoClip ? $"Auto-clip triggered: {autoClipLabel}." : "Replay clip save requested.");
 
-                // The event tail belongs to the final kill, not whatever is
+                // The event tail belongs to the selected kill, not whatever is
                 // happening when the round finishes. Wait for it before the
                 // replay buffer snapshots its requested UTC window.
                 if (clipWindow is not null)
@@ -6546,6 +6551,7 @@ public sealed partial class MainWindow : Window
         UpdateDotaAutoClipState();
         UpdateLeagueAutoClipState();
         UpdateDetectorPackAutoClipStates();
+        ApplySavedRecordingSettings();
     }
 
     private bool IsActiveAutoClipGame(string gameId)

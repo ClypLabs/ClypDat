@@ -163,7 +163,7 @@ internal sealed unsafe class NativeRecorderSession : SafeHandleZeroOrMinusOneIsI
         {
             Header = Version<Configuration>(), QpcAnchor = MonotonicClock.QpcAnchor, QpcFrequency = Stopwatch.Frequency,
             UtcAnchorTicks = MonotonicClock.UtcAnchor.Ticks, BootId = Guid.Parse(MonotonicClock.BootId), Window = unchecked((ulong)s.GameWindowHandle),
-            DurationSeconds = s.DurationSeconds, MaxHeight = s.MaxHeight, FrameRate = s.FrameRate, CaptureX = s.CaptureX, CaptureY = s.CaptureY,
+            DurationSeconds = Math.Max(s.DurationSeconds, s.AutoClipRetentionSeconds), MaxHeight = s.MaxHeight, FrameRate = s.FrameRate, CaptureX = s.CaptureX, CaptureY = s.CaptureY,
             CaptureWidth = s.CaptureWidth, CaptureHeight = s.CaptureHeight, BitrateMbps = s.BitrateMbps,
             GameGainPercent = s.SystemAudioEnabled ? s.SystemAudioVolumePercent : s.GameAudioVolumePercent,
             MicrophoneGainPercent = s.MicrophoneVolumePercent, FullSessionQuotaGb = s.FullSessionQuotaGb,

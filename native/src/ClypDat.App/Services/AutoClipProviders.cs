@@ -12,9 +12,8 @@ public sealed record AutoClipRequest(string GameId, string GameName, string Even
 /// game's telemetry needs to be sure of what happened - clipping to it left a
 /// Double Kill as fourteen seconds with no sense of how the fight started.
 ///
-/// CS2 does not come through here. Its window is the round, from first kill to
-/// round end, which already means something; the rest of the games have no such
-/// structure to lean on.
+/// CS2 does not come through here. It waits for death or round end to choose the
+/// highest selected tier, then saves ten seconds before and after that kill.
 /// </summary>
 public static class AutoClipWindowPolicy
 {

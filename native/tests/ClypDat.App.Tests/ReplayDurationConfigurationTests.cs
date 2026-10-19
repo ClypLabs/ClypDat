@@ -16,11 +16,13 @@ public sealed class ReplayDurationConfigurationTests
 
     // Use real config construction/setters without starting audio, accounts,
     // game detection or capture from the main view model constructor.
-    private static MainWindowViewModel ViewModel(AppSettings settings)
+    private static MainWindowViewModel ViewModel(AppSettings settings, bool cs2 = false)
     {
         var vm = (MainWindowViewModel)RuntimeHelpers.GetUninitializedObject(typeof(MainWindowViewModel));
         Field(vm, "<Settings>k__BackingField", settings);
-        Field(vm, "_activeGameDetection", new GameDetection("Fixture game", "fixture.exe", "", "", 0, 123, true, DetectionKey: "fixture.exe"));
+        Field(vm, "_activeGameDetection", cs2
+            ? new GameDetection("Counter-Strike 2", "cs2.exe", "", "", 0, 123, true, DetectionKey: "steam-730")
+            : new GameDetection("Fixture game", "fixture.exe", "", "", 0, 123, true, DetectionKey: "fixture.exe"));
         Field(vm, "_selectedReplayDurationPreset", MainWindowViewModel.DurationPresets.Single(p => p.Seconds == settings.ReplayDurationSeconds));
         return vm;
     }
@@ -52,6 +54,56 @@ public sealed class ReplayDurationConfigurationTests
         var config = ViewModel(settings).CreateReplayConfig();
         Assert.Equal(expected, config.DurationSeconds);
         Assert.Equal(desktop ? "Desktop" : "Game", config.CaptureSource);
+    });
+
+    [Theory]
+    [InlineData(30, true, true, true, false, 300)]
+    [InlineData(300, true, true, true, false, 300)]
+    [InlineData(30, false, true, true, false, 30)]
+    [InlineData(30, true, false, true, false, 30)]
+    [InlineData(30, true, true, false, false, 30)]
+    [InlineData(30, true, true, true, true, 30)]
+    public void Cs2RoundHistoryReachesNativeRecorderWithoutChangingManualDuration(
+        int manualSeconds, bool master, bool game, bool kills, bool desktop, int expectedHistory) => Isolated(() =>
+    {
+        var settings = new AppSettings
+        {
+            ReplayDurationSeconds = manualSeconds,
+            ReplayCaptureSource = desktop ? "Desktop" : "Game",
+            ReplayAutoSwitchToGameCapture = false
+        };
+        settings.AutoClipping.Enabled = master;
+        settings.AutoClipping.Games["cs2"] = new AutoClipGameSettings
+        {
+            Enabled = game,
+            Events = new Dictionary<string, bool> { ["3k"] = kills }
+        };
+        var config = ViewModel(settings, cs2: true).CreateReplayConfig();
+        Assert.Equal(manualSeconds, config.DurationSeconds);
+
+        var session = typeof(NativeRecorderSession);
+        using var inputs = (IDisposable)Activator.CreateInstance(session.GetNestedType("Inputs", BindingFlags.NonPublic)!, nonPublic: true)!;
+        var native = (NativeRecorderSession.Configuration)session.GetMethod("Map", BindingFlags.NonPublic | BindingFlags.Static)!
+            .Invoke(null, [config, AppContext.BaseDirectory, "", inputs])!;
+        Assert.Equal(expectedHistory, native.DurationSeconds);
+    });
+
+    [Fact]
+    public void Cs2KillToggleUpdatesWorkerIdentityAndRestartRequirement() => Isolated(() =>
+    {
+        var settings = new AppSettings { ReplayDurationSeconds = 30 };
+        settings.AutoClipping.Games["cs2"] = new AutoClipGameSettings
+        {
+            Events = new Dictionary<string, bool> { ["2k"] = false }
+        };
+        var vm = ViewModel(settings, cs2: true);
+        var before = vm.CreateReplayConfig();
+        settings.AutoClipping.Games["cs2"].Events["2k"] = true;
+        var after = vm.CreateReplayConfig();
+        AssertRestart(before, after);
+        var roundTrip = System.Text.Json.JsonSerializer.Deserialize<ReplayBufferConfig>(System.Text.Json.JsonSerializer.Serialize(after))!;
+        Assert.Equal(300, roundTrip.AutoClipRetentionSeconds);
+        Assert.Equal(30, roundTrip.DurationSeconds);
     });
 
     [Fact]
