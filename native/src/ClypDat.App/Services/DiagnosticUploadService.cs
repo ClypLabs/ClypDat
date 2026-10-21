@@ -37,6 +37,17 @@ internal static class DiagnosticUploadService
         body.Add(new StringContent(revision), "build");
         if (guest) body.Add(new StringContent(email!.Trim().ToLowerInvariant()), "email");
         body.Add(new UploadContent(path, length, progress), "bundle", "diagnostics.zip");
+        // workerd's multipart parser requires quoted disposition parameters.
+        foreach (var part in body)
+        {
+            var disposition = part.Headers.ContentDisposition!;
+            disposition.Name = $"\"{disposition.Name!.Trim('"')}\"";
+            if (disposition.FileName is not null)
+            {
+                disposition.FileName = "\"diagnostics.zip\"";
+                part.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
+            }
+        }
         using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/support") { Content = body };
         if (!guest) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -45,7 +56,19 @@ internal static class DiagnosticUploadService
         if ((int)response.StatusCode == 429)
             throw new InvalidOperationException("Too many reports today. Try tomorrow, or use Export ZIP to save a local bundle.");
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException("The report could not be received. Try again shortly, or use Export ZIP.");
+        {
+            string? detail = null;
+            try
+            {
+                using var error = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                if (error.RootElement.ValueKind == JsonValueKind.Object &&
+                    error.RootElement.TryGetProperty("error", out var value) && value.ValueKind == JsonValueKind.String &&
+                    value.GetString() is { Length: > 0 and <= 512 } messageText) detail = messageText;
+            }
+            catch (JsonException) { }
+            throw new InvalidOperationException($"The report could not be received (HTTP {(int)response.StatusCode}). " +
+                (detail is null ? "Try again shortly, or use Export ZIP." : detail));
+        }
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
         if (!json.RootElement.TryGetProperty("id", out var id) || !Guid.TryParse(id.GetString(), out var received) || received != reportId)
             throw new InvalidOperationException("The server did not confirm the report. Please try again.");

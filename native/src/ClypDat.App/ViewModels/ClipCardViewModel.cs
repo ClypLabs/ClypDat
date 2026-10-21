@@ -26,6 +26,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     private string? _metadataError;
     private bool _busyOverlayShowsMetadataLoading;
     private CancellationTokenSource? _previewLoadCts;
+    private int _previewLoadWidth;
     private int _previewLoadVersion;
     private long _totalSizeBytes;
     private static readonly SemaphoreSlim PreviewDecodeSlots = new(2, 2);
@@ -789,10 +790,14 @@ public sealed class ClipCardViewModel : ViewModelBase
 
     private void SetPreviewImage(string path)
     {
+        var width = Volatile.Read(ref _previewDecodeWidth);
+        // Realized rows are revisited on every layout pass. Keep a pending
+        // decode (including its queued UI callback) alive until it completes.
+        // Path changes and explicit refreshes already cancel the old request.
+        if (_previewLoadCts is not null && _previewLoadWidth == width) return;
         CancelPreviewLoad();
         if (string.IsNullOrWhiteSpace(path)) return;
 
-        var width = Volatile.Read(ref _previewDecodeWidth);
         // Scrolling back over cards already seen is the common case, and it
         // has to stay synchronous: hopping to a worker to re-read something
         // already in memory would blank the card for a frame and put a wheel
@@ -808,6 +813,7 @@ public sealed class ClipCardViewModel : ViewModelBase
 
         var cancellation = new CancellationTokenSource();
         _previewLoadCts = cancellation;
+        _previewLoadWidth = width;
         var version = _previewLoadVersion;
         _ = LoadPreviewImageAsync(path, width, version, cancellation.Token);
     }
@@ -816,6 +822,7 @@ public sealed class ClipCardViewModel : ViewModelBase
     {
         _previewLoadVersion++;
         var previous = Interlocked.Exchange(ref _previewLoadCts, null);
+        _previewLoadWidth = 0;
         if (previous is null) return;
         previous.Cancel();
         previous.Dispose();
@@ -846,8 +853,15 @@ public sealed class ClipCardViewModel : ViewModelBase
         catch { return; }
         finally
         {
-            if (bitmap is not null)
-                Dispatcher.UIThread.Post(() => ApplyLoadedPreview(bitmap, path, width, version, cancellationToken));
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (version == _previewLoadVersion)
+                {
+                    Interlocked.Exchange(ref _previewLoadCts, null)?.Dispose();
+                    _previewLoadWidth = 0;
+                }
+                if (bitmap is not null) ApplyLoadedPreview(bitmap, path, width, version, cancellationToken);
+            });
         }
     }
 

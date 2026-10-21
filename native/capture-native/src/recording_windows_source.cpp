@@ -437,10 +437,7 @@ public:
     const char* name() const override { return "Windows Graphics Capture"; }
     ID3D11Device* d3d_device() const override { return shared_->gpu.device.Get(); }
     CaptureRect content_bounds() const override {
-        // Minimised at start: the item's decorated size still sizes the
-        // canvas, and frames are cropped to the client once it is restored.
-        if (config_.window)
-            if (const auto bounds = capture_window_bounds(config_.window)) return {0, 0, bounds->client.width, bounds->client.height};
+        if (config_.window) return capture_window_initial_shape(config_.window);
         if(!config_.window&&config_.capture_region.width>0&&config_.capture_region.height>0)return{0,0,config_.capture_region.width,config_.capture_region.height};
         const auto size=item_.Size();return{0,0,size.Width,size.Height};
     }
@@ -653,12 +650,7 @@ public:
     }
     bool recover() override { if (FAILED(device_removed_reason())) return false; try{open();reopener_.reset();return true;}catch(...){return false;} }
     CaptureRect content_bounds() const override {
-        if(config_.window){
-            if(const auto bounds=capture_window_bounds(config_.window))return{0,0,bounds->client.width,bounds->client.height};
-            // Minimised at start: the restored shape gives the canvas aspect
-            // ratio; frames wait until the window is eligible again.
-            return capture_window_restored_shape(config_.window).value_or(CaptureRect{});
-        }
+        if(config_.window)return capture_window_initial_shape(config_.window);
         if(config_.capture_region.width>0&&config_.capture_region.height>0)return{0,0,config_.capture_region.width,config_.capture_region.height};
         return{0,0,desktop_.right-desktop_.left,desktop_.bottom-desktop_.top};
     }

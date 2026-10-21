@@ -14,6 +14,9 @@ std::optional<WindowCaptureBounds> capture_window_bounds(uintptr_t window);
 // window minimised when recording starts. Placement is in the window's own
 // DPI space, not physical pixels, so only the aspect ratio is reliable.
 std::optional<CaptureRect> capture_window_restored_shape(uintptr_t window);
+// Initial canvas uses the client or restored shape, never WGC's minimized
+// placeholder. Returns empty when no window shape can be determined.
+CaptureRect capture_window_initial_shape(uintptr_t window);
 // Match the frame's ContentSize, not its texture allocation. An unmatched size
 // during a resize is skipped rather than guessing an origin or including chrome.
 std::optional<CaptureRect> capture_window_region(const WindowCaptureBounds& bounds, CaptureRect content);

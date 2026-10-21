@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Reflection;
 using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -10,6 +11,46 @@ namespace ClypDat.App.Tests;
 
 public sealed class LibraryThumbnailRetentionTests
 {
+    [Fact]
+    public void RepeatedViewportUpdate_DoesNotCancelPendingThumbnail()
+    {
+        AvaloniaTestThread.Run(() =>
+        {
+            var path = System.IO.Path.Combine(AppContext.BaseDirectory, $"viewport-thumbnail-{Guid.NewGuid():N}.jpg");
+            using (var image = new WriteableBitmap(new PixelSize(64, 36), new Vector(96, 96)))
+                image.Save(path, JpegBitmapEncoderOptions.Default);
+            var media = new MediaFileInfo("clip", "C:\\test\\clip.mp4", DateTimeOffset.UtcNow,
+                TimeSpan.FromSeconds(5), 1, path, [], 640, 360, 60);
+            var card = new ClipCardViewModel(media, "C:\\test");
+            try
+            {
+                card.SetPreviewLifecycle(true, true);
+                var pending = (CancellationTokenSource)typeof(ClipCardViewModel)
+                    .GetField("_previewLoadCts", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(card)!;
+                var token = pending.Token;
+                // Layout can repeat before the decode's dispatcher callback runs.
+                for (var i = 0; i < 20; i++) card.SetPreviewLifecycle(true, true);
+                Assert.False(token.IsCancellationRequested,
+                    "Viewport updates cancelled the thumbnail before it could be displayed.");
+                Assert.True(SpinWait.SpinUntil(() =>
+                {
+                    Dispatcher.UIThread.RunJobs();
+                    return card.PreviewImage is not null;
+                }, TimeSpan.FromSeconds(3)), "Visible card never received its thumbnail.");
+            }
+            finally
+            {
+                card.SetPreviewLifecycle(false, false);
+                CardThumbnailCache.Invalidate(path);
+                Assert.True(SpinWait.SpinUntil(() =>
+                {
+                    try { System.IO.File.Delete(path); return true; }
+                    catch (System.IO.IOException) { return false; }
+                }, TimeSpan.FromSeconds(3)), "Thumbnail fixture remained open after cancellation.");
+            }
+        }, TimeSpan.FromSeconds(10), "Repeated viewport thumbnail load timed out.");
+    }
+
     [Fact]
     public void SettledHiddenLibraryCacheClearPreservesEditorPosters()
     {

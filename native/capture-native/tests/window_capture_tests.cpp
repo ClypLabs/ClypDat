@@ -110,6 +110,25 @@ void check_content(CapturePixels& output, uint32_t color) {
         if (output.bgra[i] != uint8_t(color) || output.bgra[i + 1] != uint8_t(color >> 8) || output.bgra[i + 2] != uint8_t(color >> 16))
             throw std::runtime_error("Window capture includes title bar or green right border");
 }
+void minimized_initial_shape() {
+    // A hidden owned window only: no acquisition, visibility or user input.
+    const auto hwnd = CreateWindowExW(0, L"STATIC", L"ClypDat minimized shape test",
+        WS_OVERLAPPEDWINDOW | WS_MINIMIZE, 100, 100, 1920, 1080,
+        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    CHECK(hwnd);
+    struct Destroy { HWND hwnd; ~Destroy() { DestroyWindow(hwnd); } } destroy{hwnd};
+    CHECK(IsIconic(hwnd));
+    CHECK(!IsWindowVisible(hwnd));
+    const auto window = reinterpret_cast<uintptr_t>(hwnd);
+    const auto restored = capture_window_restored_shape(window);
+    CHECK(restored && restored->width > 160 && restored->height > 28);
+    // WGC reports the 160x28 minimized placeholder. It produces 6172x1080
+    // if used to choose a permanent 1080p canvas.
+    const auto shape = capture_window_initial_shape(window);
+    CHECK(shape == *restored);
+    CHECK(capture_window_initial_shape(0) == CaptureRect{});
+    std::cout << "Minimized startup: restored shape used instead of 160x28 WGC placeholder\n";
+}
 void generated_window(bool hardware) {
     // Physical bounds of a decorated 150% window, including an invisible
     // resize margin, a 40-pixel caption and a 6-pixel right border.
@@ -219,6 +238,6 @@ void generated_window(bool hardware) {
     std::cout << "Client-aspect video: " << decoded << " frames decoded, all edge pixels checked (" << health.processing_path << ", " << health.encoder << ")\n";
 }
 int main(int argc, char** argv) {
-    try { av_log_set_level(AV_LOG_ERROR); geometry_cases(); persistent_mismatch(); physical_bounds(); generated_window(argc > 1 && std::string(argv[1]) == "--gpu"); return 0; }
+    try { av_log_set_level(AV_LOG_ERROR); geometry_cases(); persistent_mismatch(); physical_bounds(); minimized_initial_shape(); generated_window(argc > 1 && std::string(argv[1]) == "--gpu"); return 0; }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

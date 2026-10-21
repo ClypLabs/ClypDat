@@ -64,6 +64,18 @@ public sealed class DiagnosticUploadTests
                 Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
                 Assert.Equal("fixture-token", request.Headers.Authorization.Parameter);
                 Assert.Equal("multipart/form-data", request.Content!.Headers.ContentType!.MediaType);
+                foreach (var part in Assert.IsType<MultipartFormDataContent>(request.Content))
+                {
+                    // workerd rejects the unquoted names emitted by Add(content, name).
+                    var disposition = part.Headers.ContentDisposition!;
+                    Assert.Contains($"name=\"{disposition.Name}\"", disposition.ToString());
+                    if (disposition.FileName is { } fileName)
+                    {
+                        Assert.Equal("diagnostics.zip", fileName);
+                        Assert.Contains("filename=\"diagnostics.zip\"", disposition.ToString());
+                        Assert.Equal("application/zip", part.Headers.ContentType!.MediaType);
+                    }
+                }
                 var body = Encoding.UTF8.GetString(await request.Content.ReadAsByteArrayAsync(token));
                 Assert.Contains(id.ToString(), body);
                 Assert.Contains("The recorder stopped after a match.", body);
@@ -100,6 +112,27 @@ public sealed class DiagnosticUploadTests
             var error = await Assert.ThrowsAsync<InvalidOperationException>(() => DiagnosticUploadService.SendAsync(client,
                 "fixture-token", path, "The recorder stopped after a match.", Guid.NewGuid(), null, CancellationToken.None));
             Assert.Contains(expected, error.Message);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData("{\"error\":\"Invalid diagnostic upload\"}", "Invalid diagnostic upload")]
+    [InlineData("<html>Bad request</html>", "use Export ZIP")]
+    public async Task FailedUploadIncludesStatusAndSafeServerReason(string response, string expected)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, $"diagnostic-upload-{Guid.NewGuid():N}.zip");
+        await File.WriteAllBytesAsync(path, new byte[32]);
+        try
+        {
+            using var client = new HttpClient(new Handler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent(response) })))
+                { BaseAddress = new Uri("https://clypdat.test/") };
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => DiagnosticUploadService.SendAsync(client,
+                "fixture-token", path, "The recorder stopped after a match.", Guid.NewGuid(), null, CancellationToken.None));
+            Assert.Contains("HTTP 400", error.Message);
+            Assert.Contains(expected, error.Message);
+            Assert.DoesNotContain("<html>", error.Message);
         }
         finally { File.Delete(path); }
     }

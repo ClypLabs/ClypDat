@@ -67,6 +67,11 @@ std::optional<CaptureRect> capture_window_region(const WindowCaptureBounds& boun
     if (!within(crop, content)) return {};
     return crop;
 }
+CaptureRect capture_window_initial_shape(uintptr_t window) {
+    if (const auto bounds = capture_window_bounds(window))
+        return {0, 0, bounds->client.width, bounds->client.height};
+    return capture_window_restored_shape(window).value_or(CaptureRect{});
+}
 std::optional<CaptureRect> capture_window_scaled_region(const WindowCaptureBounds& bounds, CaptureRect content) {
     const auto frame = reference_rect(bounds);
     if (content.width <= 0 || content.height <= 0 || frame.width <= 0 || frame.height <= 0) return {};
