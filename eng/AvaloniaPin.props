@@ -2,8 +2,8 @@
   <!-- Stable builds use the forked package set produced from this commit. Dev
        CI overrides only ClypDatAvaloniaPackageVersion on the command line. -->
   <PropertyGroup>
-    <ClypDatAvaloniaStableCommit>856a999b5991c35a5e9b84999213dec145485eaf</ClypDatAvaloniaStableCommit>
-    <ClypDatAvaloniaStablePackageVersion>12.2.1007</ClypDatAvaloniaStablePackageVersion>
+    <ClypDatAvaloniaStableCommit>6aae4dc97995efd8a72dd3a9a33fcab90d01c57f</ClypDatAvaloniaStableCommit>
+    <ClypDatAvaloniaStablePackageVersion>12.2.1008</ClypDatAvaloniaStablePackageVersion>
     <ClypDatAvaloniaPackageVersion Condition="'$(ClypDatAvaloniaPackageVersion)' == ''">$(ClypDatAvaloniaStablePackageVersion)</ClypDatAvaloniaPackageVersion>
   </PropertyGroup>
 </Project>
