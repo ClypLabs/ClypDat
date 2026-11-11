@@ -277,7 +277,7 @@
                 <ItemsControl ItemsSource="{Binding Players}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:MatchPlayerRowViewModel">
-                      <Border Background="{Binding RowBackground}" CornerRadius="6" Padding="6,4" Margin="-6,0">
+                      <Border Background="{Binding RowBackground}" BorderBrush="{Binding RowBorder}" BorderThickness="1" CornerRadius="8" Padding="8,5" Margin="-9,1">
                       <Grid ColumnDefinitions="*,Auto,72" ColumnSpacing="8">
                         <TextBlock Text="{Binding Name}" FontWeight="{Binding Weight}" Foreground="{StaticResource Text_D6E2F0}" FontSize="12"
                                    TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />

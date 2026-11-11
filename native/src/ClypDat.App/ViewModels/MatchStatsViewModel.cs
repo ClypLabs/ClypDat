@@ -12,7 +12,7 @@ public sealed record MatchRoundHalfViewModel(string Title, string Side, IBrush S
     public bool HasSide => Side.Length > 0;
 }
 
-public sealed record MatchPlayerRowViewModel(string Name, string Kda, string Detail, double BarWidth, bool IsLocal, FontWeight Weight, IBrush RowBackground);
+public sealed record MatchPlayerRowViewModel(string Name, string Kda, string Detail, double BarWidth, bool IsLocal, FontWeight Weight, IBrush RowBackground, IBrush RowBorder);
 
 public sealed record MatchTeamBoardViewModel(string Title, string Score, IBrush Accent, IReadOnlyList<MatchPlayerRowViewModel> Players);
 
@@ -222,7 +222,8 @@ public sealed class MatchStatsViewModel : ViewModelBase
         var ct = AppThemeService.Brush("Semantic_59B6FF", "#59B6FF");
         var t = AppThemeService.Brush("Semantic_E5A23D", "#E5A23D");
         var muted = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6");
-        IBrush localRow = new ImmutableSolidColorBrush(Color.Parse("#9EC6F0"), 0.08);
+        IBrush localRow = new ImmutableSolidColorBrush(Color.Parse("#9EC6F0"), 0.07);
+        IBrush localRowBorder = new ImmutableSolidColorBrush(Color.Parse("#9EC6F0"), 0.22);
         MatchRoundCellViewModel Cell(MatchRoundCell cell) => new(
             cell.Number.ToString(),
             cell.Won switch { true => win, false => loss, _ => neutral },
@@ -249,7 +250,8 @@ public sealed class MatchStatsViewModel : ViewModelBase
                     BarMaxWidth * (player.Score ?? player.Kills) / maxScore,
                     player.IsLocal,
                     player.IsLocal ? FontWeight.SemiBold : FontWeight.Normal,
-                    player.IsLocal ? localRow : Brushes.Transparent))
+                    player.IsLocal ? localRow : Brushes.Transparent,
+                    player.IsLocal ? localRowBorder : Brushes.Transparent))
                 .ToArray();
             var title = mine is null || theirs is null || mine.Score == theirs.Score ? team.Name
                 : (team.Score > (local ? theirs.Score : mine.Score)) ? "Victory" : "Defeat";
