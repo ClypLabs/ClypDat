@@ -36,7 +36,7 @@ public sealed class Cs2AutoClipWindowTests
     [InlineData("3k", 3)]
     [InlineData("4k", 4)]
     [InlineData("ace", 5)]
-    public void OnlySelectedTierControlsWindowEvenWhenMoreKillsFollow(string selected, int tier)
+    public void SelectedTierSpansFromFirstKillEvenWhenMoreKillsFollow(string selected, int tier)
     {
         var settings = Settings(selected);
         using var listener = new Cs2GsiListener(() => settings, "test-token");
@@ -53,7 +53,7 @@ public sealed class Cs2AutoClipWindowTests
 
         var clip = Assert.Single(clips);
         Assert.Equal(selected, clip.EventId);
-        Assert.Equal(Origin.AddSeconds(tier * 20 - 10), clip.StartUtc);
+        Assert.Equal(Origin.AddSeconds(10), clip.StartUtc);
         Assert.Equal(Origin.AddSeconds(tier * 20 + 10), clip.EndUtc);
         Assert.Equal(selected, Assert.Single(clip.Events!).Id);
     }
@@ -80,7 +80,7 @@ public sealed class Cs2AutoClipWindowTests
         var clip = Assert.Single(clips);
         var expected = tier == 5 ? "ace" : $"{tier}k";
         Assert.Equal(expected, clip.EventId);
-        Assert.Equal(Origin.AddSeconds(tier * 20 - 10), clip.StartUtc);
+        Assert.Equal(Origin.AddSeconds(10), clip.StartUtc);
         Assert.Equal(Origin.AddSeconds(tier * 20 + 10), clip.EndUtc);
         Assert.Equal(expected, Assert.Single(clip.Events!).Id);
     }

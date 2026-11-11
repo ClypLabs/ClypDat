@@ -56,6 +56,7 @@ public sealed class Cs2GsiListener : IDisposable
     private string _lastMapName = string.Empty;
     private string _lastMapMode = string.Empty;
     private DateTime? _pendingKillUtc;
+    private readonly List<DateTime> _roundKillTimes = new();
     private string? _pendingLabel;
     private readonly List<AutoClipEvent> _roundEvents = new();
     private int? _healthPort;
@@ -426,6 +427,7 @@ public sealed class Cs2GsiListener : IDisposable
             {
                 for (var killNumber = _lastRoundKills + 1; killNumber <= currentKills; killNumber++)
                 {
+                    _roundKillTimes.Add(now);
                     var label = LabelForKill(killNumber, settings);
                     if (label is not null && (_pendingLabel is null || KillPriority(label) > KillPriority(_pendingLabel)))
                     {
@@ -499,7 +501,9 @@ public sealed class Cs2GsiListener : IDisposable
             return;
         }
         var endUtc = killUtc + PostKillCaptureDuration;
-        var startUtc = killUtc - PreKillCaptureDuration;
+        // A multi-kill starts at the round's first kill, not the one that made the tier.
+        var firstKillUtc = _roundKillTimes.Count > 0 && _roundKillTimes[0] < killUtc ? _roundKillTimes[0] : killUtc;
+        var startUtc = firstKillUtc - PreKillCaptureDuration;
         var events = _roundEvents.Where(item => item.OccurredUtc >= startUtc && item.OccurredUtc <= endUtc).ToArray();
         var title = BuildTitle(events);
         var request = new Cs2AutoClipRequest(eventId, _pendingLabel, title, startUtc, endUtc, events);
@@ -524,6 +528,7 @@ public sealed class Cs2GsiListener : IDisposable
     {
         _pendingKillUtc = null;
         _pendingLabel = null;
+        _roundKillTimes.Clear();
         _roundEvents.Clear();
     }
 
