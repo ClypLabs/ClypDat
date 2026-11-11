@@ -13,7 +13,8 @@ public sealed record MatchRadarAxis(string Label, double Value, string Display, 
     // Drawn as a labelled spoke with no point: missing data is never a 0.
     public static MatchRadarAxis Unavailable(string label) => new(label, double.NaN, "Not recorded", Available: false);
 }
-public sealed record MatchRoundCell(int Number, bool? Won, string Reason, bool StartsHalf);
+public sealed record MatchRoundCell(int Number, bool? Won, string Reason, bool StartsHalf, int Kills = 0, string? Side = null);
+public sealed record MatchRoundHalf(string Title, string? Side, int Won, int Lost, IReadOnlyList<MatchRoundCell> Cells);
 
 // Turns a MatchStats into what the Stats panel shows. Kept free of Avalonia
 // so the numbers can be tested.
@@ -78,8 +79,34 @@ public static class MatchStatsPresentation
             round.Number,
             round.LocalWon,
             ReasonLabel(round.Reason),
-            StartsHalf(round.Number, halftime))).ToArray();
+            StartsHalf(round.Number, halftime),
+            round.LocalKills,
+            round.LocalSide)).ToArray();
     }
+
+    public static IReadOnlyList<MatchRoundHalf> RoundHalves(MatchStats match)
+    {
+        var groups = new List<List<MatchRoundCell>>();
+        foreach (var cell in Rounds(match))
+        {
+            if (groups.Count == 0 || cell.StartsHalf) groups.Add([]);
+            groups[^1].Add(cell);
+        }
+        var split = match.HalftimeAfterRound > 0;
+        return groups.Select((cells, index) => new MatchRoundHalf(
+            !split ? "Rounds" : HalfTitle(index),
+            cells.Select(cell => cell.Side).FirstOrDefault(side => side is "CT" or "T"),
+            cells.Count(cell => cell.Won == true),
+            cells.Count(cell => cell.Won == false),
+            cells)).ToArray();
+    }
+
+    internal static string HalfTitle(int index) => index switch
+    {
+        0 => "First half",
+        1 => "Second half",
+        _ => $"Overtime {(index - 2) / 2 + 1} · {(index % 2 == 0 ? "first" : "second")} half"
+    };
 
     // A gap before the second half and before each half of overtime (MR3).
     internal static bool StartsHalf(int round, int halftime)

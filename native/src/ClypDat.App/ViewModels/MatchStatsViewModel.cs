@@ -1,13 +1,18 @@
-using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using ClypDat.App.Services;
 
 namespace ClypDat.App.ViewModels;
 
-public sealed record MatchRoundCellViewModel(string Number, IBrush Fill, Thickness Margin, string Tip);
+public sealed record MatchRoundCellViewModel(string Number, IBrush Fill, string Tip, IReadOnlyList<int> KillDots);
 
-public sealed record MatchPlayerRowViewModel(string Name, string Kda, string Detail, double BarWidth, bool IsLocal, FontWeight Weight);
+public sealed record MatchRoundHalfViewModel(string Title, string Side, IBrush SideBrush, string Score, IBrush ScoreBrush,
+    IReadOnlyList<MatchRoundCellViewModel> Cells)
+{
+    public bool HasSide => Side.Length > 0;
+}
+
+public sealed record MatchPlayerRowViewModel(string Name, string Kda, string Detail, double BarWidth, bool IsLocal, FontWeight Weight, IBrush RowBackground);
 
 public sealed record MatchTeamBoardViewModel(string Title, string Score, IBrush Accent, IReadOnlyList<MatchPlayerRowViewModel> Players);
 
@@ -42,6 +47,7 @@ public sealed class MatchStatsViewModel : ViewModelBase
     public string ResultLabel { get; private init; } = string.Empty;
     public string ScoreLabel { get; private init; } = string.Empty;
     public IBrush ResultBrush { get; private init; } = Brushes.Transparent;
+    public bool HasResult => ResultLabel.Length > 0;
     public IReadOnlyList<MatchStatTile> Tiles => IsClipScope ? ClipTiles : FullTiles;
     private IReadOnlyList<MatchStatTile> FullTiles { get; init; } = [];
     private IReadOnlyList<MatchStatTile> ClipTiles { get; init; } = [];
@@ -79,8 +85,8 @@ public sealed class MatchStatsViewModel : ViewModelBase
             ? RadarAxes.FirstOrDefault(axis => string.Equals(axis.Label, selected.Label, StringComparison.Ordinal))
             : null;
     }
-    public IReadOnlyList<MatchRoundCellViewModel> Rounds { get; private init; } = [];
-    public bool HasRounds => Rounds.Count > 0;
+    public IReadOnlyList<MatchRoundHalfViewModel> RoundHalves { get; private init; } = [];
+    public bool HasRounds => RoundHalves.Count > 0;
     public IReadOnlyList<MatchTeamBoardViewModel> Teams { get; private init; } = [];
     public string Footnote { get; private init; } = string.Empty;
     public bool HasFootnote => Footnote.Length > 0;
@@ -213,11 +219,23 @@ public sealed class MatchStatsViewModel : ViewModelBase
         var mine = match.LocalTeam;
         var theirs = match.OpposingTeam;
 
-        var rounds = MatchStatsPresentation.Rounds(match).Select(cell => new MatchRoundCellViewModel(
+        var ct = AppThemeService.Brush("Semantic_59B6FF", "#59B6FF");
+        var t = AppThemeService.Brush("Semantic_E5A23D", "#E5A23D");
+        var muted = AppThemeService.Brush("Text_8EA1B6", "#8EA1B6");
+        IBrush localRow = new ImmutableSolidColorBrush(Color.Parse("#9EC6F0"), 0.08);
+        MatchRoundCellViewModel Cell(MatchRoundCell cell) => new(
             cell.Number.ToString(),
             cell.Won switch { true => win, false => loss, _ => neutral },
-            new Thickness(cell.StartsHalf ? 8 : 0, 0, 2, 3),
-            $"Round {cell.Number} · {(cell.Won switch { true => "Won", false => "Lost", _ => "Result unknown" })} · {cell.Reason}")).ToArray();
+            $"Round {cell.Number} · {(cell.Won switch { true => "Won", false => "Lost", _ => "Result unknown" })} · {cell.Reason}"
+                + (cell.Kills > 0 ? $" · {cell.Kills} {(cell.Kills == 1 ? "kill" : "kills")}" : string.Empty),
+            Enumerable.Range(0, Math.Min(cell.Kills, 5)).ToArray());
+        var halves = MatchStatsPresentation.RoundHalves(match).Select(half => new MatchRoundHalfViewModel(
+            half.Title,
+            half.Side switch { "CT" => "CT side", "T" => "T side", _ => string.Empty },
+            half.Side == "T" ? t : ct,
+            $"{half.Won} – {half.Lost}",
+            half.Won > half.Lost ? win : half.Won < half.Lost ? loss : muted,
+            half.Cells.Select(Cell).ToArray())).ToArray();
 
         var maxScore = Math.Max(1, match.Players.Select(player => player.Score ?? player.Kills).DefaultIfEmpty(1).Max());
         MatchTeamBoardViewModel Board(MatchTeam team, bool local)
@@ -230,7 +248,8 @@ public sealed class MatchStatsViewModel : ViewModelBase
                     player.Adr is { } adr ? $"{adr:0} ADR" : player.Score is { } score ? $"{score} pts" : string.Empty,
                     BarMaxWidth * (player.Score ?? player.Kills) / maxScore,
                     player.IsLocal,
-                    player.IsLocal ? FontWeight.SemiBold : FontWeight.Normal))
+                    player.IsLocal ? FontWeight.SemiBold : FontWeight.Normal,
+                    player.IsLocal ? localRow : Brushes.Transparent))
                 .ToArray();
             var title = mine is null || theirs is null || mine.Score == theirs.Score ? team.Name
                 : (team.Score > (local ? theirs.Score : mine.Score)) ? "Victory" : "Defeat";
@@ -256,7 +275,7 @@ public sealed class MatchStatsViewModel : ViewModelBase
             ResultBrush = result == "Victory" ? win : result == "Defeat" ? loss : neutral,
             FullTiles = MatchStatsPresentation.Tiles(match),
             RadarAxes = MatchStatsPresentation.RadarAxes(match),
-            Rounds = rounds,
+            RoundHalves = halves,
             Teams = teams,
             Footnote = footnote
         };
