@@ -68,8 +68,9 @@
                 <Border Background="{StaticResource Surface_0D151C}" BorderBrush="{StaticResource Surface_22303A}" BorderThickness="1"
                         CornerRadius="8" Padding="4,9" Margin="2,0">
                   <StackPanel Spacing="3" HorizontalAlignment="Center">
-                    <TextBlock Text="{Binding Value}" Foreground="{StaticResource Text_EDF4FB}" FontSize="15" FontWeight="Bold"
-                               HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Viewbox StretchDirection="DownOnly" HorizontalAlignment="Center" Height="20">
+                      <TextBlock Text="{Binding Value}" Foreground="{StaticResource Text_EDF4FB}" FontSize="15" FontWeight="Bold" />
+                    </Viewbox>
                     <TextBlock Text="{Binding Label}" Foreground="{StaticResource Text_6B7C8C}" FontSize="10" FontWeight="SemiBold"
                                LetterSpacing="0.6" HorizontalAlignment="Center" />
                   </StackPanel>
