@@ -92,7 +92,7 @@
       </Border>
     </Border>
 
-    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Install updates while loading|Updates}">
+    <StackPanel Classes="settingsGroup" IsVisible="{Binding SettingsSearchText, Converter={x:Static opconv:SettingsSearchHighlightConverter.Instance}, ConverterParameter=Check for updates|Install updates while loading|Updates|Update channel|Nightly}">
       <TextBlock Classes="settingsGroupLabel" Text="UPDATES" />
       <Border Classes="settingsGroupCard">
         <StackPanel>
@@ -121,6 +121,43 @@
                 <TextBlock Classes="settingsRowDesc" Text="The startup loader installs an available update before ClypDat opens. When off, ClypDat asks after launch instead." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
               </StackPanel>
               <ToggleSwitch Grid.Column="1" IsChecked="{Binding InstallUpdatesOnLaunch}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" />
+          <Border Classes="settingsRow">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Update channel" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="Stable gets tested releases. Nightly is built on this PC from the latest code: changes arrive first, untested." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              </StackPanel>
+              <ComboBox x:Name="UpdateChannelBox" Grid.Column="1" MinWidth="120" VerticalAlignment="Center"
+                        SelectedIndex="{Binding UpdateChannelIndex, Mode=OneWay}" SelectionChanged="UpdateChannelBox_OnSelectionChanged">
+                <ComboBoxItem Content="Stable" />
+                <ComboBoxItem Content="Nightly" />
+              </ComboBox>
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding IsNightlyChannel}" />
+          <Border Classes="settingsRow" IsVisible="{Binding IsNightlyChannel}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Build Nightly updates automatically" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock Classes="settingsRowDesc" Text="ClypDat looks for new code every 10 minutes and builds it in the background. It installs when you restart." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding NightlyAutoBuild}" OnContent="{x:Null}" OffContent="{x:Null}" />
+            </Grid>
+          </Border>
+          <Border Classes="settingsRowDivider" IsVisible="{Binding IsNightlyChannel}" />
+          <Border Classes="settingsRow" IsVisible="{Binding IsNightlyChannel}">
+            <Grid Classes="settingsRowGrid" ColumnDefinitions="*,Auto">
+              <StackPanel Classes="settingsRowText">
+                <TextBlock Classes="settingsRowTitle" Text="Nightly build files" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
+                <TextBlock x:Name="NightlyCacheText" Classes="settingsRowDesc" Text="Source code and build output. Clearing keeps the tools; the next build downloads the source again." />
+              </StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Content="Build progress" Click="NightlyProgressButton_OnClick" />
+                <Button x:Name="ClearNightlyButton" Content="Clear" Click="ClearNightlyButton_OnClick" />
+              </StackPanel>
             </Grid>
           </Border>
         </StackPanel>

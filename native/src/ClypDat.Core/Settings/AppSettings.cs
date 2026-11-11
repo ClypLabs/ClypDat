@@ -141,6 +141,9 @@ public sealed class AppSettings
     // opens, rather than opening first and offering it in a dialog. Off means
     // the old behaviour: launch now, ask afterwards.
     public bool InstallUpdatesOnLaunch { get; set; } = true;
+    // "stable" or "nightly".
+    public string UpdateChannel { get; set; } = "stable";
+    public bool NightlyAutoBuild { get; set; } = true;
     public string ChatAudioDeviceId { get; set; } = string.Empty;
     // Single-selection fields - still the persisted choice while the matching
     // Multi*Enabled toggle below is off, so most users (one mic, at most one

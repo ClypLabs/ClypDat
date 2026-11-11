@@ -247,6 +247,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         Settings = AppSettingsStore.Load();
+        NightlyBuild.ChannelIsNightly = IsNightlyChannel;
         NoticeBoardService.PolicyChanged += (_, _) => Dispatcher.UIThread.Post(ApplyRemotePolicy);
         ApplyRemotePolicy();
         _xboxActivity.Changed += XboxActivityChanged;
@@ -1890,7 +1891,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         get
         {
             var version = AppUpdateService.CurrentVersion;
-            return $"v{version.Major}.{version.Minor}.{version.Build}";
+            return NightlyBuild.Commit is { } nightly
+                ? $"v{version.Major}.{version.Minor}.{version.Build} · Nightly {nightly[..7]}"
+                : $"v{version.Major}.{version.Minor}.{version.Build}";
         }
     }
 
@@ -4056,6 +4059,37 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (Settings.InstallUpdatesOnLaunch == value) return;
             Settings.InstallUpdatesOnLaunch = value;
+            OnPropertyChanged();
+            SaveSettings();
+        }
+    }
+
+    public bool IsNightlyChannel => string.Equals(Settings.UpdateChannel, "nightly", StringComparison.OrdinalIgnoreCase);
+
+    public int UpdateChannelIndex => IsNightlyChannel ? 1 : 0;
+
+    public void SetUpdateChannel(bool nightly)
+    {
+        Settings.UpdateChannel = nightly ? "nightly" : "stable";
+        NightlyBuild.ChannelIsNightly = nightly;
+        RefreshUpdateChannel();
+        SaveSettings();
+    }
+
+    public void RefreshUpdateChannel()
+    {
+        OnPropertyChanged(nameof(IsNightlyChannel));
+        OnPropertyChanged(nameof(UpdateChannelIndex));
+        OnPropertyChanged(nameof(AppVersionDisplay));
+    }
+
+    public bool NightlyAutoBuild
+    {
+        get => Settings.NightlyAutoBuild;
+        set
+        {
+            if (Settings.NightlyAutoBuild == value) return;
+            Settings.NightlyAutoBuild = value;
             OnPropertyChanged();
             SaveSettings();
         }

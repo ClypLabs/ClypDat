@@ -1,0 +1,126 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:ClypDat.App.Views"
+        x:Class="ClypDat.App.Views.NightlyDialog"
+        x:DataType="views:NightlyDialog"
+        Title="Nightly"
+        WindowDecorations="None"
+        ShowInTaskbar="False"
+        CanResize="False"
+        Width="560"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        KeyDown="Dialog_OnKeyDown">
+  <Window.Resources>
+    <SolidColorBrush x:Key="NightlyAccent" Color="#A98BFF" />
+  </Window.Resources>
+  <Window.Styles>
+    <Style Selector="TextBlock.body">
+      <Setter Property="Foreground" Value="{StaticResource Text_B7C4D2}" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="LineHeight" Value="19" />
+    </Style>
+    <Style Selector="ProgressBar.nightly">
+      <Setter Property="Height" Value="6" />
+      <Setter Property="MinHeight" Value="6" />
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Foreground" Value="{StaticResource NightlyAccent}" />
+      <Setter Property="Background" Value="{StaticResource Surface_22303A}" />
+    </Style>
+  </Window.Styles>
+
+  <Border CornerRadius="12" Background="{StaticResource Surface_111920}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" ClipToBounds="True">
+    <DockPanel>
+      <Border DockPanel.Dock="Top" Background="{StaticResource Surface_0C1319}" CornerRadius="11,11,0,0" PointerPressed="TitleBar_OnPointerPressed">
+        <Grid ColumnDefinitions="*,Auto" Height="52">
+          <StackPanel Orientation="Horizontal" Spacing="10" Margin="18,0,0,0" VerticalAlignment="Center">
+            <Ellipse Width="10" Height="10" Fill="{StaticResource NightlyAccent}" VerticalAlignment="Center" />
+            <TextBlock x:Name="TitleText" Text="Switch to Nightly?" Foreground="{StaticResource Text_D8E4F2}" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" />
+          </StackPanel>
+          <Button x:Name="CloseButton" Grid.Column="1" Classes="dialogClose" Content="✕" Click="HideButton_OnClick"
+                  Width="52" Height="52" FontSize="14" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <StackPanel Margin="22,18,22,20" Spacing="14">
+        <StackPanel x:Name="IntroPanel" Spacing="12">
+          <TextBlock Classes="body" Text="Nightly is the newest ClypDat, built on this PC from the latest code. It gets changes first and hasn't been tested like Stable, so expect the odd bug." />
+          <Border Background="{StaticResource Surface_0C1319}" BorderBrush="{StaticResource Surface_232F3A}" BorderThickness="1" CornerRadius="8" Padding="14,12">
+            <StackPanel Spacing="9">
+              <TextBlock Text="ClypDat sets everything up itself" Foreground="{StaticResource Text_EDF4FB}" FontSize="13" FontWeight="SemiBold" />
+              <Grid ColumnDefinitions="14,*">
+                <TextBlock Text="•" Foreground="{StaticResource NightlyAccent}" />
+                <TextBlock Grid.Column="1" Classes="body" Text="Uses the Git, .NET SDK and build tools already on your PC. Anything missing is downloaded into ClypDat's own Nightly folder; nothing else changes." />
+              </Grid>
+              <Grid ColumnDefinitions="14,*">
+                <TextBlock Text="•" Foreground="{StaticResource NightlyAccent}" />
+                <TextBlock Grid.Column="1" Classes="body" Text="Installs Visual Studio's C++ build tools if they're missing, about 8 GB. Windows asks for permission once." />
+              </Grid>
+              <Grid ColumnDefinitions="14,*">
+                <TextBlock Text="•" Foreground="{StaticResource NightlyAccent}" />
+                <TextBlock Grid.Column="1" Classes="body" Text="Builds ClypDat, using about 20 GB in all. The first build takes 20 to 60 minutes; recording and clipping keep working." />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <TextBlock Classes="body" Foreground="{StaticResource Text_8EA1B6}" Text="When it's done, ClypDat restarts into Nightly. Choose Stable in Settings any time to go back; the latest release then installs over it." />
+        </StackPanel>
+
+        <StackPanel x:Name="ChangesPanel" Spacing="8" IsVisible="False">
+          <TextBlock x:Name="ChangesTitle" Text="WHAT'S CHANGED" Foreground="{StaticResource Semantic_9EC6F0}" FontSize="11" FontWeight="Bold" />
+          <ScrollViewer MaxHeight="240">
+            <ItemsControl x:Name="ChangesList">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="views:NightlyChangeRow">
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10" Margin="0,3">
+                    <Panel VerticalAlignment="Top" Margin="0,1,0,0">
+                      <Border Background="{Binding Brush}" Opacity="0.16" CornerRadius="4" />
+                      <TextBlock Text="{Binding Tag}" Foreground="{Binding Brush}" FontSize="10" FontWeight="Bold" Margin="6,1" MinWidth="34" TextAlignment="Center" />
+                    </Panel>
+                    <TextBlock Grid.Column="1" Classes="body" Text="{Binding Text}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+          <TextBlock x:Name="NoChangesText" Classes="body" Foreground="{StaticResource Text_8EA1B6}" IsVisible="False"
+                     Text="GitHub didn't say what changed this time." />
+        </StackPanel>
+
+        <StackPanel x:Name="ProgressPanel" Spacing="12" IsVisible="False">
+          <ProgressBar x:Name="TotalBar" Classes="nightly" Minimum="0" Maximum="100" />
+          <ItemsControl x:Name="StepsList">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="views:NightlyStepRow">
+                <StackPanel Spacing="4" Margin="0,4">
+                  <Grid ColumnDefinitions="20,*,Auto">
+                    <TextBlock Text="{Binding Glyph}" Foreground="{Binding Brush}" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding Label}" Foreground="{Binding LabelBrush}" FontSize="13" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Text="{Binding Status}" Foreground="{StaticResource Text_8EA1B6}" FontSize="12" VerticalAlignment="Center" />
+                  </Grid>
+                  <ProgressBar Classes="nightly" Margin="20,0,0,0" IsVisible="{Binding IsRunning}" Height="4" MinHeight="4"
+                               IsIndeterminate="{Binding IsIndeterminate}" Value="{Binding Percent}" Minimum="0" Maximum="100" />
+                  <TextBlock Margin="20,0,0,0" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" Foreground="{StaticResource Text_6B7C8C}"
+                             FontSize="11" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border x:Name="ErrorBox" IsVisible="False" Background="{StaticResource Semantic_3A1E24}" CornerRadius="8" Padding="12,10">
+            <SelectableTextBlock x:Name="ErrorText" Foreground="{StaticResource Semantic_FF9AA2}" FontSize="12" TextWrapping="Wrap" FontFamily="Consolas" />
+          </Border>
+        </StackPanel>
+
+        <TextBlock x:Name="NoteText" Classes="body" Foreground="{StaticResource Text_8EA1B6}" IsVisible="False" />
+
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+          <Button x:Name="LogButton" Content="Open log" Click="LogButton_OnClick" IsVisible="False" />
+          <Button x:Name="SecondaryButton" Content="Cancel" Click="SecondaryButton_OnClick" />
+          <Button x:Name="PrimaryButton" Classes="primaryButton" Content="Build Nightly" Click="PrimaryButton_OnClick" />
+        </StackPanel>
+      </StackPanel>
+    </DockPanel>
+  </Border>
+</Window>

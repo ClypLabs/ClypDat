@@ -229,7 +229,10 @@ public static class AppUpdateService
             .ToArray();
         foreach (var (release, kind) in releases)
         {
-            if (!IsNewerStableRelease(release.Draft, release.Prerelease, release.TagName, CurrentVersion, out var version))
+            // Back on Stable from a Nightly build: the latest release replaces it
+            // even when its version number is the same.
+            var current = NightlyBuild.ReturningToStable ? new Version(0, 0, 0) : CurrentVersion;
+            if (!IsNewerStableRelease(release.Draft, release.Prerelease, release.TagName, current, out var version))
             {
                 continue;
             }

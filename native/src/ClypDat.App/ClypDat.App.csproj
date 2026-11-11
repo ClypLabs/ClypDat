@@ -58,6 +58,11 @@
   <!-- Set by build.ps1 for the builds it publishes into
        %LOCALAPPDATA%\Programs\ClypDat. Only the define: the version, data root,
        product and names stay a Stable build's (see LocalBuildMode). -->
+  <!-- Set by build.ps1 -Nightly. -->
+  <ItemGroup Condition="'$(ClypDatNightlyCommit)' != ''">
+    <AssemblyMetadata Include="ClypDatNightlyCommit" Value="$(ClypDatNightlyCommit)" />
+  </ItemGroup>
+
   <PropertyGroup Condition="'$(ClypDatLocalBuild)' == 'true'">
     <DefineConstants>$(DefineConstants);CLYPDAT_LOCAL_BUILD</DefineConstants>
   </PropertyGroup>

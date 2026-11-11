@@ -7,7 +7,10 @@ param(
     # Build and verify the Avalonia package feed, then stop. CI uses this so a
     # release runner never publishes to, stops processes in, or launches from
     # the local install directory.
-    [switch]$PackagesOnly
+    [switch]$PackagesOnly,
+    [switch]$Nightly,
+    [string]$PublishDirectory,
+    [string]$InstallFrom
 )
 
 $ErrorActionPreference = 'Stop'
@@ -770,74 +773,10 @@ function Ensure-StableAvaloniaPackages {
     }
 }
 
-Push-Location $repoRoot
-$originalGitPosition = $null
-$restoreGitPosition = $false
-try {
-    if ($Target -eq 'local') {
-        Write-Host 'Publishing current worktree without Git changes.'
-    }
-    else {
-        Assert-CleanWorktree
-        $originalGitPosition = Get-GitPosition
-
-        if ([string]::IsNullOrWhiteSpace($Target)) {
-            Write-Host 'Switching to master.'
-            Invoke-Git switch master | Out-Null
-            $restoreGitPosition = $true
-
-            Write-Host 'Pulling origin/master.'
-            Invoke-Git pull --ff-only origin master | Out-Null
-        }
-        else {
-            & git show-ref --verify --quiet "refs/heads/$Target"
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "Fetching origin/$Target."
-                Invoke-Git fetch origin "refs/heads/$Target" | Out-Null
-                $commit = (Invoke-Git rev-parse --verify FETCH_HEAD | Select-Object -First 1).Trim()
-                Write-Host "Switching to branch $Target at fetched commit $commit."
-                Invoke-Git switch --detach $commit | Out-Null
-            }
-            else {
-                $commit = & git rev-parse --verify --quiet "$Target^{commit}" 2>$null
-                if ($LASTEXITCODE -ne 0 -or -not $commit) {
-                    throw "'$Target' is not a local branch or commit."
-                }
-
-                $commit = ($commit | Select-Object -First 1).Trim()
-                Write-Host "Switching to commit $commit."
-                Invoke-Git switch --detach $commit | Out-Null
-            }
-
-            $restoreGitPosition = $true
-        }
-    }
-
-    Ensure-StableAvaloniaPackages -UseLocalAvalonia:($Target -eq 'local')
-
-    if ($PackagesOnly) {
-        Write-Host 'Avalonia packages are ready; skipping local publish (-PackagesOnly).'
-        return
-    }
-
+function Install-PublishedBuild {
+    param([Parameter(Mandatory)][string]$PublishStagingDirectory)
+    $publishStagingDirectory = $PublishStagingDirectory
     $installParent = Split-Path -Parent $installDirectory
-    New-Item -ItemType Directory -Path $installParent -Force | Out-Null
-    if (-not (Test-DirectoryCreateAccess -Directory $installParent)) {
-        throw "Cannot create local publish files under $installParent."
-    }
-    $publishStagingDirectory = Join-Path ([IO.Path]::GetTempPath()) ('ClypDat.publish-' + [Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $publishStagingDirectory -Force | Out-Null
-
-    Write-Host "Publishing to staging directory: $publishStagingDirectory"
-    # ClypDatLocalBuild: the Stable updater never installs a release over this
-    # build (LocalBuildMode). Version, data root and names are unchanged.
-    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:ClypDatLocalBuild=true -o $publishStagingDirectory /nodeReuse:false
-    if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish failed with exit code $LASTEXITCODE."
-    }
-
-    & $selfContainedVerifier -PublishDirectory $publishStagingDirectory
-
     Stop-InstalledClypDatProcesses -InstallDirectories @($installDirectory, $legacyInstallDirectory)
 
     $previousInstallDirectory = $null
@@ -906,6 +845,111 @@ try {
 
     Write-Host 'Starting updated ClypDat.'
     Start-Process -FilePath $installedExe -ArgumentList '--publish-restart'
+}
+
+Push-Location $repoRoot
+$originalGitPosition = $null
+$restoreGitPosition = $false
+try {
+    if ($InstallFrom) {
+        $source = [IO.Path]::GetFullPath($InstallFrom)
+        if (-not (Test-Path -LiteralPath (Join-Path $source 'ClypDat.exe') -PathType Leaf)) {
+            throw "No staged ClypDat build at $source."
+        }
+        # Install moves its source; copy so the staged build survives a failed swap.
+        $copy = Join-Path ([IO.Path]::GetTempPath()) ('ClypDat.publish-' + [Guid]::NewGuid().ToString('N'))
+        & robocopy $source $copy /MIR /NFL /NDL /NJH /NJS /NP /R:2 /W:1 | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "Copying the staged build failed (robocopy exit $LASTEXITCODE)." }
+        $global:LASTEXITCODE = 0
+        Install-PublishedBuild -PublishStagingDirectory $copy
+        return
+    }
+
+    if ($Nightly) {
+        if (-not $PublishDirectory) { throw '-Nightly needs -PublishDirectory.' }
+        Write-Host 'Building Nightly from the checked-out source.'
+        Write-Host '[nightly] avalonia'
+        Ensure-StableAvaloniaPackages
+        Write-Host '[nightly] app'
+        $nightlyCommit = (Invoke-Git rev-parse HEAD | Select-Object -First 1).Trim()
+        $nightlyOutput = [IO.Path]::GetFullPath($PublishDirectory)
+        if (Test-Path -LiteralPath $nightlyOutput) { Remove-Item -LiteralPath $nightlyOutput -Recurse -Force }
+        New-Item -ItemType Directory -Path $nightlyOutput -Force | Out-Null
+        & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 "-p:ClypDatNightlyCommit=$nightlyCommit" -o $nightlyOutput /nodeReuse:false
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet publish failed with exit code $LASTEXITCODE."
+        }
+        Write-Host '[nightly] check'
+        & $selfContainedVerifier -PublishDirectory $nightlyOutput
+        Write-Host "Nightly $nightlyCommit is ready in $nightlyOutput"
+        return
+    }
+
+    if ($Target -eq 'local') {
+        Write-Host 'Publishing current worktree without Git changes.'
+    }
+    else {
+        Assert-CleanWorktree
+        $originalGitPosition = Get-GitPosition
+
+        if ([string]::IsNullOrWhiteSpace($Target)) {
+            Write-Host 'Switching to master.'
+            Invoke-Git switch master | Out-Null
+            $restoreGitPosition = $true
+
+            Write-Host 'Pulling origin/master.'
+            Invoke-Git pull --ff-only origin master | Out-Null
+        }
+        else {
+            & git show-ref --verify --quiet "refs/heads/$Target"
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Fetching origin/$Target."
+                Invoke-Git fetch origin "refs/heads/$Target" | Out-Null
+                $commit = (Invoke-Git rev-parse --verify FETCH_HEAD | Select-Object -First 1).Trim()
+                Write-Host "Switching to branch $Target at fetched commit $commit."
+                Invoke-Git switch --detach $commit | Out-Null
+            }
+            else {
+                $commit = & git rev-parse --verify --quiet "$Target^{commit}" 2>$null
+                if ($LASTEXITCODE -ne 0 -or -not $commit) {
+                    throw "'$Target' is not a local branch or commit."
+                }
+
+                $commit = ($commit | Select-Object -First 1).Trim()
+                Write-Host "Switching to commit $commit."
+                Invoke-Git switch --detach $commit | Out-Null
+            }
+
+            $restoreGitPosition = $true
+        }
+    }
+
+    Ensure-StableAvaloniaPackages -UseLocalAvalonia:($Target -eq 'local')
+
+    if ($PackagesOnly) {
+        Write-Host 'Avalonia packages are ready; skipping local publish (-PackagesOnly).'
+        return
+    }
+
+    $installParent = Split-Path -Parent $installDirectory
+    New-Item -ItemType Directory -Path $installParent -Force | Out-Null
+    if (-not (Test-DirectoryCreateAccess -Directory $installParent)) {
+        throw "Cannot create local publish files under $installParent."
+    }
+    $publishStagingDirectory = Join-Path ([IO.Path]::GetTempPath()) ('ClypDat.publish-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $publishStagingDirectory -Force | Out-Null
+
+    Write-Host "Publishing to staging directory: $publishStagingDirectory"
+    # ClypDatLocalBuild: the Stable updater never installs a release over this
+    # build (LocalBuildMode). Version, data root and names are unchanged.
+    & $dotnetExecutable publish $appProject -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:ClypDatLocalBuild=true -o $publishStagingDirectory /nodeReuse:false
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish failed with exit code $LASTEXITCODE."
+    }
+
+    & $selfContainedVerifier -PublishDirectory $publishStagingDirectory
+
+    Install-PublishedBuild -PublishStagingDirectory $publishStagingDirectory
 }
 finally {
     try {

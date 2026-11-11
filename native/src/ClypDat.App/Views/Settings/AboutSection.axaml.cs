@@ -203,6 +203,36 @@ public sealed partial class AboutSection : UserControl
         }
     }
 
+    private async void UpdateChannelBox_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (Owner is not { } owner || DataContext is not MainWindowViewModel viewModel) return;
+        var nightly = UpdateChannelBox.SelectedIndex == 1;
+        if (nightly == viewModel.IsNightlyChannel) return;
+        await owner.ChangeUpdateChannelAsync(nightly);
+    }
+
+    private void NightlyProgressButton_OnClick(object? sender, RoutedEventArgs e) => Owner?.ShowNightlyDialog();
+
+    private async void ClearNightlyButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        ClearNightlyButton.IsEnabled = false;
+        try
+        {
+            var freed = await Task.Run(NightlyBuild.ClearCache);
+            NightlyCacheText.Text = $"Cleared {freed / 1_000_000_000.0:0.0} GB. The next build downloads the source again.";
+        }
+        catch (InvalidOperationException error)
+        {
+            NightlyCacheText.Text = error.Message;
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Nightly: clearing build files failed", error);
+            NightlyCacheText.Text = $"Some files could not be removed: {error.Message}";
+        }
+        finally { ClearNightlyButton.IsEnabled = true; }
+    }
+
     private void OpenGitHubButton_OnClick(object? sender, RoutedEventArgs e)
         => Owner?.OpenGitHubButton_OnClick(sender, e);
 

@@ -14,10 +14,12 @@ namespace ClypDat.App.Services;
 public static class LocalBuildMode
 {
 #if CLYPDAT_LOCAL_BUILD
-    public static bool Enabled => true;
+    private const bool Compiled = true;
 #else
-    public static bool Enabled => false;
+    private const bool Compiled = false;
 #endif
+
+    public static bool Enabled => Compiled || NightlyBuild.ChannelIsNightly;
 
     public const string UpdatesSuppressedMessage =
         "Stable updates are suppressed: this is a locally published development build, and a release would replace it.";

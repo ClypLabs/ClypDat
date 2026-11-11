@@ -206,6 +206,11 @@ public sealed partial class MainWindow : Window
     private readonly SemaphoreSlim _clipSaveLock = new(1, 1);
     private bool _updateDialogOpen;
     private AppUpdateInfo? _availableUpdate;
+    private NightlyDialog? _nightlyDialog;
+    private DateTime _nightlyCheckedUtc = DateTime.MinValue;
+    // Switching to Nightly restarts into the first build at once; later
+    // builds wait for the user.
+    private bool _nightlyInstallWhenDone;
     private readonly DispatcherTimer _updateCheckTimer;
     private readonly ClipHoverPreviewController _clipHoverPreview = new();
     // The card preview is an FFmpeg stream and cannot transfer its decoder to
@@ -411,6 +416,7 @@ public sealed partial class MainWindow : Window
         // leaves plenty of headroom.
         _updateCheckTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
         _updateCheckTimer.Tick += async (_, _) => await CheckForUpdatesAsync();
+        NightlyBuild.Changed += report => Dispatcher.UIThread.Post(() => OnNightlyChanged(report));
         Activated += (_, _) => StartStartupDialogsAfterUserActivation();
         Opened += (_, _) =>
         {
@@ -8777,6 +8783,11 @@ public sealed partial class MainWindow : Window
 
     private async void AvailableUpdateButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (ViewModel?.IsNightlyChannel == true)
+        {
+            ShowNightlyDialog();
+            return;
+        }
         if (_availableUpdate is null || _updateDialogOpen) return;
         if (NoticeBoardService.IsBlocked("block-update-version", _availableUpdate.LatestVersion.ToString(3)))
         {
@@ -8844,6 +8855,11 @@ public sealed partial class MainWindow : Window
     private async Task RefreshUpdateAvailabilityAsync(UpdateCheckPresentation presentation)
     {
         if (ViewModel is null || _updateDialogOpen) return;
+        if (ViewModel.IsNightlyChannel)
+        {
+            await RefreshNightlyAsync(presentation);
+            return;
+        }
         AppUpdateInfo? update;
         if (PendingStartupUpdate is { } fromSplash)
         {
@@ -8891,6 +8907,125 @@ public sealed partial class MainWindow : Window
         SetAvailableUpdate(update);
         if (presentation == UpdateCheckPresentation.Dialog)
             await ShowUpdateDialogAsync(CreateUpdateDialog(update));
+    }
+
+    private async Task RefreshNightlyAsync(UpdateCheckPresentation presentation)
+    {
+        if (ViewModel is null) return;
+        if (NightlyBuild.ReadyCommit is not null) ViewModel.HasAvailableUpdate = true;
+        var automatic = presentation == UpdateCheckPresentation.BadgeOnly;
+        if (automatic && DateTime.UtcNow - _nightlyCheckedUtc < NightlyBuild.CheckEvery) return;
+        _nightlyCheckedUtc = DateTime.UtcNow;
+        var update = await NightlyBuild.CheckAsync();
+        if (update is null)
+        {
+            if (!automatic)
+                await ShowMessageAsync("Nightly is up to date", "This is the newest Nightly. ClypDat looks again every 10 minutes.");
+            return;
+        }
+        NightlyBuild.LastFound = update;
+        if (string.Equals(update.Commit, NightlyBuild.ReadyCommit, StringComparison.OrdinalIgnoreCase))
+        {
+            ViewModel.HasAvailableUpdate = true;
+            if (!automatic) ShowNightlyDialog();
+            return;
+        }
+        if (NightlyBuild.IsRunning)
+        {
+            if (!automatic) ShowNightlyDialog();
+            return;
+        }
+        if (automatic && ViewModel.NightlyAutoBuild)
+        {
+            NightlyBuild.Start();
+            return;
+        }
+        ViewModel.HasAvailableUpdate = true;
+        if (!automatic) ShowNightlyDialog();
+    }
+
+    private void OnNightlyChanged(NightlyReport report)
+    {
+        if (ViewModel is null || report.Running || !report.Finished || report.Error is not null) return;
+        if (NightlyBuild.ReadyCommit is null) return;
+        if (_nightlyInstallWhenDone)
+        {
+            _nightlyInstallWhenDone = false;
+            _ = RestartIntoNightlyAsync();
+            return;
+        }
+        ViewModel.HasAvailableUpdate = true;
+    }
+
+    internal void ShowNightlyDialog()
+    {
+        if (_nightlyDialog is not null)
+        {
+            _nightlyDialog.Activate();
+            return;
+        }
+        var mode = NightlyBuild.IsRunning || NightlyBuild.Last is { Error: not null } ? NightlyDialogMode.Progress
+            : NightlyBuild.ReadyCommit is not null ? NightlyDialogMode.Ready
+            : NightlyBuild.LastFound is not null ? NightlyDialogMode.Available
+            : NightlyDialogMode.Progress;
+        OpenNightlyDialog(mode);
+    }
+
+    private NightlyDialog OpenNightlyDialog(NightlyDialogMode mode)
+    {
+        var dialog = new NightlyDialog(mode, StartNightlyAsync, RestartIntoNightlyAsync);
+        _nightlyDialog = dialog;
+        dialog.Closed += (_, _) => _nightlyDialog = null;
+        dialog.Show(this);
+        return dialog;
+    }
+
+    internal async Task ChangeUpdateChannelAsync(bool nightly)
+    {
+        if (ViewModel is null) return;
+        if (nightly)
+        {
+            _nightlyDialog?.Close();
+            var dialog = new NightlyDialog(NightlyDialogMode.Intro, StartNightlyAsync, RestartIntoNightlyAsync);
+            _nightlyDialog = dialog;
+            dialog.Closed += (_, _) => _nightlyDialog = null;
+            await dialog.ShowDialog(this);
+            if (!dialog.StartedBuild) ViewModel.RefreshUpdateChannel();
+            return;
+        }
+
+        NightlyBuild.Cancel();
+        _nightlyInstallWhenDone = false;
+        ViewModel.SetUpdateChannel(false);
+        ViewModel.HasAvailableUpdate = false;
+        if (NightlyBuild.IsNightlyBuild) await RefreshUpdateAvailabilityAsync(UpdateCheckPresentation.Dialog);
+    }
+
+    private Task StartNightlyAsync()
+    {
+        if (ViewModel is null) return Task.CompletedTask;
+        ViewModel.SetUpdateChannel(true);
+        SetAvailableUpdate(null);
+        _nightlyInstallWhenDone = !NightlyBuild.IsNightlyBuild;
+        NightlyBuild.Start();
+        return Task.CompletedTask;
+    }
+
+    private async Task RestartIntoNightlyAsync()
+    {
+        try
+        {
+            if (NightlyBuild.InstallReady())
+            {
+                await ExitForUpdateAsync();
+                return;
+            }
+        }
+        catch (Exception error)
+        {
+            AppLog.Error("Nightly: starting the install failed", error);
+        }
+        await ShowMessageAsync("Couldn't install Nightly", "The finished build or its install script is missing. Build it again from Settings › About.");
     }
 
     private void SetAvailableUpdate(AppUpdateInfo? update)
