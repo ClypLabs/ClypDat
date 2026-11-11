@@ -130,7 +130,7 @@
                 <TextBlock Classes="settingsRowTitle" Text="Update channel" opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
                 <TextBlock Classes="settingsRowDesc" Text="Stable gets tested releases. Nightly is built on this PC from the latest code: changes arrive first, untested." opconv:SettingsHighlight.Query="{Binding SettingsSearchText}" />
               </StackPanel>
-              <ComboBox x:Name="UpdateChannelBox" Grid.Column="1" MinWidth="120" VerticalAlignment="Center"
+              <ComboBox x:Name="UpdateChannelBox" Grid.Column="1" Classes="settingsInput" Width="150" VerticalAlignment="Center"
                         SelectedIndex="{Binding UpdateChannelIndex, Mode=OneWay}" SelectionChanged="UpdateChannelBox_OnSelectionChanged">
                 <ComboBoxItem Content="Stable" />
                 <ComboBoxItem Content="Nightly" />
