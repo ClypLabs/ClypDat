@@ -690,7 +690,10 @@ function Ensure-StableAvaloniaPackages {
                 Write-Host "Using MSBuild executable $msbuildExecutable for Avalonia package tasks."
             }
             $previousDotNetHostPath = $env:DOTNET_HOST_PATH
+            $previousDotNetRoot = $env:DOTNET_ROOT
             $env:DOTNET_HOST_PATH = $dotnetExecutable
+            # Else MSBuild.exe's apphost uses the machine-wide runtime, which may be older.
+            $env:DOTNET_ROOT = Split-Path $dotnetExecutable -Parent
             try {
                 $packageBuildExitCode = Invoke-AvaloniaBuild -FilePath $msbuildExecutable -Arguments @(
                     $packageProject, '/t:Pack', "/p:ClypDatPackageVersion=$stableVersion",
@@ -699,6 +702,7 @@ function Ensure-StableAvaloniaPackages {
             }
             finally {
                 $env:DOTNET_HOST_PATH = $previousDotNetHostPath
+                $env:DOTNET_ROOT = $previousDotNetRoot
             }
             if ($packageBuildExitCode -ne 0) {
                 throw "Avalonia package build failed with exit code $packageBuildExitCode."
