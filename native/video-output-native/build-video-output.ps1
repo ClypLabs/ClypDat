@@ -15,13 +15,8 @@ if (-not (Test-Path -LiteralPath $cmake)) { throw 'Install CMake or set CLYPDAT_
 $major = ([version]$installation.installationVersion).Major
 $generator = switch ($major) { 17 { 'Visual Studio 17 2022' }; 18 { 'Visual Studio 18 2026' }; default { throw "Unsupported Visual Studio version: $major" } }
 $build = Join-Path $PSScriptRoot 'build'
-# CMake refuses a cache made by another Visual Studio version.
-$cache = Join-Path $build 'CMakeCache.txt'
-if ((Test-Path -LiteralPath $cache) -and -not (Select-String -LiteralPath $cache -SimpleMatch "CMAKE_GENERATOR:INTERNAL=$generator" -Quiet)) {
-    Remove-Item -LiteralPath $cache -Force
-    Remove-Item -LiteralPath (Join-Path $build 'CMakeFiles') -Recurse -Force -ErrorAction SilentlyContinue
-}
-& $cmake -S $PSScriptRoot -B $build -G $generator -A x64 "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)" "-DVLC_ROOT=$VlcRoot"
+$cacheArguments = @(& (Join-Path $PSScriptRoot '../../eng/Get-CMakeCacheArguments.ps1') -BuildDirectory $build -Generator $generator -InstallationPath $installation.installationPath)
+& $cmake @cacheArguments -S $PSScriptRoot -B $build -G $generator -A x64 "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)" "-DVLC_ROOT=$VlcRoot"
 if ($LASTEXITCODE -ne 0) { throw "Video output configuration failed ($LASTEXITCODE)." }
 # Same CPU budget and priority as eng/Build-NativeCapture.ps1.
 $jobs = if ($env:CLYPDAT_BUILD_JOBS) { [int]$env:CLYPDAT_BUILD_JOBS } else { [Math]::Max(1, [Math]::Max([int][Math]::Floor([Environment]::ProcessorCount * 0.75), [Environment]::ProcessorCount - 4)) }

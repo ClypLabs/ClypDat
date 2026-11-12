@@ -28,7 +28,8 @@ $encoderInputDiagnostics = if ($EnableEncoderInputDiagnostics) { 'ON' } else { '
 # All but four logical processors, or three quarters on small machines (CLYPDAT_BUILD_JOBS
 # overrides), at below-normal priority so the desktop or a running game wins.
 $jobs = if ($env:CLYPDAT_BUILD_JOBS) { [int]$env:CLYPDAT_BUILD_JOBS } else { [Math]::Max(1, [Math]::Max([int][Math]::Floor([Environment]::ProcessorCount * 0.75), [Environment]::ProcessorCount - 4)) }
-& $cmake -S $source -B $build -G $generator -A x64 "-DCLYPDAT_COMPILE_JOBS=$jobs" "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)" "-DCLYPDAT_FFMPEG_SDK=$sdk" "-DCLYPDAT_TEST_GPU=$($TestGpu.IsPresent.ToString().ToUpperInvariant())" "-DCLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS=$encoderInputDiagnostics"
+$cacheArguments = @(& (Join-Path $PSScriptRoot 'Get-CMakeCacheArguments.ps1') -BuildDirectory $build -Generator $generator -InstallationPath $installation.installationPath)
+& $cmake @cacheArguments -S $source -B $build -G $generator -A x64 "-DCLYPDAT_COMPILE_JOBS=$jobs" "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)" "-DCLYPDAT_FFMPEG_SDK=$sdk" "-DCLYPDAT_TEST_GPU=$($TestGpu.IsPresent.ToString().ToUpperInvariant())" "-DCLYPDAT_ENABLE_ENCODER_INPUT_DIAGNOSTICS=$encoderInputDiagnostics"
 if ($LASTEXITCODE -ne 0) { throw "CMake configure failed ($LASTEXITCODE)." }
 # RecorderCore compiles alone with /MP before the projects that depend on it,
 # so project and per-file parallelism rarely stack. MSBuild and cl inherit
