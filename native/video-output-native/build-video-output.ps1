@@ -4,16 +4,10 @@ param(
     [string]$VlcRoot = "$env:USERPROFILE/.nuget/packages/videolan.libvlc.windows/3.0.23.1/build/x64"
 )
 $ErrorActionPreference = 'Stop'
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio Installer (vswhere.exe) is required.' }
-$installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json | Select-Object -First 1
-if (-not $installation) { throw 'Install Visual Studio C++ x64 build tools.' }
-$cmake = $env:CLYPDAT_CMAKE
-if (-not $cmake) { $cmake = (Get-Command cmake -ErrorAction SilentlyContinue).Source }
-if (-not $cmake) { $cmake = Join-Path $installation.installationPath 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe' }
-if (-not (Test-Path -LiteralPath $cmake)) { throw 'Install CMake or set CLYPDAT_CMAKE.' }
-$major = ([version]$installation.installationVersion).Major
-$generator = switch ($major) { 17 { 'Visual Studio 17 2022' }; 18 { 'Visual Studio 18 2026' }; default { throw "Unsupported Visual Studio version: $major" } }
+$tools = & (Join-Path $PSScriptRoot '../../eng/Get-NativeBuildTools.ps1')
+$installation = $tools.Installation
+$cmake = $tools.CMake
+$generator = $tools.Generator
 $build = Join-Path $PSScriptRoot 'build'
 $cacheArguments = @(& (Join-Path $PSScriptRoot '../../eng/Get-CMakeCacheArguments.ps1') -BuildDirectory $build -Generator $generator -InstallationPath $installation.installationPath)
 & $cmake @cacheArguments -S $PSScriptRoot -B $build -G $generator -A x64 "-DCMAKE_GENERATOR_INSTANCE=$($installation.installationPath)" "-DVLC_ROOT=$VlcRoot"
