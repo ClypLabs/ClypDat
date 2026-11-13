@@ -82,7 +82,8 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
                     var error = Text(state.Details, "error");
                     if (state.Value.RestartRequired != 0 || error.Length > 0) throw new InvalidOperationException(error.Length > 0 ? error : "Native recorder requires a worker restart.");
                     if (state.Value.Encoded > 0) break;
-                    if (startup.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException("Native recorder did not deliver an encoded frame within 30 seconds.");
+                    if (startup.Elapsed > TimeSpan.FromSeconds(30))
+                        throw new TimeoutException(state.Value.Acquired == 0 ? SilentSourceFailure : "Native recorder did not deliver an encoded frame within 30 seconds.");
                     // A capture source opened while the display stack is being
                     // reset (a driver install, a GPU or monitor change) can stay
                     // silent for good, while a fresh one opened moments later
@@ -131,6 +132,7 @@ internal sealed class NativeRecordingAdapter : IReplayBuffer, IReplayCaptureDiag
         finally { _lifecycle.Release(); }
     }
     internal static readonly TimeSpan SilentSourceReopenDelay = TimeSpan.FromSeconds(5);
+    internal const string SilentSourceFailure = "The capture target has not shown a frame yet.";
     private static NativeRecorderSession CreateSession(ReplayBufferConfig configuration, string fullSessionPath) =>
         NativeRecorderSession.Create(configuration, Path.Combine(AppDataPaths.Root, "native-replay-buffer", "session-" + Guid.NewGuid().ToString("N")), fullSessionPath);
     private void StartSession(NativeRecorderSession session, OverlayCaptureSettings settings, RecordingKeyboardArtwork? artwork)

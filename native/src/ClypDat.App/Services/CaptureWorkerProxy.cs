@@ -9,6 +9,8 @@ namespace ClypDat.App.Services;
 internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnostics, IAdaptiveCaptureFrameRate, IReplayCaptureWorkerEvents, IReplayCaptureWorkerControl
 {
     private static readonly TimeSpan[] RetryDelays = [TimeSpan.Zero, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4)];
+    // A game still loading or minimised presents nothing; that is not a crash.
+    private const int MaximumSilentTargetRetries = 10;
     private readonly Func<ReplayBufferConfig> _configProvider;
     private readonly SemaphoreSlim _connectionGate = new(1, 1);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -589,6 +591,7 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                 catch (Exception error) { AppLog.Info($"Capture worker IPC reconnect failed: {error.Message}"); }
             }
             await TerminateWorkerAsync(token);
+            var silentRetries = 0;
             for (var attempt = 0; attempt < RetryDelays.Length; attempt++)
             {
                 var delay = RetryDelays[attempt]; RecoveryHealth(attempt + 1, count, exitCode, DateTime.UtcNow + delay, false, ReplayRecoveryStopReason.None, $"Restarting capture worker in {delay.TotalSeconds:0}s.");
@@ -602,7 +605,15 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
                     _gpuRecovering = true; _gpuFailure = error.Failure;
                     await RecoverGpuAsync(exitCode, token); return;
                 }
-                catch (Exception error) { AppLog.Info($"Capture worker restart attempt {attempt + 1} failed: {error.Message}"); await TerminateWorkerAsync(token); }
+                catch (Exception error)
+                {
+                    AppLog.Info($"Capture worker restart attempt {attempt + 1} failed: {error.Message}"); await TerminateWorkerAsync(token);
+                    if (error.Message.Contains(NativeRecordingAdapter.SilentSourceFailure, StringComparison.Ordinal) && silentRetries++ < MaximumSilentTargetRetries)
+                    {
+                        if (!await WaitForCaptureTargetAsync(token)) return;
+                        attempt = Math.Max(-1, attempt - 1);
+                    }
+                }
             }
             Breaker(count, exitCode);
         }
@@ -675,6 +686,27 @@ internal sealed class CaptureWorkerProxy : IReplayBuffer, IReplayCaptureDiagnost
         await SendAsync<CaptureWorkerAck>("video-overlays", _videoOverlaySettings, token);
         await SendAsync<CaptureWorkerAck>("clip-game-name", new { gameDisplayName = _clipGameName ?? config.GameDisplayName }, token);
     }
+
+    // False when the game window closed: game detection picks the next target.
+    private async Task<bool> WaitForCaptureTargetAsync(CancellationToken token)
+    {
+        var window = (nint)RecoveryConfiguration().GameWindowHandle;
+        RecoveryHealth(0, _health.RecentWorkerFailureCount, null, null, false, ReplayRecoveryStopReason.None, "Waiting for the game window to show.");
+        if (window == 0) { await Task.Delay(TimeSpan.FromSeconds(5), token); return _desiredRecording; }
+        var logged = false;
+        while (_desiredRecording)
+        {
+            if (!IsWindow(window)) return false;
+            if (IsWindowVisible(window) && !IsIconic(window)) return true;
+            if (!logged) { AppLog.Info("Capture worker recovery: game window is minimised or hidden; waiting for it."); logged = true; }
+            await Task.Delay(TimeSpan.FromSeconds(1), token);
+        }
+        return false;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindow(nint window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(nint window);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsIconic(nint window);
 
     private void Breaker(int count, int? exitCode)
     { _desiredRecording = false; RecoveryHealth(RetryDelays.Length, count, exitCode, null, true, ReplayRecoveryStopReason.WorkerCrashLoop, "Capture worker crashed repeatedly."); Dispatcher.UIThread.Post(() => { SetRecording(false); RecordingStopped?.Invoke(this, EventArgs.Empty); }); AppLog.Info("Capture worker recovery breaker opened."); }
